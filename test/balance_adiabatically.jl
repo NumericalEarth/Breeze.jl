@@ -11,7 +11,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze: dynamics_density
+using Breeze: continuity_density
 using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition, EnergyFluxBoundaryConditionFunction
 using Breeze.BoundaryConditions: BulkDrag, BulkDragFunction
 using Breeze.AtmosphereModels: adiabatic_balance_twin, AdiabaticBalancer, thermodynamic_density
@@ -90,7 +90,7 @@ end
 
         @test length(Breeze.AtmosphereModels.initial_fields(model)) == 5
 
-        ρ   = dynamics_density(model.dynamics)
+        ρ   = continuity_density(model.dynamics)
         ρθ  = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
         ρ₀  = Array(interior(ρ))
         ρθ₀ = Array(interior(ρθ))

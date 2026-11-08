@@ -29,11 +29,11 @@ Morrison–Gettelman semi-analytic rates. It aligns `qᵛ`, `qᶜˡ`, `T`, `qᵛ
 `qᵛ⁺ⁱ` with each other before the per-species rate equations are evaluated.
 
 Given the advected vapor excess over liquid ``δqᵛ⁺ˡ``, the diagnostic local
-``qᵛ - qᵛ⁺ˡ``, and the liquid-side psychrometric factor
-``ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)``, compute the cloud-water increment
+``qᵛ - qᵛ⁺ˡ``, and the saturation response ``Γˡ = 1 + dqᵛ⁺ˡ/dqᶜˡ`` of
+`Microphysics.thermodynamic_adjustment_factor`, compute the cloud-water increment
 
 ```math
-ε = (qᵛ - qᵛ⁺ˡ - δqᵛ⁺ˡ) / ξˡ
+ε = (qᵛ - qᵛ⁺ˡ - δqᵛ⁺ˡ) / Γˡ
 ```
 
 clamped to physical limits: ``ε`` cannot evaporate more cloud than is locally
@@ -46,35 +46,50 @@ steps rather than landing in one.
 
 When `vapor_excess = DiagnosticVaporExcess()`, dispatch bypasses the adjustment and the
 local state passes through unchanged.
+
+The aligned state is the host's own state at the new composition: it keeps the host's
+conserved thermodynamic variable (`θˡⁱ` or `s`), at fixed pressure for reference-pressure
+states (anelastic core, parcels) and at fixed density for `LiquidIceDensityState`
+(compressible core), as `vapor_excess_after_moisture_update` does. `Γˡ` is the response
+under the same constraint, so ``qᵛ - qᵛ⁺ˡ`` of the aligned state matches ``δqᵛ⁺ˡ`` to
+first order in ``ε``. Its `q`, `ρᵗʰ`, and `P` are returned. This alignment is
+Breeze's, so it follows the host thermodynamics rather than the dry-air `cᵖᵈ`
+psychrometric convention of the Morrison–Gettelman rates that follow it.
 """
-@inline prognostic_vapor_excess_adjustment(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants) =
-    prognostic_vapor_excess_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ,
-                                         δqᵛ⁺ˡ, T, ρ, constants)
+@inline prognostic_vapor_excess_adjustment(p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants) =
+    prognostic_vapor_excess_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ⁺ˡ,
+                                         δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
 
 @inline function prognostic_vapor_excess_adjustment(
-    ::ProcessRate{FT, DiagnosticVaporExcess}, p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants
+    ::ProcessRate{FT, DiagnosticVaporExcess}, p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants
 ) where FT
+    q = 𝒰.moisture_mass_fractions
     cloud_water_adjustment = zero(qᶜˡ)
     return (; cloud_water_adjustment,
             rate = zero(qᶜˡ),
             qᶜˡ,
-            qᵛ,
+            qᵛ = q.vapor,
             qᵛ⁺ˡ,
-            T)
+            T,
+            P = air_pressure(𝒰, constants),
+            q,
+            ρᵗʰ)
 end
 
 @inline function prognostic_vapor_excess_adjustment(
     parameters::ProcessRate{PFT, PrognosticVaporExcess}, p3,
-    qᶜˡ, qᵛ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρ, constants
+    qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants
 ) where PFT
     FT = typeof(qᶜˡ)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
     τ = max(parameters.sink_limiting_timescale, eps(FT))
-    Rᵛ = FT(vapor_gas_constant(constants))
-    ℒˡ = vaporization_latent_heat(constants, T)
-    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
-    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
 
-    cloud_water_adjustment = (qᵛ - qᵛ⁺ˡ - δqᵛ⁺ˡ) / ξˡ
+    # Γˡ = 1 + dqᵛ⁺ˡ/dqᶜˡ under the constraint 𝒰 is closed on, so that moving ε from vapor to
+    # cloud lowers qᵛ - qᵛ⁺ˡ by Γˡ ε to first order and the aligned excess lands on δqᵛ⁺ˡ.
+    Γˡ = thermodynamic_adjustment_factor(qᵛ⁺ˡ, T, 𝒰, constants)
+
+    cloud_water_adjustment = (qᵛ - qᵛ⁺ˡ - δqᵛ⁺ˡ) / Γˡ
     cloud_water_adjustment = max(cloud_water_adjustment, -max(0, qᶜˡ))
     cloud_water_adjustment = ifelse(δqᵛ⁺ˡ < 0,
                                     min(cloud_water_adjustment, zero(FT)),
@@ -82,16 +97,29 @@ end
     cloud_water_adjustment = ifelse(abs(cloud_water_adjustment) <
                                     100 * eps(FT) * max(qᵛ⁺ˡ, qᵛ),
                                     zero(FT), cloud_water_adjustment)
-    adjusted_temperature = T + cloud_water_adjustment * ℒˡ / cᵖᵈ
+    adjusted_moisture = MoistureMassFractions(qᵛ - cloud_water_adjustment,
+                                              q.liquid + cloud_water_adjustment,
+                                              q.ice)
+
+    # The host's conserved thermodynamic variable at the new composition, at fixed pressure or
+    # fixed density per the state type: the temperature the host diagnoses once the
+    # alignment rate is applied.
+    𝒰ᵃ = with_moisture(𝒰, adjusted_moisture)
+    adjusted_temperature = temperature(𝒰ᵃ, constants)
+    adjusted_density = density(𝒰ᵃ, constants)
+    adjusted_pressure = adjusted_density * mixture_gas_constant(adjusted_moisture, constants) * adjusted_temperature
     adjusted_saturation = saturation_specific_humidity(
-        adjusted_temperature, ρ, constants, PlanarLiquidSurface())
+        adjusted_temperature, adjusted_density, constants, PlanarLiquidSurface())
 
     return (; cloud_water_adjustment,
             rate = cloud_water_adjustment / τ,
             qᶜˡ = qᶜˡ + cloud_water_adjustment,
-            qᵛ = qᵛ - cloud_water_adjustment,
+            qᵛ = adjusted_moisture.vapor,
             qᵛ⁺ˡ = adjusted_saturation,
-            T = adjusted_temperature)
+            T = adjusted_temperature,
+            P = adjusted_pressure,
+            q = adjusted_moisture,
+            ρᵗʰ = adjusted_density)
 end
 
 """
