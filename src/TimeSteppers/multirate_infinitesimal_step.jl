@@ -109,21 +109,19 @@ Adapt.adapt_structure(to, s::ThermodynamicTendencySplit) = ThermodynamicTendency
 @inline slow_part(::ContinuityTendencySplit, G, I) = zero(eltype(G))
 @inline slow_part(s::ThermodynamicTendencySplit, G, I) = @inbounds G[I] - s.fast_tendency[I]
 
-@inline fast_part(::SlowTendencySplit, G, I) = zero(eltype(G))
-@inline fast_part(::ContinuityTendencySplit, G, I) = @inbounds G[I]
-@inline fast_part(s::ThermodynamicTendencySplit, G, I) = @inbounds s.fast_tendency[I]
-
 tendency_split(name, θ_name, C) = name === :ρᵈ ? ContinuityTendencySplit() :
                                   name === θ_name ? ThermodynamicTendencySplit(C) : SlowTendencySplit()
 
 # One pass per field: store Sᵢ, then form the stage forcing
 #   G = (fast part at Yᵢ₋₁) + (1/dᵢ)[βᵢᵢ Sᵢ + Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt)]
+#     = Gᵢ + (βᵢᵢ/dᵢ - 1) Sᵢ + (1/dᵢ) Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt),
+# written in the second form so a diagonal tableau (Wicker–Skamarock) leaves Gᵢ bitwise intact,
 # and the stage start state U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ.
 @kernel function _assemble_multirate_stage!(G, U⁰, S, ΔY, Uⁿ, split, i, wβ, wγ, wα)
     I = @index(Global, Cartesian)
     @inbounds begin
         Sᵢ = slow_part(split, G, I)
-        Gᵢ = fast_part(split, G, I) + wβ[i] * Sᵢ
+        Gᵢ = G[I] + (wβ[i] - 1) * Sᵢ
         uᵢ = Uⁿ[I]
         for j in 1:i-1
             Gᵢ += wβ[j] * S[j][I] + wγ[j] * ΔY[j][I]
