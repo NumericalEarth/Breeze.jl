@@ -32,7 +32,8 @@ Fields
 - `implicit_solver`, `substepper`: as for `AcousticRungeKutta3`.
 - `Uⁿ`: the outer-step-start state.
 - `stage_increments`: ``ΔYⱼ = Yⱼ - Uⁿ`` for ``j = 1, …, s - 1``.
-- `slow_tendencies`: ``Sⱼ`` for ``j = 1, …, s``.
+- `slow_tendencies`: ``Sⱼ`` for ``j = 1, …, s - 1`` (the last stage's is never reused), for every prognostic
+  but the dry density, whose tendency is entirely fast.
 - `fast_thermodynamic_tendency`: scratch for the stage-entry fast thermodynamic tendency.
 - `stage`: the stage being integrated.
 """
@@ -75,7 +76,8 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     Gⁿ = map(similar, prognostic_fields)
     Uⁿ = map(similar, prognostic_fields)
     stage_increments = ntuple(_ -> map(similar, prognostic_fields), s - 1)
-    slow_tendencies = ntuple(_ -> map(similar, prognostic_fields), s)
+    slow_fields = Base.structdiff(prognostic_fields, NamedTuple{(:ρᵈ,)})
+    slow_tendencies = ntuple(_ -> map(similar, slow_fields), s - 1)
     fast_thermodynamic_tendency = CenterField(grid)
 
     return MultirateInfinitesimalStep(tableau, U⁰, Gⁿ, implicit_solver, substepper,
@@ -127,11 +129,14 @@ tendency_split(name, θ_name, C) = name === :ρᵈ ? ContinuityTendencySplit() :
 #     = Gᵢ + (βᵢᵢ/dᵢ - 1) Sᵢ + (1/dᵢ) Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt),
 # written in the second form so a diagonal tableau (Wicker–Skamarock) leaves Gᵢ bitwise intact,
 # and the stage start state U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ. `S` and `ΔY` hold only stages j < i.
+@inline store_slow_tendency!(::Nothing, n, slow) = nothing
+@inline store_slow_tendency!(Sᵢ, n, slow) = @inbounds Sᵢ[n] = slow
+
 @kernel function _assemble_multirate_stage!(G, U⁰, Sᵢ, Uⁿ, S, ΔY, split, wᵢ, wβ, wγ, wα)
     n = @index(Global, Linear)
     @inbounds begin
         slow = slow_part(split, G, n)
-        Sᵢ[n] = slow
+        store_slow_tendency!(Sᵢ, n, slow)
         G[n] = G[n] + wᵢ * slow + weighted_sum(n, S, wβ) + weighted_sum(n, ΔY, wγ)
         U⁰[n] = Uⁿ[n] + weighted_sum(n, ΔY, wα)
     end
@@ -164,12 +169,16 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
 
     for name in keys(ts.Gⁿ)
         G = parent(ts.Gⁿ[name])
-        S = ntuple(j -> parent(ts.slow_tendencies[j][name]), i - 1)
+        # The dry density has no slow part, and no later stage reads the last stage's.
+        has_slow = name !== :ρᵈ
+        S = has_slow ? ntuple(j -> parent(ts.slow_tendencies[j][name]), i - 1) : ()
+        wβⁿ = has_slow ? wβ : ()
+        Sᵢ = has_slow && i < length(d) ? parent(ts.slow_tendencies[i][name]) : nothing
         ΔY = ntuple(j -> parent(ts.stage_increments[j][name]), i - 1)
         split = tendency_split(name, θ_name, C)
         launch!(arch, grid, (length(G),), _assemble_multirate_stage!,
-                G, parent(ts.U⁰[name]), parent(ts.slow_tendencies[i][name]), parent(ts.Uⁿ[name]),
-                S, ΔY, split, wᵢ, wβ, wγ, wα)
+                G, parent(ts.U⁰[name]), Sᵢ, parent(ts.Uⁿ[name]),
+                S, ΔY, split, wᵢ, wβⁿ, wγ, wα)
     end
 
     return nothing
