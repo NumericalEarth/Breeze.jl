@@ -398,6 +398,7 @@ end
 timestepper_uses_dynamics(::Val) = false
 timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
 timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
+timestepper_uses_dynamics(::Val{:MultirateInfinitesimalStep}) = true
 timestepper_uses_dynamics(s::Symbol) = timestepper_uses_dynamics(Val(s))
 
 function Base.summary(model::AtmosphereModel)

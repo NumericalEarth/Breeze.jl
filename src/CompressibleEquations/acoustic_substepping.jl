@@ -1644,6 +1644,33 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     return nothing
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Compute into `C` the stage-entry thermodynamic flux divergence in the discretization of the
+substep loop, ``C = -∇·(θᴸ (ρu)ᴸ)`` with ``θᴸ`` the substepper's cached linearization potential
+temperature (so [`prepare_acoustic_cache!`](@ref) must have run for this stage). This is the
+part of the thermodynamic tendency that the acoustic loop integrates as fast: its perturbation
+about the stage-entry state is ``-∇·(θᴸ (ρu)′)``. Multirate steppers subtract it from the full
+tendency to isolate the slow remainder.
+"""
+function compute_linearized_thermodynamic_flux_divergence!(C, substepper::AcousticSubstepper, model)
+    grid = model.grid
+    launch!(architecture(grid), grid, :xyz, _linearized_thermodynamic_flux_divergence!,
+            C, grid, model.dynamics, substepper.linearization_potential_temperature,
+            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw)
+    return nothing
+end
+
+@kernel function _linearized_thermodynamic_flux_divergence!(C, grid, dynamics, θᴸ, ρu, ρv, ρw)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
+        ∇ʰ_θM = V⁻¹ * (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu) + δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv))
+        C[i, j, k] = - ∇ʰ_θM - ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu, ρv, ρw)
+    end
+end
+
 Oceananigans.prognostic_state(substepper::AcousticSubstepper) =
     (time_averaged_velocities = Oceananigans.prognostic_state(substepper.time_averaged_velocities),
      time_averaged_vertical_velocity_cache = Oceananigans.prognostic_state(substepper.time_averaged_vertical_velocity_cache))

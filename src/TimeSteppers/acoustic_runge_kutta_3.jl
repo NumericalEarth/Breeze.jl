@@ -28,6 +28,16 @@ using Breeze.CompressibleEquations:
 """
 $(TYPEDEF)
 
+Abstract supertype for outer time steppers that drive the linearized acoustic substep loop
+of [`AcousticSubstepper`](@ref): [`AcousticRungeKutta3`](@ref) and
+[`MultirateInfinitesimalStep`](@ref). Subtypes carry `U⁰` (the state each stage's acoustic
+integration starts from), `Gⁿ` (the slow forcing it applies), `implicit_solver` and `substepper`.
+"""
+abstract type AcousticTimeStepper <: AbstractTimeStepper end
+
+"""
+$(TYPEDEF)
+
 Wicker–Skamarock third-order Runge–Kutta time stepper with linearized
 acoustic substepping for fully compressible dynamics. Stage fractions
 ``β = (1/3, 1/2, 1)``. Each stage:
@@ -62,7 +72,7 @@ References
 Wicker, L. J. & Skamarock, W. C. (2002). *Time-splitting methods for
 elastic models using forward time schemes.* MWR 130, 2088–2097.
 """
-struct AcousticRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
+struct AcousticRungeKutta3{FT, U0, TG, TI, AS} <: AcousticTimeStepper
     β₁ :: FT
     β₂ :: FT
     β₃ :: FT
@@ -119,12 +129,13 @@ end
 
 # An `AtmosphereModel` stepped by `AcousticRungeKutta3`; the free parameter is the
 # architecture, so `BreezeReactantExt` can specialize on `{<:ReactantState}`.
-const CompressibleAcousticModel{Arc} = AtmosphereModel{<:CompressibleDynamics, <:Any, Arc, <:AcousticRungeKutta3}
+const CompressibleAcousticModel{Arc} = AtmosphereModel{<:CompressibleDynamics, <:Any, Arc, <:AcousticTimeStepper}
 
 # Stage fractions, and the increment each stage adds to the clock. `ifelse` rather than
 # branching: `clock.stage` is traced under Reactant.
 @inline stage_fraction(ts, stage) = ifelse(stage == 1, ts.β₁, ifelse(stage == 2, ts.β₂, ts.β₃))
 @inline stage_increment(ts, stage) = ifelse(stage == 1, ts.β₁, ifelse(stage == 2, ts.β₂ - ts.β₁, 1 - ts.β₂))
+@inline final_stage_increment(ts::AcousticRungeKutta3) = stage_increment(ts, 3)
 
 """
 $(TYPEDSIGNATURES)
@@ -155,6 +166,8 @@ Run one Wicker–Skamarock RK3 stage: complete the slow tendencies built by
 `update_state!`, then execute the linearized-acoustic substep loop, then
 update remaining scalars.
 """
+assemble_stage_forcing!(::AcousticRungeKutta3, model, Δt) = nothing
+
 function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     ts = model.timestepper
     substepper = ts.substepper
@@ -177,6 +190,11 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
     # substep inside the loop, dispatched on the scheme type.
     add_implicit_advection_tendency!(model)
+
+    # Combine the stored stage tendencies and increments into this stage's slow forcing and
+    # start state (a no-op for Wicker–Skamarock RK3, whose stages all start from Uⁿ and apply
+    # only the latest tendency).
+    assemble_stage_forcing!(ts, model, Δt)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
@@ -232,7 +250,7 @@ function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::Compress
     clock = model.clock
     if clock.iteration == 0 || !isfinite(clock.last_stage_Δt)
         clock.last_Δt = Δt
-        clock.last_stage_Δt = stage_increment(model.timestepper, 3) * Δt
+        clock.last_stage_Δt = final_stage_increment(model.timestepper) * Δt
         reconcile_state!(model)
 
         # Seed the transport velocity *before* the tendencies below: `set!` has already
@@ -347,7 +365,7 @@ end
 #####
 
 function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
-                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+                                                                      <:Any, <:Any, <:AcousticTimeStepper})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,
             v = sub.time_averaged_velocities.v,
@@ -355,7 +373,7 @@ function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:Compress
 end
 
 function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainCompressibleDynamics,
-                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+                                                                      <:Any, <:Any, <:AcousticTimeStepper})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,
             v = sub.time_averaged_velocities.v,
@@ -365,15 +383,15 @@ end
 # `update_state!` builds the slow tendencies the stages apply: momentum without the pressure-gradient
 # force and buoyancy, which the substep loop integrates, and the thermodynamic variable advected by
 # the RK predictor velocity rather than the time-averaged transport velocity.
-AtmosphereModels.slow_dynamics(::AcousticRungeKutta3, dynamics) = SlowDynamics(dynamics)
+AtmosphereModels.slow_dynamics(::AcousticTimeStepper, dynamics) = SlowDynamics(dynamics)
 AtmosphereModels.thermodynamic_transport_velocities(model::CompressibleAcousticModel) = slow_thermodynamic_velocities(model)
 
-Oceananigans.prognostic_state(timestepper::AcousticRungeKutta3) =
+Oceananigans.prognostic_state(timestepper::AcousticTimeStepper) =
     (substepper = Oceananigans.prognostic_state(timestepper.substepper),)
 
-function Oceananigans.restore_prognostic_state!(restored::AcousticRungeKutta3, from)
+function Oceananigans.restore_prognostic_state!(restored::AcousticTimeStepper, from)
     Oceananigans.restore_prognostic_state!(restored.substepper, from.substepper)
     return restored
 end
 
-Oceananigans.restore_prognostic_state!(timestepper::AcousticRungeKutta3, ::Nothing) = timestepper
+Oceananigans.restore_prognostic_state!(timestepper::AcousticTimeStepper, ::Nothing) = timestepper
