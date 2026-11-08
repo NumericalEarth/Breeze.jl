@@ -15,7 +15,7 @@ for fully compressible dynamics, driving the same linearized acoustic substep lo
 [`AcousticRungeKutta3`](@ref). Stage ``i`` of an ``s``-stage method starts the acoustic
 integration from ``Uⁿ + Σⱼ αᵢⱼ ΔYⱼ`` (``ΔYⱼ = Yⱼ - Uⁿ``) and integrates over ``dᵢ Δt`` with the
 frozen slow forcing ``(1/dᵢ)[Σⱼ γᵢⱼ ΔYⱼ / Δt + Σⱼ βᵢⱼ Sⱼ]``, where ``Sⱼ`` is the slow tendency
-evaluated at ``Yⱼ₋₁``. The fast tendency is linearized about the latest stage ``Yᵢ₋₁``.
+evaluated at ``Yⱼ₋₁``. The fast tendency is linearized once per step, about ``Uⁿ``.
 
 The slow tendency excludes everything the acoustic loop integrates: momentum tendencies never
 contain the pressure gradient or buoyancy; the continuity tendency ``-∇·(ρu)`` is entirely fast;
@@ -31,21 +31,21 @@ Fields
 - `Gⁿ`: tendency storage; holds the combined slow forcing during each acoustic loop.
 - `implicit_solver`, `substepper`: as for `AcousticRungeKutta3`.
 - `Uⁿ`: the outer-step-start state.
-- `stage_increments`: ``ΔYⱼ = Yⱼ - Uⁿ`` for ``j = 1, …, s - 1``.
-- `slow_tendencies`: ``Sⱼ`` for ``j = 1, …, s - 1`` (the last stage's is never reused), for every prognostic
-  but the dry density, whose tendency is entirely fast.
+- `accumulators`: for each stage ``k = 3, …, s``, the parts of its forcing and start state known so far,
+  `forcing` ``= (1/dₖ) Σⱼ (βₖⱼ Sⱼ + γₖⱼ ΔYⱼ / Δt)`` and `offset` ``= Σⱼ αₖⱼ ΔYⱼ``, accumulated as each
+  ``Sⱼ`` and ``ΔYⱼ = Yⱼ - Uⁿ`` becomes available, so no ``Sⱼ`` or ``ΔYⱼ`` is stored. Until stage 2
+  consumes them, stage 3's pair holds the raw ``S₁`` and ``ΔY₁``.
 - `fast_thermodynamic_tendency`: scratch for the stage-entry fast thermodynamic tendency.
 - `stage`: the stage being integrated.
 """
-struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, DY, ST, FC} <: AcousticTimeStepper
+struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC} <: AcousticTimeStepper
     tableau :: TB
     U⁰ :: U0
     Gⁿ :: TG
     implicit_solver :: TI
     substepper :: AS
     Uⁿ :: UN
-    stage_increments :: DY
-    slow_tendencies :: ST
+    accumulators :: AC
     fast_thermodynamic_tendency :: FC
     stage :: Base.RefValue{Int}
 end
@@ -69,19 +69,19 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     FT = eltype(grid)
     tableau = multirate_infinitesimal_step_tableau(coefficients, FT)
     s = number_of_stages(tableau)
+    s ≥ 3 || throw(ArgumentError("MultirateInfinitesimalStep needs at least three stages; got $s."))
 
     substepper = build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_state)
 
     U⁰ = map(similar, prognostic_fields)
     Gⁿ = map(similar, prognostic_fields)
     Uⁿ = map(similar, prognostic_fields)
-    stage_increments = ntuple(_ -> map(similar, prognostic_fields), s - 1)
-    slow_fields = Base.structdiff(prognostic_fields, NamedTuple{(:ρᵈ,)})
-    slow_tendencies = ntuple(_ -> map(similar, slow_fields), s - 1)
+    accumulators = ntuple(_ -> (forcing = map(similar, prognostic_fields),
+                                offset = map(similar, prognostic_fields)), s - 2)
     fast_thermodynamic_tendency = CenterField(grid)
 
     return MultirateInfinitesimalStep(tableau, U⁰, Gⁿ, implicit_solver, substepper,
-                                      Uⁿ, stage_increments, slow_tendencies,
+                                      Uⁿ, accumulators,
                                       fast_thermodynamic_tendency, Ref(1))
 end
 
@@ -120,74 +120,167 @@ Adapt.adapt_structure(to, s::ThermodynamicTendencySplit) = ThermodynamicTendency
 tendency_split(name, θ_name, C) = name === :ρᵈ ? ContinuityTendencySplit() :
                                   name === θ_name ? ThermodynamicTendencySplit(C) : SlowTendencySplit()
 
-# Σⱼ wⱼ Aⱼ[n] over tuples whose length is known at compile time, so the sum unrolls.
-@inline weighted_sum(n, ::Tuple{}, ::Tuple{}) = 0
-@inline weighted_sum(n, A::Tuple, w::Tuple) = @inbounds(w[1] * A[1][n]) + weighted_sum(n, Base.tail(A), Base.tail(w))
+# Pointwise updates of tuples of arrays whose length is known at compile time, so they unroll.
+@inline accumulate!(n, ::Tuple{}, ::Tuple{}, x) = nothing
+@inline function accumulate!(n, A::Tuple, w::Tuple, x)
+    @inbounds A[1][n] += w[1] * x
+    return accumulate!(n, Base.tail(A), Base.tail(w), x)
+end
 
-# One pass per field over the linearly-indexed parent arrays: store Sᵢ, then form the stage forcing
-#   G = (fast part at Yᵢ₋₁) + (1/dᵢ)[βᵢᵢ Sᵢ + Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt)]
-#     = Gᵢ + (βᵢᵢ/dᵢ - 1) Sᵢ + (1/dᵢ) Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt),
-# written in the second form so a diagonal tableau (Wicker–Skamarock) leaves Gᵢ bitwise intact,
-# and the stage start state U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ. `S` and `ΔY` hold only stages j < i.
-@inline store_slow_tendency!(::Nothing, n, slow) = nothing
-@inline store_slow_tendency!(Sᵢ, n, slow) = @inbounds Sᵢ[n] = slow
+@inline combine!(n, ::Tuple{}, ::Tuple{}, ::Tuple{}, ::Tuple{}, a, b, c) = nothing
+@inline function combine!(n, A::Tuple, wa::Tuple, wb::Tuple, wc::Tuple, a, b, c)
+    @inbounds A[1][n] = wa[1] * a + wb[1] * b + wc[1] * c
+    return combine!(n, Base.tail(A), Base.tail(wa), Base.tail(wb), Base.tail(wc), a, b, c)
+end
 
-@kernel function _assemble_multirate_stage!(G, U⁰, Sᵢ, Uⁿ, S, ΔY, split, wᵢ, wβ, wγ, wα)
+@inline assign!(n, ::Tuple{}, ::Tuple{}, x) = nothing
+@inline function assign!(n, A::Tuple, w::Tuple, x)
+    @inbounds A[1][n] = w[1] * x
+    return assign!(n, Base.tail(A), Base.tail(w), x)
+end
+
+# The stage forcing is
+#   G = (fast part at Yᵢ₋₁) + (1/dᵢ)[βᵢᵢ Sᵢ + Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt)] = Gᵢ + (βᵢᵢ/dᵢ - 1) Sᵢ + Fᵢ,
+# written so a diagonal tableau (Wicker–Skamarock) leaves Gᵢ bitwise intact, and the start state
+# is U⁰ = Uⁿ + Zᵢ with Zᵢ = Σⱼ αᵢⱼ ΔYⱼ. Each kernel makes one pass over a field's parent array.
+
+# Stage 1: F₁ = Z₁ = 0. Keep S₁ (in stage 3's forcing accumulator) for later stages.
+@kernel function _first_multirate_stage!(G, U⁰, Uⁿ, split, wᵢ, S₁)
     n = @index(Global, Linear)
     @inbounds begin
         slow = slow_part(split, G, n)
-        store_slow_tendency!(Sᵢ, n, slow)
-        G[n] = G[n] + wᵢ * slow + weighted_sum(n, S, wβ) + weighted_sum(n, ΔY, wγ)
-        U⁰[n] = Uⁿ[n] + weighted_sum(n, ΔY, wα)
+        S₁[n] = slow
+        G[n] = G[n] + wᵢ * slow
+        U⁰[n] = Uⁿ[n]
     end
 end
+
+# Stage 2 reads the raw S₁, ΔY₁ and turns them, with S₂, into the accumulators of stages k ≥ 3
+# (whose first pair is where S₁, ΔY₁ were kept: they are read before being overwritten).
+@kernel function _second_multirate_stage!(G, U⁰, Uⁿ, split, wᵢ, wβ₁, wγ₁, α₁, F, Z, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, α₁ᵏ)
+    n = @index(Global, Linear)
+    @inbounds begin
+        S₁ = F[1][n]
+        ΔY₁ = Z[1][n]
+        S₂ = slow_part(split, G, n)
+        G[n] = G[n] + wᵢ * S₂ + wβ₁ * S₁ + wγ₁ * ΔY₁
+        U⁰[n] = Uⁿ[n] + α₁ * ΔY₁
+        combine!(n, F, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, S₁, ΔY₁, S₂)
+        assign!(n, Z, α₁ᵏ, ΔY₁)
+    end
+end
+
+# Stage i ≥ 3 uses its completed accumulators and adds Sᵢ to those of later stages.
+@kernel function _later_multirate_stage!(G, U⁰, Uⁿ, split, wᵢ, Fᵢ, Zᵢ, F, wβᵏ)
+    n = @index(Global, Linear)
+    @inbounds begin
+        slow = slow_part(split, G, n)
+        G[n] = G[n] + wᵢ * slow + Fᵢ[n]
+        U⁰[n] = Uⁿ[n] + Zᵢ[n]
+        accumulate!(n, F, wβᵏ, slow)
+    end
+end
+
+# After stage i: ΔYᵢ = Yᵢ - Uⁿ, kept raw after stage 1 and accumulated after later stages.
+@kernel function _store_first_increment!(ΔY₁, u, Uⁿ)
+    n = @index(Global, Linear)
+    @inbounds ΔY₁[n] = u[n] - Uⁿ[n]
+end
+
+@kernel function _accumulate_increment!(F, Z, u, Uⁿ, wγᵏ, αᵏ)
+    n = @index(Global, Linear)
+    @inbounds begin
+        ΔY = u[n] - Uⁿ[n]
+        accumulate!(n, F, wγᵏ, ΔY)
+        accumulate!(n, Z, αᵏ, ΔY)
+    end
+end
+
+# Weights of stage j's contributions to the stages k = i+1, …, s that still need them.
+later_stages(i, s) = ntuple(m -> i + m, s - i)
+forcing_weights(β, d, j, ks) = map(k -> β[k, j] / d[k], ks)
+increment_weights(γ, d, Δt, j, ks) = map(k -> γ[k, j] / (d[k] * Δt), ks)
+offset_weights(α, j, ks) = map(k -> α[k, j], ks)
+
+# Accumulators of stages ks (k ≥ 3), as parent arrays of field `name`.
+accumulator_arrays(ts, name, ks, part) = map(k -> parent(getproperty(ts.accumulators[k - 2], part)[name]), ks)
 
 """
 $(TYPEDSIGNATURES)
 
 Assemble the start state `U⁰` and slow forcing `Gⁿ` of MIS stage ``i = `` `ts.stage[]`. On
-entry `Gⁿ` holds the full tendency at ``Yᵢ₋₁``; its slow part is stored as ``Sᵢ`` first.
-The continuity forcing keeps the current (fast) mass-flux divergence, and the thermodynamic
-forcing keeps the current fast flux divergence at weight one, so only slow parts are
-recombined across stages.
+entry `Gⁿ` holds the full tendency at ``Yᵢ₋₁``. The continuity forcing keeps the current (fast)
+mass-flux divergence, and the thermodynamic forcing keeps the current fast flux divergence at
+weight one, so only slow parts are recombined across stages; the slow part ``Sᵢ`` is folded into
+the accumulators of the later stages.
 """
 function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
     i = ts.stage[]
     (; α, β, γ, d) = ts.tableau
+    s = length(d)
     θ_name = thermodynamic_density_name(model.formulation)
     grid = model.grid
     arch = architecture(grid)
 
     compute_linearized_thermodynamic_flux_divergence!(ts.fast_thermodynamic_tendency, ts.substepper, model)
     C = parent(ts.fast_thermodynamic_tendency)
-
-    dᵢ = d[i]
-    wᵢ = β[i, i] / dᵢ - 1
-    wβ = ntuple(j -> β[i, j] / dᵢ, i - 1)
-    wγ = ntuple(j -> γ[i, j] / (dᵢ * Δt), i - 1)
-    wα = ntuple(j -> α[i, j], i - 1)
+    wᵢ = β[i, i] / d[i] - 1
+    ks = later_stages(max(i, 2), s)
 
     for name in keys(ts.Gⁿ)
         G = parent(ts.Gⁿ[name])
-        # The dry density has no slow part, and no later stage reads the last stage's.
-        has_slow = name !== :ρᵈ
-        S = has_slow ? ntuple(j -> parent(ts.slow_tendencies[j][name]), i - 1) : ()
-        wβⁿ = has_slow ? wβ : ()
-        Sᵢ = has_slow && i < length(d) ? parent(ts.slow_tendencies[i][name]) : nothing
-        ΔY = ntuple(j -> parent(ts.stage_increments[j][name]), i - 1)
+        U⁰ = parent(ts.U⁰[name])
+        Uⁿ = parent(ts.Uⁿ[name])
         split = tendency_split(name, θ_name, C)
-        launch!(arch, grid, (length(G),), _assemble_multirate_stage!,
-                G, parent(ts.U⁰[name]), Sᵢ, parent(ts.Uⁿ[name]),
-                S, ΔY, split, wᵢ, wβⁿ, wγ, wα)
+        F = accumulator_arrays(ts, name, ks, :forcing)
+        size_G = (length(G),)
+
+        if i == 1
+            launch!(arch, grid, size_G, _first_multirate_stage!, G, U⁰, Uⁿ, split, wᵢ,
+                    parent(ts.accumulators[1].forcing[name]))
+        elseif i == 2
+            Z = accumulator_arrays(ts, name, ks, :offset)
+            launch!(arch, grid, size_G, _second_multirate_stage!, G, U⁰, Uⁿ, split, wᵢ,
+                    β[2, 1] / d[2], γ[2, 1] / (d[2] * Δt), α[2, 1], F, Z,
+                    forcing_weights(β, d, 1, ks), increment_weights(γ, d, Δt, 1, ks),
+                    forcing_weights(β, d, 2, ks), offset_weights(α, 1, ks))
+        else
+            Fᵢ = parent(ts.accumulators[i - 2].forcing[name])
+            Zᵢ = parent(ts.accumulators[i - 2].offset[name])
+            launch!(arch, grid, size_G, _later_multirate_stage!, G, U⁰, Uⁿ, split, wᵢ,
+                    Fᵢ, Zᵢ, F, forcing_weights(β, d, i, ks))
+        end
     end
 
     return nothing
 end
 
-function store_stage_increment!(ts::MultirateInfinitesimalStep, model, i)
-    for (ΔY, u, uⁿ) in zip(ts.stage_increments[i], prognostic_fields(model), ts.Uⁿ)
-        parent(ΔY) .= parent(u) .- parent(uⁿ)
+"""
+$(TYPEDSIGNATURES)
+
+Fold the increment ``ΔYᵢ = Yᵢ - Uⁿ`` of the stage just completed into the accumulators of the
+stages after it (after stage 1, keep it raw for stage 2).
+"""
+function store_stage_increment!(ts::MultirateInfinitesimalStep, model, i, Δt)
+    (; α, γ, d) = ts.tableau
+    s = length(d)
+    grid = model.grid
+    arch = architecture(grid)
+    ks = later_stages(max(i, 2), s)
+
+    for (name, u) in pairs(prognostic_fields(model))
+        Uⁿ = parent(ts.Uⁿ[name])
+        size_u = (length(Uⁿ),)
+        if i == 1
+            launch!(arch, grid, size_u, _store_first_increment!,
+                    parent(ts.accumulators[1].offset[name]), parent(u), Uⁿ)
+        else
+            launch!(arch, grid, size_u, _accumulate_increment!,
+                    accumulator_arrays(ts, name, ks, :forcing), accumulator_arrays(ts, name, ks, :offset),
+                    parent(u), Uⁿ, increment_weights(γ, d, Δt, i, ks), offset_weights(α, i, ks))
+        end
     end
+
     return nothing
 end
 
@@ -225,7 +318,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
         acoustic_rk3_substep!(model, Δt, d[i])
 
         if i < s
-            store_stage_increment!(ts, model, i)
+            store_stage_increment!(ts, model, i, Δt)
             Δc = i == 1 ? c[1] : c[i] - c[i-1]
             tick_stage!(model.clock, Δc * Δt)
             update_state!(model, callbacks; compute_tendencies = true)
