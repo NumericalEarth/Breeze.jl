@@ -37,8 +37,12 @@ Fields
   consumes them, stage 3's pair holds the raw ``S₁`` and ``ΔY₁``.
 - `fast_thermodynamic_tendency`: scratch for the stage-entry fast thermodynamic tendency.
 - `stage`: the stage being integrated.
+- `relinearize_stages`: re-linearize the fast operator at every stage entry (as `AcousticRungeKutta3` does)
+  instead of once per step. Off by default: it makes the fast operator stage-dependent, which costs an
+  order of accuracy; it exists to diagnose robustness in strongly nonlinear flows.
 """
 struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC} <: AcousticTimeStepper
+    relinearize_stages :: Bool
     tableau :: TB
     U⁰ :: U0
     Gⁿ :: TG
@@ -64,7 +68,8 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
                                     coefficients = :MIS2,
                                     implicit_solver = nothing,
-                                    cache_advecting_state = false)
+                                    cache_advecting_state = false,
+                                    relinearize_stages = false)
 
     FT = eltype(grid)
     tableau = multirate_infinitesimal_step_tableau(coefficients, FT)
@@ -80,7 +85,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
                                 offset = map(similar, prognostic_fields)), s - 2)
     fast_thermodynamic_tendency = CenterField(grid)
 
-    return MultirateInfinitesimalStep(tableau, U⁰, Gⁿ, implicit_solver, substepper,
+    return MultirateInfinitesimalStep(relinearize_stages, tableau, U⁰, Gⁿ, implicit_solver, substepper,
                                       Uⁿ, accumulators,
                                       fast_thermodynamic_tendency, Ref(1))
 end
@@ -89,7 +94,8 @@ end
 # pressure coefficients) stay at the values `freeze_linearization_state!` computed from Uⁿ.
 # Re-linearizing per stage makes the fast operator stage-dependent, which costs an order of
 # accuracy because MIS stages start away from the stage-entry state.
-refresh_stage_linearization!(::MultirateInfinitesimalStep, substepper, model) = nothing
+refresh_stage_linearization!(ts::MultirateInfinitesimalStep, substepper, model) =
+    ts.relinearize_stages ? prepare_acoustic_cache!(substepper, model) : nothing
 
 const MultirateAcousticModel = AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep}
 
