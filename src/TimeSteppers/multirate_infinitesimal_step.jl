@@ -2,7 +2,7 @@ using Breeze.AtmosphereModels: thermodynamic_density_name
 using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_divergence!
 
 using Oceananigans: prognostic_fields, CenterField, architecture
-using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Utils: launch!
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -112,24 +112,22 @@ Adapt.adapt_structure(to, s::ThermodynamicTendencySplit) = ThermodynamicTendency
 tendency_split(name, θ_name, C) = name === :ρᵈ ? ContinuityTendencySplit() :
                                   name === θ_name ? ThermodynamicTendencySplit(C) : SlowTendencySplit()
 
-# One pass per field: store Sᵢ, then form the stage forcing
+# Σⱼ wⱼ Aⱼ[n] over tuples whose length is known at compile time, so the sum unrolls.
+@inline weighted_sum(n, ::Tuple{}, ::Tuple{}) = 0
+@inline weighted_sum(n, A::Tuple, w::Tuple) = @inbounds(w[1] * A[1][n]) + weighted_sum(n, Base.tail(A), Base.tail(w))
+
+# One pass per field over the linearly-indexed parent arrays: store Sᵢ, then form the stage forcing
 #   G = (fast part at Yᵢ₋₁) + (1/dᵢ)[βᵢᵢ Sᵢ + Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt)]
 #     = Gᵢ + (βᵢᵢ/dᵢ - 1) Sᵢ + (1/dᵢ) Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt),
 # written in the second form so a diagonal tableau (Wicker–Skamarock) leaves Gᵢ bitwise intact,
-# and the stage start state U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ.
-@kernel function _assemble_multirate_stage!(G, U⁰, S, ΔY, Uⁿ, split, i, wβ, wγ, wα)
-    I = @index(Global, Cartesian)
+# and the stage start state U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ. `S` and `ΔY` hold only stages j < i.
+@kernel function _assemble_multirate_stage!(G, U⁰, Sᵢ, Uⁿ, S, ΔY, split, wᵢ, wβ, wγ, wα)
+    n = @index(Global, Linear)
     @inbounds begin
-        Sᵢ = slow_part(split, G, I)
-        Gᵢ = G[I] + (wβ[i] - 1) * Sᵢ
-        uᵢ = Uⁿ[I]
-        for j in 1:i-1
-            Gᵢ += wβ[j] * S[j][I] + wγ[j] * ΔY[j][I]
-            uᵢ += wα[j] * ΔY[j][I]
-        end
-        S[i][I] = Sᵢ
-        G[I] = Gᵢ
-        U⁰[I] = uᵢ
+        slow = slow_part(split, G, n)
+        Sᵢ[n] = slow
+        G[n] = G[n] + wᵢ * slow + weighted_sum(n, S, wβ) + weighted_sum(n, ΔY, wγ)
+        U⁰[n] = Uⁿ[n] + weighted_sum(n, ΔY, wα)
     end
 end
 
@@ -145,7 +143,6 @@ recombined across stages.
 function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
     i = ts.stage[]
     (; α, β, γ, d) = ts.tableau
-    s = length(d)
     θ_name = thermodynamic_density_name(model.formulation)
     grid = model.grid
     arch = architecture(grid)
@@ -154,17 +151,19 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
     C = parent(ts.fast_thermodynamic_tendency)
 
     dᵢ = d[i]
-    wβ = ntuple(j -> β[i, j] / dᵢ, s)
-    wγ = ntuple(j -> γ[i, j] / (dᵢ * Δt), s)
-    wα = ntuple(j -> α[i, j], s)
+    wᵢ = β[i, i] / dᵢ - 1
+    wβ = ntuple(j -> β[i, j] / dᵢ, i - 1)
+    wγ = ntuple(j -> γ[i, j] / (dᵢ * Δt), i - 1)
+    wα = ntuple(j -> α[i, j], i - 1)
 
     for name in keys(ts.Gⁿ)
         G = parent(ts.Gⁿ[name])
-        S = map(Sⱼ -> parent(Sⱼ[name]), ts.slow_tendencies)
-        ΔY = map(ΔYⱼ -> parent(ΔYⱼ[name]), ts.stage_increments)
+        S = ntuple(j -> parent(ts.slow_tendencies[j][name]), i - 1)
+        ΔY = ntuple(j -> parent(ts.stage_increments[j][name]), i - 1)
         split = tendency_split(name, θ_name, C)
-        launch!(arch, grid, KernelParameters(size(G), (0, 0, 0)), _assemble_multirate_stage!,
-                G, parent(ts.U⁰[name]), S, ΔY, parent(ts.Uⁿ[name]), split, i, wβ, wγ, wα)
+        launch!(arch, grid, (length(G),), _assemble_multirate_stage!,
+                G, parent(ts.U⁰[name]), parent(ts.slow_tendencies[i][name]), parent(ts.Uⁿ[name]),
+                S, ΔY, split, wᵢ, wβ, wγ, wα)
     end
 
     return nothing
