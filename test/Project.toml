@@ -28,7 +28,6 @@ TiffImages = "731e570b-9d59-4bfa-96dc-6df516fadf69" # TODO: remove together with
 
 [sources]
 Breeze = {path = ".."}
-Documenter = {url = "https://github.com/JuliaDocs/Documenter.jl", rev = "master"} # TODO: remove once a new Documenter release is tagged
 TiffImages = {url = "https://github.com/tlnagy/TiffImages.jl", rev = "master"} # TODO: remove once TiffImages v0.11.10 is registered
 
 [compat]
@@ -38,7 +37,7 @@ CUDA = "5, ~6.0, 6.2"
 ClimaComms = "0.6"
 CloudMicrophysics = "0.47, 0.48"
 Dates = "<0.0.1, 1"
-Documenter = "1.15"
+Documenter = "1.20"
 Enzyme = "0.13.118"
 ExplicitImports = "1.13"
 GPUArraysCore = "0.2"
