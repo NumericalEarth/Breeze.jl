@@ -83,6 +83,12 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
                                       fast_thermodynamic_tendency, Ref(1))
 end
 
+# MIS assumes one fast operator for the whole step: the linearization coefficients (θᴸ, the
+# pressure coefficients) stay at the values `freeze_linearization_state!` computed from Uⁿ.
+# Re-linearizing per stage makes the fast operator stage-dependent, which costs an order of
+# accuracy because MIS stages start away from the stage-entry state.
+refresh_stage_linearization!(::MultirateInfinitesimalStep, substepper, model) = nothing
+
 const MultirateAcousticModel = AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep}
 
 @inline function final_stage_increment(ts::MultirateInfinitesimalStep)

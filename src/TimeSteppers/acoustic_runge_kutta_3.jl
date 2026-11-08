@@ -172,6 +172,9 @@ update remaining scalars.
 """
 assemble_stage_forcing!(::AcousticRungeKutta3, model, Δt) = nothing
 
+# Wicker–Skamarock re-linearizes the fast operator about each stage's entry state.
+refresh_stage_linearization!(::AcousticRungeKutta3, substepper, model) = prepare_acoustic_cache!(substepper, model)
+
 function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     ts = model.timestepper
     substepper = ts.substepper
@@ -181,7 +184,7 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β)
     # to the current RK stage-entry state; the substep perturbations are
     # initialized with a rewind term inside the substep loop so the
     # WS-RK3 invariant still starts from Uⁿ.
-    prepare_acoustic_cache!(substepper, model)
+    refresh_stage_linearization!(ts, substepper, model)
     cache_advecting_state!(model)
 
     # `update_state!` built the slow tendencies (advection + Coriolis + diffusion; PGF and
