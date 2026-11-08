@@ -44,10 +44,11 @@ function anelastic_model(FT; microphysics=nothing, closure=nothing, optics=nothi
     return model
 end
 
-function compressible_model(FT; time_discretization=ExplicitTimeStepping(), microphysics=nothing, closure=nothing)
+function compressible_model(FT; time_discretization=ExplicitTimeStepping(), microphysics=nothing, closure=nothing,
+                            timestepper=nothing, timestepper_kwargs=NamedTuple())
     grid = test_grid(FT)
     dynamics = CompressibleDynamics(time_discretization; reference_potential_temperature=300)
-    model = AtmosphereModel(grid; dynamics, microphysics, closure)
+    model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper, timestepper_kwargs)
     set!(model; ρ=model.dynamics.reference_state.density, θ=θᵢ, qᵗ=0.015, u=uᵢ)
     return model
 end
@@ -131,6 +132,12 @@ end
 
         @testset "split-explicit, no microphysics, no closure" begin
             test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization()))
+        end
+
+        @testset "split-explicit, multirate infinitesimal step" begin
+            test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
+                                                          timestepper=:MultirateInfinitesimalStep,
+                                                          timestepper_kwargs=(; coefficients=:MIS3C)))
         end
 
         @testset "non-equilibrium microphysics, two species" begin
