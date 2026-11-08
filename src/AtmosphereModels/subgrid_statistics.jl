@@ -62,6 +62,17 @@ end
 
 GaussianStatistics{FT}() where FT = GaussianStatistics{FT}(zero(FT), zero(FT), zero(FT))
 
+# Mixed argument types promote, so that statistics built from values of different float types
+# (for example a closure parameter and a field value) merge with a single float type.
+GaussianStatistics(σ²ᵗ, σ²ᶿ, cᵗᶿ) = GaussianStatistics(promote(σ²ᵗ, σ²ᶿ, cᵗᶿ)...)
+
+# Zero statistics with the float type of the value `x` (a state value read in the kernel)
+@inline zero_gaussian_statistics(x) = GaussianStatistics(zero(x), zero(x), zero(x))
+
+@inline convert_statistics(::Type{FT}, 𝒮::GaussianStatistics{FT}) where FT = 𝒮
+@inline convert_statistics(::Type{FT}, 𝒮::GaussianStatistics) where FT =
+    GaussianStatistics{FT}(convert(FT, 𝒮.σ²ᵗ), convert(FT, 𝒮.σ²ᶿ), convert(FT, 𝒮.cᵗᶿ))
+
 """
 $(TYPEDEF)
 
@@ -94,6 +105,13 @@ struct DoubleGaussianStatistics{FT} <: AbstractSubgridStatistics{FT}
     updraft :: GaussianStatistics{FT}
     "within-environment statistics"
     environment :: GaussianStatistics{FT}
+end
+
+@inline function DoubleGaussianStatistics(aᵘ, δqᵗ, δθ, updraft::GaussianStatistics{U},
+                                          environment::GaussianStatistics{E}) where {U, E}
+    FT = promote_type(typeof(aᵘ), typeof(δqᵗ), typeof(δθ), U, E)
+    return DoubleGaussianStatistics{FT}(convert(FT, aᵘ), convert(FT, δqᵗ), convert(FT, δθ),
+                                        convert_statistics(FT, updraft), convert_statistics(FT, environment))
 end
 
 # Closures in a tuple compose. Gaussian contributions add as independent variances; a Gaussian
@@ -232,17 +250,25 @@ holding the specific conserved variables `θ` (liquid-ice potential temperature)
 moments add a method, after `compute_closure_fields!` has filled `closure_fields`; a closure
 without one contributes zero variance. Closures in a tuple compose through `merge_statistics`.
 """
+# The statistics take the float type of the state they describe, never `eltype(grid)`: inside a
+# Reactant kernel that is a traced number type whose conversions allocate on the stack.
+# Without a subgrid distribution there is no state; `DiracStatistics` carries no values.
+@inline subgrid_state_value(i, j, k, grid, state) = @inbounds state.θ[i, j, k]
+@inline subgrid_state_value(i, j, k, grid, ::Nothing) = Δzᶜᶜᶜ(i, j, k, grid)
+
+@inline dirac_statistics(i, j, k, grid, state) = DiracStatistics{typeof(subgrid_state_value(i, j, k, grid, state))}()
+
 @inline subgrid_statisticsᶜᶜᶜ(i, j, k, grid, ::NoSubgridCorrelation, closure, closure_fields, state) =
-    DiracStatistics{eltype(grid)}()
+    dirac_statistics(i, j, k, grid, state)
 
 @inline subgrid_statisticsᶜᶜᶜ(i, j, k, grid, ::AbstractSubgridCorrelation, closure, closure_fields, state) =
-    GaussianStatistics{eltype(grid)}()
+    zero_gaussian_statistics(subgrid_state_value(i, j, k, grid, state))
 
 @inline subgrid_statisticsᶜᶜᶜ(i, j, k, grid, ::NoSubgridCorrelation, ::Tuple, ::Tuple, state) =
-    DiracStatistics{eltype(grid)}()
+    dirac_statistics(i, j, k, grid, state)
 
 @inline subgrid_statisticsᶜᶜᶜ(i, j, k, grid, ::AbstractSubgridCorrelation, ::Tuple{}, ::Tuple{}, state) =
-    GaussianStatistics{eltype(grid)}()
+    zero_gaussian_statistics(subgrid_state_value(i, j, k, grid, state))
 
 @inline subgrid_statisticsᶜᶜᶜ(i, j, k, grid, correlation::AbstractSubgridCorrelation,
                               closures::Tuple, closure_fields::Tuple, state) =

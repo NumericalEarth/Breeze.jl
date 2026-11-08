@@ -188,3 +188,26 @@ end
     C₀ = Array(interior(compute!(Field(cloud_fraction(grid_mean)))))[:]
     @test all(c -> c == 0 || c == 1, C₀)
 end
+
+@testset "Subgrid statistics take the float type of their values" begin
+    # Mixed argument types promote, so a merge never sees two float types
+    @test GaussianStatistics(1f-8, 0.01, -1f-5) isa GaussianStatistics{Float64}
+    updraft = GaussianStatistics{Float32}()
+    environment = GaussianStatistics(1e-8, 0.01, -1e-5)
+    𝒮 = DoubleGaussianStatistics(0.1f0, 1f-3, -0.5f0, updraft, environment)
+    @test 𝒮 isa DoubleGaussianStatistics{Float64}
+    @test 𝒮.environment === environment
+    merged = Breeze.AtmosphereModels.merge_statistics(GaussianStatistics(1f-8, 1f-2, 0f0), 𝒮)
+    @test merged isa DoubleGaussianStatistics{Float64}
+    @test merged.environment.σ²ᵗ ≈ 2e-8
+
+    # The fallback statistics read the float type from the state, not the grid
+    grid = RectilinearGrid(CPU(); size=4, z=(0, 1), topology=(Flat, Flat, Bounded))
+    subgrid = GaussianSubgridCorrelation(Float64)
+    state = (; θ = fill(290f0, 1, 1, 4), qᵗ = fill(1f-2, 1, 1, 4))
+    AM = Breeze.AtmosphereModels
+    @test AM.subgrid_statisticsᶜᶜᶜ(1, 1, 2, grid, subgrid, nothing, nothing, state) === GaussianStatistics{Float32}()
+    @test AM.subgrid_statisticsᶜᶜᶜ(1, 1, 2, grid, subgrid, (), (), state) === GaussianStatistics{Float32}()
+    @test AM.subgrid_statisticsᶜᶜᶜ(1, 1, 2, grid, AM.NoSubgridCorrelation(), nothing, nothing, state) === DiracStatistics{Float32}()
+    @test AM.subgrid_statisticsᶜᶜᶜ(1, 1, 2, grid, AM.NoSubgridCorrelation(), nothing, nothing, nothing) === DiracStatistics{Float64}()
+end
