@@ -63,7 +63,8 @@ $(TYPEDSIGNATURES)
 
 Return the [`MultirateInfinitesimalStepTableau`](@ref) named `name` in float type `FT`.
 Available: `:WickerSkamarock3`, `:MIS2`, `:MIS3C`, `:MIS4`, `:MIS4a`, `:TVDMISA`, `:TVDMISB`, and the
-experimental optimized sets `:MIS3opt`, `:SSPMIS43`, `:SSPMIS42`.
+experimental optimized sets `:MIS3opt`, `:SSPMIS43`, `:SSPMIS42`; `:MIS54` (Bauer and Knoth 2021) and the
+experimental frozen-split set `:MISF53` (from MultiRate.jl).
 """
 multirate_infinitesimal_step_tableau(name::Symbol, FT=Float64) =
     multirate_infinitesimal_step_tableau(Val(name), FT)
@@ -216,5 +217,49 @@ function multirate_infinitesimal_step_tableau(::Val{:SSPMIS42}, FT)
          0.0642695535248788 0 0 0
          -0.04057498955669165 0.010035624487130182 0 0
          -0.034722055023560496 -0.060694567163454026 0.068480072531976369 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+
+# MIS54: 5 stages, fourth order (additive), Bauer & Knoth, J. Comput. Appl. Math. 387 (2021), Table 2,
+# as transcribed in OsKnoth/MultiRate.jl (MIT), src/TimeSteppers/tableaus.jl. Σdᵢ ≈ 1.88.
+function multirate_infinitesimal_step_tableau(::Val{:MIS54}, FT)
+    α = [0 0 0 0 0
+         0.050143439731979 0 0 0 0
+         0.287530720188756 0.239030810792355 0 0 0
+         0.382675659910308 0.177185696263246 -0.314894383613333 0 0
+         0.079591607322196 0.459806401597571 0.086725275506356 0.439945196292364 0]
+    β = [0.219579314792533 0 0 0 0
+         -0.032864918414060 0.634699918767414 0 0 0
+         -0.241761887431829 -0.120631540663984 0.374686620841487 0 0
+         -0.058474324094343 0.351217252190521 0.309657030167295 0.168604799122988 0
+         -0.056205055946158 -0.068390330952311 -0.086209210260269 0.034904705602768 0.448964988009822]
+    γ = [0 0 0 0 0
+         0.025515704040468 0 0 0 0
+         0.264445452990869 0.402246482358727 0 0 0
+         -0.068258296801680 0.027558616966568 0.015830368641068 0 0
+         0.088610905686011 0.067880982803316 -0.297416190393485 0.148246909195494 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Experimental: MISF53 from OsKnoth/MultiRate.jl (MIT): MIS54 projected (minimum norm) onto the bicoloured
+# B-series order conditions ≤ 3, so it stays third order when the fast part carries frozen coefficients
+# (the "frozen split" N(q) = F(q, q)); additive order 3. Knoth–Wensch advective limit ≥ 2.05 for C_sound ≤ 12.
+function multirate_infinitesimal_step_tableau(::Val{:MISF53}, FT)
+    α = [0 0 0 0 0
+         0.051563690870730 0 0 0 0
+         0.288176208387839 0.237366040355735 0 0 0
+         0.386426181933435 0.226884120668535 -0.311883003737751 0 0
+         0.071336206140529 0.439759102553759 0.100672171718086 0.430813910589328 0]
+    β = [0.224169820125832 0 0 0 0
+         -0.030923474116757 0.636449295829766 0 0 0
+         -0.212661135267493 -0.090680928053002 0.403342063320495 0 0
+         -0.046027730295941 0.354986906394194 0.301752054981687 0.164177159708017 0
+         -0.039824363933280 -0.062654571166931 -0.092900063675952 0.033041549509142 0.440487189534418]
+    γ = [0 0 0 0 0
+         0.026055100529186 0 0 0 0
+         0.259743921769648 0.385911008665460 0 0 0
+         -0.084812012173229 0.017527045095579 -0.004196238099816 0 0
+         0.085121165877309 0.059732128761052 -0.256253527165363 0.156391645563470 0]
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end
