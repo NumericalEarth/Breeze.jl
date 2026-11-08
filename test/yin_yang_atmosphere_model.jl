@@ -218,6 +218,18 @@ end
             @test all(isfinite, interior(getregion(model.velocities.w, 1)))
         end
 
+        @testset "Upper sponge in the acoustic substepper" begin
+            sponge = UpperSponge(damping_rate = 1/100, depth = 2000)
+            sponged = CompressibleDynamics(SplitExplicitTimeDiscretization(; sponge); base_pressure = 1e5,
+                                           reference_potential_temperature = 300)
+            model = AtmosphereModel(grid; dynamics = sponged, advection = WENO(order=5))
+            set!(model; θ = (λ, φ, z) -> 300 + 3z / 1000, ρ = 1, w = 1)
+            time_step!(model, 1)
+            for r in 1:length(grid)
+                @test all(isfinite, interior(getregion(model.velocities.w, r)))
+            end
+        end
+
         @testset "set! from temperature and an Oceananigans closure" begin
             model = AtmosphereModel(grid; dynamics, closure = SmagorinskyLilly())
             set!(model; T = 300, ρ = 1)
