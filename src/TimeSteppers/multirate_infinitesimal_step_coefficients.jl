@@ -64,7 +64,7 @@ $(TYPEDSIGNATURES)
 Return the [`MultirateInfinitesimalStepTableau`](@ref) named `name` in float type `FT`.
 Available: `:WickerSkamarock3`, `:MIS2`, `:MIS3C`, `:MIS4`, `:MIS4a`, `:TVDMISA`, `:TVDMISB`, and the
 experimental optimized sets `:MIS3opt`, `:SSPMIS43`, `:SSPMIS42`; `:MIS54` (Bauer and Knoth 2021) and the
-experimental frozen-split set `:MISF53` (from MultiRate.jl).
+experimental frozen-split set `:MISF53` (from MultiRate.jl), and the experimental robust sets `:MISR33`, `:MISR43`.
 """
 multirate_infinitesimal_step_tableau(name::Symbol, FT=Float64) =
     multirate_infinitesimal_step_tableau(Val(name), FT)
@@ -170,6 +170,8 @@ end
 ##### the remaining freedom; objective = cost per simulated time with the acoustic substep fixed, i.e.
 ##### w_slow·s/C + w_fast·Σdᵢ). Verified in a 2D linear model with Breeze's actual fast integrator, by analytic
 ##### order conditions and nonlinear ODE tests — NOT yet validated in nonlinear 3D simulations. Labeled experimental.
+##### WARNING: their limit collapses at weak scale separation (C_max at c/U = 4: MIS3opt 0.70, SSPMIS43 0.82, SSPMIS42 0.91),
+##### which predicts failure in deep convection; prefer the robust sets (:MISR33, :MISR43) below.
 #####
 
 # Experimental: 3-stage, coupled 2nd / slow 3rd order, minimized Σdᵢ (1.02) at the RK3 advective limit C_max = 1.43; pure-fast amplification 1.10 (relies on divergence damping).
@@ -261,5 +263,42 @@ function multirate_infinitesimal_step_tableau(::Val{:MISF53}, FT)
          0.259743921769648 0.385911008665460 0 0 0
          -0.084812012173229 0.017527045095579 -0.004196238099816 0 0
          0.085121165877309 0.059732128761052 -0.256253527165363 0.156391645563470 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+#####
+##### Experimental robust sets (breeze-mis optimizer v3): as v2, but the advective stability limit is the minimum over
+##### sound/flow speed ratios c/U ∈ {4, 8, 17, 34}. Weak scale separation (c/W ≈ 4 in deep-convective updrafts) is where
+##### MIS3C (1.43 → 1.12) and the v2 sets below collapse; this ranking matches which sets survive the supercell.
+#####
+
+# Experimental: 3-stage, coupled 2nd / slow 3rd order, robust to weak scale separation: von Neumann C_max = 1.43 at every sound/flow speed ratio c/U ∈ {4, 8, 17, 34}, Σdᵢ = 1.09.
+function multirate_infinitesimal_step_tableau(::Val{:MISR33}, FT)
+    α = [0 0 0
+         0.66290161860108543 0 0
+         0.12206375790886395 0.9728966140357751 0]
+    β = [0.78198372346090073 0 0
+         -0.14776225645427224 0.26886854896911722 0
+         -0.34270773098542007 -0.26776852333968387 0.79270396898872975]
+    γ = [0 0 0
+         0.044238844721691803 0 0
+         0.20602916346829875 -0.14033949058669903 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Experimental: 4-stage, coupled 2nd / slow 3rd order, robust to weak scale separation: C_max = 1.87 at every c/U ∈ {4, 8, 17, 34}, Σdᵢ = 1.13.
+function multirate_infinitesimal_step_tableau(::Val{:MISR43}, FT)
+    α = [0 0 0 0
+         0.73376679464050421 0 0 0
+         0.50558138471126768 0.83620761882821593 0 0
+         0.34283783804280543 -0.055399167663750463 0.4222087634286299 0]
+    β = [0.16662171747091625 0 0 0
+         -0.31326595213453812 0.51228079031531137 0 0
+         -0.095986124994452693 -0.37928480111342494 0.63089477034533314 0
+         0.16368347168080843 0.0023092878686045946 -0.10435930593501695 0.54335569620286572]
+    γ = [0 0 0 0
+         0.061846765439072561 0 0 0
+         0.28355370140551323 0.54935363714137364 0 0
+         0.028281030567658048 -0.27706190877247799 0.17174999771104635 0]
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end
