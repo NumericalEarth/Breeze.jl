@@ -20,6 +20,22 @@ using CUDA
 using Breeze.AtmosphereModels: GaussianSubgridCorrelation
 using Breeze.Microphysics.PredictedParticleProperties: ProcessRate
 
+# TODO: move upstream to Reactant (ReactantCUDAExt). Tracked parameters reach GPU kernels as
+# `CuTracedRNumber{Float64, 1}`, and P3 mixes them with plain `Float64` (e.g. `FT(p)`, `clamp`,
+# `rate / scale`). Reactant's `promote_rule` methods for `CuTracedRNumber` are `@nospecializeinfer`,
+# so promotion is a dynamic call inside the kernel (InvalidIRError), and `Float64(::CuTracedRNumber)`
+# has no method. These concrete rules are inferable and return what arithmetic on a
+# `CuTracedRNumber` already returns: its loaded value.
+const ReactantCUDA = Base.get_extension(Reactant, :ReactantCUDAExt)
+
+if !isnothing(ReactantCUDA)
+    const CuTracedFloat64 = ReactantCUDA.CuTracedRNumber{Float64, 1}
+    Base.promote_rule(::Type{CuTracedFloat64}, ::Type{Float64}) = Float64
+    Base.promote_rule(::Type{Float64}, ::Type{CuTracedFloat64}) = Float64
+    Base.promote_rule(::Type{CuTracedFloat64}, ::Type{CuTracedFloat64}) = Float64
+    Base.Float64(x::CuTracedFloat64) = x[]
+end
+
 if default_arch isa GPU
     Reactant.set_default_backend("gpu")
 else
