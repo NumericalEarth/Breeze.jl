@@ -1,7 +1,10 @@
 using Breeze.AtmosphereModels: thermodynamic_density_name
 using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_divergence!
 
-using Oceananigans: prognostic_fields, CenterField
+using Oceananigans: prognostic_fields, CenterField, architecture
+using Oceananigans.Utils: launch!, KernelParameters
+using Adapt: Adapt, adapt
+using KernelAbstractions: @kernel, @index
 
 """
 $(TYPEDEF)
@@ -92,6 +95,46 @@ end
 ##### Stage assembly
 #####
 
+# How a field's full tendency splits into the part the acoustic loop integrates (kept at
+# weight one, from the stage-entry state) and the slow part MIS recombines across stages.
+struct SlowTendencySplit end                  # momentum, moisture, tracers: all slow
+struct ContinuityTendencySplit end            # continuity: all fast
+struct ThermodynamicTendencySplit{C}          # thermodynamic: fast part is C = -∇·(θᴸ (ρu)ᴸ)
+    fast_tendency :: C
+end
+
+Adapt.adapt_structure(to, s::ThermodynamicTendencySplit) = ThermodynamicTendencySplit(adapt(to, s.fast_tendency))
+
+@inline slow_part(::SlowTendencySplit, G, I) = @inbounds G[I]
+@inline slow_part(::ContinuityTendencySplit, G, I) = zero(eltype(G))
+@inline slow_part(s::ThermodynamicTendencySplit, G, I) = @inbounds G[I] - s.fast_tendency[I]
+
+@inline fast_part(::SlowTendencySplit, G, I) = zero(eltype(G))
+@inline fast_part(::ContinuityTendencySplit, G, I) = @inbounds G[I]
+@inline fast_part(s::ThermodynamicTendencySplit, G, I) = @inbounds s.fast_tendency[I]
+
+tendency_split(name, θ_name, C) = name === :ρᵈ ? ContinuityTendencySplit() :
+                                  name === θ_name ? ThermodynamicTendencySplit(C) : SlowTendencySplit()
+
+# One pass per field: store Sᵢ, then form the stage forcing
+#   G = (fast part at Yᵢ₋₁) + (1/dᵢ)[βᵢᵢ Sᵢ + Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt)]
+# and the stage start state U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ.
+@kernel function _assemble_multirate_stage!(G, U⁰, S, ΔY, Uⁿ, split, i, wβ, wγ, wα)
+    I = @index(Global, Cartesian)
+    @inbounds begin
+        Sᵢ = slow_part(split, G, I)
+        Gᵢ = fast_part(split, G, I) + wβ[i] * Sᵢ
+        uᵢ = Uⁿ[I]
+        for j in 1:i-1
+            Gᵢ += wβ[j] * S[j][I] + wγ[j] * ΔY[j][I]
+            uᵢ += wα[j] * ΔY[j][I]
+        end
+        S[i][I] = Sᵢ
+        G[I] = Gᵢ
+        U⁰[I] = uᵢ
+    end
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -104,42 +147,26 @@ recombined across stages.
 function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
     i = ts.stage[]
     (; α, β, γ, d) = ts.tableau
-    names = keys(ts.Gⁿ)
+    s = length(d)
     θ_name = thermodynamic_density_name(model.formulation)
-    C = parent(ts.fast_thermodynamic_tendency)
+    grid = model.grid
+    arch = architecture(grid)
 
     compute_linearized_thermodynamic_flux_divergence!(ts.fast_thermodynamic_tendency, ts.substepper, model)
+    C = parent(ts.fast_thermodynamic_tendency)
 
-    Sᵢ = ts.slow_tendencies[i]
     dᵢ = d[i]
+    wβ = ntuple(j -> β[i, j] / dᵢ, s)
+    wγ = ntuple(j -> γ[i, j] / (dᵢ * Δt), s)
+    wα = ntuple(j -> α[i, j], s)
 
-    for name in names
+    for name in keys(ts.Gⁿ)
         G = parent(ts.Gⁿ[name])
-        S = parent(Sᵢ[name])
-        U⁰ = parent(ts.U⁰[name])
-        Uⁿ = parent(ts.Uⁿ[name])
-
-        if name === :ρᵈ
-            # Continuity is entirely fast: keep the stage-entry divergence at weight one.
-            fill!(S, 0)
-        elseif name === θ_name
-            S .= G .- C
-            G .= C .+ (β[i, i] / dᵢ) .* S
-        else
-            S .= G
-            G .= (β[i, i] / dᵢ) .* S
-        end
-
-        U⁰ .= Uⁿ
-
-        for j in 1:i-1
-            ΔY = parent(ts.stage_increments[j][name])
-            Sⱼ = parent(ts.slow_tendencies[j][name])
-            wβ = β[i, j] / dᵢ
-            wγ = γ[i, j] / (dᵢ * Δt)
-            G .+= wβ .* Sⱼ .+ wγ .* ΔY
-            U⁰ .+= α[i, j] .* ΔY
-        end
+        S = map(Sⱼ -> parent(Sⱼ[name]), ts.slow_tendencies)
+        ΔY = map(ΔYⱼ -> parent(ΔYⱼ[name]), ts.stage_increments)
+        split = tendency_split(name, θ_name, C)
+        launch!(arch, grid, KernelParameters(size(G), (0, 0, 0)), _assemble_multirate_stage!,
+                G, parent(ts.U⁰[name]), S, ΔY, parent(ts.Uⁿ[name]), split, i, wβ, wγ, wα)
     end
 
     return nothing
