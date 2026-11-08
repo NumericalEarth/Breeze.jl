@@ -69,7 +69,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     tableau = multirate_infinitesimal_step_tableau(coefficients, FT)
     s = number_of_stages(tableau)
 
-    substepper = AcousticSubstepper(grid, dynamics.time_discretization; cache_advecting_state)
+    substepper = build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_state)
 
     U⁰ = map(similar, prognostic_fields)
     Gⁿ = map(similar, prognostic_fields)
@@ -221,14 +221,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
         end
     end
 
-    corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
-    tick_stage!(model.clock, corrected_Δt, Δt)
-
-    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
-    update_state!(model, callbacks; compute_tendencies = true)
-    cache_transport_velocity!(model)
-    microphysics_model_update!(model.microphysics, model)
-    step_lagrangian_particles!(model, Δt)
+    complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
 
     return nothing
 end

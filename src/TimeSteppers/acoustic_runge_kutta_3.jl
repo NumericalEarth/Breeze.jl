@@ -112,16 +112,20 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     β₂ = FT(β[2])
     β₃ = FT(β[3])
 
-    substepper = AcousticSubstepper(grid, dynamics.time_discretization;
-                                    cache_advecting_state,
-                                    prognostic_momentum = (ρu = prognostic_fields.ρu,
-                                                           ρv = prognostic_fields.ρv,
-                                                           ρw = prognostic_fields.ρw))
+    substepper = build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_state)
     AS = typeof(substepper)
 
     return AcousticRungeKutta3{FT, U0, TG, TI, AS}(β₁, β₂, β₃, U⁰, Gⁿ,
                                                     implicit_solver, substepper)
 end
+
+# The substepper every `AcousticTimeStepper` drives, built from the model's prognostic fields.
+build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_state = false) =
+    AcousticSubstepper(grid, dynamics.time_discretization;
+                       cache_advecting_state,
+                       prognostic_momentum = (ρu = prognostic_fields.ρu,
+                                              ρv = prognostic_fields.ρv,
+                                              ρw = prognostic_fields.ρw))
 
 #####
 ##### Adaptive-implicit vertical advection split time step
@@ -306,6 +310,19 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**)
     acoustic_rk3_substep!(model, Δt, β₃)
 
+    complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Finish an outer step of an `AcousticTimeStepper` after its last stage: land the clock on
+`tⁿ⁺¹`, step the closure prognostics, rebuild the tendencies stage 1 of the next step uses,
+apply the once-per-step microphysics update, and advect particles.
+"""
+function complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
