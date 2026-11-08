@@ -14,7 +14,7 @@ using Oceananigans.TimeSteppers: update_state!
 using LinearAlgebra: istril
 using Test
 
-const mis_coefficient_sets = (:WickerSkamarock3, :MIS2, :MIS3C, :MIS4, :MIS4a, :TVDMISA, :TVDMISB)
+const mis_coefficient_sets = (:WickerSkamarock3, :MIS2, :MIS3C, :MIS4, :MIS4a, :TVDMISA, :TVDMISB, :MIS3opt, :SSPMIS43, :SSPMIS42)
 
 function mis_bubble_model(; timestepper, coefficients = :MIS2, moist = false, Δθ = 2)
     grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5),

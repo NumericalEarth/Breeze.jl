@@ -62,7 +62,8 @@ number_of_stages(tableau::MultirateInfinitesimalStepTableau) = length(tableau.d)
 $(TYPEDSIGNATURES)
 
 Return the [`MultirateInfinitesimalStepTableau`](@ref) named `name` in float type `FT`.
-Available: `:WickerSkamarock3`, `:MIS2`, `:MIS3C`, `:MIS4`, `:MIS4a`, `:TVDMISA`, `:TVDMISB`.
+Available: `:WickerSkamarock3`, `:MIS2`, `:MIS3C`, `:MIS4`, `:MIS4a`, `:TVDMISA`, `:TVDMISB`, and the
+experimental optimized sets `:MIS3opt`, `:SSPMIS43`, `:SSPMIS42`.
 """
 multirate_infinitesimal_step_tableau(name::Symbol, FT=Float64) =
     multirate_infinitesimal_step_tableau(Val(name), FT)
@@ -160,5 +161,60 @@ function multirate_infinitesimal_step_tableau(::Val{:TVDMISB}, FT)
     γ = [0                     0                     0
          0.28904389120139701   0                     0
          0.45113560071334202  -0.25006656847591002   0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+#####
+##### Experimental optimized sets (breeze-mis optimizer v2: order conditions as equality constraints, CMA-ES over
+##### the remaining freedom; objective = cost per simulated time with the acoustic substep fixed, i.e.
+##### w_slow·s/C + w_fast·Σdᵢ). Verified in a 2D linear model with Breeze's actual fast integrator, by analytic
+##### order conditions and nonlinear ODE tests — NOT yet validated in nonlinear 3D simulations. Labeled experimental.
+#####
+
+# Experimental: 3-stage, coupled 2nd / slow 3rd order, minimized Σdᵢ (1.02) at the RK3 advective limit C_max = 1.43; pure-fast amplification 1.10 (relies on divergence damping).
+function multirate_infinitesimal_step_tableau(::Val{:MIS3opt}, FT)
+    α = [0 0 0
+         0.81787672620735752 0 0
+         -0.032272457774980737 1.0424429521043383 0]
+    β = [0.62058614776978571 0 0
+         -0.25432774773148764 0.3588923369108708 0
+         -0.039490893678879285 -0.41234937297395752 0.74831161613593478]
+    γ = [0 0 0
+         0.088039904277198405 0 0
+         -0.073597787227516837 0.11123416923677598 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Experimental: 4-stage, coupled 2nd / slow 3rd order, strict SSP (C_SSP = 1.79), Σdᵢ = 1.15–1.18; pure-fast amplification 1.00.
+function multirate_infinitesimal_step_tableau(::Val{:SSPMIS43}, FT)
+    α = [0 0 0 0
+         0.62724492162547518 0 0 0
+         0.23430164294884198 1.0654114265586287 0 0
+         0.0044647991429055409 0.47676213827145197 0.34061317941416769 0]
+    β = [0.55978704832753967 0 0 0
+         -0.13703374696667955 0.4455138059089358 0 0
+         -0.08356056647074829 0.011356587798664766 0.21157449047031091 0
+         -0.07717839985836826 -0.28295021995546038 0.054034557649107431 0.43893059297785891]
+    γ = [0 0 0 0
+         0.42598752307186377 0 0 0
+         -0.033886544164628218 -0.7094153778115867 0 0
+         -0.33319589552418832 0.35581112503939216 0.19062097801779304 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Experimental: 4-stage, coupled 2nd / slow 2nd order, strict SSP (C_SSP = 1.78), Σdᵢ = 1.03.
+function multirate_infinitesimal_step_tableau(::Val{:SSPMIS42}, FT)
+    α = [0 0 0 0
+         0.93090262262783308 0 0 0
+         0.055075823891310327 0.90859594461706827 0 0
+         0.12876158840650917 0.010471028874744041 0.94687250883678153 0]
+    β = [0.51441875850385166 0 0 0
+         -0.17895800913077078 0.3609653018802319 0 0
+         -0.085537006406372754 -0.11757058350895166 0.32683431177008909 0
+         0.015048779441518256 -0.044308807401374599 -0.12312350260141104 0.35839537060819626]
+    γ = [0 0 0 0
+         0.0642695535248788 0 0 0
+         -0.04057498955669165 0.010035624487130182 0 0
+         -0.034722055023560496 -0.060694567163454026 0.068480072531976369 0]
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end
