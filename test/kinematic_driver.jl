@@ -21,7 +21,7 @@ using Test
     @testset "PrescribedDynamics construction" begin
         dynamics = PrescribedDynamics(reference_state)
         @test dynamics.density isa PrescribedDensity
-        @test dynamics_density(dynamics) === reference_state.density
+        @test continuity_density(dynamics) === reference_state.density
 
         dynamics_div = PrescribedDynamics(reference_state; divergence_correction=true)
         @test dynamics_div isa PrescribedDynamics{true}
