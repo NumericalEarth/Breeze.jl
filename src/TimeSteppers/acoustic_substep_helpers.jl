@@ -197,7 +197,9 @@ scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_nam
 ##### What moves and what stays:
 #####   - Advection, closure diffusion, forcing and the microphysical sources of the scalars are
 #####     rebuilt after the loop (`compute_scalar_tendencies!` with the live transport velocity);
-#####     `update_state!` skips them (`scalar_tendencies_in_update_state`).
+#####     `update_state!` skips them (`scalar_tendencies_in_update_state`). The stepper picks the
+#####     build (`post_loop_scalar_tendency_kernel`): the full tendency added to `Gⁿ`, or, for a
+#####     multirate infinitesimal step, the advection kept apart from the sources it treats as slow.
 #####   - The flux boundary conditions and the closure's own scalar sources (TKE production) are
 #####     still evaluated before the loop, at the stage-entry state, onto zeroed scalar
 #####     tendencies, and the post-loop build adds to them. Evaluating the closure sources after
@@ -274,7 +276,8 @@ compute_post_loop_scalar_tendencies!(::PreLoopScalarTendencies, model, Δt, call
 
 function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model, Δt, callbacks)
     tracer_density_to_specific!(model)
-    compute_scalar_tendencies!(model, fields(model), transport_velocities(model), add_scalar_tendency!)
+    kernel = post_loop_scalar_tendency_kernel(model.timestepper)
+    compute_scalar_tendencies!(model, fields(model), transport_velocities(model), kernel)
 
     for callback in callbacks
         callback.callsite isa TendencyCallsite && callback(model)
@@ -285,6 +288,16 @@ function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model,
     cache_transport_velocity!(model)
     return nothing
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+The `compute_scalar_tendencies!` kernel of the post-loop scalar tendency build: by default
+`add_scalar_tendency!`, the full tendency added to the stage-entry sources in `Gⁿ`. A stepper that
+treats a scalar's advection and its sources differently (`MultirateInfinitesimalStep`) builds the
+two apart instead.
+"""
+post_loop_scalar_tendency_kernel(timestepper) = add_scalar_tendency!
 
 #####
 ##### Implicit vertical solve for the acoustic prognostics

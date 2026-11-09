@@ -8,10 +8,13 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: specific_prognostic_moisture, total_density
-using Breeze.TimeSteppers: PreLoopScalarTendencies, PostLoopScalarTendencies
+using Breeze.AtmosphereModels: specific_prognostic_moisture, total_density, transport_velocities,
+                               compute_scalar_tendencies!, compute_scalar_tendency!, SplitScalarTendencies,
+                               tracer_density_to_specific!, tracer_specific_to_density!
+using Breeze.TimeSteppers: PreLoopScalarTendencies, PostLoopScalarTendencies, scalar_prognostic_names,
+                           fast_tendency_scratch
 using Oceananigans
-using Oceananigans: TendencyCallsite
+using Oceananigans: TendencyCallsite, fields
 using Statistics: mean
 using Test
 
@@ -113,4 +116,52 @@ end
     end
     @test mean_tke[false] > 2e-3 # production is active
     @test isapprox(mean_tke[true], mean_tke[false]; rtol = 1e-10)
+end
+
+@testset "The split post-loop build sums to the full scalar tendency" begin
+    # A multirate infinitesimal step builds each post-loop scalar tendency in two parts from one
+    # evaluation — the advective part into its own scratch, the rest added to `Gⁿ` — instead of
+    # recomputing the advection to separate them. The parts must sum to the full tendency to
+    # round-off, with a closure, a forcing and a non-uniform tracer so that both parts are nonzero.
+    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-20e3, 20e3), z = (0, 8e3),
+                           topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    ρc_forcing = Forcing((x, z, t) -> 1e-6 * exp(-(x / 5e3)^2))
+    model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
+                            closure = ScalarDiffusivity(ν = 10, κ = 10), forcing = (; ρc = ρc_forcing),
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients = :MIS3C, post_loop_scalar_tendencies = true))
+    set!(model; θ = θ_bubble, qᵛ = (x, z) -> q₀ * exp(-((x / 4e3)^2 + (z / 2e3)^2)),
+         ρ = HydrostaticallyBalancedDensity(), u = 5)
+    set!(model.tracers.ρc, (x, z) -> c₀ * exp(-((x / 3e3)^2 + ((z - 2e3) / 2e3)^2)))
+    parent(model.tracers.ρc) .*= parent(total_density(model.dynamics))
+    time_step!(model, 1)
+
+    ts = model.timestepper
+    names = scalar_prognostic_names(model)
+    @test ts.fast_tendency isa NamedTuple
+    @test all(name -> haskey(ts.fast_tendency, name), names)
+    pre_loop = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep).timestepper
+    @test pre_loop.fast_tendency isa Field
+
+    tracer_density_to_specific!(model)
+    velocities = transport_velocities(model)
+    compute_scalar_tendencies!(model, fields(model), velocities, compute_scalar_tendency!)
+    full = Dict(name => Array(interior(ts.Gⁿ[name])) for name in names)
+
+    for name in names
+        fill!(parent(ts.Gⁿ[name]), 0)
+    end
+    compute_scalar_tendencies!(model, fields(model), velocities, SplitScalarTendencies(ts.fast_tendency))
+    tracer_specific_to_density!(model)
+
+    for name in names
+        slow = Array(interior(ts.Gⁿ[name]))
+        fast = Array(interior(fast_tendency_scratch(ts, name)))
+        scale = maximum(abs, full[name])
+        @test scale > 0
+        @test maximum(abs, fast) > 0
+        @test maximum(abs, slow) > 0
+        @test maximum(abs, slow .+ fast .- full[name]) < 1e-13 * scale
+    end
 end
