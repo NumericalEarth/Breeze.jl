@@ -192,3 +192,80 @@ end
     @test maximum(abs, rebuilt) > 0
     @test isapprox(stored, rebuilt; rtol=0, atol=8 * eps(FT) * maximum(abs, rebuilt))
 end
+
+# A halo fill that is not a copy (Yin-Yang halos are Lagrange-interpolated from the other panel)
+# can leave the outflow fraction outside [0, 1] in the halos: measured [-0.26, 1.22]. The limiter
+# must read such halos as clamped to [0, 1], and its passes must stay finite and in [0, 1].
+@testset "Outflow limiter tolerates overshooting halos of r [$(FT)]" for FT in all_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size=(8, 8, 16), halo=(6, 6, 6), x=(0, 800), y=(0, 800), z=(0, 800))
+    constants = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=300)
+    advection = WENO(FT; order=5, bounds=(0, 1), time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=1//2))
+    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants,
+                            microphysics=FallingRain(FT(fall_speed), false), scalar_advection=(; ρqʳ=advection))
+    # Rain only in the cells next to the x and y edges, so the limited cells border the halos.
+    edge(x, y, z) = ifelse(((x < 100) | (x > 700) | (y < 100) | (y > 700)) & (300 < z < 600), FT(1e-3), zero(FT))
+    set!(model; θ=300, qᵛ=FT(5e-3), qʳ=edge, u=(x, y, z) -> 40 * sinpi(2y / 800), v=(x, y, z) -> 30 * cospi(2x / 800))
+    Oceananigans.TimeSteppers.update_state!(model)
+
+    scheme = model.advection.ρqʳ
+    limiter = scheme.bounds.limiter
+    r, r₀, F = limiter.outflow_fraction, limiter.provisional_fraction, limiter.face_fluxes
+    ρ = AM.total_density(model.dynamics)
+    c = model.microphysical_fields.qʳ
+    U = BA.scalar_transport_velocities(model, :ρqʳ)
+    Nx, Ny, Nz = size(grid)
+    Hx, Hy, Hz = Oceananigans.Grids.halo_size(grid)
+    Δt = FT(200) # long enough that the limiter acts
+
+    # Interior fraction 1 - roundoff, halos alternating between the measured overshoots.
+    function overshoot!(f)
+        A = Array(parent(f))
+        for I in CartesianIndices(A)
+            interior_cell = (Hx < I[1] ≤ Hx + Nx) & (Hy < I[2] ≤ Hy + Ny) & (Hz < I[3] ≤ Hz + Nz)
+            A[I] = interior_cell ? 1 - eps(FT) : (isodd(sum(Tuple(I))) ? FT(-0.26) : FT(1.22))
+        end
+        copyto!(parent(f), A)
+        return f
+    end
+
+    arch = Oceananigans.Architectures.architecture(grid)
+    Oceananigans.Utils.launch!(arch, grid, (Nx+1, Ny+1, Nz+1), BA._compute_outflow_limiter_face_fluxes!, F, grid, scheme, ρ, U, c)
+    overshoot!(r₀)
+    Oceananigans.Utils.launch!(arch, grid, :xyz, BA._compute_outflow_fraction!, r, r₀, grid, F, ρ, c, c, false, Δt, true)
+    R = Array(interior(r))
+    @test all(isfinite, R)
+    @test all(x -> 0 ≤ x ≤ 1, R)
+    # 1 - eps counts as settled
+    @test all(==(1), R)
+
+    # A provisional pass (no inflow credit) from zeroed interior, then a credited pass from overshooting halos.
+    Oceananigans.Utils.launch!(arch, grid, :xyz, BA._compute_outflow_fraction!, r₀, r₀, grid, F, ρ, c, c, false, Δt, false)
+    @test minimum(Array(interior(r₀))) < 1 # the limiter acts somewhere
+    A = Array(parent(r₀))
+    for I in CartesianIndices(A)
+        interior_cell = (Hx < I[1] ≤ Hx + Nx) & (Hy < I[2] ≤ Hy + Ny) & (Hz < I[3] ≤ Hz + Nz)
+        interior_cell || (A[I] = isodd(sum(Tuple(I))) ? FT(-0.26) : FT(1.22))
+    end
+    copyto!(parent(r₀), A)
+    Oceananigans.Utils.launch!(arch, grid, :xyz, BA._compute_outflow_fraction!, r, r₀, grid, F, ρ, c, c, false, Δt, true)
+    R = Array(interior(r))
+    @test all(isfinite, R)
+    @test all(x -> 0 ≤ x ≤ 1, R)
+
+    # The tendency reads overshooting halos of r as their clamp.
+    Ar = Array(parent(r))
+    for I in CartesianIndices(Ar)
+        interior_cell = (Hx < I[1] ≤ Hx + Nx) & (Hy < I[2] ≤ Hy + Ny) & (Hz < I[3] ≤ Hz + Nz)
+        interior_cell || (Ar[I] = isodd(sum(Tuple(I))) ? FT(-0.26) : FT(1.22))
+    end
+    copyto!(parent(r), Ar)
+    G = Field(KernelFunctionOperation{Center, Center, Center}(AM.div_ρUc, grid, scheme, ρ, U, c))
+    compute!(G)
+    Gover = Array(interior(G))
+    copyto!(parent(r), clamp.(Ar, 0, 1))
+    compute!(G)
+    @test all(isfinite, Gover)
+    @test Gover == Array(interior(G))
+end

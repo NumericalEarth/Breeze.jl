@@ -156,10 +156,17 @@ end
     return ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Azᶜᶜᶠ(i, j, k, grid) * upwind_biased_product(w̃, cᴸ, cᴿ)
 end
 
+# The outflow fraction of cell (i, j, k), clamped to [0, 1]. Interior values are in [0, 1] by
+# construction, but a halo fill that is not a copy need not preserve that: Yin-Yang halos are
+# Lagrange-interpolated from the other panel and overshoot where `r` jumps between 0 and 1
+# (measured halo range [-0.26, 1.22]). A negative halo `r` would reverse a seam flux and one
+# above 1 would amplify it, so every read of a neighbour's `r` goes through this clamp.
+@inline outflow_fraction(r, i, j, k) = @inbounds clamp(r[i, j, k], 0, 1)
+
 # Each face flux is scaled by the outflow fraction of its upwind cell.
 @inline upwind_outflow_fraction_z(i, j, k, advection, w) =
-    @inbounds ifelse(w[i, j, k] ≥ 0, advection.bounds.limiter.outflow_fraction[i, j, k-1],
-                                     advection.bounds.limiter.outflow_fraction[i, j, k])
+    @inbounds ifelse(w[i, j, k] ≥ 0, outflow_fraction(advection.bounds.limiter.outflow_fraction, i, j, k-1),
+                                     outflow_fraction(advection.bounds.limiter.outflow_fraction, i, j, k))
 
 @inline limited_face_flux_z(i, j, k, grid, advection, ρ, w, c) =
     upwind_outflow_fraction_z(i, j, k, advection, w) * bounded_face_flux_z(i, j, k, grid, advection, ρ, w, c)
@@ -181,13 +188,13 @@ end
 
 @inline function stored_limited_face_flux_x(i, j, k, grid, advection, u, F)
     r = advection.bounds.limiter.outflow_fraction
-    @inbounds rᵘ = ifelse(u[i, j, k] ≥ 0, r[i-1, j, k], r[i, j, k])
+    @inbounds rᵘ = ifelse(u[i, j, k] ≥ 0, outflow_fraction(r, i-1, j, k), outflow_fraction(r, i, j, k))
     return rᵘ * stored_face_flux_x(i, j, k, grid, F)
 end
 
 @inline function stored_limited_face_flux_y(i, j, k, grid, advection, v, F)
     r = advection.bounds.limiter.outflow_fraction
-    @inbounds rᵘ = ifelse(v[i, j, k] ≥ 0, r[i, j-1, k], r[i, j, k])
+    @inbounds rᵘ = ifelse(v[i, j, k] ≥ 0, outflow_fraction(r, i, j-1, k), outflow_fraction(r, i, j, k))
     return rᵘ * stored_face_flux_y(i, j, k, grid, F)
 end
 
@@ -257,19 +264,19 @@ end
 @inline function limited_inflow_x(i, j, k, grid, F, r)
     F⁻ = stored_face_flux_x(i,   j, k, grid, F)
     F⁺ = stored_face_flux_x(i+1, j, k, grid, F)
-    return @inbounds max(0, F⁻) * r[i-1, j, k] - min(0, F⁺) * r[i+1, j, k]
+    return max(0, F⁻) * outflow_fraction(r, i-1, j, k) - min(0, F⁺) * outflow_fraction(r, i+1, j, k)
 end
 
 @inline function limited_inflow_y(i, j, k, grid, F, r)
     F⁻ = stored_face_flux_y(i, j,   k, grid, F)
     F⁺ = stored_face_flux_y(i, j+1, k, grid, F)
-    return @inbounds max(0, F⁻) * r[i, j-1, k] - min(0, F⁺) * r[i, j+1, k]
+    return max(0, F⁻) * outflow_fraction(r, i, j-1, k) - min(0, F⁺) * outflow_fraction(r, i, j+1, k)
 end
 
 @inline function limited_inflow_z(i, j, k, grid, F, r)
     F⁻ = stored_face_flux_z(i, j, k,   grid, F)
     F⁺ = stored_face_flux_z(i, j, k+1, grid, F)
-    return @inbounds max(0, F⁻) * r[i, j, k-1] - min(0, F⁺) * r[i, j, k+1]
+    return max(0, F⁻) * outflow_fraction(r, i, j, k-1) - min(0, F⁺) * outflow_fraction(r, i, j, k+1)
 end
 
 # Mass the explicit fluxes of the coming stage bring into cell (i, j, k), per unit volume, each
@@ -283,19 +290,24 @@ end
 
 # `r = min(1, available / removed)`. With `credit_inflow`, `available` includes the inflow scaled by
 # the previous pass's fractions `r₀`, which never exceed the final ones, so positivity holds.
-# Later passes skip the cells the previous pass left at `r = 1`, which stay there.
+# Later passes skip the cells the previous pass left at `r = 1` (to within a few ulps, so a fraction
+# that arrives as 1 ± roundoff still counts), which stay there.
+#
+# `available` is floored at zero: `content ≥ 0` and the clamped inflow is non-negative, so the floor
+# only acts on roundoff, but it guarantees `removed > available` implies `removed > 0`, so `r` is in
+# [0, 1) and never ±Inf.
 @kernel function _compute_outflow_fraction!(r, r₀, grid, F, ρ, c, q⁰, from_initial_state, Δt, credit_inflow)
     i, j, k = @index(Global, NTuple)
     @inbounds content = max(0, ifelse(from_initial_state, q⁰[i, j, k], ρ[i, j, k] * c[i, j, k]))
     FT = typeof(content)
-    @inbounds settled = credit_inflow & (r₀[i, j, k] == 1)
+    @inbounds settled = credit_inflow & (r₀[i, j, k] ≥ 1 - 4 * eps(FT))
 
     if settled
         @inbounds r[i, j, k] = one(FT)
     else
         removed = Δt * explicit_outflow(i, j, k, grid, F)
         inflow = ifelse(credit_inflow, Δt * limited_explicit_inflow(i, j, k, grid, F, r₀), zero(content))
-        available = content + ifelse(isfinite(inflow), inflow, zero(inflow))
+        available = max(0, content + ifelse(isfinite(inflow), inflow, zero(inflow)))
         @inbounds r[i, j, k] = ifelse(isfinite(removed) & (removed > available), available / removed, one(available))
     end
 end
