@@ -26,9 +26,10 @@
 using Breeze.Thermodynamics: MoistureMassFractions
 using Breeze.Utils: sum_properties
 
+using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.BoundaryConditions: BoundaryCondition, NormalFlow
 using Oceananigans.Fields: set!, ZeroField, ZFaceField
-using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ
+using Oceananigans.Operators: Azᶜᶜᶠ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ, V⁻¹ᶜᶜᶜ, δzᵃᵃᶜ
 
 #####
 ##### MicrophysicalState abstraction
@@ -225,10 +226,17 @@ without grid indexing. It works identically for grid-based LES and parcel models
 # Arguments
 - `microphysics`: The microphysics scheme
 - `name`: Variable name as `Val(:name)` (e.g., `Val(:ρqᶜˡ)`)
-- `ρ`: Local density (scalar)
+- `ρ`: Total density, [`total_density`](@ref), which weights the density-weighted prognostics
+  and their tendencies (scalar). Because the prognostic condensate content is ``ρ q``, it also sets
+  the precipitation size distributions. On the anelastic core this is the reference density ``ρᵣ``.
 - `ℳ`: Microphysical state (e.g., `WarmPhaseOneMomentState`)
 - `𝒰`: Thermodynamic state
 - `constants`: Thermodynamic constants
+
+Saturation must not use `ρ`. The saturation specific humidity ``qᵛ⁺ = pᵛ⁺ / (ρᵗʰ Rᵛ T)`` and the
+supersaturation use the thermodynamic state density `density(𝒰, constants)`, which
+[`thermodynamic_state_density`](@ref) also returns: ``ρᵗʰ = pᵣ / (Rᵐ T)`` on the anelastic core and
+the total density on the compressible core.
 
 # Returns
 The tendency value (scalar, units depend on variable).
@@ -307,10 +315,14 @@ function compute_microphysical_tendencies!(microphysics, model)
     G_tuple = map(n -> getproperty(G, n), all_names)
     name_tuple = map(Val, all_names)
 
+    # Microphysics responds to the physical velocity of the current state, so we pass
+    # `model.velocities` rather than `transport_velocities(model)`, which is the contravariant
+    # vertical velocity on terrain-following grids and the acoustic time average under
+    # `AcousticRungeKutta3`.
     launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
             G_tuple, name_tuple, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, specific_prognostic_moisture(model),
-            model.microphysical_fields, transport_velocities(model))
+            model.microphysical_fields, model.velocities)
 
     return nothing
 end
@@ -470,6 +482,10 @@ volume. It defaults to all prognostic fields; schemes with prognostic number con
 """
 condensate_field_names(microphysics) = prognostic_field_names(microphysics)
 condensate_field_names(::Nothing) = tuple()
+
+# Precipitating water is part of the thermodynamic moisture bundle, but does not
+# equilibrate as cloud condensate during a saturated parcel displacement.
+@inline precipitating_mass_fraction(i, j, k, microphysics, microphysical_fields) = 0
 
 
 """
@@ -1003,7 +1019,7 @@ end
 ##### Sedimentation of the condensate part of the thermodynamic variables
 #####
 #
-# The thermodynamic variables carry a condensate part — the deficit −(ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / (cᵖᵐ Π)
+# The thermodynamic variables carry a condensate part — the deficit −(ℒˡ(T) qˡ + ℒⁱ(T) qⁱ) / (ĉᵖ Π)
 # of θˡⁱ, the content qˡ (cˡ T − ℒˡ₀) + qⁱ (cⁱ T − ℒⁱ₀) of s — and when condensate falls, that
 # part must fall with it. Rain-out then leaves the latent warming from forming the rain aloft
 # and pre-cools the layer that later evaporates it, the mechanism that drives cold pools.
@@ -1029,8 +1045,8 @@ end
 # reconstructions per cell, and at the velocity that tendency transports the tracer with),
 # weighted like it by the total density; the enthalpy each brings is that of the cell it drains
 # (`condensate_content_fluxes`), the cell above the face when the condensate falls, the cell
-# below when an updraft outruns its fall speed; and the cell's coupling-to-total density ratio
-# turns the resulting change of the specific variable into that of the coupling-weighted
+# below when an updraft outruns its fall speed; and the cell's continuity-to-total density ratio
+# turns the resulting change of the specific variable into that of the continuity-density-weighted
 # prognostic.
 #
 # The content moves in the same two parts as the mass. `sedimentation_tendency` carries the part
@@ -1054,7 +1070,7 @@ variable `φ` at fixed temperature along the dynamics' composition increment
 ([`sedimentation_composition_increment`](@ref)); per phase the enthalpy the falling mass
 carries (phase enthalpy `hˣ` on the compressible core, `hˣ − hᵈ` under the fixed-density
 convention); and `∂φ/∂h`, the local response of `φ` to heating: one for `s`, and for `θˡⁱ`
-`1 / (cᵖᵐ Π)` at prescribed pressure (the anelastic core) or the fixed-gas-density response
+`1 / (ĉᵖ Π)` at prescribed pressure (the anelastic core) or the fixed-gas-density response
 `β_cv` on the compressible core (see `sedimentation_thermal_response`). Each thermodynamic
 formulation extends this function for its `formulation` type. The remaining arguments are the model's
 `dynamics`, thermodynamic `constants`, `microphysics` and `microphysical_fields`, prognostic
@@ -1066,7 +1082,7 @@ function condensate_content end
 """
 $(TYPEDSIGNATURES)
 
-Return the tendency of the coupling-weighted thermodynamic variable (`ρθ = ρᵈ θ` or `ρs = ρᵈ s`)
+Return the tendency of the continuity-density-weighted thermodynamic variable (`ρθ = ρᵈ θ` or `ρs = ρᵈ s`)
 at cell `(i, j, k)` from the sedimentation of the condensate the `condensates` describe (see
 [`materialize_sedimentation`](@ref)): the part the tracer tendencies apply, which
 is the whole transport of an explicit scheme and the CFL-limited explicit fraction under adaptive
@@ -1083,7 +1099,7 @@ the tendency is
 where `Fᵢ(w)` is the vertical advective flux of condensate `i`'s humidity at velocity `w`
 through the face with the scheme that transports the tracer ([`sedimentation_mass_fluxes`](@ref)),
 `Wᵢ = wᵗ + wᵢ` its total velocity, `ρ` the [`total_density`](@ref) that weights the tracer's
-mass flux, `ρᵈ` the [`dynamics_density`](@ref) that carries the thermodynamic variable, and
+mass flux, `ρᵈ` the [`continuity_density`](@ref) that carries the thermodynamic variable, and
 `cᵢ(w) = χᵢ + (∂φ/∂h) (hᵢ(w) − hᵢ)` the content the flux delivers to the cell: the cell's own
 `χ` of the condensate's phase, plus its `∂φ/∂h` times the enthalpy in the upwind cell of `w` in
 excess of its own. A flux out drains the cell itself and delivers `χ` alone, changing the
@@ -1101,7 +1117,7 @@ does not. The `θˡⁱ` tendency is a cell-local response, not the divergence of
 conservative thermodynamic face flux. Continuity advances `ρᵈ` without a sedimentation source on
 every core, so the content moved per unit total mass is the change of the specific variable, and
 the cell's ratio `ρᵈ / ρ` (one on the anelastic core, the dry mass fraction on the compressible
-core) turns it into the change of the coupling-weighted prognostic.
+core) turns it into the change of the continuity-density-weighted prognostic.
 """
 @inline sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature) =
@@ -1127,12 +1143,12 @@ core) turns it into the change of the coupling-weighted prognostic.
     c⁺ = condensate_content(i, j, min(k + 1, grid.Nz), grid, formulation, dynamics, constants,
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     ρ = total_density(dynamics)
-    ρᵈ = dynamics_density(dynamics)
+    ρᵈ = continuity_density(dynamics)
     Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
     ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
     ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
-    @inbounds coupling_fraction = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
-    return -(coupling_fraction * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻))
+    @inbounds density_ratio = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
+    return -(density_ratio * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻))
 end
 
 # Σᵢ [cᵢ(Wᵢ) Fᵢ(Wᵢ) − cᵢ(wᵗ) Fᵢ(wᵗ)] through the lower and upper faces of cell (i, j, k): the
@@ -1248,6 +1264,16 @@ microphysics_model_update!(microphysics::Nothing, model) = nothing
 """
 $(TYPEDSIGNATURES)
 
+Whether an operator-split microphysics update refreshes halos, diagnostics, and all
+tendencies before returning for a finite positive time step. Such schemes must not
+read the incoming tendencies. The time stepper may omit the preceding tendency pass
+only when no tendency callbacks would be lost. Defaults to `false`.
+"""
+refreshes_state_after_update(microphysics) = false
+
+"""
+$(TYPEDSIGNATURES)
+
 Validate that `microphysics` is compatible with the model's `thermodynamic_constants`.
 
 Defaults to a no-op. Schemes that require a particular thermodynamic formulation (for
@@ -1256,6 +1282,15 @@ example a specific saturation vapor pressure formula) extend this method to thro
 failure surfaces as an opaque dynamic `getproperty` / GPU compilation error.
 """
 validate_microphysics(microphysics, thermodynamic_constants) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Validate that `microphysics` can run on architecture `arch`; a no-op by default. Extensions throw
+an `ArgumentError` at model construction for schemes that need settings an architecture requires
+(for example a static sedimentation substep bound under Reactant).
+"""
+validate_microphysics_architecture(microphysics, arch) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -1326,6 +1361,129 @@ The generic method is implemented in `Breeze.Advection`, which owns the flux ker
 loaded after this module.
 """
 bottom_precipitation_flux(model) = bottom_precipitation_flux(model, model.microphysics)
+
+#####
+##### Precipitation flux profile diagnostic
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a `KernelFunctionOperation` at `(Center, Center, Face)` for the downward mass flux of
+sedimenting condensate through every ``z``-face, in kg m⁻² s⁻¹ (positive downward).
+Multiply by `3600` to obtain a precipitation rate in mm h⁻¹ of liquid water equivalent.
+
+The flux is the sedimentation part of each condensate's advective mass flux,
+``-ρ (F(wᵗ + wˢ) - F(wᵗ)) / A_z``, formed with the same advection scheme and face
+reconstruction that transports the condensate ([`sedimentation_mass_fluxes`](@ref) plus the
+adaptive-implicit remainder [`implicit_sedimentation_mass_fluxes`](@ref)), so it matches the
+sedimentation the model applies. Here ``F(w)`` is the volume-weighted face flux of the
+condensate's specific humidity at velocity ``w``, ``wᵗ`` the transport velocity and ``wˢ``
+the condensate's (negative) sedimentation velocity. At the bottom face, where an impenetrable
+boundary makes ``wᵗ = 0``, it reduces to [`bottom_precipitation_flux`](@ref).
+
+The keyword argument `condensates` selects which sedimenting condensates contribute, by
+prognostic name (see `keys(model.sedimentation)`); by default all of them do, which for a
+scheme with sedimenting cloud condensate includes cloud droplet fallout. Use, for example,
+`condensates = (:ρqʳ,)` for the rain flux alone. Sedimentation velocities are those diagnosed
+during the most recent `update_state!`.
+
+# Example
+
+```jldoctest
+using Breeze
+grid = RectilinearGrid(size=(4, 4, 8), extent=(1e3, 1e3, 1e3))
+model = AtmosphereModel(grid; microphysics=P3Microphysics())
+set!(model, θ=290, qᵛ=0.01, qᶜˡ=1e-3)
+P = precipitation_flux(model, condensates=(:ρqʳ,))
+
+# output
+KernelFunctionOperation at (Center, Center, Face)
+├── grid: 4×4×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
+├── kernel_function: precipitation_flux_kernel (generic function with 1 method)
+└── arguments: ("Tuple", "Field", "Field")
+```
+"""
+function precipitation_flux(model; condensates = keys(model.sedimentation))
+    sedimenting = values(model.sedimentation[condensates])
+    return KernelFunctionOperation{Center, Center, Face}(precipitation_flux_kernel, model.grid,
+                                                         sedimenting,
+                                                         total_density(model.dynamics),
+                                                         transport_velocities(model).w)
+end
+
+# The flux through face k is formed from the fluxes of the cell below it, except at the top
+# face (k = Nz + 1), which is the upper face of cell Nz; this keeps every evaluation inside the
+# cells whose face reconstructions the tracer tendency uses.
+@inline function precipitation_flux_kernel(i, j, k, grid, condensates, ρ, wᵗ)
+    Nz = size(grid, 3)
+    kᶜ = min(k, Nz)
+    top = k > Nz
+    F = sedimentation_face_flux(i, j, kᶜ, top, grid, condensates, wᵗ, ρ)
+    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+    return -ρᶠ * F / Azᶜᶜᶠ(i, j, k, grid)
+end
+
+@inline sedimentation_face_flux(i, j, k, top, grid, ::Tuple{}, wᵗ, ρ) = zero(grid)
+
+@inline function sedimentation_face_flux(i, j, k, top, grid, condensates, wᵗ, ρ)
+    condensate = first(condensates)
+    Fᵉ⁻, Fᵉ⁺ = explicit_condensate_mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ)
+    Fⁱ⁻, Fⁱ⁺ = implicit_condensate_mass_fluxes(i, j, k, grid, condensate, wᵗ, ρ)
+    # Each pair is (flux at wᵗ + wˢ, flux at wᵗ); their difference is the sedimentation part.
+    F⁻ = (Fᵉ⁻[1] - Fᵉ⁻[2]) + (Fⁱ⁻[1] - Fⁱ⁻[2])
+    F⁺ = (Fᵉ⁺[1] - Fᵉ⁺[2]) + (Fⁱ⁺[1] - Fⁱ⁺[2])
+    F = ifelse(top, F⁺, F⁻)
+    return F + sedimentation_face_flux(i, j, k, top, grid, Base.tail(condensates), wᵗ, ρ)
+end
+
+#####
+##### Microphysical process rate diagnostic
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a `KernelFunctionOperation` at `(Center, Center, Center)` that evaluates the
+microphysical process rate called `name` of `model.microphysics` (for example
+`:autoconversion`, `:accretion`, `:condensation`, or `:rain_evaporation`).
+
+Rates are *specific*: per unit mass of moist air, in kg kg⁻¹ s⁻¹ for mass transfers and
+kg⁻¹ s⁻¹ for number transfers. Multiply by the density (for example
+[`total_density`](@ref)`(model.dynamics)`) for a rate per unit volume, whose vertical
+`Integral` is a column-integrated rate in kg m⁻² s⁻¹.
+
+Each scheme documents which rates it provides and their sign conventions. Schemes that
+compute their rates jointly with sink limiters evaluate the limited rates, that is, exactly
+the rates that drive the model tendencies, at the current model state. The operation
+is lazy: wrap it in `Field` to compute and store it, slice it with `Field(op; indices)`, or
+reduce it with `Integral` and `Average`.
+
+Supported schemes: `PredictedParticlePropertiesMicrophysics`, for which every rate field
+of `P3ProcessRates` is available.
+
+# Example
+
+```jldoctest
+using Breeze
+grid = RectilinearGrid(size=(4, 4, 8), extent=(1e3, 1e3, 1e3))
+model = AtmosphereModel(grid; microphysics=P3Microphysics())
+set!(model, θ=290, qᵛ=0.01, qᶜˡ=1e-3)
+autoconversion = MicrophysicalProcessRate(model, :autoconversion)
+
+# output
+KernelFunctionOperation at (Center, Center, Center)
+├── grid: 4×4×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
+├── kernel_function: P3ProcessRateKernelFunction(:autoconversion,)
+└── arguments: ()
+```
+"""
+MicrophysicalProcessRate(model, name::Symbol) =
+    MicrophysicalProcessRate(model, model.microphysics, Val(name))
+
+MicrophysicalProcessRate(model, microphysics, ::Val{name}) where name =
+    throw(ArgumentError(string("MicrophysicalProcessRate is not implemented for :", name,
+                               " and microphysics of type ", summary(microphysics), ".")))
 
 #####
 ##### Cloud effective radius interface

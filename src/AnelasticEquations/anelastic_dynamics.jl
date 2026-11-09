@@ -2,21 +2,34 @@
 ##### AnelasticDynamics definition
 #####
 
-struct AnelasticDynamics{R, P}
+struct AnelasticDynamics{R, P, FT}
     reference_state :: R
     pressure_anomaly :: P
+    pressure_solver_float_type :: FT
 end
 
 """
 $(TYPEDSIGNATURES)
 
 Return `AnelasticDynamics` representing incompressible fluid dynamics expanded about `reference_state`.
-"""
-AnelasticDynamics(reference_state) = AnelasticDynamics(reference_state, nothing)
 
+Keyword arguments
+=================
+
+- `pressure_solver_float_type`: floating-point type of the anelastic pressure solve. Default: `Float64`,
+  also for a `Float32` model. The Fourier–tridiagonal solve is poorly conditioned for the longest
+  horizontal waves under a tall, strongly stratified column, and can be unstable in `Float32` on
+  large domains. When it differs from the grid's type, the solver is built on a copy of the grid in
+  this type, and the pressure is returned in the model's precision.
+"""
+AnelasticDynamics(reference_state; pressure_solver_float_type=Float64) =
+    AnelasticDynamics(reference_state, nothing, pressure_solver_float_type)
+
+# Kernels never need the solver's float type, and a `DataType` is not a valid GPU kernel argument.
 Adapt.adapt_structure(to, dynamics::AnelasticDynamics) =
     AnelasticDynamics(adapt(to, dynamics.reference_state),
-                      adapt(to, dynamics.pressure_anomaly))
+                      adapt(to, dynamics.pressure_anomaly),
+                      nothing)
 
 #####
 ##### Default dynamics and materialization
@@ -40,7 +53,7 @@ Materialize a stub `AnelasticDynamics` into a full dynamics object with the pres
 """
 function AtmosphereModels.materialize_dynamics(dynamics::AnelasticDynamics, grid, boundary_conditions, thermodynamic_constants)
     pressure_anomaly = CenterField(grid)
-    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly)
+    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly, dynamics.pressure_solver_float_type)
 end
 
 #####
@@ -107,18 +120,16 @@ $(TYPEDSIGNATURES)
 
 Return the reference density field for `AnelasticDynamics`.
 
-For anelastic models, the dynamics density is the time-independent
+For anelastic models, the continuity density is the time-independent
 reference state density ``ρᵣ(z)``.
 """
-AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
+AtmosphereModels.continuity_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
-# The anelastic reference density ρᵣ(z) is a dry reference state evaluated at the reference
-# temperature, so it is not the local moist density that mass fractions are referenced to.
-# Rediagnose that at the reference pressure: ρ = pᵣ(z) / (Rᵐ(q) T).
-@inline function AtmosphereModels.gas_phase_density(i, j, k, dynamics::AnelasticDynamics, T, q, constants)
-    @inbounds p = dynamics.reference_state.pressure[i, j, k]
-    return density(T, p, q, constants)
-end
+# The total density ρᵣ(z) is the reference state's, not the local state's, so evaluate the
+# equation of state at the reference pressure with the local temperature and moisture:
+# ρ = pᵣ(z) / (Rᵐ(q) T). This is also the density in the anelastic buoyancy.
+@inline AtmosphereModels.thermodynamic_state_density(i, j, k, dynamics::AnelasticDynamics, T, q, constants) =
+    fixed_pressure_state_density(i, j, k, dynamics, T, q, constants)
 
 #####
 ##### Prognostic fields
@@ -163,6 +174,7 @@ end
 
 function Base.show(io::IO, dynamics::AnelasticDynamics)
     print(io, summary(dynamics), '\n')
+    print(io, "├── pressure_solver_float_type: ", dynamics.pressure_solver_float_type, '\n')
     if dynamics.pressure_anomaly === nothing
         print(io, "└── pressure_anomaly: not materialized")
     else

@@ -120,6 +120,7 @@ using Adapt: Adapt
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU, on_architecture
 using Breeze.AtmosphereModels: prognostic_field_names
+using Breeze.Microphysics: thermodynamic_adjustment_factor
 using Breeze.Thermodynamics: MoistureMassFractions,
                              PlanarIceSurface,
                              PlanarLiquidSurface,
@@ -130,6 +131,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
                              dry_air_gas_constant,
                              ice_latent_heat,
                              liquid_latent_heat,
+                             mixture_gas_constant,
                              mixture_heat_capacity,
                              psychrometric_correction,
                              saturation_specific_humidity,
@@ -265,5 +267,6 @@ include("prognostic_tendencies.jl")
 include("p3_microphysical_state.jl")
 include("p3_microphysical_tendencies.jl")
 include("p3_driver.jl")
+include("p3_process_rate_diagnostics.jl")
 
 end # module PredictedParticleProperties

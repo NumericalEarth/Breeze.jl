@@ -24,7 +24,7 @@ where:
 - ℒˡ is latent heat of vaporization
 - Dᵛ is diffusivity of water vapor
 - qᵛ, qᵛ⁺(T₀) are the vapor and saturation specific humidities (total-air mass
-  fractions) at T₀; qᵛ⁺(T₀) = ρᵛ⁺(T₀)/ρ so that ρ (qᵛ - qᵛ⁺(T₀)) = ρᵛ - ρᵛ⁺(T₀)
+  fractions) at T₀; qᵛ⁺(T₀) = ρᵛ⁺(T₀)/ρᵗʰ so that ρᵗʰ (qᵛ - qᵛ⁺(T₀)) = ρᵛ - ρᵛ⁺(T₀)
 - fᵛᵉ is the ventilation factor
 
 # Arguments
@@ -35,22 +35,24 @@ where:
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
-- `ρ`: Air density [kg/m³]
+- `ρ`: Total density, weighting the vapor-diffusion heat flux and the ice lookups [kg/m³]
+- `ρᵗʰ`: Thermodynamic state density, at which the freezing-point
+  saturation fraction is evaluated [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
 
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
-@inline ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+@inline ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                          constants, transport) =
-    ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+    ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                                      constants, transport)[1]
 
 # Returns `(melt_rate, small, large)`. The small/large split of the ventilation
 # integral sets the rain-vs-coating partition in `ice_melting_rates`, and comes free
 # with the four table reads the melt rate already makes at the bracket.
-@inline function ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+@inline function ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                                                   constants, transport)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
@@ -69,14 +71,16 @@ where:
     prep = ice_table_bracket(p3.ice.deposition.small_ice_ventilation_constant,
                              m_mean, Fᶠ, Fˡ, ρᶠ, floors)
 
-    return ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+    return ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport,
                                   ρ_correction, prep)
 end
 
 # Shared body. With `P3IceLookups` the bracket floors `nⁱ` at `floors.number_scale` where the
 # standalone form above floors it at zero; the coordinates agree for `nⁱ ≥ number_scale`, and
 # below it the melt rate `nⁱ₊ × dm/dt` is negligible.
-@inline function ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+# The total density `ρ` weights the vapor-diffusion heat flux; the freezing-point saturation
+# fraction is evaluated at the thermodynamic state density `ρᵗʰ`.
+@inline function ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport,
                                         ρ_correction, prep)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
@@ -98,7 +102,7 @@ end
     Dᵛ = transport.Dᵛ       # Diffusivity of water vapor [m²/s]
     ν  = transport.ν        # Kinematic viscosity [m²/s]
 
-    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρ)
+    q_sat0 = freezing_point_saturation_mass_fraction(constants, T₀, ρᵗʰ)
 
     # Use the dry-ice PSD ventilation tables (small + large) for melting. The total
     # Ventilation/VentilationEnhanced tables use the wet-ice PSD and are not
@@ -166,29 +170,31 @@ Requires tabulated small/large ice ventilation integrals.
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
-- `ρ`: Air density [kg/m³]
+- `ρ`: Total density, weighting the vapor-diffusion heat flux and the ice lookups [kg/m³]
+- `ρᵗʰ`: Thermodynamic state density, at which the freezing-point
+  saturation fraction is evaluated [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
 
 # Returns
 - NamedTuple with `partial_melting` and `complete_melting` rates [kg/kg/s]
 """
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                                    constants, transport)
     # Total melting rate, plus the small/large ventilation split it already had to
     # look up. Passing qʷⁱ gives the Fˡ-blended ventilation.
     total_melt, small, large =
-        ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+        ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                                          constants, transport)
 
     return partition_melting(total_melt, small, large)
 end
 
 # Shared-lookup variant used by `p3_phase1_rates`.
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport,
                                    lookups::P3IceLookups)
     total_melt, small, large =
-        ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, constants, transport,
+        ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport,
                                lookups.ρ_correction, lookups.prep)
     return partition_melting(total_melt, small, large)
 end
@@ -236,9 +242,14 @@ Number of melted particles equals number of rain drops produced.
     qⁱ₊ = max(0, qⁱ)
     nⁱ₊ = max(0, nⁱ)
 
-    # |∂nⁱ/∂t| = (nⁱ/qⁱ) × ∂qⁱ_melt/∂t (positive magnitude)
+    # |∂nⁱ/∂t| = nⁱ × (∂qⁱ_melt/∂t) / qⁱ (positive magnitude)
     # Sign convention: returns positive; caller subtracts in tendency assembly.
-    ratio = safe_divide(nⁱ₊, qⁱ₊, zero(FT))
+    #
+    # Form the melted fraction before multiplying by nⁱ. The ratio nⁱ/qⁱ overflows when qⁱ
+    # is subnormal (reachable in Float32 as melting drains the dry ice), and Inf × 0 = NaN
+    # when nothing melts. The melt rate is limited to qⁱ / sink_limiting_timescale, so the
+    # fraction stays bounded.
+    melted_fraction = safe_divide(qⁱ_melt_rate, qⁱ₊, zero(FT))
 
-    return ratio * qⁱ_melt_rate
+    return nⁱ₊ * melted_fraction
 end

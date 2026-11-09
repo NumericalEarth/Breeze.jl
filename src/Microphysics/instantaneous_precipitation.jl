@@ -8,10 +8,10 @@ using ..Thermodynamics:
 
 using ..AtmosphereModels:
     AtmosphereModels,
-    dynamics_density,
+    continuity_density,
+    diagnose_thermodynamic_state,
     kernel_time_step,
-    total_density,
-    standard_pressure
+    total_density
 
 using Oceananigans: Oceananigans, CenterField, Field, Integral
 using Oceananigans.Architectures: architecture
@@ -35,6 +35,10 @@ and validated. The distinction is irreversibility: the condensate is purged from
 the prognostic vapor every step and cannot re-evaporate.
 
 The prognostic moisture is the vapor density `ρqᵛ` (no condensate is retained).
+On the compressible core, rain-out leaves dry-air density unchanged and reduces
+total density by the removed condensate. The remaining vapor mass fraction and
+potential temperature are recomputed at that density, preserving the temperature
+reached during condensation.
 """
 struct InstantaneousPrecipitation{S}
     saturation_adjustment :: S
@@ -55,6 +59,8 @@ function InstantaneousPrecipitation(FT::DataType=Oceananigans.defaults.FloatType
 end
 
 const IP = InstantaneousPrecipitation
+
+@inline Diagnostics.microphysics_phase_equilibrium(μ::IP) = microphysics_phase_equilibrium(μ.saturation_adjustment)
 
 # Prognostic vapor density; no retained condensate fields.
 AtmosphereModels.moisture_prognostic_name(::IP) = :ρqᵛ
@@ -119,11 +125,11 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     Δt = model.clock.last_Δt
 
     # Skip before the first step (Δt invalid during construction).
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    invalid_time_step(Δt) && return nothing
 
-    pˢᵗ = standard_pressure(model.dynamics)
     constants = model.thermodynamic_constants
-    ρθˡⁱ = model.formulation.potential_temperature_density
+    formulation = model.formulation
+    ρθˡⁱ = formulation.potential_temperature_density
     ρqᵛ = model.moisture_density
     μ = model.microphysical_fields
 
@@ -132,7 +138,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     kernel_Δt = kernel_time_step(arch, grid, Δt)
 
     launch!(arch, grid, :xyz, _instantaneous_precipitation_update!,
-            model.dynamics, saturation_adjustment, constants, pˢᵗ, kernel_Δt, ρθˡⁱ, ρqᵛ, μ)
+            grid, formulation, model.dynamics, saturation_adjustment, constants, kernel_Δt, ρθˡⁱ, ρqᵛ, μ)
 
     # The kernel mutated prognostic fields in the interior only; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
@@ -141,36 +147,56 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     return nothing
 end
 
-@kernel function _instantaneous_precipitation_update!(dynamics, saturation_adjustment,
-                                                   constants, pˢᵗ, Δt, ρθˡⁱ, ρqᵛ, μ)
+# Pressure-closed cores keep their density weighting fixed when condensate leaves.
+@inline rainout_state(𝒰, qᵛ, ρqᵛ, ρᵈ) = with_moisture(𝒰, MoistureMassFractions(qᵛ))
+
+# The compressible cell loses condensate mass at fixed volume, leaving only dry air
+# and vapor: ρ = ρᵈ + ρqᵛ. Renormalize the vapor before inverting θ at the retained T.
+@inline function rainout_state(𝒰::LiquidIceDensityState, qᵛ, ρqᵛ, ρᵈ)
+    ρ = ρᵈ + ρqᵛ
+    q = MoistureMassFractions(ρqᵛ / ρ)
+    return LiquidIceDensityState(𝒰.potential_temperature, q, 𝒰.standard_pressure, ρ,
+                                𝒰.temperature_solver, 𝒰.exner_exponent)
+end
+
+# The condensation holds fixed what the dynamics holds fixed. `diagnose_thermodynamic_state` builds
+# the state the dynamics is closed on, and its type carries that constraint into
+# `adjust_thermodynamic_state` and the θˡⁱ inversion. The compressible core evolves its density, so
+# the adjustment is isochoric at the cell's total density ρ. The anelastic core, like the kinematic
+# core, holds the reference or prescribed pressure fixed, so the adjustment is isobaric there:
+# temperature and saturation are evaluated at that pressure, at the thermodynamic state density
+# p / (Rᵐ T), not at the total density ρ = ρᵣ that weights the anelastic prognostics. The state takes
+# the formulation's temperature solver and Exner exponent.
+@kernel function _instantaneous_precipitation_update!(grid, formulation, dynamics, saturation_adjustment,
+                                                   constants, Δt, ρθˡⁱ, ρqᵛ, μ)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field  = total_density(dynamics)     # total ρ: mass fractions, saturation, density-based inversion
-    ρᵈ_field = dynamics_density(dynamics)  # ρᵈ: ρθ = ρᵈθ is dry-coupled
+    ρ_field  = total_density(dynamics)       # total ρ: mass fractions and the density weighting them
+    ρᵈ_field = continuity_density(dynamics)  # ρᵈ: ρθ = ρᵈθ is dry-coupled
 
     @inbounds begin
         ρ  = ρ_field[i, j, k]
         ρᵈ = ρᵈ_field[i, j, k]
         ρqᵛ₀ = ρqᵛ[i, j, k]
         qᵗ = ρqᵛ₀ / ρ              # total water mass fraction (÷ total ρ); prognostic vapor, no retained condensate
-        θ₀ = ρθˡⁱ[i, j, k] / ρᵈ     # θˡⁱ = ρθˡⁱ/ρᵈ (dry-coupled), conserved by the reversible condensation
 
-        # Condensation — constant-density saturation adjustment with θˡⁱ held fixed. Delegated to
-        # the shared #765 secant, which saturates against the density-based qsat at the cell's own
-        # ρ (true pressure p = ρRᵐT). Subsaturated cells short-circuit untouched, matching the
-        # original large-scale-condensation behavior. See adjust_thermodynamic_state(::LiquidIceDensityState, ::SA).
-        𝒰₀  = LiquidIceDensityState(θ₀, MoistureMassFractions(qᵗ), pˢᵗ, ρ)
+        # Condensation: saturation adjustment with θˡⁱ held fixed, at the cell's density on the
+        # compressible core and at its pressure otherwise. The state reads θˡⁱ = ρθˡⁱ/ρᵈ from the
+        # formulation's diagnostic field, which `update_state!` refreshes just before this
+        # operator-split update. Delegated to the shared #765 secant. Subsaturated cells
+        # short-circuit untouched, matching the original large-scale-condensation behavior.
+        𝒰₀  = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, MoistureMassFractions(qᵗ))
         𝒰₁  = adjust_thermodynamic_state(𝒰₀, saturation_adjustment, constants)
         q   = 𝒰₁.moisture_mass_fractions
         T   = temperature(𝒰₁, constants)
         qᵛ⁺ = q.vapor
 
-        # Rain-out — remove all condensate but RETAIN the latent warming: the vapor-only parcel
-        # keeps T, so its θˡⁱ is the condensate-free (L = 0) inversion. with_temperature on the
-        # vapor-only state is exactly the old closed form θᶠ = T^(1/γ)(ρRᵐ/pˢᵗ)^((1-γ)/γ).
-        𝒰ᵥ = with_moisture(𝒰₁, MoistureMassFractions(qᵛ⁺))
-        θᶠ = with_temperature(𝒰ᵥ, T, constants).potential_temperature
+        # Rain-out keeps T while removing condensate. On the compressible core, recover θ
+        # using the reduced total density and renormalized vapor mass fraction that
+        # update_state! will diagnose; pressure-closed cores retain their prescribed pressure.
         ρqᵛ⁺ = ρ * qᵛ⁺
+        𝒰ᵥ = rainout_state(𝒰₁, qᵛ⁺, ρqᵛ⁺, ρᵈ)
+        θᶠ = with_temperature(𝒰ᵥ, T, constants).potential_temperature
         # Mass-fraction form (≡ ρqᵛ₀ - ρqᵛ⁺, since qᵗ = ρqᵛ₀/ρ) but exactly 0 when subsaturated
         # (qᵛ⁺ = qᵗ), avoiding a round-trip ρ·(ρqᵛ₀/ρ) that would leave a spurious tiny precip rate.
         condensed_water_density = ρ * max(0, qᵗ - qᵛ⁺)
@@ -178,7 +204,7 @@ end
 
         ρqᵛ[i, j, k]  = ρqᵛ⁺
         ρθˡⁱ[i, j, k] = ρᵈ * θᶠ    # ρθ = ρᵈθ (dry-coupled)
-        μ.qᵛ[i, j, k] = qᵛ⁺
+        μ.qᵛ[i, j, k] = 𝒰ᵥ.moisture_mass_fractions.vapor
         μ.precipitation_rate[i, j, k] = ifelse(condensed_water_density > 0,
                                                precipitation_rate,
                                                μ.precipitation_rate[i, j, k])

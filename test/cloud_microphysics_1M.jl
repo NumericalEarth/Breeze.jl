@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_velocity, condensate_liquid_fraction,
-                               total_density, dynamics_density, standard_pressure,
+                               total_density, continuity_density, standard_pressure,
                                implicit_advection_velocities, density_weighted_advection_diagonal,
                                implicit_advection_density, implicit_step_scheme, closure_scalar_index,
                                liquid_fraction_content, specific_prognostic_moisture
@@ -436,7 +436,7 @@ end
     Oceananigans.defaults.FloatType = FT
     Nz = 8
     Δz = FT(20)
-    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Nz * Δz), topology=(Flat, Flat, Bounded))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -451,8 +451,8 @@ end
     # Courant number of 4, of which the explicit fraction carries 1/8 and the solve the rest.
     Δt = FT(10)
     w₀ = FT(-8)
-    set!(model; θ=300, qᵗ=0.005, qᶜˡ=0, qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
-    set!(μ.wʳ, (x, y, z) -> ifelse(z < Nz * Δz, w₀, FT(0)))
+    set!(model; θ=300, qᵗ=0.005, qᶜˡ=0, qʳ=z -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+    set!(μ.wʳ, z -> ifelse(z < Nz * Δz, w₀, FT(0)))
     set!(μ.wᶜˡ, 0)
     td = Oceananigans.TimeSteppers.time_discretization(model.advection.ρqʳ)
     td.Δt[] = Δt
@@ -480,8 +480,8 @@ end
 
     # With a uniform synthetic content and enthalpy (no sensible heat moves between cells), the
     # heat the post-solve step moves is χ times the mass the solve moved, cell by cell (the
-    # anelastic coupling ratio is one), outflow through the bottom included, so the column loses
-    # deficit with the rain that leaves.
+    # anelastic continuity-to-total density ratio is one), outflow through the bottom included,
+    # so the column loses deficit with the rain that leaves.
     χ = FT(-2500)
     uniform_content = UniformContent(χ)
     ρθ = model.formulation.potential_temperature_density
@@ -502,10 +502,10 @@ end
                                       closure = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ=10),
                                       scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
     μₜ = transport_model.microphysical_fields
-    set!(transport_model; θ=300, qᵗ=0.005, qᶜˡ=0, qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
-    set!(μₜ.wʳ, (x, y, z) -> ifelse(z < Nz * Δz, FT(-3), FT(0)))
+    set!(transport_model; θ=300, qᵗ=0.005, qᶜˡ=0, qʳ=z -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+    set!(μₜ.wʳ, z -> ifelse(z < Nz * Δz, FT(-3), FT(0)))
     set!(μₜ.wᶜˡ, 0)
-    set!(transport_model.velocities.w, (x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)))
+    set!(transport_model.velocities.w, z -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)))
     for name in (:ρθ, :ρqʳ)
         Oceananigans.TimeSteppers.time_discretization(transport_model.advection[name]).Δt[] = Δt
     end
@@ -553,13 +553,13 @@ end
     # budget are unchanged; no energy-conservation statement is implied. At the
     # operator level the step moves χ times the mass the tracer's solve moved, weighted by the
     # cell's dry mass fraction, with a nonzero implicit remainder.
-    acoustic_grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, 800))
+    acoustic_grid = RectilinearGrid(default_arch; size=Nz, z=(0, 800), topology=(Flat, Flat, Bounded))
     acoustic_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
     acoustic_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.05)))
     acoustic_model = AtmosphereModel(acoustic_grid; dynamics=acoustic_dynamics, microphysics=OneMomentCloudMicrophysics(),
                                      scalar_advection=acoustic_advection)
     set!(acoustic_model; ρ=acoustic_model.dynamics.reference_state.density, θ=300, qᵗ=0.005, qᶜˡ=0,
-         qʳ=(x, y, z) -> ifelse(z > 400, FT(1e-3), FT(0)))
+         qʳ=z -> ifelse(z > 400, FT(1e-3), FT(0)))
     μₐ = acoustic_model.microphysical_fields
     Δtₐ = FT(10)
     Oceananigans.TimeSteppers.time_discretization(acoustic_model.advection.ρqʳ).Δt[] = Δtₐ
@@ -577,7 +577,7 @@ end
     ρθₐ⁰ = Array(interior(ρθₐ, 1, 1, :))
     Breeze.AtmosphereModels.implicit_sedimentation_step!(acoustic_model, Δtₐ, acoustic_model.velocities, uniform_content)
     Δρθₐ = Array(interior(ρθₐ, 1, 1, :)) .- ρθₐ⁰
-    qᵈₐ = Array(interior(dynamics_density(acoustic_model.dynamics), 1, 1, :)) ./
+    qᵈₐ = Array(interior(continuity_density(acoustic_model.dynamics), 1, 1, :)) ./
           Array(interior(total_density(acoustic_model.dynamics), 1, 1, :))
     @test Δρθₐ ≈ qᵈₐ .* χ .* Δρqʳₐ
 
@@ -594,7 +594,7 @@ end
     Oceananigans.defaults.FloatType = FT
     Nz = 8
     Δz = FT(20)
-    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Nz * Δz), topology=(Flat, Flat, Bounded))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -608,8 +608,8 @@ end
     # remove the downdraft from a column, so one stage is run on its own, as the time stepper
     # runs it, from the tendencies built for it.
     Δt = FT(10)
-    set!(model; θ=300, qᵛ=0.005, qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)),
-         w=(x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)), enforce_mass_conservation=false)
+    set!(model; θ=300, qᵛ=0.005, qʳ=z -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)),
+         w=z -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)), enforce_mass_conservation=false)
     model.clock.last_Δt = Δt # what `update_advection_timestep!` hands the adaptive schemes
     update_state!(model; compute_tendencies=true)
     μ = model.microphysical_fields
@@ -649,7 +649,7 @@ end
     Oceananigans.defaults.FloatType = FT
     Nz = 8
     Δz = FT(20)
-    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Nz * Δz))
+    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Nz * Δz), topology=(Flat, Flat, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
     microphysics = OneMomentCloudMicrophysics(FT)
     adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
@@ -658,7 +658,7 @@ end
 
     Δt = FT(10)
     set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.005, qᶜˡ=0,
-         qʳ=(x, y, z) -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+         qʳ=z -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
     update_state!(model)
     μ = model.microphysical_fields
     for name in (:ρθ, :ρqʳ)
@@ -671,9 +671,9 @@ end
     # at Courant number one, whose explicit fraction the adaptive scheme clips to the rain's own
     # speed so that sedimentation fluxes formed with it cancel, and a transport downdraft at half
     # the explicit limit, which leaves the tendency half of the explicit sedimentation flux.
-    set!(model.velocities.w, (x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)))
+    set!(model.velocities.w, z -> ifelse(0 < z < Nz * Δz, FT(-2), FT(0)))
     w̄ = model.timestepper.substepper.time_averaged_velocities.w
-    set!(w̄, (x, y, z) -> ifelse(0 < z < Nz * Δz, FT(-0.5), FT(0)))
+    set!(w̄, z -> ifelse(0 < z < Nz * Δz, FT(-0.5), FT(0)))
     Breeze.TimeSteppers.cache_transport_velocity!(model)
 
     # The explicit sedimentation part of a tendency: the tendency with the rain falling minus the
@@ -727,8 +727,8 @@ end
     χ = [cₖ.χ[1] for cₖ in c]
     h = [cₖ.h[1] for cₖ in c]
     β = [cₖ.∂φ∂h for cₖ in c]
-    qᵈ = column(dynamics_density(model.dynamics)) ./ column(total_density(model.dynamics))
-    Sθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, β; coupling = qᵈ)
+    qᵈ = column(continuity_density(model.dynamics)) ./ column(total_density(model.dynamics))
+    Sθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, β; density_ratio = qᵈ)
     tolerance = sqrt(eps(FT)) * maximum(abs.(Sθ_expected))
     @test Sθ ≈ Sθ_expected
 
@@ -1078,7 +1078,7 @@ end
     qᵛ = column(μ.qᵛ)
     ρ = total_density(model.dynamics)
     ρᶜ = column(ρ)
-    qᵈ = column(dynamics_density(model.dynamics)) ./ ρᶜ
+    qᵈ = column(continuity_density(model.dynamics)) ./ ρᶜ
     ρᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, ρ)) for k in 1:Nz+1]
     wʳ = [(@allowscalar μ.wʳ[1, 1, k]) for k in 1:Nz+1]
     qʳᶠ = [(@allowscalar ℑzᵃᵃᶠ(1, 1, k, grid, μ.qʳ)) for k in 1:Nz+1]
@@ -1105,7 +1105,7 @@ end
     enthalpy = [constants.liquid.heat_capacity * T[k] - Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid) for k in 1:Nz]
     β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], p[k], pˢᵗ; fixed_volume=true) for k in 1:Nz]
     expected(renormalize) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; renormalize), enthalpy, β;
-                                                            coupling = qᵈ)
+                                                            density_ratio = qᵈ)
 
     @test maximum(abs.(G)) > 0
     @test G ≈ expected(true)
@@ -1497,8 +1497,8 @@ end
     for equilibrium in (WarmPhaseEquilibrium(), MixedPhaseEquilibrium(FT)), (qᵛ, qᶜˡ, qʳ) in cases
         microphysics = OneMomentCloudMicrophysics(FT; cloud_formation=SaturationAdjustment(FT; equilibrium))
         ℳ = equilibrium isa WarmPhaseEquilibrium ?
-            BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState(FT(qᶜˡ), FT(qʳ)) :
-            BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(FT(qᶜˡ), zero(FT), FT(qʳ), zero(FT))
+            BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState(FT(qᶜˡ), FT(qʳ), zero(FT)) :
+            BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(FT(qᶜˡ), zero(FT), FT(qʳ), zero(FT), zero(FT))
         q = AM.moisture_fractions(microphysics, ℳ, qᵛ + qᶜˡ)
         𝒰 = TD.LiquidIcePotentialTemperatureState(T, q, p, p)
 

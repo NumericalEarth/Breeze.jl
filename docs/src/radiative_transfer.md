@@ -374,11 +374,10 @@ extension = OverlyingAtmosphereColumn(top = 80kilometers, layers = 60, ozone_mol
 The ecCKD reference models tabulate eight gases. Two vary in space: water vapor, taken
 from the model's prognostic moisture, and ozone, from `BackgroundAtmosphere.O₃`. Five are
 well-mixed and read from the [`BackgroundAtmosphere`](@ref): CO₂, CH₄, N₂O, CFC₁₁ and
-CFC₁₂. Nitrogen and oxygen form the "composite" dry-air gas whose absorption the tables
-fold in. Gas amounts follow the "dry" column convention the ecCKD tables were derived with:
-the composite amount of a layer is its total mass over the dry molar mass, `ρ Δz / mᵈ`
+CFC₁₂. Nitrogen and oxygen form the dry air, whose absorption the tables fold in. Gas amounts follow the "dry" column convention the ecCKD tables were derived with:
+the dry-air amount of a layer is its total mass over the dry molar mass, `ρ Δz / mᵈ`
 (`Δp / (g mᵈ)` for a hydrostatic layer), the water vapor `ρ qᵛ Δz / mᵛ` is counted on top of
-it, and the well-mixed gases are their mole fractions times the composite amount. The
+it, and the well-mixed gases are their mole fractions times the dry-air amount. The
 molar masses `mᵈ` and `mᵛ` and the gravitational acceleration `g` are those of the
 `ThermodynamicConstants` passed to `RadiativeTransferModel`; the Stefan–Boltzmann constant
 of the gray Planck source (used by g-points without a Planck source table) is carried by
@@ -480,8 +479,9 @@ Despite its historical name, `radiation.flux_divergence` stores ``Q_{\mathscr{I}
 minus the vertical derivative of the signed flux sum, evaluated at cell centers
 from the two bounding cell faces. The static-energy formulation adds this W/m³
 source directly to its energy-density tendency. The liquid-ice potential-temperature
-formulation adds ``Q_{\mathscr{I}} / (cᵖᵐ Π)`` to its potential-temperature-density
-tendency. Omitting the upwelling shortwave would bias either tendency wherever
+formulation adds ``Q_{\mathscr{I}} / (\hat{c}ᵖ \hat{Π})`` to its potential-temperature-density
+tendency, with the vapor-equivalent heat capacity ``\hat{c}ᵖ`` and Exner function ``\hat{Π}``
+(see [Liquid-ice potential temperature](@ref liquid-ice-potential-temperature)). Omitting the upwelling shortwave would bias either tendency wherever
 shortwave radiation scatters or reflects.
 
 ## Architecture Support

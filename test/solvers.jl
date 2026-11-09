@@ -43,6 +43,15 @@ using Breeze.Thermodynamics: newton_hydrostatic_pressure
         flat(x) = one(FT)
         @test isfinite(secant_solve(flat, SecantSolver(FT; abstol=1e-5, maxiter=50), x₁, x₂, scale))
         @test isfinite(secant_solve(flat, FixedIterations(5), x₁, x₂, scale))
+
+        # A temperature solve at its root: two iterates one ulp apart whose residuals,
+        # differences of potential temperatures near 300 K, differ only by rounding. Saturation
+        # adjustment met this on a GPU in Float32 with abstol = 1e-4 K, the rounding noise there:
+        # the slope was ~4e6 and T jumped to -155 K, where the residual is NaN.
+        T★ = FT(282.2824)
+        r★ = 10 * eps(T★)
+        noisy(T) = ifelse(T < 0, FT(NaN), ifelse(T > T★, nextfloat(r★), r★))
+        @test secant_solve(noisy, SecantSolver(FT; abstol=0), T★, nextfloat(T★), T★) ≈ T★
     end
 
     @testset "default tolerances" begin
