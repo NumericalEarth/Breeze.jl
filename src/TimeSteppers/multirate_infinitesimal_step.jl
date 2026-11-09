@@ -116,6 +116,17 @@ with weights ``βᵢⱼ/dᵢ``, so the explicit/implicit pairing is exact only f
     return ts.tableau.d[ts.next_stage[]] * Δt
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Whether the tendencies the next `update_state!` builds feed the first stage of an outer step, so that
+state an advection scheme freezes for the whole step (see `Breeze.Advection.FrozenWeightsWENO`) is
+to be refreshed from the current fields. `true` for every time stepper but MIS, which raises
+`next_stage` past 1 while its stages run.
+"""
+tendencies_feed_first_stage(timestepper) = true
+tendencies_feed_first_stage(ts::MultirateInfinitesimalStep) = ts.next_stage[] == 1
+
 const MultirateAcousticModel = AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep}
 
 @inline function final_stage_increment(ts::MultirateInfinitesimalStep)

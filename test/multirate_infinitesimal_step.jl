@@ -16,7 +16,8 @@ using Test
 
 const mis_coefficient_sets = (:WickerSkamarock3, :MIS2, :MIS3C, :MIS4, :MIS4a, :TVDMISA, :TVDMISB, :MIS3opt, :SSPMIS43, :SSPMIS42, :MIS54, :MISF53, :MISR33, :MISR43)
 
-function mis_bubble_model(; timestepper, coefficients = :MIS2, moist = false, Δθ = 2)
+function mis_bubble_model(; timestepper, coefficients = :MIS2, moist = false, Δθ = 2, qᵗ = 0.012,
+                          scalar_advection = WENO(order=5))
     grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5),
                            x = (-10e3, 10e3), z = (0, 10e3),
                            topology = (Bounded, Flat, Bounded))
@@ -27,12 +28,12 @@ function mis_bubble_model(; timestepper, coefficients = :MIS2, moist = false, Δ
                                     reference_potential_temperature = θ₀)
     microphysics = moist ? SaturationAdjustment(; equilibrium = WarmPhaseEquilibrium()) : nothing
     timestepper_kwargs = timestepper === :MultirateInfinitesimalStep ? (; coefficients) : NamedTuple()
-    model = AtmosphereModel(grid; dynamics, microphysics, advection = WENO(order=5),
+    model = AtmosphereModel(grid; dynamics, microphysics, momentum_advection = WENO(order=5), scalar_advection,
                             timestepper, timestepper_kwargs)
     constants = model.thermodynamic_constants
     θᵢ(x, z) = θ₀ + Δθ * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2
     ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, p₀, constants)
-    moist ? set!(model; ρ = ρᵢ, θ = θᵢ, qᵗ = 0.012) : set!(model; ρ = ρᵢ, θ = θᵢ)
+    moist ? set!(model; ρ = ρᵢ, θ = θᵢ, qᵗ) : set!(model; ρ = ρᵢ, θ = θᵢ)
     return model
 end
 
@@ -121,4 +122,100 @@ end
     @test all(isfinite, Array(interior(model.velocities.w)))
     # The split is sized for the stage the next tendencies feed: stage 1 of the next step, d₁ Δt.
     @test adaptive_advection_timestep(ts, model.clock) ≈ ts.tableau.d[1] * 20
+end
+
+@testset "FrozenWeightsWENO reconstruction" begin
+    using Oceananigans.Advection: materialize_advection, LeftBias, RightBias,
+                                  _biased_interpolate_xᶠᵃᵃ, _biased_interpolate_zᵃᵃᶠ
+    using Oceananigans.BoundaryConditions: fill_halo_regions!
+    using Breeze.Advection: step_start_tracer
+
+    grid = RectilinearGrid(CPU(); size = (16, 8), halo = (5, 5), x = (0, 1), z = (0, 1),
+                           topology = (Periodic, Flat, Bounded))
+    weno = materialize_advection(WENO(order=9), grid)
+    frozen = materialize_advection(FrozenWeightsWENO(order=9), grid)
+    upwind = materialize_advection(UpwindBiased(order=9), grid)
+    @test frozen isa FrozenWeightsWENO
+    @test sprint(show, FrozenWeightsWENO(order=9)) ==
+        "FrozenWeightsWENO(order=9)\n└── weno: WENO{5, Float64, Nothing}(order=9)"
+    @test_throws ArgumentError FrozenWeightsWENO(WENO(order=5, bounds=(0, 1)))
+
+    ψ = CenterField(grid)
+    set!(ψ, (x, z) -> sin(2π * x) + 0.3 * (z > 0.5) + 0.1 * cos(6π * x) * z)
+    fill_halo_regions!(ψ)
+    reference = step_start_tracer(frozen)
+
+    # With the step-start copy equal to the reconstructed field the scheme is WENO, in the interior and
+    # through the lower-order buffer schemes near the bounded top and bottom.
+    parent(reference) .= parent(ψ)
+    @test @inferred(_biased_interpolate_xᶠᵃᵃ(5, 1, 4, grid, frozen, LeftBias, ψ)) isa Float64
+    for i in 1:16, k in 1:8, bias in (LeftBias, RightBias)
+        @test _biased_interpolate_xᶠᵃᵃ(i, 1, k, grid, frozen, bias, ψ) ≈ _biased_interpolate_xᶠᵃᵃ(i, 1, k, grid, weno, bias, ψ) atol=1e-14
+        @test _biased_interpolate_zᵃᵃᶠ(i, 1, k, grid, frozen, bias, ψ) ≈ _biased_interpolate_zᵃᵃᶠ(i, 1, k, grid, weno, bias, ψ) atol=1e-14
+    end
+
+    # A uniform step-start copy makes every smoothness indicator vanish, so the weights are the
+    # optimal ones and the reconstruction of the (non-smooth) ψ is the linear upwind-biased one.
+    fill!(parent(reference), 1)
+    for i in 1:16, k in 1:8, bias in (LeftBias, RightBias)
+        @test _biased_interpolate_xᶠᵃᵃ(i, 1, k, grid, frozen, bias, ψ) ≈ _biased_interpolate_xᶠᵃᵃ(i, 1, k, grid, upwind, bias, ψ) atol=1e-12
+    end
+end
+
+@testset "FrozenWeightsWENO in AtmosphereModel" begin
+    using Breeze.Advection: step_start_tracer
+    using Breeze.AtmosphereModels: moisture_prognostic_name, specific_prognostic_moisture
+    using Breeze.TimeSteppers: tendencies_feed_first_stage
+
+    qᵗᵢ(x, z) = 0.012 * exp(-z / 3e3) * (1 + 0.2 * (abs(x) < 3e3))
+    grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
+                           topology = (Bounded, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    @test_throws ArgumentError AtmosphereModel(grid; dynamics, advection = FrozenWeightsWENO(order=5))
+
+    # Every tendency evaluation of a Runge–Kutta stepper feeds its own stage, so the copy is refreshed
+    # each time and the scheme tracks WENO.
+    reference = mis_bubble_model(; timestepper = :AcousticRungeKutta3, moist = true, qᵗ = qᵗᵢ)
+    frozen = mis_bubble_model(; timestepper = :AcousticRungeKutta3, moist = true, qᵗ = qᵗᵢ,
+                              scalar_advection = FrozenWeightsWENO(order=5))
+    moist_name = moisture_prognostic_name(frozen.microphysics)
+    @test frozen.advection[moist_name] isa FrozenWeightsWENO
+    @test tendencies_feed_first_stage(frozen.timestepper)
+    for _ in 1:5
+        time_step!(reference, 5)
+        time_step!(frozen, 5)
+    end
+    for name in keys(prognostic_fields(frozen))
+        a = Array(interior(prognostic_fields(frozen)[name]))
+        b = Array(interior(prognostic_fields(reference)[name]))
+        @test maximum(abs, a .- b) <= 1e-12 * maximum(abs, b)
+    end
+
+    # Under MIS the stage-1 tendencies are those of WENO, the copy holds the step-start tracer for
+    # the whole step (so later stages see frozen weights and the trajectory departs from WENO), and
+    # it is refreshed by the tendency evaluation that ends the step.
+    reference = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :MIS3C, moist = true, qᵗ = qᵗᵢ)
+    frozen = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :MIS3C, moist = true, qᵗ = qᵗᵢ,
+                              scalar_advection = FrozenWeightsWENO(order=5))
+    update_state!(reference; compute_tendencies = true)
+    update_state!(frozen; compute_tendencies = true)
+    Ga = Array(interior(frozen.timestepper.Gⁿ[moist_name]))
+    Gb = Array(interior(reference.timestepper.Gⁿ[moist_name]))
+    @test maximum(abs, Ga .- Gb) <= 1e-12 * maximum(abs, Gb)
+
+    frozen_q = step_start_tracer(frozen.advection[moist_name])
+    q = specific_prognostic_moisture(frozen)
+    @test Array(interior(frozen_q)) == Array(interior(q))
+
+    for _ in 1:5
+        time_step!(reference, 5)
+        time_step!(frozen, 5)
+    end
+    @test tendencies_feed_first_stage(frozen.timestepper)
+    @test Array(interior(frozen_q)) == Array(interior(q))
+    a = Array(interior(prognostic_fields(frozen)[moist_name]))
+    b = Array(interior(prognostic_fields(reference)[moist_name]))
+    @test all(isfinite, a)
+    @test maximum(abs, a .- b) > 0
 end
