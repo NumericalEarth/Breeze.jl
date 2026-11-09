@@ -22,11 +22,9 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
-TiffImages = "731e570b-9d59-4bfa-96dc-6df516fadf69"
 
 [sources]
 Breeze = {path = ".."}
-TiffImages = {rev = "master", url = "https://github.com/tlnagy/TiffImages.jl"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
