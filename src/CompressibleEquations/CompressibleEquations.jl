@@ -30,6 +30,9 @@ export
     CompressibleModel,
     AcousticSubstepper,
     SplitExplicitTimeDiscretization,
+    AcousticPressureCoefficient,
+    FrozenCompositionPressureCoefficient,
+    PhaseEquilibriumPressureCoefficient,
     AcousticOuterScheme,
     WickerSkamarock3,
     stage_fractions,
@@ -68,13 +71,16 @@ using Breeze.Solvers: NewtonSolver
 using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key
 using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, MoistureMassFractions,
                              vapor_equivalent_heat_capacity, condensate_latent_energy, exner_exponent,
-                             reject_renamed_surface_pressure,
+                             reject_renamed_surface_pressure, specific_heat_difference,
+                             saturation_specific_humidity, equilibrated_surface,
                              vapor_gas_constant, ExnerReferenceState, temperature, temperature_and_sensitivity,
                              LiquidIceDensityState
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture
+                               thermodynamic_density_name, specific_prognostic_moisture,
+                               precipitating_mass_fraction
+using Breeze.AtmosphereModels.Diagnostics: microphysics_phase_equilibrium
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 
 using ReactantCore: @trace

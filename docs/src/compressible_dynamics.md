@@ -150,6 +150,51 @@ at the converged root. Without condensate this vanishes for every inversion, so
 ``p' = C^L (ρθ)'`` is the complete linearization. In cloud the loop omits it; for 5 g/kg of cloud
 liquid it is about 5% of ``C^L θ^L``.
 
+### Phase change under compression
+
+The fixed-composition slope treats the condensate as frozen over the acoustic loop. In a
+saturated cell, the state that saturation adjustment re-diagnoses at the next stage is a uniform
+compression along which the vapor stays at saturation: compression warms the air, raises
+``q^{v+}``, and evaporates condensate, whose latent heat is drawn from the air, so the
+equilibrium pressure rises 10–13% less than the frozen one (the ratio of the frozen to the
+equilibrium sound speed squared, set by ``dq^{v+}/dT`` rather than by the amount of condensate).
+The loop then overestimates the pressure response in cloud, which destabilizes grid-scale modes
+in saturated air at large ``Δt`` without divergence damping
+([#1086](https://github.com/NumericalEarth/Breeze.jl/issues/1086)).
+
+[`PhaseEquilibriumPressureCoefficient`](@ref Breeze.CompressibleEquations.PhaseEquilibriumPressureCoefficient),
+selected with `SplitExplicitTimeDiscretization(pressure_coefficient = PhaseEquilibriumPressureCoefficient())`,
+replaces ``C^L`` in saturated cells (cloud condensate, in excess of the precipitating fraction, at the
+linearization state) with the slope of the saturation-adjusted pressure along the uniform compression
+``ds = d\ln ρ`` at fixed ``θ`` and total water, at the microphysics' phase equilibrium. Differentiating
+the inversion ``c^p_m T = H + H^c`` with ``H = \hat{c}^p Π θ``, where the phase change ``dq^c = -dq^v``
+enters through ``c^p_m``, ``R^m`` and ``H^c``, and closing it with saturation,
+``dq^c = q^{v+} ds - A \, dT`` with ``A = q^{v+} (ℒ / (R^v T^2) - 1 / T)`` from Clausius–Clapeyron,
+
+```math
+\frac{dT}{ds} = \frac{\hat κ H + B q^{v+}}{D + A B} , \qquad
+D = c^p_m - \frac{\hat κ H}{T} , \qquad B = ℒ - \frac{\hat κ H R^v}{R^m} ,
+```
+
+```math
+\frac{d \ln p}{ds} = 1 + \frac{1}{T} \frac{dT}{ds} - \frac{R^v}{R^m} \frac{dq^c}{ds} , \qquad
+C^e = \frac{p}{(ρθ)^L} \frac{d \ln p}{ds} .
+```
+
+Without vapor this is the frozen compression slope, ``γ^d p / (ρθ)`` in dry air. ``C^e`` is the slope
+at the converged root, and since it is derived along the compression it includes the ``∂p/∂ρ^d`` part
+that the fixed-composition slope omits in cloud. The evaporation lowers it below ``C^L`` by 10–13%
+for a few g/kg of cloud water; in heavily loaded cloud (``q^l ≳ 10`` g/kg, where
+``H^c / (c^p_m T - H^c)`` exceeds 10%) the ``∂p/∂ρ^d`` part outweighs that and ``C^e`` exceeds
+``C^L``. Over a mixed-phase equilibrium it uses the latent heat
+and saturation vapor pressure of the liquid fraction at ``T`` and neglects that fraction's temperature
+dependence. Unsaturated cells keep the fixed-composition slope, so dry and unsaturated runs are
+unchanged. The coefficient is refreshed wherever the linearization is: at every stage with
+`AcousticRungeKutta3` and once per step with `MultirateInfinitesimalStep`. With it, the linearized
+pressure response to a uniform compression of a saturated cell matches the re-diagnosed one to solver
+tolerance, and the grid-scale growth of the issue's saturated column at ``Δt = 10`` s is removed. The
+default remains [`FrozenCompositionPressureCoefficient`](@ref Breeze.CompressibleEquations.FrozenCompositionPressureCoefficient).
+
 The momentum is the dry-mass momentum ``ρ^d \boldsymbol{u}``, and the compressible core applies
 the full pressure gradient and gravity ``-∇p - g ρ \hat{\boldsymbol{z}}`` to it. Its acoustic
 inertia is therefore ``ρ^d`` rather than ``ρ``. Thus the sound speed is ``\sqrt{γ^e p / ρ^d}``. In
