@@ -148,6 +148,13 @@ end
                                                           timestepper_kwargs=(; coefficients=:MIS3C)))
         end
 
+        @testset "split-explicit, multirate infinitesimal step, post-loop scalar tendencies" begin
+            test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
+                                                          timestepper=:MultirateInfinitesimalStep,
+                                                          timestepper_kwargs=(; coefficients=:MIS3C,
+                                                                                post_loop_scalar_tendencies=true)))
+        end
+
         @testset "non-equilibrium microphysics, two species" begin
             test_bitwise_restart(() -> compressible_model(FT; microphysics=OneMomentCloudMicrophysics()))
         end

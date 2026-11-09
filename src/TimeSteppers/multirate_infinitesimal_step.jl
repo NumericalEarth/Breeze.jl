@@ -1,4 +1,4 @@
-using Breeze.AtmosphereModels: thermodynamic_density_name
+using Breeze.AtmosphereModels: thermodynamic_density_name, transport_velocities, compute_scalar_advective_tendency!
 using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_divergence!
 
 using Oceananigans: prognostic_fields, CenterField, architecture
@@ -35,15 +35,21 @@ Fields
   `forcing` ``= (1/dₖ) Σⱼ (βₖⱼ Sⱼ + γₖⱼ ΔYⱼ / Δt)`` and `offset` ``= Σⱼ αₖⱼ ΔYⱼ``, accumulated as each
   ``Sⱼ`` and ``ΔYⱼ = Yⱼ - Uⁿ`` becomes available, so no ``Sⱼ`` or ``ΔYⱼ`` is stored. Until stage 2
   consumes them, stage 3's pair holds the raw ``S₁`` and ``ΔY₁``.
-- `fast_thermodynamic_tendency`: scratch for the stage-entry fast thermodynamic tendency.
+- `fast_tendency`: scratch for the fast part of the tendency of the field being assembled: the
+  stage-entry fast thermodynamic tendency, or a scalar's post-loop advective tendency.
 - `stage`: the stage being integrated.
 - `next_stage`, `current_Δt`: the stage the next tendency evaluation feeds and the current outer step, which
   size the adaptive-implicit vertical-advection split (see `adaptive_advection_timestep`).
 - `relinearize_stages`: re-linearize the fast operator at every stage entry (as `AcousticRungeKutta3` does)
   instead of once per step. Off by default: it makes the fast operator stage-dependent, which costs an
   order of accuracy; it exists to diagnose robustness in strongly nonlinear flows.
+- `scalar_tendencies`: when the moisture and tracer tendencies are built,
+  [`PreLoopScalarTendencies`](@ref) (between stages, the default) or
+  [`PostLoopScalarTendencies`](@ref) (after each stage's own acoustic loop). With the latter, the
+  scalars' slow tendency ``Sᵢ`` stored for stage ``i`` is the post-loop one, and their stage forcing
+  and start state are assembled after the loop.
 """
-struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC} <: AcousticTimeStepper
+struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC, ST} <: AcousticTimeStepper
     relinearize_stages :: Bool
     tableau :: TB
     U⁰ :: U0
@@ -52,7 +58,8 @@ struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC} <: AcousticTim
     substepper :: AS
     Uⁿ :: UN
     accumulators :: AC
-    fast_thermodynamic_tendency :: FC
+    fast_tendency :: FC
+    scalar_tendencies :: ST
     stage :: Base.RefValue{Int}
     next_stage :: Base.RefValue{Int}
     current_Δt :: Base.RefValue{Float64}
@@ -67,13 +74,18 @@ naming a set in [`multirate_infinitesimal_step_tableau`](@ref) (default `:MIS2`)
 
 Select it with `AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep,
 timestepper_kwargs = (; coefficients = :MIS2))`.
+
+`post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
+stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
+between stages with the preceding loop's (see [`PostLoopScalarTendencies`](@ref)).
 """
 function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
                                     coefficients = :MIS2,
                                     implicit_solver = nothing,
                                     cache_advecting_state = false,
-                                    relinearize_stages = false)
+                                    relinearize_stages = false,
+                                    post_loop_scalar_tendencies = false)
 
     FT = eltype(grid)
     tableau = multirate_infinitesimal_step_tableau(coefficients, FT)
@@ -87,11 +99,12 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     Uⁿ = map(similar, prognostic_fields)
     accumulators = ntuple(_ -> (forcing = map(similar, prognostic_fields),
                                 offset = map(similar, prognostic_fields)), s - 2)
-    fast_thermodynamic_tendency = CenterField(grid)
+    fast_tendency = CenterField(grid)
+    scalar_tendencies = scalar_tendency_timing(post_loop_scalar_tendencies)
 
     return MultirateInfinitesimalStep(relinearize_stages, tableau, U⁰, Gⁿ, implicit_solver, substepper,
-                                      Uⁿ, accumulators,
-                                      fast_thermodynamic_tendency, Ref(1), Ref(1), Ref(NaN))
+                                      Uⁿ, accumulators, fast_tendency, scalar_tendencies,
+                                      Ref(1), Ref(1), Ref(NaN))
 end
 
 # MIS assumes one fast operator for the whole step: the linearization coefficients (θᴸ, the
@@ -143,18 +156,18 @@ end
 # weight one, from the stage-entry state) and the slow part MIS recombines across stages.
 struct SlowTendencySplit end                  # momentum, moisture, tracers: all slow
 struct ContinuityTendencySplit end            # continuity: all fast
-struct ThermodynamicTendencySplit{C}          # thermodynamic: fast part is C = -∇·(θᴸ (ρu)ᴸ)
-    fast_tendency :: C
+struct FastSlowTendencySplit{C}               # thermodynamic: fast part is C = -∇·(θᴸ (ρu)ᴸ);
+    fast_tendency :: C                        # post-loop scalars: C = -∇·(ρ ⟨𝐔⟩ c)
 end
 
-Adapt.adapt_structure(to, s::ThermodynamicTendencySplit) = ThermodynamicTendencySplit(adapt(to, s.fast_tendency))
+Adapt.adapt_structure(to, s::FastSlowTendencySplit) = FastSlowTendencySplit(adapt(to, s.fast_tendency))
 
 @inline slow_part(::SlowTendencySplit, G, I) = @inbounds G[I]
 @inline slow_part(::ContinuityTendencySplit, G, I) = zero(eltype(G))
-@inline slow_part(s::ThermodynamicTendencySplit, G, I) = @inbounds G[I] - s.fast_tendency[I]
+@inline slow_part(s::FastSlowTendencySplit, G, I) = @inbounds G[I] - s.fast_tendency[I]
 
 tendency_split(name, θ_name, C) = name === :ρᵈ ? ContinuityTendencySplit() :
-                                  name === θ_name ? ThermodynamicTendencySplit(C) : SlowTendencySplit()
+                                  name === θ_name ? FastSlowTendencySplit(C) : SlowTendencySplit()
 
 # Pointwise updates of tuples of arrays whose length is known at compile time, so they unroll.
 @inline accumulate!(n, ::Tuple{}, ::Tuple{}, x) = nothing
@@ -249,43 +262,85 @@ entry `Gⁿ` holds the full tendency at ``Yᵢ₋₁``. The continuity forcing k
 mass-flux divergence, and the thermodynamic forcing keeps the current fast flux divergence at
 weight one, so only slow parts are recombined across stages; the slow part ``Sᵢ`` is folded into
 the accumulators of the later stages.
+
+Before the acoustic loop this assembles every prognostic, or, with
+[`PostLoopScalarTendencies`](@ref), only the ones the loop advances; the scalars are then
+assembled after the loop by `assemble_post_loop_stage_forcing!`, from their post-loop tendencies.
 """
 function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
+    # The fast thermodynamic tendency is linearized about the stage-entry state, so it must be
+    # evaluated here, before the loop.
+    compute_linearized_thermodynamic_flux_divergence!(ts.fast_tendency, ts.substepper, model)
+    θ_name = thermodynamic_density_name(model.formulation)
+    C = parent(ts.fast_tendency)
+    for name in pre_loop_assembly_names(ts.scalar_tendencies, model)
+        assemble_stage_forcing!(ts, model, Δt, name, tendency_split(name, θ_name, C))
+    end
+    return nothing
+end
+
+pre_loop_assembly_names(::PreLoopScalarTendencies, model) = keys(prognostic_fields(model))
+pre_loop_assembly_names(::PostLoopScalarTendencies, model) = acoustic_prognostic_names(model)
+
+"""
+$(TYPEDSIGNATURES)
+
+With [`PostLoopScalarTendencies`](@ref), assemble the moisture and tracer stage forcing after the
+acoustic loop, from the tendencies just built with the loop's time-averaged transport velocity.
+The advective part of each scalar tendency — the flux divergence by that velocity, sedimentation
+included — is treated as fast, like the continuity flux it pairs with: applied at weight one from
+the current stage and not recombined across stages. Only the non-advective remainder (closure
+diffusion and sources, forcing, microphysical sources, boundary fluxes) is the slow ``Sᵢ`` that
+the tableau recombines. The scalars' flux is then exactly ``q/(1 - q)`` times the dry-mass flux
+the stage applied, which recombining each stage's advective flux with the ``βᵢⱼ`` weights cannot
+give, since the stages' loop means differ. A no-op for Wicker–Skamarock RK3.
+"""
+assemble_post_loop_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt) =
+    assemble_post_loop_stage_forcing!(ts.scalar_tendencies, ts, model, Δt)
+
+assemble_post_loop_stage_forcing!(::PreLoopScalarTendencies, ts, model, Δt) = nothing
+
+function assemble_post_loop_stage_forcing!(::PostLoopScalarTendencies, ts, model, Δt)
+    velocities = transport_velocities(model)
+    split = FastSlowTendencySplit(parent(ts.fast_tendency))
+    for name in scalar_prognostic_names(model)
+        compute_scalar_advective_tendency!(ts.fast_tendency, model, name, velocities)
+        assemble_stage_forcing!(ts, model, Δt, name, split)
+    end
+    return nothing
+end
+
+# Assemble one field's start state and forcing, its tendency split into fast and slow parts by `split`.
+function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, name, split)
     i = ts.stage[]
     (; α, β, γ, d) = ts.tableau
     s = length(d)
-    θ_name = thermodynamic_density_name(model.formulation)
     grid = model.grid
     arch = architecture(grid)
 
-    compute_linearized_thermodynamic_flux_divergence!(ts.fast_thermodynamic_tendency, ts.substepper, model)
-    C = parent(ts.fast_thermodynamic_tendency)
     wᵢ = β[i, i] / d[i] - 1
     ks = later_stages(max(i, 2), s)
 
-    for name in keys(ts.Gⁿ)
-        G = parent(ts.Gⁿ[name])
-        U⁰ = parent(ts.U⁰[name])
-        Uⁿ = parent(ts.Uⁿ[name])
-        split = tendency_split(name, θ_name, C)
-        F = accumulator_arrays(ts, name, ks, :forcing)
-        size_G = (length(G),)
+    G = parent(ts.Gⁿ[name])
+    U⁰ = parent(ts.U⁰[name])
+    Uⁿ = parent(ts.Uⁿ[name])
+    F = accumulator_arrays(ts, name, ks, :forcing)
+    size_G = (length(G),)
 
-        if i == 1
-            launch!(arch, grid, size_G, _first_multirate_stage!, G, U⁰, Uⁿ, split, wᵢ,
-                    parent(ts.accumulators[1].forcing[name]))
-        elseif i == 2
-            Z = accumulator_arrays(ts, name, ks, :offset)
-            launch!(arch, grid, size_G, _second_multirate_stage!, G, U⁰, Uⁿ, split, wᵢ,
-                    β[2, 1] / d[2], γ[2, 1] / (d[2] * Δt), α[2, 1], F, Z,
-                    forcing_weights(β, d, 1, ks), increment_weights(γ, d, Δt, 1, ks),
-                    forcing_weights(β, d, 2, ks), offset_weights(α, 1, ks))
-        else
-            Fᵢ = parent(ts.accumulators[i - 2].forcing[name])
-            Zᵢ = parent(ts.accumulators[i - 2].offset[name])
-            launch!(arch, grid, size_G, _later_multirate_stage!, G, U⁰, Uⁿ, split, wᵢ,
-                    Fᵢ, Zᵢ, F, forcing_weights(β, d, i, ks))
-        end
+    if i == 1
+        launch!(arch, grid, size_G, _first_multirate_stage!, G, U⁰, Uⁿ, split, wᵢ,
+                parent(ts.accumulators[1].forcing[name]))
+    elseif i == 2
+        Z = accumulator_arrays(ts, name, ks, :offset)
+        launch!(arch, grid, size_G, _second_multirate_stage!, G, U⁰, Uⁿ, split, wᵢ,
+                β[2, 1] / d[2], γ[2, 1] / (d[2] * Δt), α[2, 1], F, Z,
+                forcing_weights(β, d, 1, ks), increment_weights(γ, d, Δt, 1, ks),
+                forcing_weights(β, d, 2, ks), offset_weights(α, 1, ks))
+    else
+        Fᵢ = parent(ts.accumulators[i - 2].forcing[name])
+        Zᵢ = parent(ts.accumulators[i - 2].offset[name])
+        launch!(arch, grid, size_G, _later_multirate_stage!, G, U⁰, Uⁿ, split, wᵢ,
+                Fᵢ, Zᵢ, F, forcing_weights(β, d, i, ks))
     end
 
     return nothing
@@ -353,7 +408,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
 
     for i in 1:s
         ts.stage[] = i
-        acoustic_rk3_substep!(model, Δt, d[i])
+        acoustic_rk3_substep!(model, Δt, d[i]; callbacks)
 
         if i < s
             store_stage_increment!(ts, model, i, Δt)
