@@ -71,12 +71,15 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
                              reject_renamed_surface_pressure,
                              vapor_gas_constant, ExnerReferenceState, temperature, temperature_and_sensitivity,
                              LiquidIceDensityState, temperature_from_moist_entropy, vapor_entropy, liquid_entropy,
-                             ice_entropy
+                             ice_entropy, DryDensityState
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
                                thermodynamic_density_name, specific_prognostic_moisture
-using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
+using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, PotentialTemperatureFormulation,
+                                                LiquidIcePotentialTemperatureFormulation, DryPotentialTemperatureFormulation,
+                                                IsochoricPressureWork, IsobaricPressureWork,
+                                                post_loop_divergence_coefficient
 using Breeze.MoistEntropyFormulations: MoistEntropyFormulations, MoistEntropyFormulation
 
 using ReactantCore: @trace
@@ -93,5 +96,6 @@ include("compressible_time_stepping.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
 include("moist_entropy_compressible.jl")
+include("dry_potential_temperature_compressible.jl")
 
 end # module
