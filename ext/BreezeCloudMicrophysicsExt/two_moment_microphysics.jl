@@ -160,7 +160,8 @@ parameters and aerosol activation.
 - `aerosol_activation`: Aerosol activation parameters (default: continental aerosol).
   Set to `nothing` to disable activation (not recommended for physical simulations).
 - `τⁿᵘᵐ`: Timescale [s] for per-reservoir tendency limiting.
-  Must satisfy `τⁿᵘᵐ ≥ Δt` to prevent reservoir overdraw.
+  Acts as a floor: during time stepping the effective timescale is `max(τⁿᵘᵐ, Δt)`,
+  so no step overdraws a reservoir.
   Default: 10 seconds.
 
 # References
@@ -188,6 +189,14 @@ const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories}
 # Warm-phase non-equilibrium with 2M precipitation
 const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories}
 const WPNE2M = WarmPhaseNonEquilibrium2M
+
+# Raise the per-reservoir limiting timescale to the step that applies the tendencies: max(τⁿᵘᵐ, Δt).
+function AtmosphereModels.with_sink_limiting_time_step(bμp::TwoMomentCloudMicrophysics, Δt)
+    categories = bμp.categories
+    τ = AtmosphereModels.sink_limiting_timescale_for(categories.τⁿᵘᵐ, Δt)
+    new_categories = AtmosphereModels.replace_property(categories, Val(:τⁿᵘᵐ), τ)
+    return AtmosphereModels.replace_property(bμp, Val(:categories), new_categories)
+end
 
 @inline AtmosphereModels.precipitating_mass_fraction(i, j, k, ::WPNE2M, μ) = @inbounds μ.qʳ[i, j, k]
 
@@ -914,7 +923,7 @@ end
 # `compute_microphysical_tendencies!` to compute the bundle once per cell and
 # write to all 6 G fields in a single kernel.
 
-@kernel function _compute_wpne2m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ,
+@kernel function _compute_wpne2m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ, limiter,
                                              grid, microphysics, dynamics, formulation,
                                              constants, specific_prognostic_moisture,
                                              microphysical_fields, velocities)
@@ -934,12 +943,16 @@ end
 
     G = wpne2m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
-    @inbounds Gρqᵛ[i, j, k]  += G.ρqᵛ
-    @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
-    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
-    @inbounds Gρnᶜˡ[i, j, k] += G.ρnᶜˡ
-    @inbounds Gρnʳ[i, j, k]  += G.ρnʳ
-    @inbounds Gρnᵃ[i, j, k]  += G.ρnᵃ
+    G_species = (Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ)
+    Gᵐ = (G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ)
+    f = AtmosphereModels.positivity_preserving_fraction(i, j, k, grid, limiter, G_species, Gᵐ)
+
+    @inbounds Gρqᵛ[i, j, k]  += f * G.ρqᵛ
+    @inbounds Gρqᶜˡ[i, j, k] += f * G.ρqᶜˡ
+    @inbounds Gρqʳ[i, j, k]  += f * G.ρqʳ
+    @inbounds Gρnᶜˡ[i, j, k] += f * G.ρnᶜˡ
+    @inbounds Gρnʳ[i, j, k]  += f * G.ρnʳ
+    @inbounds Gρnᵃ[i, j, k]  += f * G.ρnᵃ
 end
 
 function AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M, model)
@@ -949,6 +962,7 @@ function AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M
 
     launch!(arch, grid, :xyz, _compute_wpne2m_tendencies!,
             G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ,
+            AtmosphereModels.SinkLimiter(model, (:ρqᵛ, :ρqᶜˡ, :ρqʳ, :ρnᶜˡ, :ρnʳ, :ρnᵃ)),
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AtmosphereModels.specific_prognostic_moisture(model),
             model.microphysical_fields, model.velocities)

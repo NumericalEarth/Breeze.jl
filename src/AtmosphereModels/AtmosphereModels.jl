@@ -138,7 +138,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, Center, Face, CenterField, fields
+using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, fields
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Operators: Δzᶜᶜᶜ, ∂zᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
@@ -171,6 +171,7 @@ include("formulation_interface.jl")
 ##### AtmosphereModel core
 #####
 
+include("outflow_limiter.jl")
 include("atmosphere_model.jl")
 
 #####

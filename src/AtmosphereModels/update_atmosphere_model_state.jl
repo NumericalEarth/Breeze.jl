@@ -95,7 +95,14 @@ compute_total_density!(model) = nothing
 # `(momentum, tracers...)`, so pair each scheme with the specific field it reconstructs.
 function Oceananigans.Advection.update_advection!(advection::NamedTuple, model::AtmosphereModel)
     fields = reconstructed_fields(model, advection)
-    return update_each_advection!(values(advection), values(fields), model)
+    update_each_advection!(values(advection), values(fields), model)
+
+    # After the bounds-preserving rescaling θ, which the outflow fractions are built from.
+    for name in keys(advection)
+        update_outflow_limiter!(advection[name], model, name)
+    end
+
+    return nothing
 end
 
 @inline update_each_advection!(::Tuple{}, ::Tuple{}, model) = nothing
@@ -418,12 +425,6 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     end
 
     #####
-    ##### Fused microphysics tendencies (no-op by default; schemes opt in)
-    #####
-
-    compute_microphysical_tendencies!(model)
-
-    #####
     ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
     #####
 
@@ -432,6 +433,13 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
     for callback in callbacks
         callback.callsite isa TendencyCallsite && callback(model)
     end
+
+    #####
+    ##### Fused microphysics tendencies (no-op by default; schemes opt in)
+    #####
+
+    # Last, because the `SinkLimiter` reads every other tendency, including the callbacks'.
+    compute_microphysical_tendencies!(model)
 
     return nothing
 end
