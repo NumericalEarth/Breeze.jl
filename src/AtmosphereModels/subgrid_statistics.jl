@@ -157,6 +157,9 @@ form ⟨φ'ψ'⟩ = (`variance_coefficient` ℓ² + `grid_variance_coefficient` 
 mixing-length variance of Bechtold et al. (1995), with ℓ the closure's mixing length, plus the
 variance of the resolved gradient within the cell (Δz²/12 for a linear profile). The microphysics
 floors the saturation-deficit spread in quadrature, σₛ² + σ₀², with σ₀ = `minimum_saturation_deficit_spread` (P3 caps it at qᵛ⁺/10 and applies the distribution to warm cells only).
+An optional non-dimensional floor c₀ = `relative_minimum_saturation_deficit_spread` (default
+`nothing`, off) raises it to σ₀ = max(σ₀, c₀ qᵛ⁺), a spread proportional to the saturation
+specific humidity.
 
 Cloud liquid relaxes toward the distribution's equilibrium condensate over the relaxation
 timescale τ of the condensate-formation model `condensation` (for example an
@@ -181,9 +184,15 @@ julia> c.grid_variance_coefficient, c.minimum_saturation_deficit_spread
 
 julia> round(c.autoconversion_enhancement, digits=4)
 3.0247
+
+julia> c.relative_minimum_saturation_deficit_spread === nothing
+true
+
+julia> GaussianSubgridCorrelation(Float64; relative_minimum_saturation_deficit_spread=0.05).relative_minimum_saturation_deficit_spread
+0.05
 ```
 """
-struct GaussianSubgridCorrelation{FT, CF} <: AbstractSubgridCorrelation
+struct GaussianSubgridCorrelation{FT, CF, RF} <: AbstractSubgridCorrelation
     "coefficient c of the mixing-length (co)variances ℓ² ∂zφ ∂zψ"
     variance_coefficient :: FT
     "coefficient c_Δ of the within-cell gradient (co)variances Δz² ∂zφ ∂zψ"
@@ -196,6 +205,8 @@ struct GaussianSubgridCorrelation{FT, CF} <: AbstractSubgridCorrelation
     autoconversion_enhancement :: FT
     "floor on the cloud fraction used to form in-cloud means"
     minimum_cloud_fraction :: FT
+    "non-dimensional saturation-deficit spread floor c₀, σ₀ ≥ c₀ qᵛ⁺, or `nothing`"
+    relative_minimum_saturation_deficit_spread :: RF
 end
 
 # Walk the fields so that traced numbers (`Reactant.to_rarray`) are converted for the kernel.
@@ -205,14 +216,17 @@ Adapt.adapt_structure(to, c::GaussianSubgridCorrelation) =
                                adapt(to, c.minimum_saturation_deficit_spread),
                                adapt(to, c.condensation),
                                adapt(to, c.autoconversion_enhancement),
-                               adapt(to, c.minimum_cloud_fraction))
+                               adapt(to, c.minimum_cloud_fraction),
+                               adapt(to, c.relative_minimum_saturation_deficit_spread))
 
 """
 $(TYPEDSIGNATURES)
 
 Return a [`GaussianSubgridCorrelation`](@ref) with float type `FT`. The autoconversion enhancement
 is computed from the in-cloud gamma shape `cloud_liquid_shape` ν and the autoconversion exponent
-`autoconversion_exponent` p (2.47 for Khairoutdinov and Kogan 2000).
+`autoconversion_exponent` p (2.47 for Khairoutdinov and Kogan 2000). A number
+`relative_minimum_saturation_deficit_spread` c₀ adds the non-dimensional floor σ₀ ≥ c₀ qᵛ⁺;
+`nothing` (the default) keeps the dimensional floor alone.
 """
 function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatType;
                                     variance_coefficient = 1,
@@ -221,7 +235,8 @@ function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatTy
                                     condensation = nothing,
                                     cloud_liquid_shape = 1,
                                     autoconversion_exponent = 2.47,
-                                    minimum_cloud_fraction = 0.01)
+                                    minimum_cloud_fraction = 0.01,
+                                    relative_minimum_saturation_deficit_spread = nothing)
     ν = cloud_liquid_shape
     p = autoconversion_exponent
     E = gamma(ν + p) / (gamma(ν) * ν^p)
@@ -230,8 +245,12 @@ function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatTy
                                       convert(FT, minimum_saturation_deficit_spread),
                                       condensation,
                                       convert(FT, E),
-                                      convert(FT, minimum_cloud_fraction))
+                                      convert(FT, minimum_cloud_fraction),
+                                      convert_or_nothing(FT, relative_minimum_saturation_deficit_spread))
 end
+
+convert_or_nothing(FT, ::Nothing) = nothing
+convert_or_nothing(FT, x) = convert(FT, x)
 
 """
 $(TYPEDSIGNATURES)

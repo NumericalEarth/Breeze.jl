@@ -211,3 +211,29 @@ end
     @test AM.subgrid_statisticsᶜᶜᶜ(1, 1, 2, grid, AM.NoSubgridCorrelation(), nothing, nothing, state) === DiracStatistics{Float32}()
     @test AM.subgrid_statisticsᶜᶜᶜ(1, 1, 2, grid, AM.NoSubgridCorrelation(), nothing, nothing, nothing) === DiracStatistics{Float64}()
 end
+
+@testset "Relative saturation-deficit spread floor σ₀ = max(σ₀, c₀ qᵛ⁺)" begin
+    PPP = Breeze.Microphysics.PredictedParticleProperties
+    default = GaussianSubgridCorrelation(Float64)
+    relative = GaussianSubgridCorrelation(Float64; relative_minimum_saturation_deficit_spread=0.05)
+    @test default.relative_minimum_saturation_deficit_spread === nothing
+    @test relative.relative_minimum_saturation_deficit_spread === 0.05
+    @test GaussianSubgridCorrelation(Float32; relative_minimum_saturation_deficit_spread=0.05).relative_minimum_saturation_deficit_spread === 0.05f0
+
+    # Off by default: the dimensional floor, capped at qᵛ⁺ / 10
+    @test PPP.saturation_deficit_spread_floor(default, 0.015) === 1e-4
+    @test PPP.saturation_deficit_spread_floor(default, 5e-4) === 5e-5
+    # On: the larger of the two floors
+    @test PPP.saturation_deficit_spread_floor(relative, 0.015) ≈ 0.05 * 0.015
+    @test PPP.saturation_deficit_spread_floor(relative, 1e-3) ≈ 1e-4
+    @test PPP.saturation_deficit_spread_floor(NoSubgridCorrelation(), 0.015) === 0.0
+
+    # At 92% relative humidity the relative floor yields cloud that the dimensional floor does not
+    qᵛ⁺ = 0.015
+    s̄ = -0.08qᵛ⁺
+    𝒮 = GaussianStatistics{Float64}()
+    C₀ = subgrid_cloud(𝒮, s̄, 1.0, 0.0, PPP.saturation_deficit_spread_floor(default, qᵛ⁺)).C
+    C₁ = subgrid_cloud(𝒮, s̄, 1.0, 0.0, PPP.saturation_deficit_spread_floor(relative, qᵛ⁺)).C
+    @test C₀ < 1e-10
+    @test C₁ ≈ normal_cumulative_distribution(-0.08 / 0.05)
+end
