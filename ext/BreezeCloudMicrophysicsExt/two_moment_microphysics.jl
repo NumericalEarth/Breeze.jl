@@ -88,15 +88,16 @@ microphysics = TwoMomentCloudMicrophysics(aerosol_activation = nothing)
 ```
 """
 function default_aerosol_activation(FT::DataType = Float64; τⁿᵘᶜ = 1)
-    # Default continental aerosol mode using κ-Köhler theory
+    # Default continental aerosol mode using κ-Köhler theory, in the float type FT so that
+    # the activated fraction does not promote Float32 tendencies to Float64
     # Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
-    r_dry = 0.05e-6           # 50 nm dry radius
-    stdev = 2.0               # geometric standard deviation
-    Nᵃ₀ = 100e6               # 100 cm⁻³
-    vol_mix_ratio = (1.0,)    # single component
-    mass_mix_ratio = (1.0,)
-    molar_mass = (0.132,)     # ammonium sulfate ~132 g/mol
-    kappa = (0.5,)            # hygroscopicity
+    r_dry = FT(0.05e-6)          # 50 nm dry radius
+    stdev = FT(2)                # geometric standard deviation
+    Nᵃ₀ = FT(100e6)              # 100 cm⁻³
+    vol_mix_ratio = (FT(1),)     # single component
+    mass_mix_ratio = (FT(1),)
+    molar_mass = (FT(0.132),)    # ammonium sulfate ~132 g/mol
+    kappa = (FT(0.5),)           # hygroscopicity
 
     mode = CMAM.Mode_κ(r_dry, stdev, Nᵃ₀, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
     aerosol_distribution = CMAM.AerosolDistribution((mode,))
@@ -381,6 +382,10 @@ function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, b
     return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ)
 end
 
+# Diagnostic liquid (cloud liquid + rain), used e.g. by `set_to_mean!`
+AtmosphereModels.liquid_mass_fraction(::WPNE2M, model) = model.microphysical_fields.qˡ
+AtmosphereModels.ice_mass_fraction(::WPNE2M, model) = nothing
+
 #####
 ##### Update microphysical fields (diagnostics + terminal velocities)
 #####
@@ -417,17 +422,18 @@ end
     # Local copy of CM2.cloud_terminal_velocity with 2//3 → FT(2/3)
     # so that Rational literals don't appear inside Reactant-traced code.
     FT = eltype(q_liq)
-    ϵN = CloudMicrophysics.Utilities.ϵ_numerics_2M_N(FT)
-    ϵM = CloudMicrophysics.Utilities.ϵ_numerics_2M_M(FT)
+    # CloudMicrophysics 0.47 uses one smallness threshold, `cbrt(floatmin(FT))`,
+    # for both the mass and number variables of the 2-moment scheme.
+    ϵ = CloudMicrophysics.Utilities.ϵ_numerics(FT)
 
     (; νc, μc) = pdf_c
     (; Bc) = CM2.pdf_cloud_parameters_mass(pdf_c, q_liq, ρₐ, N_liq)
 
     prefactor = FT(1 / 18) * (6 / ρw / π)^FT(2 / 3) * (ρw / ρₐ - 1) * grav / ν_air
 
-    vt0 = ifelse(N_liq < ϵN, FT(0),
+    vt0 = ifelse(N_liq < ϵ, FT(0),
         prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(2 / 3)) / N_liq)
-    vt1 = ifelse(q_liq < ϵM, FT(0),
+    vt1 = ifelse(q_liq < ϵ, FT(0),
         prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(5 / 3)) / ρₐ / q_liq)
 
     return (vt0, vt1)
@@ -550,7 +556,10 @@ end
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    # Saturation uses the thermodynamic state density; the total density ρ weights the
+    # tendencies (ρᵣ on the anelastic core).
+    ρᵗʰ = density(𝒰, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
 
     # ===== Process rates =====
 
@@ -561,13 +570,13 @@ end
                                             ρ, ℳ, 𝒰, constants)
 
     # Condensation on existing droplets, budget reduced by activation
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
     Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
     Sᶜᵒⁿᵈ_eff = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
 
     # Rain evaporation (mass and number)
-    evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, Nʳ, T, constants)
+    evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, ρᵗʰ, Nʳ, T, constants)
     Sᵉᵛᵃᵖ = max(evap.evap_rate_1, -max(0, qʳ) / τⁿᵘᵐ)
     dNʳ_evap = evap.evap_rate_0
 
@@ -736,10 +745,11 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     velocities⁺ = (; u = ℳ.velocities.u, v = ℳ.velocities.v, w = w⁺)
     ℳ⁺ = WarmPhaseTwoMomentState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.nᵃ, velocities⁺)
 
-    # Supersaturation - activation only occurs when air is supersaturated (S > 0)
+    # Supersaturation - activation only occurs when air is supersaturated (𝒮 > 0).
+    # It is evaluated at the thermodynamic state density, not at ρ (ρᵣ on the anelastic core).
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
+    𝒮 = supersaturation(T, density(𝒰, constants), q, constants, PlanarLiquidSurface())
 
     # Target: fraction of available aerosol that should activate
     N★ = aerosol_activated_fraction(aerosol_activation, aps, ρ, ℳ⁺, 𝒰, constants) * Nᵃ⁺
@@ -751,7 +761,7 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     τⁿᵘᶜ = aerosol_activation.nucleation_timescale
 
     # Convert to rate [1/m³/s], zero if subsaturated
-    dNᶜˡ_act = ifelse(S > 0, ΔNᵃᶜᵗ / τⁿᵘᶜ, zero(ρ))
+    dNᶜˡ_act = ifelse(𝒮 > 0, ΔNᵃᶜᵗ / τⁿᵘᶜ, zero(ρ))
 
     return dNᶜˡ_act
 end
@@ -767,9 +777,9 @@ the corresponding mass source term for cloud liquid water.
 
 The activation radius is derived from Köhler theory:
 ```math
-r_{act} = \\frac{2A}{3 S}
+r_{act} = \\frac{2A}{3 𝒮}
 ```
-where ``A = 2σ/(ρ_w R_v T)`` is the curvature parameter and ``S`` is the
+where ``A = 2σ/(ρ_w R_v T)`` is the curvature parameter and ``𝒮`` is the
 instantaneous supersaturation. See eq. 19 in [Abdul-Razzak et al. (1998)](@cite AbdulRazzakGhan1998).
 
 The mass tendency is then:
@@ -803,7 +813,7 @@ Mass tendency for cloud liquid [kg/kg/s]
 
     # Compute activation radius from Köhler theory
     # A = 2σ / (ρw * Rv * T) is the curvature parameter
-    # r_act = 2A / (3S) for the critical radius at supersaturation S
+    # r_act = 2A / (3𝒮) for the critical radius at supersaturation 𝒮
     Rᵛ = vapor_gas_constant(constants)
     ρᴸ = ap.ρ_w  # intrinsic density of liquid water [kg/m³]
     σ = ap.σ     # surface tension [N/m]
@@ -812,12 +822,12 @@ Mass tendency for cloud liquid [kg/kg/s]
 
     # Use instantaneous supersaturation to compute activation radius
     # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation
-    S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
+    𝒮 = supersaturation(T, density(𝒰, constants), q, constants, PlanarLiquidSurface())
 
-    # Compute radius: rᵃᶜᵗ = 2A / (3S), capped at 1 μm (1e-6 m)
-    # Use rⁿᵘᶜ as fallback when S is negligible (no supersaturation) or no activation
-    is_activating = (dNᶜˡ_act > eps(FT)) & (S > eps(FT))
-    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(S, eps(FT)))), rⁿᵘᶜ)
+    # Compute radius: rᵃᶜᵗ = 2A / (3𝒮), capped at 1 μm (1e-6 m)
+    # Use rⁿᵘᶜ as fallback when 𝒮 is negligible (no supersaturation) or no activation
+    is_activating = (dNᶜˡ_act > eps(FT)) & (𝒮 > eps(FT))
+    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(𝒮, eps(FT)))), FT(rⁿᵘᶜ))
 
     # Mass of a single activated droplet [kg]
     # m = (4π/3) * r³ * ρᴸ
@@ -873,7 +883,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         # Guard against log(0) or log(negative): when Sᵐᵃˣ ≈ 0, no activation occurs
         Sᵐᵃˣ_safe = max(eps(FT), Sᵐᵃˣ)
         Sᶜʳⁱᵗ_safe = max(eps(FT), Sᶜʳⁱᵗ)
-        ϕ = 2 * log(Sᶜʳⁱᵗ_safe / Sᵐᵃˣ_safe) / 3 / sqrt(2) / log(mode.stdev)
+        ϕ = 2 * log(Sᶜʳⁱᵗ_safe / Sᵐᵃˣ_safe) / 3 / sqrt(FT(2)) / log(mode.stdev)
         fᵃᶜᵗ = (1 - erf(ϕ)) / 2
 
         Nᵃᶜᵗ += fᵃᶜᵗ * Nᵐᵒᵈᵉ
