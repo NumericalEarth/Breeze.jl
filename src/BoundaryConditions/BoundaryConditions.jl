@@ -27,7 +27,7 @@ export BulkDragFunction,
        default_neutral_sensible_heat_polynomial,
        default_neutral_latent_heat_polynomial
 
-using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density,
+using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, continuity_density,
                           dynamics_thermodynamic_fields,
                           standard_pressure, default_drag_surface_temperature,
                           moisture_specific_name, thermodynamic_density_name,
@@ -388,11 +388,11 @@ function materialize_bulk_drag(df, side, grid, dynamics, microphysics, constants
     Tˢ = materialize_surface_field(Tˢ_input, grid, side)
     coef = materialize_coefficient(df.coefficient, grid, dynamics, microphysics, constants, Val(:momentum))
     gustiness = materialize_gustiness(df.gustiness, closure)
-    # The flux lands on the coupling-weighted momentum, so the stress on the mixture is converted
-    # with the coupling density over the total density of the near-wall cell (see `getbc`). The
+    # The flux lands on the continuity-density-weighted momentum, so the stress on the mixture is converted
+    # with the continuity density over the total density of the near-wall cell (see `getbc`). The
     # compressible dry density is not materialized yet at this point (`nothing`); `getbc` then reads
     # the prognostic `ρᵈ` field instead, as the energy flux conditions do.
-    density = dynamics_density(dynamics)
+    density = continuity_density(dynamics)
     new_df = BulkDragFunction(df.direction, side, coef, gustiness, Tˢ, df.filtered_velocities, constants, density)
     return BoundaryCondition(Flux(), new_df)
 end

@@ -23,7 +23,7 @@ Notation ``\boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u})`` abov
 ``[\boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u})]_i = \boldsymbol{\nabla \cdot}\, (ρ u_i \boldsymbol{u})``.
 
 Here ``ρ`` is the *total* density, so this balance carries the full pressure gradient and the total
-gravitational force ``ρ g``. Breeze steps not this mixture momentum but the coupling-weighted one
+gravitational force ``ρ g``. Breeze steps not this mixture momentum but the continuity-density-weighted one
 (``ρᵈ \boldsymbol{u}`` compressible, ``ρᵣ \boldsymbol{u}`` anelastic), so both forces enter the
 tendency rescaled by ``ρᵈ/ρ``, exactly 1 where the two densities coincide. See
 [Compressible dynamics](@ref Compressible-section).

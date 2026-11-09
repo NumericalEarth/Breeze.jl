@@ -410,7 +410,7 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ρᵈ = dry_density[i, j, k]    # coupling density (recovers θ = ρθ/ρᵈ)
+        ρᵈ = dry_density[i, j, k]    # continuity density (recovers θ = ρθ/ρᵈ)
         ρ  = total_density[i, j, k]  # total air density (mass fractions, EOS, inversion)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
     end
@@ -447,7 +447,7 @@ end
 end
 
 # The density-based state the compressible core closes the thermodynamics with. ρθ = ρᵈθ is
-# dry-coupled, so θ is recovered with the coupling density ρᵈ, while the inversion and the equation
+# dry-coupled, so θ is recovered with the continuity density ρᵈ, while the inversion and the equation
 # of state use the total density ρ. The acoustic substepper differentiates this same state
 # (`_compute_linearization_basic_state!`).
 @inline function compressible_density_state(i, j, k, formulation::LiquidIcePotentialTemperatureFormulation,

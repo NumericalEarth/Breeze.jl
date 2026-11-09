@@ -66,7 +66,7 @@ end
 #####
 ##### `dynamics_mass_fraction*` rescales the mixture pressure and buoyancy forces onto the
 ##### dry-air momentum ρu = ρᵈ u (not the mixture ρ u). Advection and Coriolis already carry
-##### ρᵈ u; the stress is modeled with the coupling density (see `dynamics_mass_fractionᶠᶜᶜ`).
+##### ρᵈ u; the stress is modeled with the continuity density (see `dynamics_mass_fractionᶠᶜᶜ`).
 #####
 
 @inline function x_momentum_tendency(i, j, k, grid,

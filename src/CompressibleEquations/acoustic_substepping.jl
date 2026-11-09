@@ -27,12 +27,12 @@
 
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
+using Oceananigans: Field, CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: implicit_step!
-using Oceananigans.Grids: ZDirection, rnode, znode
+using Oceananigans.Grids: ZDirection, rnode, znode, node
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
@@ -87,8 +87,8 @@ Fields:
   excluded — those are in the fast operator).
 - `vertical_solver_source_term` (z-faces): explicit RHS of the (ρw)′ tridiagonal system.
 - `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
-- `vertical_velocity_cache`, `density_cache`: the stage-entry predictor velocity and its carrier
-  dry density, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
+- `vertical_velocity_cache`, `density_cache`: the stage-entry predictor velocity and the dry
+  density that weights it, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
   adaptive-implicit advection.
 - `time_averaged_vertical_velocity_cache`: the acoustic-mean transport velocity the moisture and
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
@@ -194,7 +194,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     final_stage_vertical_pressure_tendency_factor = convert(FT, split_explicit.final_stage_vertical_pressure_tendency_factor)
 
     damping = split_explicit.damping
-    sponge = split_explicit.sponge
+    # Evaluate the ramp into a 1D z-face profile now, so the substep kernels never touch it.
+    sponge = materialize_sponge(grid, split_explicit.sponge)
     substep_distribution = split_explicit.substep_distribution
     open_boundary_relaxation = convert(FT, split_explicit.open_boundary_relaxation)
 
@@ -565,26 +566,115 @@ end
 # + rdz_c(k−1))/Δzᶠ(k); the matching (1−ω) term goes on the predictor RHS in `_build_vertical_rhs!`.
 # Constant-Courant scaling γ_z=αΔz²/Δτ makes dᵐ⁺ Δτ-independent. `damp_vertical=false`/`NoDivergenceDamping` ⇒ 0.
 
-# Implicit upper Rayleigh sponge → column-tridiag diagonal (Klemp, Dudhia & Hassiotis 2008): a layer of
-# thickness `depth` below the lid damps (ρw)′ at peak `damping_rate` (1/s) × ramp shape, using the reference
-# face coordinate `rnode` (terrain-following grids get a horizontally uniform sponge in r). CN-weighted:
-# `|δτᵐ⁺|·rate·ramp` on the LHS diagonal, matched by `|δτˢ⁻|·rate·ramp·ρw_old` on the RHS in
-# `_build_vertical_rhs!`. Local in z (no off-diagonal). `|δτ|` (not δτ) makes it a one-sided
-# dissipative regularizer for either integration direction (forward through a sponge is intentionally not
-# exactly invertible). Outside the layer the ramp vanishes and the tridiag is unaffected.
-@inline sponge_term_diag(i, j, k, grid, ::Nothing, δτᵐ⁺) = zero(grid)
+# Implicit upper Rayleigh sponge (Klemp, Dudhia & Hassiotis 2008): a layer of thickness `depth`
+# below the lid damps the **total** vertical momentum at peak `damping_rate` (1/s) × ramp shape,
+# using the reference face coordinate `rnode` (terrain-following grids get a horizontally uniform
+# sponge in r). Outside the layer the ramp vanishes and nothing is touched.
+#
+# Within a substep the total splits as ρw = ρwᴸ + (ρw)′, so the damping −γ(ρwᴸ + (ρw)′) splits too:
+#
+#   * the stage-entry part −γ ρwᴸ is a *known* constant over the substep loop, so it rides along in
+#     the slow tendency Gˢρw (`sponge_slow_tendency`, assembled once per stage);
+#   * the acoustic part −γ (ρw)′ is CN-weighted into the column tridiag: `|δτᵐ⁺|·γ` on the LHS
+#     diagonal (`sponge_term_diag`), matched by `|δτˢ⁻|·γ·ρw_old` on the RHS in
+#     `_build_vertical_rhs!` (`sponge_rhs`). Local in z, so no off-diagonal coupling.
+#
+# Damping only the perturbation would leave an established (quasi-steady) gravity wave untouched —
+# (ρw)′ measures the *change* over a stage, not the wave itself — and the absorbing layer would be a
+# no-op at the very moment it is needed. `|δτ|` (not δτ) makes the acoustic half a one-sided
+# dissipative regularizer for either integration direction (forward through a sponge is
+# intentionally not exactly invertible).
+#
+# γ = rate × ramp(z) is a function of the reference face coordinate alone, so it is precomputed
+# once per z-face by `materialize_sponge` and read here with a single load. It is read twice per
+# face per acoustic substep: from the tridiag diagonal, inside the serial-in-k Thomas sweep, and
+# from `_build_vertical_rhs!`.
+@inline sponge_damping(i, j, k, grid, ::Nothing) = zero(grid)
+@inline sponge_damping(i, j, k, grid, sponge::UpperSponge) = @inbounds sponge.damping_profile[i, j, k]
 
-@inline function sponge_term_diag(i, j, k, grid, sponge::UpperSponge, δτᵐ⁺)
-    z = rnode(i, j, k, grid, Center(), Center(), Face())
-    return abs(δτᵐ⁺) * sponge.damping_rate * sponge.ramp(z, grid.Lz, sponge.depth)
+materialize_sponge(grid, ::Nothing) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Build the grid-dependent form of `sponge` by evaluating its ramp into a 1D profile of the damping
+rate ``γ(z) = \\text{rate} × \\text{ramp}(z)`` over z-faces. Called by the
+[`AcousticSubstepper`](@ref) constructor; a `nothing` sponge returns `nothing`.
+
+The user-facing [`UpperSponge`](@ref) constructor has no grid, so it produces a skeleton with
+`damping_profile = nothing` — this is the matching materialization step.
+"""
+function materialize_sponge(grid, sponge::UpperSponge)
+    isnothing(sponge.mask) || return materialize_masked_sponge(grid, sponge)
+
+    # Converting to the *grid* float type is what keeps γ out of the tridiag's promotion path: a
+    # Float64 γ on a Float32 grid would widen the whole Thomas recurrence, per column per substep.
+    FT = eltype(grid)
+    damping_rate = convert(FT, sponge.damping_rate)
+    depth = convert(FT, sponge.depth)
+
+    # Faces 1:Nz+1 are the whole read range (the tridiag covers 1:Nz and `_build_vertical_rhs!`
+    # is launched over 1:Nz+1), so the halo values are left at the field's initial zero.
+    damping_profile = Field{Nothing, Nothing, Face}(grid)
+
+    launch!(architecture(grid), grid, tuple(size(grid, 3) + 1), _compute_sponge_damping_profile!,
+            damping_profile, grid, damping_rate, depth, sponge.ramp)
+
+    return UpperSponge(damping_rate, depth, sponge.ramp, nothing, damping_profile)
 end
 
-@inline sponge_rhs(i, j, k, grid, ::Nothing, δτˢ⁻, ρw_old) = zero(grid)
+# With a `mask` the damping rate varies horizontally, so it is evaluated into a full z-face field:
+# γ = rate × max(ramp(r), mask(x, y, z)), read at the same (i, j, k) as the 1D profile.
+function materialize_masked_sponge(grid, sponge::UpperSponge)
+    FT = eltype(grid)
+    damping_rate = convert(FT, sponge.damping_rate)
+    depth = convert(FT, sponge.depth)
+    damping_profile = ZFaceField(grid)
+    Nx, Ny, Nz = size(grid)
 
-@inline function sponge_rhs(i, j, k, grid, sponge::UpperSponge, δτˢ⁻, ρw_old)
-    z = rnode(i, j, k, grid, Center(), Center(), Face())
-    @inbounds return abs(δτˢ⁻) * sponge.damping_rate * sponge.ramp(z, grid.Lz, sponge.depth) * ρw_old[i, j, k]
+    launch!(architecture(grid), grid, (Nx, Ny, Nz + 1), _compute_masked_sponge_damping!,
+            damping_profile, grid, damping_rate, depth, sponge.ramp, sponge.mask)
+
+    return UpperSponge(damping_rate, depth, sponge.ramp, nothing, damping_profile)
 end
+
+@kernel function _compute_masked_sponge_damping!(γ, grid, damping_rate, depth, ramp, mask)
+    i, j, k = @index(Global, NTuple)
+    r = rnode(i, j, k, grid, Center(), Center(), Face())
+    # `node` gives the coordinates `set!` passes to functions: (λ, φ, z) on a LatitudeLongitudeGrid
+    # (`xnode`/`ynode` would give distances in metres there), (x, y, z) on a RectilinearGrid.
+    m = mask(node(i, j, k, grid, Center(), Center(), Face())...)
+    @inbounds γ[i, j, k] = damping_rate * max(ramp(r, grid.Lz, depth), m)
+end
+
+# `ramp` is an arbitrary user-supplied callable, so this is the only place it is evaluated,
+# once per face at construction rather than per substep.
+@kernel function _compute_sponge_damping_profile!(γ, grid, damping_rate, depth, ramp)
+    k = @index(Global)
+    z = rnode(1, 1, k, grid, Center(), Center(), Face())
+    @inbounds γ[1, 1, k] = damping_rate * ramp(z, grid.Lz, depth)
+end
+
+@inline sponge_term_diag(i, j, k, grid, sponge, δτᵐ⁺) =
+    abs(δτᵐ⁺) * sponge_damping(i, j, k, grid, sponge)
+
+# `_build_vertical_rhs!` loads ρw′ at this face anyway, so there is nothing for a `::Nothing`
+# specialization to save here (unlike `sponge_slow_tendency` below).
+@inline sponge_rhs(i, j, k, grid, sponge, δτˢ⁻, ρw_old) =
+    @inbounds abs(δτˢ⁻) * sponge_damping(i, j, k, grid, sponge) * ρw_old[i, j, k]
+
+# Rayleigh damping of the stage-entry vertical momentum, folded into the slow tendency Gˢρw. `ρwᴸ`
+# is the **Cartesian** ρw on both height-coordinate and terrain-following grids (see the terrain
+# assembly for why targeting ρw̃ would force the mean flow). `direction = sign(Δτ)` keeps the term
+# dissipative when integrating backwards, since `_build_vertical_rhs!` scales Gˢρw by the *signed*
+# Δτ (the acoustic half gets the same treatment through its `abs(δτ)` weights). Riding in Gˢρw also
+# means this half is scaled by `vertical_momentum_tendency_factor` along with the rest of the slow
+# tendency — irrelevant at its default of 1, but worth knowing if that knob is ever turned down.
+# The `::Nothing` method is what keeps ρwᴸ out of the sponge-free assembly kernels entirely.
+@inline sponge_slow_tendency(i, j, k, grid, ::Nothing, ρwᴸ, direction) = zero(grid)
+
+@inline sponge_slow_tendency(i, j, k, grid, sponge::UpperSponge, ρwᴸ, direction) =
+    @inbounds -direction * sponge_damping(i, j, k, grid, sponge) * ρwᴸ[i, j, k]
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagLower, p, ::ZDirection,
                                  θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, dynamics)
@@ -675,11 +765,14 @@ end
 # Height-coordinate (non-terrain) slow vertical-momentum tendency. The terrain method is dispatched
 # separately (`::TerrainCompressibleModel`), so here the single `reference_state`, when present, is
 # a 1D-column `ExnerReferenceState`; `nothing` selects the full-pressure fallback.
-function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper, model, β_stage = nothing)
+function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubstepper, model,
+                                                  β_stage = nothing, Δτ = one(eltype(model.grid)))
     grid = model.grid
     arch = architecture(grid)
-    g    = convert(eltype(grid), model.thermodynamic_constants.gravitational_acceleration)
+    FT   = eltype(grid)
+    g    = convert(FT, model.thermodynamic_constants.gravitational_acceleration)
     Gⁿρw = model.timestepper.Gⁿ.ρw
+    direction = convert(FT, sign(Δτ))
 
     ref = model.dynamics.reference_state
 
@@ -689,7 +782,8 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
                 Gⁿρw,
                 model.dynamics.pressure,
                 model.dynamics.total_density,
-                grid, model.dynamics, g)
+                model.momentum.ρw,
+                grid, model.dynamics, g, substepper.sponge, direction)
     else
         launch!(arch, grid, :xyz, _assemble_slow_vertical_momentum_tendency!,
                 substepper.slow_vertical_momentum_tendency,
@@ -697,23 +791,25 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
                 model.dynamics.pressure,
                 model.dynamics.total_density,
                 ref.pressure, ref.density,
-                grid, model.dynamics, g)
+                model.momentum.ρw,
+                grid, model.dynamics, g, substepper.sponge, direction)
     end
 
     return nothing
 end
 
 # Slow-tendency assembly with reference state. Buoyancy uses the diagnosed TOTAL density
-# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): the mixture gravitational force is `-g ρ`,
-# summed over all species. The prognostic mass variable is the dry density ρᵈ (its continuity has
-# no sedimentation source); total ρ is reconstructed each update.
-# Across the acoustic substeps the water densities are frozen, so the evolving density perturbation
-# `ρ′ = ρᵈ′` is also the total-density perturbation, and the moisture loading enters exactly once —
-# here, through the stage-entry total `ρᴸ`.
+# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): in conservation-form momentum
+# `∂t(ρw) = -∂z p - g ρ`, gravity acts on the total mass of all species. The prognostic mass
+# variable is the dry density ρᵈ (its continuity has no sedimentation source); total ρ is
+# reconstructed each update. Across the acoustic substeps the water densities are frozen, so the
+# evolving density perturbation `ρ′ = ρᵈ′` is also the total-density perturbation, and the
+# moisture loading enters exactly once — here, through the stage-entry total `ρᴸ`.
 #
-# `qᵈ` converts the mixture force `-∂z p - g ρ` onto the dry-coupled ρw, reducing the buoyancy term
-# to `-g ℑᶻ(ρᵈ)`.
-@kernel function _assemble_slow_vertical_momentum_tendency!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, pᵣ, ρᵣ, grid, dynamics, g)
+# `qᵈ` converts the mixture force `-∂z p - g ρ` onto the dry-air momentum ρw, reducing the buoyancy
+# term to `-g ℑᶻ(ρᵈ)`.
+@kernel function _assemble_slow_vertical_momentum_tendency!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, pᵣ, ρᵣ, ρwᴸ,
+                                                            grid, dynamics, g, sponge, direction)
     i, j, k = @index(Global, NTuple)
 
     qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
@@ -723,15 +819,17 @@ end
         # both terms are exactly zero by construction of the reference.
         ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δϕ, pᴸ, pᵣ)
         ρ′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, δϕ, ρᴸ, ρᵣ)
+        Gˢρwˢᵖ = sponge_slow_tendency(i, j, k, grid, sponge, ρwᴸ, direction)
 
-        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - qᵈ * (∂z_p′ + g * ρ′ᶜᶜᶠ)) * (k > 1)
+        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - qᵈ * (∂z_p′ + g * ρ′ᶜᶜᶠ) + Gˢρwˢᵖ) * (k > 1)
     end
 end
 
 # Field perturbation about a reference (used for both pressure and density).
 @inline δϕ(i, j, k, grid, ϕᴸ, ϕᵣ) = @inbounds ϕᴸ[i, j, k] - ϕᵣ[i, j, k]
 
-@kernel function _assemble_slow_vertical_momentum_tendency_no_ref!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, grid, dynamics, g)
+@kernel function _assemble_slow_vertical_momentum_tendency_no_ref!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, ρwᴸ,
+                                                                   grid, dynamics, g, sponge, direction)
     i, j, k = @index(Global, NTuple)
 
     qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
@@ -739,7 +837,8 @@ end
     @inbounds begin
         ∂z_pᴸ  = ∂zᶜᶜᶠ(i, j, k, grid, pᴸ)
         ρᴸᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρᴸ)
-        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - qᵈ * (∂z_pᴸ + g * ρᴸᶜᶜᶠ)) * (k > 1)
+        Gˢρwˢᵖ = sponge_slow_tendency(i, j, k, grid, sponge, ρwᴸ, direction)
+        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - qᵈ * (∂z_pᴸ + g * ρᴸᶜᶜᶠ) + Gˢρwˢᵖ) * (k > 1)
     end
 end
 
@@ -1217,17 +1316,27 @@ end
 #####   ⟨ρu⟩ = ρuᴸ + (1/Nτ) ∑ₙ (ρu)′(n) = model.momentum.ρu + accum/Nτ
 #####   ⟨u⟩  ≈ ⟨ρu⟩ / ρᴸ_face
 #####
+##### ρ′ sees the off-centered vertical flux (1 − ω)(ρw)′(n−1) + ω(ρw)′(n), so ⟨ρw⟩ must too.
+##### `solve!` is the only writer of (ρw)′ inside the loop, so the sum of that flux over
+##### n = 1…Nτ telescopes onto the raw accumulation:
+#####
+#####   ∑ₙ [(1 − ω)(ρw)′(n−1) + ω(ρw)′(n)] = ∑ₙ (ρw)′(n) − (1 − ω)[(ρw)′(Nτ) − (ρw)′(0)]
+#####
+##### The rewind (ρw)′(0) is zero in stage 1 but not in stages 2–3, so it is recomputed
+##### from Uᴸ_outer.
+#####
 ##### `model.momentum.*` and `model.dynamics.dry_density` are still the stage-entry
 ##### (Uᴸ_stage) values here. Dividing by ρᴸ ignores ρ's variation over the
 ##### loop, small for acoustic perturbations.
 #####
 
 
-function finalize_time_averaged_velocity!(substepper, model, Nτ)
+function finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
     FT   = eltype(grid)
     inv_Nτ = one(FT) / FT(Nτ)
+    ωˢ⁻ = 1 - substepper.forward_weight
 
     # `model.dynamics.dry_density` and `model.momentum.*` are still the
     # stage-entry (Uᴸ) values here — the substep loop only touched
@@ -1238,7 +1347,9 @@ function finalize_time_averaged_velocity!(substepper, model, Nτ)
             substepper.time_averaged_velocities.w,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
             model.dynamics.dry_density,
-            grid, model.dynamics, inv_Nτ)
+            substepper.momentum_perturbation.w,
+            Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
+            grid, model.dynamics, inv_Nτ, ωˢ⁻)
 
     map(fill_halo_regions!, substepper.time_averaged_velocities)
 
@@ -1247,15 +1358,16 @@ end
 
 @kernel function _finalize_time_averaged_velocity!(u_avg, v_avg, w_avg,
                                                    ρu_stage, ρv_stage, ρw_stage,
-                                                   ρᴸ, grid, dynamics, inv_Nτ)
+                                                   ρᴸ, ρw′, ρu_outer, ρv_outer, ρw_outer,
+                                                   grid, dynamics, inv_Nτ, ωˢ⁻)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
+        ρwᴸ = transport_ρw(i, j, k, grid, dynamics, ρu_stage, ρv_stage, ρw_stage)
+        ρw′⁰ = transport_ρw(i, j, k, grid, dynamics, ρu_outer, ρv_outer, ρw_outer) - ρwᴸ
         ρu_total = ρu_stage[i, j, k] + u_avg[i, j, k] * inv_Nτ
         ρv_total = ρv_stage[i, j, k] + v_avg[i, j, k] * inv_Nτ
-        ρw_total = transport_ρw(i, j, k, grid, dynamics,
-                                                              ρu_stage, ρv_stage, ρw_stage) +
-                   w_avg[i, j, k] * inv_Nτ
+        ρw_total = ρwᴸ + (w_avg[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - ρw′⁰)) * inv_Nτ
 
         ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρᴸ)
         ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρᴸ)
@@ -1289,17 +1401,21 @@ end
 # kernel writes ρ can read a GPU-scheduling-dependent mix of old and new
 # neighbor values. The driver calls AtmosphereModels.compute_velocities! after
 # recovery and halo fill.
+#
+# Each sum is rounded with the round-off treatment `rounding` (see `RoundingTreatments`);
+# `key` seeds its random numbers, offset by one per prognostic.
 @kernel function _recover_full_state!(ρ, ρθ, m,
                                       ρ′, ρθ′, ρu′, ρv′, ρw′,
                                       ρᴸ, ρuᴸ, ρvᴸ, ρwᴸ, ρθᴸ,
-                                      grid, dynamics)
+                                      grid, dynamics, rounding, key)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρᵐ⁺  = ρᴸ[i, j, k]  + ρ′[i, j, k]
-        ρθᵐ⁺ = ρθᴸ[i, j, k] + ρθ′[i, j, k]
-        ρuᵐ⁺ = ρuᴸ[i, j, k] + ρu′[i, j, k]
-        ρvᵐ⁺ = ρvᴸ[i, j, k] + ρv′[i, j, k]
-        ρwᵐ⁺ = acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρwᴸ[i, j, k], ρu′, ρv′, ρw′)
+        ρᵐ⁺  = rounded_add(rounding, ρᴸ[i, j, k],  ρ′[i, j, k],  i, j, k, key + 0x00000001)
+        ρθᵐ⁺ = rounded_add(rounding, ρθᴸ[i, j, k], ρθ′[i, j, k], i, j, k, key + 0x00000002)
+        ρuᵐ⁺ = rounded_add(rounding, ρuᴸ[i, j, k], ρu′[i, j, k], i, j, k, key + 0x00000003)
+        ρvᵐ⁺ = rounded_add(rounding, ρvᴸ[i, j, k], ρv′[i, j, k], i, j, k, key + 0x00000004)
+        ρwᵐ⁺ = rounded_recovered_vertical_momentum(rounding, i, j, k, grid, dynamics, ρwᴸ[i, j, k],
+                                                   ρu′, ρv′, ρw′, key + 0x00000005)
 
         ρ[i, j, k]  = ρᵐ⁺
         ρθ[i, j, k] = ρθᵐ⁺
@@ -1312,6 +1428,16 @@ end
 
 @inline acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρwᴸ_ccf, ρu′, ρv′, ρw′) =
     @inbounds ρwᴸ_ccf + ρw′[i, j, k]
+
+# Round-to-nearest keeps the original summation order (bitwise unchanged); other treatments
+# round the sum of the stage-entry value and the whole recovered increment.
+@inline rounded_recovered_vertical_momentum(::RoundToNearest, i, j, k, grid, dynamics, ρwᴸ_ccf, ρu′, ρv′, ρw′, key) =
+    acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, ρwᴸ_ccf, ρu′, ρv′, ρw′)
+
+@inline function rounded_recovered_vertical_momentum(rounding, i, j, k, grid, dynamics, ρwᴸ_ccf, ρu′, ρv′, ρw′, key)
+    δ = acoustic_recovered_vertical_momentum(i, j, k, grid, dynamics, 0, ρu′, ρv′, ρw′)
+    return rounded_add(rounding, ρwᴸ_ccf, δ, i, j, k, key)
+end
 
 #####
 ##### Section 12 — Substep loop driver
@@ -1563,9 +1689,11 @@ $(TYPEDSIGNATURES)
 
 Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
-`substepper.substep_distribution`.
+`substepper.substep_distribution`. The recovery of the full state from the stage-entry state and
+the accumulated perturbations is rounded with the round-off treatment `rounding`.
 """
-function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing)
+function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing;
+                                    rounding = RoundToNearest())
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -1592,7 +1720,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     #   Gˢρw = Gⁿρw − ∂z(pᴸ − pᵣ) − g (ρᴸ − ρᵣ)        (with reference state)
     #   Gˢρw = Gⁿρw − ∂z pᴸ − g ρᴸ                     (no reference state)
     # which the per-substep linearized acoustic forces add to.
-    assemble_slow_vertical_momentum_tendency!(substepper, model, β_stage)
+    assemble_slow_vertical_momentum_tendency!(substepper, model, β_stage, Δτ)
 
     # Initialize perturbations with the SK08 rewind term so the substep
     # effectively starts from U(t) = Uᴸ (the outer-step-start state).
@@ -1611,15 +1739,17 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Done BEFORE `_recover_full_state!` so we read the stage-entry
     # `model.momentum.*` (substep loop hasn't touched it) and stage-entry
     # `model.dynamics.dry_density` as the Uᴸ_stage reference.
-    finalize_time_averaged_velocity!(substepper, model, Nτ)
+    finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
     # `ρᵡ`, and `model.momentum.*` are still the stage-entry Uᴸ values here
     # (the substep loop only touched substepper.* perturbation fields). The
     # recovery kernel reads them as Uᴸ AND writes the full state back to the
     # same fields; per-thread read-before-write makes this aliasing safe
-    # because all reads are local to the same grid point.
+    # because all reads are local to the same grid point. The sums are rounded with `rounding`;
+    # field number 0 keeps their keys apart from those of the scalar updates.
     ρᵡ = thermodynamic_density(model.formulation)
+    key = rounding_key(rounding, model.clock.iteration, model.clock.stage, 0)
     launch!(arch, grid, :xyz, _recover_full_state!,
             model.dynamics.dry_density, ρᵡ,
             model.momentum,
@@ -1631,7 +1761,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
             model.dynamics.dry_density,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
             ρᵡ,
-            grid, model.dynamics)
+            grid, model.dynamics, rounding, key)
 
     # Thread clock + model fields so time-dependent Open BCs on the recovered
     # prognostic state dispatch correctly in `getbc` (see #717).

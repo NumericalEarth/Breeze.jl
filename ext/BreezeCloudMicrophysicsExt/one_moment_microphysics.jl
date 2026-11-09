@@ -79,6 +79,7 @@ struct OneMomentCloudMicrophysicsCategories{P, V, FT}
     parameters :: P
     hydrometeor_velocities :: V
     freezing_temperature :: FT
+    τⁿᵘᵐ :: FT
 end
 
 struct TemperatureDependentIceFormation{FT, F} <: AbstractCondensateFormation
@@ -99,12 +100,16 @@ Return one-moment categories backed by CloudMicrophysics' unified
   so the two containers cannot diverge.
 - `freezing_temperature`: Temperature used to route melting and freezing
   processes. Defaults to CloudMicrophysics' standard value, 273.15 K.
+- `τⁿᵘᵐ`: Timescale [s] for limiting sinks and relaxing negative values: a donor
+  reservoir loses at most its content over `τⁿᵘᵐ`. Must satisfy `τⁿᵘᵐ ≥ Δt` to
+  prevent reservoir overdraw within one time step. Default: 10 seconds.
 """
 function one_moment_cloud_microphysics_categories(
     FT::DataType = Oceananigans.defaults.FloatType;
     parameters = Microphysics1MParams(FT),
     hydrometeor_velocities = TerminalVelocityParams(FT),
-    freezing_temperature = FT(273.15))
+    freezing_temperature = FT(273.15),
+    τⁿᵘᵐ = FT(10))
 
     # CloudMicrophysics owns the Blk1M rain and snow velocities. Retain Breeze's
     # aggregate velocity container for cloud condensate sedimentation, but make
@@ -114,8 +119,9 @@ function one_moment_cloud_microphysics_categories(
         hydrometeor_velocities.chen2022,
         blk1m = parameters.terminal_velocity)
     freezing_temperature = convert(FT, freezing_temperature)
+    τⁿᵘᵐ = convert(FT, τⁿᵘᵐ)
 
-    return OneMomentCloudMicrophysicsCategories(parameters, hydrometeor_velocities, freezing_temperature)
+    return OneMomentCloudMicrophysicsCategories(parameters, hydrometeor_velocities, freezing_temperature, τⁿᵘᵐ)
 end
 
 const CM1MCategories = OneMomentCloudMicrophysicsCategories{<:Microphysics1MParams, <:TerminalVelocityParams}
@@ -235,12 +241,12 @@ end
     return conv_q_lcl_to_q_rai(option, parameters, nothing, micro, thermo)
 end
 
-@inline function ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+@inline function ice_autoconversion(parameters, q, qᶜⁱ, ρ, ρᵗʰ, T, Tᶠ, constants)
     option = parameters.processes.snow_autoconversion
-    return ice_autoconversion(option, parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+    return ice_autoconversion(option, parameters, q, qᶜⁱ, ρ, ρᵗʰ, T, Tᶠ, constants)
 end
 
-@inline function ice_autoconversion(option, parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+@inline function ice_autoconversion(option, parameters, q, qᶜⁱ, ρ, ρᵗʰ, T, Tᶠ, constants)
     micro = (; q_icl = qᶜⁱ)
     return conv_q_icl_to_q_sno(option, parameters, nothing, micro, nothing)
 end
@@ -251,6 +257,7 @@ end
     q,
     qᶜⁱ,
     ρ,
+    ρᵗʰ,
     T,
     Tᶠ,
     constants,
@@ -261,6 +268,7 @@ end
         q,
         qᶜⁱ,
         ρ,
+        ρᵗʰ,
         T,
         Tᶠ,
         constants,
@@ -330,10 +338,12 @@ end
     )
 end
 
-@inline rain_evaporation_rate(::Nothing, rain, velocity, air, q, qʳ, ρ, T, constants) = 0
+# The total density `ρ` weights the prognostic precipitation (its size distribution); the
+# supersaturation is evaluated at the thermodynamic state density `ρᵗʰ`.
+@inline rain_evaporation_rate(::Nothing, rain, velocity, air, q, qʳ, ρ, ρᵗʰ, T, constants) = 0
 
-@inline function rain_evaporation_rate(option, rain, velocity, air, q, qʳ, ρ, T, constants)
-    return rain_evaporation(rain, velocity, air, q, qʳ, ρ, T, constants)
+@inline function rain_evaporation_rate(option, rain, velocity, air, q, qʳ, ρ, ρᵗʰ, T, constants)
+    return rain_evaporation(rain, velocity, air, q, qʳ, ρ, ρᵗʰ, T, constants)
 end
 
 @inline function snow_deposition_sublimation_rate(
@@ -344,14 +354,15 @@ end
     q,
     qˢⁿ,
     ρ,
+    ρᵗʰ,
     T,
     constants,
 )
     return 0
 end
 
-@inline function snow_deposition_sublimation_rate(option, snow, velocity, air, q, qˢⁿ, ρ, T, constants)
-    return snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, T, constants)
+@inline function snow_deposition_sublimation_rate(option, snow, velocity, air, q, qˢⁿ, ρ, ρᵗʰ, T, constants)
+    return snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, ρᵗʰ, T, constants)
 end
 
 @inline function snow_deposition_sublimation_rate(
@@ -362,10 +373,11 @@ end
     q,
     qˢⁿ,
     ρ,
+    ρᵗʰ,
     T,
     constants,
 )
-    return min(0, snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, T, constants))
+    return min(0, snow_sublimation_deposition(snow, velocity, air, q, qˢⁿ, ρ, ρᵗʰ, T, constants))
 end
 
 @inline snow_melt_rate(::Nothing, snow, velocity, air, qˢⁿ, ρ, T, Tᶠ, constants) = 0
@@ -584,6 +596,11 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
 
     return (; zip(center_names, center_fields)..., wʳ)
 end
+
+# Diagnostic liquid (cloud liquid + rain) and ice (cloud ice + snow), used e.g. by `set_to_mean!`
+AM.liquid_mass_fraction(::OneMomentLiquidRain, model) = model.microphysical_fields.qˡ
+AM.ice_mass_fraction(::WarmPhase1M, model) = nothing
+AM.ice_mass_fraction(::MixedPhase1M, model) = model.microphysical_fields.qⁱ
 
 #####
 ##### update_microphysical_auxiliaries! for one-moment schemes
@@ -822,15 +839,21 @@ end
 # where qᵛ⁺ is the saturation specific humidity, τˡ is the relaxation timescale,
 # and Γˡ is a thermodynamic adjustment factor that accounts for latent heating:
 #
-#   Γˡ = 1 + (ℒˡ / cᵖᵐ) ⋅ dqᵛ⁺/dT
+#   Γˡ = 1 + dqᵛ⁺/dqᶜˡ = 1 + (dT/dqᶜˡ) ⋅ ∂qᵛ⁺/∂T + ∂qᵛ⁺/∂qᶜˡ
 #
 # This factor arises because condensation releases latent heat, which increases
 # temperature and hence increases the saturation specific humidity, creating a
 # negative feedback that slows the approach to equilibrium.
 #
-# The derivative dqᵛ*/dT follows from the Clausius-Clapeyron equation:
+# The saturation derivative follows the Clausius-Clapeyron equation at fixed composition.
+# With qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T),
 #
-#   dqᵛ⁺/dT = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T)
+#   fixed pressure (anelastic, parcel): ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ ℒˡ / (Rᵛ T²),  ∂qᵛ⁺/∂qᶜˡ = -qᵛ⁺ Rᵛ / Rᵐ
+#   fixed density (compressible):       ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T),  ∂qᵛ⁺/∂qᶜˡ = 0
+#
+# The heating response dT/dqᶜˡ follows the state's conserved enthalpy at fixed pressure,
+# or its θ–density relation and temperature solver at fixed density; see
+# `Microphysics.saturation_response`.
 #
 # See Morrison and Grabowski (2008, JAS), Appendix A, especially Eq. (A3).
 #####
@@ -850,12 +873,12 @@ end
 # The non-equilibrium and mixed-phase schemes evaluate these processes in their tendency bundles below.
 #####
 
-# Numerical timescale for limiting negative-value relaxation
-const τⁿᵘᵐ = 10  # seconds
+# Sinks and negative-value relaxation are limited over the numerical timescale
+# `categories.τⁿᵘᵐ` (default 10 s; see `one_moment_cloud_microphysics_categories`).
 
 # Fraction of a donor's process rates that can be honoured without draining more than
 # its content `q` over τⁿᵘᵐ: 1 when the summed sink rate `ΣS` fits, `q⁺ / (τⁿᵘᵐ ΣS)` otherwise.
-@inline function donor_limiter(q, ΣS)
+@inline function donor_limiter(q, ΣS, τⁿᵘᵐ)
     q⁺ = max(0, q)
     # Disabled processes return integer zeros; retain the moisture precision for zero demand.
     demand = oftype(q, τⁿᵘᵐ) * ΣS
@@ -868,15 +891,19 @@ end
 ##### The two densities of the one-moment tendencies
 #####
 #
-# `ρ` is the density that weights the prognostic mass fractions, so it converts specific rates S into
-# the density tendencies ρ S. Saturation and every process rate depend on the air's own density ρᵐ
-# = density(𝒰, constants): qᵛ⁺ = pᵛ⁺ / (ρᵐ Rᵛ T). On the compressible core the two coincide. On the
-# anelastic core ρ is the reference density ρᵣ(z), a dry profile about 1% heavier than moist air at
-# qᵛ = 16 g/kg, so saturating on ρ places qᵛ⁺ about 1% too low and condenses water in subsaturated air.
+# `ρ` is the total density that weights the prognostic mass fractions (the reference density ρᵣ on
+# the anelastic core). It converts specific rates S into the density tendencies ρ S and, since the
+# prognostic precipitation content is ρq, it also sets the size distributions behind every
+# collection, evaporation and melting rate, as it does for the sedimentation velocities written in
+# `update_microphysical_auxiliaries!`. Saturation alone is evaluated at the thermodynamic state
+# density ρᵗʰ = density(𝒰, constants): qᵛ⁺ = pᵛ⁺ / (ρᵗʰ Rᵛ T). On the compressible core the two
+# coincide. On the anelastic core ρᵣ is a dry profile about 1% heavier than moist air at qᵛ = 16 g/kg,
+# so saturating on ρ places qᵛ⁺ about 1% too low and condenses water in subsaturated air.
 
 # State-based rain tendency for WP1M
 @inline function AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
     processes = parameters.processes
     process_params = parameters.process_params
@@ -885,7 +912,7 @@ end
     rain_velocity = parameters.terminal_velocity.rain
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
-    ρᵐ = density(𝒰, constants)  # the air's own density; `ρ` only weights the tendencies
+    ρᵗʰ = density(𝒰, constants)  # thermodynamic state density, for saturation only
 
     # Autoconversion: cloud liquid → rain
     Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ, ℳ.w)
@@ -898,7 +925,7 @@ end
         rain_velocity,
         qᶜˡ,
         qʳ,
-        ρᵐ,
+        ρ,
     )
 
     # Rain evaporation in subsaturated air
@@ -911,7 +938,8 @@ end
         parameters.air_properties,
         q,
         qʳ,
-        ρᵐ,
+        ρ,
+        ρᵗʰ,
         T,
         constants,
     )
@@ -950,6 +978,7 @@ end
 
 @inline function wpne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
     processes = parameters.processes
     process_params = parameters.process_params
@@ -963,11 +992,11 @@ end
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
-    ρᵐ = density(𝒰, constants)  # the air's own density; `ρ` only weights the tendencies
+    ρᵗʰ = density(𝒰, constants)  # thermodynamic state density, for saturation only
 
     # Condensation: vapor ↔ cloud liquid
-    qᵛ⁺ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρᵐ, q, τᶜˡ, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
@@ -978,7 +1007,8 @@ end
         parameters.air_properties,
         q,
         qʳ,
-        ρᵐ,
+        ρ,
+        ρᵗʰ,
         T,
         constants,
     )
@@ -993,7 +1023,7 @@ end
         rain_velocity,
         qᶜˡ,
         qʳ,
-        ρᵐ,
+        ρ,
     )
 
     # Physics tendencies — conserved by construction: ρqᵛ_phys + ρqᶜˡ_phys + ρqʳ_phys = 0
@@ -1034,8 +1064,10 @@ end
 # Every process that moves mass into or out of rain and snow, evaluated identically for the
 # non-equilibrium (MPNE1M) and saturation-adjustment (MP1M) schemes. Vapor ↔ cloud exchange is not
 # here: MPNE1M relaxes it prognostically and saturation adjustment owns it for MP1M.
+# `ρ` sets the precipitation size distributions and `ρᵗʰ` the supersaturation (see "The two
+# densities of the one-moment tendencies").
 
-@inline function mixed_phase_precipitation_rates(bμp, ρ, ℳ::MixedPhaseOneMomentState, q, T, Tᶠ, constants)
+@inline function mixed_phase_precipitation_rates(bμp, ρ, ρᵗʰ, ℳ::MixedPhaseOneMomentState, q, T, Tᶠ, constants)
     parameters = bμp.categories.parameters
     processes = parameters.processes
     process_params = parameters.process_params
@@ -1050,11 +1082,11 @@ end
 
     # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
     Sᵉᵛᵃᵖ = rain_evaporation_rate(processes.rain_condensation_evaporation,
-                                  rain, rain_velocity, air, q, qʳ, ρ, T, constants)
+                                  rain, rain_velocity, air, q, qʳ, ρ, ρᵗʰ, T, constants)
 
     # Snow sublimation/deposition: snow ↔ vapor (positive = deposition)
     Sˢᵘᵇˡ = snow_deposition_sublimation_rate(processes.snow_deposition_sublimation,
-                                             snow, snow_velocity, air, q, qˢⁿ, ρ, T, constants)
+                                             snow, snow_velocity, air, q, qˢⁿ, ρ, ρᵗʰ, T, constants)
 
     # Snow melting: snow → rain (always non-negative)
     Sᵐᵉˡᵗ = snow_melt_rate(processes.snow_melt, snow, snow_velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
@@ -1065,7 +1097,7 @@ end
                                          cloud_liquid, rain, rain_velocity, qᶜˡ, qʳ, ρ)
 
     # Ice → snow autoconversion
-    Sᵃᶜⁿᵛⁱˢⁿ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, T, Tᶠ, constants)
+    Sᵃᶜⁿᵛⁱˢⁿ = ice_autoconversion(parameters, q, qᶜⁱ, ρ, ρᵗʰ, T, Tᶠ, constants)
 
     # Accretion: cloud liquid + snow (riming when cold, shedding to rain when warm)
     Sᵃᶜᶜˡˢⁿ = cloud_precipitation_accretion(process_params.cloud_liquid_snow_accretion,
@@ -1113,6 +1145,7 @@ end
 
 @inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
     processes = parameters.processes
     cloud_ice = parameters.cloud.ice
@@ -1127,30 +1160,30 @@ end
     Tᶠ = categories.freezing_temperature
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
-    ρᵐ = density(𝒰, constants)  # the air's own density; `ρ` only weights the tendencies
+    ρᵗʰ = density(𝒰, constants)  # thermodynamic state density, for saturation only
 
     # Condensation: vapor ↔ cloud liquid
-    qᵛ⁺ = saturation_specific_humidity(T, ρᵐ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρᵐ, q, τᶜˡ, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Deposition: vapor ↔ cloud ice
     # Suppress warm cloud-ice growth, matching CloudMicrophysics' INP limiter.
-    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵐ, constants, PlanarIceSurface())
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarIceSurface())
     τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories, qᶜⁱ, T, qᵛ, qᵛ⁺ⁱ)
-    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρᵐ, q, τᶜⁱ, constants)
+    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, 𝒰, τᶜⁱ, constants)
     Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
     Sᵈᵉᵖ = ifelse((T > Tᶠ) & (Sᵈᵉᵖ > 0), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
 
     (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ) =
-        mixed_phase_precipitation_rates(bμp, ρᵐ, ℳ, q, T, Tᶠ, constants)
+        mixed_phase_precipitation_rates(bμp, ρ, ρᵗʰ, ℳ, q, T, Tᶠ, constants)
 
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
     Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -max(0, qˢⁿ) / τⁿᵘᵐ)
     Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, max(0, qˢⁿ) / τⁿᵘᵐ)
 
     # Cloud ice melting: cloud ice → cloud liquid
-    Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(processes.cloud_ice_melt, cloud_ice, air, qᶜⁱ, ρᵐ, T, Tᶠ, constants)
+    Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(processes.cloud_ice_melt, cloud_ice, air, qᶜⁱ, ρ, T, Tᶠ, constants)
     Sᵐᵉˡᵗᶜⁱ = min(Sᵐᵉˡᵗᶜⁱ, max(0, qᶜⁱ) / τⁿᵘᵐ)
 
     # Thermal melt factor for warm accretion
@@ -1168,16 +1201,16 @@ end
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)                       # cold: rain → snow
 
-    fᵛ  = donor_limiter(qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
-    fᶜˡ = donor_limiter(qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
-    fᶜⁱ = donor_limiter(qᶜⁱ, -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ)
-    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
+    fᵛ  = donor_limiter(qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺, τⁿᵘᵐ)
+    fᶜˡ = donor_limiter(qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ, τⁿᵘᵐ)
+    fᶜⁱ = donor_limiter(qᶜⁱ, -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ, τⁿᵘᵐ)
+    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ, τⁿᵘᵐ)
 
     # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
     # computing this melt demand, then cap all snow sinks against the available snow.
     Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
-    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
+    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ, τⁿᵘᵐ)
 
     Sᶜᵒⁿᵈ = fᵛ * Sᶜᵒⁿᵈ⁺ + fᶜˡ * Sᶜᵒⁿᵈ⁻
     Sᵈᵉᵖ  = fᵛ * Sᵈᵉᵖ⁺  + fᶜⁱ * Sᵈᵉᵖ⁻
@@ -1316,6 +1349,7 @@ end
 
 @inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
     qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
     qʳ = ℳ.qʳ
@@ -1325,10 +1359,10 @@ end
     Tᶠ = categories.freezing_temperature
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
-    ρᵐ = density(𝒰, constants)  # the air's own density; `ρ` only weights the tendencies
+    ρᵗʰ = density(𝒰, constants)  # thermodynamic state density, for saturation only
 
     (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ) =
-        mixed_phase_precipitation_rates(bμp, ρᵐ, ℳ, q, T, Tᶠ, constants)
+        mixed_phase_precipitation_rates(bμp, ρ, ρᵗʰ, ℳ, q, T, Tᶠ, constants)
 
     α = warm_accretion_melt_factor(T, Tᶠ, constants)
     is_warm = T ≥ Tᶠ
@@ -1338,16 +1372,16 @@ end
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)
 
-    fᵛ  = donor_limiter(qᵛ,  Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
-    fᶜˡ = donor_limiter(qᶜˡ, Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
-    fᶜⁱ = donor_limiter(qᶜⁱ, Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ)
-    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
+    fᵛ  = donor_limiter(qᵛ,  Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺, τⁿᵘᵐ)
+    fᶜˡ = donor_limiter(qᶜˡ, Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ, τⁿᵘᵐ)
+    fᶜⁱ = donor_limiter(qᶜⁱ, Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ, τⁿᵘᵐ)
+    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ, τⁿᵘᵐ)
 
     # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
     # computing this melt demand, then cap all snow sinks against the available snow.
     Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
-    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
+    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ, τⁿᵘᵐ)
 
     Sᵉᵛᵃᵖ = fᵛ * Sᵉᵛᵃᵖ⁺ + fʳ * Sᵉᵛᵃᵖ⁻
     Sˢᵘᵇˡ = fᵛ * Sˢᵘᵇˡ⁺ + fˢⁿ * Sˢᵘᵇˡ⁻

@@ -32,10 +32,10 @@ for `u` (not `ρu`), so using `u` here keeps the formulation consistent with the
 theory underlying `Cᴰ`.
 
 The stress `ρˢ Cᴰ |U| u` acts on the air mixture, but the condition sets the flux of the
-coupling-weighted momentum — the dry-air momentum `ρᵈ u` on the compressible core — so it carries
+continuity-density-weighted momentum — the dry-air momentum `ρᵈ u` on the compressible core — so it carries
 the dry-air mass fraction `qᵈ = ρᵈ / ρ` of the near-wall cell, exactly as the interior pressure
 gradient and gravity do (see `AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ`) and as the energy
-flux conditions do. On the anelastic core the coupling and total densities are the same field,
+flux conditions do. On the anelastic core the continuity and total densities are the same field,
 so `qᵈ = 1`.
 
 The drag may be placed on any of the six boundaries of a bounded domain, on either of the
@@ -132,20 +132,20 @@ end
 ##### filtered field at the appropriate face location when filtering is enabled.
 #####
 
-# The stress ρˢ Cᴰ Ũ u acts on the mixture, but the flux lands on the coupling-weighted momentum
+# The stress ρˢ Cᴰ Ũ u acts on the mixture, but the flux lands on the continuity-density-weighted momentum
 # ρᵈ u, so it carries qᵈ = ρᵈ / ρ of the near-wall cell: the wall counterpart of the
 # `dynamics_mass_fraction*` weight on the interior pressure gradient and gravity, and of the
 # (ρᵈ / ρ) in `𝒬ᵀ_to_Jᶿ`. `fields.ρ` is the total density from `dynamics_thermodynamic_fields`.
-# The coupling density is stored at materialization when the dynamics already carries it (the
+# The continuity density is stored at materialization when the dynamics already carries it (the
 # anelastic reference density, the same field as `fields.ρ`, so the ratio is exactly one); the
 # compressible dry density is materialized with the model, after the boundary conditions, so the
 # condition then holds `nothing` and reads the prognostic `fields.ρᵈ` — as `_energy_flux_density`
 # does for the energy fluxes.
-@inline near_wall_coupling_density(i, j, k, density, fields) = @inbounds density[i, j, k]
-@inline near_wall_coupling_density(i, j, k, ::Nothing, fields) = @inbounds fields.ρᵈ[i, j, k]
+@inline near_wall_continuity_density(i, j, k, density, fields) = @inbounds density[i, j, k]
+@inline near_wall_continuity_density(i, j, k, ::Nothing, fields) = @inbounds fields.ρᵈ[i, j, k]
 
 @inline function near_wall_dry_mass_fraction(i, j, k, density, fields)
-    ρᵈ = near_wall_coupling_density(i, j, k, density, fields)
+    ρᵈ = near_wall_continuity_density(i, j, k, density, fields)
     ρ = @inbounds fields.ρ[i, j, k]
     return ρᵈ / ρ
 end
