@@ -24,6 +24,12 @@ end
 # Returns both Float32 and Float64 for tests that need both precision levels
 all_float_types() = (Float32, Float64)
 
+# Temperature inversions of the density-based state: non-iterated, fixed-count, stopped and converged
+temperature_solver_variants(FT) = (nothing, Breeze.FixedIterations(0), Breeze.FixedIterations(1),
+                                   Breeze.FixedIterations(2), Breeze.NewtonSolver(FT; maxiter=0),
+                                   Breeze.NewtonSolver(FT; maxiter=1), Breeze.NewtonSolver(FT; abstol=1e3),
+                                   Breeze.NewtonSolver(FT))
+
 # The single column of the radiation tests, at 45°N on the prime meridian
 radiation_column_grid(FT, Nz, top) =
     Oceananigans.RectilinearGrid(default_arch, FT; size = Nz, x = 0.0, y = 45.0, z = (0, top),
@@ -110,13 +116,13 @@ end
 # and `β` the content, enthalpy and heating response of that phase per cell. The flux through
 # the upper face of cell k drains cell k + 1 (clamped at the top, where the flux vanishes) and
 # delivers χ[k] + β[k] (h[k+1] − h[k]); the flux through its lower face drains the cell itself
-# and delivers χ[k]. `coupling` is the cell's coupling-to-total density ratio.
-function expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, χ, h, β; coupling = ones(Nz))
+# and delivers χ[k]. `density_ratio` is the cell's continuity-to-total density ratio.
+function expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, χ, h, β; density_ratio = ones(Nz))
     above(k) = min(k, Nz)
     G = zeros(Nz)
     for k in 1:Nz
         delivered⁺ = χ[k] + β[k] * (h[above(k + 1)] - h[k])
-        G[k] = -coupling[k] * (ρᶠ[k+1] * Φ[k+1] * delivered⁺ - ρᶠ[k] * Φ[k] * χ[k]) / Δz
+        G[k] = -density_ratio[k] * (ρᶠ[k+1] * Φ[k+1] * delivered⁺ - ρᶠ[k] * Φ[k] * χ[k]) / Δz
     end
     return G
 end

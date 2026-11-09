@@ -433,23 +433,28 @@ end
 @inline function temperature_and_pressure(i, j, k, grid,
                                           formulation::LiquidIcePotentialTemperatureFormulation,
                                           dynamics, ρᵈ, ρ, Rᵐ, q, constants)
-    # Note: potential_temperature_density is ρθ = ρᵈθ (prognostic, dry-coupled);
-    # θ is recovered with the continuity density ρᵈ, while the inversion and EOS below use total ρ.
-    ρθ = @inbounds formulation.potential_temperature_density[i, j, k]
-    θ = ρθ / ρᵈ
-    pˢᵗ = standard_pressure(dynamics)
-
     # Invert θˡⁱ at constant density via LiquidIceDensityState.temperature, which iterates the
     # implicit relation cᵖᵐ T = ĉᵖ (ρRᵐT/pˢᵗ)^κ θ + ℒˡ₀qˡ + ℒⁱ₀qⁱ to convergence. This is the same
     # inversion used by the saturation adjustment on the compressible core, so the dynamics and the
     # microphysics carry one self-consistent T (fixes the κ·ΔL split — NumericalEarth/Breeze.jl#765).
-    𝒰 = LiquidIceDensityState(θ, q, pˢᵗ, ρ, formulation.temperature_solver, formulation.exner_exponent)
+    𝒰 = compressible_density_state(i, j, k, formulation, dynamics, ρᵈ, ρ, q)
     T = temperature(𝒰, constants)
 
     # Ideal gas law: p = ρ Rᵐ T
     p = ρ * Rᵐ * T
 
     return T, p
+end
+
+# The density-based state the compressible core closes the thermodynamics with. ρθ = ρᵈθ is
+# dry-coupled, so θ is recovered with the continuity density ρᵈ, while the inversion and the equation
+# of state use the total density ρ. The acoustic substepper differentiates this same state
+# (`_compute_linearization_basic_state!`).
+@inline function compressible_density_state(i, j, k, formulation::LiquidIcePotentialTemperatureFormulation,
+                                            dynamics, ρᵈ, ρ, q)
+    ρθ = @inbounds formulation.potential_temperature_density[i, j, k]
+    return LiquidIceDensityState(ρθ / ρᵈ, q, standard_pressure(dynamics), ρ,
+                                 formulation.temperature_solver, formulation.exner_exponent)
 end
 
 # Build the density-based thermodynamic state for the compressible core, so that the

@@ -153,10 +153,8 @@ AtmosphereModels.standard_pressure(d::PrescribedDynamics) = d.standard_pressure
 # As on the anelastic core, the prescribed density is not the local state's (it is the reference
 # profile when built from a `ReferenceState`), so evaluate the equation of state at the
 # prescribed pressure with the local temperature and moisture: ρ = p / (Rᵐ(q) T).
-@inline function AtmosphereModels.thermodynamic_state_density(i, j, k, dynamics::PrescribedDynamics, T, q, constants)
-    @inbounds p = dynamics.pressure[i, j, k]
-    return density(T, p, q, constants)
-end
+@inline AtmosphereModels.thermodynamic_state_density(i, j, k, dynamics::PrescribedDynamics, T, q, constants) =
+    fixed_pressure_state_density(i, j, k, dynamics, T, q, constants)
 
 #####
 ##### Materialization

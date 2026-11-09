@@ -1,5 +1,5 @@
 using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant, absolute_zero_latent_heat,
-                             VaporEquivalentExponent
+                             VaporEquivalentExponent, density
 
 #####
 ##### Dynamics Interface
@@ -247,12 +247,26 @@ It is the *total* density, condensate loading included: ``Rᵐ(q) = qᵈ Rᵈ + 
 ``ρᵈ + ρᵛ``.
 
 The default returns [`total_density`](@ref), which is the state density on `CompressibleDynamics`.
-`AnelasticDynamics` overrides it with ``pᵣ / (Rᵐ T)``, the equation of state at the reference
-pressure. This differs from ``total_density = ρᵣ`` wherever ``T`` or ``q`` depart from the
-reference state, and it is the density whose departure from ``ρᵣ`` is the anelastic buoyancy.
+Dynamics closed on a reference or prescribed pressure (`AnelasticDynamics`, `PrescribedDynamics`)
+override it with [`fixed_pressure_state_density`](@ref), ``p / (Rᵐ T)``. On the anelastic core
+this differs from ``total_density = ρᵣ`` wherever ``T`` or ``q`` depart from the reference state,
+and it is the density whose departure from ``ρᵣ`` is the anelastic buoyancy.
 """
 @inline function thermodynamic_state_density(i, j, k, dynamics, T, q, constants)
     return @inbounds total_density(dynamics)[i, j, k]
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the equation-of-state density ``p / (Rᵐ(q) T)`` at the pressure
+[`dynamics_pressure`](@ref) of `dynamics` at `(i, j, k)`, with temperature `T` and moisture mass
+fractions `q`. Dynamics closed on a reference or prescribed pressure extend
+[`thermodynamic_state_density`](@ref) with it, since their total density is not the local state's.
+"""
+@inline function fixed_pressure_state_density(i, j, k, dynamics, T, q, constants)
+    p = @inbounds dynamics_pressure(dynamics)[i, j, k]
+    return density(T, p, q, constants)
 end
 
 """

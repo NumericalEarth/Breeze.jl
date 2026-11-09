@@ -88,11 +88,13 @@ tendency_transport_velocities(model) =
 """
 $(TYPEDSIGNATURES)
 
-Update non-acoustic scalar fields (moisture, microphysics, tracers) using the given kernel.
-Iterates over prognostic fields, skipping the ones the acoustic substep loop advances
-(see `acoustic_prognostic_names`).
+Update non-acoustic scalar fields (moisture, microphysics, tracers) with the
+Wicker–Skamarock stage update ``u = u⁰ + Δt G``, rounded with the round-off
+treatment `rounding`, followed by their implicit solves over `Δt_stage`. Iterates over prognostic
+fields, skipping the ones the acoustic substep loop advances (see `acoustic_prognostic_names`).
+`kernel_Δt` is `Δt_stage` as the kernels take it (see `kernel_time_step`).
 """
-function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
+function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     grid = model.grid
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
@@ -110,10 +112,11 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     ρ = total_density(model.dynamics)
     velocities = tendency_transport_velocities(model)
 
-    for (name, u, u⁰, G) in zip(names, prognostic, U⁰, Gⁿ)
+    for (field_number, (name, u, u⁰, G)) in enumerate(zip(names, prognostic, U⁰, Gⁿ))
         name ∈ acoustic_names && continue
 
-        launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
+        key = rounding_key(rounding, model.clock.iteration, model.clock.stage, field_number)
+        launch_rk3_substep!(rounding, arch, grid, u, u⁰, G, kernel_Δt, key)
 
         field_index = closure_scalar_index(model, name)
         advection = field_advection_scheme(model.advection, name)
@@ -134,7 +137,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
                            field_index,
                            model.clock,
                            fields(model),
-                           Δt_implicit,
+                           Δt_stage,
                            implicit_step_scheme(advection),
                            implicit_advection_velocities(model.dynamics, velocities, name,
                                                          model.microphysics, model.microphysical_fields),
@@ -148,7 +151,7 @@ function scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     # in `implicit_substep!`, so the moved content takes the same closure diffusion as the rest
     # of the field; its implicit vertical transport ran inside the substep loop, before this
     # step (a first-order splitting difference).
-    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, Δt_implicit, velocities)
+    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, Δt_stage, velocities)
 
     return nothing
 end

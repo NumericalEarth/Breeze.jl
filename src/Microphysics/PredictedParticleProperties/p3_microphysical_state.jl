@@ -15,6 +15,14 @@ const P3 = PredictedParticlePropertiesMicrophysics
 @inline AM.precipitating_mass_fraction(i, j, k, ::P3, μ) =
     @inbounds μ.qʳ[i, j, k] + μ.qⁱ[i, j, k] + μ.qʷⁱ[i, j, k]
 
+# Liquid (cloud + rain + liquid on ice) and ice, partitioned as in `moisture_fractions`
+function AM.liquid_mass_fraction(::P3, model)
+    μ = model.microphysical_fields
+    return μ.qᶜˡ + μ.qʳ + μ.qʷⁱ
+end
+
+AM.ice_mass_fraction(::P3, model) = model.microphysical_fields.qⁱ
+
 #####
 ##### P3MicrophysicalState
 #####

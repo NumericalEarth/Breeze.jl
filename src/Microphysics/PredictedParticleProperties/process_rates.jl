@@ -612,25 +612,21 @@ end
     end
 
     T = temperature(𝒰, constants)
-    q_base = 𝒰.moisture_mass_fractions
-    qᵛ_base = q_base.vapor
 
     # Saturation uses the thermodynamic state density; the total density ρ weights the
-    # tendencies (ρᵣ on the anelastic core). ρᵗʰ is held fixed through the vapor-excess
-    # alignment below.
+    # tendencies (ρᵣ on the anelastic core). The alignment below updates ρᵗʰ and P.
     ρᵗʰ = density(𝒰, constants)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
-    P = air_pressure(𝒰, constants)
 
     vapor_excess_adjustment = prognostic_vapor_excess_adjustment(
-        p3, qᶜˡ, qᵛ_base, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, constants)
+        p3, qᶜˡ, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
     saturation_alignment_rate = vapor_excess_adjustment.rate
     qᶜˡ = vapor_excess_adjustment.qᶜˡ
     qᵛ = vapor_excess_adjustment.qᵛ
     T = vapor_excess_adjustment.T
-    q = MoistureMassFractions(qᵛ,
-                              q_base.liquid + vapor_excess_adjustment.cloud_water_adjustment,
-                              q_base.ice)
+    P = vapor_excess_adjustment.P
+    q = vapor_excess_adjustment.q
+    ρᵗʰ = vapor_excess_adjustment.ρᵗʰ
     qᵛ⁺ˡ = vapor_excess_adjustment.qᵛ⁺ˡ
     qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρᵗʰ, constants, T₀, qᵛ⁺ˡ)
     transport = air_transport_properties(T, P, constants)

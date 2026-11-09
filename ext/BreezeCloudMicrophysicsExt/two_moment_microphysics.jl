@@ -88,15 +88,16 @@ microphysics = TwoMomentCloudMicrophysics(aerosol_activation = nothing)
 ```
 """
 function default_aerosol_activation(FT::DataType = Float64; τⁿᵘᶜ = 1)
-    # Default continental aerosol mode using κ-Köhler theory
+    # Default continental aerosol mode using κ-Köhler theory, in the float type FT so that
+    # the activated fraction does not promote Float32 tendencies to Float64
     # Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
-    r_dry = 0.05e-6           # 50 nm dry radius
-    stdev = 2.0               # geometric standard deviation
-    Nᵃ₀ = 100e6               # 100 cm⁻³
-    vol_mix_ratio = (1.0,)    # single component
-    mass_mix_ratio = (1.0,)
-    molar_mass = (0.132,)     # ammonium sulfate ~132 g/mol
-    kappa = (0.5,)            # hygroscopicity
+    r_dry = FT(0.05e-6)          # 50 nm dry radius
+    stdev = FT(2)                # geometric standard deviation
+    Nᵃ₀ = FT(100e6)              # 100 cm⁻³
+    vol_mix_ratio = (FT(1),)     # single component
+    mass_mix_ratio = (FT(1),)
+    molar_mass = (FT(0.132),)    # ammonium sulfate ~132 g/mol
+    kappa = (FT(0.5),)           # hygroscopicity
 
     mode = CMAM.Mode_κ(r_dry, stdev, Nᵃ₀, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
     aerosol_distribution = CMAM.AerosolDistribution((mode,))
@@ -381,6 +382,10 @@ function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, b
     return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ)
 end
 
+# Diagnostic liquid (cloud liquid + rain), used e.g. by `set_to_mean!`
+AtmosphereModels.liquid_mass_fraction(::WPNE2M, model) = model.microphysical_fields.qˡ
+AtmosphereModels.ice_mass_fraction(::WPNE2M, model) = nothing
+
 #####
 ##### Update microphysical fields (diagnostics + terminal velocities)
 #####
@@ -565,7 +570,7 @@ end
                                             ρ, ℳ, 𝒰, constants)
 
     # Condensation on existing droplets, budget reduced by activation
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
     Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
     Sᶜᵒⁿᵈ_eff = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
@@ -878,7 +883,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         # Guard against log(0) or log(negative): when Sᵐᵃˣ ≈ 0, no activation occurs
         Sᵐᵃˣ_safe = max(eps(FT), Sᵐᵃˣ)
         Sᶜʳⁱᵗ_safe = max(eps(FT), Sᶜʳⁱᵗ)
-        ϕ = 2 * log(Sᶜʳⁱᵗ_safe / Sᵐᵃˣ_safe) / 3 / sqrt(2) / log(mode.stdev)
+        ϕ = 2 * log(Sᶜʳⁱᵗ_safe / Sᵐᵃˣ_safe) / 3 / sqrt(FT(2)) / log(mode.stdev)
         fᵃᶜᵗ = (1 - erf(ϕ)) / 2
 
         Nᵃᶜᵗ += fᵃᶜᵗ * Nᵐᵒᵈᵉ

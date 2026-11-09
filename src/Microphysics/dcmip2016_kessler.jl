@@ -330,6 +330,10 @@ All microphysical source/sink terms are applied directly to the prognostic field
 """
 @inline AtmosphereModels.microphysical_tendency(::DCMIP2016KM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
+# Kessler is operator-split: its tendency is identically zero, so the default per-cell kernel would
+# only add zero to every moisture tendency. Skip the launch.
+AtmosphereModels.compute_microphysical_tendencies!(::DCMIP2016KM, model) = nothing
+
 #####
 ##### Precipitation rate and surface flux diagnostics
 #####
@@ -441,6 +445,9 @@ end
 ##### Main update function - launches GPU kernel
 #####
 
+# The grid-model update below rebuilds all tendencies after changing the state.
+AtmosphereModels.refreshes_state_after_update(::DCMIP2016KM) = true
+
 """
 $(TYPEDSIGNATURES)
 
@@ -466,8 +473,8 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Total density weights water mass fractions and enters the Kessler air-density corrections.
     # The continuity density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
-    # dynamics, is the dry-air density Kessler mixing ratios are relative to. These fields alias for anelastic
-    # dynamics and are distinct (total and dry density) for compressible dynamics.
+    # dynamics, is the dry-air density Kessler mixing ratios are relative to. These fields alias
+    # for anelastic dynamics and are distinct (total and dry density) for compressible dynamics.
     ρ = total_density(model.dynamics)
     ρᵈ = continuity_density(model.dynamics)
     dry_air_coupled = ρ !== ρᵈ
