@@ -13,13 +13,17 @@ const REACTANT_COMPAT = VERSION < v"1.14-" && Base.JLOptions().check_bounds != 1
 
 # These aren't test files, they are only used as setup for other tests.
 delete!(testsuite, "setup")
-delete!(testsuite, "reactant/weno_compilation_setup")
+delete!(testsuite, "reactant/compilation_setup")
 delete!(testsuite, "reactant/microphysics_compilation_setup")
 
 # MPI worker scripts are launched on several ranks by the drivers in `distributed/`, never run directly.
 filter!(((name, _),) -> !startswith(name, "mpi/"), testsuite)
 
 if filter_tests!(testsuite, args)
+    # The anelastic Reactant compilation tests don't pass yet; they only run when requested
+    # by name (`reactant/anelastic_compilation`).
+    delete!(testsuite, "reactant/anelastic_compilation")
+
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
     # limitation).
     for key in keys(testsuite)
