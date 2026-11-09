@@ -44,13 +44,14 @@ jobs:
           # this entry runs on the libReactantExtra of a "Build Reactant_jll" run on
           # that PR's branch (`enzyme_jax_branch`; see the steps below), with
           # Reactant.jl#3472 at a fixed commit (`reactant_rev`); every other entry
-          # keeps the registered Reactant and Reactant_jll. Both sides are force-pushed
-          # often, so `enzyme_jax_run` pins the build to the one `reactant_rev` was
-          # written against (without it, the latest build of the branch is used):
-          # Reactant.jl pb/kernel-ad f439eef3 (upstream main at 025e4a59, Reactant 0.2.304,
-          # with the kernel AD commits and lower-kernel-to-polygeist) on Enzyme-JAX df8d0cf8,
-          # whose build (2026-11-04) compiled libReactantExtra from that day's Reactant.jl main (0.2.305).
-          # Its artifacts expire 2026-11-06.
+          # keeps the registered Reactant and Reactant_jll. The build is the newest
+          # successful one on the branch whose products have not expired (they are kept
+          # for about two days, so the branch's "Build Reactant_jll" workflow has to be
+          # rerun when they lapse); `enzyme_jax_run` would pin one run instead. The Julia
+          # side is Reactant.jl pb/kernel-ad f439eef3 (upstream main at 025e4a59, Reactant
+          # 0.2.304, with the kernel AD commits and lower-kernel-to-polygeist), unchanged
+          # since 2026-11-04 while the Enzyme-JAX branch moved on, so the two are not
+          # pinned to each other.
           # `mode` keeps its artifact names apart from the AD job's, and while kernel AD is
           # experimental its failure does not fail the workflow or block publishing.
           # The Reactant.jl branch now needs Enzyme-JAX options the registered
@@ -63,7 +64,6 @@ jobs:
             topology: 'PBB'
             mode: 'kernelad'
             enzyme_jax_branch: 'pb/kernel-ad'
-            enzyme_jax_run: '41838506164'
             reactant_rev: 'f439eef39171e3225908be5722367aee6f24a29d'
             # TEMPORARY: the kernel AD pipeline's convert-parallel-to-gpu1{emit_single_alternative=true}
             # rebuilds each launch from its original shape, which lower-kernel-to-polygeist does not
@@ -74,7 +74,15 @@ jobs:
             # TEMPORARY: dump every MLIR pass pipeline to check the launch shapes of the compiled kernels
             dump_mlir: 'mlir_dumps'
             timeout: 60
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial --kernels kernelad'
+            # TEMPORARY: the AD job's window is 64 steps with binomial checkpointing (2 and 8).
+            # Under kernel AD each kernel launch of the loop body becomes its own jit region, and
+            # checkpointing clones the body: the 675 launches of the forward program became 2538 regions
+            # (2879 GPU modules), which lower-jit compiles one by one, keeping roughly 10 MiB each,
+            # until the 30 GiB runner killed Julia at 29 GiB (run 41965836851). Without
+            # checkpointing the reverse pass holds the forward and the reverse body only, about
+            # half the regions, and 8 steps keep the whole tape on the GPU. Restore the AD job's
+            # window once Enzyme-JAX shares identical regions or frees them after compiling.
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 8 --checkpoints none --kernels kernelad'
     defaults:
       run:
         shell: bash
