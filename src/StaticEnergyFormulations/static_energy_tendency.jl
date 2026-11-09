@@ -60,7 +60,7 @@ end
                                         temperature_field)
 
     specific_energy = formulation.specific_energy
-    ρ_field = dynamics_density(dynamics)
+    ρ_field = continuity_density(dynamics)
 
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, w_buoyancy_forceᶜᶜᶠ,
@@ -68,15 +68,21 @@ end
                           microphysics, microphysical_fields, constants)
 
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
+
+    @inbounds begin
+        ρᵈ = ρ_field[i, j, k]
+        ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
+    end
+
+    FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
+    div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
+
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              - buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             # An energy forcing (note: ρs and ρE are mutually exclusive) is an energy per unit mass
-             # and needs no conversion
              + ρs_forcing(i, j, k, grid, clock, model_fields)
-             + ρE_forcing(i, j, k, grid, clock, model_fields)
-             + radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field))
+             + ρᵈ / ρ * (FρE + div_ℐ)) # a volumetric heating Q changes s at Q / ρ, so ρᵈ s at (ρᵈ / ρ) Q (ρs and ρE forcings are mutually exclusive)
 end
 
 #####
@@ -87,10 +93,10 @@ end
 # composition increment Δqˣ of `sedimentation_composition_increment`: q̂ˣ − q̂ᵈ on the anelastic
 # core, whose total density is fixed, q̂ˣ − q on the compressible core, whose total density falls
 # with the condensate. Losing condensate at this content leaves the temperature unchanged on
-# either core. From s = cᵖᵐ T + g z − Λ₀, Λ₀ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ with the latent heats extrapolated
-# to zero kelvin (`absolute_zero_latent_heat`), and Δcᵖ and ΔΛ₀ the changes of cᵖᵐ and Λ₀ along Δqˣ,
+# either core. From s = cᵖᵐ T + g z − Hᶜ, Hᶜ = ℒˡ₀ qˡ + ℒⁱ₀ qⁱ with the latent heats extrapolated
+# to zero kelvin (`absolute_zero_latent_heat`), and Δcᵖ and ΔHᶜ the changes of cᵖᵐ and Hᶜ along Δqˣ,
 #
-#   χˣ = Δcᵖ T − ΔΛ₀ ,
+#   χˣ = Δcᵖ T − ΔHᶜ ,
 #
 # the enthalpy of the condensate relative to what its mass gives way to: hˣ − hᵈ against dry
 # air, hˣ − (s − g z) against the mixture. The geopotential is independent of the composition and
@@ -119,7 +125,7 @@ AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρ
 
 function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:s}, value)
     set!(model.formulation.specific_energy, value)
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
     s = model.formulation.specific_energy
     set!(model.formulation.energy_density, ρ * s)
     return nothing
@@ -164,7 +170,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρs = ρᵈs)
+        ρᵈ = continuity_density(dynamics)[i, j, k]  # continuity density ρᵈ (ρs = ρᵈs)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
@@ -237,7 +243,7 @@ end
 
     @inbounds begin
         ρ = total_density(dynamics)[i, j, k]      # total ρ (mass fractions)
-        ρᵈ = dynamics_density(dynamics)[i, j, k]  # coupling density ρᵈ (ρs = ρᵈs)
+        ρᵈ = continuity_density(dynamics)[i, j, k]  # continuity density ρᵈ (ρs = ρᵈs)
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end

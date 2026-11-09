@@ -20,8 +20,13 @@ struct VirtualDensity <: AbstractVirtualFlavor end
 
 # Liquid-ice potential temperature flavors
 abstract type AbstractLiquidIceFlavor end
-struct SpecificLiquidIce <: AbstractLiquidIceFlavor end
-struct LiquidIceDensity <: AbstractLiquidIceFlavor end
+struct SpecificLiquidIce{E} <: AbstractLiquidIceFlavor
+    exner_exponent :: E # Exner exponent that defines θˡⁱ
+end
+
+struct LiquidIceDensity{E} <: AbstractLiquidIceFlavor
+    exner_exponent :: E
+end
 
 # Equivalent potential temperature flavors
 abstract type AbstractEquivalentFlavor end
@@ -55,7 +60,7 @@ const PotentialTemperatureDensityType = Union{
 #####
 ##### The kernel function stores the three fields needed for computing potential temperature:
 ##### - pressure: the pressure field used in the Exner function
-##### - density: the density field used for moisture fractions and density-weighted outputs
+##### - density: the total density, used for moisture fractions and density-weighted outputs
 ##### - standard_pressure: the reference pressure for potential temperature (typically 10⁵ Pa)
 #####
 ##### For anelastic dynamics, these come from the reference state (pᵣ, ρᵣ, pˢᵗ).
@@ -131,14 +136,6 @@ dynamics_pressure_for_potential_temperature(dynamics) = dynamics.reference_state
 """
 $(TYPEDSIGNATURES)
 
-Return the density field used for computing potential temperature.
-For anelastic dynamics, this is the reference density.
-"""
-dynamics_density_for_potential_temperature(dynamics) = dynamics.reference_state.density
-
-"""
-$(TYPEDSIGNATURES)
-
 Return the standard pressure for potential temperature calculations.
 """
 dynamics_standard_pressure(dynamics) = dynamics.reference_state.standard_pressure
@@ -185,7 +182,7 @@ Field(θ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=300.0, min=300.0, mean=300.0
 ```
 """
@@ -201,7 +198,7 @@ function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -263,7 +260,7 @@ Field(θᵛ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=301.82, min=301.8, mean=301.81
 ```
 """
@@ -279,7 +276,7 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -298,15 +295,18 @@ end
 
 Return a `KernelFunctionOperation` representing liquid-ice potential temperature ``θˡⁱ``.
 
-Liquid-ice potential temperature is a conserved quantity under moist adiabatic processes
-that accounts for the latent heat associated with liquid water and ice:
+Liquid-ice potential temperature is invariant under phase changes at fixed pressure and
+total water, and accounts for the latent heat associated with liquid water and ice:
 
 ```math
-θˡⁱ = θ \\left(1 - \\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T}\\right)
+θˡⁱ = \\frac{cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ}{ĉᵖ Π}
 ```
 
-where ``θ`` is the mixture potential temperature, ``ℒˡᵣ`` and ``ℒⁱᵣ`` are the reference
-latent heats for liquid and ice, and ``qˡ``, ``qⁱ`` are the liquid and ice mass fractions.
+where ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ`` is the vapor-equivalent heat capacity, ``ℒˡ₀`` and ``ℒⁱ₀`` are the
+latent heats extrapolated to absolute zero, ``qˡ``, ``qⁱ`` are the liquid and ice mass fractions,
+and ``Π`` is the Exner function with the exponent of `model.formulation` (see
+[`Breeze.PotentialTemperatureFormulations.LiquidIcePotentialTemperatureFormulation`](@ref)). This is the variable that
+`LiquidIcePotentialTemperatureFormulation` evolves.
 
 # Arguments
 
@@ -332,23 +332,25 @@ Field(θˡⁱ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=300.0, min=300.0, mean=300.0
 ```
 """
 function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 
+    κ̂ = liquid_ice_exner_exponent(model.formulation)
+
     flavor = if flavor_symbol === :specific
-        SpecificLiquidIce()
+        SpecificLiquidIce(κ̂)
     elseif flavor_symbol === :density
-        LiquidIceDensity()
+        LiquidIceDensity(κ̂)
     else
         msg = "`flavor` must be :specific or :density, received :$flavor_symbol"
         throw(ArgumentError(msg))
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -402,7 +404,7 @@ Field(θᵉ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=326.162, min=325.851, mean=326.006
 ```
 
@@ -422,7 +424,7 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -484,7 +486,7 @@ Field(θᵇ)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=326.162, min=325.851, mean=326.006
 ```
 
@@ -505,7 +507,7 @@ function StabilityEquivalentPotentialTemperature(model::AtmosphereModel, flavor_
     end
 
     p = dynamics_pressure_for_potential_temperature(model.dynamics)
-    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    ρ = total_density(model.dynamics)
     pˢᵗ = dynamics_standard_pressure(model.dynamics)
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -523,6 +525,9 @@ end
 ##### Unified kernel function
 #####
 
+@inline liquid_ice_potential_temperature(flavor::AbstractLiquidIceFlavor, T, p, pˢᵗ, q, constants) =
+    Thermodynamics.potential_temperature_from_temperature(T, p, pˢᵗ, constants, q, flavor.exner_exponent)
+
 function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         p = d.pressure[i, j, k]
@@ -536,13 +541,10 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵛᵉ, d.microphysical_fields)
     qᵛ = q.vapor
     qˡ = q.liquid
-    qⁱ = q.ice
 
     # Extract thermodynamic constants
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
 
     # Plain properties
     Rᵐ = mixture_gas_constant(q, constants)
@@ -556,8 +558,8 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         θ
 
     elseif d.flavor isa AbstractLiquidIceFlavor
-        # Liquid-ice potential temperature
-        θ * (1 - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / (cᵖᵐ * T))
+        # Liquid-ice potential temperature, as LiquidIcePotentialTemperatureFormulation defines it
+        liquid_ice_potential_temperature(d.flavor, T, p, pˢᵗ, q, constants)
 
     elseif d.flavor isa AbstractVirtualFlavor
         # Virtual potential temperature

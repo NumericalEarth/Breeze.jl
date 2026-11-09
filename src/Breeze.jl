@@ -33,6 +33,7 @@ export
     LinearRamp,
     CubicRamp,
     Sin2Ramp,
+    GaussianRamp,
     ExplicitTimeStepping,
     balance_adiabatically!,
     AdiabaticBalancer,
@@ -44,6 +45,8 @@ export
     SingleColumnGrid,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
+    VaporEquivalentExponent,
+    DryExponent,
     RadiativeTransferModel,
     BackgroundAtmosphere,
     standard_ozone_profile,
@@ -64,7 +67,7 @@ export
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
-    dynamics_density,
+    continuity_density,
     dynamics_pressure,
     total_density,
 
@@ -91,6 +94,8 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
     bottom_precipitation_flux,
+    precipitation_flux,
+    MicrophysicalProcessRate,
     total_pressure,
     specific_humidity,
     moisture_prognostic_name,
@@ -127,6 +132,8 @@ export
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
+    Supersaturation,
+    SupersaturationField,
     number_concentration,
     number_concentration_field,
     BulkMicrophysics,
@@ -150,6 +157,7 @@ export
     FittedStabilityFunction,
     FilteredSurfaceVelocities,
     FilteredSurfaceScalar,
+    TKEGustiness,
     default_neutral_drag_polynomial,
     default_neutral_sensible_heat_polynomial,
     default_neutral_latent_heat_polynomial,
@@ -158,6 +166,7 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
     SpecificForcing,
+    TemperatureForcing,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
@@ -174,6 +183,8 @@ export
     SSPRungeKutta3,
     AcousticRungeKutta3,
     AcousticSubstepper,
+    RoundToNearest,
+    StochasticRounding,
 
     # ParcelDynamics
     ParcelDynamics,
@@ -194,6 +205,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     ImmersedBoundaryCondition, ImmersedBoundaryGrid, InMemory,
                     Integral, IterationInterval, JLD2Writer,
                     KernelFunctionOperation, LagrangianParticles,
+                    ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,
                     LatitudeLongitudeGrid, NetCDFWriter,
                     NonTraditionalBetaPlane, OnDisk, NormalFlowBoundaryCondition,
                     PartialCellBottom, Partition, Periodic,
@@ -238,7 +250,7 @@ export
     GradientLimitedMixingLength, ConstantStabilityFunctions,
     RationalStabilityFunction,
     DryStaticStability, MoistStaticStability,
-    LagrangianParticles,
+    LagrangianParticles, ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
     NetCDFWriter, JLD2Writer, Checkpointer,
@@ -252,6 +264,9 @@ using .Utils
 
 include("Solvers.jl")
 using .Solvers
+
+include("RoundingTreatments.jl")
+using .RoundingTreatments
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
@@ -292,7 +307,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,
                               UpperSponge,
-                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
+                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp, GaussianRamp,
                               ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
