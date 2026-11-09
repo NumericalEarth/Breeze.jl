@@ -169,7 +169,9 @@ function ssp_rk3_substep!(model, Δt, α)
     # variable, so the moved content takes the same transport and diffusion as the rest of the
     # field (see `implicit_sedimentation_step!`).
     isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, α * Δt, model.velocities)
-    implicit_stage_step!(model, thermodynamic_name, prognostic[thermodynamic_name], α * Δt)
+    implicit_thermodynamic_solve!(model.formulation, model, α * Δt) do ρᵡ
+        implicit_stage_step!(model, thermodynamic_name, ρᵡ, α * Δt)
+    end
 
     return nothing
 end

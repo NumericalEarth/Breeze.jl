@@ -1,13 +1,18 @@
 module Advection
 
 export div_ρUc,
-       bottom_advective_tracer_flux
+       bottom_advective_tracer_flux,
+       tracer_mass_flux_x,
+       tracer_mass_flux_y,
+       tracer_mass_flux_z
 
 using Oceananigans.Advection:
     _advective_tracer_flux_x,
     _advective_tracer_flux_y,
     _advective_tracer_flux_z,
     AdaptiveImplicitVerticalAdvection,
+    _biased_interpolate_xᶠᵃᵃ,
+    _biased_interpolate_yᵃᶠᵃ,
     _biased_interpolate_zᵃᵃᶠ,
     BoundsPreservation,
     BoundsPreservingWENO,
@@ -27,7 +32,7 @@ using Adapt: Adapt
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: Field, ZeroField
 using Oceananigans.Grids: Center
-using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: time_discretization
 using DocStringExtensions: TYPEDSIGNATURES
@@ -49,6 +54,30 @@ const AIVA = AdaptiveImplicitVerticalAdvection
 
 @inline tracer_mass_flux_z(i, j, k, grid, ρ, args...) =
     ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _advective_tracer_flux_z(i, j, k, grid, args...)
+
+# Bounds-preserving WENO: the face flux `bounded_tracer_flux_divergence_*` forms, from the
+# reconstructions rescaled by the cached limiter of each donor cell, so a term built on these
+# fluxes moves exactly the mass `div_ρUc` moves.
+@inline function tracer_mass_flux_x(i, j, k, grid, ρ, advection::BoundsPreservingWENO, u, c)
+    θ = advection.bounds.limiter
+    cᴸ = rescaled_reconstruction(_biased_interpolate_xᶠᵃᵃ(i, j, k, grid, advection, LeftBias,  c), i-1, j, k, grid, θ, c)
+    cᴿ = rescaled_reconstruction(_biased_interpolate_xᶠᵃᵃ(i, j, k, grid, advection, RightBias, c), i,   j, k, grid, θ, c)
+    return ℑxᶠᵃᵃ(i, j, k, grid, ρ) * Axᶠᶜᶜ(i, j, k, grid) * upwind_biased_product(@inbounds(u[i, j, k]), cᴸ, cᴿ)
+end
+
+@inline function tracer_mass_flux_y(i, j, k, grid, ρ, advection::BoundsPreservingWENO, v, c)
+    θ = advection.bounds.limiter
+    cᴸ = rescaled_reconstruction(_biased_interpolate_yᵃᶠᵃ(i, j, k, grid, advection, LeftBias,  c), i, j-1, k, grid, θ, c)
+    cᴿ = rescaled_reconstruction(_biased_interpolate_yᵃᶠᵃ(i, j, k, grid, advection, RightBias, c), i, j,   k, grid, θ, c)
+    return ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Ayᶜᶠᶜ(i, j, k, grid) * upwind_biased_product(@inbounds(v[i, j, k]), cᴸ, cᴿ)
+end
+
+@inline function tracer_mass_flux_z(i, j, k, grid, ρ, advection::BoundsPreservingWENO, w, c)
+    θ = advection.bounds.limiter
+    cᴸ = rescaled_reconstruction(_biased_interpolate_zᵃᵃᶠ(i, j, k, grid, advection, LeftBias,  c), i, j, k-1, grid, θ, c)
+    cᴿ = rescaled_reconstruction(_biased_interpolate_zᵃᵃᶠ(i, j, k, grid, advection, RightBias, c), i, j, k,   grid, θ, c)
+    return ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Azᶜᶜᶠ(i, j, k, grid) * upwind_biased_product(@inbounds(w[i, j, k]), cᴸ, cᴿ)
+end
 
 # Main operator
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection, ρ, U, c)

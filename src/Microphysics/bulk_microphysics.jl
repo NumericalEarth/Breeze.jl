@@ -1,6 +1,8 @@
 using Breeze.Thermodynamics:
     AbstractReferencePressureState,
     LiquidIceDensityState,
+    InternalEnergyDensityState,
+    MoistEntropyState,
     liquid_latent_heat,
     ice_latent_heat,
     vapor_gas_constant,
@@ -165,6 +167,18 @@ end
     T̃ = T - γ * Hᶜ / cᵖᵐ
     dT_dqᶜ = γ * (ℒ - κ * (cᵖᵐ * T̃ * Rᵛ / Rᵐ + γ * Δcᵖ * Hᶜ / cᵖᵐ)) / cᵖᵐ
     return dT_dqᶜ * qᵛ⁺ * (ℒ / (Rᵛ * T^2) - 1 / T)
+end
+
+# Fixed ρ with the internal energy (`InternalEnergyDensityState`) or the moist entropy
+# (`MoistEntropyState`) closed: the response these states had before the state-specific responses
+# above, dT = ℒ dqᶜ / cᵖᵐ with qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) at fixed ρ.
+# TODO: replace with the exact responses at fixed (ρ, 𝓊) and (ρ, η), as for `LiquidIceDensityState`.
+const FixedDensityEnergyOrEntropyState = Union{InternalEnergyDensityState, MoistEntropyState}
+
+@inline function saturation_response(𝒰::FixedDensityEnergyOrEntropyState, qᵛ⁺, T, ℒ, Δcᵖ, constants)
+    cᵖᵐ = mixture_heat_capacity(𝒰.moisture_mass_fractions, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    return (ℒ / cᵖᵐ) * qᵛ⁺ * (ℒ / (Rᵛ * T^2) - 1 / T)
 end
 
 """
