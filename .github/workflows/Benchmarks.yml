@@ -40,20 +40,27 @@ jobs:
           # removed with it; restore both from main before merging
           # Kernel AD: the AD job's model and loop, differentiating the kernel bodies
           # themselves (--kernels kernelad, EnzymeAD/Reactant.jl#3472) instead of the
-          # raised kernels. The pipeline's passes come from EnzymeAD/Enzyme-JAX#3533, which
-          # no registered Reactant_jll has, so this entry takes the Reactant_jll that
-          # Reactant.jl#3472 itself sources: Pangoraw/Reactant_jll.jl (`reactant_jll_url`,
-          # `reactant_jll_rev`), whose builds are GitHub release assets and do not expire
-          # (the "Build Reactant_jll" products of the Enzyme-JAX branch used before lapsed
-          # after two days). Its newest build, 0.0.435+4 of 2026-10-29, is x86_64 Linux with
-          # CUDA 12.9 only (`reactant_jll_gpu_version`; the image's preference is 13.1), and
-          # predates Enzyme-JAX's rename of kernel-call-to-gpu-wrapper to
-          # lower-kernel-to-polygeist, which Reactant.jl pb/kernel-ad f439eef3
-          # (`reactant_rev`: upstream main at 025e4a59, Reactant 0.2.304) uses, so the job
-          # renames the pass back in its copy of Reactant.jl and relaxes Reactant's
-          # Reactant_jll compat (0.0.438) to that build; drop both once a newer build is
-          # published. Every other entry keeps the registered Reactant and Reactant_jll.
-          # `mode` keeps its artifact names apart from the AD job's.
+          # raised kernels. The Julia side is Reactant.jl#3472 at `reactant_rev`
+          # (pb/kernel-ad f439eef3: upstream main at 025e4a59, Reactant 0.2.304). The
+          # pipeline's passes come from EnzymeAD/Enzyme-JAX#3533, which no registered
+          # Reactant_jll has, so the entry needs a libReactantExtra of that branch, from
+          # one of two sources (see the steps below):
+          # - `enzyme_jax_branch`: the newest successful "Build Reactant_jll" run on the
+          #   Enzyme-JAX branch whose products have not expired. They are kept for about
+          #   two days, so the branch's workflow has to be rerun when they lapse, and the
+          #   job fails at its first step until then; `enzyme_jax_run` would pin one run.
+          # - `reactant_jll_url` and `reactant_jll_rev`: a Reactant_jll package with
+          #   published builds, added to the environment, with `reactant_jll_gpu_version`
+          #   its CUDA version (the image's preference is 13.1) and `reactant_jll_compat`
+          #   the Reactant_jll compat to give the copy of Reactant.jl when the build's
+          #   version lies outside Reactant's. Reactant.jl#3472 itself sources
+          #   Pangoraw/Reactant_jll.jl this way, but its newest build (11cfdccc, 0.0.435+4
+          #   of 2026-10-29, x86_64 Linux CUDA 12.9) is too old: it has none of
+          #   nvvm-attach-target, which every kernel AD commit's GPU pipeline runs, so the
+          #   compile fails at its first pipeline (run 42651955060), nor the renamed
+          #   lower-kernel-to-polygeist. Switch to this source once a newer build is published.
+          # Every other entry keeps the registered Reactant and Reactant_jll. `mode` keeps
+          # its artifact names apart from the AD job's.
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '128x128x32'
@@ -62,10 +69,11 @@ jobs:
             topology: 'PBB'
             mode: 'kernelad'
             reactant_rev: 'f439eef39171e3225908be5722367aee6f24a29d'
-            reactant_jll_url: 'https://github.com/Pangoraw/Reactant_jll.jl'
-            reactant_jll_rev: '11cfdcccc9beede4ecce01a5e913a465baabb33e'
-            reactant_jll_gpu_version: '12.9'
-            reactant_jll_compat: '0.0.435'
+            enzyme_jax_branch: 'pb/kernel-ad'
+            # reactant_jll_url: 'https://github.com/Pangoraw/Reactant_jll.jl'
+            # reactant_jll_rev: '<a build newer than 11cfdccc>'
+            # reactant_jll_gpu_version: '12.9'
+            # reactant_jll_compat: '0.0.435'
             # TEMPORARY: the kernel AD pipeline's convert-parallel-to-gpu1{emit_single_alternative=true}
             # rebuilds each launch from its original shape, which lower-kernel-to-polygeist does not
             # record: every kernel got one thread per block, and a kernel whose loop was delinearized
@@ -111,10 +119,69 @@ jobs:
       - name: df after cleanup
         run: |
           df -hT
-      - name: Use the kernel AD Reactant_jll's CUDA version
+      - name: Find the Enzyme-JAX Reactant_jll build
+        # The newest successful "Build Reactant_jll" run on the Enzyme-JAX branch whose
+        # products have not expired (they are kept for a couple of days). The image has
+        # neither curl nor gh, so Julia's Downloads fetches the API.
+        if: ${{ matrix.enzyme_jax_branch }}
+        id: enzyme_jax_build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: 'products-x86_64-linux-gnu-cxx11-gpu_version+13.1-gpu+cuda-mode+opt'
+        run: |
+          github_api() {
+              julia --startup-file=no -e 'using Downloads; Downloads.download(ARGS[1], stdout; headers = ["Authorization" => "Bearer " * ENV["GH_TOKEN"], "Accept" => "application/vnd.github+json"])' "https://api.github.com/repos/EnzymeAD/Enzyme-JAX/$1"
+          }
+          if [[ -n "${{ matrix.enzyme_jax_run }}" ]]; then
+              runs="$(github_api "actions/runs/${{ matrix.enzyme_jax_run }}" | jq -r '"\(.id) \(.head_sha)"')"
+          else
+              runs="$(github_api "actions/workflows/build-reactantjll.yml/runs?branch=${{ matrix.enzyme_jax_branch }}&status=success&per_page=10" | jq -r '.workflow_runs[] | "\(.id) \(.head_sha)"')"
+          fi
+          while read -r run_id sha; do
+              [[ -n "${run_id}" ]] || continue
+              # `+` must be percent-encoded in the query, or it reads as a space
+              if github_api "actions/runs/${run_id}/artifacts?name=${ARTIFACT//+/%2B}" < /dev/null | jq -e '[.artifacts[] | select(.expired | not)] | length > 0' > /dev/null; then
+                  echo "Using Enzyme-JAX run ${run_id} (commit ${sha}) of ${{ matrix.enzyme_jax_branch }}"
+                  echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+                  exit 0
+              fi
+          done <<< "${runs}"
+          echo "No unexpired ${ARTIFACT} on Enzyme-JAX's ${{ matrix.enzyme_jax_branch }}: rerun its Build Reactant_jll workflow" >&2
+          exit 1
+      - name: Download the Enzyme-JAX Reactant_jll build
+        if: ${{ matrix.enzyme_jax_branch }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: 'products-x86_64-linux-gnu-cxx11-gpu_version+13.1-gpu+cuda-mode+opt'
+          repository: EnzymeAD/Enzyme-JAX
+          run-id: ${{ steps.enzyme_jax_build.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: reactant_jll_products
+      - name: Use the Enzyme-JAX libReactantExtra
+        # Unpack the build (lib/libReactantExtra.so with its lib/cuda next to it) and point
+        # Reactant_jll's libReactantExtra at it in the image's @breeze preferences, which
+        # list Reactant_jll; before instantiating, so everything compiles against it
+        if: ${{ matrix.enzyme_jax_branch }}
+        working-directory: .
+        run: |
+          ls -l reactant_jll_products
+          mkdir -p reactant_jll
+          # The image has no xz; Pkg unpacks the .tar.xz with the p7zip that ships with Julia
+          julia --startup-file=no -e 'using Pkg; Pkg.PlatformEngines.unpack(ARGS[1], ARGS[2])' \
+              reactant_jll_products/Reactant.v*.tar.* reactant_jll
+          lib="${GITHUB_WORKSPACE}/reactant_jll/lib/libReactantExtra.so"
+          ls -l "${lib}"
+          julia --startup-file=no -e '
+              using TOML
+              file = "/usr/local/share/julia/environments/breeze/LocalPreferences.toml"
+              preferences = TOML.parsefile(file)
+              preferences["Reactant_jll"]["libReactantExtra_path"] = ARGS[1]
+              open(io -> TOML.print(io, preferences), file, "w")
+              print(read(file, String))' "${lib}"
+      - name: Use the published kernel AD Reactant_jll's CUDA version
         # Reactant_jll picks its artifact by the `gpu_version` preference in the image's
-        # @breeze environment, which lists Reactant_jll; the kernel AD build has one
-        # CUDA version, so the preference follows it. Before instantiating, so everything
+        # @breeze environment, which lists Reactant_jll; a published build has one CUDA
+        # version, so the preference follows it. Before instantiating, so everything
         # compiles against it
         if: ${{ matrix.reactant_jll_url }}
         working-directory: .
@@ -143,12 +210,11 @@ jobs:
           Pkg.resolve()
           Pkg.compat("Reactant", nothing)
           Pkg.add(url = "https://github.com/EnzymeAD/Reactant.jl", rev = "${{ matrix.reactant_rev }}")
-      - name: Patch the kernel AD branch for the block size and the Reactant_jll build
+      - name: Patch the kernel AD branch for the block size and a published Reactant_jll
         # Develop a copy of the Reactant.jl branch whose kernel AD pipeline runs
         # convert-parallel-to-gpu1 without emit_single_alternative, so that the
         # POLYGEIST_GPU_KERNEL_BLOCK_SIZE set for the run below takes effect, and whose
-        # pipeline and compat fit the kernel AD Reactant_jll build (see the entry); then
-        # add that build
+        # Reactant_jll compat admits a published build (see the entry); then add that build
         if: ${{ matrix.kernelad_block_size || matrix.reactant_jll_url }}
         shell: julia --color=yes --project {0}
         env:
@@ -168,13 +234,11 @@ jobs:
           if !isempty("${{ matrix.kernelad_block_size }}")
               replace_once!(compiler, "convert-parallel-to-gpu1{emit_single_alternative=true}", "convert-parallel-to-gpu1")
           end
-          if !isempty("${{ matrix.reactant_jll_url }}")
-              # TEMPORARY: the published build predates the pass's rename
-              replace_once!(compiler, "lower-kernel-to-polygeist", "kernel-call-to-gpu-wrapper")
+          if !isempty("${{ matrix.reactant_jll_compat }}")
               replace_once!(joinpath(reactant, "Project.toml"), "Reactant_jll = \"0.0.438\"", "Reactant_jll = \"${{ matrix.reactant_jll_compat }}\"")
           end
           Pkg.develop(path = reactant)
-          run(`grep -nE "convert-parallel-to-gpu1|kernel-call-to-gpu-wrapper|lower-kernel-to-polygeist" $compiler`)
+          run(`grep -n convert-parallel-to-gpu1 $compiler`)
           if !isempty("${{ matrix.reactant_jll_url }}")
               Pkg.add(url = "${{ matrix.reactant_jll_url }}", rev = "${{ matrix.reactant_jll_rev }}")
           end
