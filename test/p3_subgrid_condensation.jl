@@ -14,6 +14,7 @@ using Oceananigans
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization
 using GPUArraysCore: @allowscalar
 using Test
+using Enzyme: Enzyme
 
 # Midpoint quadrature of ∫ f(s) N(s̄, σ²) ds over ±10σ.
 function gaussian_quadrature(f, s̄, σ; N = 200_000)
@@ -236,4 +237,27 @@ end
     C₁ = subgrid_cloud(𝒮, s̄, 1.0, 0.0, PPP.saturation_deficit_spread_floor(relative, qᵛ⁺)).C
     @test C₀ < 1e-10
     @test C₁ ≈ normal_cumulative_distribution(-0.08 / 0.05)
+end
+
+@testset "Zero spread (σ₀ = 0, zero variance): all-or-nothing limit, no NaN, finite gradients" begin
+    𝒮 = GaussianStatistics{Float64}()
+    for s̄ in (2e-4, -2e-4)
+        cloud = subgrid_cloud(𝒮, s̄, 0.4, 1e-3, 0.0)
+        @test isfinite(cloud.C) && isfinite(cloud.q⁺)
+        @test cloud.C == (s̄ > 0 ? 1 : 0)
+        @test cloud.q⁺ ≈ max(0, s̄) atol=1e-18
+    end
+    @test subgrid_cloud(𝒮, 0.0, 0.4, 1e-3, 0.0).C == 0
+    cloud = subgrid_cloud(GaussianStatistics{Float32}(), 2f-4, 0.4f0, 1f-3, 0f0)
+    @test cloud.C == 1 && cloud.q⁺ ≈ 2f-4
+
+    # The guard never binds at the default floor
+    @test Breeze.Microphysics.saturation_deficit_spread(𝒮, 0.4, 1e-3, 1e-4) === 1e-4
+
+    # Derivatives with respect to the mean and the variance stay finite
+    q(s̄, σ²ᵗ) = subgrid_cloud(GaussianStatistics(σ²ᵗ, 0.0, 0.0), s̄, 0.4, 1e-3, 0.0).q⁺
+    ∂s̄ = only(Enzyme.autodiff(Enzyme.Forward, s̄ -> q(s̄, 0.0), Enzyme.Duplicated(2e-4, 1.0)))
+    ∂σ² = only(Enzyme.autodiff(Enzyme.Forward, σ² -> q(2e-4, σ²), Enzyme.Duplicated(0.0, 1.0)))
+    @test isfinite(∂s̄) && ∂s̄ ≈ 1
+    @test isfinite(∂σ²)
 end

@@ -44,13 +44,10 @@ Microphysics.cloud_fraction(model, p3::P3) =
                                       p3_subgrid_state(p3.subgrid, model)),
         model.grid)
 
-# Gaussian cloud fraction, or its σₛ → 0 limit (s̄ / σₛ = 0 / 0 is NaN).
+# Gaussian cloud fraction; `subgrid_cloud` takes the σₛ → 0 limit itself.
 @inline subgrid_cloud_fraction(::DiracStatistics, s̄, a, b, σ₀) = ifelse(s̄ > 0, one(s̄), zero(s̄))
 
-@inline function subgrid_cloud_fraction(𝒮, s̄, a, b, σ₀)
-    C = subgrid_cloud(𝒮, s̄, a, b, σ₀).C
-    return ifelse(isnan(C), ifelse(s̄ > 0, one(s̄), zero(s̄)), C)
-end
+@inline subgrid_cloud_fraction(𝒮, s̄, a, b, σ₀) = subgrid_cloud(𝒮, s̄, a, b, σ₀).C
 
 # The subgrid statistics 𝒮 and mean saturation deficit of cell (i, j, k), from the same state
 # `_p3_add_tendencies_kernel!` and `compute_p3_process_rates` build.

@@ -87,12 +87,22 @@ end
 $(TYPEDSIGNATURES)
 
 Spread σₛ of the saturation deficit s' = a qᵗ' - b θˡⁱ' from the conserved-variable statistics
-`𝒮`, with the floor `σ₀` added in quadrature.
+`𝒮`, with the floor `σ₀` added in quadrature and σₛ² bounded below by a tiny positive value so
+that σₛ > 0 even when both vanish.
 """
-@inline function saturation_deficit_spread(𝒮::GaussianStatistics, a, b, σ₀)
-    σ²ₛ = max(0, a^2 * 𝒮.σ²ᵗ - 2a * b * 𝒮.cᵗᶿ + b^2 * 𝒮.σ²ᶿ)
-    return sqrt(σ²ₛ + σ₀^2)
-end
+@inline saturation_deficit_spread(𝒮::GaussianStatistics, a, b, σ₀) =
+    sqrt(max(saturation_deficit_variance(𝒮, a, b, σ₀), minimum_saturation_deficit_variance))
+
+# σₛ² + σ₀², before the lower bound
+@inline saturation_deficit_variance(𝒮::GaussianStatistics, a, b, σ₀) =
+    max(0, a^2 * 𝒮.σ²ᵗ - 2a * b * 𝒮.cᵗᶿ + b^2 * 𝒮.σ²ᶿ) + σ₀^2
+
+# Lower bound on σₛ² that keeps σₛ > 0 when both the variance and the floor σ₀ vanish, so that
+# s̄ / σₛ, and the derivative of the square root, stay finite (no NaN in C or q̄ˡ, nor under AD).
+# A literal (Float32 `floatmin`, σₛ ≈ 1e-19 kg/kg) rather than `floatmin(FT)`, which a traced number
+# type does not define. It never binds for any physical floor (σ₀ = 1e-4 gives σₛ² ≥ 1e-8), and at
+# this spread C and q̄ˡ take their all-or-nothing limits, C = 1 or 0 and q̄ˡ = max(0, s̄).
+const minimum_saturation_deficit_variance = floatmin(Float32)
 
 """
 $(TYPEDSIGNATURES)
@@ -114,8 +124,12 @@ julia> round(cloud.C, digits=6)
 ```
 """
 @inline function subgrid_cloud(𝒮::GaussianStatistics, s̄, a, b, σ₀)
-    σₛ = saturation_deficit_spread(𝒮, a, b, σ₀)
-    return (; C = gaussian_cloud_fraction(s̄, σₛ), q⁺ = gaussian_equilibrium_condensate(s̄, σₛ))
+    σ² = saturation_deficit_variance(𝒮, a, b, σ₀)
+    σₛ = sqrt(max(σ², minimum_saturation_deficit_variance))
+    # A vanishing spread is the Dirac limit: all-or-nothing cloud (C = 0 at s̄ = 0, where Φ(0) = 1/2)
+    dirac = σ² < minimum_saturation_deficit_variance
+    C = ifelse(dirac, ifelse(s̄ > 0, one(s̄), zero(s̄)), gaussian_cloud_fraction(s̄, σₛ))
+    return (; C, q⁺ = gaussian_equilibrium_condensate(s̄, σₛ))
 end
 
 @inline function subgrid_cloud(𝒮::DoubleGaussianStatistics, s̄, a, b, σ₀)
