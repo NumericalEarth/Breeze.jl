@@ -41,7 +41,6 @@ using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: get_coefficient
-using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Units
 using Oceananigans.Utils: KernelParameters, launch!
 using Test
@@ -133,7 +132,6 @@ end
     qᵗ = FT(0.02)
     moist_model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
     set!(moist_model; θ=300, ρ=1.1, qᵗ=qᵗ)
-    update_state!(moist_model)
     weightings = ((nothing, one(FT)), (moist_model.dynamics, 1 - qᵗ))
 
     code_diag(k, dynamics) = get_coefficient(2, 2, k, grid, AcousticTridiagDiagonal(), nothing, direction,

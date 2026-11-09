@@ -36,6 +36,10 @@ wall_side(side) = (west=West(), east=East(), south=South(), north=North(), botto
 
 momentum_direction(name) = (ρu=XDirection(), ρv=YDirection(), ρw=ZDirection())[name]
 
+# The two momentum components tangential to a wall, each paired with its uniform velocity.
+tangential_momentum(side, u, v, w) = side ∈ (:bottom, :top) ? ((:ρu, u), (:ρv, v)) :
+                                     side ∈ (:west, :east)  ? ((:ρv, v), (:ρw, w)) : ((:ρu, u), (:ρw, w))
+
 # Fluxes point along the positive coordinate direction: a flux out of the domain is
 # negative on a left wall and positive on a right wall.
 outward_sign(side) = side ∈ (:west, :south, :bottom) ? -1 : 1
@@ -56,7 +60,8 @@ closed_box_grid(FT; Nx=4, Ny=4, Nz=4) =
     RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z=(0, 1),
                     topology=(Bounded, Bounded, Bounded))
 
-function closed_box_model(FT; formulation=:LiquidIcePotentialTemperature, coefficient=FT(2e-3), Nx=4, Ny=4, Nz=4)
+function closed_box_model(FT; formulation=:LiquidIcePotentialTemperature, coefficient=FT(2e-3), Nx=4, Ny=4, Nz=4,
+                          model_kwargs...)
     grid = closed_box_grid(FT; Nx, Ny, Nz)
 
     Tˢ = wall_temperatures(FT)
@@ -76,7 +81,7 @@ function closed_box_model(FT; formulation=:LiquidIcePotentialTemperature, coeffi
     names = (:ρu, :ρv, :ρw, thermodynamic_name, :ρqᵛ)
     boundary_conditions = NamedTuple{names}((ρu_bcs, ρv_bcs, ρw_bcs, heat_bcs, ρqᵛ_bcs))
 
-    return AtmosphereModel(grid; formulation, boundary_conditions, advection=WENO(order=3))
+    return AtmosphereModel(grid; formulation, boundary_conditions, advection=WENO(order=3), model_kwargs...)
 end
 
 momentum_field(model, side, name) = getproperty(model.momentum, name)
@@ -125,9 +130,7 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
             sign = outward_sign(side)
 
             # Momentum: drag on the two tangential components, with the sign that removes momentum
-            tangential_momentum = side ∈ (:bottom, :top) ? ((:ρu, u), (:ρv, v)) :
-                                  side ∈ (:west, :east)  ? ((:ρv, v), (:ρw, w)) : ((:ρu, u), (:ρw, w))
-            for (name, uₜ) in tangential_momentum
+            for (name, uₜ) in tangential_momentum(side, u, v, w)
                 field = getproperty(model.momentum, name)
                 pᵘˢ = wall_pressure(model, side, i, j, k, momentum_direction(name))
                 ρˢ = surface_density(pᵘˢ, Tˢ[side], constants)
@@ -154,6 +157,28 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
             qᵛ = @allowscalar fields.qᵛ[i, j, k]
             expected = sign * ρˢ * C * Ũ * (qᵛ - qᵛˢ)
             @test evaluate_bc(model, prognostic_fields(model).ρqᵛ, side, probe...) ≈ expected rtol=100 * eps(FT)
+        end
+    end
+
+    @testset "Drag on dry-air momentum carries the near-wall qᵈ" begin
+        # The stress acts on the mixture but lands on ρu = ρᵈ u, so on the compressible core every
+        # wall's drag carries ρᵈ/ρ of its near-wall cell. The anelastic box above checks qᵈ = 1.
+        qᵗ = FT(0.02)
+        model = closed_box_model(FT; coefficient=C, dynamics=CompressibleDynamics(ExplicitTimeStepping()))
+        Nx, Ny, Nz = size(model.grid)
+        constants = model.thermodynamic_constants
+        set!(model; θ=θᵢ, ρ=FT(1.1), qᵗ, u, v, w)
+
+        probe = (2, 3, 2)
+        for side in sides, (name, uₜ) in tangential_momentum(side, u, v, w)
+            i, j, k = near_wall_cell(side, probe..., Nx, Ny, Nz)
+            qᵈ = @allowscalar model.dynamics.dry_density[i, j, k] / model.dynamics.total_density[i, j, k]
+            pᵘˢ = wall_pressure(model, side, i, j, k, momentum_direction(name))
+            ρˢ = surface_density(pᵘˢ, Tˢ[side], constants)
+            expected = outward_sign(side) * qᵈ * ρˢ * C * tangential_speed[side] * uₜ
+            field = getproperty(model.momentum, name)
+            @test qᵈ ≈ 1 - qᵗ
+            @test evaluate_bc(model, field, side, probe...) ≈ expected rtol=10 * eps(FT)
         end
     end
 

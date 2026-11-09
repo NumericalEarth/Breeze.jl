@@ -18,16 +18,9 @@ and momentum carrier, are:
 \\end{aligned}
 ```
 
-The mixture momentum balance contains the full pressure gradient ``-∇p`` and the total
-gravitational force per unit volume ``-ρ g \\hat{\\boldsymbol{z}}``, where ``ρ = ρ^d + ρ^t`` is
-the total mixture density. Multiplying this balance by the dry-air mass fraction
-``q^d = ρ^d / ρ = 1 - q^t`` and using dry-air continuity gives the conservative equation above
-for ``ρ^d \\boldsymbol{u}``. Its pressure and gravitational contributions are therefore
-``-q^d ∇p`` and ``-ρ^d g \\hat{\\boldsymbol{z}}``. The stress ``\\mathcal{T}`` is modeled with the
-dry-air density, so its divergence acts on ``ρ^d \\boldsymbol{u}`` without a further factor.
-
-At each momentum face, ``q^d`` is computed as the ratio of the interpolated dry-air and total
-densities by `AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ` and its counterparts.
+Here ``q^d = ρ^d / ρ = 1 - q^t`` is the dry-air mass fraction, which carries the mixture pressure
+gradient and gravity onto the dry-air momentum, and ``ρ = ρ^d + ρ^t`` is the total density. See
+[Compressible dynamics](@ref Compressible-section) for the derivation.
 
 Pressure is computed from the ideal gas law:
 ```math

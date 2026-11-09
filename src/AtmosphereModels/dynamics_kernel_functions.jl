@@ -64,9 +64,9 @@ end
 #####
 ##### Momentum tendencies
 #####
-##### `dynamics_mass_fraction*` rescales the mixture pressure and buoyancy forces onto the
-##### dry-air momentum ρu = ρᵈ u (not the mixture ρ u). Advection and Coriolis already carry
-##### ρᵈ u; the stress is modeled with the continuity density (see `dynamics_mass_fractionᶠᶜᶜ`).
+##### The pressure gradient and buoyancy are mixture forces; `dynamics_mass_fraction*` (qᵈ = ρᵈ/ρ,
+##### 1 on anelastic) converts them onto the dry-air momentum ρu = ρᵈ u. Advection and Coriolis
+##### already carry ρᵈ u, and the stress is modeled with ρᵈ (see docs/src/compressible_dynamics.md).
 #####
 
 @inline function x_momentum_tendency(i, j, k, grid,

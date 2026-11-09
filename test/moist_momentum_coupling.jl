@@ -5,14 +5,9 @@ using Oceananigans
 using Test
 using GPUArraysCore: @allowscalar
 
-using Oceananigans.BoundaryConditions: getbc, Bottom
-using Oceananigans.Grids: XDirection
-using Oceananigans.Models: boundary_condition_args
 using Oceananigans.TimeSteppers: update_state!
 using Breeze.AtmosphereModels: dynamics_mass_fractionᶠᶜᶜ, dynamics_mass_fractionᶜᶜᶠ
-using Breeze.BoundaryConditions: BulkDrag, surface_layer_state, wall_air_pressure
 using Breeze.CompressibleEquations: assemble_slow_vertical_momentum_tendency!
-using Breeze.Thermodynamics: surface_density
 
 #####
 ##### The mixture momentum balance carries -∇p and -g ρ with total ρ = ρᵈ + Σρˣ, but momentum is
@@ -23,16 +18,20 @@ using Breeze.Thermodynamics: surface_density
 # The assertions below are exact, so one moist point suffices — any mis-weighting fails at any qᵗ.
 const moisture_fractions = (0, 0.02)
 
-uniform_grid() = RectilinearGrid(default_arch; size=(8, 8), halo=(5, 5),
-                                 x=(0, 1000), z=(0, 1000),
-                                 topology=(Periodic, Flat, Bounded))
+const L = 1000
+const N = 8
 
-# `reference_state = nothing` keeps the full-pressure form (tendency is exactly -∂z p - g ρ, with
-# no reference cancellation); uniform ρ and θ make p uniform, isolating gravity.
-function uniform_moist_model(time_discretization, qᵗ, grid)
+column_grid() = RectilinearGrid(default_arch; size=(N, N), halo=(5, 5),
+                                x=(0, L), z=(0, L),
+                                topology=(Periodic, Flat, Bounded))
+
+# A moist model at rest. `reference_state = nothing` keeps the full-pressure form (tendency is
+# exactly -∂z p - g ρ, with no reference cancellation); the default uniform ρ and θ make p uniform,
+# isolating gravity.
+function moist_model(time_discretization, qᵗ, grid; ρ=1.1)
     dynamics = CompressibleDynamics(time_discretization; reference_state=nothing)
     model = AtmosphereModel(grid; dynamics)
-    set!(model; θ=300, ρ=1.1, qᵗ=qᵗ, u=0, w=0)
+    set!(model; θ=300, ρ, qᵗ)
     update_state!(model)
     return model
 end
@@ -52,12 +51,12 @@ end
 @testset "Free fall of a uniform moist column [$FT]" for FT in test_float_types()
     old_FT = Oceananigans.defaults.FloatType
     Oceananigans.defaults.FloatType = FT
-    grid = uniform_grid()
+    grid = column_grid()
 
     time_discretizations = (ExplicitTimeStepping(), SplitExplicitTimeDiscretization(substeps=4))
 
     for time_discretization in time_discretizations, qᵗ in moisture_fractions
-        model = uniform_moist_model(time_discretization, qᵗ, grid)
+        model = moist_model(time_discretization, qᵗ, grid)
         g = FT(model.thermodynamic_constants.gravitational_acceleration)
         ρᵈ = Array(interior(model.dynamics.dry_density))
         ρ = Array(interior(model.dynamics.total_density))
@@ -80,7 +79,6 @@ end
 
     # Anelastic carries a single density, so the weight is exactly one.
     anelastic_model = AtmosphereModel(grid)
-    set!(anelastic_model; θ=300, qᵗ=0.02)
     @test @allowscalar(dynamics_mass_fractionᶜᶜᶠ(2, 1, 3, grid, anelastic_model.dynamics)) == 1
     @test @allowscalar(dynamics_mass_fractionᶠᶜᶜ(2, 1, 3, grid, anelastic_model.dynamics)) == 1
 
@@ -91,72 +89,29 @@ end
     old_FT = Oceananigans.defaults.FloatType
     Oceananigans.defaults.FloatType = FT
 
-    Lx = 1000
-    Nx = 8
-    grid = RectilinearGrid(default_arch; size=(Nx, 8), halo=(5, 5),
-                           x=(0, Lx), z=(0, 1000),
-                           topology=(Periodic, Flat, Bounded))
+    grid = column_grid()
+
+    # Varying ρ gives a horizontal pressure gradient; at rest, Gρu is that force alone.
+    ρᵢ(x, z) = 1.1 * (1 + 0.05 * sinpi(2x / L))
 
     for qᵗ in moisture_fractions
-        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state=nothing)
-        model = AtmosphereModel(grid; dynamics)
-        # Varying ρ gives a horizontal pressure gradient; at rest, Gρu is that force alone.
-        ρᵢ(x, z) = 1.1 * (1 + 0.05 * sinpi(2x / Lx))
-        set!(model; θ=300, ρ=ρᵢ, qᵗ=qᵗ, u=0, w=0)
-        update_state!(model)
+        model = moist_model(ExplicitTimeStepping(), qᵗ, grid; ρ=ρᵢ)
 
         ρᵈ = Array(interior(model.dynamics.dry_density))
         ρ = Array(interior(model.dynamics.total_density))
         p = Array(interior(model.dynamics.pressure))
         Gρu = Array(interior(model.timestepper.Gⁿ.ρu))
-        Δx = FT(Lx / Nx)
+        Δx = FT(L / N)
 
         @test maximum(p) - minimum(p) > 0
 
-        for i in 2:Nx, k in 2:size(grid, 3)
+        for i in 2:N, k in 2:size(grid, 3)
             ρᵈᶠᶜᶜ = (ρᵈ[i, 1, k] + ρᵈ[i - 1, 1, k]) / 2
             ρᶠᶜᶜ = (ρ[i, 1, k] + ρ[i - 1, 1, k]) / 2
             ∂x_p = (p[i, 1, k] - p[i - 1, 1, k]) / Δx
             # du/dt = Gρu / ℑˣ(ρᵈ) is the mixture acceleration -∂x p / ℑˣ(ρ).
             @test Gρu[i, 1, k] / ρᵈᶠᶜᶜ ≈ -∂x_p / ρᶠᶜᶜ rtol=100eps(FT)
         end
-    end
-
-    Oceananigans.defaults.FloatType = old_FT
-end
-
-@testset "Bulk drag on moist dry-coupled momentum [$FT]" for FT in test_float_types()
-    old_FT = Oceananigans.defaults.FloatType
-    Oceananigans.defaults.FloatType = FT
-
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), halo=(3, 3, 3),
-                           x=(0, 1000), y=(0, 1000), z=(0, 1000),
-                           topology=(Periodic, Periodic, Bounded))
-    Cᴰ, Tˢ, u, v = FT(2e-3), FT(298), FT(1), FT(2)
-    ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(; coefficient=Cᴰ, surface_temperature=Tˢ))
-
-    for qᵗ in moisture_fractions
-        dynamics = CompressibleDynamics(ExplicitTimeStepping(); reference_state=nothing)
-        model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs))
-        set!(model; θ=300, ρ=1.1, qᵗ=qᵗ, u, v)
-        update_state!(model)
-
-        i, j = 2, 3
-        constants = model.thermodynamic_constants
-        clock, model_fields, dynamics_fields = boundary_condition_args(model)
-        fields = surface_layer_state(model_fields, dynamics_fields)
-        pˢ = @allowscalar wall_air_pressure(i, j, 1, grid, Bottom(), XDirection(), fields, constants)
-        ρˢ = surface_density(pˢ, Tˢ, constants)
-        ρᵈ = @allowscalar model.dynamics.dry_density[i, j, 1]
-        ρ = @allowscalar model.dynamics.total_density[i, j, 1]
-        Ũ = sqrt(u^2 + v^2)
-
-        # The stress ρˢ Cᴰ |U| u on the mixture reaches ρu = ρᵈ u scaled by the near-wall qᵈ = ρᵈ/ρ,
-        # the wall counterpart of the weight on the interior pressure gradient and gravity.
-        bc = model.momentum.ρu.boundary_conditions.bottom
-        Jᵘ = @allowscalar getbc(bc, i, j, grid, clock, model_fields, dynamics_fields)
-        @test ρᵈ / ρ ≈ 1 - qᵗ
-        @test Jᵘ ≈ -(ρᵈ / ρ) * ρˢ * Cᴰ * Ũ * u rtol=10eps(FT)
     end
 
     Oceananigans.defaults.FloatType = old_FT

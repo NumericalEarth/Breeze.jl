@@ -388,12 +388,7 @@ function materialize_bulk_drag(df, side, grid, dynamics, microphysics, constants
     Tˢ = materialize_surface_field(Tˢ_input, grid, side)
     coef = materialize_coefficient(df.coefficient, grid, dynamics, microphysics, constants, Val(:momentum))
     gustiness = materialize_gustiness(df.gustiness, closure)
-    # The flux lands on the continuity-density-weighted momentum, so the stress on the mixture is converted
-    # with the continuity density over the total density of the near-wall cell (see `getbc`). The
-    # compressible dry density is not materialized yet at this point (`nothing`); `getbc` then reads
-    # the prognostic `ρᵈ` field instead, as the energy flux conditions do.
-    density = continuity_density(dynamics)
-    new_df = BulkDragFunction(df.direction, side, coef, gustiness, Tˢ, df.filtered_velocities, constants, density)
+    new_df = BulkDragFunction(df.direction, side, coef, gustiness, Tˢ, df.filtered_velocities, constants)
     return BoundaryCondition(Flux(), new_df)
 end
 
@@ -415,7 +410,7 @@ function materialize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux,
     end
 
     directed_df = BulkDragFunction(direction, df.side, df.coefficient, df.gustiness, df.surface_temperature,
-                                   df.filtered_velocities, df.thermodynamic_constants, df.density)
+                                   df.filtered_velocities, df.thermodynamic_constants)
     return materialize_bulk_drag(directed_df, side, grid, dynamics, microphysics, constants, closure)
 end
 
@@ -509,8 +504,8 @@ materialize_surface_field(f::Function, grid, side) = f
 ##### so that they add methods to the existing constructors.
 #####
 
-BulkDragFunction(d, side, coef::NothingPolynomialCoefficient, g, t, fv, c, ρ) =
-    BulkDragFunction(d, side, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t, fv, c, ρ)
+BulkDragFunction(d, side, coef::NothingPolynomialCoefficient, g, t, fv, c) =
+    BulkDragFunction(d, side, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t, fv, c)
 
 BulkSensibleHeatFluxFunction(side, coef::NothingPolynomialCoefficient, g, t, s, c, f, fv, fs, microphysics) =
     BulkSensibleHeatFluxFunction(side, fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)),

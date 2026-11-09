@@ -799,15 +799,15 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
 end
 
 # Slow-tendency assembly with reference state. Buoyancy uses the diagnosed TOTAL density
-# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): in conservation-form momentum
-# `∂t(ρw) = -∂z p - g ρ`, gravity acts on the total mass of all species. The prognostic mass
+# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): in the mixture momentum balance
+# `ρ Dw/Dt = -∂z p - g ρ`, gravity acts on the total mass of all species. The prognostic mass
 # variable is the dry density ρᵈ (its continuity has no sedimentation source); total ρ is
 # reconstructed each update. Across the acoustic substeps the water densities are frozen, so the
 # evolving density perturbation `ρ′ = ρᵈ′` is also the total-density perturbation, and the
 # moisture loading enters exactly once — here, through the stage-entry total `ρᴸ`.
 #
-# `qᵈ` converts the mixture force `-∂z p - g ρ` onto the dry-air momentum ρw, reducing the buoyancy
-# term to `-g ℑᶻ(ρᵈ)`.
+# `qᵈ` converts the mixture force `-∂z p - g ρ` onto the dry-air momentum ρw (see
+# `dynamics_mass_fractionᶜᶜᶠ`); without a reference state its buoyancy part is exactly `-g ℑᶻ(ρᵈ)`.
 @kernel function _assemble_slow_vertical_momentum_tendency!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, pᵣ, ρᵣ, ρwᴸ,
                                                             grid, dynamics, g, sponge, direction)
     i, j, k = @index(Global, NTuple)
@@ -953,44 +953,37 @@ end
 @kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Cᴸ, Gⁿρu, Gⁿρv)
     i, j, k = @index(Global, NTuple)
 
+    qᵈˣ = AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics)
+    qᵈʸ = AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics)
+
     @inbounds begin
-        ∂x_pᴸ  = weighted_x_pressure_gradient(i, j, k, grid, dynamics)
+        ∂x_pᴸ  = AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
         ∂x_p′  = ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ)
-        ∂y_pᴸ  = weighted_y_pressure_gradient(i, j, k, grid, dynamics)
+        ∂y_pᴸ  = AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
         ∂y_p′  = ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ)
 
         ∂x_p = ∂x_pᴸ + ∂x_p′
         ∂y_p = ∂y_pᴸ + ∂y_p′
 
-        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p)
-        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - qᵈˣ * ∂x_p)
+        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - qᵈʸ * ∂y_p)
     end
 end
 
 @inline δpᴸ(i, j, k, grid, ρθ′, Cᴸ) = @inbounds Cᴸ[i, j, k] * ρθ′[i, j, k]
 
-# The frozen (Uᴸ) and perturbation gradients below return the *force on the momentum*: each carries
-# `qᵈ` at its own face, so callers that interpolate them (the terrain slope corrections) stay
-# consistent with the (ρu)′,(ρv)′ updates built from the same values.
-@inline weighted_x_pressure_gradient(i, j, k, grid, dynamics) =
-    AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
-    AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
+@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+@inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 
-@inline weighted_y_pressure_gradient(i, j, k, grid, dynamics) =
-    AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
-    AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
+# The perturbation pressure force that the (ρw)′ solve subtracts: `qᵈ ∂z p′` on the dry-air ρw.
+# On terrain-following grids it acts on ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv, so it also subtracts the
+# slope projection of the horizontal forces on ρu and ρv (zero on other grids).
+@inline vertical_pressure_force′(i, j, k, grid, dynamics, ρθ′, Cᴸ) =
+    AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) * ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) -
+    terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid, dynamics, ρθ′, Cᴸ)
 
-@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) =
-    AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
-    ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
-
-@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) =
-    AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
-    ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
-
-@inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) =
-    AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) *
-    ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+@inline terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid, dynamics, ρθ′, Cᴸ) = zero(grid)
 
 """
 $(TYPEDSIGNATURES)
@@ -1049,11 +1042,10 @@ end
     Nz = size(grid, 3)
 
     @inbounds begin
-        ∂r_p′★  = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′★, Cᴸ)
-        ∂r_p′ˢ⁻ = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′,  Cᴸ)
+        ∂r_p′★  = vertical_pressure_force′(i, j, k, grid, dynamics, ρθ′★, Cᴸ)
+        ∂r_p′ˢ⁻ = vertical_pressure_force′(i, j, k, grid, dynamics, ρθ′,  Cᴸ)
         Gρwᵖ = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★ # pressure gradient
 
-        # `∇ᶻp′` is already weighted; the buoyancy is not.
         qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
         ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
         ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)

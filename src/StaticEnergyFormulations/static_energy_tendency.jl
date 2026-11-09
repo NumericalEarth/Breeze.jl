@@ -62,10 +62,8 @@ end
     specific_energy = formulation.specific_energy
     ρ_field = continuity_density(dynamics)
 
-    # The buoyancy flux ρ w b of the mixture: the pressure work plus the geopotential change,
-    # ρ Ds/Dt ∋ Dp/Dt + ρ g w, in the reference-state approximation Dp/Dt ≈ w ∂z pᵣ. It enters
-    # the dry-weighted ρᵈ s at (ρᵈ / ρ), like the heating below and the pressure gradient and
-    # gravity on the dry-air momentum; ρᵈ = ρ on the anelastic core, where this is ρᵣ w b.
+    # The mixture buoyancy flux ρ w b (pressure work plus geopotential change, ρ Ds/Dt ∋ Dp/Dt + ρ g w
+    # with Dp/Dt ≈ w ∂z pᵣ). Like the heating, it enters ρᵈ s at qᵈ = ρᵈ / ρ, which is 1 on anelastic.
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, w_buoyancy_forceᶜᶜᶠ,
                           velocities.w, dynamics, temperature_field, specific_prognostic_moisture,
                           microphysics, microphysical_fields, constants)
@@ -77,15 +75,17 @@ end
         ρ = total_density(dynamics)[i, j, k]  # total ρ (mass fractions)
     end
 
+    qᵈ = ρᵈ / ρ
+
     FρE = ρE_forcing(i, j, k, grid, clock, model_fields)
     div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
-             - ρᵈ / ρ * buoyancy_flux
+             - qᵈ * buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + ρs_forcing(i, j, k, grid, clock, model_fields)
-             + ρᵈ / ρ * (FρE + div_ℐ)) # a volumetric heating Q changes s at Q / ρ, so ρᵈ s at (ρᵈ / ρ) Q (ρs and ρE forcings are mutually exclusive)
+             + qᵈ * (FρE + div_ℐ)) # a volumetric heating Q changes s at Q / ρ, so ρᵈ s at (ρᵈ / ρ) Q (ρs and ρE forcings are mutually exclusive)
 end
 
 #####

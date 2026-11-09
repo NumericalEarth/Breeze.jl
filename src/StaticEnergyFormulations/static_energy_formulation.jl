@@ -19,9 +19,7 @@ of condensation and deposition extrapolated to zero kelvin. Pairing the referenc
 ``ℒᵣ`` with ``cᵖᵐ T`` would give incorrect phase-change heating.
 
 The energy density equation includes a buoyancy flux term following [Pauluis2008](@citet).
-On the compressible core the prognostic ``ρs = ρᵈ s`` is dry-air weighted, so this mixture term
-enters it with the dry-air mass fraction ``ρᵈ / ρ``, exactly as the pressure gradient and gravity
-enter the dry-air momentum.
+On the compressible core this mixture term enters the dry-air weighted ``ρs = ρᵈ s`` with ``ρᵈ / ρ``.
 """
 struct StaticEnergyFormulation{E, S}
     energy_density :: E    # ρs (prognostic)

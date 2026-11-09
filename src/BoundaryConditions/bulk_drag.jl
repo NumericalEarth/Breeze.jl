@@ -2,7 +2,7 @@
 ##### BulkDragFunction for momentum fluxes
 #####
 
-struct BulkDragFunction{D, S, C, G, T, FV, TC, CD}
+struct BulkDragFunction{D, S, C, G, T, FV, TC}
     direction :: D
     side :: S                  # Set during materialization (nothing pre-materialize)
     coefficient :: C
@@ -10,7 +10,6 @@ struct BulkDragFunction{D, S, C, G, T, FV, TC, CD}
     surface_temperature :: T
     filtered_velocities :: FV  # Nothing or FilteredSurfaceVelocities
     thermodynamic_constants :: TC
-    density :: CD              # Coupling density the flux lands on, when the dynamics carries it (see `getbc`)
 end
 
 """
@@ -29,14 +28,9 @@ tangential to the wall together with the gustiness `Uᵍ`, `u` is the
 velocity component at the first cell face, and `ρˢ` is the surface density computed from
 the surface pressure and surface temperature. Monin–Obukhov similarity is a profile law
 for `u` (not `ρu`), so using `u` here keeps the formulation consistent with the similarity
-theory underlying `Cᴰ`.
-
-The stress `ρˢ Cᴰ |U| u` acts on the air mixture, but the condition sets the flux of the
-continuity-density-weighted momentum — the dry-air momentum `ρᵈ u` on the compressible core — so it carries
-the dry-air mass fraction `qᵈ = ρᵈ / ρ` of the near-wall cell, exactly as the interior pressure
-gradient and gravity do (see `AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ`) and as the energy
-flux conditions do. On the anelastic core the continuity and total densities are the same field,
-so `qᵈ = 1`.
+theory underlying `Cᴰ`. The stress acts on the air mixture while the flux lands on the
+continuity-density-weighted momentum, so it carries the near-wall `qᵈ = ρᵈ / ρ`, as the interior
+pressure gradient and gravity do; `qᵈ = 1` on the anelastic core.
 
 The drag may be placed on any of the six boundaries of a bounded domain, on either of the
 two momentum components tangential to that wall: `ρu` and `ρv` on the bottom and top,
@@ -96,7 +90,7 @@ function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=Defau
         throw(ArgumentError("surface_temperature keyword argument must be provided when configuring BulkDrag with a PolynomialCoefficient"))
     end
     return BulkDragFunction(direction, nothing, coefficient, gustiness, surface_temperature,
-                            filtered_velocities, nothing, nothing)
+                            filtered_velocities, nothing)
 end
 
 const XDirectionBulkDragFunction = BulkDragFunction{<:XDirection}
@@ -111,8 +105,7 @@ Adapt.adapt_structure(to, df::BulkDragFunction) =
                      Adapt.adapt(to, df.gustiness),
                      Adapt.adapt(to, df.surface_temperature),
                      Adapt.adapt(to, df.filtered_velocities),
-                     Adapt.adapt(to, df.thermodynamic_constants),
-                     Adapt.adapt(to, df.density))
+                     Adapt.adapt(to, df.thermodynamic_constants))
 
 function Base.summary(df::BulkDragFunction)
     s = string("BulkDragFunction(direction=", summary(df.direction),
@@ -132,24 +125,6 @@ end
 ##### filtered field at the appropriate face location when filtering is enabled.
 #####
 
-# The stress ρˢ Cᴰ Ũ u acts on the mixture, but the flux lands on the continuity-density-weighted momentum
-# ρᵈ u, so it carries qᵈ = ρᵈ / ρ of the near-wall cell: the wall counterpart of the
-# `dynamics_mass_fraction*` weight on the interior pressure gradient and gravity, and of the
-# (ρᵈ / ρ) in `𝒬ᵀ_to_Jᶿ`. `fields.ρ` is the total density from `dynamics_thermodynamic_fields`.
-# The continuity density is stored at materialization when the dynamics already carries it (the
-# anelastic reference density, the same field as `fields.ρ`, so the ratio is exactly one); the
-# compressible dry density is materialized with the model, after the boundary conditions, so the
-# condition then holds `nothing` and reads the prognostic `fields.ρᵈ` — as `_energy_flux_density`
-# does for the energy fluxes.
-@inline near_wall_continuity_density(i, j, k, density, fields) = @inbounds density[i, j, k]
-@inline near_wall_continuity_density(i, j, k, ::Nothing, fields) = @inbounds fields.ρᵈ[i, j, k]
-
-@inline function near_wall_dry_mass_fraction(i, j, k, density, fields)
-    ρᵈ = near_wall_continuity_density(i, j, k, density, fields)
-    ρ = @inbounds fields.ρ[i, j, k]
-    return ρᵈ / ρ
-end
-
 @inline function OceananigansBC.getbc(df::BulkDragFunction, ℓ::Integer, m::Integer,
                                       grid::AbstractGrid, clock, model_fields, dynamics_fields)
     fields = surface_layer_state(model_fields, dynamics_fields)
@@ -164,7 +139,7 @@ end
     pˢ = wall_air_pressure(i, j, k, grid, side, df.direction, fields, constants)
     ρˢ = surface_density(pˢ, Tˢ, constants)
     Cᴰ = bulk_coefficient(i, j, k, grid, side, df.coefficient, fields, Tˢ, df.filtered_velocities, pˢ, Uᵍ²)
-    qᵈ = near_wall_dry_mass_fraction(i, j, k, df.density, fields)
+    qᵈ = @inbounds fields.ρᵈ[i, j, k] / fields.ρ[i, j, k]
     return outward_flux_sign(side) * qᵈ * ρˢ * Cᴰ * Ũ * u
 end
 

@@ -199,20 +199,12 @@ total_density(dynamics) = continuity_density(dynamics)
 $(TYPEDSIGNATURES)
 
 Return ``qᵈ = ρᵈ/ρ`` at an x-face: [`continuity_density`](@ref) over [`total_density`](@ref).
+`dynamics_mass_fractionᶜᶠᶜ` and `dynamics_mass_fractionᶜᶜᶠ` are the same at y- and z-faces.
 
-For compressible dynamics, the mixture pressure and gravitational forces ``-∇p`` and ``-ρ g ẑ``
-are rescaled by ``qᵈ`` for the prognostic dry-air momentum ``ρu = ρᵈ u``. Advection and Coriolis
-already use continuity-density-weighted momentum, so they are exact without a factor. The stress is
-*modeled* with the continuity density, ``𝒯 = ρᵈ ν S``, so its divergence is already a force on
-``ρᵈ u``; this is a closure choice (the one WRF-ARW makes) rather than an identity, since the
-rescaled mixture stress ``qᵈ ∇·(ρ ν S)`` differs from it by ``ρ ν S·∇qᵈ``, a term proportional
-to the moisture gradient. The same weight converts the bulk drag and the energy fluxes at the
-walls (see `BoundaryConditions`).
-
-Defaults to `1`, exact wherever `total_density === continuity_density` (e.g. anelastic);
-`CompressibleDynamics` overrides it with ``qᵈ = 1 - qᵗ``. Derivation:
-[Compressible dynamics](@ref Compressible-section). `dynamics_mass_fractionᶜᶠᶜ` and
-`dynamics_mass_fractionᶜᶜᶠ` are the same at y- and z-faces.
+The momentum tendencies multiply the mixture pressure gradient and buoyancy force by it, since
+those act on the total mass while the momentum is the continuity-density-weighted ``ρᵈ u``.
+Defaults to `1`, exact wherever `total_density === continuity_density` (e.g. anelastic).
+Derivation: [Compressible dynamics](@ref Compressible-section).
 """
 @inline dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) = one(grid)
 @inline dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) = one(grid)
@@ -493,30 +485,32 @@ dynamics_prognostic_fields(dynamics) = NamedTuple()
 """
     x_pressure_gradient(i, j, k, grid, dynamics)
 
-Return the x-component of the pressure gradient force at (Face, Center, Center).
+Return the x-component of the pressure gradient at (Face, Center, Center).
 
 For anelastic dynamics, returns zero (pressure is handled via projection).
-For compressible dynamics, returns `-∂p/∂x`.
+For compressible dynamics, returns `∂p/∂x`. The momentum tendency subtracts it weighted by
+[`dynamics_mass_fractionᶠᶜᶜ`](@ref).
 """
 @inline x_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
     y_pressure_gradient(i, j, k, grid, dynamics)
 
-Return the y-component of the pressure gradient force at (Center, Face, Center).
+Return the y-component of the pressure gradient at (Center, Face, Center).
 
 For anelastic dynamics, returns zero (pressure is handled via projection).
-For compressible dynamics, returns `-∂p/∂y`.
+For compressible dynamics, returns `∂p/∂y` (see [`x_pressure_gradient`](@ref)).
 """
 @inline y_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
     z_pressure_gradient(i, j, k, grid, dynamics)
 
-Return the z-component of the pressure gradient force at (Center, Center, Face).
+Return the z-component of the pressure gradient at (Center, Center, Face).
 
 For anelastic dynamics, returns zero (pressure is handled via projection).
-For compressible dynamics, returns `-∂p/∂z`.
+For compressible dynamics, returns `∂(p - pᵣ)/∂z`, with `pᵣ` the reference pressure when a
+reference state is present (see [`x_pressure_gradient`](@ref)).
 """
 @inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
@@ -552,10 +546,7 @@ Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 
 @inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowDynamics, args...) = zero(grid)
 
-# Whichever forces the wrapper lets through still act on the wrapped formulation's momentum.
-@inline dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, s::SlowDynamics) = dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, s.dynamics)
-@inline dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, s::SlowDynamics) = dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, s.dynamics)
-@inline dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, s::SlowDynamics) = dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, s.dynamics)
+# `dynamics_mass_fraction*` keeps its default of 1 here: every force it would weight is zeroed above.
 
 #####
 ##### Tendency computation interface

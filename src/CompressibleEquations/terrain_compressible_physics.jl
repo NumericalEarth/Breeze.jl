@@ -301,14 +301,11 @@ end
     @inbounds ρw̃′[i, j, k] = ρw̃_outer - ρw̃_stage
 end
 
-# Every `∇p′` returns the *force on the momentum*, weighted by `qᵈ` at its own face. These terrain
-# methods replace the flat ones wholesale, so they must apply the weight themselves.
 @inline function ∇ˣp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
                                                 ρθ′, Cᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
-    return AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) *
-           terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
+    return terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                   stencil, ρθ′, Cᴸ)
 end
 
@@ -316,8 +313,7 @@ end
                                                 dynamics::TerrainCompressibleDynamics,
                                                 ρθ′, Cᴸ)
     stencil = dynamics.terrain_metrics.pressure_gradient_stencil
-    return AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) *
-           terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
+    return terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                   stencil, ρθ′, Cᴸ)
 end
 
@@ -374,38 +370,32 @@ terrain_ρw_boundary_conditions(::TerrainFollowingGrid, ρw_bcs) =
                               top = ρw_bcs.top, immersed = ρw_bcs.immersed)
 
 # ρw̃ = ρw - slopeₓ·ρu - slopeᵧ·ρv, so the force on ρw̃ collects the horizontal pressure forces *as
-# they act on ρu and ρv*: weighted at their own x/y faces, then interpolated. Weighting after the
-# interpolation would put the contravariant projection out of step with the (ρu)′,(ρv)′ updates.
+# they act on ρu and ρv*: each gradient is weighted by qᵈ at its own x/y face, then interpolated.
+# Weighting after the interpolation would put the contravariant projection out of step with the
+# ρu and ρv updates.
+@inline dry_mass_weightedᶠᶜᶜ(i, j, k, grid, dynamics, gradient, args...) =
+    AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) * gradient(i, j, k, grid, dynamics, args...)
+
+@inline dry_mass_weightedᶜᶠᶜ(i, j, k, grid, dynamics, gradient, args...) =
+    AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) * gradient(i, j, k, grid, dynamics, args...)
+
 @inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    ∂x_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, weighted_x_pressure_gradient, dynamics)
-    ∂y_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, weighted_y_pressure_gradient, dynamics)
+    ∂x_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, dry_mass_weightedᶠᶜᶜ, dynamics, AtmosphereModels.x_pressure_gradient)
+    ∂y_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, dry_mass_weightedᶜᶠᶜ, dynamics, AtmosphereModels.y_pressure_gradient)
     return slope_x * ∂x_p_ccf + slope_y * ∂y_p_ccf
 end
 
+# The same slope correction for the perturbation pressure, subtracted in `vertical_pressure_force′`.
 @inline function terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
-                                                                            dynamics, ρθ′, Cᴸ)
+                                                                            dynamics::TerrainCompressibleDynamics,
+                                                                            ρθ′, Cᴸ)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ∇ˣp′,
-                       dynamics, ρθ′, Cᴸ)
-    ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ∇ʸp′,
-                       dynamics, ρθ′, Cᴸ)
+    ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, dry_mass_weightedᶠᶜᶜ, dynamics, ∇ˣp′, ρθ′, Cᴸ)
+    ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, dry_mass_weightedᶜᶠᶜ, dynamics, ∇ʸp′, ρθ′, Cᴸ)
     return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
-end
-
-# The vertical gradient minus the horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) + slopeᵧ·∂ᵧ(Cᴸ(ρθ)′),
-# since ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv.
-@inline function ∇ᶻp′(i, j, k, grid,
-                      dynamics::TerrainCompressibleDynamics,
-                      ρθ′, Cᴸ)
-    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
-    ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
-    # The correction is built from the already-weighted `∇ˣp′`/`∇ʸp′`.
-    correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
-                                                                            dynamics, ρθ′, Cᴸ)
-    return qᵈ * ∂z_p′ - correction
 end
 
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,

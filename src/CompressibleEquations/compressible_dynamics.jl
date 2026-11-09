@@ -465,17 +465,12 @@ AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_
 # densities, not an interpolated cell-centered ratio, so that qᵈ ⋅ (-g ℑ(ρ)) is exactly -g ℑ(ρᵈ) —
 # the same face density `_compute_velocities!` divides by. `safe_divide` covers ρ = 0 (masked or
 # unset cells) with an unweighted force.
-@inline AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, d::CompressibleDynamics) =
-    safe_divide(ℑxᶠᵃᵃ(i, j, k, grid, d.dry_density),
-                ℑxᶠᵃᵃ(i, j, k, grid, d.total_density), one(grid))
+@inline face_dry_mass_fraction(i, j, k, grid, ℑ, d) =
+    safe_divide(ℑ(i, j, k, grid, d.dry_density), ℑ(i, j, k, grid, d.total_density), one(grid))
 
-@inline AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, d::CompressibleDynamics) =
-    safe_divide(ℑyᵃᶠᵃ(i, j, k, grid, d.dry_density),
-                ℑyᵃᶠᵃ(i, j, k, grid, d.total_density), one(grid))
-
-@inline AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, d::CompressibleDynamics) =
-    safe_divide(ℑzᵃᵃᶠ(i, j, k, grid, d.dry_density),
-                ℑzᵃᵃᶠ(i, j, k, grid, d.total_density), one(grid))
+@inline AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, d::CompressibleDynamics) = face_dry_mass_fraction(i, j, k, grid, ℑxᶠᵃᵃ, d)
+@inline AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, d::CompressibleDynamics) = face_dry_mass_fraction(i, j, k, grid, ℑyᵃᶠᵃ, d)
+@inline AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, d::CompressibleDynamics) = face_dry_mass_fraction(i, j, k, grid, ℑzᵃᵃᶠ, d)
 
 # Sedimentation drains the diagnosed total density but not the prognostic dry density (its
 # continuity has no sedimentation source), so every mass fraction renormalizes: the composition
