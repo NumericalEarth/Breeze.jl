@@ -125,15 +125,32 @@ function bubble(grid, x, y, z)
     return exp(-(ξ^2 + η^2) / 0.4^2 - ζ^2)
 end
 
+# The reference density as a function of height, read from the vanilla model, so that both
+# models are set from the same host values: `set!` from one field to another does not run
+# eagerly on a `ReactantState` GPU field (it broadcasts between device arrays, which indexes
+# them one element at a time). The reference is hydrostatic, so one column describes it, and
+# the cell centres it is read at are the ones it is set at.
+function reference_density_profile(model)
+    ρ̄ = model.dynamics.reference_state.density
+    zᶜ = Array(znodes(ρ̄))
+    ρᶜ = Array(interior(ρ̄))[1, 1, :]
+    function ρ(z)
+        k = clamp(searchsortedlast(zᶜ, z), 1, length(zᶜ) - 1)
+        w = (z - zᶜ[k]) / (zᶜ[k+1] - zᶜ[k])
+        return (1 - w) * ρᶜ[k] + w * ρᶜ[k+1]
+    end
+    return ρ
+end
+
 # The bubble is warm and moist, with cloud liquid and a little rain in its core; the zonal wind
 # is sheared over the depth with a weak meridional wave; the turbulent kinetic energy decays
 # with height. Vapour sits near 80% of saturation in the mixed layer and is given as a density
 # with the reference's near-surface value, 1.1 kg/m³.
-function set_initial_state!(model)
+function set_initial_state!(model, ρ̄)
     grid = model.grid
     b(x, y, z) = bubble(grid, x, y, z)
     set!(model;
-         ρ    = model.dynamics.reference_state.density,
+         ρ    = (x, y, z) -> ρ̄(z),
          θ    = (x, y, z) -> θ̄(z) + 2 * b(x, y, z),
          u    = (x, y, z) -> 5 + 3 * z / Lz,
          v    = (x, y, z) -> 0.5 * sinpi(normalized(grid, x, y)[1]) * cospi(z / Lz / 2),
@@ -148,8 +165,9 @@ end
 function build_model_pair(make_grid)
     vmodel = build_model(make_grid(default_arch))
     rmodel = build_model(make_grid(ReactantState()))
-    set_initial_state!(vmodel)
-    set_initial_state!(rmodel)
+    ρ̄ = reference_density_profile(vmodel)
+    set_initial_state!(vmodel, ρ̄)
+    set_initial_state!(rmodel, ρ̄)
     return vmodel, rmodel
 end
 
