@@ -135,7 +135,9 @@ jobs:
           if [[ -n "${{ matrix.enzyme_jax_run }}" ]]; then
               runs="$(github_api "actions/runs/${{ matrix.enzyme_jax_run }}" | jq -r '"\(.id) \(.head_sha)"')"
           else
-              runs="$(github_api "actions/workflows/build-reactantjll.yml/runs?branch=${{ matrix.enzyme_jax_branch }}&status=success&per_page=10" | jq -r '.workflow_runs[] | "\(.id) \(.head_sha)"')"
+              # Any status: each platform uploads its products when its own job finishes, so
+              # a run still building the other platforms may already have ours
+              runs="$(github_api "actions/workflows/build-reactantjll.yml/runs?branch=${{ matrix.enzyme_jax_branch }}&per_page=10" | jq -r '.workflow_runs[] | "\(.id) \(.head_sha)"')"
           fi
           while read -r run_id sha; do
               [[ -n "${run_id}" ]] || continue
@@ -214,7 +216,11 @@ jobs:
         # Develop a copy of the Reactant.jl branch whose kernel AD pipeline runs
         # convert-parallel-to-gpu1 without emit_single_alternative, so that the
         # POLYGEIST_GPU_KERNEL_BLOCK_SIZE set for the run below takes effect, and whose
-        # Reactant_jll compat admits a published build (see the entry); then add that build
+        # Reactant_jll compat admits a published build (see the entry); then add that build.
+        # The branch's `[sources]` pins Reactant_jll to Pangoraw/Reactant_jll.jl (0.0.435+4),
+        # which the add above follows, while the branch's own compat (0.0.438) is enforced
+        # when the copy is developed: without a published build, drop the pin so the
+        # registered Reactant_jll resolves; the preference above replaces its library
         if: ${{ matrix.kernelad_block_size || matrix.reactant_jll_url }}
         shell: julia --color=yes --project {0}
         env:
@@ -237,7 +243,11 @@ jobs:
           if !isempty("${{ matrix.reactant_jll_compat }}")
               replace_once!(joinpath(reactant, "Project.toml"), "Reactant_jll = \"0.0.438\"", "Reactant_jll = \"${{ matrix.reactant_jll_compat }}\"")
           end
+          if isempty("${{ matrix.reactant_jll_url }}")
+              replace_once!(joinpath(reactant, "Project.toml"), r"\nReactant_jll = \{url = [^\n]*\}\n", "\n")
+          end
           Pkg.develop(path = reactant)
+          run(`grep -n Reactant_jll $(joinpath(reactant, "Project.toml"))`)
           run(`grep -n convert-parallel-to-gpu1 $compiler`)
           if !isempty("${{ matrix.reactant_jll_url }}")
               Pkg.add(url = "${{ matrix.reactant_jll_url }}", rev = "${{ matrix.reactant_jll_rev }}")
