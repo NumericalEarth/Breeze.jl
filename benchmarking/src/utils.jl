@@ -12,13 +12,9 @@ function memory_reclaim(arch)
     end
 end
 
-# On GPUs, a vanilla run with WENO advection divides through Oceananigans'
-# `BackendOptimizedDivision`, which OceananigansCUDAExt implements with the
-# `rcp.approx.ftz` intrinsic (flush-to-zero). To compare like with like, the
-# Reactant-compiled program must flush denormals too: `xla_gpu_ftz=true`.
 uses_ftz_division(advection::AbstractString) = occursin("WENO", advection)
 
-reactant_gpu() = lowercase(string(Reactant.XLA.platform_name(Reactant.XLA.default_backend()))) in ("gpu", "cuda", "rocm")
+reactant_gpu() = lowercase(string(Reactant.XLA.platform_name(Reactant.XLA.default_backend()))) in ("cuda", "rocm")
 
 function reactant_compile_options(; ftz = false)
     xla_debug_options = ftz ? (; xla_gpu_ftz = true) : (;)
