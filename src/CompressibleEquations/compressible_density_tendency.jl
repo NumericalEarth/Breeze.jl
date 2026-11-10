@@ -30,7 +30,7 @@ end
 
 ##### Density tendency
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the density tendency for compressible dynamics using the continuity equation.
 
