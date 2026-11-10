@@ -73,9 +73,13 @@ SHOC has its own surface source of turbulent kinetic energy (`u★³` from the s
 bottom flux boundary condition on `ρe` is not applied at all: neither by the stages nor by SHOC.
 
 The model must use the liquid-ice potential temperature formulation; `ρθ / ρ` is SHOC's liquid
-water potential temperature and the model's moisture density over `ρ` its total water. SHOC
-owns the subgrid cloud: the liquid water it diagnoses is not fed back to the thermodynamics of the
-model.
+water potential temperature and the model's moisture density over `ρ` its total water. By
+default the liquid water SHOC diagnoses is not fed back to the thermodynamics of the model. With
+a microphysics scheme whose subgrid choice is `Breeze.AtmosphereModels.ClosureCloud` (for example
+`PredictedParticlePropertiesMicrophysics(subgrid=ClosureCloud())`) SHOC owns the cloud: its total
+water is the vapor plus the cloud liquid of the model, after every step the cloud liquid of the
+model is SHOC's `shoc_ql` and the vapor the rest, and the microphysics reads `shoc_cldfrac` as
+the cloud fraction and keeps the precipitation.
 
 Keyword arguments
 =================
@@ -320,7 +324,7 @@ end
     @inbounds for k in 1:Nz
         ρᵏ = ρ[i, j, k]
         thetal = ρθ[i, j, k] / ρᵏ
-        qw = ρqᵗ[i, j, k] / ρᵏ
+        qw = total_water_density(i, j, k, ρqᵗ) / ρᵏ
 
         state.thetal[i, j, k] = thetal
         state.qw[i, j, k] = qw
@@ -386,7 +390,7 @@ end
     @inbounds for k in 1:Nz
         ρᵏ = ρ[i, j, k]
         ρθ[i, j, k] = ρᵏ * state.thetal[i, j, k]
-        ρqᵗ[i, j, k] = ρᵏ * state.qw[i, j, k]
+        store_total_water!(i, j, k, ρqᵗ, ρᵏ, state.qw[i, j, k], fields.diagnostics.shoc_ql[i, j, k])
         ρe[i, j, k] = ρᵏ * state.tke[i, j, k]
         fields.increments.u[i, j, k] = state.u_wind[i, j, k] - fields.increments.u[i, j, k]
         fields.increments.v[i, j, k] = state.v_wind[i, j, k] - fields.increments.v[i, j, k]
@@ -451,7 +455,7 @@ function Oceananigans.TimeSteppers.step_closure_prognostics!(fields::SHOCFields,
     ρ = AtmosphereModels.total_density(dynamics)
     pressure = AtmosphereModels.dynamics_pressure(dynamics)
     ρθ = shoc_thermodynamic_density(model.formulation)
-    ρqᵗ = model.moisture_density
+    ρqᵗ = shoc_moisture(model)
     ρu, ρv, ρw = model.momentum.ρu, model.momentum.ρv, model.momentum.ρw
     ρe = model.tracers[TKE_NAME]
 
