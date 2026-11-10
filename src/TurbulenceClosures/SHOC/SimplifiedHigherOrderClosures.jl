@@ -18,7 +18,7 @@ export SimplifiedHigherOrderClosure, SHOC,
        DowngradientSecondMoments,
        CanutoThirdMoment, ResetBound,
        DoubleGaussianPDF,
-       HardClipping,
+       HardClipping, SmoothClipping,
        HoltslagBovilleDepth,
        SHOCConstants,
        closure_parameters, with_parameters

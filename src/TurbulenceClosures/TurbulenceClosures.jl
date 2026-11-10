@@ -18,7 +18,7 @@ export TKEBasedTurbulenceClosure,
        DowngradientSecondMoments,
        CanutoThirdMoment, ResetBound,
        DoubleGaussianPDF,
-       HardClipping,
+       HardClipping, SmoothClipping,
        HoltslagBovilleDepth,
        SHOCConstants,
        closure_parameters, with_parameters
@@ -196,7 +196,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
                                       DowngradientSecondMoments,
                                       CanutoThirdMoment, ResetBound,
                                       DoubleGaussianPDF,
-                                      HardClipping,
+                                      HardClipping, SmoothClipping,
                                       HoltslagBovilleDepth,
                                       SHOCConstants,
                                       closure_parameters, with_parameters
