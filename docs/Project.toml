@@ -25,7 +25,6 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [sources]
 Breeze = {path = ".."}
-Reactant = {url = "https://github.com/EnzymeAD/Reactant.jl", rev = "main"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
@@ -47,6 +46,6 @@ Oceananigans = "0.117.2"
 Pkg = "<0.0.1, 1"
 RRTMGP = "0.22, 0.23, 1"
 Random = "<0.0.1, 1"
-Reactant = "0.2.268 - 0.2.274, =0.2.278, 0.2.286"
+Reactant = "0.2.268 - 0.2.274, =0.2.278, 0.2.286, 0.2.308"
 SpecialFunctions = "2"
 Statistics = "1.11"
