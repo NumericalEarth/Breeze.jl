@@ -28,11 +28,12 @@ using Oceananigans.TimeSteppers: ExplicitTimeDiscretization
 using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure, getclosure
 using Oceananigans.Utils: Utils, launch!, prettysummary
 
-using Breeze.AtmosphereModels: AtmosphereModels
+using Breeze.AtmosphereModels: AtmosphereModels, ClosureCloud, ClosureCloudStatistics
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 include("shoc_parameters.jl")
 include("shoc_column.jl")
 include("simplified_higher_order_closure.jl")
+include("shoc_cloud.jl")
 
 end # module SHOC

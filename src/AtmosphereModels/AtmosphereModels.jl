@@ -48,6 +48,16 @@ export
     SpeciesBorrowing,
     AbstractNumberConcentrationCategories,
 
+    # Subgrid statistics (closure → microphysics)
+    AbstractSubgridStatistics,
+    DiracStatistics,
+    ClosureCloudStatistics,
+    AbstractSubgridCorrelation,
+    NoSubgridCorrelation,
+    ClosureCloud,
+    subgrid_correlation,
+    subgrid_statisticsᶜᶜᶜ,
+
     # Microphysics interface
     AbstractMicrophysicalState,
     NothingMicrophysicalState,
@@ -166,6 +176,7 @@ using Oceananigans.Utils: prettysummary, launch!
 
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
+include("subgrid_statistics.jl")
 include("dynamics_interface.jl")
 include("formulation_interface.jl")
 
