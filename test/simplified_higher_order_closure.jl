@@ -11,14 +11,15 @@ using Test
 function shoc_boundary_layer_model(grid; closure = SimplifiedHigherOrderClosure(eltype(grid);
                                                                                surface_temperature_flux = 0.1,
                                                                                surface_moisture_flux = 5e-5,
-                                                                               friction_velocity = 0.3))
+                                                                               friction_velocity = 0.3),
+                                   boundary_conditions = NamedTuple())
     FT = eltype(grid)
     θᵢ(z) = 300 + 3e-3 * z
     qᵢ(z) = 0.016 * exp(-z / 2000)
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=θᵢ)
     dynamics = AnelasticDynamics(reference_state)
-    model = AtmosphereModel(grid; dynamics, closure)
+    model = AtmosphereModel(grid; dynamics, closure, boundary_conditions)
     set!(model, θ = (args...) -> θᵢ(last(args)), qᵗ = (args...) -> qᵢ(last(args)), u = 5)
     set!(model.tracers.ρe, reference_state.density * FT(0.1))
     return model
@@ -79,6 +80,83 @@ column_data(field) = Array(interior(field))
 
         # The drag decelerates the wind of the lowest level
         @test @allowscalar(model.momentum.ρu[1, 1, 1] / ρ[1, 1, 1]) < 5
+    end
+
+    @testset "Surface fluxes from the model's bottom boundary conditions" begin
+        grid = RectilinearGrid(default_arch, FT; size=Nz, z=(0, 3000), topology=(Flat, Flat, Bounded))
+        Δz = 3000 / Nz
+        Δt = 60
+        Nt = 10
+        𝒬ᵀ = 120    # sensible heat flux, W m⁻²
+        Jᵗ = 6e-5   # moisture flux, kg m⁻² s⁻¹
+        𝒯ˣ = -0.1   # x-momentum flux, kg m⁻¹ s⁻²
+
+        flux(J; kw...) = FieldBoundaryConditions(bottom = FluxBoundaryCondition(J; kw...))
+        boundary_conditions = (ρE = flux(𝒬ᵀ), ρqᵗ = flux(Jᵗ), ρu = flux(𝒯ˣ))
+        model = shoc_boundary_layer_model(grid; closure = SimplifiedHigherOrderClosure(FT), boundary_conditions)
+
+        ρθ = model.formulation.potential_temperature_density
+        water₀ = sum(column_data(model.moisture_density)) * Δz
+        heat₀ = sum(column_data(ρθ)) * Δz
+        for _ in 1:Nt
+            time_step!(model, Δt)
+        end
+        water₁ = sum(column_data(model.moisture_density)) * Δz
+        heat₁ = sum(column_data(ρθ)) * Δz
+
+        # The boundary-condition flux enters the column exactly once: SHOC applies it and the
+        # Runge–Kutta stages do not.
+        @test isapprox(water₁ - water₀, Jᵗ * Nt * Δt; rtol = FT == Float64 ? 1e-9 : 1e-3)
+
+        # The energy flux arrives as the potential temperature flux 𝒬ᵀ / (cᵖ Π)
+        cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
+        @test isapprox(heat₁ - heat₀, 𝒬ᵀ / cᵖ * Nt * Δt; rtol = 5e-2)
+
+        # SHOC used the kinematic fluxes: the density-weighted ones over the surface density
+        surface = model.closure_fields.surface
+        ρ₁ = @allowscalar model.dynamics.reference_state.density[1, 1, 1]
+        @test isapprox(@allowscalar(surface.wqw_sfc[1, 1, 1]), Jᵗ / ρ₁; rtol = 5e-2)
+        @test isapprox(@allowscalar(surface.uw_sfc[1, 1, 1]), 𝒯ˣ / ρ₁; rtol = 5e-2)
+        @test @allowscalar(surface.wthl_sfc[1, 1, 1]) > 0
+
+        # Boundary-condition fluxes and the closure-owned kinematic fluxes are the same thing
+        by_condition = shoc_boundary_layer_model(grid; closure = SimplifiedHigherOrderClosure(FT),
+                                                 boundary_conditions = (ρqᵗ = flux(Jᵗ), ρu = flux(𝒯ˣ)))
+        time_step!(by_condition, Δt)
+        kinematic = by_condition.closure_fields.surface
+        surface_moisture_flux = @allowscalar kinematic.wqw_sfc[1, 1, 1]
+        surface_x_momentum_flux = @allowscalar kinematic.uw_sfc[1, 1, 1]
+        by_closure = shoc_boundary_layer_model(grid; closure = SimplifiedHigherOrderClosure(FT; surface_moisture_flux,
+                                                                                            surface_x_momentum_flux))
+        time_step!(by_closure, Δt)
+        for _ in 2:Nt
+            time_step!(by_condition, Δt)
+            time_step!(by_closure, Δt)
+        end
+        @test column_data(by_condition.moisture_density) == column_data(by_closure.moisture_density)
+        @test column_data(by_condition.momentum.ρu) == column_data(by_closure.momentum.ρu)
+        @test column_data(by_condition.tracers.ρe) == column_data(by_closure.tracers.ρe)
+
+        # The same fluxes as a discrete-form function and as a field give the same answer
+        discrete_flux(i, j, grid, clock, fields, J) = J
+        surface_flux_field = Field{Center, Center, Nothing}(grid)
+        set!(surface_flux_field, Jᵗ)
+        other_conditions = (ρE = flux(discrete_flux; discrete_form=true, parameters=FT(𝒬ᵀ)),
+                            ρqᵗ = flux(surface_flux_field), ρu = flux(𝒯ˣ))
+
+        # A wall flux of turbulent kinetic energy is replaced by SHOC's own surface source
+        wall_conditions = merge(boundary_conditions, (; ρe = flux(10)))
+
+        for conditions in (other_conditions, wall_conditions)
+            other = shoc_boundary_layer_model(grid; closure = SimplifiedHigherOrderClosure(FT),
+                                              boundary_conditions = conditions)
+            for _ in 1:Nt
+                time_step!(other, Δt)
+            end
+            @test column_data(other.moisture_density) == column_data(model.moisture_density)
+            @test column_data(other.formulation.potential_temperature_density) == column_data(ρθ)
+            @test column_data(other.tracers.ρe) == column_data(model.tracers.ρe)
+        end
     end
 
     @testset "Rebuilding and materializing the closure" begin

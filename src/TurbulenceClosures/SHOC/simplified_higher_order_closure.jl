@@ -52,12 +52,25 @@ SHOC carries between steps — the subgrid cloud liquid `shoc_ql`, the cloud fra
 `shoc_cldfrac`, the buoyancy flux `wthv_sec`, the diffusivities `tkh` and `tk` — together with
 every diagnosed moment in `model.closure_fields.diagnostics`.
 
-SHOC applies the surface fluxes of heat, moisture and momentum inside its implicit solve. They are
-kinematic fluxes held in the two-dimensional fields of `model.closure_fields.surface_specification`
-(`wthl_sfc`, `wqw_sfc`, `uw_sfc`, `vw_sfc`, `friction_velocity`), which are initialized uniformly
-from the keyword arguments below and may be `set!` afterwards, column by column. The model
-fields should keep their default (no-flux) bottom boundary conditions, or the fluxes are applied
-twice.
+SHOC applies the surface fluxes of heat, moisture and momentum inside its implicit solve, and it is
+the only place they are applied. They are the sum of two parts:
+
+1. The model's own bottom `Flux` boundary conditions on the thermodynamic density `ρθ` (or the
+   energy flux given under the key `ρE`, which the model converts to a `ρθ` flux), the moisture
+   density, `ρu` and `ρv`. Once per step SHOC evaluates them at the bottom of each column, exactly
+   as the tendency kernels would (`total_boundary_flux`, so constants, arrays, fields,
+   `FieldTimeSeries`, continuous and discrete functions and bulk formulae all work), at the time
+   and state the step ends with, and divides the density-weighted flux by the density SHOC uses
+   at the surface to obtain the kinematic flux. The Runge–Kutta stages skip the bottom boundary
+   flux of these fields (see `AtmosphereModels.closure_applies_bottom_flux`), so nothing is
+   applied twice and the boundary conditions stay the single source of truth.
+2. A closure-owned specification, in kinematic units, held in the two-dimensional fields of
+   `model.closure_fields.surface_specification` (`wthl_sfc`, `wqw_sfc`, `uw_sfc`, `vw_sfc`,
+   `friction_velocity`). They are initialized uniformly from the keyword arguments below (zero by
+   default) and may be `set!` afterwards, column by column.
+
+SHOC has its own surface source of turbulent kinetic energy (`u★³` from the surface stress), so a
+bottom flux boundary condition on `ρe` is not applied at all: neither by the stages nor by SHOC.
 
 The model must use the liquid-ice potential temperature formulation; `ρθ / ρ` is SHOC's liquid
 water potential temperature and the model's moisture density over `ρ` its total water. SHOC
@@ -71,7 +84,9 @@ Keyword arguments
 - `surface_temperature_flux`, `surface_moisture_flux`, `surface_x_momentum_flux`,
   `surface_y_momentum_flux`: uniform kinematic surface fluxes.
 - `friction_velocity`: where positive, the surface momentum flux is diagnosed every step as
-  `−u★² u / |u|` from the wind of the lowest level, and the prescribed momentum fluxes are ignored.
+  `−u★² u / |u|` from the wind of the lowest level, in place of the closure-owned
+  `surface_x_momentum_flux` and `surface_y_momentum_flux` (the model's boundary-condition fluxes
+  are still added).
 - `host_grid_spacing`: the horizontal mesh size that caps the mixing length along `Flat`
   directions (elsewhere the grid spacing is used).
 
@@ -258,6 +273,27 @@ end
 Oceananigans.TurbulenceClosures.compute_closure_fields!(::SHOCFields, ::FlavorOfSHOC, model; kw...) = nothing
 
 #####
+##### Surface fluxes from the model's bottom boundary conditions
+#####
+
+# The density-weighted flux through the bottom of column (i, j) that the boundary condition `bc`
+# of the prognostic field `c` prescribes: positive upward, into the domain. Only `Flux` boundary
+# conditions carry one (the default no-flux condition gives zero).
+@inline bottom_boundary_flux(bc::BoundaryCondition{<:Flux}, i, j, grid, c, args...) =
+    total_boundary_flux(bc, Bottom(), i, j, 1, grid, c, args...)
+
+@inline bottom_boundary_flux(bc, i, j, grid, c, args...) = zero(grid)
+
+# SHOC applies the bottom fluxes of the fields it steps, so the Runge–Kutta stages must not.
+# SHOC's own surface source of turbulent kinetic energy replaces a wall flux of `ρe`, which is
+# therefore claimed here too and applied nowhere.
+function AtmosphereModels.closure_applies_bottom_flux(::FlavorOfSHOC, model, name)
+    thermodynamic_name = AtmosphereModels.thermodynamic_density_name(model.formulation)
+    moisture_name = AtmosphereModels.moisture_prognostic_name(model.microphysics)
+    return name ∈ (thermodynamic_name, moisture_name, :ρu, :ρv, TKE_NAME)
+end
+
+#####
 ##### Loading a column from the model, and storing it back
 #####
 
@@ -270,7 +306,8 @@ Oceananigans.TurbulenceClosures.compute_closure_fields!(::SHOCFields, ::FlavorOf
 @inline specific_valueᶜᶜᶜ(i, j, k, grid, ρc, ρ) = @inbounds ρc[i, j, k] / ρ[i, j, k]
 @inline level_increment_density(i, j, k, grid, ρ, δ) = @inbounds ρ[i, j, k] * δ[i, j, k]
 
-@inline function load_shoc_column!(i, j, grid, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+@inline function load_shoc_column!(i, j, grid, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe,
+                                   bottom_bcs, bc_args)
     Nz = size(grid, 3)
     p = closure.parameters
     state, host, diagnostics = fields.state, fields.host, fields.diagnostics
@@ -323,10 +360,19 @@ Oceananigans.TurbulenceClosures.compute_closure_fields!(::SHOCFields, ::FlavorOf
         drag = (u★ > 0) & (speed > 0)
         speed = ifelse(drag, speed, one(speed))
 
-        surface.wthl_sfc[i, j, 1] = specification.wthl_sfc[i, j, 1]
-        surface.wqw_sfc[i, j, 1] = specification.wqw_sfc[i, j, 1]
-        surface.uw_sfc[i, j, 1] = ifelse(drag, -(u★ * u★) * u₁ / speed, specification.uw_sfc[i, j, 1])
-        surface.vw_sfc[i, j, 1] = ifelse(drag, -(u★ * u★) * v₁ / speed, specification.vw_sfc[i, j, 1])
+        # The model's bottom boundary-condition fluxes are density weighted. SHOC multiplies its
+        # kinematic surface fluxes by the density it interpolates to the surface, so dividing by
+        # that same density puts exactly the boundary-condition flux into the lowest level.
+        ρ_surface = rho_zi(i, j, 1, Nz, p, host.zt_grid, host.zi_grid, host.pdel)
+        Jᶿ = bottom_boundary_flux(bottom_bcs.ρθ, i, j, grid, ρθ, bc_args...)
+        Jᵗ = bottom_boundary_flux(bottom_bcs.ρqᵗ, i, j, grid, ρqᵗ, bc_args...)
+        𝒯ˣ = bottom_boundary_flux(bottom_bcs.ρu, i, j, grid, ρu, bc_args...)
+        𝒯ʸ = bottom_boundary_flux(bottom_bcs.ρv, i, j, grid, ρv, bc_args...)
+
+        surface.wthl_sfc[i, j, 1] = specification.wthl_sfc[i, j, 1] + Jᶿ / ρ_surface
+        surface.wqw_sfc[i, j, 1] = specification.wqw_sfc[i, j, 1] + Jᵗ / ρ_surface
+        surface.uw_sfc[i, j, 1] = ifelse(drag, -(u★ * u★) * u₁ / speed, specification.uw_sfc[i, j, 1]) + 𝒯ˣ / ρ_surface
+        surface.vw_sfc[i, j, 1] = ifelse(drag, -(u★ * u★) * v₁ / speed, specification.vw_sfc[i, j, 1]) + 𝒯ʸ / ρ_surface
         surface.friction_velocity[i, j, 1] = u★
     end
 
@@ -356,12 +402,12 @@ One SHOC step of every column of the model: load the specific state from the pro
 densities, step SHOC, and store θˡ, qᵗ and turbulent kinetic energy back as densities. One thread
 per column, with every vertical loop inside the thread.
 """
-@kernel function _step_shoc!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+@kernel function _step_shoc!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe, bottom_bcs, bc_args)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     Nz = size(grid, 3)
 
-    load_shoc_column!(i, j, grid, closure_ij, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+    load_shoc_column!(i, j, grid, closure_ij, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe, bottom_bcs, bc_args)
 
     shoc_column!(i, j, Nz, Δt, closure_ij.parameters,
                  fields.state, fields.host, fields.surface, fields.diagnostics, fields.scratch)
@@ -409,8 +455,16 @@ function Oceananigans.TimeSteppers.step_closure_prognostics!(fields::SHOCFields,
     ρu, ρv, ρw = model.momentum.ρu, model.momentum.ρv, model.momentum.ρw
     ρe = model.tracers[TKE_NAME]
 
+    # The surface fluxes: the model's bottom boundary conditions, evaluated in the kernel with the
+    # arguments the tendency kernels give them.
+    bottom_bcs = (ρθ = ρθ.boundary_conditions.bottom,
+                  ρqᵗ = ρqᵗ.boundary_conditions.bottom,
+                  ρu = ρu.boundary_conditions.bottom,
+                  ρv = ρv.boundary_conditions.bottom)
+    bc_args = boundary_condition_args(model)
+
     launch!(arch, grid, :xy, _step_shoc!,
-            grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+            grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe, bottom_bcs, bc_args)
 
     fill_halo_regions!((fields.increments.u, fields.increments.v))
 

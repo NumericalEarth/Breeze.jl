@@ -17,8 +17,10 @@ using KernelAbstractions: @kernel, @index
 using SpecialFunctions: erf
 
 using Oceananigans: Oceananigans
-using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
+using Oceananigans.BoundaryConditions: BoundaryConditions, BoundaryCondition, Flux, Bottom,
+                                       fill_halo_regions!, total_boundary_flux
 using Oceananigans.Fields: Field, CenterField, ZFaceField
+using Oceananigans.Models: boundary_condition_args
 using Oceananigans.Grids: AbstractGrid, Center, Face, Flat, znode, peripheral_node
 using Oceananigans.Operators: Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ
 using Oceananigans.TimeSteppers: ExplicitTimeDiscretization
