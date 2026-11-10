@@ -19,7 +19,7 @@
     },
     {
       "matchManagers": ["julia"],
-      "schedule": ["0 8 * * *"]
+      "schedule": ["* 8 * * *"]
     }
   ]
 }
