@@ -165,7 +165,13 @@ Cloud liquid relaxes toward the distribution's equilibrium condensate over the r
 timescale τ of the condensate-formation model `condensation` (for example an
 `ExponentialRateCondensateFormation`, whose exact exponential increment keeps long steps
 stable), blended with the cloud fraction C to τ [C + (1 - C) Γ]. With `condensation = nothing`
-the microphysics scheme picks its own timescale.
+the microphysics scheme picks its own timescale. A number `phase_relaxation_coefficient` α
+(default `nothing`, off) replaces that constant timescale, per cell and step, with the droplet
+phase-relaxation time τ = 1 / (α 4π Dᵛ N r̄) of [Squires (1952)](@cite Squires1952): Dᵛ the vapor diffusivity, N the
+cloud droplet number and r̄ the mean-volume radius of the in-cloud liquid qᶜˡ / C, floored at
+`activation_radius` (1 µm by default) so that τ stays finite as the liquid vanishes. The latent-heat
+correction stays in the Γ blend above. The formation model's time step (exponential increment) is
+kept.
 Autoconversion is averaged over an in-cloud gamma distribution of shape ν, which multiplies the
 in-cloud rate by `autoconversion_enhancement` E = Γ(ν + p) / (Γ(ν) νᵖ)
 (Morrison and Gettelman 2008); the cloud fraction used to form in-cloud means is floored at
@@ -190,9 +196,12 @@ true
 
 julia> GaussianSubgridCorrelation(Float64; relative_minimum_saturation_deficit_spread=0.05).relative_minimum_saturation_deficit_spread
 0.05
+
+julia> GaussianSubgridCorrelation(Float64; phase_relaxation_coefficient=1).phase_relaxation_coefficient
+1.0
 ```
 """
-struct GaussianSubgridCorrelation{FT, CF, RF} <: AbstractSubgridCorrelation
+struct GaussianSubgridCorrelation{FT, CF, RF, PR} <: AbstractSubgridCorrelation
     "coefficient c of the mixing-length (co)variances ℓ² ∂zφ ∂zψ"
     variance_coefficient :: FT
     "coefficient c_Δ of the within-cell gradient (co)variances Δz² ∂zφ ∂zψ"
@@ -207,6 +216,10 @@ struct GaussianSubgridCorrelation{FT, CF, RF} <: AbstractSubgridCorrelation
     minimum_cloud_fraction :: FT
     "non-dimensional saturation-deficit spread floor c₀, σ₀ ≥ c₀ qᵛ⁺, or `nothing`"
     relative_minimum_saturation_deficit_spread :: RF
+    "non-dimensional phase-relaxation coefficient α of τ = 1 / (α 4π Dᵛ N r̄), or `nothing`"
+    phase_relaxation_coefficient :: PR
+    "activation radius r_act [m] flooring the mean droplet radius r̄ of the phase-relaxation time"
+    activation_radius :: FT
 end
 
 # Walk the fields so that traced numbers (`Reactant.to_rarray`) are converted for the kernel.
@@ -217,7 +230,9 @@ Adapt.adapt_structure(to, c::GaussianSubgridCorrelation) =
                                adapt(to, c.condensation),
                                adapt(to, c.autoconversion_enhancement),
                                adapt(to, c.minimum_cloud_fraction),
-                               adapt(to, c.relative_minimum_saturation_deficit_spread))
+                               adapt(to, c.relative_minimum_saturation_deficit_spread),
+                               adapt(to, c.phase_relaxation_coefficient),
+                               adapt(to, c.activation_radius))
 
 """
 $(TYPEDSIGNATURES)
@@ -226,7 +241,10 @@ Return a [`GaussianSubgridCorrelation`](@ref) with float type `FT`. The autoconv
 is computed from the in-cloud gamma shape `cloud_liquid_shape` ν and the autoconversion exponent
 `autoconversion_exponent` p (2.47 for Khairoutdinov and Kogan 2000). A number
 `relative_minimum_saturation_deficit_spread` c₀ adds the non-dimensional floor σ₀ ≥ c₀ qᵛ⁺;
-`nothing` (the default) keeps the dimensional floor alone.
+`nothing` (the default) keeps the dimensional floor alone. A number `phase_relaxation_coefficient`
+α replaces the constant condensation timescale with the droplet phase-relaxation time
+1 / (α 4π Dᵛ N r̄), r̄ floored at `activation_radius`; `nothing` (the default) keeps the constant
+timescale.
 """
 function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatType;
                                     variance_coefficient = 1,
@@ -236,7 +254,9 @@ function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatTy
                                     cloud_liquid_shape = 1,
                                     autoconversion_exponent = 2.47,
                                     minimum_cloud_fraction = 0.01,
-                                    relative_minimum_saturation_deficit_spread = nothing)
+                                    relative_minimum_saturation_deficit_spread = nothing,
+                                    phase_relaxation_coefficient = nothing,
+                                    activation_radius = 1e-6)
     ν = cloud_liquid_shape
     p = autoconversion_exponent
     E = gamma(ν + p) / (gamma(ν) * ν^p)
@@ -246,7 +266,9 @@ function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatTy
                                       condensation,
                                       convert(FT, E),
                                       convert(FT, minimum_cloud_fraction),
-                                      convert_or_nothing(FT, relative_minimum_saturation_deficit_spread))
+                                      convert_or_nothing(FT, relative_minimum_saturation_deficit_spread),
+                                      convert_or_nothing(FT, phase_relaxation_coefficient),
+                                      convert(FT, activation_radius))
 end
 
 convert_or_nothing(FT, ::Nothing) = nothing

@@ -53,8 +53,6 @@ end
 @inline p3_subgrid_phase1_rates(::DiracStatistics, phase1, p3, ρ, ℳ, 𝒰, constants, state) =
     (; phase1, cloud = nothing)
 
-# In-cloud droplet number: prescribed numbers are already in-cloud values; predicted grid-mean
-# numbers are concentrated into the cloudy fraction.
 @inline in_cloud_droplet_number(::Nothing, Nᶜˡ, C) = Nᶜˡ
 @inline in_cloud_droplet_number(aerosol, Nᶜˡ, C) = Nᶜˡ / C
 
@@ -76,9 +74,17 @@ end
     q⁺ = min(cloud.q⁺, max(0, qᵛ) + qᶜˡ)
     Cᶠ = max(C, correlation.minimum_cloud_fraction)
 
-    # Condensation (step 7)
+    # In-cloud droplet number: prescribed numbers are already in-cloud values; predicted grid-mean
+    # numbers are concentrated into the cloudy fraction.
+    Nᶜˡ = in_cloud_droplet_number(p3.aerosol, state.Nᶜˡ, Cᶠ)
+
+    # Condensation (step 7). With a phase-relaxation coefficient α the constant timescale of the
+    # formation model is replaced by τ = 1 / (α 4π Dᵛ Nᶜˡ r̄) of the in-cloud liquid qᶜˡ / C.
     τ = parameters.sink_limiting_timescale
-    τₑ = scaled_relaxation_timescale(correlation.condensation, τ, C + (1 - C) * Γ)
+    formation = phase_relaxation_formation(correlation.phase_relaxation_coefficient, correlation.condensation,
+                                           state.Dᵛ, Nᶜˡ, qᶜˡ / Cᶠ, ρ, parameters.liquid_water_density,
+                                           correlation.activation_radius)
+    τₑ = scaled_relaxation_timescale(formation, τ, C + (1 - C) * Γ)
     condensation = (q⁺ - qᶜˡ) / τₑ
 
     # Activation over the supersaturated tail
@@ -87,7 +93,6 @@ end
                                                   qᵛ_tail, qᵛ⁺ˡ, T, ρ, constants)
 
     # Autoconversion and accretion over the cloudy fraction
-    Nᶜˡ = in_cloud_droplet_number(p3.aerosol, state.Nᶜˡ, Cᶠ)
     autoconversion = Cᶠ * correlation.autoconversion_enhancement *
                      rain_autoconversion_rate(p3, qᶜˡ / Cᶠ, Nᶜˡ, ρ, qʳ)
     accretion = Cᶠ * rain_accretion_rate(p3, qᶜˡ / Cᶠ, qʳ, ρ)

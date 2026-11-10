@@ -161,3 +161,45 @@ end
 @inline relaxation_window(formation, τ) = τ
 @inline relaxation_window(formation::ExponentialRateCondensateFormation, τ) = formation.Δt
 @inline exponential_rate_factor(λ, Δt) = -expm1(-λ * Δt) / Δt
+
+#####
+##### Droplet phase-relaxation timescale (opt-in; replaces the constant condensation timescale)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Phase-relaxation rate λ = α 4π Dᵛ N r̄ of a droplet population ([Squires (1952)](@cite Squires1952);
+[Politovich and Cooper (1988)](@cite PolitovichCooper1988)), with vapor diffusivity `Dᵛ`, droplet number `N` [m⁻³], the mean-volume radius
+r̄ = (3 ρ qˡ / (4π ρʷ N))^(1/3) of the liquid `qˡ` in air of density `ρ`, liquid density `ρʷ`,
+and the non-dimensional coefficient `α`. The radius is floored at the activation radius `r_act`,
+inside the cube root so that the derivative stays finite at qˡ = 0, which keeps λ > 0 and
+τ = 1 / λ finite as the liquid vanishes. The latent-heat correction is not included; the subgrid
+condensation applies it through its Γ blend.
+
+```jldoctest
+julia> using Breeze.Microphysics: phase_relaxation_rate
+
+julia> λ = phase_relaxation_rate(1.0, 2.5e-5, 2e8, 1e-4, 1.0, 1e3, 1e-6);
+
+julia> round(1 / λ, digits=2) # τ [s] for 0.1 g/kg of liquid over 200 cm⁻³ droplets
+3.23
+```
+"""
+@inline function phase_relaxation_rate(α, Dᵛ, N, qˡ, ρ, ρʷ, r_act)
+    FT = typeof(r_act)
+    r̄ = cbrt(max(r_act^3, 3 * ρ * max(0, qˡ) / (4 * FT(π) * ρʷ * N)))
+    return α * 4 * FT(π) * Dᵛ * N * r̄
+end
+
+# The formation model with its constant rate replaced by the per-cell phase-relaxation rate λ:
+# the exponential increment keeps its time step, and with no formation model the relaxation is
+# the plain first-order one of rate λ. `nothing` (the default) keeps the formation model as it is.
+@inline phase_relaxation_formation(::Nothing, formation, args...) = formation
+@inline phase_relaxation_formation(α, formation, args...) =
+    with_relaxation_rate(formation, phase_relaxation_rate(α, args...))
+
+@inline with_relaxation_rate(::Nothing, λ) = ConstantRateCondensateFormation(λ)
+@inline with_relaxation_rate(::ConstantRateCondensateFormation, λ) = ConstantRateCondensateFormation(λ)
+@inline with_relaxation_rate(formation::ExponentialRateCondensateFormation, λ) =
+    ExponentialRateCondensateFormation(λ, formation.Δt)

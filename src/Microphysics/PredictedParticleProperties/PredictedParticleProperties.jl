@@ -125,7 +125,8 @@ using Breeze.AtmosphereModels: prognostic_field_names,
 using Breeze.Microphysics: subgrid_cloud,
                            scaled_relaxation_timescale,
                            relaxation_window,
-                           exponential_rate_factor
+                           exponential_rate_factor,
+                           phase_relaxation_formation
 using Breeze.Thermodynamics: exner_function
 using Breeze.Thermodynamics: MoistureMassFractions,
                              PlanarIceSurface,

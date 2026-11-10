@@ -261,3 +261,96 @@ end
     @test isfinite(∂s̄) && ∂s̄ ≈ 1
     @test isfinite(∂σ²)
 end
+
+#####
+##### The condensation increment is differentiable in the stiff limit Δt·rate ≫ 1
+#####
+
+using Breeze.Microphysics.PredictedParticleProperties: compute_p3_process_rates, P3MicrophysicalState,
+                                                        tendency_ρqᶜˡ, tendency_ρqᵛ, ProcessRate
+using Breeze.Microphysics: phase_relaxation_rate
+using Breeze.Thermodynamics: ThermodynamicConstants, MoistureMassFractions, LiquidIcePotentialTemperatureState,
+                             with_temperature, saturation_specific_humidity, PlanarLiquidSurface
+
+# One P3 cell with a Gaussian subgrid distribution: the ρqᶜˡ and ρqᵛ tendencies as functions of the
+# state (qᵛ, qᶜˡ, T, σ²ᵗ, σ²ᶿ) and the condensation rate.
+function p3_subgrid_cell(rate, Δt; phase_relaxation_coefficient = nothing)
+    condensation = ExponentialRateCondensateFormation(rate, Δt)
+    subgrid = GaussianSubgridCorrelation(Float64; condensation, phase_relaxation_coefficient)
+    process_rates = ProcessRate(Float64; sink_limiting_timescale=Δt)
+    return PredictedParticlePropertiesMicrophysics(; subgrid, process_rates)
+end
+
+function condensation_increment(x, p3, constants)
+    qᵛ, qᶜˡ, T, σ²ᵗ, σ²ᶿ = x
+    ρ = 1.0
+    q = MoistureMassFractions(qᵛ, qᶜˡ, 0.0)
+    𝒰 = with_temperature(LiquidIcePotentialTemperatureState(0.0, q, 1e5, 85e3), T, constants)
+    ℳ = P3MicrophysicalState(qᶜˡ, 2e8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    𝒮 = GaussianStatistics(σ²ᵗ, σ²ᶿ, -sqrt(σ²ᵗ * σ²ᶿ) / 2)
+    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, nothing, T, 0.0, 0.0, 𝒮)
+    return (tendency_ρqᶜˡ(rates, ρ), tendency_ρqᵛ(rates, ρ))
+end
+
+reverse_gradient(f, x) = Enzyme.autodiff(Enzyme.set_strong_zero(Enzyme.Reverse), Enzyme.Const(f),
+                                         Enzyme.Active, Enzyme.Active(x))[1][1]
+central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
+
+@testset "Subgrid condensation increment: Enzyme reverse against finite differences" begin
+    Δt = 900.0
+    constants = ThermodynamicConstants(Float64)
+    T = 280.0
+    qᵛ⁺ = saturation_specific_humidity(T, 1.0, constants, PlanarLiquidSurface())
+    for α in (nothing, 1.0), x_rate in (0.1, 1.0, 10.0, 90.0, 1000.0)
+        p3 = p3_subgrid_cell(x_rate / Δt, Δt; phase_relaxation_coefficient=α)
+        for (qᵛ, qᶜˡ) in ((qᵛ⁺ - 2e-4, 1e-4), (qᵛ⁺ + 1e-5, 1e-4), (qᵛ⁺ - 5e-4, 0.0))
+            x₀ = (qᵛ, qᶜˡ, T, 1e-8, 0.02)
+            for output in 1:2, j in 1:5
+                x₀[j] == 0 && continue
+                f = v -> condensation_increment(ntuple(k -> k == j ? v : x₀[k], 5), p3, constants)[output]
+                ad = reverse_gradient(f, x₀[j])
+                fd = central_difference(f, x₀[j], 1e-5)
+                scale = max(abs(fd), 1e-12 * abs(f(x₀[j]) / x₀[j]))
+                @test isfinite(ad)
+                @test abs(ad - fd) ≤ 1e-3 * scale
+            end
+        end
+    end
+end
+
+@testset "Phase-relaxation timescale τ = 1 / (α 4π Dᵛ N r̄)" begin
+    Dᵛ, N, ρ, ρʷ, r_act = 2.5e-5, 2e8, 1.0, 1e3, 1e-6
+    τ(qˡ) = 1 / phase_relaxation_rate(1.0, Dᵛ, N, qˡ, ρ, ρʷ, r_act)
+    # The activation radius bounds τ as the liquid vanishes
+    @test τ(0.0) ≈ 1 / (4π * Dᵛ * N * r_act)
+    @test τ(-1e-5) == τ(0.0)
+    @test τ(1e-10) == τ(0.0)
+    # Typical cloudy cells: a few seconds
+    @test 1 < τ(1e-3) < τ(1e-4) < τ(0.0) < 20
+    @test τ(1e-3) ≈ 1 / (4π * Dᵛ * N * cbrt(3ρ * 1e-3 / (4π * ρʷ * N)))
+    # α scales the rate
+    @test phase_relaxation_rate(2.0, Dᵛ, N, 1e-4, ρ, ρʷ, r_act) ≈ 2 / τ(1e-4)
+    # The derivative at qˡ = 0 is finite (the floor sits inside the cube root)
+    ∂τ = only(Enzyme.autodiff(Enzyme.Forward, τ, Enzyme.Duplicated(0.0, 1.0)))
+    @test ∂τ == 0
+
+    # The default (no coefficient) keeps the constant timescale; α = 1 replaces it in the model
+    default = GaussianSubgridCorrelation(Float64)
+    @test default.phase_relaxation_coefficient === nothing
+    @test default.activation_radius == 1e-6
+    opt_in = GaussianSubgridCorrelation(Float32; phase_relaxation_coefficient=0.5, activation_radius=2e-6)
+    @test opt_in.phase_relaxation_coefficient === 0.5f0
+    @test opt_in.activation_radius === 2f-6
+
+    Δt = 60.0
+    constants = ThermodynamicConstants(Float64)
+    T = 280.0
+    qᵛ⁺ = saturation_specific_humidity(T, 1.0, constants, PlanarLiquidSurface())
+    x = (qᵛ⁺ + 1e-5, 1e-4, T, 1e-8, 0.02)
+    constant = condensation_increment(x, p3_subgrid_cell(1 / 10, Δt), constants)
+    physical = condensation_increment(x, p3_subgrid_cell(1 / 10, Δt; phase_relaxation_coefficient=1.0), constants)
+    @test all(isfinite, physical)
+    @test physical[1] != constant[1]
+    @test physical[1] > 0
+    @test physical[2] ≈ -physical[1]
+end
