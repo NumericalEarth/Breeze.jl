@@ -597,6 +597,15 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
 - `scratch`: `du`, `dl`, `d` on levels.
 """
 @inline function shoc_column!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
+    shoc_turbulence!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
+    shoc_cloud!(i, j, Nz, p, state, host, surface, diagnostics)
+    return nothing
+end
+
+# The first part of the step: boundary layer depth, length scale, TKE, implicit diffusion, second
+# and third moments. Split from `shoc_cloud!` so that each part can run as its own kernel, with
+# fewer registers per thread.
+@inline function shoc_turbulence!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
     thetal, qw, u_wind, v_wind, tke = state.thetal, state.qw, state.u_wind, state.v_wind, state.tke
     zt, zi, pres, pdel = host.zt_grid, host.zi_grid, host.pres, host.pdel
     thv, w_field, inv_exner = host.thv, host.w_field, host.inv_exner
@@ -913,6 +922,26 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
     @inbounds begin
         w3[i, j, 1] = clip_third_moment(p, interpolate_to_interface(i, j, 1, Nz, zt, zi, w_sec, w_sec_min), zero(FT))
         w3[i, j, Nz+1] = clip_third_moment(p, interpolate_to_interface(i, j, Nz+1, Nz, zt, zi, w_sec, w_sec_min), zero(FT))
+    end
+
+    return nothing
+end
+
+# The second part of the step: the assumed PDF (subgrid cloud and buoyancy flux), check_tke and the
+# boundary layer depth of the updated state.
+@inline function shoc_cloud!(i, j, Nz, p, state, host, surface, diagnostics)
+    thetal, qw, u_wind, v_wind, tke = state.thetal, state.qw, state.u_wind, state.v_wind, state.tke
+    zt, zi, pres, w_field = host.zt_grid, host.zi_grid, host.pres, host.w_field
+    wthv_sec, shoc_ql, shoc_cldfrac, shoc_ql2 = diagnostics.wthv_sec, diagnostics.shoc_ql, diagnostics.shoc_cldfrac, diagnostics.shoc_ql2
+    w_sec, wqls_sec, w3 = diagnostics.w_sec, diagnostics.wqls_sec, diagnostics.w3
+    thl_sec, qw_sec, qwthl_sec = diagnostics.thl_sec, diagnostics.qw_sec, diagnostics.qwthl_sec
+    wthl_sec, wqw_sec = diagnostics.wthl_sec, diagnostics.wqw_sec
+
+    @inbounds begin
+        wthl_sfc = surface.wthl_sfc[i, j, 1]
+        wqw_sfc = surface.wqw_sfc[i, j, 1]
+        uw_sfc = surface.uw_sfc[i, j, 1]
+        vw_sfc = surface.vw_sfc[i, j, 1]
     end
 
     #####

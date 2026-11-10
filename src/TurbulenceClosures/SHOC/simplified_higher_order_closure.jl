@@ -348,19 +348,34 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-One SHOC step of every column of the model: load the specific state from the prognostic
-densities, step SHOC, and store θˡ, qᵗ and turbulent kinetic energy back as densities. One thread
-per column, with every vertical loop inside the thread.
+The first half of a SHOC step of every column of the model: load the specific state from the
+prognostic densities and take `shoc_turbulence!`. One thread per column, with every vertical
+loop inside the thread. `_step_shoc_cloud!` completes the step; the step is split in
+two kernels because each half needs fewer registers than the whole.
 """
-@kernel function _step_shoc!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+@kernel function _step_shoc_turbulence!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     Nz = size(grid, 3)
 
     load_shoc_column!(i, j, grid, closure_ij, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
 
-    shoc_column!(i, j, Nz, Δt, closure_ij.parameters,
-                 fields.state, fields.host, fields.surface, fields.diagnostics, fields.scratch)
+    shoc_turbulence!(i, j, Nz, Δt, closure_ij.parameters,
+                     fields.state, fields.host, fields.surface, fields.diagnostics, fields.scratch)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The second half of a SHOC step of every column: `shoc_cloud!`, then store θˡ, qᵗ and turbulent
+kinetic energy back as densities.
+"""
+@kernel function _step_shoc_cloud!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+    i, j = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    Nz = size(grid, 3)
+
+    shoc_cloud!(i, j, Nz, closure_ij.parameters, fields.state, fields.host, fields.surface, fields.diagnostics)
 
     store_shoc_column!(i, j, grid, fields, ρ, ρθ, ρqᵗ, ρe)
 end
@@ -399,10 +414,12 @@ function launch_shoc_columns!(arch, grid, args...)
     dev = device(arch)
     if dev isa KernelAbstractions.GPU
         Nx, Ny, _ = size(grid)
-        kernel! = _step_shoc!(dev, shoc_gpu_workgroup(Nx, Ny), (Nx, Ny))
-        kernel!(grid, args...)
+        workgroup = shoc_gpu_workgroup(Nx, Ny)
+        _step_shoc_turbulence!(dev, workgroup, (Nx, Ny))(grid, args...)
+        _step_shoc_cloud!(dev, workgroup, (Nx, Ny))(grid, args...)
     else
-        launch!(arch, grid, :xy, _step_shoc!, grid, args...)
+        launch!(arch, grid, :xy, _step_shoc_turbulence!, grid, args...)
+        launch!(arch, grid, :xy, _step_shoc_cloud!, grid, args...)
     end
     return nothing
 end
