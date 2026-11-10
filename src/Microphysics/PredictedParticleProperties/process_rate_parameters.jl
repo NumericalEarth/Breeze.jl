@@ -22,7 +22,7 @@ struct NumericalFloors{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct the numerical floors shared by the P3 process rates: the smallest value each
 quantity is allowed to take before it enters a division or a logarithm, so that a
@@ -206,6 +206,10 @@ struct ProcessRate{FT, VE, LF, N}
     maximum_rime_impact :: FT                # ℂʳⁱᵐᵉ₇ [-]
     minimum_riming_supercooling :: FT        # smallest T₀ - T admitted in Ri [K]
     unrimed_rime_density :: FT               # ℂʳⁱᵐᵉ₈ [kg/m³]
+    rime_density_constant_coefficient :: FT  # ℂʳⁱᵐᵉ₉ [kg/m³]
+    rime_density_linear_coefficient :: FT    # ℂʳⁱᵐᵉ₁₀ [kg/m³]
+    rime_density_quadratic_coefficient :: FT # ℂʳⁱᵐᵉ₁₁ [kg/m³]
+    rime_density_transition_impact :: FT     # ℂʳⁱᵐᵉ₁₂ [-]
 
     # Shedding
     shed_drop_mass :: FT                     # ℂˢʰᵉᵈ₁ [kg] (cloud/wet-growth shedding)
@@ -328,7 +332,7 @@ struct ProcessRate{FT, VE, LF, N}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct process rate parameters with default values from P3 literature.
 
@@ -343,6 +347,14 @@ while `splintering_crystal_mass` uses `splintering_crystal_density`, which defau
 These parameters control the rates of all microphysical processes:
 autoconversion, accretion, aggregation, riming, melting, evaporation,
 deposition, nucleation, and freezing.
+
+The fresh-rime density polynomial has configurable `rime_density_constant_coefficient`,
+`rime_density_linear_coefficient`, and `rime_density_quadratic_coefficient` (all in kg/m³,
+since the impact parameter is dimensionless). `rime_density_transition_impact` selects
+the start of its linear extension. The extension is continuous and reaches
+`maximum_rime_density` at `maximum_rime_impact`; its intercept and slope are derived,
+not independent parameters. The impact bounds must satisfy
+`minimum_rime_impact ≤ rime_density_transition_impact < maximum_rime_impact`.
 
 Calibratable empirical values are denoted ``\\mathbb{C}`` in the theory. When a
 kernel unpacks one into a formula-local variable, the implementation uses the matching
@@ -465,6 +477,12 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         maximum_rime_impact = 12.0,
         minimum_riming_supercooling = 0.001,
         unrimed_rime_density = 400.0,
+        # Cober–List polynomial in SI density units; the upper branch connects
+        # its transition value to maximum_rime_density at maximum_rime_impact.
+        rime_density_constant_coefficient = 51.0,
+        rime_density_linear_coefficient = 114.0,
+        rime_density_quadratic_coefficient = -5.5,
+        rime_density_transition_impact = 8.0,
 
         # Shedding. Every path sheds the same 1 mm drop, so both masses are derived
         # from one diameter and the configured liquid density rather than carried as
@@ -580,6 +598,9 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
     coupled_sink_limiting_iterations > 0 ||
         throw(ArgumentError("coupled_sink_limiting_iterations must be positive"))
 
+    FT(minimum_rime_impact) <= FT(rime_density_transition_impact) < FT(maximum_rime_impact) ||
+        throw(ArgumentError("rime impact bounds must satisfy minimum_rime_impact ≤ rime_density_transition_impact < maximum_rime_impact"))
+
     N = Int(coupled_sink_limiting_iterations)
 
     return ProcessRate{FT, typeof(vapor_excess), typeof(liquid_fraction), N}(
@@ -618,6 +639,10 @@ function ProcessRate(FT::DataType = Oceananigans.defaults.FloatType;
         FT(maximum_rime_impact),
         FT(minimum_riming_supercooling),
         FT(unrimed_rime_density),
+        FT(rime_density_constant_coefficient),
+        FT(rime_density_linear_coefficient),
+        FT(rime_density_quadratic_coefficient),
+        FT(rime_density_transition_impact),
         FT(shed_drop_mass),
         FT(shed_drop_mass_liqfrac),
         FT(wet_growth_hydrometeor_threshold),

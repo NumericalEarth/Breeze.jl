@@ -480,8 +480,8 @@ end
 
     # With a uniform synthetic content and enthalpy (no sensible heat moves between cells), the
     # heat the post-solve step moves is χ times the mass the solve moved, cell by cell (the
-    # anelastic coupling ratio is one), outflow through the bottom included, so the column loses
-    # deficit with the rain that leaves.
+    # anelastic continuity-to-total density ratio is one), outflow through the bottom included,
+    # so the column loses deficit with the rain that leaves.
     χ = FT(-2500)
     uniform_content = UniformContent(χ)
     ρθ = model.formulation.potential_temperature_density
@@ -728,7 +728,7 @@ end
     h = [cₖ.h[1] for cₖ in c]
     β = [cₖ.∂φ∂h for cₖ in c]
     qᵈ = column(continuity_density(model.dynamics)) ./ column(total_density(model.dynamics))
-    Sθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, β; coupling = qᵈ)
+    Sθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, χ, h, β; density_ratio = qᵈ)
     tolerance = sqrt(eps(FT)) * maximum(abs.(Sθ_expected))
     @test Sθ ≈ Sθ_expected
 
@@ -1105,7 +1105,7 @@ end
     enthalpy = [constants.liquid.heat_capacity * T[k] - Breeze.Thermodynamics.absolute_zero_latent_heat(constants, constants.liquid) for k in 1:Nz]
     β = [heating_response(:LiquidIcePotentialTemperature, T[k], q[k], p[k], pˢᵗ; fixed_volume=true) for k in 1:Nz]
     expected(renormalize) = expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, content(; renormalize), enthalpy, β;
-                                                            coupling = qᵈ)
+                                                            density_ratio = qᵈ)
 
     @test maximum(abs.(G)) > 0
     @test G ≈ expected(true)
@@ -1497,8 +1497,8 @@ end
     for equilibrium in (WarmPhaseEquilibrium(), MixedPhaseEquilibrium(FT)), (qᵛ, qᶜˡ, qʳ) in cases
         microphysics = OneMomentCloudMicrophysics(FT; cloud_formation=SaturationAdjustment(FT; equilibrium))
         ℳ = equilibrium isa WarmPhaseEquilibrium ?
-            BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState(FT(qᶜˡ), FT(qʳ)) :
-            BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(FT(qᶜˡ), zero(FT), FT(qʳ), zero(FT))
+            BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState(FT(qᶜˡ), FT(qʳ), zero(FT)) :
+            BreezeCloudMicrophysicsExt.MixedPhaseOneMomentState(FT(qᶜˡ), zero(FT), FT(qʳ), zero(FT), zero(FT))
         q = AM.moisture_fractions(microphysics, ℳ, qᵛ + qᶜˡ)
         𝒰 = TD.LiquidIcePotentialTemperatureState(T, q, p, p)
 

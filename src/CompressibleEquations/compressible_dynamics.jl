@@ -65,7 +65,7 @@ struct AutoReference end
 Base.summary(::AutoReference) = "auto (standard-atmosphere reference)"
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `CompressibleDynamics`. The density and pressure fields are materialized
 later in the model constructor.
@@ -223,7 +223,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Materialize a stub `CompressibleDynamics` into a full dynamics object with density and pressure fields.
 """
@@ -357,7 +357,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the dynamics pressure for `CompressibleDynamics`.
 For compressible dynamics, there is no background/anomaly decomposition - returns the
@@ -366,7 +366,7 @@ prognostic pressure field, computed diagnostically from the equation of state.
 AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the pressure anomaly for `CompressibleDynamics`.
 For compressible dynamics, there is no decomposition - returns zero.
@@ -374,7 +374,7 @@ For compressible dynamics, there is no decomposition - returns zero.
 AtmosphereModels.pressure_anomaly(dynamics::CompressibleDynamics) = 0
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the total pressure for `CompressibleDynamics`, in Pa.
 """
@@ -394,14 +394,14 @@ AtmosphereModels.total_pressure(dynamics::CompressibleDynamics) = dynamics.press
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the prognostic density field for `CompressibleDynamics`.
 """
 AtmosphereModels.continuity_density(dynamics::CompressibleDynamics) = dynamics.dry_density
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `CompressibleDynamics` identical to `dynamics` but with its `time_discretization`
 replaced. Every field (densities, pressure, reference and terrain states) is shared by
@@ -421,7 +421,7 @@ with_time_discretization(dynamics::CompressibleDynamics, time_discretization) =
                          dynamics.contravariant_vertical_momentum)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a copy of `time_discretization` with its upper sponge removed. The adiabatic-balance
 excursion must be reversible, and the sponge (like divergence damping) is an irreversible term;
@@ -495,7 +495,7 @@ AtmosphereModels.prognostic_dynamics_field_names(::CompressibleDynamics) = (:ρ�
 AtmosphereModels.additional_dynamics_field_names(::CompressibleDynamics) = ()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return prognostic fields specific to compressible dynamics.
 Returns the density field as a prognostic variable.
@@ -503,7 +503,7 @@ Returns the density field as a prognostic variable.
 AtmosphereModels.dynamics_prognostic_fields(dynamics::CompressibleDynamics) = (; ρᵈ=dynamics.dry_density)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a standard surface pressure for boundary condition regularization.
 For compressible dynamics, uses the standard atmospheric pressure (101325 Pa).
@@ -511,7 +511,7 @@ For compressible dynamics, uses the standard atmospheric pressure (101325 Pa).
 AtmosphereModels.base_pressure(dynamics::CompressibleDynamics) = dynamics.base_pressure
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the reference pressure at the bottom face of each column, as a 2D field. Requires a
 materialized reference state: with `reference_state = nothing` there is no reference atmosphere
@@ -527,7 +527,7 @@ compressible_surface_pressure(reference_state) =
                          no materialized reference-state surface pressure"))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the standard pressure for potential temperature calculations.
 """
@@ -536,7 +536,7 @@ AtmosphereModels.standard_pressure(dynamics::CompressibleDynamics) = dynamics.st
 AtmosphereModels.dynamics_reference_state(dynamics::CompressibleDynamics) = dynamics.reference_state
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 `BulkDrag` under `CompressibleDynamics` requires the user to supply
 `surface_temperature` explicitly. Unlike `AnelasticDynamics`, compressible
@@ -556,7 +556,7 @@ AtmosphereModels.default_drag_surface_temperature(::CompressibleDynamics, grid, 
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `nothing` for `CompressibleDynamics` - no pressure solver is needed.
 Pressure is computed directly from the equation of state.
@@ -564,7 +564,7 @@ Pressure is computed directly from the equation of state.
 AtmosphereModels.dynamics_pressure_solver(dynamics::CompressibleDynamics, grid) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the default timestepper for `CompressibleDynamics` based on its `time_discretization`.
 
@@ -635,7 +635,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the pressure field for potential temperature diagnostics.
 For compressible dynamics, uses the actual pressure field.
@@ -643,15 +643,7 @@ For compressible dynamics, uses the actual pressure field.
 AtmosphereModels.Diagnostics.dynamics_pressure_for_potential_temperature(dynamics::CompressibleDynamics) = dynamics.pressure
 
 """
-$(TYPEDSIGNATURES)
-
-Return the density field for potential temperature diagnostics.
-For compressible dynamics, uses the diagnosed total air density (the moisture fractions need total ρ).
-"""
-AtmosphereModels.Diagnostics.dynamics_density_for_potential_temperature(dynamics::CompressibleDynamics) = dynamics.total_density
-
-"""
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the standard pressure for potential temperature diagnostics.
 """

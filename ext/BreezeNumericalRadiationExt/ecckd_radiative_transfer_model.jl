@@ -125,7 +125,7 @@ effective_radius_model(FT, model) =
                         "received $(summary(model)). Variable effective radii are a planned follow-up."))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a full-spectrum `RadiativeTransferModel` on `grid` with the ecCKD gas optics of
 `optics::EcCKDOptics`, solved column by column by NumericalRadiation.jl. Radiation is solved

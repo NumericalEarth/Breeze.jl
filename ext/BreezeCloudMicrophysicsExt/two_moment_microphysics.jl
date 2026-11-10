@@ -51,7 +51,7 @@ using CloudMicrophysics.Parameters:
 #####
 
 """
-    default_aerosol_activation(FT = Float64; τⁿᵘᶜ = 1)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create a default `AerosolActivation` representing a typical continental aerosol population.
 
@@ -88,15 +88,16 @@ microphysics = TwoMomentCloudMicrophysics(aerosol_activation = nothing)
 ```
 """
 function default_aerosol_activation(FT::DataType = Float64; τⁿᵘᶜ = 1)
-    # Default continental aerosol mode using κ-Köhler theory
+    # Default continental aerosol mode using κ-Köhler theory, in the float type FT so that
+    # the activated fraction does not promote Float32 tendencies to Float64
     # Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
-    r_dry = 0.05e-6           # 50 nm dry radius
-    stdev = 2.0               # geometric standard deviation
-    Nᵃ₀ = 100e6               # 100 cm⁻³
-    vol_mix_ratio = (1.0,)    # single component
-    mass_mix_ratio = (1.0,)
-    molar_mass = (0.132,)     # ammonium sulfate ~132 g/mol
-    kappa = (0.5,)            # hygroscopicity
+    r_dry = FT(0.05e-6)          # 50 nm dry radius
+    stdev = FT(2)                # geometric standard deviation
+    Nᵃ₀ = FT(100e6)              # 100 cm⁻³
+    vol_mix_ratio = (FT(1),)     # single component
+    mass_mix_ratio = (FT(1),)
+    molar_mass = (FT(0.132),)    # ammonium sulfate ~132 g/mol
+    kappa = (FT(0.5),)           # hygroscopicity
 
     mode = CMAM.Mode_κ(r_dry, stdev, Nᵃ₀, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
     aerosol_distribution = CMAM.AerosolDistribution((mode,))
@@ -141,12 +142,7 @@ end
 Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
 
 """
-    two_moment_cloud_microphysics_categories(FT = Oceananigans.defaults.FloatType;
-                                             warm_processes = SB2006(FT),
-                                             air = AirProperties(FT),
-                                             cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
-                                             rain_fall_velocity = SB2006VelType(FT),
-                                             aerosol_activation = default_aerosol_activation(FT))
+$(TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN)
 
 Construct `TwoMomentCategories` with default [Seifert-Beheng 2006](@cite SeifertBeheng2006)
 parameters and aerosol activation.
@@ -222,10 +218,7 @@ end
 end
 
 """
-    TwoMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
-                               cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
-                               categories = two_moment_cloud_microphysics_categories(FT),
-                               precipitation_boundary_condition = nothing)
+$(TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN)
 
 Return a `TwoMomentCloudMicrophysics` microphysics scheme for warm-rain precipitation
 using the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) two-moment parameterization.
@@ -381,6 +374,10 @@ function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, b
     return (; zip(two_moment_center_field_names, center_fields)..., wᶜˡ, wⁿᶜˡ, wʳ, wⁿʳ)
 end
 
+# Diagnostic liquid (cloud liquid + rain), used e.g. by `set_to_mean!`
+AtmosphereModels.liquid_mass_fraction(::WPNE2M, model) = model.microphysical_fields.qˡ
+AtmosphereModels.ice_mass_fraction(::WPNE2M, model) = nothing
+
 #####
 ##### Update microphysical fields (diagnostics + terminal velocities)
 #####
@@ -417,17 +414,18 @@ end
     # Local copy of CM2.cloud_terminal_velocity with 2//3 → FT(2/3)
     # so that Rational literals don't appear inside Reactant-traced code.
     FT = eltype(q_liq)
-    ϵN = CloudMicrophysics.Utilities.ϵ_numerics_2M_N(FT)
-    ϵM = CloudMicrophysics.Utilities.ϵ_numerics_2M_M(FT)
+    # CloudMicrophysics 0.47 uses one smallness threshold, `cbrt(floatmin(FT))`,
+    # for both the mass and number variables of the 2-moment scheme.
+    ϵ = CloudMicrophysics.Utilities.ϵ_numerics(FT)
 
     (; νc, μc) = pdf_c
     (; Bc) = CM2.pdf_cloud_parameters_mass(pdf_c, q_liq, ρₐ, N_liq)
 
     prefactor = FT(1 / 18) * (6 / ρw / π)^FT(2 / 3) * (ρw / ρₐ - 1) * grav / ν_air
 
-    vt0 = ifelse(N_liq < ϵN, FT(0),
+    vt0 = ifelse(N_liq < ϵ, FT(0),
         prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(2 / 3)) / N_liq)
-    vt1 = ifelse(q_liq < ϵM, FT(0),
+    vt1 = ifelse(q_liq < ϵ, FT(0),
         prefactor * CloudMicrophysics.DistributionTools.generalized_gamma_Mⁿ(νc, μc, Bc, N_liq, FT(5 / 3)) / ρₐ / q_liq)
 
     return (vt0, vt1)
@@ -564,7 +562,7 @@ end
                                             ρ, ℳ, 𝒰, constants)
 
     # Condensation on existing droplets, budget reduced by activation
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
     Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
     Sᶜᵒⁿᵈ_eff = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
@@ -761,7 +759,7 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
 end
 
 """
-    aerosol_activation_mass_tendency(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the cloud liquid mass tendency from aerosol activation.
 
@@ -821,7 +819,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     # Compute radius: rᵃᶜᵗ = 2A / (3𝒮), capped at 1 μm (1e-6 m)
     # Use rⁿᵘᶜ as fallback when 𝒮 is negligible (no supersaturation) or no activation
     is_activating = (dNᶜˡ_act > eps(FT)) & (𝒮 > eps(FT))
-    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(𝒮, eps(FT)))), rⁿᵘᶜ)
+    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(𝒮, eps(FT)))), FT(rⁿᵘᶜ))
 
     # Mass of a single activated droplet [kg]
     # m = (4π/3) * r³ * ρᴸ
@@ -835,7 +833,7 @@ Mass tendency for cloud liquid [kg/kg/s]
 end
 
 """
-    aerosol_activated_fraction(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the fraction of aerosol that activates given current thermodynamic conditions.
 Uses the maximum supersaturation to determine which aerosol modes activate.
@@ -877,7 +875,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         # Guard against log(0) or log(negative): when Sᵐᵃˣ ≈ 0, no activation occurs
         Sᵐᵃˣ_safe = max(eps(FT), Sᵐᵃˣ)
         Sᶜʳⁱᵗ_safe = max(eps(FT), Sᶜʳⁱᵗ)
-        ϕ = 2 * log(Sᶜʳⁱᵗ_safe / Sᵐᵃˣ_safe) / 3 / sqrt(2) / log(mode.stdev)
+        ϕ = 2 * log(Sᶜʳⁱᵗ_safe / Sᵐᵃˣ_safe) / 3 / sqrt(FT(2)) / log(mode.stdev)
         fᵃᶜᵗ = (1 - erf(ϕ)) / 2
 
         Nᵃᶜᵗ += fᵃᶜᵗ * Nᵐᵒᵈᵉ
@@ -945,7 +943,7 @@ function AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M
             G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ,
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AtmosphereModels.specific_prognostic_moisture(model),
-            model.microphysical_fields, AtmosphereModels.transport_velocities(model))
+            model.microphysical_fields, model.velocities)
 
     return nothing
 end

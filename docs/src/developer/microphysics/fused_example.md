@@ -112,8 +112,8 @@ Otherwise the override below is sufficient for `AtmosphereModel`.
 ## Writing the Fused Kernel
 
 !!! warning "Non-public internals"
-    The kernel below calls four `Breeze.AtmosphereModels` symbols that are not part of
-    the public API: `continuity_density`, `grid_moisture_fractions`,
+    Besides the exported `total_density`, the kernel below calls three
+    `Breeze.AtmosphereModels` symbols that `Breeze` does not export: `grid_moisture_fractions`,
     `diagnose_thermodynamic_state`, and `specific_prognostic_moisture`. They are stable
     enough to override against today, but the canonical reference is `MPNE1M`'s override
     in `ext/BreezeCloudMicrophysicsExt/one_moment_microphysics.jl` — track it if the
@@ -131,7 +131,7 @@ using KernelAbstractions: @kernel, @index
                                                             microphysical_fields)
     i, j, k = @index(Global, NTuple)
 
-    ρ_field = Breeze.AtmosphereModels.continuity_density(dynamics)
+    ρ_field = total_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
 

@@ -43,10 +43,12 @@ cloud formation in warm-phase (liquid only) simulations.
 # Fields
 - `qᶜˡ`: Cloud liquid mixing ratio (kg/kg)
 - `qʳ`: Rain mixing ratio (kg/kg)
+- `w`: Vertical velocity (m/s), used by the rain autoconversion
 """
 struct WarmPhaseOneMomentState{FT} <: AbstractMicrophysicalState{FT}
     qᶜˡ :: FT  # cloud liquid mixing ratio
     qʳ  :: FT  # rain mixing ratio
+    w   :: FT  # vertical velocity
 end
 
 """
@@ -63,12 +65,14 @@ cloud formation in mixed-phase simulations.
 - `qᶜⁱ`: Cloud ice mixing ratio (kg/kg)
 - `qʳ`: Rain mixing ratio (kg/kg)
 - `qˢⁿ`: Snow mixing ratio (kg/kg)
+- `w`: Vertical velocity (m/s), used by the rain autoconversion
 """
 struct MixedPhaseOneMomentState{FT} <: AbstractMicrophysicalState{FT}
     qᶜˡ :: FT  # cloud liquid mixing ratio
     qᶜⁱ :: FT  # cloud ice mixing ratio
     qʳ  :: FT  # rain mixing ratio
     qˢⁿ :: FT  # snow mixing ratio
+    w   :: FT  # vertical velocity
 end
 
 struct OneMomentCloudMicrophysicsCategories{P, V, FT}
@@ -84,7 +88,7 @@ struct TemperatureDependentIceFormation{FT, F} <: AbstractCondensateFormation
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return one-moment categories backed by CloudMicrophysics' unified
 `Microphysics1MParams` container.
@@ -124,7 +128,7 @@ const CM1MCategories = OneMomentCloudMicrophysicsCategories{<:Microphysics1MPara
 const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `OneMomentCloudMicrophysics` microphysics scheme for warm-rain and mixed-phase precipitation.
 
@@ -203,8 +207,6 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
         cloud_formation = NonEquilibriumCloudFormation(liquid, ice)
     end
 
-    validate_rain_autoconversion(categories.parameters.process_params.rain_autoconversion)
-
     return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition, negative_moisture_correction)
 end
 
@@ -230,26 +232,11 @@ function condensate_formation_from_option(option, params, reference)
 end
 
 # The Kessler rain autoconversion threshold and timescale blend between quiescent ("slow") and
-# convective ("fast") values with the vertical velocity `thermo.w`. We evaluate it at rest
-# (`w = 0`), which is exact only when the slow and fast values are equal (the defaults), so
-# `validate_rain_autoconversion` rejects parameters whose rate would depend on `w`.
-# TODO: carry the vertical velocity in the one-moment microphysical states (as the two-moment
-# state already does), pass it here, and remove `validate_rain_autoconversion`.
-validate_rain_autoconversion(parameters) = nothing
-
-function validate_rain_autoconversion(parameters::KesslerAcnv)
-    if parameters.τ_slow != parameters.τ_fast || parameters.q_threshold_slow != parameters.q_threshold_fast
-        throw(ArgumentError("Velocity-dependent Kessler rain autoconversion is not supported: " *
-                            "OneMomentCloudMicrophysics evaluates autoconversion at rest, so the " *
-                            "rain autoconversion parameters must have τ_slow == τ_fast and " *
-                            "q_threshold_slow == q_threshold_fast, got " * prettysummary(parameters)))
-    end
-    return nothing
-end
-
-@inline function liquid_autoconversion(parameters, qᶜˡ)
+# convective ("fast") values with the vertical velocity `w` (see `CloudMicrophysics.Parameters.KesslerAcnv`).
+# With the default parameters the slow and fast values are equal and the rate does not depend on `w`.
+@inline function liquid_autoconversion(parameters, qᶜˡ, w)
     micro = (; q_lcl = qᶜˡ)
-    thermo = (; w = zero(qᶜˡ))
+    thermo = (; w)
     option = parameters.processes.rain_autoconversion
     return conv_q_lcl_to_q_rai(option, parameters, nothing, micro, thermo)
 end
@@ -490,19 +477,19 @@ const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 # For non-equilibrium: cloud condensate comes from prognostic μ
 
 # Warm-phase saturation adjustment: cloud liquid from thermodynamic state, rain from prognostic
-# The velocities argument is required for interface compatibility but not used by one-moment schemes.
+# The vertical velocity is kept for the rain autoconversion.
 @inline function AM.microphysical_state(bμp::WP1M, ρ, μ, 𝒰, velocities)
     q = 𝒰.moisture_mass_fractions
     qʳ = μ.ρqʳ / ρ
     qᶜˡ = max(zero(qʳ), q.liquid - qʳ)  # cloud liquid = total liquid - rain
-    return WarmPhaseOneMomentState(qᶜˡ, qʳ)
+    return WarmPhaseOneMomentState(qᶜˡ, qʳ, velocities.w)
 end
 
 # Warm-phase non-equilibrium: all from prognostic μ
 @inline function AM.microphysical_state(bμp::WPNE1M, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
     qʳ = μ.ρqʳ / ρ
-    return WarmPhaseOneMomentState(qᶜˡ, qʳ)
+    return WarmPhaseOneMomentState(qᶜˡ, qʳ, velocities.w)
 end
 
 # Mixed-phase saturation adjustment: cloud condensate from thermodynamic state
@@ -512,7 +499,7 @@ end
     qˢⁿ = μ.ρqˢⁿ / ρ
     qᶜˡ = max(zero(qʳ), q.liquid - qʳ)  # cloud liquid = total liquid - rain
     qᶜⁱ = max(zero(qˢⁿ), q.ice - qˢⁿ)     # cloud ice = total ice - snow
-    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
+    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ, velocities.w)
 end
 
 # Mixed-phase non-equilibrium: all from prognostic μ
@@ -521,7 +508,7 @@ end
     qᶜⁱ = μ.ρqᶜⁱ / ρ
     qʳ = μ.ρqʳ / ρ
     qˢⁿ = μ.ρqˢⁿ / ρ
-    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
+    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ, velocities.w)
 end
 
 #####
@@ -610,6 +597,11 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
 
     return (; zip(center_names, center_fields)..., wʳ)
 end
+
+# Diagnostic liquid (cloud liquid + rain) and ice (cloud ice + snow), used e.g. by `set_to_mean!`
+AM.liquid_mass_fraction(::OneMomentLiquidRain, model) = model.microphysical_fields.qˡ
+AM.ice_mass_fraction(::WarmPhase1M, model) = nothing
+AM.ice_mass_fraction(::MixedPhase1M, model) = model.microphysical_fields.qⁱ
 
 #####
 ##### update_microphysical_auxiliaries! for one-moment schemes
@@ -848,15 +840,21 @@ end
 # where qᵛ⁺ is the saturation specific humidity, τˡ is the relaxation timescale,
 # and Γˡ is a thermodynamic adjustment factor that accounts for latent heating:
 #
-#   Γˡ = 1 + (ℒˡ / cᵖᵐ) ⋅ dqᵛ⁺/dT
+#   Γˡ = 1 + dqᵛ⁺/dqᶜˡ = 1 + (dT/dqᶜˡ) ⋅ ∂qᵛ⁺/∂T + ∂qᵛ⁺/∂qᶜˡ
 #
 # This factor arises because condensation releases latent heat, which increases
 # temperature and hence increases the saturation specific humidity, creating a
 # negative feedback that slows the approach to equilibrium.
 #
-# The derivative dqᵛ*/dT follows from the Clausius-Clapeyron equation:
+# The saturation derivative follows the Clausius-Clapeyron equation at fixed composition.
+# With qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T),
 #
-#   dqᵛ⁺/dT = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T)
+#   fixed pressure (anelastic, parcel): ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ ℒˡ / (Rᵛ T²),  ∂qᵛ⁺/∂qᶜˡ = -qᵛ⁺ Rᵛ / Rᵐ
+#   fixed density (compressible):       ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T),  ∂qᵛ⁺/∂qᶜˡ = 0
+#
+# The heating response dT/dqᶜˡ follows the state's conserved enthalpy at fixed pressure,
+# or its θ–density relation and temperature solver at fixed density; see
+# `Microphysics.saturation_response`.
 #
 # See Morrison and Grabowski (2008, JAS), Appendix A, especially Eq. (A3).
 #####
@@ -890,6 +888,19 @@ end
     return ifelse(demand > q⁺, q⁺ / denominator, one(demand))
 end
 
+#####
+##### The two densities of the one-moment tendencies
+#####
+#
+# `ρ` is the total density that weights the prognostic mass fractions (the reference density ρᵣ on
+# the anelastic core). It converts specific rates S into the density tendencies ρ S and, since the
+# prognostic precipitation content is ρq, it also sets the size distributions behind every
+# collection, evaporation and melting rate, as it does for the sedimentation velocities written in
+# `update_microphysical_auxiliaries!`. Saturation alone is evaluated at the thermodynamic state
+# density ρᵗʰ = density(𝒰, constants): qᵛ⁺ = pᵛ⁺ / (ρᵗʰ Rᵛ T). On the compressible core the two
+# coincide. On the anelastic core ρᵣ is a dry profile about 1% heavier than moist air at qᵛ = 16 g/kg,
+# so saturating on ρ places qᵛ⁺ about 1% too low and condenses water in subsaturated air.
+
 # State-based rain tendency for WP1M
 @inline function AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
@@ -902,9 +913,10 @@ end
     rain_velocity = parameters.terminal_velocity.rain
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
+    ρᵗʰ = density(𝒰, constants)  # thermodynamic state density, for saturation only
 
     # Autoconversion: cloud liquid → rain
-    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
+    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ, ℳ.w)
 
     # Accretion: cloud liquid captured by falling rain
     Sᵃᶜᶜ = cloud_precipitation_accretion(
@@ -982,6 +994,7 @@ end
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
+    ρᵗʰ = density(𝒰, constants)  # thermodynamic state density, for saturation only
 
     # Saturation uses the thermodynamic state density; the total density ρ weights the
     # tendencies (ρᵣ on the anelastic core).
@@ -989,7 +1002,7 @@ end
 
     # Condensation: vapor ↔ cloud liquid
     qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
@@ -1008,7 +1021,7 @@ end
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
 
     # Collection: cloud liquid → rain (does not involve vapor)
-    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
+    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ, ℳ.w)
     Sᵃᶜᶜ = cloud_precipitation_accretion(
         process_params.cloud_liquid_rain_accretion,
         cloud_liquid,
@@ -1057,8 +1070,8 @@ end
 # Every process that moves mass into or out of rain and snow, evaluated identically for the
 # non-equilibrium (MPNE1M) and saturation-adjustment (MP1M) schemes. Vapor ↔ cloud exchange is not
 # here: MPNE1M relaxes it prognostically and saturation adjustment owns it for MP1M.
-# The total density `ρ` weights the tendencies and the precipitation size distributions; the
-# supersaturation is evaluated at the thermodynamic state density `ρᵗʰ`.
+# `ρ` sets the precipitation size distributions and `ρᵗʰ` the supersaturation (see "The two
+# densities of the one-moment tendencies").
 
 @inline function mixed_phase_precipitation_rates(bμp, ρ, ρᵗʰ, ℳ::MixedPhaseOneMomentState, q, T, Tᶠ, constants)
     parameters = bμp.categories.parameters
@@ -1085,7 +1098,7 @@ end
     Sᵐᵉˡᵗ = snow_melt_rate(processes.snow_melt, snow, snow_velocity, air, qˢⁿ, ρ, T, Tᶠ, constants)
 
     # Collection: cloud liquid → rain
-    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ)
+    Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ, ℳ.w)
     Sᵃᶜᶜ = cloud_precipitation_accretion(process_params.cloud_liquid_rain_accretion,
                                          cloud_liquid, rain, rain_velocity, qᶜˡ, qʳ, ρ)
 
@@ -1153,6 +1166,7 @@ end
     Tᶠ = categories.freezing_temperature
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
+    ρᵗʰ = density(𝒰, constants)  # thermodynamic state density, for saturation only
 
     # Saturation uses the thermodynamic state density; the total density ρ weights the
     # tendencies (ρᵣ on the anelastic core).
@@ -1160,14 +1174,14 @@ end
 
     # Condensation: vapor ↔ cloud liquid
     qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, 𝒰, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Deposition: vapor ↔ cloud ice
     # Suppress warm cloud-ice growth, matching CloudMicrophysics' INP limiter.
     qᵛ⁺ⁱ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarIceSurface())
     τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories, qᶜⁱ, T, qᵛ, qᵛ⁺ⁱ)
-    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
+    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, 𝒰, τᶜⁱ, constants)
     Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
     Sᵈᵉᵖ = ifelse((T > Tᶠ) & (Sᵈᵉᵖ > 0), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
 
@@ -1284,7 +1298,7 @@ end
 @kernel function _compute_mpne1m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢⁿ,
                                              grid, microphysics, dynamics, formulation,
                                              constants, specific_prognostic_moisture,
-                                             microphysical_fields)
+                                             microphysical_fields, velocities)
     i, j, k = @index(Global, NTuple)
 
     ρ_field = AM.total_density(dynamics)
@@ -1295,13 +1309,14 @@ end
     q = AM.grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
     𝒰 = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
-    # Build the microphysical state directly to avoid the velocity interpolation
-    # in `grid_microphysical_state` (MPNE1M's `microphysical_state` does not use it).
+    # Build the microphysical state directly to avoid interpolating the horizontal velocities
+    # in `grid_microphysical_state`: only the vertical velocity is used (by the rain autoconversion).
     @inbounds qᶜˡ = microphysical_fields.ρqᶜˡ[i, j, k] / ρ
     @inbounds qᶜⁱ = microphysical_fields.ρqᶜⁱ[i, j, k] / ρ
     @inbounds qʳ  = microphysical_fields.ρqʳ[i, j, k]  / ρ
     @inbounds qˢⁿ = microphysical_fields.ρqˢⁿ[i, j, k] / ρ
-    ℳ = MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ)
+    w = ℑzᵃᵃᶜ(i, j, k, grid, velocities.w)
+    ℳ = MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ, w)
 
     G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
@@ -1321,7 +1336,7 @@ function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
             G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ,
             grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
-            model.microphysical_fields)
+            model.microphysical_fields, model.velocities)
 
     return nothing
 end
@@ -1354,7 +1369,7 @@ end
     Tᶠ = categories.freezing_temperature
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
-    ρᵗʰ = density(𝒰, constants)
+    ρᵗʰ = density(𝒰, constants)  # thermodynamic state density, for saturation only
 
     (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ) =
         mixed_phase_precipitation_rates(bμp, ρ, ρᵗʰ, ℳ, q, T, Tᶠ, constants)
@@ -1420,7 +1435,7 @@ end
 
 # Fused kernel: evaluate the MP1M bundle once per cell and write all three tendencies.
 @kernel function _compute_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, grid, microphysics, dynamics, formulation,
-                                           constants, specific_prognostic_moisture, microphysical_fields)
+                                           constants, specific_prognostic_moisture, microphysical_fields, velocities)
     i, j, k = @index(Global, NTuple)
 
     ρ_field = AM.total_density(dynamics)
@@ -1429,7 +1444,8 @@ end
 
     q = AM.grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵉ, microphysical_fields)
     𝒰 = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
-    ℳ = AM.microphysical_state(microphysics, ρ, microphysical_fields_at(microphysical_fields, i, j, k), 𝒰, nothing)
+    U = (; w = ℑzᵃᵃᶜ(i, j, k, grid, velocities.w))  # only the vertical velocity is used (by the rain autoconversion)
+    ℳ = AM.microphysical_state(microphysics, ρ, microphysical_fields_at(microphysical_fields, i, j, k), 𝒰, U)
 
     G = mp1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
 
@@ -1446,6 +1462,6 @@ function AM.compute_microphysical_tendencies!(microphysics::MP1M, model)
     launch!(grid.architecture, grid, :xyz, _compute_mp1m_tendencies!,
             G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
-            model.microphysical_fields)
+            model.microphysical_fields, model.velocities)
     return nothing
 end

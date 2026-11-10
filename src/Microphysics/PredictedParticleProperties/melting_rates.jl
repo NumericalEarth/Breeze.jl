@@ -3,7 +3,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute ice melting rate using the heat balance equation from
 Morrison & Milbrandt (2015a) Eq. 44.
@@ -24,7 +24,7 @@ where:
 - ℒˡ is latent heat of vaporization
 - Dᵛ is diffusivity of water vapor
 - qᵛ, qᵛ⁺(T₀) are the vapor and saturation specific humidities (total-air mass
-  fractions) at T₀; qᵛ⁺(T₀) = ρᵛ⁺(T₀)/ρ so that ρ (qᵛ - qᵛ⁺(T₀)) = ρᵛ - ρᵛ⁺(T₀)
+  fractions) at T₀; qᵛ⁺(T₀) = ρᵛ⁺(T₀)/ρᵗʰ so that ρᵗʰ (qᵛ - qᵛ⁺(T₀)) = ρᵛ - ρᵛ⁺(T₀)
 - fᵛᵉ is the ventilation factor
 
 # Arguments
@@ -35,22 +35,24 @@ where:
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
-- `ρ`: Air density [kg/m³]
+- `ρ`: Total density, weighting the vapor-diffusion heat flux and the ice lookups [kg/m³]
+- `ρᵗʰ`: Thermodynamic state density, at which the freezing-point
+  saturation fraction is evaluated [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
 
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
-@inline ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+@inline ice_melting_rate(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                          constants, transport) =
-    ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+    ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                                      constants, transport)[1]
 
 # Returns `(melt_rate, small, large)`. The small/large split of the ventilation
 # integral sets the rain-vs-coating partition in `ice_melting_rates`, and comes free
 # with the four table reads the melt rate already makes at the bracket.
-@inline function ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+@inline function ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                                                   constants, transport)
     FT = typeof(qⁱ)
     parameters = p3.process_rates
@@ -69,8 +71,7 @@ where:
     prep = ice_table_bracket(p3.ice.deposition.small_ice_ventilation_constant,
                              m_mean, Fᶠ, Fˡ, ρᶠ, floors)
 
-    # Standalone form: one air density serves as both the weighting and the saturation density.
-    return ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρ, constants, transport,
+    return ice_melting_at_bracket(p3, qⁱ, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport,
                                   ρ_correction, prep)
 end
 
@@ -149,7 +150,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute partitioned ice melting rates using PSD-resolved partitioning.
 
@@ -169,19 +170,21 @@ Requires tabulated small/large ice ventilation integrals.
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
-- `ρ`: Air density [kg/m³]
+- `ρ`: Total density, weighting the vapor-diffusion heat flux and the ice lookups [kg/m³]
+- `ρᵗʰ`: Thermodynamic state density, at which the freezing-point
+  saturation fraction is evaluated [kg/m³]
 - `constants`: Thermodynamic constants
 - `transport`: Pre-computed air transport properties `(; Dᵛ, Kᵃ, ν)`
 
 # Returns
 - NamedTuple with `partial_melting` and `complete_melting` rates [kg/kg/s]
 """
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                                    constants, transport)
     # Total melting rate, plus the small/large ventilation split it already had to
     # look up. Passing qʷⁱ gives the Fˡ-blended ventilation.
     total_melt, small, large =
-        ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ,
+        ice_melting_rate_and_ventilation(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, Fᶠ, ρᶠ, ρ, ρᵗʰ,
                                          constants, transport)
 
     return partition_melting(total_melt, small, large)
@@ -219,7 +222,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute ice number loss from melting.
 

@@ -68,8 +68,7 @@ Microphysics.cloud_fraction(model, p3::P3) =
     T = temperature(𝒰, constants)
     ρᵗʰ = density(𝒰, constants)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
-    adjusted = prognostic_vapor_excess_adjustment(p3, ℳ.qᶜˡ, 𝒰.moisture_mass_fractions.vapor,
-                                                  qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, constants)
+    adjusted = prognostic_vapor_excess_adjustment(p3, ℳ.qᶜˡ, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
 
     deficit = p3_saturation_deficit(p3.subgrid, adjusted.qᵛ, adjusted.qᵛ⁺ˡ, max(0, adjusted.qᶜˡ),
                                     adjusted.T, 𝒰, constants)

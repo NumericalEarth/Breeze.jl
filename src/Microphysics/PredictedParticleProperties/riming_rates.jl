@@ -4,7 +4,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute cloud droplet collection (riming) by ice particles using the
 continuous collection equation with the collision kernel integrated
@@ -39,7 +39,7 @@ read from Table 1 at the ice bracket, and
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Ice sweep-out of cloud water, gated by `temperature_active`. Below freezing the
 collected water rimes onto the ice; above freezing it is shed as rain. Both use
@@ -74,7 +74,7 @@ the result — see [`cloud_riming_rate`](@ref) and [`cloud_warm_collection_rate`
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute above-freezing cloud collection by melting ice.
 
@@ -97,7 +97,7 @@ is the mass of a 1 mm drop, ``π/6 ρ^L D³ ≈ 5.24 × 10⁻⁷`` kg.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute above-freezing rain collection by melting ice.
 
@@ -118,7 +118,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute cloud droplet number sink from riming.
 
@@ -140,7 +140,7 @@ number removal proportional to the rimed cloud mass fraction.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain collection (riming) by ice particles from the Table 2 double-PSD
 collection kernel.
@@ -177,7 +177,7 @@ slope limiter binds.
                               T <= p3.process_rates.freezing_temperature, qʷⁱ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Ice sweep-out of rain water, gated by `temperature_active`. Below freezing the
 collected rain rimes onto the ice; above freezing it becomes liquid coating. See
@@ -240,7 +240,7 @@ end
     rain_collection_rates(p3, qʳ, nʳ, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ, temperature_active, qʷⁱ)[2]
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute below-freezing rain number loss from riming using the tabulated
 number-weighted collection kernel (`IceRainCollection.number`).

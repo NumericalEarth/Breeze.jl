@@ -1,10 +1,10 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
 using Oceananigans
 using Oceananigans: UpdateStateCallsite, TendencyCallsite, TimeStepCallsite
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, NormalFlowBoundaryCondition
-using Oceananigans.Fields: flattened_unique_values
 using Oceananigans.Models: update_model_field_time_series!
 using Oceananigans.OutputReaders: extract_field_time_series, InMemory
 using Oceananigans.TimeSteppers: Clock
@@ -69,6 +69,41 @@ using Test
         @test isapprox(minimum(ρc), c * Δt)
     end
 
+    @testset "A TendencyCallsite callback keeps the tendency pass before DCMIP2016 Kessler" begin
+        # Kessler rebuilds the tendencies after its update, through an `update_state!` that does
+        # not forward the time stepper's callbacks, so the pass before it can be skipped only when
+        # no callback needs it. Without the guard this callback would fire once less per step.
+        acoustic_grid = RectilinearGrid(default_arch; size=(4, 4, 4),
+                                        x=(0, 1000), y=(0, 1000), z=(0, 1000),
+                                        topology=(Periodic, Periodic, Bounded))
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+        microphysics = DCMIP2016KesslerMicrophysics(FT)
+        thermodynamic_constants = ThermodynamicConstants(FT; saturation_vapor_pressure=Breeze.Thermodynamics.TetensFormula(FT))
+        model = AtmosphereModel(acoustic_grid; dynamics, microphysics, thermodynamic_constants, timestepper=:AcousticRungeKutta3)
+        set!(model; ρ=model.dynamics.reference_state.density, θ=300)
+
+        tendency_calls = Ref(0)
+        count_tendency_call!(m) = (tendency_calls[] += 1; nothing)
+        callbacks = [Callback(count_tendency_call!, IterationInterval(1); callsite=TendencyCallsite())]
+
+        time_step!(model, FT(1); callbacks) # first step: one extra pass from `maybe_prepare_first_time_step!`
+        @test tendency_calls[] == 4
+
+        tendency_calls[] = 0
+        time_step!(model, FT(1); callbacks) # one pass after each of the three stages
+        @test tendency_calls[] == 3
+
+        skip = Breeze.TimeSteppers.skip_pre_microphysics_tendencies
+        update_state_callback = Callback(count_tendency_call!, IterationInterval(1); callsite=UpdateStateCallsite())
+        @test skip(microphysics, 1, [])
+        @test skip(microphysics, 1, [update_state_callback])
+        @test !skip(microphysics, 1, callbacks)
+        @test !skip(microphysics, 0, [])  # Kessler returns early and does not rebuild the tendencies
+        @test !skip(microphysics, NaN, [])
+        @test !skip(microphysics, Inf, [])
+        @test !skip(nothing, 1, [])       # other schemes keep the pass
+    end
+
     @testset "compute_tendencies! still callable without callbacks" begin
         model = AtmosphereModel(grid)
         Breeze.AtmosphereModels.compute_tendencies!(model)
@@ -96,7 +131,7 @@ end
         times = collect(FT(0):FT(1):FT(3))
         fts = FieldTimeSeries{Nothing, Center, Center}(grid, times)
         model = AtmosphereModel(grid)
-        walked = flattened_unique_values(extract_field_time_series((fields(model), model.forcing, fts)))
+        walked = extract_field_time_series((fields(model), model.forcing, fts))
         @test any(x -> x === fts, walked)
     end
 

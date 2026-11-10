@@ -47,6 +47,7 @@ using Breeze.Thermodynamics:
     MoistureMassFractions,
     with_moisture,
     temperature,
+    density,
     air_pressure,
     density,
     PlanarLiquidSurface,
@@ -76,11 +77,11 @@ using Breeze.Microphysics:
     deposition_rate,
     adjust_thermodynamic_state
 
-using Oceananigans: Oceananigans
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN
 
-using Oceananigans: Center, Field
+using Oceananigans: Oceananigans, Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Operators: ℑzᵃᵃᶜ
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt

@@ -17,7 +17,7 @@ using Oceananigans.Utils: TabulatedFunction
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Read the P3 lookup tables from their ASCII files and construct a complete
 `PredictedParticlePropertiesMicrophysics` with tabulated ice integrals.
@@ -211,7 +211,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Materialize the three rain lookup tables of a [`RainDrops`](@ref) skeleton by integrating its
 [`RainFallSpeed`](@ref) law with Chebyshev-Gauss quadrature.

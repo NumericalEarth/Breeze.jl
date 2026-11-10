@@ -34,6 +34,8 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
     bottom_precipitation_flux,
+    precipitation_flux,
+    MicrophysicalProcessRate,
     specific_humidity,
     moisture_prognostic_name,
     total_moisture_density_name,
@@ -143,7 +145,9 @@ export
     # Radiation schedules that the architecture can evaluate
     validate_schedule
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+
+using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 

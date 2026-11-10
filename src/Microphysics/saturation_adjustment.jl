@@ -18,9 +18,9 @@ using Breeze.Thermodynamics:
     equilibrated_surface
 
 using Breeze.Solvers: SecantSolver, secant_solve, materialize_solver
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using Oceananigans: Oceananigans, CenterField
-using DocStringExtensions: TYPEDSIGNATURES
 
 struct SaturationAdjustment{E, S}
     equilibrium :: E
@@ -30,7 +30,7 @@ end
 const SA = SaturationAdjustment
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `SaturationAdjustment` microphysics representing an instantaneous adjustment
 to `equilibrium` between condensates and water vapor, computed by a secant iteration
@@ -50,7 +50,8 @@ The options for `equilibrium` are:
 
 The options for `solver` are [`SecantSolver`](@ref) (default:
 `SecantSolver(abstol=1e-4, maxiter=20)`, an absolute tolerance on the temperature-like
-residual in Kelvin) and [`FixedIterations`](@ref Breeze.Solvers.FixedIterations), which performs a fixed number of secant
+residual in Kelvin, floored at the residual's rounding noise, about 1e-3 K in `Float32`)
+and [`FixedIterations`](@ref Breeze.Solvers.FixedIterations), which performs a fixed number of secant
 steps with no convergence test (the form required for Reactant tracing and cheap
 reverse-mode differentiation).
 """
@@ -195,10 +196,15 @@ end
 
 @inline saturation_adjustment_residual(T, 𝒰::ARPS, constants) = T - temperature(𝒰, constants)
 
-# At fixed density, solve θˡⁱ(T, ρ, q) - θ₀ = 0 directly. Reusing with_temperature
-# preserves the equation of state without nesting the θˡⁱ-to-T inversion in the secant solve.
+# Compare θ(T) with θ(T₁), T₁ being the temperature the dynamics diagnose with the state's own
+# inversion; the stored θ matches only a converged one. θ(T) increases strictly at fixed density
+# and composition, so the residual vanishes exactly at T = T₁, and the θ form keeps fixed-count
+# secant solves well conditioned. The cost is one inversion per residual evaluation.
 @inline function saturation_adjustment_residual(T, 𝒰::LiquidIceDensityState, constants)
-    return with_temperature(𝒰, T, constants).potential_temperature - 𝒰.potential_temperature
+    T₁ = temperature(𝒰, constants)
+    θ = with_temperature(𝒰, T, constants).potential_temperature
+    θ₁ = with_temperature(𝒰, T₁, constants).potential_temperature
+    return θ - θ₁
 end
 
 # This function allows saturation adjustment to be used as a microphysics scheme directly
@@ -209,13 +215,15 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 
 The state selects the constraint: fixed pressure for reference-pressure states, or fixed
 density with pressure `p = ρ Rᵐ T` for `LiquidIceDensityState`. The conserved
 thermodynamic variable, initial temperature guesses, and solver are retained in either case.
+The residual uses the state's selected temperature inversion, including non-iterated and
+fixed-iteration inversions, so equilibrium is evaluated at the returned temperature.
 
 `precipitation = (qʳ, qˢⁿ)` specifies fixed rain and snow mass fractions, included in
 the state's total water, heat capacity, gas constant, and latent energy.
@@ -263,7 +271,7 @@ the state's total water, heat capacity, gas constant, and latent energy.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Perform saturation adjustment and return the temperature
 associated with the adjusted state.

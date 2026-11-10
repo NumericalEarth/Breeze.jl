@@ -26,7 +26,7 @@ Adapt.adapt_structure(to, sf::SubsidenceForcing) =
                       Adapt.adapt(to, sf.inflow_lower_bound))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Forcing that represents large-scale subsidence advecting horizontally-averaged
 fields downward. The kernel returns the *specific* tendency

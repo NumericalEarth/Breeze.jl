@@ -16,8 +16,9 @@ export
     PrescribedDynamics,
     KinematicModel
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
+using DocStringExtensions: TYPEDEF
+using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, Field
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition, fill_halo_regions!
@@ -28,15 +29,15 @@ using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.TimeSteppers: Clock, TimeSteppers
 using Oceananigans.Utils: launch!, prettysummary
 
-using KernelAbstractions: @kernel, @index
-
 # Import PrescribedVelocityFields from Oceananigans
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, continuity_density
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, continuity_density,
+                               fixed_pressure_state_density
 using Breeze.Thermodynamics: ReferenceState, column_surface_pressure,
                              surface_boundary_value, surface_pressure_from_cell_center,
-                             surface_state_field, density
+                             surface_state_field
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 include("prescribed_dynamics.jl")
 

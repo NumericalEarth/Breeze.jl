@@ -113,16 +113,19 @@ export
     sum_aerosol_number,
     aerosol_activation_rate
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+
+using DocStringExtensions: TYPEDFIELDS, TYPEDEF
 using SpecialFunctions: erf
 
 using Adapt: Adapt
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU, on_architecture
 using Breeze.AtmosphereModels: prognostic_field_names,
-                                DiracStatistics,
-                                NoSubgridCorrelation
-using Breeze.Microphysics: subgrid_cloud,
+                               DiracStatistics,
+                               NoSubgridCorrelation
+using Breeze.Microphysics: thermodynamic_adjustment_factor,
+                           subgrid_cloud,
                            scaled_relaxation_timescale,
                            relaxation_window,
                            exponential_rate_factor,
@@ -138,6 +141,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
                              dry_air_gas_constant,
                              ice_latent_heat,
                              liquid_latent_heat,
+                             mixture_gas_constant,
                              mixture_heat_capacity,
                              psychrometric_correction,
                              saturation_specific_humidity,
@@ -279,5 +283,6 @@ include("p3_microphysical_state.jl")
 include("p3_microphysical_tendencies.jl")
 include("p3_driver.jl")
 include("p3_cloud_fraction.jl")
+include("p3_process_rate_diagnostics.jl")
 
 end # module PredictedParticleProperties

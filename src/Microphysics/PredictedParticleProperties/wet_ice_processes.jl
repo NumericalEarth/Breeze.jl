@@ -1,5 +1,5 @@
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the density of newly accreted cloud rime from the rime-impact parameter.
 
@@ -35,6 +35,10 @@ is used.
     ℂʳⁱᵐᵉ₆ = parameters.minimum_rime_impact
     ℂʳⁱᵐᵉ₇ = parameters.maximum_rime_impact
     ℂʳⁱᵐᵉ₈ = parameters.unrimed_rime_density
+    ℂʳⁱᵐᵉ₉ = parameters.rime_density_constant_coefficient
+    ℂʳⁱᵐᵉ₁₀ = parameters.rime_density_linear_coefficient
+    ℂʳⁱᵐᵉ₁₁ = parameters.rime_density_quadratic_coefficient
+    ℂʳⁱᵐᵉ₁₂ = parameters.rime_density_transition_impact
     T₀ = parameters.freezing_temperature
     ρᴸ = parameters.liquid_water_density
 
@@ -57,17 +61,15 @@ is used.
                abs(𝕎ⁱ - 𝕎ᶜˡ) * inverse_supercooling,
                ℂʳⁱᵐᵉ₆, ℂʳⁱᵐᵉ₇)
 
-    # Cober-List rime-density fit (see the docstring for the citation): a quadratic
-    # in g/cm³ (hence the ×10³) below Ri = 8, a linear extension above it.
-    #   Ri ≤ 8:  ρᶠ = (0.051 + 0.114 Ri - 0.0055 Ri²) × 10³
-    #   Ri > 8:  ρᶠ = 611 + 72.25 (Ri - 8)
-    # These are the coefficients of a published fit, not independently tunable
-    # parameters, so they stay inline with the formula they belong to. What *is*
-    # settable is the range of Ri over which the fit is trusted, clamped above.
+    # Calibratable Cober–List polynomial in kg/m³. Derive the linear extension
+    # to preserve continuity and reach the configured maximum density at the
+    # maximum impact parameter. Defaults recover 611 + 72.25 (Ri - 8).
+    transition_density = ℂʳⁱᵐᵉ₉ + ℂʳⁱᵐᵉ₁₀ * ℂʳⁱᵐᵉ₁₂ + ℂʳⁱᵐᵉ₁₁ * ℂʳⁱᵐᵉ₁₂^2
+    slope = (ℂʳⁱᵐᵉ₄ - transition_density) / (ℂʳⁱᵐᵉ₇ - ℂʳⁱᵐᵉ₁₂)
     ρ_rime_Ri = ifelse(
-        Ri <= FT(8),
-        (FT(0.051) + FT(0.114) * Ri - FT(0.0055) * Ri^2) * FT(1000),
-        FT(611) + FT(72.25) * (Ri - FT(8))
+        Ri <= ℂʳⁱᵐᵉ₁₂,
+        ℂʳⁱᵐᵉ₉ + ℂʳⁱᵐᵉ₁₀ * Ri + ℂʳⁱᵐᵉ₁₁ * Ri^2,
+        transition_density + slope * (Ri - ℂʳⁱᵐᵉ₁₂)
     )
 
     active_cloud_riming = (cloud_rim >= qsmall) & (qᶜˡ >= qsmall) & (T < T₀)
@@ -81,7 +83,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute liquid shedding rate from ice particles following
 [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
@@ -127,7 +129,7 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain number source from shedding.
 
@@ -149,7 +151,7 @@ Shed liquid forms rain drops of approximately 1 mm diameter.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the wet growth and refreezing capacities, the maximum rates at which
 collected water and the liquid coating can freeze, from the ventilated heat
@@ -199,7 +201,7 @@ density `ρᵗʰ`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the wet growth freezing capacity following
 [Musil (1970)](@cite Musil1970), Eq. (A9), as in P3 v4.
@@ -238,7 +240,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     first(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport, lookups))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the heat-limited refreezing capacity of the liquid coating on ice.
 See [`refreezing_rate`](@ref).
@@ -248,7 +250,7 @@ See [`refreezing_rate`](@ref).
     last(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport, lookups))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute refreezing rate of liquid on ice using the heat-balance formula.
 

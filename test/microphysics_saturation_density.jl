@@ -31,7 +31,8 @@ function all_vapor_saturation_specific_humidity(T, p, constants)
     return ϵ * pᵛ⁺ / (p + (ϵ - 1) * pᵛ⁺)
 end
 
-function saturated_column_model(FT, microphysics, dynamics_kind; constants = ThermodynamicConstants(FT))
+function saturated_column_model(FT, microphysics, dynamics_kind; constants = ThermodynamicConstants(FT),
+                                supersaturation = 0)
     grid = RectilinearGrid(default_arch, FT; size = 8, z = (0, 2000), topology = (Flat, Flat, Bounded))
     if dynamics_kind === :anelastic
         reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 290)
@@ -41,22 +42,23 @@ function saturated_column_model(FT, microphysics, dynamics_kind; constants = The
     end
     model = AtmosphereModel(grid; dynamics, microphysics, thermodynamic_constants = constants, advection = nothing)
 
-    # Air 10 K warmer than the reference, saturated at its own pressure and temperature.
+    # Air 10 K warmer than the reference, saturated at its own pressure and temperature, or
+    # holding a fraction `supersaturation` more water than that.
     T = z -> FT(300) - FT(0.0065) * z
     p = Breeze.AtmosphereModels.dynamics_pressure(model.dynamics)
     Tᵢ = CenterField(grid)
     set!(Tᵢ, T)
-    qᵛ⁺ = CenterField(grid)
-    set!(qᵛ⁺, all_vapor_saturation_specific_humidity.(interior(Tᵢ), interior(p), Ref(constants)))
+    qᵗ = CenterField(grid)
+    set!(qᵗ, (1 + supersaturation) .* all_vapor_saturation_specific_humidity.(interior(Tᵢ), interior(p), Ref(constants)))
     kw = dynamics_kind === :compressible ? (; ρ = model.dynamics.reference_state.density) : (;)
-    set!(model; kw..., T, qᵗ = qᵛ⁺)
+    set!(model; kw..., T, qᵗ)
 
     # Compressible pressure is diagnosed from the state just set, p = ρ Rᵐ T, and Rᵐ depends
     # on the vapor: iterate to the saturated fixed point.
     if dynamics_kind === :compressible
         for _ in 1:8
-            set!(qᵛ⁺, all_vapor_saturation_specific_humidity.(interior(Tᵢ), interior(p), Ref(constants)))
-            set!(model; kw..., T, qᵗ = qᵛ⁺)
+            set!(qᵗ, (1 + supersaturation) .* all_vapor_saturation_specific_humidity.(interior(Tᵢ), interior(p), Ref(constants)))
+            set!(model; kw..., T, qᵗ)
         end
     end
 
@@ -116,4 +118,31 @@ end
     qᶜˡ = column(model.microphysical_fields.ρqᶜˡ) ./ column(total_density(model.dynamics))
     tolerance = FT == Float64 ? 1e-6 * maximum(qᵛ⁺) : 1e-2 * maximum(qᵛ⁺)
     @test maximum(abs, qᶜˡ) < tolerance
+end
+
+@testset "InstantaneousPrecipitation saturates at the local density [$FT, $dynamics_kind]" for FT in test_float_types(),
+                                                                                            dynamics_kind in (:anelastic, :compressible)
+    Δt = FT(10)
+
+    # A saturated column does not precipitate. The secant solve converges to 1e-4 K, which bounds
+    # any spurious condensate at about 1e-5 of the saturation specific humidity.
+    model = saturated_column_model(FT, InstantaneousPrecipitation(FT), dynamics_kind)
+    ρ = column(total_density(model.dynamics))
+    qᵛ⁺ = column(SaturationSpecificHumidityField(model))
+    model.clock.last_Δt = Δt
+    microphysics_model_update!(model.microphysics, model)
+    precipitation_rate = column(model.microphysical_fields.precipitation_rate)
+    @test maximum(precipitation_rate) < 1e-4 * maximum(ρ .* qᵛ⁺) / Δt
+
+    # A column 1% supersaturated precipitates down to saturation at the local density. Saturating
+    # at the anelastic reference density instead (and inverting θ at it) would see this column,
+    # 10 K warmer than the reference, as subsaturated.
+    model = saturated_column_model(FT, InstantaneousPrecipitation(FT), dynamics_kind; supersaturation = FT(0.01))
+    model.clock.last_Δt = Δt
+    microphysics_model_update!(model.microphysics, model)
+    @test minimum(column(model.microphysical_fields.precipitation_rate)) > 0
+
+    qᵛ = column(specific_prognostic_moisture(model))
+    qᵛ⁺ = column(SaturationSpecificHumidityField(model))
+    @test all(isapprox.(qᵛ, qᵛ⁺; rtol = 1e-3))
 end

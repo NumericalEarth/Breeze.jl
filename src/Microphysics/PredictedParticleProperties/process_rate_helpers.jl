@@ -13,7 +13,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute proportional rescaling factor for sink rates so that
 `total_sink × dt_safety` does not exceed `available_mass`.
@@ -46,7 +46,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Cap vapor sinks and sources against the moist-adiabatic saturation-adjustment
 budget.
@@ -181,7 +181,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Mass [kg] of a newly activated cloud droplet, the sphere of radius
 `parameters.activated_droplet_radius` at the liquid water density. It converts a
@@ -194,7 +194,7 @@ is diagnosed from the other.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Cloud droplets per unit cloud mass, ``Nᶜˡ / (ρ qᶜˡ)`` [1/kg], which converts a cloud
 mass rate into its number rate. Zero below `minimum_mass_mixing_ratio`, where the
@@ -208,7 +208,7 @@ quotient would overflow to `Inf` and turn a zero companion rate into `NaN`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Cloud-droplet number budget, ``∂n^{cl}/∂t`` [1/kg/s], before homogeneous freezing:
 CCN activation is the only source, and the sinks are autoconversion, accretion,
@@ -239,7 +239,7 @@ in mean droplet mass.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rain-drop number budget, ``∂n^r/∂t`` [1/kg/s], before homogeneous freezing.
 Sources: autoconversion, melting ice, drop breakup, shedding, wet-growth shedding,
@@ -282,7 +282,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply a bulk rime-density consistency pass to the prognostic rime state.
 Returns corrected `qᶠ`, `bᶠ`, rime fraction `Fᶠ`, and rime density `ρᶠ`.
@@ -387,7 +387,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the exponential rain particle size distribution slope parameter ``λʳ``
 diagnosed from the rain mass concentration `qʳ` and number concentration `nʳ`.
@@ -427,7 +427,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the ice PSD shape parameter μⁱ from the lookup tables.
 

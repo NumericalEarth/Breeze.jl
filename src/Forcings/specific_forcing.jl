@@ -16,7 +16,7 @@ struct SpecificForcing{F, D, L}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Wrap a user-supplied forcing that produces a *specific* (per-unit-mass) tendency so that
 Breeze applies the density multiply ``ρ`` at kernel time. After materialization, the
@@ -82,7 +82,7 @@ end
 
 function specific_forcing_density(name, context)
     if name ∈ context.continuity_density_names
-        return context.continuity_density_field
+        return context.continuity_density
     else
         return context.total_density
     end

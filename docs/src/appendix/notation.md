@@ -43,7 +43,7 @@ The following table also uses a few conventions that suffuse the source code and
 | math symbol                         | code   | property name                       | description                                                                    |
 | ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
 | ``\rho``                            | `ρ`    | `AM.density`                        | Total air density, ``ρ = ρᵈ + ρᵗ``, `total_density(dynamics)`: diagnosed on the compressible core; the reference density ``ρᵣ`` on the anelastic core |
-| ``ρ^{th}``                          | `ρᵗʰ`  | `thermodynamic_state_density`       | Thermodynamic state density, the equation of state with the local ``T`` and ``q``: ``ρᵗʰ = pᵣ / (Rᵐ T)`` on the anelastic core, ``ρᵗʰ = ρ`` on the compressible core. Saturation is evaluated at ``ρᵗʰ``, while ``ρ`` carries mass and weights tendencies |
+| ``ρᵗʰ``                             | `ρᵗʰ`  | `thermodynamic_state_density`       | Thermodynamic state density, the equation of state with the local ``T`` and ``q``: ``ρᵗʰ = pᵣ / (Rᵐ T)`` on the anelastic core, ``ρᵗʰ = ρ`` on the compressible core. Saturation is evaluated at ``ρᵗʰ``, while ``ρ`` carries mass and weights tendencies |
 | ``ρᵈ``                              | `ρᵈ`   | `AM.dynamics.dry_density`           | Dry-air density; the prognostic continuity density of [`CompressibleDynamics`](@ref Breeze.CompressibleEquations.CompressibleDynamics) (total ``ρ = ρᵈ + ρᵗ``) |
 | ``ρᵗ``                              | `ρᵗ`   |                                     | Total condensate density, ``ρᵗ = ρqᵛᵉ + Σ ρqᶜ`` (vapor/equilibrium moisture plus all condensed species); diagnosed via `total_condensate_density`, summed over [`condensate_field_names`](@ref Breeze.AtmosphereModels.condensate_field_names) |
 | ``\alpha``                          | `α`    |                                     | Specific volume, ``α = 1/ρ``                                                   |
@@ -114,7 +114,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``pᵛ``                              | `pᵛ`   |                                     | Vapor pressure (partial pressure of water vapor), ``pᵛ = ρ qᵛ Rᵛ T``           |
 | ``pᵛ⁺``                             | `pᵛ⁺`  |                                     | Saturation vapor pressure                                                      |
 | ``\mathscr{H}``                     | `ℋ`    | `RelativeHumidity(model)`           | Relative humidity, ``ℋ = pᵛ / pᵛ⁺``                                            |
-| ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``                                          |
+| ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)`, `Supersaturation(model)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``            |
 | ``ξ``                               | `ξ`    | `psychrometric_correction`           | Psychrometric correction, ``ξ = 1 + ℒ² qᵛ⁺ / (cᵖ Rᵛ T²)``; ``ξˡ`` and ``ξⁱ`` name the liquid and ice phase |
 | ``δqˡ``, ``δqⁱ``                    | `δqˡ`, `δqⁱ` |                               | Saturation-adjustment increments, ``δq = (qᵛ - qᵛ⁺) / ξ`` for the liquid and ice phase |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
@@ -135,6 +135,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\rho^L``                          | `ρᴸ`   | `TC.liquid.density`                 | Intrinsic density of liquid water                                                        |
 | ``\rho^I``                          | `ρᴵ`   | `TC.ice.density`                    | Intrinsic density of ice                                                                 |
 | ``cᵖᵐ``                             | `cᵖᵐ`  | `mixture_heat_capacity(q, constants)` | Mixture heat capacity at constant pressure                                   |
+| ``cᵛᵐ``                             | `cᵛᵐ`  |                                     | Mixture heat capacity at constant volume, ``cᵛᵐ = cᵖᵐ - Rᵐ``                   |
 | ``\hat{c}ᵖ``                        | `ĉᵖ`   | `vapor_equivalent_heat_capacity(q, constants)` | Vapor-equivalent heat capacity, ``ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ``: the heat capacity if all water were vapor; unchanged by phase change |
 | ``\hat{R}``                         | `R̂`    | `vapor_equivalent_gas_constant(q, constants)` | Vapor-equivalent gas constant, ``R̂ = qᵈ Rᵈ + qᵗ Rᵛ``; equals ``Rᵐ`` in unsaturated air |
 | ``\hat{κ}``                         | `κ̂`    | `exner_exponent(VaporEquivalentExponent(), q, constants)` | Vapor-equivalent Exner exponent, ``κ̂ = R̂ / ĉᵖ`` (the default exponent of ``θˡⁱ``); ``κᵈ = Rᵈ / cᵖᵈ`` is the `DryExponent`. In code, `κ̂` also names the exponent choice (`VaporEquivalentExponent()` or `DryExponent()`) passed to functions. Distinct from the von Kármán constant ``κ`` |
@@ -175,6 +176,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
+| ``Uᵍ``                              | `Uᵍ`   | `gustiness`                         | Gustiness: the unresolved wind added to the resolved wind in the bulk surface fluxes, m/s; ``Uᵍ = \max(c \sqrt{e}, Uᵍ_{min})`` for `TKEGustiness` |
+| ``Ũ``                               | `Ũ`    |                                     | Effective wind speed of the bulk surface fluxes and their transfer coefficients, ``Ũ = \sqrt{u² + v² + Uᵍ²}``, m/s |
 | ``\ell``                            | `ℓ`    |                                     | A **length scale**, m; the superscript says which one. Bare ``ℓ`` is used locally where only one length scale is in play (the primary mixing length in `TKEBasedTurbulenceClosure`, the divergence-damping scale in `CompressibleEquations`) |
 | ``\ell^b``                          | `ℓᵇ`   |                                     | Buoyancy penetration depth, ``ℓᵇ = \sqrt{e} / N``, how far an eddy with kinetic energy ``e`` penetrates air of buoyancy frequency ``N``; infinite where ``N² ≤ 0``. Every mixing-length formulation is built from it and the wall length ``ℂˢ z``: the local minimum ``\min(ℂˢ z, ℓᵇ)``, its interior envelope with slope ``ℂⁱ``, capped separately by ``ℂˢ z`` (the default), or the Bougeault–Lacarrère parcel lengths |
 | ``\ell^u, \ell^c, \ell^e, \ell^D``  | `ℓᵘ`, `ℓᶜ`, `ℓᵉ`, `ℓᴰ` |                    | Mixing lengths for momentum, scalars, TKE and dissipation: ``ℓᵘ = Sᵘ ℓ``, ``ℓᶜ = Sᶜ ℓ``, ``ℓᵉ = Sᵉ ℓ``, ``ℓᴰ = ℓ / Sᴰ`` |
@@ -208,10 +211,11 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N_A``                             | `ℕᴬ`   |                                     | Avogadro's number, molecules per mole                                          |
 | ``\mathcal{U}``                     | `𝒰`    |                                     | Thermodynamic state struct (e.g., `StaticEnergyState`)                         |
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
-| ``Π^L``                             | `Πᴸ`   | `AcousticSubstepper.linearization_exner` | Stage-entry Exner function, ``Π^L = (p^L / p^{st})^κ``                  |
 | ``θ^L``                             | `θᴸ`   | `AcousticSubstepper.linearization_potential_temperature` | Stage-entry potential temperature, ``θ^L = (ρθ)^L / ρ^L`` |
-| ``γ^m R^m\vert_L``                  | `γRᵐᴸ` | `AcousticSubstepper.linearization_gamma_R_mixture` | Stage-entry equation-of-state coefficient in ``p' = γ^m R^m\vert_L Π^L (ρθ)'`` |
-| ``C^L``                             | `Cᴸ`   |                                     | Linearized pressure coefficient, ``C^L = γ^m R^m\vert_L Π^L``                 |
+| ``C^L``                             | `Cᴸ`   | `AcousticSubstepper.linearization_pressure_coefficient` | Linearized pressure coefficient, the slope ``∂p/∂(ρθ)`` of the equation of state at the stage-entry state, ``C^L = γ^e p^L / (ρθ)^L`` |
+| ``γ^e``                             | `γᵉ`   |                                     | Effective heat-capacity ratio of the linearized equation of state, ``γ^e = (θ / T) ∂T/∂θ`` |
+| ``θ ∂T/∂θ``                         | `θ∂T∂θ` | `temperature_and_sensitivity(𝒰, constants)` | Temperature sensitivity at fixed density and composition, propagated through the selected inversion |
+| ``\tilde{T}``                       | `T̃`    |                                     | Condensate-free root of the density-based inversion of ``θˡⁱ`` (the root with ``H^c = 0``) |
 | ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
 | ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
 | ``N``                               | `N`    | `AcousticSubstepper.substeps`       | Acoustic substeps per outer time step, or adaptive substep count before stage partitioning |

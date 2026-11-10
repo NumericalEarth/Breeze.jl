@@ -32,7 +32,7 @@ using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 
 using Adapt: Adapt, adapt
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using KernelAbstractions: @index, @kernel
 
 """
@@ -73,7 +73,7 @@ struct DCMIP2016KesslerMicrophysics{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a DCMIP2016 implementation of the [Kessler (1969)](@cite Kessler1969) warm-rain bulk microphysics scheme.
 
@@ -219,7 +219,7 @@ function AtmosphereModels.validate_microphysics(::DCMIP2016KM, thermodynamic_con
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the names of prognostic microphysical fields for the Kessler scheme.
 
@@ -249,7 +249,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create and return the microphysical fields for the Kessler scheme.
 
@@ -294,7 +294,7 @@ end
 # DCMIP2016Kessler's microphysical_state doesn't use 𝒰.
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the thermodynamic state without adjustment.
 
@@ -321,7 +321,7 @@ AtmosphereModels.ice_mass_fraction(::DCMIP2016KM, model) = nothing
 @inline AtmosphereModels.precipitating_mass_fraction(i, j, k, ::DCMIP2016KM, μ) = @inbounds μ.qʳ[i, j, k]
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return zero tendency.
 
@@ -330,12 +330,16 @@ All microphysical source/sink terms are applied directly to the prognostic field
 """
 @inline AtmosphereModels.microphysical_tendency(::DCMIP2016KM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
+# Kessler is operator-split: its tendency is identically zero, so the default per-cell kernel would
+# only add zero to every moisture tendency. Skip the launch.
+AtmosphereModels.compute_microphysical_tendencies!(::DCMIP2016KM, model) = nothing
+
 #####
 ##### Precipitation rate and surface flux diagnostics
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the liquid precipitation rate field for the DCMIP2016 Kessler microphysics scheme.
 
@@ -353,7 +357,7 @@ AtmosphereModels.precipitation_rate(model, ::DCMIP2016KM, ::Val{:liquid}) = mode
 AtmosphereModels.precipitation_rate(model, ::DCMIP2016KM, ::Val{:ice}) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the bottom precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
 
@@ -390,7 +394,7 @@ Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain terminal velocity (m/s) following Klemp and Wilhelmson (1978) eq. 2.15.
 
@@ -410,7 +414,7 @@ and ``β^𝕎`` is the `terminal_velocity_exponent`.
 end
 
 """
-    cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute cloud-to-rain production rate from autoconversion and accretion
 ([Klemp and Wilhelmson 1978](@cite Klemp1978), eq. 2.13).
@@ -441,8 +445,11 @@ end
 ##### Main update function - launches GPU kernel
 #####
 
+# The grid-model update below rebuilds all tendencies after changing the state.
+AtmosphereModels.refreshes_state_after_update(::DCMIP2016KM) = true
+
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the Kessler microphysics to the model.
 
@@ -466,8 +473,8 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Total density weights water mass fractions and enters the Kessler air-density corrections.
     # The continuity density weights the thermodynamic prognostic ρθˡⁱ and, for compressible
-    # dynamics, is the dry-air density Kessler mixing ratios are relative to. These fields alias for anelastic
-    # dynamics and are distinct (total and dry density) for compressible dynamics.
+    # dynamics, is the dry-air density Kessler mixing ratios are relative to. These fields alias
+    # for anelastic dynamics and are distinct (total and dry density) for compressible dynamics.
     ρ = total_density(model.dynamics)
     ρᵈ = continuity_density(model.dynamics)
     dry_air_coupled = ρ !== ρᵈ
@@ -523,7 +530,7 @@ end
 # the Eulerian grid kernel and the Lagrangian parcel model.
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply one Kessler microphysics step: autoconversion, accretion, saturation adjustment,
 rain evaporation, and condensation.
@@ -531,7 +538,8 @@ rain evaporation, and condensation.
 `Δr𝕎` is the sedimentation flux divergence (zero for parcel models).
 
 `ρ` is the total density, which weights the rain in the evaporation rate (KW eq. 2.14); `ρᵗʰ` is
-the thermodynamic state density, at which the saturation specific humidity is evaluated. They coincide on the compressible core; on the anelastic core `ρ` is the
+the thermodynamic state density, at which the saturation specific humidity is evaluated. They
+coincide on the compressible core and in parcel models; on the anelastic core `ρ` is the
 reference density ``ρᵣ`` and `ρᵗʰ = pᵣ / (Rᵐ T)`.
 
 Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
@@ -581,7 +589,7 @@ Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convert from mixing ratios back to mass fractions.
 
@@ -601,7 +609,7 @@ Returns `(qᵛ, qᶜˡ, qʳ, qᵗ)`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convert from mass fractions to mixing ratios.
 
@@ -656,7 +664,7 @@ const maximum_representable_substeps = 2^24
 @inline substep_bound(::Val{N}) where N = N
 
 """
-    sedimentation_substeps(Δt, max_Δt, substep_limit)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The sedimentation substeps for a step `Δt` whose rain CFL limit is `max_Δt`, validated before the
 count becomes an integer. The ratio `Δt / max_Δt` must be finite and positive, and the count needed,
@@ -951,7 +959,7 @@ end
 # Rain sedimentation is not applicable to a Lagrangian parcel (rain falls with the parcel).
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply DCMIP2016 Kessler microphysics to a parcel model.
 
@@ -998,12 +1006,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
     FT = typeof(ρ)
 
-    # The parcel saturates at its thermodynamic state density, p / (Rᵐ T); ρ is the
-    # environmental density that weights the parcel's prognostics.
-    ρᵗʰ = density(𝒰, constants)
-
-    # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0)
-    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, ρᵗʰ, p_parcel, Δt,
+    # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0). The parcel's own density ρ is
+    # its thermodynamic state density, so it serves for both the rain rates and the saturation.
+    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, ρ, p_parcel, Δt,
                                                microphysics, constants, f₅, δT, FT)
 
     # Convert mixing ratios → mass fractions (shared helper)

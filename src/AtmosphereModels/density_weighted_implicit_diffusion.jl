@@ -433,7 +433,7 @@ end
 implicit_sedimentation(condensates) = any(c -> c.advection isa AIVA, condensates)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Move the condensate content of the thermodynamic variable with the sedimentation mass that the
 adaptive implicit vertical solve has just applied to the tracers: add `Δt` times the
@@ -467,7 +467,7 @@ function implicit_sedimentation_step!(model, Δt, velocities, formulation = mode
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Add the explicit condensate [`sedimentation_tendency`](@ref) of the thermodynamic variable to its
 tendency `G`, with `tracer_transport_velocity` the vertical velocity the moisture and tracer
@@ -496,7 +496,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the temperature argument `implicit_sedimentation_step!` passes to
 [`condensate_content`](@ref) for `formulation`: the model's `temperature_field` by default, or
