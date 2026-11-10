@@ -8,7 +8,9 @@ export TKEBasedTurbulenceClosure,
        ConstantStabilityFunctions,
        RationalStabilityFunction,
        DryStaticStability,
-       MoistStaticStability
+       MoistStaticStability,
+       SimplifiedHigherOrderClosure,
+       SHOCParameters
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
@@ -172,5 +174,8 @@ end
 include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
 include("richardson_number_stability_functions.jl")
+
+include("SHOC/SHOC.jl")
+using .SHOC: SHOC, SimplifiedHigherOrderClosure, SHOCParameters
 
 end # module TurbulenceClosures

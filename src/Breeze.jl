@@ -250,6 +250,7 @@ export
     GradientLimitedMixingLength, ConstantStabilityFunctions,
     RationalStabilityFunction,
     DryStaticStability, MoistStaticStability,
+    SimplifiedHigherOrderClosure, SHOCParameters,
     LagrangianParticles, ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
