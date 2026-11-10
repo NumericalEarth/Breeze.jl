@@ -380,6 +380,33 @@ end
     end
 end
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Threads per block of the column kernel on a GPU, for `Nx × Ny` columns: one thread per column
+leaves few threads in all, so the blocks are made small enough that the columns spread over all
+multiprocessors (`2 × 108` blocks on an A100) before they are made larger, up to `maxthreads`.
+The block spans `x` first, so that the threads of a warp read adjacent memory.
+"""
+function shoc_gpu_workgroup(Nx, Ny; target_blocks = 216, maxthreads = 128)
+    threads = clamp(prevpow(2, max(1, (Nx * Ny) ÷ target_blocks)), 32, maxthreads)
+    wx = min(threads, Nx)
+    wy = clamp(threads ÷ wx, 1, Ny)
+    return (wx, wy)
+end
+
+function launch_shoc_columns!(arch, grid, args...)
+    dev = device(arch)
+    if dev isa KernelAbstractions.GPU
+        Nx, Ny, _ = size(grid)
+        kernel! = _step_shoc!(dev, shoc_gpu_workgroup(Nx, Ny), (Nx, Ny))
+        kernel!(grid, args...)
+    else
+        launch!(arch, grid, :xy, _step_shoc!, grid, args...)
+    end
+    return nothing
+end
+
 function shoc_thermodynamic_density(formulation)
     AtmosphereModels.thermodynamic_density_name(formulation) === :ρθ ||
         throw(ArgumentError("SimplifiedHigherOrderClosure requires the liquid-ice potential temperature " *
@@ -405,8 +432,7 @@ function Oceananigans.TimeSteppers.step_closure_prognostics!(fields::SHOCFields,
     ρu, ρv, ρw = model.momentum.ρu, model.momentum.ρv, model.momentum.ρw
     ρe = model.tracers[TKE_NAME]
 
-    launch!(arch, grid, :xy, _step_shoc!,
-            grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+    launch_shoc_columns!(arch, grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
 
     fill_halo_regions!((fields.increments.u, fields.increments.v))
 
