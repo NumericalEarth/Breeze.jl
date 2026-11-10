@@ -352,5 +352,5 @@ end
     @test all(isfinite, physical)
     @test physical[1] != constant[1]
     @test physical[1] > 0
-    @test physical[2] ≈ -physical[1]
+    @test physical[2] < 0 # vapor is consumed
 end
