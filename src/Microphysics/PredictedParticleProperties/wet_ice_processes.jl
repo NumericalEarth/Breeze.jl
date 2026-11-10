@@ -1,5 +1,5 @@
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the density of newly accreted cloud rime from the rime-impact parameter.
 
@@ -83,7 +83,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute liquid shedding rate from ice particles following
 [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
@@ -129,7 +129,7 @@ where `f1pr28 = ∫_{D≥9mm} m(D) N'(D) dD` (lookup table, Fl-blended mass),
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain number source from shedding.
 
@@ -151,7 +151,7 @@ Shed liquid forms rain drops of approximately 1 mm diameter.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the wet growth and refreezing capacities, the maximum rates at which
 collected water and the liquid coating can freeze, from the ventilated heat
@@ -201,7 +201,7 @@ density `ρᵗʰ`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the wet growth freezing capacity following
 [Musil (1970)](@cite Musil1970), Eq. (A9), as in P3 v4.
@@ -240,7 +240,7 @@ the excess collected water stays liquid and is redirected into qʷⁱ.
     first(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport, lookups))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the heat-limited refreezing capacity of the liquid coating on ice.
 See [`refreezing_rate`](@ref).
@@ -250,7 +250,7 @@ See [`refreezing_rate`](@ref).
     last(freezing_capacities(p3, nⁱ, T, qᵛ, ρ, ρᵗʰ, constants, transport, lookups))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute refreezing rate of liquid on ice using the heat-balance formula.
 

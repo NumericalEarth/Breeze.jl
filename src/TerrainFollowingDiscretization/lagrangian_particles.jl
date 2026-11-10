@@ -85,7 +85,7 @@ end
     terrain_physical_height(x, y, r, grid, grid.z.formulation)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the physical altitudes `(z_bottom, z_top)` of the bounding coordinate
 surfaces above the horizontal position `(x, y)`: the terrain surface
@@ -157,7 +157,7 @@ const newton_iterations = 8
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Invert the terrain coordinate map for the reference coordinate `r` of the physical
 position `(x, y, z)`, clamped to the grid's bounding r faces.
