@@ -69,7 +69,10 @@ jobs:
             topology: 'PBB'
             mode: 'kernelad'
             reactant_rev: 'f439eef39171e3225908be5722367aee6f24a29d'
-            enzyme_jax_branch: 'pb/kernel-ad'
+            # pb/kernel-ad plus EnzymeAD/Enzyme-JAX#3908, the lower-jit fix for the 29 GiB
+            # below, built by its builds-only PR against main; back to pb/kernel-ad once
+            # #3908 is on it
+            enzyme_jax_branch: 'dkz/lower-jit-constructor-closure'
             # reactant_jll_url: 'https://github.com/Pangoraw/Reactant_jll.jl'
             # reactant_jll_rev: '<a build newer than 11cfdccc>'
             # reactant_jll_gpu_version: '12.9'
@@ -84,26 +87,15 @@ jobs:
             dump_mlir: 'mlir_dumps'
             timeout: 60
             # TEMPORARY: the AD job's window is 64 steps with binomial checkpointing (2 and 8).
-            # Under kernel AD each kernel launch of the loop body becomes its own jit region, and
-            # checkpointing clones the body: the 675 launches of the forward program became 2538 regions
-            # (2879 GPU modules), which lower-jit compiles one by one, keeping roughly 10 MiB each,
-            # until the 30 GiB runner killed Julia at 29 GiB (run 41965836851). Without
-            # checkpointing the reverse pass holds the forward and the reverse body only, about
-            # half the regions, and 8 steps keep the whole tape on the GPU. Restore the AD job's
-            # window once Enzyme-JAX shares identical regions or frees them after compiling.
+            # Under kernel AD each kernel launch of the loop body becomes its own jit region;
+            # 8 steps without checkpointing keep the whole tape on the GPU and the region count
+            # at 1378 (1606 GPU modules). lower-jit was killed at 29 GiB on them because each
+            # call's submodule carried every module's constructor and fat binary
+            # (EnzymeAD/Enzyme-JAX#3908 fixes that; runs 42863400682 to 42890370661 and
+            # benchmarking/kernelad_memprobe.jl, which `probe_run: <run id>` on this entry runs
+            # on that run's dump instead of the benchmark). Restore the AD job's window once
+            # the fix is in and the compile fits.
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 8 --checkpoints none --kernels kernelad'
-            # TEMPORARY: instead of the benchmark (which the 30 GiB runner kills at 29 GiB in the
-            # binary pipeline, run 42863400682), run benchmarking/kernelad_memprobe.jl on that
-            # run's pre_kernelad_binary_pm.mlir dump: the binary pipeline one pass at a time, with
-            # the process RSS after each, to attribute the memory to a pass. Remove to benchmark.
-            probe_run: '42863400682'
-            # lower-jit{jit=false} retains nothing (run 42880168010), cubin-only climbs like
-            # fatbin, and with the constructors stripped the whole pass takes 3.6 s and 64 MiB
-            # (run 42888283969): the memory and the time are the per-call constructors, which
-            # register each module's fatbin with the CUDA runtime. Does an explicitly lazy
-            # module loading make registration cheap?
-            probe_experiments: 'bin:true'
-            probe_cuda_module_loading: 'LAZY'
     defaults:
       run:
         shell: bash
