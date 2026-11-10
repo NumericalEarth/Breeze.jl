@@ -24,7 +24,7 @@
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Standard normal cumulative distribution Φ(x).
 
@@ -38,7 +38,7 @@ julia> round(normal_cumulative_distribution(1.0), digits=6)
 @inline normal_cumulative_distribution(x) = complementary_error_function(-x / sqrt(oftype(x, 2))) / 2
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Standard normal density φ(x).
 
@@ -52,7 +52,7 @@ julia> round(normal_density(0.0), digits=6)
 @inline normal_density(x) = exp(-x^2 / 2) / sqrt(2 * oftype(x, π))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Gaussian cloud fraction C = Φ(s̄ / σₛ) for mean saturation deficit `s̄` and spread `σₛ`.
 
@@ -66,7 +66,7 @@ julia> round(gaussian_cloud_fraction(0.0, 1e-3), digits=6)
 @inline gaussian_cloud_fraction(s̄, σₛ) = normal_cumulative_distribution(s̄ / σₛ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Mean condensate σₛ G(s̄ / σₛ), with G(Q) = Q Φ(Q) + φ(Q), of a Gaussian saturation deficit with
 mean `s̄` and spread `σₛ` (Mellor 1977).
@@ -84,7 +84,7 @@ julia> round(gaussian_equilibrium_condensate(-1e-3, 1e-3) * 1e3, digits=4) # g/k
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Spread σₛ of the saturation deficit s' = a qᵗ' - b θˡⁱ' from the conserved-variable statistics
 `𝒮`, with the floor `σ₀` added in quadrature and σₛ² bounded below by a tiny positive value so
@@ -105,7 +105,7 @@ that σₛ > 0 even when both vanish.
 const minimum_saturation_deficit_variance = floatmin(Float32)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Cloud fraction `C` and equilibrium mean condensate `q⁺` of the subgrid distribution `𝒮` of the
 saturation deficit, with cell mean `s̄`, linearisation coefficients `a`, `b` and spread floor
@@ -167,7 +167,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Phase-relaxation rate λ = α 4π Dᵛ N r̄ of a droplet population ([Squires (1952)](@cite Squires1952);
 [Politovich and Cooper (1988)](@cite PolitovichCooper1988)), with vapor diffusivity `Dᵛ`, droplet number `N` [m⁻³], the mean-volume radius

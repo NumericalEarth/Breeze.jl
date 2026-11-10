@@ -1,6 +1,6 @@
 using Adapt: Adapt, adapt
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using DocStringExtensions: TYPEDEF
 
 using Breeze.Thermodynamics:
     AbstractReferencePressureState,
@@ -155,7 +155,7 @@ Adapt.adapt_structure(to, f::ExponentialRateCondensateFormation) =
     ExponentialRateCondensateFormation(adapt(to, f.rate), adapt(to, f.Δt))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the relaxation timescale of a condensate formation model: `1 / rate` for a constant-rate
 formation and `Δt / (1 - exp(-Δt rate))` for an [`ExponentialRateCondensateFormation`](@ref).

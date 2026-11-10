@@ -53,7 +53,7 @@ model.clock.last_Δt
 prepare_first_time_step!(model, Δt) = maybe_prepare_first_time_step!(model, Δt, [])
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Prepare `model`, at iteration 0, for a first time step of `Δt`: set `clock.last_Δt`, reconcile
 the state and `update_state!`, which at initialization also computes the initial radiative

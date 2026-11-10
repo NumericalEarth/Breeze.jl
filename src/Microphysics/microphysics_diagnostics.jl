@@ -313,7 +313,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Lazy diagnostic of the cloud fraction ``C`` of `model`, as a `KernelFunctionOperation`.
 

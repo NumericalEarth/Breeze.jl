@@ -236,7 +236,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The coefficient of ``q_{k+1}`` in row `k` of the vertically implicit solve of the prognostic `q`
 contributed by `closure` with fields `closure_fields`, for the closure scalar `id` (a `Val` index
@@ -255,7 +255,7 @@ The closure's contribution to the diagonal is not supplied separately: it is der
     zero(grid)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The coefficient of ``q_{k′}`` in row `k′ + 1` of the vertically implicit solve contributed by
 `closure` (the `LinearAlgebra.Tridiagonal` convention, as in Oceananigans' `ivd_lower_diagonal`).
@@ -267,7 +267,7 @@ across the bottom boundary face. The default is zero.
     zero(grid)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The linear coefficient `λ` of row `k` contributed by `closure`, the Breeze analogue of
 Oceananigans' `implicit_linear_coefficient` for the closure-supplied transport: the solve treats
@@ -297,7 +297,7 @@ uniform density. Each column of the resulting matrix then sums to one with `Δz`
     zero(grid)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The contribution of `closure` to the coefficient of ``q_k`` in row `k` of the vertically implicit
 solve, excluding the identity. The arguments and conventions are those of

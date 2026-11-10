@@ -241,7 +241,7 @@ Adapt.adapt_structure(to, c::GaussianSubgridCorrelation) =
                                adapt(to, c.spread_regularization))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`GaussianSubgridCorrelation`](@ref) with float type `FT`. The autoconversion enhancement
 is computed from the in-cloud gamma shape `cloud_liquid_shape` ν and the autoconversion exponent
@@ -283,14 +283,14 @@ convert_or_nothing(FT, ::Nothing) = nothing
 convert_or_nothing(FT, x) = convert(FT, x)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the subgrid distribution choice of `microphysics`; [`NoSubgridCorrelation`](@ref) by default.
 """
 subgrid_correlation(microphysics) = NoSubgridCorrelation()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the [`AbstractSubgridStatistics`](@ref) of cell `(i, j, k)` for the subgrid distribution
 `correlation`, from the turbulence `closure` and its `closure_fields`. `state` is a `NamedTuple`

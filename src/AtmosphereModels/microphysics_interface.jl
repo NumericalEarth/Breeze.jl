@@ -1302,7 +1302,7 @@ an `ArgumentError` at model construction for schemes that need settings an archi
 validate_microphysics_architecture(microphysics, arch) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Adjust the thermodynamic `state` according to the `scheme`.
 For example, if `scheme isa SaturationAdjustment`, then this function
