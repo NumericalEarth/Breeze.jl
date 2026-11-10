@@ -32,6 +32,13 @@ using Breeze.AtmosphereModels: AtmosphereModels, ClosureCloud, ClosureCloudStati
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 include("shoc_parameters.jl")
+include("clipping.jl")
+include("column_utilities.jl")
+include("boundary_layer_depth.jl")
+include("tke_updates.jl")
+include("implicit_diffusion.jl")
+include("third_moments.jl")
+include("assumed_pdfs.jl")
 include("shoc_column.jl")
 include("simplified_higher_order_closure.jl")
 include("shoc_cloud.jl")
