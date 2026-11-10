@@ -274,9 +274,9 @@ using Breeze.Thermodynamics: ThermodynamicConstants, MoistureMassFractions, Liqu
 
 # One P3 cell with a Gaussian subgrid distribution: the ρqᶜˡ and ρqᵛ tendencies as functions of the
 # state (qᵛ, qᶜˡ, T, σ²ᵗ, σ²ᶿ) and the condensation rate.
-function p3_subgrid_cell(rate, Δt; phase_relaxation_coefficient = nothing)
+function p3_subgrid_cell(rate, Δt; phase_relaxation_coefficient = nothing, subgrid_options...)
     condensation = ExponentialRateCondensateFormation(rate, Δt)
-    subgrid = GaussianSubgridCorrelation(Float64; condensation, phase_relaxation_coefficient)
+    subgrid = GaussianSubgridCorrelation(Float64; condensation, phase_relaxation_coefficient, subgrid_options...)
     process_rates = ProcessRate(Float64; sink_limiting_timescale=Δt)
     return PredictedParticlePropertiesMicrophysics(; subgrid, process_rates)
 end
@@ -353,4 +353,45 @@ end
     @test physical[1] != constant[1]
     @test physical[1] > 0
     @test physical[2] < 0 # vapor is consumed
+end
+
+@testset "Spread regularization ε: finite, correct gradients at the Dirac limit with α" begin
+    # No variance and no floor: the distribution is a step in s̄ of width sqrt(floatmin(Float32)),
+    # so ∂C/∂s̄ is unbounded at s̄ ≈ 0, and the phase-relaxation radius r̄ ∝ (qᶜˡ / C)^(1/3) feeds it
+    # to the gradient. ε adds (ε qᵛ⁺)² to the variance and keeps the derivative finite.
+    Δt = 120.0
+    constants = ThermodynamicConstants(Float64)
+    T = 280.0
+    qᵛ⁺ = saturation_specific_humidity(T, 1.0, constants, PlanarLiquidSurface())
+    qᶜˡ = 1e-4
+    PPP = Breeze.Microphysics.PredictedParticleProperties
+    # s̄ = (qᵛ - qᵛ⁺) / Γ + qᶜˡ is linear in qᵛ: invert it for the vapor that gives a target s̄
+    q = MoistureMassFractions(qᵛ⁺, qᶜˡ, 0.0)
+    𝒰 = with_temperature(LiquidIcePotentialTemperatureState(0.0, q, 1e5, 85e3), T, constants)
+    Γ = PPP.p3_saturation_deficit(NoSubgridCorrelation(), qᵛ⁺, qᵛ⁺, qᶜˡ, T, 𝒰, constants).Γ
+    vapor(s̄) = qᵛ⁺ + Γ * (s̄ - qᶜˡ)
+    for ε in (0.0, 1e-4), s̄ in (-1e-6, 0.0, 1e-6)
+        p3 = p3_subgrid_cell(1 / 10, Δt; phase_relaxation_coefficient=1.0,
+                             minimum_saturation_deficit_spread=0, spread_regularization=ε)
+        x₀ = (vapor(s̄), qᶜˡ, T, 0.0, 0.0)
+        for output in 1:2, j in 1:3
+            f = v -> condensation_increment(ntuple(k -> k == j ? v : x₀[k], 5), p3, constants)[output]
+            ad = reverse_gradient(f, x₀[j])
+            fd = central_difference(f, x₀[j], 1e-6)
+            scale = max(abs(fd), 1e-12 * abs(f(x₀[j]) / x₀[j]))
+            if ε > 0
+                @test isfinite(ad)
+                @test abs(ad - fd) ≤ 1e-3 * scale
+            else
+                @info "ε = 0, s̄ = $s̄, output $output, ∂/∂x$j" ad fd
+            end
+        end
+    end
+
+    # ε = 0 is the default and leaves the floor unchanged
+    default = GaussianSubgridCorrelation(Float64)
+    @test default.spread_regularization == 0
+    @test PPP.saturation_deficit_spread_floor(default, qᵛ⁺) === min(1e-4, qᵛ⁺ / 10)
+    regularized = GaussianSubgridCorrelation(Float64; minimum_saturation_deficit_spread=0, spread_regularization=1e-4)
+    @test PPP.saturation_deficit_spread_floor(regularized, qᵛ⁺) ≈ 1e-4 * qᵛ⁺
 end

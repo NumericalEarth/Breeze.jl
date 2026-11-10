@@ -26,7 +26,7 @@
 # Mean saturation deficit s̄ of the Mellor linearisation, s' = a qᵗ' - b θˡⁱ', with Γ the
 # psychrometric correction that the grid-mean caps use, so σₛ → 0 recovers their increment
 # (qᵛ - qᵛ⁺ˡ) / Γ. The spread floor σ₀ is capped at a tenth of qᵛ⁺ˡ, then raised to the optional
-# relative floor c₀ qᵛ⁺ˡ; it is zero without a
+# relative floor c₀ qᵛ⁺ˡ and regularized in quadrature by ε qᵛ⁺ˡ; it is zero without a
 # subgrid distribution. Shared by the subgrid rates and the `cloud_fraction` diagnostic.
 @inline function p3_saturation_deficit(correlation, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, 𝒰, constants)
     FT = typeof(T)
@@ -42,9 +42,13 @@
 end
 
 @inline saturation_deficit_spread_floor(::NoSubgridCorrelation, qᵛ⁺ˡ) = zero(qᵛ⁺ˡ)
-@inline saturation_deficit_spread_floor(correlation, qᵛ⁺ˡ) =
-    relative_spread_floor(correlation.relative_minimum_saturation_deficit_spread,
-                          min(correlation.minimum_saturation_deficit_spread, qᵛ⁺ˡ / 10), qᵛ⁺ˡ)
+@inline function saturation_deficit_spread_floor(correlation, qᵛ⁺ˡ)
+    σ₀ = relative_spread_floor(correlation.relative_minimum_saturation_deficit_spread,
+                               min(correlation.minimum_saturation_deficit_spread, qᵛ⁺ˡ / 10), qᵛ⁺ˡ)
+    # The floor enters the variance in quadrature, so the smooth regularization ε qᵛ⁺ is folded
+    # into it: σₛ² = σ² + σ₀² + (ε qᵛ⁺)². sqrt(σ₀²) is σ₀ exactly, so ε = 0 changes nothing.
+    return sqrt(σ₀^2 + (correlation.spread_regularization * qᵛ⁺ˡ)^2)
+end
 
 # The optional non-dimensional floor σ₀ ≥ c₀ qᵛ⁺ˡ; `nothing` leaves the dimensional floor unchanged.
 @inline relative_spread_floor(::Nothing, σ₀, qᵛ⁺ˡ) = σ₀

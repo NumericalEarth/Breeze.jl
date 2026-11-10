@@ -171,7 +171,10 @@ phase-relaxation time τ = 1 / (α 4π Dᵛ N r̄) of [Squires (1952)](@cite Squ
 cloud droplet number and r̄ the mean-volume radius of the in-cloud liquid qᶜˡ / C, floored at
 `activation_radius` (1 µm by default) so that τ stays finite as the liquid vanishes. The latent-heat
 correction stays in the Γ blend above. The formation model's time step (exponential increment) is
-kept.
+kept. The spread may be regularized smoothly with `spread_regularization` ε (default 0, off),
+σₛ² = σ² + σ₀² + (ε qᵛ⁺)²: with no variance and no floor the distribution is a step of width
+~1e-19 in s̄, whose derivative ∂C/∂s̄ is unbounded, which an in-cloud quantity such as the
+phase-relaxation radius r̄ ∝ (qᶜˡ / C)^(1/3) passes to the gradient; ε keeps it finite.
 Autoconversion is averaged over an in-cloud gamma distribution of shape ν, which multiplies the
 in-cloud rate by `autoconversion_enhancement` E = Γ(ν + p) / (Γ(ν) νᵖ)
 (Morrison and Gettelman 2008); the cloud fraction used to form in-cloud means is floored at
@@ -220,6 +223,8 @@ struct GaussianSubgridCorrelation{FT, CF, RF, PR} <: AbstractSubgridCorrelation
     phase_relaxation_coefficient :: PR
     "activation radius r_act [m] flooring the mean droplet radius r̄ of the phase-relaxation time"
     activation_radius :: FT
+    "non-dimensional spread regularization ε, added in quadrature as σₛ² += (ε qᵛ⁺)²"
+    spread_regularization :: FT
 end
 
 # Walk the fields so that traced numbers (`Reactant.to_rarray`) are converted for the kernel.
@@ -232,7 +237,8 @@ Adapt.adapt_structure(to, c::GaussianSubgridCorrelation) =
                                adapt(to, c.minimum_cloud_fraction),
                                adapt(to, c.relative_minimum_saturation_deficit_spread),
                                adapt(to, c.phase_relaxation_coefficient),
-                               adapt(to, c.activation_radius))
+                               adapt(to, c.activation_radius),
+                               adapt(to, c.spread_regularization))
 
 """
 $(TYPEDSIGNATURES)
@@ -244,7 +250,7 @@ is computed from the in-cloud gamma shape `cloud_liquid_shape` ν and the autoco
 `nothing` (the default) keeps the dimensional floor alone. A number `phase_relaxation_coefficient`
 α replaces the constant condensation timescale with the droplet phase-relaxation time
 1 / (α 4π Dᵛ N r̄), r̄ floored at `activation_radius`; `nothing` (the default) keeps the constant
-timescale.
+timescale. A number `spread_regularization` ε adds (ε qᵛ⁺)² to the saturation-deficit variance.
 """
 function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatType;
                                     variance_coefficient = 1,
@@ -256,7 +262,8 @@ function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatTy
                                     minimum_cloud_fraction = 0.01,
                                     relative_minimum_saturation_deficit_spread = nothing,
                                     phase_relaxation_coefficient = nothing,
-                                    activation_radius = 1e-6)
+                                    activation_radius = 1e-6,
+                                    spread_regularization = 0)
     ν = cloud_liquid_shape
     p = autoconversion_exponent
     E = gamma(ν + p) / (gamma(ν) * ν^p)
@@ -268,7 +275,8 @@ function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatTy
                                       convert(FT, minimum_cloud_fraction),
                                       convert_or_nothing(FT, relative_minimum_saturation_deficit_spread),
                                       convert_or_nothing(FT, phase_relaxation_coefficient),
-                                      convert(FT, activation_radius))
+                                      convert(FT, activation_radius),
+                                      convert(FT, spread_regularization))
 end
 
 convert_or_nothing(FT, ::Nothing) = nothing
