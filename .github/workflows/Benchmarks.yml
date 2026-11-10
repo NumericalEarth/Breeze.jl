@@ -92,6 +92,11 @@ jobs:
             # half the regions, and 8 steps keep the whole tape on the GPU. Restore the AD job's
             # window once Enzyme-JAX shares identical regions or frees them after compiling.
             extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 8 --checkpoints none --kernels kernelad'
+            # TEMPORARY: instead of the benchmark (which the 30 GiB runner kills at 29 GiB in the
+            # binary pipeline, run 42863400682), run benchmarking/kernelad_memprobe.jl on that
+            # run's pre_kernelad_binary_pm.mlir dump: the binary pipeline one pass at a time, with
+            # the process RSS after each, to attribute the memory to a pass. Remove to benchmark.
+            probe_run: '42863400682'
     defaults:
       run:
         shell: bash
@@ -262,6 +267,15 @@ jobs:
         run: |
           earlyoom -m 2 -s 100 -r 60 --prefer 'julia'
         background: true
+      - name: Download the MLIR dump to probe
+        if: ${{ matrix.probe_run }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: 'mlir-dumps-*'
+          run-id: ${{ matrix.probe_run }}
+          github-token: ${{ github.token }}
+          path: probe_dumps
+          merge-multiple: true
       - name: Run benchmarks
         timeout-minutes: ${{ matrix.timeout || 45 }}
         env:
@@ -271,6 +285,12 @@ jobs:
           # An empty POLYGEIST_GPU_KERNEL_BLOCK_SIZE would still be read, as a block size of 0
           if [[ -n "${{ matrix.kernelad_block_size }}" ]]; then
               export POLYGEIST_GPU_KERNEL_BLOCK_SIZE="${{ matrix.kernelad_block_size }}"
+          fi
+          if [[ -n "${{ matrix.probe_run }}" ]]; then
+              dump="$(find "${GITHUB_WORKSPACE}/probe_dumps" -name 'module_*_pre_kernelad_binary_pm.mlir' | head -n1)"
+              ls -l "${dump}"
+              julia --color=yes --project kernelad_memprobe.jl "${dump}"
+              exit $?
           fi
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }} ${{ matrix.profile_kernels && '--profile_kernels' || '' }}
       - name: Stop earlyoom
