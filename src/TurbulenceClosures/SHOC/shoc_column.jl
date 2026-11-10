@@ -70,6 +70,7 @@ end
 
     FT = eltype(tke)
     g = p.ggr
+    cp = HardClipping()
 
     @inbounds begin
         wthl_sfc = surface.wthl_sfc[i, j, 1]
@@ -101,7 +102,7 @@ end
     thv_zi_u = interpolate_to_interface(i, j, Nz+1, Nz, zt, zi, thv, zero(FT))
 
     @inbounds for k in Nz:-1:1
-        tke_k = max(p.mintke, tke[i, j, k])
+        tke_k = clip_max(cp, p.mintke, tke[i, j, k], p.mintke)
         tke[i, j, k] = tke_k
 
         thv_zi_l = interpolate_to_interface(i, j, k, Nz, zt, zi, thv, zero(FT))
@@ -128,6 +129,11 @@ end
     temp_crit = convert(FT, 182) # surface temperature below which extra mixing applies [K]
     pbl_trans = convert(FT, 200) # transition depth above the boundary layer top [m]
 
+    # Scales of the clipped quantities, for the clipping policy
+    brunt_scale = convert(FT, 1e-6) # squared buoyancy frequency [s⁻²]
+    production_scale = convert(FT, 1e-6) # production of turbulent kinetic energy [m² s⁻³]
+    iso_scale_floor = convert(FT, 100) # return-to-isotropy time scale [s]
+
     Cs = p.ℂᴰ₂
     Ck = p.ℂᴰ₁
     Ce = (Ck * Ck * Ck) / ((Cs * Cs) * (Cs * Cs))
@@ -139,7 +145,7 @@ end
 
     # The damping of the return-to-isotropy time scale by column stability
     lambda_column = p.ℂᵝ₁ + ((brunt_int / g) - p.ℂᵝ₄) * p.ℂᵝ₃
-    lambda_column = max(p.ℂᵝ₁, min(p.ℂᵝ₂, lambda_column))
+    lambda_column = clip_between(cp, lambda_column, p.ℂᵝ₁, p.ℂᵝ₂, p.ℂᵝ₁)
 
     # The shear production term of the interface below the level, carried up the column
     sterm_l = shear_production_term(i, j, 1, Nz, p, zt, u_wind, v_wind)
@@ -149,32 +155,31 @@ end
         brunt_k = brunt[i, j, k]
 
         tkes = sqrt(tke_k)
-        brunt2 = ifelse(brunt_k >= 0, brunt_k, zero(FT))
+        brunt2 = clip_negative(cp, brunt_k, brunt_scale)
 
-        mix = min(p.maxlen, (p.ℂˡ₂ * sqrt(1 / ((1 / (tscale * tkes * p.vk * zt[i, j, k]))
-                             + (1 / (tscale * tkes * l_inf)) + p.ℂˡ₃ * (brunt2 / tke_k)))) / p.ℂˡ₁)
-        mix = min(p.maxlen, mix)
-        mix = max(p.minlen, mix)
-        mix = min(host_scale, mix)
+        mix = clip_min(cp, p.maxlen, (p.ℂˡ₂ * sqrt(1 / ((1 / (tscale * tkes * p.vk * zt[i, j, k]))
+                             + (1 / (tscale * tkes * l_inf)) + p.ℂˡ₃ * (brunt2 / tke_k)))) / p.ℂˡ₁, p.minlen)
+        mix = clip_min(cp, p.maxlen, mix, p.minlen)
+        mix = clip_max(cp, p.minlen, mix, p.minlen)
+        mix = clip_min(cp, host_scale, mix, p.minlen)
         shoc_mix[i, j, k] = mix
 
         # adv_sgs_tke
         # compute_shr_prod at interface k+1, interpolated to level k with that of interface k
         sterm_u = shear_production_term(i, j, k+1, Nz, p, zt, u_wind, v_wind)
-        sterm_zt = clip_below(linear_interp(zi[i, j, k+1], zi[i, j, k], sterm_u, sterm_l, zt[i, j, k]), zero(FT))
+        sterm_zt = hard_floor(linear_interp(zi[i, j, k+1], zi[i, j, k], sterm_u, sterm_l, zt[i, j, k]), zero(FT))
         sterm_l = sterm_u
         a_prod_bu = (g / p.basetemp) * wthv_sec[i, j, k]
         tke_k = max(0, tke_k)
         a_prod_sh = tk[i, j, k] * sterm_zt
         a_diss = Cee / mix * tke_k^convert(FT, 1.5)
-        tke_k = max(p.mintke, tke_k + dtime * (max(0, a_prod_sh + a_prod_bu) - a_diss))
-        tke_k = min(tke_k, p.maxtke)
+        tke_k = clip_max(cp, p.mintke, tke_k + dtime * (clip_max(cp, 0, a_prod_sh + a_prod_bu, production_scale) - a_diss), p.mintke)
+        tke_k = clip_min(cp, tke_k, p.maxtke, p.mintke)
         tke[i, j, k] = tke_k
 
         # isotropic_ts
         iso_scale = (2 * tke_k) / a_diss
-        lambda = ifelse(brunt_k <= 0, zero(FT), lambda_column)
-        iso = min(maxiso, iso_scale / (1 + lambda * brunt_k * (iso_scale * iso_scale)))
+        iso = clip_min(cp, maxiso, iso_scale / (1 + stable_damping(cp, lambda_column, brunt_k, brunt_scale) * (iso_scale * iso_scale)), iso_scale_floor)
         isotropy[i, j, k] = iso
 
         # eddy_diffusivities
@@ -203,6 +208,7 @@ end
 
     FT = eltype(tke)
     g = p.ggr
+    cp = HardClipping()
 
     @inbounds begin
         wthl_sfc = surface.wthl_sfc[i, j, 1]
@@ -225,12 +231,12 @@ end
     ksrfmin = convert(FT, 1e-4) # minimum surface drag coefficient [kg/s/m²]
     taux = rho_zi_sfc * uw_sfc
     tauy = rho_zi_sfc * vw_sfc
-    @inbounds ws = max(zero_safe_sqrt(u_wind[i, j, 1] * u_wind[i, j, 1] + v_wind[i, j, 1] * v_wind[i, j, 1]), wsmin)
+    @inbounds ws = clip_max(cp, zero_safe_sqrt(u_wind[i, j, 1] * u_wind[i, j, 1] + v_wind[i, j, 1] * v_wind[i, j, 1]), wsmin, wsmin)
     tau = zero_safe_sqrt(taux * taux + tauy * tauy)
-    ksrf = max(tau / ws, ksrfmin)
+    ksrf = clip_max(cp, tau / ws, ksrfmin, ksrfmin)
 
     # tke_srf_flux_term
-    ustar = max(zero_safe_sqrt(zero_safe_sqrt(uw_sfc * uw_sfc + vw_sfc * vw_sfc)), convert(FT, 0.01))
+    ustar = clip_max(cp, zero_safe_sqrt(zero_safe_sqrt(uw_sfc * uw_sfc + vw_sfc * vw_sfc)), convert(FT, 0.01), convert(FT, 0.01))
     wtke_sfc = ustar * ustar * ustar
 
     # sfc_fluxes
@@ -262,8 +268,8 @@ end
     # diag_second_moments_lbycond
     a_const = p.ℂᶠ
     uf = zero_safe_sqrt(ustar2 + convert(FT, 0.3) * wstar * wstar)
-    uf = max(convert(FT, 0.01), uf)
-    maxval = max(zero_safe_sqrt(ustar2), convert(FT, 0.01))
+    uf = clip_max(cp, convert(FT, 0.01), uf, convert(FT, 0.01))
+    maxval = clip_max(cp, zero_safe_sqrt(ustar2), convert(FT, 0.01), convert(FT, 0.01))
 
     @inbounds begin
         thl_sec[i, j, 1] = convert(FT, 0.4) * a_const * ((wthl_sfc / uf) * (wthl_sfc / uf))
@@ -308,9 +314,9 @@ end
 
         w_sec[i, j, k] = w2fac * tke_u
 
-        isotropy_zi = clip_below(linear_interp(zt_u, zt_l, iso_u, iso_l, zi_k), zero(FT))
-        tkh_zi = clip_below(linear_interp(zt_u, zt_l, tkh_u, tkh_l, zi_k), zero(FT))
-        tk_zi = clip_below(linear_interp(zt_u, zt_l, tk_u, tk_l, zi_k), zero(FT))
+        isotropy_zi = hard_floor(linear_interp(zt_u, zt_l, iso_u, iso_l, zi_k), zero(FT))
+        tkh_zi = hard_floor(linear_interp(zt_u, zt_l, tkh_u, tkh_l, zi_k), zero(FT))
+        tk_zi = hard_floor(linear_interp(zt_u, zt_l, tk_u, tk_l, zi_k), zero(FT))
 
         grid_dz = 1 / (zt_u - zt_l)
         grid_dz2 = grid_dz * grid_dz
@@ -379,10 +385,10 @@ end
         thl_sec_above = thl_sec[i, j, k+1]
         wthl_sec_above = wthl_sec[i, j, k+1]
 
-        isotropy_zi = clip_below(linear_interp(zt_u, zt_l, iso_u, iso_l, zi_k), zero(FT))
-        brunt_zi = clip_below(linear_interp(zt_u, zt_l, brunt_u, brunt_l, zi_k), largeneg)
-        w_sec_zi = clip_below(linear_interp(zt_u, zt_l, w_sec_u, w_sec_l, zi_k), w_sec_min)
-        thetal_zi = clip_below(linear_interp(zt_u, zt_l, thetal_u, thetal_l, zi_k), zero(FT))
+        isotropy_zi = hard_floor(linear_interp(zt_u, zt_l, iso_u, iso_l, zi_k), zero(FT))
+        brunt_zi = hard_floor(linear_interp(zt_u, zt_l, brunt_u, brunt_l, zi_k), largeneg)
+        w_sec_zi = clip_below(cp, linear_interp(zt_u, zt_l, w_sec_u, w_sec_l, zi_k), w_sec_min, p.mintke)
+        thetal_zi = hard_floor(linear_interp(zt_u, zt_l, thetal_u, thetal_l, zi_k), zero(FT))
 
         thedz = 1 / (zt_u - zt_l)
         thedz2 = 1 / (dz_l + dz_u)
@@ -415,6 +421,7 @@ end
     w_sec, wqls_sec, w3 = diagnostics.w_sec, diagnostics.wqls_sec, diagnostics.w3
     thl_sec, qw_sec, qwthl_sec = diagnostics.thl_sec, diagnostics.qw_sec, diagnostics.qwthl_sec
     wthl_sec, wqw_sec = diagnostics.wthl_sec, diagnostics.wqw_sec
+    cp = HardClipping()
 
     @inbounds begin
         wthl_sfc = surface.wthl_sfc[i, j, 1]
@@ -434,7 +441,7 @@ end
     @inbounds for k in 1:Nz
         moments_u = interface_moments(k+1)
         cldfrac_k, ql_k, ql2_k, wqls_k, wthv_k =
-            assumed_pdf(i, j, k, p, zt, zi, pres, w_field, thetal, qw, w_sec, moments_l, moments_u)
+            assumed_pdf(i, j, k, p, cp, zt, zi, pres, w_field, thetal, qw, w_sec, moments_l, moments_u)
         moments_l = moments_u
 
         shoc_cldfrac[i, j, k] = cldfrac_k
@@ -443,7 +450,7 @@ end
         wqls_sec[i, j, k] = wqls_k
         wthv_sec[i, j, k] = wthv_k
 
-        tke[i, j, k] = max(p.mintke, tke[i, j, k])
+        tke[i, j, k] = clip_max(cp, p.mintke, tke[i, j, k], p.mintke)
     end
 
     #####

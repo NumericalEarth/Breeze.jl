@@ -14,7 +14,7 @@ end
 # shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters share one form: the plume
 # means and variances of a scalar from its variance `sec`, its flux correlation with w, and the
 # skewness `skew` of the scalar (identically zero for thetal, where `dothetal_skew = false`).
-@inline function plume_variance(first_plume, x1_1, x1_2, a, skew, sec)
+@inline function plume_variance(cp, first_plume, x1_1, x1_2, a, skew, sec)
     one_minus = 1 - a * (x1_1 * x1_1) - (1 - a) * (x1_2 * x1_2)
     third = skew - a * (x1_1 * x1_1 * x1_1) - (1 - a) * (x1_2 * x1_2 * x1_2)
     numerator = ifelse(first_plume, 3 * x1_2 * one_minus - third, -3 * x1_1 * one_minus + third)
@@ -22,12 +22,12 @@ end
     # Where the plume means coincide the Fortran forms 0/0 and MAX(0, NaN) drops it; that is zero.
     degenerate = denominator == 0
     ratio = ifelse(degenerate, zero(numerator), numerator / ifelse(degenerate, one(denominator), denominator))
-    return min(100, max(0, ratio)) * sec
+    return clip_between(cp, ratio, 0, 100, 1) * sec
 end
 
-@inline function scalar_plume_parameters(flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed, p)
+@inline function scalar_plume_parameters(cp, flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed, p)
     FT = typeof(sec)
-    corrtest = max(-1, min(1, flux / (sqrtw2 * sqrt_sec)))
+    corrtest = clip_between(cp, flux / (sqrtw2 * sqrt_sec), -1, 1, 1)
 
     uniform = (sec <= tol * tol) | (abs(w1_2 - w1_1) <= 0)
 
@@ -41,8 +41,8 @@ end
                             ((p.ℂᵍ₂ * Skew_w) / (p.ℂᵍ₄ - p.ℂᵍ₃)) * (tsign - p.ℂᵍ₃)))
     skew = ifelse(skewed, skew_qw, zero(FT))
 
-    x2_1 = plume_variance(true, x1_1, x1_2, a, skew, sec)
-    x2_2 = plume_variance(false, x1_1, x1_2, a, skew, sec)
+    x2_1 = plume_variance(cp, true, x1_1, x1_2, a, skew, sec)
+    x2_2 = plume_variance(cp, false, x1_1, x1_2, a, skew, sec)
 
     x1_1 = x1_1 * sqrt_sec + x_first
     x1_2 = x1_2 * sqrt_sec + x_first
@@ -106,7 +106,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The assumed PDF of level `k` (Analytic Double Gaussian 1 of Larson et al. 2002): return the
 subgrid cloud fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
 """
-@inline function assumed_pdf(i, j, k, p, zt, zi, pres, w_field, thetal, qw, w_sec, moments_l, moments_u)
+@inline function assumed_pdf(i, j, k, p, cp, zt, zi, pres, w_field, thetal, qw, w_sec, moments_l, moments_u)
     FT = eltype(thetal)
     largeneg = convert(FT, -99999999.99)
     thl_tol = convert(FT, 1e-2)
@@ -118,7 +118,7 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     # Interpolate the interface moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec of the
     # interfaces below, `moments_l`, and above, `moments_u`, the level) to the level
     @inbounds zi_u, zi_l, zt_k = zi[i, j, k+1], zi[i, j, k], zt[i, j, k]
-    interpolate(n, minthresh) = clip_below(linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k), minthresh)
+    interpolate(n, minthresh) = hard_floor(linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k), minthresh)
     w3var = interpolate(1, largeneg)
     thlsec = interpolate(2, zero(FT))
     wthlsec = interpolate(3, largeneg)
@@ -135,8 +135,8 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     end
 
     sqrtw2 = zero_safe_sqrt(wsec)
-    sqrtthl = max(thl_tol, zero_safe_sqrt(thlsec))
-    sqrtqt = max(rt_tol, zero_safe_sqrt(qwsec))
+    sqrtthl = clip_max(cp, thl_tol, zero_safe_sqrt(thlsec), thl_tol)
+    sqrtqt = clip_max(cp, rt_tol, zero_safe_sqrt(qwsec), rt_tol)
 
     # shoc_assumed_pdf_vv_parameters
     calm = wsec <= w_tol_sqd
@@ -144,8 +144,8 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     Skew_w = w3var / sqrt(wsec_safe * wsec_safe * wsec_safe)
     w2_1 = p.ℂᵍ₁
     omw = 1 - w2_1
-    a = max(convert(FT, 0.01),
-            min(convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))), convert(FT, 0.99)))
+    a = clip_between(cp, convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))),
+                     convert(FT, 0.01), convert(FT, 0.99), 1)
     sqrtw2t = sqrt(1 - w2_1)
     w1_1 = sqrt((1 - a) / a) * sqrtw2t
     w1_2 = -1 * sqrt(a / (1 - a)) * sqrtw2t
@@ -157,10 +157,10 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
 
     # shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters
     thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 =
-        scalar_plume_parameters(wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, p)
+        scalar_plume_parameters(cp, wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, p)
 
     qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 =
-        scalar_plume_parameters(wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, p)
+        scalar_plume_parameters(cp, wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, p)
 
     # shoc_assumed_pdf_tilde_to_real
     w1_1 = w1_1 * sqrtw2 + w_first
@@ -169,9 +169,9 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     # shoc_assumed_pdf_inplume_correlations
     testvar = a * sqrtqw2_1 * sqrtthl2_1 + (1 - a) * sqrtqw2_2 * sqrtthl2_2
     uncorrelated = testvar == 0
-    r_qwthl_1 = max(-1, min(1, (qwthlsec - a * (qw1_1 - qw_first) * (thl1_1 - thl_first)
-                                - (1 - a) * (qw1_2 - qw_first) * (thl1_2 - thl_first)) /
-                               ifelse(uncorrelated, one(FT), testvar)))
+    r_qwthl_1 = clip_between(cp, (qwthlsec - a * (qw1_1 - qw_first) * (thl1_1 - thl_first)
+                                  - (1 - a) * (qw1_2 - qw_first) * (thl1_2 - thl_first)) /
+                                 ifelse(uncorrelated, one(FT), testvar), -1, 1, 1)
     r_qwthl_1 = ifelse(uncorrelated, zero(FT), r_qwthl_1)
 
     # shoc_assumed_pdf_compute_temperature
@@ -189,8 +189,8 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     s1, std_s1, qn1, C1 = plume_condensate(qw1_1, qs1, beta1, pval, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r_qwthl_1, p)
     s2, std_s2, qn2, C2 = plume_condensate(qw1_2, qs2, beta2, pval, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r_qwthl_1, p)
 
-    ql1 = min(qn1, qw1_1)
-    ql2 = min(qn2, qw1_2)
+    ql1 = clip_min(cp, qn1, qw1_1, rt_tol)
+    ql2 = clip_min(cp, qn2, qw1_2, rt_tol)
 
     shoc_cldfrac = min(1, a * C1 + (1 - a) * C2)
     shoc_ql = max(0, a * ql1 + (1 - a) * ql2)

@@ -22,5 +22,5 @@ end
     sterm_u = shear_production_term(i, j, k+1, Nz, p, zt, u_wind, v_wind)
     sterm_l = shear_production_term(i, j, k, Nz, p, zt, u_wind, v_wind)
     @inbounds y2 = linear_interp(zi[i, j, k+1], zi[i, j, k], sterm_u, sterm_l, zt[i, j, k])
-    return clip_below(y2, zero(y2))
+    return hard_floor(y2, zero(y2))
 end

@@ -15,8 +15,8 @@
 # (lower, `_l`): du of level k and the unfactorized dl of level k-1.
 @inline function interface_coupling(dtime, p, zt_u, zt_l, kv_u, kv_l, rho_u, rho_l, rdp_u, rdp_l, zi_k)
     FT = typeof(zt_u)
-    kv_zi = clip_below(linear_interp(zt_u, zt_l, kv_u, kv_l, zi_k), zero(FT))
-    rho_zi_k = clip_below(linear_interp(zt_u, zt_l, rho_u, rho_l, zi_k), zero(FT))
+    kv_zi = hard_floor(linear_interp(zt_u, zt_l, kv_u, kv_l, zi_k), zero(FT))
+    rho_zi_k = hard_floor(linear_interp(zt_u, zt_l, rho_u, rho_l, zi_k), zero(FT))
     # tmpi = dt * (g * rho)² / dp at the interface, with dp = g * rho * dz
     tmpi = dtime * (p.ggr * rho_zi_k) / (zt_u - zt_l)
     du_k = -1 * kv_zi * tmpi * rdp_u

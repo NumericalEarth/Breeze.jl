@@ -15,7 +15,7 @@ interfaces), clipped below at `minthresh`.
     ku = clamp(k, 2, Nz)
     kl = ku - 1
     @inbounds y2 = linear_interp(zt[i, j, ku], zt[i, j, kl], y[i, j, ku], y[i, j, kl], zi[i, j, k])
-    return clip_below(y2, minthresh)
+    return hard_floor(y2, minthresh)
 end
 
 #####
@@ -37,7 +37,7 @@ end
     kl = ku - 1
     @inbounds y2 = linear_interp(zt[i, j, ku], zt[i, j, kl],
                                  rho_zt(i, j, ku, p, zi, pdel), rho_zt(i, j, kl, p, zi, pdel), zi[i, j, k])
-    return clip_below(y2, zero(y2))
+    return hard_floor(y2, zero(y2))
 end
 
 # 1 / dp of level k
