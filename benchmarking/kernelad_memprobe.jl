@@ -25,7 +25,16 @@ using Dates
 
 const file = ARGS[1]
 
-rss_mib() = parse(Int, strip(read(`ps -o rss= -p $(getpid())`, String))) ÷ 1024
+function rss_mib()
+    # The CI image has no `ps`; /proc has the same number on Linux
+    if Sys.islinux()
+        for line in eachline("/proc/self/status")
+            startswith(line, "VmRSS:") && return parse(Int, split(line)[2]) ÷ 1024
+        end
+        error("no VmRSS in /proc/self/status")
+    end
+    return parse(Int, strip(read(`ps -o rss= -p $(getpid())`, String))) ÷ 1024
+end
 let last = Ref(0)
     global function report(label)
         GC.gc()
