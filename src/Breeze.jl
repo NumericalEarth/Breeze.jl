@@ -252,7 +252,7 @@ export
     DryStaticStability, MoistStaticStability,
     SimplifiedHigherOrderClosure, SHOC, OriginalSHOC,
     SHOCMixingLength, ColumnStabilityDamping, ForwardEulerTKE, PDFBuoyancyFlux, DowngradientSecondMoments,
-    CanutoThirdMoment, ResetBound, DoubleGaussianPDF, HardClipping, SmoothClipping, HoltslagBovilleDepth, SHOCConstants,
+    CanutoThirdMoment, ResetBound, ClampBound, TanhBound, DoubleGaussianPDF, HardClipping, SmoothClipping, HoltslagBovilleDepth, SHOCConstants,
     closure_parameters, with_parameters,
     LagrangianParticles, ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,
     conjure_time_step_wizard!,

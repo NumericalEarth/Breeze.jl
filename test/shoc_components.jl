@@ -3,7 +3,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Oceananigans
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_min, clip_below, clip_between, clip_negative,
-                                      stable_damping, hard_floor
+                                      stable_damping, hard_floor, third_moment_bound, bound_third_moment
 using Test
 
 # Bitwise equality, with NaN equal to NaN and the two zeros distinct
@@ -145,6 +145,39 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         if FT == Float64
             narrower = run_shoc_column(SHOC(OriginalSHOC(), FT; clipping = SmoothClipping(FT; width = 1e-4), surface_forcing...))
             @test maximum(abs, narrower.θ .- original.θ) < maximum(abs, smooth.θ .- original.θ)
+        end
+    end
+
+    @testset "Bounds of the third moment" begin
+        hard = HardClipping()
+        reset = CanutoThirdMoment(FT)
+        clamped = CanutoThirdMoment(FT; bound = ClampBound())
+        smooth = CanutoThirdMoment(FT; bound = TanhBound())
+        @test summary(clamped) == "CanutoThirdMoment{$FT} with ClampBound"
+        @test closure_parameters(SHOC(OriginalSHOC(), FT; third_moment = smooth)).ℂʷ₂ == FT(7)
+
+        w_sec = FT(0.5)
+        bound = reset.w3clip * sqrt(2 * w_sec^3)
+        @test third_moment_bound(reset, w_sec) ≈ bound
+
+        for w3 in FT[-10, -1, -0.5, -1e-3, 0, 1e-3, 0.5, 1, 10] .* bound
+            inside = abs(w3) ≤ bound
+            # E3SM resets a third moment beyond the bound to 0.02
+            @test bound_third_moment(reset, hard, w_sec, w3) == (inside ? w3 : FT(0.02))
+            @test bound_third_moment(clamped, hard, w_sec, w3) == clamp(w3, -bound, bound)
+            @test abs(bound_third_moment(clamped, SmoothClipping(FT(0.1)), w_sec, w3)) ≤ bound
+            @test abs(bound_third_moment(smooth, hard, w_sec, w3)) ≤ bound
+            @test sign(bound_third_moment(smooth, hard, w_sec, w3)) == sign(w3)
+        end
+        # Well inside the bound the smooth bounds change little
+        @test isapprox(bound_third_moment(smooth, hard, w_sec, bound / 100), bound / 100; rtol = 1e-4)
+        @test bound_third_moment(smooth, hard, w_sec, zero(FT)) == 0
+
+        for third_moment in (clamped, smooth)
+            run = run_shoc_column(SHOC(OriginalSHOC(), FT; third_moment, surface_forcing...))
+            @test all_finite(run)
+            @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
+            @test isapprox(run.θ, original.θ; rtol = 1e-4)
         end
     end
 end

@@ -21,6 +21,24 @@ struct ResetBound <: AbstractSHOCComponent end
 """
 $(TYPEDEF)
 
+Beyond the bound `b`, the third moment is the bound: `w3 ← clip_between(w3, -b, b)` through the
+clipping policy. Continuous, with a kink at the bound under [`HardClipping`](@ref) and smooth
+under [`SmoothClipping`](@ref), whose smoothing length is its width times `b`.
+"""
+struct ClampBound <: AbstractSHOCComponent end
+
+"""
+$(TYPEDEF)
+
+The third moment approaches the bound `b` smoothly: `w3 ← b tanh(w3 / b)`. Infinitely
+differentiable whatever the clipping policy; a third moment well inside the bound is changed by
+the relative amount `(w3 / b)² / 3`.
+"""
+struct TanhBound <: AbstractSHOCComponent end
+
+"""
+$(TYPEDEF)
+
 The diagnostic third moment of vertical velocity of Canuto et al. (2001) as
 E3SM `shoc.F90` computes it (`compute_diag_third_shoc_moment`), bounded in magnitude by
 `w3clip √(2 w'w'³)` in the manner of `bound`.
@@ -110,3 +128,7 @@ end
     tsign = ifelse(w3 < 0, -one(FT), one(FT))
     return ifelse(tsign * w3 > cond, convert(FT, 0.02), w3)
 end
+
+# The bound is positive: the interface variance it is made of is floored
+@inline bound_third_moment(::ClampBound, cp, cond, w3) = clip_between(cp, w3, -cond, cond, cond)
+@inline bound_third_moment(::TanhBound, cp, cond, w3) = cond * tanh(w3 / cond)
