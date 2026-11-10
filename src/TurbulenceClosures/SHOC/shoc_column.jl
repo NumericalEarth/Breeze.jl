@@ -175,8 +175,12 @@ end
 @inline function shear_production_term(i, j, k, Nz, p, zt, u_wind, v_wind)
     ku = clamp(k, 2, Nz)
     kl = ku - 1
-    grid_dz = 1 / dz_zi(i, j, ku, zt)
     @inbounds begin
+        # The level spacing is written out rather than taken from `dz_zi(i, j, ku, zt)` (identical
+        # values, since ku ≥ 2): with `dz_zi`'s own `k == 1` branch and `max(k-1, 1)` index nested
+        # in the clamped index, Reactant 0.2.300 raises this function to a wrong program (the
+        # shear production is wrong wherever `tk` is nonzero; Reactant 0.2.308 is unaffected).
+        grid_dz = 1 / (zt[i, j, ku] - zt[i, j, kl])
         u_grad = grid_dz * (u_wind[i, j, ku] - u_wind[i, j, kl])
         v_grad = grid_dz * (v_wind[i, j, ku] - v_wind[i, j, kl])
     end
