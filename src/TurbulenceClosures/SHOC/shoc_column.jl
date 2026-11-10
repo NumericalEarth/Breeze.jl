@@ -46,16 +46,6 @@ interfaces), clipped below at `minthresh`.
     return clip_below(y2, minthresh)
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Interpolate the interface array `y` to level `k`, clipped below at `minthresh`.
-"""
-@inline function interpolate_to_level(i, j, k, zt, zi, y, minthresh)
-    @inbounds y2 = linear_interp(zi[i, j, k+1], zi[i, j, k], y[i, j, k+1], y[i, j, k], zt[i, j, k])
-    return clip_below(y2, minthresh)
-end
-
 #####
 ##### shoc_grid: thicknesses and density, recomputed on demand
 #####
@@ -101,9 +91,12 @@ end
                                  ustar, thv_ref, pblh, check)
     thv_1 = pbl_thv(i, j, 1, p, thetal, qw, shoc_ql)
     rino_below = zero(pblh)
+    # The highest level at which the boundary layer top may be diagnosed
+    z_pbl_max = @inbounds zt[i, j, 1]
 
     @inbounds for k in 2:Nz
         in_pbl = pres[i, j, k] >= p.pblmaxp
+        z_pbl_max = ifelse(in_pbl, zt[i, j, k], z_pbl_max)
         Δu = u_wind[i, j, k] - u_wind[i, j, 1]
         Δv = v_wind[i, j, k] - v_wind[i, j, 1]
         vvk = Δu * Δu + Δv * Δv + p.ℂᴴ₂ * (ustar * ustar)
@@ -119,7 +112,7 @@ end
         rino_below = rino
     end
 
-    return pblh, check
+    return pblh, check, z_pbl_max
 end
 
 """
@@ -149,17 +142,11 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
     kbfs_offset = ifelse(kbfs >= 0, convert(FT, 1e-10), -convert(FT, 1e-10))
     obklen = -thv_sfc * (ustar * ustar * ustar) / (p.ggr * p.vk * (kbfs + kbfs_offset))
 
-    # The highest level at which the boundary layer top may be diagnosed
-    z_pbl_max = @inbounds zt[i, j, 1]
-    @inbounds for k in 2:Nz
-        z_pbl_max = ifelse(pres[i, j, k] >= p.pblmaxp, zt[i, j, k], z_pbl_max)
-    end
-
     # pblintd_init, pblintd_height
     thv_1 = pbl_thv(i, j, 1, p, thetal, qw, shoc_ql)
     pblh = @inbounds zt[i, j, 1]
-    pblh, check = pbl_height_scan(i, j, Nz, p, zt, pres, thetal, qw, shoc_ql, u_wind, v_wind,
-                                  ustar, thv_1, pblh, true)
+    pblh, check, z_pbl_max = pbl_height_scan(i, j, Nz, p, zt, pres, thetal, qw, shoc_ql, u_wind, v_wind,
+                                             ustar, thv_1, pblh, true)
 
     # pblintd_surf_temp: an effective surface temperature that accounts for surface fluctuations
     pblh = ifelse(check, z_pbl_max, pblh)
@@ -168,8 +155,8 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
     tlv = ifelse(check, thv_1 + kbfs * fak / (ustar * phiminv), thv_1)
 
     # Improve the estimate for unstable conditions with the convective temperature excess
-    pblh, check = pbl_height_scan(i, j, Nz, p, zt, pres, thetal, qw, shoc_ql, u_wind, v_wind,
-                                  ustar, tlv, pblh, check)
+    pblh, check, _ = pbl_height_scan(i, j, Nz, p, zt, pres, thetal, qw, shoc_ql, u_wind, v_wind,
+                                     ustar, tlv, pblh, check)
 
     # pblintd_check_pblh
     pblh = ifelse(check, z_pbl_max, pblh)
@@ -211,82 +198,129 @@ end
 # Superdiagonal `du` (coupling to the level below) and Thomas-factorized subdiagonal `dl` and
 # diagonal `d` of the diffusion matrix for the level diffusivity `kv`. The factorization sweeps
 # from the top of the column down, as in the Fortran.
+#
+# The matrix coefficients and the elimination of the Fortran's two loops are done in one downward
+# sweep; the level quantities of the level above (height, diffusivity, density, 1/dp) and the
+# factorized coefficients of the level above are carried in registers. The arithmetic of every
+# coefficient is that of the Fortran.
+
+# The coupling coefficients of interface k (2 ≤ k ≤ Nz) between levels k (upper, `_u`) and k-1
+# (lower, `_l`): du of level k and the unfactorized dl of level k-1.
+@inline function interface_coupling(dtime, p, zt_u, zt_l, kv_u, kv_l, rho_u, rho_l, rdp_u, rdp_l, zi_k)
+    FT = typeof(zt_u)
+    kv_zi = clip_below(linear_interp(zt_u, zt_l, kv_u, kv_l, zi_k), zero(FT))
+    rho_zi_k = clip_below(linear_interp(zt_u, zt_l, rho_u, rho_l, zi_k), zero(FT))
+    # tmpi = dt * (g * rho)² / dp at the interface, with dp = g * rho * dz
+    tmpi = dtime * (p.ggr * rho_zi_k) / (zt_u - zt_l)
+    du_k = -1 * kv_zi * tmpi * rdp_u
+    dl_l = -1 * kv_zi * tmpi * rdp_l
+    return du_k, dl_l
+end
+
 @inline function vd_shoc_decomp!(i, j, Nz, dtime, p, zt, zi, pdel, kv, flux, du, dl, d)
     FT = typeof(flux)
 
-    @inbounds for k in Nz:-1:2
-        kv_zi = interpolate_to_interface(i, j, k, Nz, zt, zi, kv, zero(FT))
-        # tmpi = dt * (g * rho)² / dp at the interface, with dp = g * rho * dz
-        tmpi = dtime * (p.ggr * rho_zi(i, j, k, Nz, p, zt, zi, pdel)) / dz_zi(i, j, k, zt)
-        du[i, j, k]   = -1 * kv_zi * tmpi * rdp_zt(i, j, k, p, zi, pdel)
-        dl[i, j, k-1] = -1 * kv_zi * tmpi * rdp_zt(i, j, k-1, p, zi, pdel)
-    end
-
     @inbounds begin
-        du[i, j, 1] = 0
+        # Level Nz and interface Nz
+        zt_u = zt[i, j, Nz]
+        kv_u = kv[i, j, Nz]
+        rho_u = rho_zt(i, j, Nz, p, zi, pdel)
+        rdp_u = rdp_zt(i, j, Nz, p, zi, pdel)
+
+        zt_l = zt[i, j, Nz-1]
+        kv_l = kv[i, j, Nz-1]
+        rho_l = rho_zt(i, j, Nz-1, p, zi, pdel)
+        rdp_l = rdp_zt(i, j, Nz-1, p, zi, pdel)
+
+        du_u, dl_k = interface_coupling(dtime, p, zt_u, zt_l, kv_u, kv_l, rho_u, rho_l, rdp_u, rdp_l, zi[i, j, Nz])
+        d_u = 1 - du_u
+        du[i, j, Nz] = du_u
         dl[i, j, Nz] = 0
-        d[i, j, Nz] = 1 - du[i, j, Nz]
+        d[i, j, Nz] = d_u
+
+        # Levels Nz-1 to 2: dl_k is the unfactorized dl of level k
+        for k in Nz-1:-1:2
+            zt_u, kv_u, rho_u, rdp_u = zt_l, kv_l, rho_l, rdp_l
+            zt_l = zt[i, j, k-1]
+            kv_l = kv[i, j, k-1]
+            rho_l = rho_zt(i, j, k-1, p, zi, pdel)
+            rdp_l = rdp_zt(i, j, k-1, p, zi, pdel)
+
+            du_k, dl_l = interface_coupling(dtime, p, zt_u, zt_l, kv_u, kv_l, rho_u, rho_l, rdp_u, rdp_l, zi[i, j, k])
+
+            d_k = 1 - du_k - dl_k
+            dl_k = dl_k / d_u
+            d_k = d_k - dl_k * du_u
+
+            du[i, j, k] = du_k
+            dl[i, j, k] = dl_k
+            d[i, j, k] = d_k
+
+            du_u, d_u, dl_k = du_k, d_k, dl_l
+        end
+
+        # Level 1, with the implicit surface flux
+        d_1 = 1 - dl_k + flux * dtime * p.ggr * rdp_l
+        dl_k = dl_k / d_u
+        d_1 = d_1 - dl_k * du_u
+        du[i, j, 1] = 0
+        dl[i, j, 1] = dl_k
+        d[i, j, 1] = d_1
     end
 
-    @inbounds for k in Nz-1:-1:2
-        d[i, j, k] = 1 - du[i, j, k] - dl[i, j, k]
-        dl[i, j, k] = dl[i, j, k] / d[i, j, k+1]
-        d[i, j, k] = d[i, j, k] - dl[i, j, k] * du[i, j, k+1]
-    end
+    return nothing
+end
 
+# Solve for one or more right-hand sides `vars` (a tuple of arrays) at once, so that the
+# factorization is read once; the value of the neighbouring level is carried in a register.
+@inline function vd_shoc_solve!(i, j, Nz, du, dl, d, vars::Tuple)
     @inbounds begin
-        d[i, j, 1] = 1 - dl[i, j, 1] + flux * dtime * p.ggr * rdp_zt(i, j, 1, p, zi, pdel)
-        dl[i, j, 1] = dl[i, j, 1] / d[i, j, 2]
-        d[i, j, 1] = d[i, j, 1] - dl[i, j, 1] * du[i, j, 2]
+        above = map(var -> var[i, j, Nz], vars)
+        for k in Nz-1:-1:1
+            dl_k = dl[i, j, k]
+            above = map(vars, above) do var, a
+                x = var[i, j, k] - dl_k * a
+                var[i, j, k] = x
+                x
+            end
+        end
+
+        d_1 = d[i, j, 1]
+        below = map(var -> (x = var[i, j, 1] / d_1; var[i, j, 1] = x; x), vars)
+
+        for k in 2:Nz
+            du_k = du[i, j, k]
+            d_k = d[i, j, k]
+            below = map(vars, below) do var, b
+                x = (var[i, j, k] - du_k * b) / d_k
+                var[i, j, k] = x
+                x
+            end
+        end
     end
 
     return nothing
 end
 
-@inline function vd_shoc_solve!(i, j, Nz, du, dl, d, var)
-    @inbounds for k in Nz-1:-1:1
-        var[i, j, k] = var[i, j, k] - dl[i, j, k] * var[i, j, k+1]
-    end
-
-    @inbounds var[i, j, 1] = var[i, j, 1] / d[i, j, 1]
-
-    @inbounds for k in 2:Nz
-        var[i, j, k] = (var[i, j, k] - du[i, j, k] * var[i, j, k-1]) / d[i, j, k]
-    end
-
-    return nothing
-end
+@inline vd_shoc_solve!(i, j, Nz, du, dl, d, var::AbstractArray) = vd_shoc_solve!(i, j, Nz, du, dl, d, (var,))
 
 #####
 ##### Third moment of vertical velocity (compute_diag_third_shoc_moment and its helpers)
 #####
 
-@inline function third_moment(i, j, k, Nz, p, zt, zi, thetal, tke, isotropy, brunt, w_sec, thl_sec, wthl_sec)
-    FT = eltype(tke)
+# The third moment at an interior interface from the interface values of isotropy, Brunt-Vaisala
+# frequency, w_sec and thetal, the inverse thicknesses `thedz` and `thedz2`, and the differences
+# of the moments across the interface; `wthl` is wthl_sec at the interface.
+@inline function third_moment(p, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
+                              thl_sec_diff, wthl_sec_diff, wsec_diff, tke_diff, wthl)
+    FT = typeof(wthl)
     c = p.ℂʷ₂
-    largeneg = convert(FT, -99999999.99)
-
-    isotropy_zi = interpolate_to_interface(i, j, k, Nz, zt, zi, isotropy, zero(FT))
-    brunt_zi = interpolate_to_interface(i, j, k, Nz, zt, zi, brunt, largeneg)
-    w_sec_zi = interpolate_to_interface(i, j, k, Nz, zt, zi, w_sec, (convert(FT, 2) / 3) * p.mintke)
-    thetal_zi = interpolate_to_interface(i, j, k, Nz, zt, zi, thetal, zero(FT))
 
     # fterms_input_for_diag_third_shoc_moment
-    thedz = 1 / dz_zi(i, j, k, zt)
-    thedz2 = 1 / (dz_zt(i, j, k-1, zi) + dz_zt(i, j, k, zi))
     iso = isotropy_zi
     isosqrd = iso * iso
     buoy_sgs2 = isosqrd * brunt_zi
     bet2 = p.ggr / thetal_zi
-
-    # f0_to_f5_diag_third_shoc_moment
-    @inbounds begin
-        thl_sec_diff = thl_sec[i, j, k+1] - thl_sec[i, j, k-1]
-        wthl_sec_diff = wthl_sec[i, j, k+1] - wthl_sec[i, j, k-1]
-        wsec_diff = w_sec[i, j, k] - w_sec[i, j, k-1]
-        tke_diff = tke[i, j, k] - tke[i, j, k-1]
-        wthl = wthl_sec[i, j, k]
-    end
 
     f0 = thedz2 * (bet2 * bet2 * bet2) * ((iso * iso) * (iso * iso)) * wthl * thl_sec_diff
     f1 = thedz2 * (bet2 * bet2) * (iso * iso * iso) * (wthl * wthl_sec_diff + convert(FT, 0.5) * w_sec_zi * thl_sec_diff)
@@ -321,9 +355,9 @@ end
 end
 
 # clipping_diag_third_shoc_moments: a value beyond the bound is reset to 0.02, as in the Fortran
-@inline function clip_third_moment(i, j, k, Nz, p, zt, zi, w_sec, w3)
+# `theterm` is w_sec interpolated to the interface
+@inline function clip_third_moment(p, theterm, w3)
     FT = typeof(w3)
-    theterm = interpolate_to_interface(i, j, k, Nz, zt, zi, w_sec, (convert(FT, 2) / 3) * p.mintke)
     cond = p.w3clip * sqrt(2 * (theterm * theterm * theterm))
     tsign = ifelse(w3 < 0, -one(FT), one(FT))
     return ifelse(tsign * w3 > cond, convert(FT, 0.02), w3)
@@ -437,8 +471,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The assumed PDF of level `k` (Analytic Double Gaussian 1 of Larson et al. 2002): return the
 subgrid cloud fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
 """
-@inline function assumed_pdf(i, j, k, p, zt, zi, pres, w_field, thetal, qw, w_sec,
-                             thl_sec, qw_sec, qwthl_sec, wthl_sec, wqw_sec, w3)
+@inline function assumed_pdf(i, j, k, p, zt, zi, pres, w_field, thetal, qw, w_sec, moments_l, moments_u)
     FT = eltype(thetal)
     largeneg = convert(FT, -99999999.99)
     thl_tol = convert(FT, 1e-2)
@@ -447,13 +480,16 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     Tl_min = convert(FT, 100)
     epsterm = p.rgas / p.rv
 
-    # Interpolate the interface moments to the level
-    w3var = interpolate_to_level(i, j, k, zt, zi, w3, largeneg)
-    thlsec = interpolate_to_level(i, j, k, zt, zi, thl_sec, zero(FT))
-    wthlsec = interpolate_to_level(i, j, k, zt, zi, wthl_sec, largeneg)
-    qwthlsec = interpolate_to_level(i, j, k, zt, zi, qwthl_sec, largeneg)
-    wqwsec = interpolate_to_level(i, j, k, zt, zi, wqw_sec, largeneg)
-    qwsec = interpolate_to_level(i, j, k, zt, zi, qw_sec, zero(FT))
+    # Interpolate the interface moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec of the
+    # interfaces below, `moments_l`, and above, `moments_u`, the level) to the level
+    @inbounds zi_u, zi_l, zt_k = zi[i, j, k+1], zi[i, j, k], zt[i, j, k]
+    interpolate(n, minthresh) = clip_below(linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k), minthresh)
+    w3var = interpolate(1, largeneg)
+    thlsec = interpolate(2, zero(FT))
+    wthlsec = interpolate(3, largeneg)
+    qwthlsec = interpolate(4, largeneg)
+    wqwsec = interpolate(5, largeneg)
+    qwsec = interpolate(6, zero(FT))
 
     @inbounds begin
         pval = pres[i, j, k]
@@ -561,6 +597,16 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
 - `scratch`: `du`, `dl`, `d` on levels.
 """
 @inline function shoc_column!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
+    shoc_turbulence!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
+    shoc_implicit_moments!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
+    shoc_cloud!(i, j, Nz, p, state, host, surface, diagnostics)
+    return nothing
+end
+
+# The first part of the step: boundary layer depth, length scale, TKE production and dissipation,
+# eddy diffusivities. Split from `shoc_cloud!` so that each part can run as its own kernel, with
+# fewer registers per thread.
+@inline function shoc_turbulence!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
     thetal, qw, u_wind, v_wind, tke = state.thetal, state.qw, state.u_wind, state.v_wind, state.tke
     zt, zi, pres, pdel = host.zt_grid, host.zi_grid, host.pres, host.pdel
     thv, w_field, inv_exner = host.thv, host.w_field, host.inv_exner
@@ -586,14 +632,6 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
     end
 
     #####
-    ##### check_tke
-    #####
-
-    @inbounds for k in 1:Nz
-        tke[i, j, k] = max(p.mintke, tke[i, j, k])
-    end
-
-    #####
     ##### compute_shoc_temperature (only the lowest level is used), shoc_diag_obklen, pblintd
     #####
 
@@ -604,20 +642,25 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
 
     #####
     ##### shoc_length: Brunt-Vaisala frequency and L_inf; shoc_tke: integrated column stability.
-    ##### The sums run from the top of the column down, as in the Fortran.
+    ##### The sums run from the top of the column down, as in the Fortran. check_tke (which
+    ##### nothing before this loop reads) is fused into it.
     #####
 
     numer = zero(FT)
     denom = zero(FT)
     brunt_int = zero(FT)
+    thv_zi_u = interpolate_to_interface(i, j, Nz+1, Nz, zt, zi, thv, zero(FT))
 
     @inbounds for k in Nz:-1:1
-        thv_zi_u = interpolate_to_interface(i, j, k+1, Nz, zt, zi, thv, zero(FT))
+        tke_k = max(p.mintke, tke[i, j, k])
+        tke[i, j, k] = tke_k
+
         thv_zi_l = interpolate_to_interface(i, j, k, Nz, zt, zi, thv, zero(FT))
         dz = dz_zt(i, j, k, zi)
         brunt[i, j, k] = (g / thv[i, j, k]) * (thv_zi_u - thv_zi_l) / dz
+        thv_zi_u = thv_zi_l
 
-        tkes = sqrt(tke[i, j, k])
+        tkes = sqrt(tke_k)
         numer = numer + tkes * zt[i, j, k] * dz
         denom = denom + tkes * dz
 
@@ -649,6 +692,9 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
     lambda_column = p.ℂᵝ₁ + ((brunt_int / g) - p.ℂᵝ₄) * p.ℂᵝ₃
     lambda_column = max(p.ℂᵝ₁, min(p.ℂᵝ₂, lambda_column))
 
+    # The shear production term of the interface below the level, carried up the column
+    sterm_l = shear_production_term(i, j, 1, Nz, p, zt, u_wind, v_wind)
+
     @inbounds for k in 1:Nz
         tke_k = tke[i, j, k]
         brunt_k = brunt[i, j, k]
@@ -664,7 +710,10 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
         shoc_mix[i, j, k] = mix
 
         # adv_sgs_tke
-        sterm_zt = shear_production_term_zt(i, j, k, Nz, p, zt, zi, u_wind, v_wind)
+        # compute_shr_prod at interface k+1, interpolated to level k with that of interface k
+        sterm_u = shear_production_term(i, j, k+1, Nz, p, zt, u_wind, v_wind)
+        sterm_zt = clip_below(linear_interp(zi[i, j, k+1], zi[i, j, k], sterm_u, sterm_l, zt[i, j, k]), zero(FT))
+        sterm_l = sterm_u
         a_prod_bu = (g / p.basetemp) * wthv_sec[i, j, k]
         tke_k = max(0, tke_k)
         a_prod_sh = tk[i, j, k] * sterm_zt
@@ -684,6 +733,35 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
         sqrt_sterm = zero_safe_sqrt(sterm_zt)
         tkh[i, j, k] = ifelse(runaway, p.ℂᶜₛ * (mix * mix) * sqrt_sterm, p.ℂᶜ * iso * tke_k)
         tk[i, j, k]  = ifelse(runaway, p.ℂᵘₛ * (mix * mix) * sqrt_sterm, p.ℂᵘ * iso * tke_k)
+    end
+
+    return nothing
+end
+
+# The implicit diffusion of the state and TKE, and the second and third moments.
+@inline function shoc_implicit_moments!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
+    thetal, qw, u_wind, v_wind, tke = state.thetal, state.qw, state.u_wind, state.v_wind, state.tke
+    zt, zi, pres, pdel = host.zt_grid, host.zi_grid, host.pres, host.pdel
+    thv, w_field, inv_exner = host.thv, host.w_field, host.inv_exner
+    wthv_sec, tkh, tk = diagnostics.wthv_sec, diagnostics.tkh, diagnostics.tk
+    shoc_ql, shoc_cldfrac, shoc_ql2 = diagnostics.shoc_ql, diagnostics.shoc_cldfrac, diagnostics.shoc_ql2
+    shoc_mix, isotropy, brunt = diagnostics.shoc_mix, diagnostics.isotropy, diagnostics.brunt
+    w_sec, wqls_sec = diagnostics.w_sec, diagnostics.wqls_sec
+    thl_sec, qw_sec, qwthl_sec = diagnostics.thl_sec, diagnostics.qw_sec, diagnostics.qwthl_sec
+    wthl_sec, wqw_sec, wtke_sec = diagnostics.wthl_sec, diagnostics.wqw_sec, diagnostics.wtke_sec
+    uw_sec, vw_sec, w3 = diagnostics.uw_sec, diagnostics.vw_sec, diagnostics.w3
+    du, dl, d = scratch.du, scratch.dl, scratch.d
+
+    FT = eltype(tke)
+    g = p.ggr
+
+    @inbounds begin
+        wthl_sfc = surface.wthl_sfc[i, j, 1]
+        wqw_sfc = surface.wqw_sfc[i, j, 1]
+        uw_sfc = surface.uw_sfc[i, j, 1]
+        vw_sfc = surface.vw_sfc[i, j, 1]
+        host_dx = host.host_dx[i, j, 1]
+        host_dy = host.host_dy[i, j, 1]
     end
 
     #####
@@ -716,14 +794,11 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
 
     # Momentum
     vd_shoc_decomp!(i, j, Nz, dtime, p, zt, zi, pdel, tk, ksrf, du, dl, d)
-    vd_shoc_solve!(i, j, Nz, du, dl, d, u_wind)
-    vd_shoc_solve!(i, j, Nz, du, dl, d, v_wind)
+    vd_shoc_solve!(i, j, Nz, du, dl, d, (u_wind, v_wind))
 
     # Thermodynamic variables and TKE (the surface fluxes were applied explicitly above)
     vd_shoc_decomp!(i, j, Nz, dtime, p, zt, zi, pdel, tkh, zero(FT), du, dl, d)
-    vd_shoc_solve!(i, j, Nz, du, dl, d, thetal)
-    vd_shoc_solve!(i, j, Nz, du, dl, d, qw)
-    vd_shoc_solve!(i, j, Nz, du, dl, d, tke)
+    vd_shoc_solve!(i, j, Nz, du, dl, d, (thetal, qw, tke))
 
     #####
     ##### diag_second_shoc_moments
@@ -752,24 +827,48 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
         wtke_sec[i, j, 1] = maxval * maxval * maxval
     end
 
-    # diag_second_moments: vertical velocity variance
+    # diag_second_moments: the vertical velocity variance, and calc_shoc_varorcovar and
+    # calc_shoc_vertflux at the interior interfaces, in one upward sweep that carries the values
+    # of the level below the interface
     w2fac = p.ℂʷ₁ * (convert(FT, 2) / 3)
-    @inbounds for k in 1:Nz
-        w_sec[i, j, k] = w2fac * tke[i, j, k]
+
+    @inbounds begin
+        zt_l = zt[i, j, 1]
+        iso_l = isotropy[i, j, 1]
+        tkh_l = tkh[i, j, 1]
+        tk_l = tk[i, j, 1]
+        thetal_l = thetal[i, j, 1]
+        qw_l = qw[i, j, 1]
+        tke_l = tke[i, j, 1]
+        u_l = u_wind[i, j, 1]
+        v_l = v_wind[i, j, 1]
+        w_sec[i, j, 1] = w2fac * tke_l
     end
 
-    # diag_second_moments: calc_shoc_varorcovar and calc_shoc_vertflux at the interior interfaces
     @inbounds for k in 2:Nz
-        isotropy_zi = interpolate_to_interface(i, j, k, Nz, zt, zi, isotropy, zero(FT))
-        tkh_zi = interpolate_to_interface(i, j, k, Nz, zt, zi, tkh, zero(FT))
-        tk_zi = interpolate_to_interface(i, j, k, Nz, zt, zi, tk, zero(FT))
+        zt_u = zt[i, j, k]
+        iso_u = isotropy[i, j, k]
+        tkh_u = tkh[i, j, k]
+        tk_u = tk[i, j, k]
+        thetal_u = thetal[i, j, k]
+        qw_u = qw[i, j, k]
+        tke_u = tke[i, j, k]
+        u_u = u_wind[i, j, k]
+        v_u = v_wind[i, j, k]
+        zi_k = zi[i, j, k]
 
-        grid_dz = 1 / dz_zi(i, j, k, zt)
+        w_sec[i, j, k] = w2fac * tke_u
+
+        isotropy_zi = clip_below(linear_interp(zt_u, zt_l, iso_u, iso_l, zi_k), zero(FT))
+        tkh_zi = clip_below(linear_interp(zt_u, zt_l, tkh_u, tkh_l, zi_k), zero(FT))
+        tk_zi = clip_below(linear_interp(zt_u, zt_l, tk_u, tk_l, zi_k), zero(FT))
+
+        grid_dz = 1 / (zt_u - zt_l)
         grid_dz2 = grid_dz * grid_dz
         sm = isotropy_zi * tkh_zi
 
-        Δthetal = thetal[i, j, k] - thetal[i, j, k-1]
-        Δqw = qw[i, j, k] - qw[i, j, k-1]
+        Δthetal = thetal_u - thetal_l
+        Δqw = qw_u - qw_l
 
         thl_sec[i, j, k] = p.ℂᵛ₁ * sm * grid_dz2 * Δthetal * Δthetal
         qw_sec[i, j, k] = p.ℂᵛ₂ * sm * grid_dz2 * Δqw * Δqw
@@ -777,9 +876,12 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
 
         wthl_sec[i, j, k] = -1 * tkh_zi * grid_dz * Δthetal
         wqw_sec[i, j, k] = -1 * tkh_zi * grid_dz * Δqw
-        wtke_sec[i, j, k] = -1 * tkh_zi * grid_dz * (tke[i, j, k] - tke[i, j, k-1])
-        uw_sec[i, j, k] = -1 * tk_zi * grid_dz * (u_wind[i, j, k] - u_wind[i, j, k-1])
-        vw_sec[i, j, k] = -1 * tk_zi * grid_dz * (v_wind[i, j, k] - v_wind[i, j, k-1])
+        wtke_sec[i, j, k] = -1 * tkh_zi * grid_dz * (tke_u - tke_l)
+        uw_sec[i, j, k] = -1 * tk_zi * grid_dz * (u_u - u_l)
+        vw_sec[i, j, k] = -1 * tk_zi * grid_dz * (v_u - v_l)
+
+        zt_l, iso_l, tkh_l, tk_l = zt_u, iso_u, tkh_u, tk_u
+        thetal_l, qw_l, tke_l, u_l, v_l = thetal_u, qw_u, tke_u, u_u, v_u
     end
 
     # diag_second_moments_ubycond
@@ -798,24 +900,93 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
     ##### diag_third_shoc_moments
     #####
 
+    # An upward sweep over the interior interfaces that carries the values of the level below
+    # and of the interface below
+    largeneg = convert(FT, -99999999.99)
+    w_sec_min = (convert(FT, 2) / 3) * p.mintke
+
+    @inbounds begin
+        zt_l = zt[i, j, 1]
+        iso_l = isotropy[i, j, 1]
+        brunt_l = brunt[i, j, 1]
+        w_sec_l = w_sec[i, j, 1]
+        thetal_l = thetal[i, j, 1]
+        tke_l = tke[i, j, 1]
+        dz_l = dz_zt(i, j, 1, zi)
+        thl_sec_below = thl_sec[i, j, 1]
+        wthl_sec_below = wthl_sec[i, j, 1]
+        wthl_k = wthl_sec[i, j, 2]
+    end
+
     @inbounds for k in 2:Nz
-        w3_k = third_moment(i, j, k, Nz, p, zt, zi, thetal, tke, isotropy, brunt, w_sec, thl_sec, wthl_sec)
-        w3[i, j, k] = clip_third_moment(i, j, k, Nz, p, zt, zi, w_sec, w3_k)
+        zt_u = zt[i, j, k]
+        iso_u = isotropy[i, j, k]
+        brunt_u = brunt[i, j, k]
+        w_sec_u = w_sec[i, j, k]
+        thetal_u = thetal[i, j, k]
+        tke_u = tke[i, j, k]
+        dz_u = dz_zt(i, j, k, zi)
+        zi_k = zi[i, j, k]
+        thl_sec_above = thl_sec[i, j, k+1]
+        wthl_sec_above = wthl_sec[i, j, k+1]
+
+        isotropy_zi = clip_below(linear_interp(zt_u, zt_l, iso_u, iso_l, zi_k), zero(FT))
+        brunt_zi = clip_below(linear_interp(zt_u, zt_l, brunt_u, brunt_l, zi_k), largeneg)
+        w_sec_zi = clip_below(linear_interp(zt_u, zt_l, w_sec_u, w_sec_l, zi_k), w_sec_min)
+        thetal_zi = clip_below(linear_interp(zt_u, zt_l, thetal_u, thetal_l, zi_k), zero(FT))
+
+        thedz = 1 / (zt_u - zt_l)
+        thedz2 = 1 / (dz_l + dz_u)
+
+        w3_k = third_moment(p, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
+                            thl_sec_above - thl_sec_below, wthl_sec_above - wthl_sec_below,
+                            w_sec_u - w_sec_l, tke_u - tke_l, wthl_k)
+
+        w3[i, j, k] = clip_third_moment(p, w_sec_zi, w3_k)
+
+        zt_l, iso_l, brunt_l, w_sec_l, thetal_l, tke_l, dz_l = zt_u, iso_u, brunt_u, w_sec_u, thetal_u, tke_u, dz_u
+        thl_sec_below = thl_sec[i, j, k]
+        wthl_sec_below, wthl_k = wthl_k, wthl_sec_above
     end
 
     @inbounds begin
-        w3[i, j, 1] = clip_third_moment(i, j, 1, Nz, p, zt, zi, w_sec, zero(FT))
-        w3[i, j, Nz+1] = clip_third_moment(i, j, Nz+1, Nz, p, zt, zi, w_sec, zero(FT))
+        w3[i, j, 1] = clip_third_moment(p, interpolate_to_interface(i, j, 1, Nz, zt, zi, w_sec, w_sec_min), zero(FT))
+        w3[i, j, Nz+1] = clip_third_moment(p, interpolate_to_interface(i, j, Nz+1, Nz, zt, zi, w_sec, w_sec_min), zero(FT))
+    end
+
+    return nothing
+end
+
+# The second part of the step: the assumed PDF (subgrid cloud and buoyancy flux), check_tke and the
+# boundary layer depth of the updated state.
+@inline function shoc_cloud!(i, j, Nz, p, state, host, surface, diagnostics)
+    thetal, qw, u_wind, v_wind, tke = state.thetal, state.qw, state.u_wind, state.v_wind, state.tke
+    zt, zi, pres, w_field = host.zt_grid, host.zi_grid, host.pres, host.w_field
+    wthv_sec, shoc_ql, shoc_cldfrac, shoc_ql2 = diagnostics.wthv_sec, diagnostics.shoc_ql, diagnostics.shoc_cldfrac, diagnostics.shoc_ql2
+    w_sec, wqls_sec, w3 = diagnostics.w_sec, diagnostics.wqls_sec, diagnostics.w3
+    thl_sec, qw_sec, qwthl_sec = diagnostics.thl_sec, diagnostics.qw_sec, diagnostics.qwthl_sec
+    wthl_sec, wqw_sec = diagnostics.wthl_sec, diagnostics.wqw_sec
+
+    @inbounds begin
+        wthl_sfc = surface.wthl_sfc[i, j, 1]
+        wqw_sfc = surface.wqw_sfc[i, j, 1]
+        uw_sfc = surface.uw_sfc[i, j, 1]
+        vw_sfc = surface.vw_sfc[i, j, 1]
     end
 
     #####
     ##### shoc_assumed_pdf, then check_tke
     #####
 
+    interface_moments(k) = @inbounds (w3[i, j, k], thl_sec[i, j, k], wthl_sec[i, j, k],
+                                      qwthl_sec[i, j, k], wqw_sec[i, j, k], qw_sec[i, j, k])
+    moments_l = interface_moments(1)
+
     @inbounds for k in 1:Nz
+        moments_u = interface_moments(k+1)
         cldfrac_k, ql_k, ql2_k, wqls_k, wthv_k =
-            assumed_pdf(i, j, k, p, zt, zi, pres, w_field, thetal, qw, w_sec,
-                        thl_sec, qw_sec, qwthl_sec, wthl_sec, wqw_sec, w3)
+            assumed_pdf(i, j, k, p, zt, zi, pres, w_field, thetal, qw, w_sec, moments_l, moments_u)
+        moments_l = moments_u
 
         shoc_cldfrac[i, j, k] = cldfrac_k
         shoc_ql[i, j, k] = ql_k

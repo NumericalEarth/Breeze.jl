@@ -13,10 +13,11 @@ export SimplifiedHigherOrderClosure, SHOCParameters
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using GPUArraysCore: @allowscalar
-using KernelAbstractions: @kernel, @index
+using KernelAbstractions: KernelAbstractions, @kernel, @index
 using SpecialFunctions: erf
 
 using Oceananigans: Oceananigans
+using Oceananigans.Architectures: device
 using Oceananigans.BoundaryConditions: BoundaryConditions, BoundaryCondition, Flux, Bottom,
                                        fill_halo_regions!, total_boundary_flux
 using Oceananigans.Fields: Field, CenterField, ZFaceField

@@ -398,19 +398,50 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-One SHOC step of every column of the model: load the specific state from the prognostic
-densities, step SHOC, and store θˡ, qᵗ and turbulent kinetic energy back as densities. One thread
-per column, with every vertical loop inside the thread.
+The first part of a SHOC step of every column of the model: load the specific state from the
+prognostic densities and take `shoc_turbulence!`. One thread per column, with every vertical
+loop inside the thread. `_step_shoc_cloud!` completes the step; the step is split in
+three kernels because each part needs fewer registers than the whole.
 """
-@kernel function _step_shoc!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe, bottom_bcs, bc_args)
+@kernel function _step_shoc_turbulence!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe,
+                                        bottom_bcs, bc_args)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     Nz = size(grid, 3)
 
     load_shoc_column!(i, j, grid, closure_ij, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe, bottom_bcs, bc_args)
 
-    shoc_column!(i, j, Nz, Δt, closure_ij.parameters,
-                 fields.state, fields.host, fields.surface, fields.diagnostics, fields.scratch)
+    shoc_turbulence!(i, j, Nz, Δt, closure_ij.parameters,
+                     fields.state, fields.host, fields.surface, fields.diagnostics, fields.scratch)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The implicit diffusion and the second and third moments of a SHOC step of every column
+(`shoc_implicit_moments!`), between `_step_shoc_turbulence!` and `_step_shoc_cloud!`.
+"""
+@kernel function _step_shoc_implicit!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+    i, j = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    Nz = size(grid, 3)
+
+    shoc_implicit_moments!(i, j, Nz, Δt, closure_ij.parameters,
+                           fields.state, fields.host, fields.surface, fields.diagnostics, fields.scratch)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The last part of a SHOC step of every column: `shoc_cloud!`, then store θˡ, qᵗ and turbulent
+kinetic energy back as densities.
+"""
+@kernel function _step_shoc_cloud!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+    i, j = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    Nz = size(grid, 3)
+
+    shoc_cloud!(i, j, Nz, closure_ij.parameters, fields.state, fields.host, fields.surface, fields.diagnostics)
 
     store_shoc_column!(i, j, grid, fields, ρ, ρθ, ρqᵗ, ρe)
 end
@@ -428,6 +459,38 @@ end
         ρu[i, j, k] += ifelse(peripheral_node(i, j, k, grid, f, c, c), zero(δρu), δρu)
         ρv[i, j, k] += ifelse(peripheral_node(i, j, k, grid, c, f, c), zero(δρv), δρv)
     end
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Threads per block of the column kernel on a GPU, for `Nx × Ny` columns: one thread per column
+leaves few threads in all, so the blocks are made small enough that the columns spread over all
+multiprocessors (`2 × 108` blocks on an A100) before they are made larger, up to `maxthreads`.
+The block spans `x` first, so that the threads of a warp read adjacent memory.
+"""
+function shoc_gpu_workgroup(Nx, Ny; target_blocks = 216, maxthreads = 128)
+    threads = clamp(prevpow(2, max(1, (Nx * Ny) ÷ target_blocks)), 32, maxthreads)
+    wx = min(threads, Nx)
+    wy = clamp(threads ÷ wx, 1, Ny)
+    return (wx, wy)
+end
+
+# Only the first kernel, which loads the column, evaluates the bottom boundary conditions.
+function launch_shoc_columns!(arch, grid, bottom_bcs, bc_args, args...)
+    dev = device(arch)
+    if dev isa KernelAbstractions.GPU
+        Nx, Ny, _ = size(grid)
+        workgroup = shoc_gpu_workgroup(Nx, Ny)
+        _step_shoc_turbulence!(dev, workgroup, (Nx, Ny))(grid, args..., bottom_bcs, bc_args)
+        _step_shoc_implicit!(dev, workgroup, (Nx, Ny))(grid, args...)
+        _step_shoc_cloud!(dev, workgroup, (Nx, Ny))(grid, args...)
+    else
+        launch!(arch, grid, :xy, _step_shoc_turbulence!, grid, args..., bottom_bcs, bc_args)
+        launch!(arch, grid, :xy, _step_shoc_implicit!, grid, args...)
+        launch!(arch, grid, :xy, _step_shoc_cloud!, grid, args...)
+    end
+    return nothing
 end
 
 function shoc_thermodynamic_density(formulation)
@@ -463,8 +526,7 @@ function Oceananigans.TimeSteppers.step_closure_prognostics!(fields::SHOCFields,
                   ρv = ρv.boundary_conditions.bottom)
     bc_args = boundary_condition_args(model)
 
-    launch!(arch, grid, :xy, _step_shoc!,
-            grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe, bottom_bcs, bc_args)
+    launch_shoc_columns!(arch, grid, bottom_bcs, bc_args, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
 
     fill_halo_regions!((fields.increments.u, fields.increments.v))
 
