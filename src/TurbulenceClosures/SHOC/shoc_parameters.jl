@@ -258,6 +258,10 @@ function with_parameters(parameters::SHOCParameters; kw...)
     return SHOCParameters(promote(values...)...)
 end
 
+# Kernels receive the parameters through `adapt`: on `ReactantState` every traced scalar must be
+# replaced by its device counterpart, which needs the fields to be recursed into.
+Adapt.@adapt_structure SHOCParameters
+
 Base.eltype(::SHOCParameters{FT}) where FT = FT
 Base.summary(::SHOCParameters{FT}) where FT = "SHOCParameters{$FT}"
 

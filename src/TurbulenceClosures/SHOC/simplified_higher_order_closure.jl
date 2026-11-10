@@ -105,6 +105,10 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
                                         convert(FT, host_grid_spacing))
 end
 
+# Recurse into the parameters and the surface scalars when the closure is adapted for a kernel
+# (on `ReactantState` they are traced scalars during automatic differentiation).
+Adapt.@adapt_structure SimplifiedHigherOrderClosure
+
 const SHOCClosureArray = AbstractArray{<:SimplifiedHigherOrderClosure}
 
 """Either a single `SimplifiedHigherOrderClosure` or an ensemble array of them."""
