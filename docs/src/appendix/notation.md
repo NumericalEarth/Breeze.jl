@@ -212,6 +212,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N_A``                             | `ℕᴬ`   |                                     | Avogadro's number, molecules per mole                                          |
 | ``\mathcal{U}``                     | `𝒰`    |                                     | Thermodynamic state struct (e.g., `StaticEnergyState`)                         |
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
+| ``\mathcal{S}``                     | `𝒮`    |                                     | Subgrid statistics of a cell that the turbulence closure supplies to the microphysics (e.g., `ClosureCloudStatistics`) |
 | ``θ^L``                             | `θᴸ`   | `AcousticSubstepper.linearization_potential_temperature` | Stage-entry potential temperature, ``θ^L = (ρθ)^L / ρ^L`` |
 | ``C^L``                             | `Cᴸ`   | `AcousticSubstepper.linearization_pressure_coefficient` | Linearized pressure coefficient, the slope ``∂p/∂(ρθ)`` of the equation of state at the stage-entry state, ``C^L = γ^e p^L / (ρθ)^L`` |
 | ``γ^e``                             | `γᵉ`   |                                     | Effective heat-capacity ratio of the linearized equation of state, ``γ^e = (θ / T) ∂T/∂θ`` |
