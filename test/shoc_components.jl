@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.TurbulenceClosures.SHOC: HardClipping, clip_max, clip_min, clip_below, clip_between, clip_negative,
+using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_min, clip_below, clip_between, clip_negative,
                                       stable_damping, hard_floor
 using Test
 

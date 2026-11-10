@@ -9,8 +9,19 @@ export TKEBasedTurbulenceClosure,
        RationalStabilityFunction,
        DryStaticStability,
        MoistStaticStability,
-       SimplifiedHigherOrderClosure,
-       SHOCParameters
+       SimplifiedHigherOrderClosure, SHOC,
+       OriginalSHOC,
+       SHOCMixingLength,
+       ColumnStabilityDamping,
+       ForwardEulerTKE,
+       PDFBuoyancyFlux,
+       DowngradientSecondMoments,
+       CanutoThirdMoment, ResetBound,
+       DoubleGaussianPDF,
+       HardClipping,
+       HoltslagBovilleDepth,
+       SHOCConstants,
+       closure_parameters, with_parameters
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
@@ -175,7 +186,19 @@ include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
 include("richardson_number_stability_functions.jl")
 
-include("SHOC/SHOC.jl")
-using .SHOC: SHOC, SimplifiedHigherOrderClosure, SHOCParameters
+include("SHOC/SimplifiedHigherOrderClosures.jl")
+using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedHigherOrderClosure, SHOC,
+                                      OriginalSHOC,
+                                      SHOCMixingLength,
+                                      ColumnStabilityDamping,
+                                      ForwardEulerTKE,
+                                      PDFBuoyancyFlux,
+                                      DowngradientSecondMoments,
+                                      CanutoThirdMoment, ResetBound,
+                                      DoubleGaussianPDF,
+                                      HardClipping,
+                                      HoltslagBovilleDepth,
+                                      SHOCConstants,
+                                      closure_parameters, with_parameters
 
 end # module TurbulenceClosures

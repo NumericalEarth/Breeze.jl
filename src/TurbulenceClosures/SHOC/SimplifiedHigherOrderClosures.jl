@@ -1,14 +1,27 @@
 """
-    SHOC
+    SimplifiedHigherOrderClosures
 
 The Simplified Higher-Order Closure (SHOC) of Bogenschutz and Krueger (2013), re-expressed from
 E3SM's `shoc.F90` (pinned at E3SM `ba53243f`) as allocation-free column functions that run one
 thread per column on CPUs and GPUs, and wired into `AtmosphereModel` as
-[`SimplifiedHigherOrderClosure`](@ref).
+[`SimplifiedHigherOrderClosure`](@ref). The closure is assembled from swappable components, one
+per relation of the scheme; the preset [`OriginalSHOC`](@ref) selects those of `shoc.F90`.
 """
-module SHOC
+module SimplifiedHigherOrderClosures
 
-export SimplifiedHigherOrderClosure, SHOCParameters
+export SimplifiedHigherOrderClosure, SHOC,
+       OriginalSHOC,
+       SHOCMixingLength,
+       ColumnStabilityDamping,
+       ForwardEulerTKE,
+       PDFBuoyancyFlux,
+       DowngradientSecondMoments,
+       CanutoThirdMoment, ResetBound,
+       DoubleGaussianPDF,
+       HardClipping,
+       HoltslagBovilleDepth,
+       SHOCConstants,
+       closure_parameters, with_parameters
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
@@ -29,18 +42,25 @@ using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure, getclosure
 using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using Breeze.AtmosphereModels: AtmosphereModels, ClosureCloud, ClosureCloudStatistics
+using Breeze.TurbulenceClosures: TurbulenceClosures, convert_eltype
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
-include("shoc_parameters.jl")
+include("shoc_constants.jl")
 include("clipping.jl")
 include("column_utilities.jl")
 include("boundary_layer_depth.jl")
-include("tke_updates.jl")
+include("mixing_lengths.jl")
+include("turbulence_time_scales.jl")
 include("implicit_diffusion.jl")
+include("tke_updates.jl")
+include("buoyancy_sources.jl")
+include("second_moments.jl")
 include("third_moments.jl")
 include("assumed_pdfs.jl")
 include("shoc_column.jl")
+include("shoc_presets.jl")
 include("simplified_higher_order_closure.jl")
+include("shoc_parameters.jl")
 include("shoc_cloud.jl")
 
-end # module SHOC
+end # module SimplifiedHigherOrderClosures

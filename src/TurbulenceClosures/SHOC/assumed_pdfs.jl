@@ -1,6 +1,70 @@
 #####
-##### The assumed double-Gaussian PDF (shoc_assumed_pdf and its helpers)
+##### Slot: the assumed double-Gaussian PDF (shoc_assumed_pdf and its helpers)
 #####
+##### An assumed-PDF component implements
+#####
+#####     assumed_pdf(pdf, cp, c, zi_u, zi_l, zt_k, pval, thl, w, qw, w_sec, moments_l, moments_u)
+#####         -> (cldfrac, ql, ql2, wqls, wthv_sec)
+#####
+##### for a level at height `zt_k` between the interfaces at `zi_l` and `zi_u`: from the pressure,
+##### the means and the vertical velocity variance of the level and the interface moments
+##### `(w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec)` below and above it, the subgrid cloud
+##### fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
+#####
+
+"""
+$(TYPEDEF)
+
+The Analytic Double Gaussian 1 of Larson et al. (2002) as E3SM `shoc.F90` computes it
+(`shoc_assumed_pdf`): two Gaussian plumes in vertical velocity, θˡ and qᵗ whose weights, means
+and widths follow from the first three moments of vertical velocity and the second moments of
+the scalars, each condensing where it is saturated. The Fortran switches are kept: where the
+vertical velocity variance is below `w_tol²` or a scalar variance below its tolerance squared,
+the plumes collapse onto the mean.
+
+| coefficient | `shoc.F90` | default | meaning |
+|:------------|:-----------|:--------|:--------|
+| `ℂᵍ₁` | `w2_1`, `w2_2` (literal `0.4`) | 0.4 | within-plume fraction of the vertical velocity variance |
+| `ℂᵍ₂` | literal `1.2`    | 1.2    | skewness of total water relative to that of vertical velocity |
+| `ℂᵍ₃` | literal `0.2`    | 0.2    | plume separation below which total water is unskewed |
+| `ℂᵍ₄` | literal `0.4`    | 0.4    | plume separation above which total water takes the full skewness `ℂᵍ₂ Skew_w` |
+
+Between `ℂᵍ₃` and `ℂᵍ₄` the skewness of total water ramps linearly; the Fortran writes the width
+of the ramp as the literal `0.2`, which is taken here as `ℂᵍ₄ - ℂᵍ₃` so that the ramp stays
+continuous when the two are changed. `ℂᵍ₃ < ℂᵍ₄` is required.
+
+$(TYPEDFIELDS)
+"""
+struct DoubleGaussianPDF{FT} <: AbstractSHOCComponent
+    "Within-plume fraction of the vertical velocity variance (literal `0.4`)"
+    ℂᵍ₁ :: FT
+    "Skewness of total water relative to that of vertical velocity (literal `1.2`)"
+    ℂᵍ₂ :: FT
+    "Plume separation below which total water is unskewed (literal `0.2`)"
+    ℂᵍ₃ :: FT
+    "Plume separation above which total water is fully skewed (literal `0.4`)"
+    ℂᵍ₄ :: FT
+    "Standard deviation of θˡ below which it is uniform, K"
+    thl_tol :: FT
+    "Standard deviation of qᵗ below which it is uniform, kg kg⁻¹"
+    rt_tol :: FT
+    "Standard deviation of vertical velocity below which the air is calm, m s⁻¹"
+    w_tol :: FT
+    "Lowest liquid water temperature of a plume, K"
+    Tl_min :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `DoubleGaussianPDF{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
+argument.
+"""
+DoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(DoubleGaussianPDF, FT,
+                            (ℂᵍ₁ = 0.4, ℂᵍ₂ = 1.2, ℂᵍ₃ = 0.2, ℂᵍ₄ = 0.4, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2, Tl_min = 100), kw)
+
+Adapt.@adapt_structure DoubleGaussianPDF
 
 # Saturation vapor pressure over liquid of Murphy and Koop (2005) (wv_sat_scream.F90, MurphyKoop_svp)
 @inline function murphy_koop_liquid_svp(t::FT) where FT
@@ -25,7 +89,7 @@ end
     return clip_between(cp, ratio, 0, 100, 1) * sec
 end
 
-@inline function scalar_plume_parameters(cp, flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed, p)
+@inline function scalar_plume_parameters(cp, flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed, p::DoubleGaussianPDF)
     FT = typeof(sec)
     corrtest = clip_between(cp, flux / (sqrtw2 * sqrt_sec), -1, 1, 1)
 
@@ -106,18 +170,19 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The assumed PDF of level `k` (Analytic Double Gaussian 1 of Larson et al. 2002): return the
 subgrid cloud fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
 """
-@inline function assumed_pdf(i, j, k, p, cp, zt, zi, pres, w_field, thetal, qw, w_sec, moments_l, moments_u)
-    FT = eltype(thetal)
+@inline function assumed_pdf(pdf::DoubleGaussianPDF, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first, wsec,
+                             moments_l, moments_u)
+    p = c # the physical constants, under the name they have in the expressions below
+    FT = typeof(thl_first)
     largeneg = convert(FT, -99999999.99)
-    thl_tol = convert(FT, 1e-2)
-    rt_tol = convert(FT, 1e-4)
-    w_tol_sqd = convert(FT, 2e-2) * convert(FT, 2e-2)
-    Tl_min = convert(FT, 100)
+    thl_tol = pdf.thl_tol
+    rt_tol = pdf.rt_tol
+    w_tol_sqd = pdf.w_tol * pdf.w_tol
+    Tl_min = pdf.Tl_min
     epsterm = p.rgas / p.rv
 
     # Interpolate the interface moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec of the
     # interfaces below, `moments_l`, and above, `moments_u`, the level) to the level
-    @inbounds zi_u, zi_l, zt_k = zi[i, j, k+1], zi[i, j, k], zt[i, j, k]
     interpolate(n, minthresh) = hard_floor(linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k), minthresh)
     w3var = interpolate(1, largeneg)
     thlsec = interpolate(2, zero(FT))
@@ -125,14 +190,6 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     qwthlsec = interpolate(4, largeneg)
     wqwsec = interpolate(5, largeneg)
     qwsec = interpolate(6, zero(FT))
-
-    @inbounds begin
-        pval = pres[i, j, k]
-        thl_first = thetal[i, j, k]
-        w_first = w_field[i, j, k]
-        qw_first = qw[i, j, k]
-        wsec = w_sec[i, j, k]
-    end
 
     sqrtw2 = zero_safe_sqrt(wsec)
     sqrtthl = clip_max(cp, thl_tol, zero_safe_sqrt(thlsec), thl_tol)
@@ -142,7 +199,7 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     calm = wsec <= w_tol_sqd
     wsec_safe = ifelse(calm, one(FT), wsec)
     Skew_w = w3var / sqrt(wsec_safe * wsec_safe * wsec_safe)
-    w2_1 = p.ℂᵍ₁
+    w2_1 = pdf.ℂᵍ₁
     omw = 1 - w2_1
     a = clip_between(cp, convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))),
                      convert(FT, 0.01), convert(FT, 0.99), 1)
@@ -157,10 +214,10 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
 
     # shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters
     thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 =
-        scalar_plume_parameters(cp, wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, p)
+        scalar_plume_parameters(cp, wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, pdf)
 
     qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 =
-        scalar_plume_parameters(cp, wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, p)
+        scalar_plume_parameters(cp, wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, pdf)
 
     # shoc_assumed_pdf_tilde_to_real
     w1_1 = w1_1 * sqrtw2 + w_first

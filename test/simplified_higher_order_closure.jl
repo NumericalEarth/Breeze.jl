@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: materialize_closure, closure_scalar_names
-using Breeze.TurbulenceClosures.SHOC: SHOC, with_parameters
+using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: SHOCParameters, trainable_parameter_names
 using Oceananigans
 using Oceananigans.Grids: ColumnEnsembleSize
 using Test
@@ -31,19 +31,54 @@ column_data(field) = Array(interior(field))
     Oceananigans.defaults.FloatType = FT
     Nz = 24
 
-    @testset "Parameters" begin
-        p = SHOCParameters(FT)
-        @test p isa SHOCParameters{FT}
-        @test isbits(p)
-        @test p.eps ≈ p.rv / p.rgas - 1
-        q = with_parameters(p; ℂᶜ = FT(0.2), ℂˡ₁ = FT(0.4))
-        @test q isa SHOCParameters{FT}
-        @test q.ℂᶜ == FT(0.2) && q.ℂˡ₁ == FT(0.4) && q.ℂᵘ == p.ℂᵘ
-        @test_throws ArgumentError with_parameters(p; Ckh = FT(0.2))
-
-        closure = SimplifiedHigherOrderClosure(FT; parameters = q, surface_temperature_flux = 0.1)
+    @testset "Components and parameters" begin
+        closure = SimplifiedHigherOrderClosure(FT; surface_temperature_flux = 0.1)
         @test isbits(closure)
-        @test closure.parameters.ℂᶜ == FT(0.2)
+        @test SHOC === SimplifiedHigherOrderClosure
+        @test SHOC(OriginalSHOC(), FT; surface_temperature_flux = 0.1) === closure
+        @test closure.mixing_length isa SHOCMixingLength{FT}
+        @test closure.turbulence_time_scale isa ColumnStabilityDamping{FT}
+        @test closure.tke_update isa ForwardEulerTKE{FT}
+        @test closure.buoyancy_source isa PDFBuoyancyFlux
+        @test closure.second_moments isa DowngradientSecondMoments{FT}
+        @test closure.third_moment isa CanutoThirdMoment{ResetBound, FT}
+        @test closure.assumed_pdf isa DoubleGaussianPDF{FT}
+        @test closure.clipping isa HardClipping
+        @test closure.constants.eps ≈ closure.constants.rv / closure.constants.rgas - 1
+
+        # The flat view of the coefficients, and the snapshot of the numbers of shoc.F90
+        ℂ = closure_parameters(closure)
+        @test length(ℂ) == 30
+        @test all(value -> value isa FT, values(ℂ))
+        @test ℂ.ℂᶜ == FT(0.1) && ℂ.ℂˡ₂ == FT(2.8284) && ℂ.ℂʷ₂ == FT(7) && ℂ.ℂᴴ₃ == FT(8.5)
+        @test length(trainable_parameter_names(closure)) == 25
+        @test :ℂˡ₅ ∉ trainable_parameter_names(closure)
+        p = SHOCParameters(closure)
+        @test p isa SHOCParameters{FT}
+        @test p.ℂᶜ == ℂ.ℂᶜ && p.mintke == closure.constants.mintke && p.w3clip == closure.third_moment.w3clip
+
+        # Coefficients are replaced through the closure, whichever component holds them
+        changed = with_parameters(closure; ℂᶜ = FT(0.2), ℂˡ₁ = FT(0.4), ℂʷ₂ = FT(6), mintke = FT(1e-4))
+        @test typeof(changed) === typeof(closure)
+        @test changed.turbulence_time_scale.ℂᶜ == FT(0.2)
+        @test changed.mixing_length.ℂˡ₁ == FT(0.4)
+        @test changed.third_moment.ℂʷ₂ == FT(6)
+        @test changed.constants.mintke == FT(1e-4)
+        @test changed.turbulence_time_scale.ℂᵘ == closure.turbulence_time_scale.ℂᵘ
+        @test changed.surface_temperature_flux == closure.surface_temperature_flux
+        @test_throws ArgumentError with_parameters(closure; Ckh = FT(0.2))
+
+        # A replacement of another type promotes every component
+        promoted = with_parameters(SimplifiedHigherOrderClosure(Float32); ℂᶜ = 0.2)
+        @test all(value -> value isa Float64, values(closure_parameters(promoted)))
+
+        # Coefficients may also be given with the component
+        closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = ColumnStabilityDamping(ℂᶜ = 0.2))
+        @test closure.turbulence_time_scale.ℂᶜ == FT(0.2)
+        @test_throws ArgumentError ColumnStabilityDamping(Ckh = 0.2)
+
+        # Two components must not share a coefficient name
+        @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; second_moments = ForwardEulerTKE())
     end
 
     @testset "Single column" begin
@@ -162,10 +197,15 @@ column_data(field) = Array(interior(field))
     @testset "Rebuilding and materializing the closure" begin
         grid = RectilinearGrid(default_arch, FT; size=Nz, z=(0, 3000), topology=(Flat, Flat, Bounded))
         model = shoc_boundary_layer_model(grid)
-        parameters = with_parameters(model.closure.parameters; ℂᶜ = FT(0.05), ℂᵘ = FT(0.05))
-        closure = SimplifiedHigherOrderClosure(FT; parameters, surface_temperature_flux = 0.1)
+        closure = with_parameters(model.closure; ℂᶜ = FT(0.05), ℂᵘ = FT(0.05))
         materialized = materialize_closure(closure, closure_scalar_names(model), grid.architecture)
-        @test materialized.parameters.ℂᶜ == FT(0.05)
+        @test materialized.turbulence_time_scale.ℂᶜ == FT(0.05)
+        @test materialized.surface_temperature_flux == model.closure.surface_temperature_flux
+
+        # The rebuilt closure fits the closure fields of the model
+        model.closure = materialized
+        time_step!(model, 60)
+        @test all(isfinite, column_data(model.tracers.ρe))
         @test_throws ArgumentError materialize_closure(closure, (:ρθ, :ρqᵛ), grid.architecture)
     end
 

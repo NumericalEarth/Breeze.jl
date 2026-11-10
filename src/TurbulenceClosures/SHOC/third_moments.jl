@@ -1,20 +1,70 @@
 #####
-##### Third moment of vertical velocity (compute_diag_third_shoc_moment and its helpers)
+##### Slot: third moment of vertical velocity (compute_diag_third_shoc_moment and its helpers)
 #####
+##### A third-moment component implements
+#####
+#####     third_moment(tm, constants, τ_zi, N²_zi, w_sec_zi, thetal_zi, thedz, thedz2,
+#####                  Δthl_sec, Δwthl_sec, Δw_sec, Δtke, wthl) -> w3
+#####     bound_third_moment(tm, cp, w_sec_zi, w3) -> w3
+#####
+##### at an interior interface: the diagnosis, and the bound that keeps the skewness realizable.
+#####
+
+"""
+$(TYPEDEF)
+
+Beyond the bound, the third moment is reset to the constant 0.02 m³ s⁻³, as in E3SM `shoc.F90`
+(`clipping_diag_third_shoc_moments`). The third moment jumps where it reaches the bound.
+"""
+struct ResetBound <: AbstractSHOCComponent end
+
+"""
+$(TYPEDEF)
+
+The diagnostic third moment of vertical velocity of Canuto et al. (2001) as
+E3SM `shoc.F90` computes it (`compute_diag_third_shoc_moment`), bounded in magnitude by
+`w3clip √(2 w'w'³)` in the manner of `bound`.
+
+| coefficient | `shoc.F90` | default | meaning |
+|:------------|:-----------|:--------|:--------|
+| `ℂʷ₂` | `c_diag_3rd_mom` | 7 | the coefficient `c` of the diagnostic third moment |
+
+$(TYPEDFIELDS)
+"""
+struct CanutoThirdMoment{B, FT} <: AbstractSHOCComponent
+    "How the third moment is kept within its bound"
+    bound :: B
+    "Coefficient of the diagnostic third moment of vertical velocity (`c_diag_3rd_mom`)"
+    ℂʷ₂ :: FT
+    "Bound on the third moment over `√(2 w'w'³)`"
+    w3clip :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return a `CanutoThirdMoment` with the values of E3SM `shoc.F90`, bounded as `bound` prescribes.
+"""
+CanutoThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; bound = ResetBound(), ℂʷ₂ = 7, w3clip = 1.2) =
+    CanutoThirdMoment(bound, convert(FT, ℂʷ₂), convert(FT, w3clip))
+
+Adapt.@adapt_structure CanutoThirdMoment
+
+Base.summary(tm::CanutoThirdMoment{B, FT}) where {B, FT} = string("CanutoThirdMoment{", FT, "} with ", summary(tm.bound))
 
 # The third moment at an interior interface from the interface values of isotropy, Brunt-Vaisala
 # frequency, w_sec and thetal, the inverse thicknesses `thedz` and `thedz2`, and the differences
 # of the moments across the interface; `wthl` is wthl_sec at the interface.
-@inline function third_moment(p, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
+@inline function third_moment(tm::CanutoThirdMoment, constants, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
                               thl_sec_diff, wthl_sec_diff, wsec_diff, tke_diff, wthl)
     FT = typeof(wthl)
-    c = p.ℂʷ₂
+    c = tm.ℂʷ₂
 
     # fterms_input_for_diag_third_shoc_moment
     iso = isotropy_zi
     isosqrd = iso * iso
     buoy_sgs2 = isosqrd * brunt_zi
-    bet2 = p.ggr / thetal_zi
+    bet2 = constants.ggr / thetal_zi
 
     f0 = thedz2 * (bet2 * bet2 * bet2) * ((iso * iso) * (iso * iso)) * wthl * thl_sec_diff
     f1 = thedz2 * (bet2 * bet2) * (iso * iso * iso) * (wthl * wthl_sec_diff + convert(FT, 0.5) * w_sec_zi * thl_sec_diff)
@@ -48,11 +98,15 @@
     return (aa1 - convert(FT, 1.2) * x1 - convert(FT, 1.5) * f5) / (c - convert(FT, 1.2) * x0 + aa0)
 end
 
+# The largest magnitude of the third moment; `theterm` is w_sec interpolated to the interface
+@inline third_moment_bound(tm::CanutoThirdMoment, theterm) = tm.w3clip * sqrt(2 * (theterm * theterm * theterm))
+
+@inline bound_third_moment(tm::CanutoThirdMoment, cp, theterm, w3) =
+    bound_third_moment(tm.bound, cp, third_moment_bound(tm, theterm), w3)
+
 # clipping_diag_third_shoc_moments: a value beyond the bound is reset to 0.02, as in the Fortran
-# `theterm` is w_sec interpolated to the interface
-@inline function clip_third_moment(p, theterm, w3)
+@inline function bound_third_moment(::ResetBound, cp, cond, w3)
     FT = typeof(w3)
-    cond = p.w3clip * sqrt(2 * (theterm * theterm * theterm))
     tsign = ifelse(w3 < 0, -one(FT), one(FT))
     return ifelse(tsign * w3 > cond, convert(FT, 0.02), w3)
 end

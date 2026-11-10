@@ -23,9 +23,28 @@ as implemented in E3SM (`shoc.F90`).
 
 $(TYPEDFIELDS)
 """
-struct SimplifiedHigherOrderClosure{P, FT} <: AbstractTurbulenceClosure{ExplicitTimeDiscretization, 1}
-    "The [`SHOCParameters`](@ref): tunable coefficients, physical constants and limits"
-    parameters :: P
+struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, PDF, BL, CP, C, FT} <:
+       AbstractTurbulenceClosure{ExplicitTimeDiscretization, 1}
+    "The mixing length"
+    mixing_length :: ML
+    "The stability dependence: return-to-isotropy time scale, eddy diffusivities and dissipation coefficient"
+    turbulence_time_scale :: TS
+    "The update of turbulent kinetic energy"
+    tke_update :: TK
+    "The buoyancy source of turbulent kinetic energy"
+    buoyancy_source :: BS
+    "The second moments"
+    second_moments :: SM
+    "The third moment of vertical velocity"
+    third_moment :: TM
+    "The assumed PDF: subgrid cloud and buoyancy flux"
+    assumed_pdf :: PDF
+    "The diagnosis of the boundary layer depth"
+    boundary_layer_depth :: BL
+    "How bounds are imposed"
+    clipping :: CP
+    "Physical constants, reference values and the bounds on turbulent kinetic energy"
+    constants :: C
     "Default kinematic surface flux of liquid water potential temperature, K m s⁻¹"
     surface_temperature_flux :: FT
     "Default kinematic surface flux of total water, kg kg⁻¹ m s⁻¹"
@@ -43,7 +62,17 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a `SimplifiedHigherOrderClosure` (SHOC) for an `AtmosphereModel`.
+Return a `SimplifiedHigherOrderClosure` (SHOC) for an `AtmosphereModel`, assembled from the
+components of `preset` with scalars of type `FT`. `SHOC` is a shorter name for the same
+constructor.
+
+The closure is made of components, one per relation of the scheme, each holding the empirical
+coefficients (written ℂ) of its relation. The preset [`OriginalSHOC`](@ref), the default, selects
+the relations of E3SM `shoc.F90` with the published coefficients. A keyword argument replaces the
+component of one slot, either to change coefficients,
+`SHOC(turbulence_time_scale = ColumnStabilityDamping(ℂᶜ=0.2))`, or to swap the relation.
+[`closure_parameters`](@ref) lists the coefficients of all components and
+[`with_parameters`](@ref) replaces some of them, whichever components hold them.
 
 SHOC is operator split from the dynamics: it contributes nothing during the Runge–Kutta stages,
 and once per time step every column takes one SHOC step over the whole time step. The closure
@@ -84,7 +113,19 @@ the cloud fraction and keeps the precipitation.
 Keyword arguments
 =================
 
-- `parameters`: the [`SHOCParameters`](@ref); the defaults are those of E3SM `shoc.F90`.
+- `mixing_length`: the mixing length; [`SHOCMixingLength`](@ref) in `OriginalSHOC`.
+- `turbulence_time_scale`: the return-to-isotropy time scale, the eddy diffusivities and the
+  dissipation coefficient; [`ColumnStabilityDamping`](@ref) in `OriginalSHOC`.
+- `tke_update`: the update of turbulent kinetic energy; [`ForwardEulerTKE`](@ref) in `OriginalSHOC`.
+- `buoyancy_source`: the buoyancy source of turbulent kinetic energy; [`PDFBuoyancyFlux`](@ref)
+  in `OriginalSHOC`.
+- `second_moments`: [`DowngradientSecondMoments`](@ref).
+- `third_moment`: the third moment of vertical velocity; [`CanutoThirdMoment`](@ref) with
+  [`ResetBound`](@ref) in `OriginalSHOC`.
+- `assumed_pdf`: the assumed PDF of the subgrid cloud; [`DoubleGaussianPDF`](@ref) in `OriginalSHOC`.
+- `clipping`: how bounds are imposed; [`HardClipping`](@ref) in `OriginalSHOC`.
+- `boundary_layer_depth`: [`HoltslagBovilleDepth`](@ref).
+- `constants`: the [`SHOCConstants`](@ref).
 - `surface_temperature_flux`, `surface_moisture_flux`, `surface_x_momentum_flux`,
   `surface_y_momentum_flux`: uniform kinematic surface fluxes.
 - `friction_velocity`: where positive, the surface momentum flux is diagnosed every step as
@@ -101,13 +142,31 @@ closure = SimplifiedHigherOrderClosure(surface_temperature_flux=0.1)
 
 # output
 SimplifiedHigherOrderClosure{Float64}
+├── mixing_length: SHOCMixingLength{Float64}
+├── turbulence_time_scale: ColumnStabilityDamping{Float64}
+├── tke_update: ForwardEulerTKE{Float64}
+├── buoyancy_source: PDFBuoyancyFlux
+├── second_moments: DowngradientSecondMoments{Float64}
+├── third_moment: CanutoThirdMoment{Float64} with ResetBound
+├── assumed_pdf: DoubleGaussianPDF{Float64}
+├── boundary_layer_depth: HoltslagBovilleDepth{Float64}
+├── clipping: HardClipping
 ├── surface fluxes: wthl_sfc = 0.1, wqw_sfc = 0.0, uw_sfc = 0.0, vw_sfc = 0.0, friction_velocity = 0.0
-├── host_grid_spacing: 100000.0
-└── parameters: SHOCParameters{Float64}
+└── host_grid_spacing: 100000.0
 ```
 """
-function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.FloatType;
-                                      parameters = SHOCParameters(FT),
+function SimplifiedHigherOrderClosure(preset::AbstractSHOCPreset = OriginalSHOC(),
+                                      FT::DataType = Oceananigans.defaults.FloatType;
+                                      mixing_length = default_component(preset, Val(:mixing_length)),
+                                      turbulence_time_scale = default_component(preset, Val(:turbulence_time_scale)),
+                                      tke_update = default_component(preset, Val(:tke_update)),
+                                      buoyancy_source = default_component(preset, Val(:buoyancy_source)),
+                                      second_moments = default_component(preset, Val(:second_moments)),
+                                      third_moment = default_component(preset, Val(:third_moment)),
+                                      assumed_pdf = default_component(preset, Val(:assumed_pdf)),
+                                      clipping = default_component(preset, Val(:clipping)),
+                                      boundary_layer_depth = HoltslagBovilleDepth(),
+                                      constants = SHOCConstants(),
                                       surface_temperature_flux = 0,
                                       surface_moisture_flux = 0,
                                       surface_x_momentum_flux = 0,
@@ -115,7 +174,13 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
                                       friction_velocity = 0,
                                       host_grid_spacing = 100000)
 
-    return SimplifiedHigherOrderClosure(parameters,
+    components = map(component -> convert_eltype(FT, component),
+                     (mixing_length, turbulence_time_scale, tke_update, buoyancy_source, second_moments,
+                      third_moment, assumed_pdf, boundary_layer_depth, clipping, constants))
+
+    check_unique_scalar_names(components)
+
+    return SimplifiedHigherOrderClosure(components...,
                                         convert(FT, surface_temperature_flux),
                                         convert(FT, surface_moisture_flux),
                                         convert(FT, surface_x_momentum_flux),
@@ -124,7 +189,14 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
                                         convert(FT, host_grid_spacing))
 end
 
-# Recurse into the parameters and the surface scalars when the closure is adapted for a kernel
+SimplifiedHigherOrderClosure(FT::DataType; kw...) = SimplifiedHigherOrderClosure(OriginalSHOC(), FT; kw...)
+
+"""
+A shorter name for [`SimplifiedHigherOrderClosure`](@ref): `SHOC(OriginalSHOC())`.
+"""
+const SHOC = SimplifiedHigherOrderClosure
+
+# Recurse into the components and the surface scalars when the closure is adapted for a kernel
 # (on `ReactantState` they are traced scalars during automatic differentiation).
 Adapt.@adapt_structure SimplifiedHigherOrderClosure
 
@@ -142,18 +214,21 @@ function Utils.with_tracers(tracer_names, closure::FlavorOfSHOC)
     return closure
 end
 
-Base.summary(::SimplifiedHigherOrderClosure{P, FT}) where {P, FT} = "SimplifiedHigherOrderClosure{$FT}"
+Base.summary(closure::SimplifiedHigherOrderClosure) = "SimplifiedHigherOrderClosure{$(typeof(closure.host_grid_spacing))}"
 
 function Base.show(io::IO, closure::SimplifiedHigherOrderClosure)
-    print(io, summary(closure), '\n',
+    print(io, summary(closure), '\n')
+    for slot in COMPONENT_SLOTS
+        slot === :constants && continue
+        print(io, "├── ", slot, ": ", summary(getfield(closure, slot)), '\n')
+    end
+    print(io,
           "├── surface fluxes: wthl_sfc = ", prettysummary(closure.surface_temperature_flux),
           ", wqw_sfc = ", prettysummary(closure.surface_moisture_flux),
           ", uw_sfc = ", prettysummary(closure.surface_x_momentum_flux),
           ", vw_sfc = ", prettysummary(closure.surface_y_momentum_flux),
           ", friction_velocity = ", prettysummary(closure.friction_velocity), '\n',
-          "├── host_grid_spacing: ", prettysummary(closure.host_grid_spacing), '\n',
-          "└── parameters: ")
-    print(io, summary(closure.parameters))
+          "└── host_grid_spacing: ", prettysummary(closure.host_grid_spacing))
 end
 
 #####
@@ -313,7 +388,7 @@ end
 @inline function load_shoc_column!(i, j, grid, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe,
                                    bottom_bcs, bc_args)
     Nz = size(grid, 3)
-    p = closure.parameters
+    p = closure.constants
     state, host, diagnostics = fields.state, fields.host, fields.diagnostics
     specification, surface = fields.surface_specification, fields.surface
     c = Center()
@@ -415,7 +490,7 @@ three kernels because each part needs fewer registers than the whole.
 
     load_shoc_column!(i, j, grid, closure_ij, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe, bottom_bcs, bc_args)
 
-    shoc_turbulence!(i, j, Nz, Δt, closure_ij.parameters,
+    shoc_turbulence!(i, j, Nz, Δt, closure_ij, grid,
                      fields.state, fields.host, fields.surface, fields.diagnostics, fields.scratch)
 end
 
@@ -430,7 +505,7 @@ The implicit diffusion and the second and third moments of a SHOC step of every 
     closure_ij = getclosure(i, j, closure)
     Nz = size(grid, 3)
 
-    shoc_implicit_moments!(i, j, Nz, Δt, closure_ij.parameters,
+    shoc_implicit_moments!(i, j, Nz, Δt, closure_ij, grid,
                            fields.state, fields.host, fields.surface, fields.diagnostics, fields.scratch)
 end
 
@@ -445,7 +520,7 @@ kinetic energy back as densities.
     closure_ij = getclosure(i, j, closure)
     Nz = size(grid, 3)
 
-    shoc_cloud!(i, j, Nz, closure_ij.parameters, fields.state, fields.host, fields.surface, fields.diagnostics)
+    shoc_cloud!(i, j, Nz, closure_ij, grid, fields.state, fields.host, fields.surface, fields.diagnostics)
 
     store_shoc_column!(i, j, grid, fields, ρ, ρθ, ρqᵗ, ρe)
 end
