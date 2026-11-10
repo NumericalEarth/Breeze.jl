@@ -97,11 +97,13 @@ jobs:
             # run's pre_kernelad_binary_pm.mlir dump: the binary pipeline one pass at a time, with
             # the process RSS after each, to attribute the memory to a pass. Remove to benchmark.
             probe_run: '42863400682'
-            # lower-jit{jit=false} retains nothing (run 42880168010), and cubin-only climbs like
-            # fatbin: the memory is the JIT or the CUDA module loads. Compile every call without
-            # loading any module to tell them apart.
+            # lower-jit{jit=false} retains nothing (run 42880168010), cubin-only climbs like
+            # fatbin, and with the constructors stripped the whole pass takes 3.6 s and 64 MiB
+            # (run 42888283969): the memory and the time are the per-call constructors, which
+            # register each module's fatbin with the CUDA runtime. Does an explicitly lazy
+            # module loading make registration cheap?
             probe_experiments: 'bin:true'
-            probe_strip_ctors: '1'
+            probe_cuda_module_loading: 'LAZY'
     defaults:
       run:
         shell: bash
@@ -294,6 +296,9 @@ jobs:
               export POLYGEIST_GPU_KERNEL_BLOCK_SIZE="${{ matrix.kernelad_block_size }}"
           fi
           if [[ -n "${{ matrix.probe_run }}" ]]; then
+              if [[ -n "${{ matrix.probe_cuda_module_loading }}" ]]; then
+                  export CUDA_MODULE_LOADING="${{ matrix.probe_cuda_module_loading }}"
+              fi
               dump="$(find "${GITHUB_WORKSPACE}/probe_dumps" -name 'module_*_pre_kernelad_binary_pm.mlir' | head -n1)"
               ls -l "${dump}"
               julia --color=yes --project kernelad_memprobe.jl "${dump}"
@@ -343,6 +348,8 @@ jobs:
           retention-days: 90
           overwrite: false
       - name: Create job summary
+        # The probe writes no results
+        if: ${{ !matrix.probe_run }}
         timeout-minutes: 1
         run: |
           cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
