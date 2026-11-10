@@ -31,7 +31,8 @@
 #####
 ##### Without CUDA (e.g. macOS) the probe covers parse, convert-polygeist-to-llvm,
 ##### strip-gpu-info and nvvm-attach-target, and gpu-module-to-binary with format=isa (PTX
-##### only, no ptxas); lower-jit needs the CUDA driver and is skipped.
+##### only, no ptxas); lower-jit needs the CUDA driver for jit=true and is then skipped, while
+##### jit=false (build and print the submodules only) runs anywhere.
 
 using Reactant
 using Reactant: MLIR, XLA
@@ -99,7 +100,7 @@ function pipeline(format, jit)
         "lower-jit{jit=$(jit)}",
         "symbol-dce",
     ]
-    has_cuda || filter!(p -> !startswith(p, "lower-jit"), passes)
+    has_cuda || !jit || filter!(p -> !startswith(p, "lower-jit"), passes)
     return passes
 end
 
