@@ -32,14 +32,13 @@ reject any unrecognized key with an `ArgumentError` rather than dropping it.
 
 ## When a Stable Simulation Becomes Unstable
 
-1. **STOP** — Don't add fixes. 2. Identify last working state via `git log`/`git diff`.
-3. Revert. 4. Make ONE change at a time. 5. Find the breaking change.
-
-The instability is NOT pre-existing if the code was stable before your changes.
+Don't add a fix on top. Identify the last working state with `git log`/`git diff`, revert, and
+reapply one change at a time until the breaking one shows itself. If the code was stable before your
+changes, the instability is not pre-existing.
 
 ## Diagnose-Before-Fix Protocol
 
-1. **STOP** — Don't immediately try a fix.
+1. Don't try a fix yet.
 2. **Characterize**: Where? What values? When did it start?
 3. **Work backwards**: Extreme at high altitude → what's special there? NaN → division by small numbers?
 4. **Compute analytically**: Expected tendency? Physically reasonable?
@@ -66,10 +65,10 @@ Interface in `src/AtmosphereModels/microphysics_interface.jl`. Key functions:
 
 ## Checklist Before Modifying Physics Code
 
-- [ ] Read relevant working examples (BOMEX, RICO, prescribed_SST)
+- [ ] Read relevant working examples (`examples/bomex.jl`, `rico.jl`, `prescribed_sea_surface_temperature.jl`)
 - [ ] Identified which field applies similar physics
 - [ ] Verified implementation matches paper specification
 - [ ] Computed tendency magnitudes analytically at key locations
 - [ ] Verified ICs are compatible with forcing
-- [ ] Making ONE change only
+- [ ] Making one change at a time
 - [ ] Committed or stashed current working state

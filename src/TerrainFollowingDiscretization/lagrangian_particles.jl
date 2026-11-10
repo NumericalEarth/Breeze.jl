@@ -198,7 +198,12 @@ position `(x, y, z)`, clamped to the grid's bounding r faces.
 # this method could be deleted and the `flattened_node` override above would be the
 # only extension needed. Until then, upstream changes to `advect_particle` — new
 # features as well as bug fixes — have to be mirrored here.
-@inline function LagrangianParticleTracking.advect_particle((x, y, z), particles, p, restitution,
+#
+# Returns the new position and whether the particle was absorbed at an
+# `AbsorbingBoundary`, as the stock method does. There is no immersed-boundary branch:
+# `validate_particles` rejects immersed terrain-following grids, so `bcs.immersed`
+# never applies here.
+@inline function LagrangianParticleTracking.advect_particle((x, y, z), particles, p, bcs,
                                                             grid::TerrainFollowingGrid, Δt, velocities)
     # Inverts z(x, y, r) for r once; the fractional indices formed below reuse it,
     # so the two-level Newton solve runs exactly once per particle per step.
@@ -238,8 +243,8 @@ position `(x, y, z)`, clamped to the grid's bounding r faces.
     x_right = ξnode(i_right, j, k, grid, Face(), Face(), Face())
     y_right = ηnode(i, j_right, k, grid, Face(), Face(), Face())
 
-    x = LagrangianParticleTracking.enforce_boundary_conditions(tx, x, x_left, x_right, restitution)
-    y = LagrangianParticleTracking.enforce_boundary_conditions(ty, y, y_left, y_right, restitution)
+    x, absorbed_x = LagrangianParticleTracking.enforce_boundary_conditions(bcs.west, bcs.east, tx, x, x_left, x_right)
+    y, absorbed_y = LagrangianParticleTracking.enforce_boundary_conditions(bcs.south, bcs.north, ty, y, y_left, y_right)
 
     # The walls are evaluated at the *new* horizontal position, so the particle
     # bounces off the terrain it has actually moved over (and, on a Periodic grid,
@@ -248,10 +253,11 @@ position `(x, y, z)`, clamped to the grid's bounding r faces.
     # Note this reflects the vertical coordinate alone: on a sloping surface it is a
     # vertical bounce, not a specular reflection about the surface normal, so neither
     # the horizontal position nor the velocity direction is altered. That is exact
-    # for the flat lid and for `restitution = 0` (the particle settles onto the
-    # ground), and approximate for an elastic bounce off a steep slope.
+    # for the flat lid, for `ReflectingBoundary(0)` (the particle settles onto the
+    # ground) and for `AbsorbingBoundary()`, and approximate for an elastic bounce
+    # off a steep slope.
     z_bottom, z_top = terrain_wall_heights(x, y, grid)
-    z = LagrangianParticleTracking.enforce_boundary_conditions(tz, z, z_bottom, z_top, restitution)
+    z, absorbed_z = LagrangianParticleTracking.enforce_boundary_conditions(bcs.bottom, bcs.top, tz, z, z_bottom, z_top)
 
-    return (x, y, z)
+    return (x, y, z), absorbed_x | absorbed_y | absorbed_z
 end
