@@ -27,7 +27,7 @@ struct DefaultValue end
 const ParticlesOrNothing = Union{Nothing, AbstractLagrangianParticles}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `particles` unchanged. Extended for grids on which Lagrangian particle
 tracking is not supported, so that the combination is rejected at construction
@@ -83,7 +83,7 @@ materialize_closure(closure, scalar_names, arch) = with_tracers(scalar_names, cl
 materialize_coriolis(coriolis, arch) = coriolis
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return an `AtmosphereModel` that uses the anelastic approximation following
 [Pauluis (2008)](@cite Pauluis2008).
@@ -337,14 +337,14 @@ function AtmosphereModel(grid;
     # is the single definition both sites go through.
     model_fields = merge(prognostic_model_fields, fields(formulation), velocities,
                          auxiliary_model_fields(temperature), microphysical_fields)
-    coupling_density = dynamics_density(dynamics)
+    continuity_density_field = continuity_density(dynamics)
     mass_density = total_density(dynamics)
 
     # A per-column `coriolis` (an array of rotations) is moved to the grid architecture; a scalar
     # coriolis passes through. See `materialize_coriolis` (extended for arrays in `SingleColumnMode`).
     coriolis = materialize_coriolis(coriolis, arch)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
-                                       grid, coriolis, coupling_density, mass_density,
+                                       grid, coriolis, continuity_density_field, mass_density,
                                        velocities, dynamics, formulation, microphysics,
                                        specific_prognostic_moisture, microphysical_fields,
                                        thermodynamic_constants)
@@ -490,7 +490,7 @@ closure_scalar_names(model::AtmosphereModel) =
     closure_scalar_names(model.formulation, model.microphysics, keys(model.tracers))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The index under which the prognostic field `name` enters the vertically-implicit solve: `nothing`
 for momentum, which is diffused with the closure's viscosity, and `Val(i)` for the `i`th closure
@@ -502,7 +502,7 @@ function closure_scalar_index(model::AtmosphereModel, name::Symbol)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether the prognostic field `name` sits out the vertically-implicit solve. The dynamics-specific
 prognostics — the compressible dry density, the kinematic driver's density — are advanced explicitly
@@ -546,7 +546,7 @@ function invalid_key_hint(name)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Check that every key of the user-supplied `boundary_conditions` names something that can
 carry them: a prognostic field, a velocity component of dynamics whose velocities are
@@ -594,7 +594,7 @@ function validate_interface_forcing(user_forcings, interface_name, target_name)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Re-key a forcing supplied under the moisture key `ρqᵗ` (see
 [`total_moisture_density_name`](@ref)), or its specific alias `qᵗ`, onto the moisture density
@@ -616,7 +616,7 @@ function route_moisture_forcing(user_forcings, microphysics)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
-                                  grid, coriolis, coupling_density, mass_density,
+                                  grid, coriolis, continuity_density_field, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture, microphysical_fields,
                                   thermodynamic_constants)
@@ -627,7 +627,7 @@ function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields
 end
 
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
-                                  grid, coriolis, coupling_density, mass_density,
+                                  grid, coriolis, continuity_density_field, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture, microphysical_fields,
                                   thermodynamic_constants)
@@ -636,7 +636,7 @@ function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
 end
 
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
-                                  grid, coriolis, coupling_density, mass_density,
+                                  grid, coriolis, continuity_density_field, mass_density,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture, microphysical_fields,
                                   thermodynamic_constants)
@@ -685,24 +685,24 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
                             NamedTuple{specific_names}(map(n -> model_fields[n], specific_names)))
 
     # Momentum, the dynamics mass variable, and thermodynamic density are weighted by the
-    # coupling density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
+    # continuity density (ρᵈ for CompressibleDynamics). Moisture, microphysical moments, and
     # user tracers are total-air mass fractions and therefore use total density. So does the
     # :ρE energy-forcing key: a specific heating Ė becomes the volumetric ρ Ė, the same units as
     # a ρE forcing and the radiative flux divergence, which the formulations then convert.
-    coupling_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
+    continuity_density_names = tuple(prognostic_dynamics_field_names(dynamics)...,
                                    prognostic_momentum_field_names(dynamics)...,
                                    ρᵡ_name)
 
-    # Keep `density` as the coupling-density compatibility entry for other forcing
-    # materializers; SpecificForcing selects between the two explicit carriers by target.
+    # Keep `density` as the continuity-density compatibility entry for other forcing
+    # materializers; SpecificForcing selects between the two explicit densities by target.
     # The moisture state and thermodynamic constants let forcings that convert between
     # thermodynamic variables (e.g. `TemperatureForcing`) form the same local moisture mass
     # fractions as the tendency kernels.
     forcing_context = (; coriolis,
-                         density=coupling_density,
-                         coupling_density,
+                         density=continuity_density_field,
+                         continuity_density=continuity_density_field,
                          total_density=mass_density,
-                         coupling_density_names,
+                         continuity_density_names,
                          specific_fields,
                          microphysics,
                          microphysical_fields,
@@ -790,7 +790,7 @@ combine_forcing_values(a, b::Tuple) = (a, b...)
 combine_forcing_values(a, b) = (a, b)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The non-prognostic fields exposed alongside the prognostic ones by `Oceananigans.fields(model)`,
 which is the temperature and nothing else. Forcings and boundary functions resolve their
@@ -808,7 +808,7 @@ every kernel that performs one. Boundary conditions receive them as a second tup
 auxiliary_model_fields(temperature) = (; T=temperature)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The pressure and density the model's own thermodynamics is evaluated with, which surface-flux
 boundary conditions read to diagnose the surface state below `(i, j)`. `boundary_condition_args`

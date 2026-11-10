@@ -17,7 +17,7 @@ struct TemperatureForcing{F, M, MF, Q, D, C}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Forcing by a prescribed temperature tendency ``∂ₜT`` (K s⁻¹), such as the large-scale heating
 of a single-column case. Supply it under the specific energy key `E`, as in

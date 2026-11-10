@@ -45,7 +45,7 @@ Base.summary(::FixedVolumePhaseChange) = "FixedVolumePhaseChange()"
 Base.summary(::SubgridDissipativeHeating) = "SubgridDissipativeHeating()"
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the [`PrecipitationDragHeating`](@ref) option of `formulation`, or `nothing` (the default)
 when the formulation does not heat the air by the drag of falling condensate. The sedimentation
@@ -54,7 +54,7 @@ tendency of the thermodynamic variable reads it.
 precipitation_heating(formulation) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the fixed-volume phase-change `option` that applies on `dynamics`: `nothing` by default,
 for dynamics whose thermodynamic pressure is prescribed and on which phase change at fixed
@@ -64,7 +64,7 @@ for dynamics whose thermodynamic pressure is prescribed and on which phase chang
 materialize_phase_change_source(option, dynamics) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether `microphysics` converts water between phases through its microphysical tendencies
 (`compute_microphysical_tendencies!`), where the fixed-volume phase-change source is formed.
@@ -74,7 +74,7 @@ return `false`.
 tendency_phase_change(microphysics) = true
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether the precipitation of `microphysics` falls through the model's sedimentation tendencies,
 where the drag heating of falling condensate is credited. `true` by default; schemes that move
@@ -83,7 +83,7 @@ or remove precipitation in their own update return `false`.
 sediments_through_model(microphysics) = true
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Throw an `ArgumentError` when an energy-closing source requested by `formulation` cannot act with
 `microphysics`. Called when the model is built, after the formulation is materialized.
@@ -91,7 +91,7 @@ Throw an `ArgumentError` when an energy-closing source requested by `formulation
 validate_energy_closing_sources(formulation, microphysics) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Hooks around `compute_microphysical_tendencies!` through which a formulation forms a source from
 the microphysical tendencies of the water densities: `compute_tendencies!` calls
@@ -102,14 +102,14 @@ part alone. No-ops by default.
 begin_phase_change_source!(formulation, model) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 See [`begin_phase_change_source!`](@ref).
 """
 finish_phase_change_source!(formulation, model) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the rate ``ρ ε`` [W m⁻³] at which the turbulence `closure` dissipates resolved kinetic
 energy at cell `(i, j, k)`, ``- 𝒯ᵢⱼ ∂ⱼ uᵢ`` with ``𝒯 = ρ τ`` its viscous stress weighted by the

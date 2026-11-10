@@ -84,7 +84,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create a pair of geostrophic forcings for the x- and y-momentum equations,
 keyed under specific names `u` and `v`. Each `GeostrophicForcing` returns a

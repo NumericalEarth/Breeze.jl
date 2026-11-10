@@ -313,7 +313,7 @@ function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::S
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`TKEBasedTurbulenceClosure`](@ref) with the given time discretization (default
 `VerticallyImplicitTimeDiscretization()`), float type, mixing length, stability functions, static
@@ -380,7 +380,7 @@ TKEBasedTurbulenceClosure(FT::DataType; kw...) =
 @inline convert_eltype(::Type{FT}, ss::MoistStaticStability) where FT = ss
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convert the parameters of the normalization ``ℓ = \\min(z, Cᴺ \\sqrt{e} / N)`` — a coefficient
 ``Cᴺ`` on the stratification length and none on the wall distance — to the present
@@ -534,7 +534,7 @@ const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:Const
 @inline face_valueᶜᶜᶠ(i, j, k, grid, field) = @inbounds field[i, j, k]
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The buoyancy penetration depth ``ℓᵇ = \\sqrt{e} / N`` at (Center, Center, Face): how far an eddy
 with kinetic energy ``e`` — floored at `minimum_tke` and reconstructed at the face from the cell
@@ -660,7 +660,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the primary mixing length at every face of every column, by the formulation of
 `closure.mixing_length` ([`LocalMinimumMixingLength`](@ref), [`IntegralMixingLength`](@ref) or
@@ -679,7 +679,7 @@ compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²) =
     launch!(grid.architecture, grid, :xy, _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The mixing length at cell center `(i, j, k)`, where the dissipation lives with ``e``. For the local
 minimum it is the local minimum at the center, with ``N²`` reconstructed from the two adjacent faces.
@@ -742,14 +742,14 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Shear production ``Kᵘ S²`` at (Center, Center, Face).
 """
 @inline shear_productionᶜᶜᶠ(i, j, k, grid, Kᵘ, u, v) = @inbounds Kᵘ[i, j, k] * shearᶜᶜᶠ(i, j, k, grid, u, v)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Buoyancy production ``-Kᶜ N²`` at (Center, Center, Face) from the stored diffusivity and static
 stability; negative in stable stratification.
@@ -757,7 +757,7 @@ stability; negative in stable stratification.
 @inline buoyancy_productionᶜᶜᶠ(i, j, k, grid, Kᶜ, N²) = @inbounds -Kᶜ[i, j, k] * N²[i, j, k]
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The dissipation rate ``ε = Sᴰ e^{3/2} / ℓ`` at cell centers, from the specific turbulent kinetic
 energy field `e`, the velocities and the closure fields, whose stored ``ℓ`` and ``N²`` it reads;
@@ -772,7 +772,7 @@ closure's TKE budget with a large-eddy simulation's. Negative ``e`` dissipates n
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The rate at which the sinks of the TKE equation remove turbulent kinetic energy, ``-Lᵉ ≥ 0``:
 the dissipation rate ``ω = Sᴰ \\sqrt{e} / ℓ`` — or, where ``e`` is negative, the damping rate
@@ -859,7 +859,7 @@ end
                            closure_fields, e) = @inbounds closure_fields.Lᵉ[i, j, k] * e
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Add the local sources of the TKE equation, ``ρ (P + B⁺)`` — shear production, formed from ``Kᵘ``
 and the velocities at the current Runge–Kutta stage, and the positive

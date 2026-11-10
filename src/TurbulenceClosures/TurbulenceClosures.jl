@@ -11,11 +11,10 @@ export TKEBasedTurbulenceClosure,
        MoistStaticStability
 
 using Adapt: Adapt, adapt
-using DocStringExtensions: TYPEDEF, TYPEDFIELDS, TYPEDSIGNATURES
+using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans
-
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!
 using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.Fields: CenterField, ZFaceField, ZeroField
@@ -60,11 +59,12 @@ using Oceananigans.Utils: Utils, launch!, prettysummary
 using ..AtmosphereModels: AtmosphereModels
 using ..BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions, DefaultGustiness, TKEGustiness
 
-using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density, gas_phase_density,
+using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density, thermodynamic_state_density,
                               precipitating_mass_fraction
 using Breeze.AtmosphereModels.Diagnostics: microphysics_phase_equilibrium
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturation_specific_humidity,
                              equilibrated_surface, absolute_zero_latent_heat, specific_heat_difference
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 #####
 ##### Fallbacks for closure = nothing
