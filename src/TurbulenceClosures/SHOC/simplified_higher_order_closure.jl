@@ -348,10 +348,10 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The first half of a SHOC step of every column of the model: load the specific state from the
+The first part of a SHOC step of every column of the model: load the specific state from the
 prognostic densities and take `shoc_turbulence!`. One thread per column, with every vertical
 loop inside the thread. `_step_shoc_cloud!` completes the step; the step is split in
-two kernels because each half needs fewer registers than the whole.
+three kernels because each part needs fewer registers than the whole.
 """
 @kernel function _step_shoc_turbulence!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
     i, j = @index(Global, NTuple)
@@ -367,7 +367,22 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The second half of a SHOC step of every column: `shoc_cloud!`, then store θˡ, qᵗ and turbulent
+The implicit diffusion and the second and third moments of a SHOC step of every column
+(`shoc_implicit_moments!`), between `_step_shoc_turbulence!` and `_step_shoc_cloud!`.
+"""
+@kernel function _step_shoc_implicit!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+    i, j = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    Nz = size(grid, 3)
+
+    shoc_implicit_moments!(i, j, Nz, Δt, closure_ij.parameters,
+                           fields.state, fields.host, fields.surface, fields.diagnostics, fields.scratch)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The last part of a SHOC step of every column: `shoc_cloud!`, then store θˡ, qᵗ and turbulent
 kinetic energy back as densities.
 """
 @kernel function _step_shoc_cloud!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
@@ -416,9 +431,11 @@ function launch_shoc_columns!(arch, grid, args...)
         Nx, Ny, _ = size(grid)
         workgroup = shoc_gpu_workgroup(Nx, Ny)
         _step_shoc_turbulence!(dev, workgroup, (Nx, Ny))(grid, args...)
+        _step_shoc_implicit!(dev, workgroup, (Nx, Ny))(grid, args...)
         _step_shoc_cloud!(dev, workgroup, (Nx, Ny))(grid, args...)
     else
         launch!(arch, grid, :xy, _step_shoc_turbulence!, grid, args...)
+        launch!(arch, grid, :xy, _step_shoc_implicit!, grid, args...)
         launch!(arch, grid, :xy, _step_shoc_cloud!, grid, args...)
     end
     return nothing

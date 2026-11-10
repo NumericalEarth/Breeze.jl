@@ -598,12 +598,13 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
 """
 @inline function shoc_column!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
     shoc_turbulence!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
+    shoc_implicit_moments!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
     shoc_cloud!(i, j, Nz, p, state, host, surface, diagnostics)
     return nothing
 end
 
-# The first part of the step: boundary layer depth, length scale, TKE, implicit diffusion, second
-# and third moments. Split from `shoc_cloud!` so that each part can run as its own kernel, with
+# The first part of the step: boundary layer depth, length scale, TKE production and dissipation,
+# eddy diffusivities. Split from `shoc_cloud!` so that each part can run as its own kernel, with
 # fewer registers per thread.
 @inline function shoc_turbulence!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
     thetal, qw, u_wind, v_wind, tke = state.thetal, state.qw, state.u_wind, state.v_wind, state.tke
@@ -732,6 +733,35 @@ end
         sqrt_sterm = zero_safe_sqrt(sterm_zt)
         tkh[i, j, k] = ifelse(runaway, p.ℂᶜₛ * (mix * mix) * sqrt_sterm, p.ℂᶜ * iso * tke_k)
         tk[i, j, k]  = ifelse(runaway, p.ℂᵘₛ * (mix * mix) * sqrt_sterm, p.ℂᵘ * iso * tke_k)
+    end
+
+    return nothing
+end
+
+# The implicit diffusion of the state and TKE, and the second and third moments.
+@inline function shoc_implicit_moments!(i, j, Nz, dtime, p, state, host, surface, diagnostics, scratch)
+    thetal, qw, u_wind, v_wind, tke = state.thetal, state.qw, state.u_wind, state.v_wind, state.tke
+    zt, zi, pres, pdel = host.zt_grid, host.zi_grid, host.pres, host.pdel
+    thv, w_field, inv_exner = host.thv, host.w_field, host.inv_exner
+    wthv_sec, tkh, tk = diagnostics.wthv_sec, diagnostics.tkh, diagnostics.tk
+    shoc_ql, shoc_cldfrac, shoc_ql2 = diagnostics.shoc_ql, diagnostics.shoc_cldfrac, diagnostics.shoc_ql2
+    shoc_mix, isotropy, brunt = diagnostics.shoc_mix, diagnostics.isotropy, diagnostics.brunt
+    w_sec, wqls_sec = diagnostics.w_sec, diagnostics.wqls_sec
+    thl_sec, qw_sec, qwthl_sec = diagnostics.thl_sec, diagnostics.qw_sec, diagnostics.qwthl_sec
+    wthl_sec, wqw_sec, wtke_sec = diagnostics.wthl_sec, diagnostics.wqw_sec, diagnostics.wtke_sec
+    uw_sec, vw_sec, w3 = diagnostics.uw_sec, diagnostics.vw_sec, diagnostics.w3
+    du, dl, d = scratch.du, scratch.dl, scratch.d
+
+    FT = eltype(tke)
+    g = p.ggr
+
+    @inbounds begin
+        wthl_sfc = surface.wthl_sfc[i, j, 1]
+        wqw_sfc = surface.wqw_sfc[i, j, 1]
+        uw_sfc = surface.uw_sfc[i, j, 1]
+        vw_sfc = surface.vw_sfc[i, j, 1]
+        host_dx = host.host_dx[i, j, 1]
+        host_dy = host.host_dy[i, j, 1]
     end
 
     #####
