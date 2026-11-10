@@ -316,6 +316,10 @@ without one contributes zero variance. Closures in a tuple compose through `merg
 @inline subgrid_statisticsᶜᶜᶜ(i, j, k, grid, ::NoSubgridCorrelation, ::Tuple, ::Tuple, state) =
     dirac_statistics(i, j, k, grid, state)
 
+# Resolves the ambiguity between the method above and the empty-tuple method below.
+@inline subgrid_statisticsᶜᶜᶜ(i, j, k, grid, ::NoSubgridCorrelation, ::Tuple{}, ::Tuple{}, state) =
+    dirac_statistics(i, j, k, grid, state)
+
 @inline subgrid_statisticsᶜᶜᶜ(i, j, k, grid, ::AbstractSubgridCorrelation, ::Tuple{}, ::Tuple{}, state) =
     zero_gaussian_statistics(subgrid_state_value(i, j, k, grid, state))
 
