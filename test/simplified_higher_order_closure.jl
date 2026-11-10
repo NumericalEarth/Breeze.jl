@@ -35,13 +35,14 @@ column_data(field) = Array(interior(field))
         @test p isa SHOCParameters{FT}
         @test isbits(p)
         @test p.eps ≈ p.rv / p.rgas - 1
-        q = with_parameters(p; Ckh = FT(0.2), length_fac = FT(0.4))
+        q = with_parameters(p; ℂᶜ = FT(0.2), ℂˡ₁ = FT(0.4))
         @test q isa SHOCParameters{FT}
-        @test q.Ckh == FT(0.2) && q.length_fac == FT(0.4) && q.Ckm == p.Ckm
+        @test q.ℂᶜ == FT(0.2) && q.ℂˡ₁ == FT(0.4) && q.ℂᵘ == p.ℂᵘ
+        @test_throws ArgumentError with_parameters(p; Ckh = FT(0.2))
 
         closure = SimplifiedHigherOrderClosure(FT; parameters = q, surface_temperature_flux = 0.1)
         @test isbits(closure)
-        @test closure.parameters.Ckh == FT(0.2)
+        @test closure.parameters.ℂᶜ == FT(0.2)
     end
 
     @testset "Single column" begin
@@ -83,10 +84,10 @@ column_data(field) = Array(interior(field))
     @testset "Rebuilding and materializing the closure" begin
         grid = RectilinearGrid(default_arch, FT; size=Nz, z=(0, 3000), topology=(Flat, Flat, Bounded))
         model = shoc_boundary_layer_model(grid)
-        parameters = with_parameters(model.closure.parameters; Ckh = FT(0.05), Ckm = FT(0.05))
+        parameters = with_parameters(model.closure.parameters; ℂᶜ = FT(0.05), ℂᵘ = FT(0.05))
         closure = SimplifiedHigherOrderClosure(FT; parameters, surface_temperature_flux = 0.1)
         materialized = materialize_closure(closure, closure_scalar_names(model), grid.architecture)
-        @test materialized.parameters.Ckh == FT(0.05)
+        @test materialized.parameters.ℂᶜ == FT(0.05)
         @test_throws ArgumentError materialize_closure(closure, (:ρθ, :ρqᵛ), grid.architecture)
     end
 

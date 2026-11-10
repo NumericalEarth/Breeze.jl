@@ -106,14 +106,14 @@ end
         in_pbl = pres[i, j, k] >= p.pblmaxp
         Δu = u_wind[i, j, k] - u_wind[i, j, 1]
         Δv = v_wind[i, j, k] - v_wind[i, j, 1]
-        vvk = Δu * Δu + Δv * Δv + p.fac * (ustar * ustar)
+        vvk = Δu * Δu + Δv * Δv + p.ℂᴴ₂ * (ustar * ustar)
         vvk = max(vvk, p.tinyw)
         thv_k = pbl_thv(i, j, k, p, thetal, qw, shoc_ql)
         rino = p.ggr * (thv_k - thv_ref) * (zt[i, j, k] - zt[i, j, 1]) / (thv_1 * vvk)
 
-        cross = check & in_pbl & (rino >= p.ricr)
+        cross = check & in_pbl & (rino >= p.ℂᴴ₁)
         Δrino = ifelse(cross, rino - rino_below, one(rino))
-        pblh_k = zt[i, j, k-1] + (p.ricr - rino_below) / Δrino * (zt[i, j, k] - zt[i, j, k-1])
+        pblh_k = zt[i, j, k-1] + (p.ℂᴴ₁ - rino_below) / Δrino * (zt[i, j, k] - zt[i, j, k-1])
         pblh = ifelse(cross, pblh_k, pblh)
         check = check & !cross
         rino_below = rino
@@ -133,8 +133,8 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
                             uw_sfc, vw_sfc, wthl_sfc, wqw_sfc)
 
     FT = typeof(uw_sfc)
-    fak = convert(FT, 8.5)                        # constant in surface temperature excess
-    binm = convert(FT, 15) * convert(FT, 0.1)     # betam * sffrac
+    fak = p.ℂᴴ₃                               # constant in surface temperature excess (fak)
+    binm = p.ℂᴴ₄ * convert(FT, 0.1)           # betam * sffrac
 
     # shoc_diag_obklen
     @inbounds begin
@@ -185,7 +185,7 @@ end
 ##### Shear production (compute_shr_prod), on interfaces and interpolated to levels
 #####
 
-@inline function shear_production_term(i, j, k, Nz, zt, u_wind, v_wind)
+@inline function shear_production_term(i, j, k, Nz, p, zt, u_wind, v_wind)
     ku = clamp(k, 2, Nz)
     kl = ku - 1
     grid_dz = 1 / dz_zi(i, j, ku, zt)
@@ -193,14 +193,13 @@ end
         u_grad = grid_dz * (u_wind[i, j, ku] - u_wind[i, j, kl])
         v_grad = grid_dz * (v_wind[i, j, ku] - v_wind[i, j, kl])
     end
-    Ck_sh = convert(typeof(u_grad), 0.1)
-    sterm = Ck_sh * (u_grad * u_grad + v_grad * v_grad)
+    sterm = p.ℂᴾ * (u_grad * u_grad + v_grad * v_grad)
     return ifelse((k == 1) | (k == Nz + 1), zero(sterm), sterm)
 end
 
-@inline function shear_production_term_zt(i, j, k, Nz, zt, zi, u_wind, v_wind)
-    sterm_u = shear_production_term(i, j, k+1, Nz, zt, u_wind, v_wind)
-    sterm_l = shear_production_term(i, j, k, Nz, zt, u_wind, v_wind)
+@inline function shear_production_term_zt(i, j, k, Nz, p, zt, zi, u_wind, v_wind)
+    sterm_u = shear_production_term(i, j, k+1, Nz, p, zt, u_wind, v_wind)
+    sterm_l = shear_production_term(i, j, k, Nz, p, zt, u_wind, v_wind)
     @inbounds y2 = linear_interp(zi[i, j, k+1], zi[i, j, k], sterm_u, sterm_l, zt[i, j, k])
     return clip_below(y2, zero(y2))
 end
@@ -264,7 +263,7 @@ end
 
 @inline function third_moment(i, j, k, Nz, p, zt, zi, thetal, tke, isotropy, brunt, w_sec, thl_sec, wthl_sec)
     FT = eltype(tke)
-    c = p.c_diag_3rd_mom
+    c = p.ℂʷ₂
     largeneg = convert(FT, -99999999.99)
 
     isotropy_zi = interpolate_to_interface(i, j, k, Nz, zt, zi, isotropy, zero(FT))
@@ -357,7 +356,7 @@ end
     return min(100, max(0, ratio)) * sec
 end
 
-@inline function scalar_plume_parameters(flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed)
+@inline function scalar_plume_parameters(flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed, p)
     FT = typeof(sec)
     corrtest = max(-1, min(1, flux / (sqrtw2 * sqrt_sec)))
 
@@ -368,9 +367,9 @@ end
     x1_2 = (-1 * corrtest) / ifelse(uniform, one(FT), w1_1)
 
     tsign = abs(x1_2 - x1_1)
-    skew_qw = ifelse(tsign > convert(FT, 0.4), convert(FT, 1.2) * Skew_w,
-                     ifelse(tsign <= convert(FT, 0.2), zero(FT),
-                            ((convert(FT, 1.2) * Skew_w) / convert(FT, 0.2)) * (tsign - convert(FT, 0.2))))
+    skew_qw = ifelse(tsign > p.ℂᵍ₄, p.ℂᵍ₂ * Skew_w,
+                     ifelse(tsign <= p.ℂᵍ₃, zero(FT),
+                            ((p.ℂᵍ₂ * Skew_w) / (p.ℂᵍ₄ - p.ℂᵍ₃)) * (tsign - p.ℂᵍ₃)))
     skew = ifelse(skewed, skew_qw, zero(FT))
 
     x2_1 = plume_variance(true, x1_1, x1_2, a, skew, sec)
@@ -472,7 +471,7 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     calm = wsec <= w_tol_sqd
     wsec_safe = ifelse(calm, one(FT), wsec)
     Skew_w = w3var / sqrt(wsec_safe * wsec_safe * wsec_safe)
-    w2_1 = convert(FT, 0.4)
+    w2_1 = p.ℂᵍ₁
     omw = 1 - w2_1
     a = max(convert(FT, 0.01),
             min(convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))), convert(FT, 0.99)))
@@ -487,10 +486,10 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
 
     # shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters
     thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 =
-        scalar_plume_parameters(wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false)
+        scalar_plume_parameters(wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, p)
 
     qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 =
-        scalar_plume_parameters(wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true)
+        scalar_plume_parameters(wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, p)
 
     # shoc_assumed_pdf_tilde_to_real
     w1_1 = w1_1 * sqrtw2 + w_first
@@ -625,20 +624,20 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
         brunt_int = ifelse(pres[i, j, k] > p.troppres, brunt_int + dz * brunt[i, j, k], brunt_int)
     end
 
-    l_inf = convert(FT, 0.1) * (numer / denom)
+    l_inf = p.ℂˡ₄ * (numer / denom)
 
     #####
     ##### Level by level: mixing length (compute_shoc_mix_shoc_length, check_length_scale_shoc_length),
     ##### adv_sgs_tke, isotropic_ts, eddy_diffusivities
     #####
 
-    tscale = convert(FT, 400) # turnover time scale [s]
+    tscale = p.ℂˡ₅ # turnover time scale [s]
     maxiso = convert(FT, 20000) # maximum return-to-isotropy time scale [s]
     temp_crit = convert(FT, 182) # surface temperature below which extra mixing applies [K]
     pbl_trans = convert(FT, 200) # transition depth above the boundary layer top [m]
 
-    Cs = convert(FT, 0.15)
-    Ck = convert(FT, 0.1)
+    Cs = p.ℂᴰ₂
+    Ck = p.ℂᴰ₁
     Ce = (Ck * Ck * Ck) / ((Cs * Cs) * (Cs * Cs))
     Ce1 = Ce / convert(FT, 0.7) * convert(FT, 0.19)
     Ce2 = Ce / convert(FT, 0.7) * convert(FT, 0.51)
@@ -647,8 +646,8 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
     host_scale = sqrt(host_dx * host_dy)
 
     # The damping of the return-to-isotropy time scale by column stability
-    lambda_column = p.lambda_low + ((brunt_int / g) - p.lambda_thresh) * p.lambda_slope
-    lambda_column = max(p.lambda_low, min(p.lambda_high, lambda_column))
+    lambda_column = p.ℂᵝ₁ + ((brunt_int / g) - p.ℂᵝ₄) * p.ℂᵝ₃
+    lambda_column = max(p.ℂᵝ₁, min(p.ℂᵝ₂, lambda_column))
 
     @inbounds for k in 1:Nz
         tke_k = tke[i, j, k]
@@ -657,15 +656,15 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
         tkes = sqrt(tke_k)
         brunt2 = ifelse(brunt_k >= 0, brunt_k, zero(FT))
 
-        mix = min(p.maxlen, (convert(FT, 2.8284) * sqrt(1 / ((1 / (tscale * tkes * p.vk * zt[i, j, k]))
-                             + (1 / (tscale * tkes * l_inf)) + convert(FT, 0.01) * (brunt2 / tke_k)))) / p.length_fac)
+        mix = min(p.maxlen, (p.ℂˡ₂ * sqrt(1 / ((1 / (tscale * tkes * p.vk * zt[i, j, k]))
+                             + (1 / (tscale * tkes * l_inf)) + p.ℂˡ₃ * (brunt2 / tke_k)))) / p.ℂˡ₁)
         mix = min(p.maxlen, mix)
         mix = max(p.minlen, mix)
         mix = min(host_scale, mix)
         shoc_mix[i, j, k] = mix
 
         # adv_sgs_tke
-        sterm_zt = shear_production_term_zt(i, j, k, Nz, zt, zi, u_wind, v_wind)
+        sterm_zt = shear_production_term_zt(i, j, k, Nz, p, zt, zi, u_wind, v_wind)
         a_prod_bu = (g / p.basetemp) * wthv_sec[i, j, k]
         tke_k = max(0, tke_k)
         a_prod_sh = tk[i, j, k] * sterm_zt
@@ -683,8 +682,8 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
         # eddy_diffusivities
         runaway = (tabs_sfc < temp_crit) & (zt[i, j, k] < pblh + pbl_trans)
         sqrt_sterm = zero_safe_sqrt(sterm_zt)
-        tkh[i, j, k] = ifelse(runaway, p.Ckh_s * (mix * mix) * sqrt_sterm, p.Ckh * iso * tke_k)
-        tk[i, j, k]  = ifelse(runaway, p.Ckm_s * (mix * mix) * sqrt_sterm, p.Ckm * iso * tke_k)
+        tkh[i, j, k] = ifelse(runaway, p.ℂᶜₛ * (mix * mix) * sqrt_sterm, p.ℂᶜ * iso * tke_k)
+        tk[i, j, k]  = ifelse(runaway, p.ℂᵘₛ * (mix * mix) * sqrt_sterm, p.ℂᵘ * iso * tke_k)
     end
 
     #####
@@ -737,7 +736,7 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
     wstar = ifelse(heated, wstar_cubed^(convert(FT, 1) / 3), zero(FT))
 
     # diag_second_moments_lbycond
-    a_const = convert(FT, 1.8)
+    a_const = p.ℂᶠ
     uf = zero_safe_sqrt(ustar2 + convert(FT, 0.3) * wstar * wstar)
     uf = max(convert(FT, 0.01), uf)
     maxval = max(zero_safe_sqrt(ustar2), convert(FT, 0.01))
@@ -754,7 +753,7 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
     end
 
     # diag_second_moments: vertical velocity variance
-    w2fac = p.w2tune * (convert(FT, 2) / 3)
+    w2fac = p.ℂʷ₁ * (convert(FT, 2) / 3)
     @inbounds for k in 1:Nz
         w_sec[i, j, k] = w2fac * tke[i, j, k]
     end
@@ -772,9 +771,9 @@ The arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1` at t
         Δthetal = thetal[i, j, k] - thetal[i, j, k-1]
         Δqw = qw[i, j, k] - qw[i, j, k-1]
 
-        thl_sec[i, j, k] = p.thl2tune * sm * grid_dz2 * Δthetal * Δthetal
-        qw_sec[i, j, k] = p.qw2tune * sm * grid_dz2 * Δqw * Δqw
-        qwthl_sec[i, j, k] = p.qwthl2tune * sm * grid_dz2 * Δthetal * Δqw
+        thl_sec[i, j, k] = p.ℂᵛ₁ * sm * grid_dz2 * Δthetal * Δthetal
+        qw_sec[i, j, k] = p.ℂᵛ₂ * sm * grid_dz2 * Δqw * Δqw
+        qwthl_sec[i, j, k] = p.ℂᵛ₃ * sm * grid_dz2 * Δthetal * Δqw
 
         wthl_sec[i, j, k] = -1 * tkh_zi * grid_dz * Δthetal
         wqw_sec[i, j, k] = -1 * tkh_zi * grid_dz * Δqw

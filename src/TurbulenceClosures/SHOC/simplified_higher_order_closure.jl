@@ -84,21 +84,7 @@ closure = SimplifiedHigherOrderClosure(surface_temperature_flux=0.1)
 SimplifiedHigherOrderClosure{Float64}
 ├── surface fluxes: wthl_sfc = 0.1, wqw_sfc = 0.0, uw_sfc = 0.0, vw_sfc = 0.0, friction_velocity = 0.0
 ├── host_grid_spacing: 100000.0
-└── parameters: SHOCParameters{Float64}:
-    thl2tune = 1.0
-    qw2tune = 1.0
-    qwthl2tune = 1.0
-    w2tune = 1.0
-    length_fac = 0.5
-    c_diag_3rd_mom = 7.0
-    lambda_low = 0.001
-    lambda_high = 0.08
-    lambda_slope = 2.65
-    lambda_thresh = 0.02
-    Ckh = 0.1
-    Ckm = 0.1
-    Ckh_s = 0.1
-    Ckm_s = 0.1
+└── parameters: SHOCParameters{Float64}
 ```
 """
 function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.FloatType;
@@ -144,7 +130,7 @@ function Base.show(io::IO, closure::SimplifiedHigherOrderClosure)
           ", friction_velocity = ", prettysummary(closure.friction_velocity), '\n',
           "├── host_grid_spacing: ", prettysummary(closure.host_grid_spacing), '\n',
           "└── parameters: ")
-    show(io, closure.parameters)
+    print(io, summary(closure.parameters))
 end
 
 #####
