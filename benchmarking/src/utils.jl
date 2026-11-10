@@ -12,9 +12,21 @@ function memory_reclaim(arch)
     end
 end
 
-reactant_compile_options() = Reactant.CompileOptions(raise = true,
-                                                     raise_first = true,
-                                                     sync = true)
+# On GPUs, a vanilla run with WENO advection divides through Oceananigans'
+# `BackendOptimizedDivision`, which OceananigansCUDAExt implements with the
+# `rcp.approx.ftz` intrinsic (flush-to-zero). To compare like with like, the
+# Reactant-compiled program must flush denormals too: `xla_gpu_ftz=true`.
+uses_ftz_division(advection::AbstractString) = occursin("WENO", advection)
+
+reactant_gpu() = lowercase(string(Reactant.XLA.platform_name(Reactant.XLA.default_backend()))) in ("gpu", "cuda", "rocm")
+
+function reactant_compile_options(; ftz = false)
+    xla_debug_options = ftz ? (; xla_gpu_ftz = true) : (;)
+    return Reactant.CompileOptions(raise = true,
+                                   raise_first = true,
+                                   sync = true,
+                                   xla_debug_options)
+end
 
 """
     benchmark_time_stepping(model;
@@ -36,7 +48,7 @@ Run a benchmark by executing `time_steps` time steps of the given model.
 
 If the model lives on a `ReactantState` architecture, the whole stepping loop
 is traced with `Reactant.@trace` (see `step_loop!`) and compiled as a single
-program with `Reactant.@compile` using `reactant_compile_options()` (raising,
+program with `Reactant.@compile` using `reactant_compile_options()` (raising, `xla_gpu_ftz=true` on GPU when the vanilla run would use the ftz `BackendOptimizedDivision` of WENO,
 with while-loop batch fission and while elementwise-reduction-to-reduce disabled) — compile time is recorded separately.
 The compiled program is then executed once for warmup and once timed. The vanilla path drives `many_time_steps!`
 directly through eager `time_step!`.
@@ -76,6 +88,9 @@ function benchmark_time_stepping(model;
     checkpointing = checkpointing === true ? Reactant.Periodic(isqrt(time_steps)) : checkpointing
     checkpointing_str = ad ? checkpointing_label(checkpointing) : ""
 
+    ftz = is_reactant && reactant_gpu() && uses_ftz_division(advection)
+    compile_options = reactant_compile_options(; ftz)
+
     ad && !is_reactant && error("AD benchmark requires a Reactant backend (got $backend)")
 
     if verbose
@@ -85,6 +100,7 @@ function benchmark_time_stepping(model;
         @info "  Mode: $mode"
         ad && @info "  Checkpointing: $checkpointing_str"
         @info "  Float type: $FT"
+        is_reactant && @info "  xla_gpu_ftz: $ftz"
         @info "  Grid size: $Nx × $Ny × $Nz ($total_points points)"
         @info "  Time step: $(Δt_FT) s"
         @info "  Warmup steps: $warmup_steps"
@@ -107,7 +123,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling grad_loss!(model, dmodel, θ_init, dθ_init, Δt, $(time_steps), $(checkpointing)) with Reactant (raise=true)..."
             end
             compiled_grad!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile compile_options=reactant_compile_options() grad_loss!(
+                Reactant.@compile compile_options=compile_options grad_loss!(
                     model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
             end
             invoke! = () -> compiled_grad!(model, dmodel, θ_init, dθ_init, Δt_FT, time_steps, checkpointing)
@@ -116,7 +132,7 @@ function benchmark_time_stepping(model;
                 @info "  Compiling step_loop!(model, Δt, $(time_steps)) with Reactant (raise=true)..."
             end
             compiled_loop!, compile_timings = timed_reactant_compile() do
-                Reactant.@compile compile_options=reactant_compile_options() step_loop!(model, Δt_FT, time_steps)
+                Reactant.@compile compile_options=compile_options step_loop!(model, Δt_FT, time_steps)
             end
             invoke! = () -> compiled_loop!(model, Δt_FT, time_steps)
         end
