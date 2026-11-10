@@ -97,6 +97,11 @@ jobs:
             # run's pre_kernelad_binary_pm.mlir dump: the binary pipeline one pass at a time, with
             # the process RSS after each, to attribute the memory to a pass. Remove to benchmark.
             probe_run: '42863400682'
+            # lower-jit{jit=false} retains nothing (run 42880168010), and cubin-only climbs like
+            # fatbin: the memory is the JIT or the CUDA module loads. Compile every call without
+            # loading any module to tell them apart.
+            probe_experiments: 'bin:true'
+            probe_strip_ctors: '1'
     defaults:
       run:
         shell: bash
@@ -281,6 +286,8 @@ jobs:
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
           BREEZE_DUMP_MLIR: ${{ matrix.dump_mlir }}
+          PROBE_EXPERIMENTS: ${{ matrix.probe_experiments }}
+          PROBE_STRIP_CTORS: ${{ matrix.probe_strip_ctors }}
         run: |
           # An empty POLYGEIST_GPU_KERNEL_BLOCK_SIZE would still be read, as a block size of 0
           if [[ -n "${{ matrix.kernelad_block_size }}" ]]; then

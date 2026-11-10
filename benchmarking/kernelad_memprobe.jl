@@ -24,6 +24,10 @@
 #####                       machine the device's own value is used)
 #####   PROBE_PRINT         "1": print the module after each pass to a string and report its
 #####                       size (how big the embedded binaries are). Costs memory itself.
+#####   PROBE_STRIP_CTORS   "1": drop the llvm.mlir.global_ctors/dtors ops before the pipeline, so
+#####                       lower-jit still JIT-compiles every call's host module but no
+#####                       constructor runs: no CUDA module is loaded. Splits the JIT's own
+#####                       retention from the driver's.
 #####
 ##### Without CUDA (e.g. macOS) the probe covers parse, convert-polygeist-to-llvm,
 ##### strip-gpu-info and nvvm-attach-target, and gpu-module-to-binary with format=isa (PTX
@@ -112,6 +116,11 @@ ngpu = count("gpu.module @", source)
 # A GEP without indices prints as `%p[]`, which the parser rejects; `%p[0]` over i8 is the
 # same address
 source = replace(source, r"(llvm\.getelementptr %[A-Za-z0-9_]+)\[\] : \(([^)]*)\) -> ([^,]+), [^ ]+" => s"\1[0] : (\2) -> \3, i8")
+if get(ENV, "PROBE_STRIP_CTORS", "0") == "1"
+    nctors = count("llvm.mlir.global_ctors", source)
+    source = replace(source, r"\n  llvm\.mlir\.global_[cd]tors [^\n]*" => "")
+    println("stripped ", nctors, " global_ctors (and the dtors): no CUDA module will be loaded")
+end
 report("read file ($ngpu gpu.modules)")
 
 for (format, jit) in experiments
