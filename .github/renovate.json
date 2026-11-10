@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":disableDependencyDashboard"],
+  "timezone": "UTC",
+  "labels": ["dependencies 🖇️"],
+  "ignorePaths": ["validation/**", "utils/**"],
+  "ignoreDeps": ["Breeze"],
+  "packageRules": [
+    {
+      "matchManagers": ["julia"],
+      "matchFileNames": ["benchmarking/Project.toml"],
+      "matchDepNames": ["Reactant"],
+      "rangeStrategy": "pin"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "schedule": ["* * 1 * *"],
+      "minimumReleaseAge": "15 days"
+    },
+    {
+      "matchManagers": ["julia"],
+      "schedule": ["0 8 * * *"]
+    }
+  ]
+}
