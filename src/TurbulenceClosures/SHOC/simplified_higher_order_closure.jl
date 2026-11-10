@@ -369,7 +369,7 @@ end
         # that same density puts exactly the boundary-condition flux into the lowest level.
         ρ_surface = rho_zi(i, j, 1, Nz, p, host.zt_grid, host.zi_grid, host.pdel)
         Jᶿ = bottom_boundary_flux(bottom_bcs.ρθ, i, j, grid, ρθ, bc_args...)
-        Jᵗ = bottom_boundary_flux(bottom_bcs.ρqᵗ, i, j, grid, ρqᵗ, bc_args...)
+        Jᵗ = bottom_boundary_flux(bottom_bcs.ρqᵗ, i, j, grid, surface_moisture_density(ρqᵗ), bc_args...)
         𝒯ˣ = bottom_boundary_flux(bottom_bcs.ρu, i, j, grid, ρu, bc_args...)
         𝒯ʸ = bottom_boundary_flux(bottom_bcs.ρv, i, j, grid, ρv, bc_args...)
 
@@ -462,7 +462,7 @@ function Oceananigans.TimeSteppers.step_closure_prognostics!(fields::SHOCFields,
     # The surface fluxes: the model's bottom boundary conditions, evaluated in the kernel with the
     # arguments the tendency kernels give them.
     bottom_bcs = (ρθ = ρθ.boundary_conditions.bottom,
-                  ρqᵗ = ρqᵗ.boundary_conditions.bottom,
+                  ρqᵗ = surface_moisture_density(ρqᵗ).boundary_conditions.bottom,
                   ρu = ρu.boundary_conditions.bottom,
                   ρv = ρv.boundary_conditions.bottom)
     bc_args = boundary_condition_args(model)

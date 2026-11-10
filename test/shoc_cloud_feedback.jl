@@ -19,7 +19,7 @@ using Test
 # Rain falls several cells per step
 implicit_transport() = WENO(; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(Float64; cfl=0.5))
 
-function shoc_p3_column(subgrid; arch = default_arch)
+function shoc_p3_column(subgrid; arch = default_arch, boundary_conditions = NamedTuple())
     grid = RectilinearGrid(arch; size=32, z=(0, 1600), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=290)
@@ -28,7 +28,7 @@ function shoc_p3_column(subgrid; arch = default_arch)
     microphysics = PredictedParticlePropertiesMicrophysics(; subgrid,
                                                            negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
-    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics,
+    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics, boundary_conditions,
                             closure=SimplifiedHigherOrderClosure(), scalar_advection=implicit_transport())
 
     # A well-mixed layer whose upper part is saturated in the mean, under an inversion at 800 m
@@ -106,6 +106,22 @@ end
     ql = column(diagnostics.shoc_ql)
     qw = non_precipitating_water(model) ./ ρ
     @test column(μ.ρqᶜˡ) ≈ ρ .* min.(max.(ql, 0), max.(qw, 0)) rtol=1e-14
+end
+
+@testset "Surface moisture flux from the bottom boundary condition, with SHOC-owned cloud" begin
+    Jᵗ = 1e-4 # kg m⁻² s⁻¹, upward
+    boundary_conditions = (; ρqᵗ = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Jᵗ)))
+    model = shoc_p3_column(ClosureCloud(); boundary_conditions)
+    μ = model.microphysical_fields
+    water₀ = sum(non_precipitating_water(model) .+ column(μ.ρqʳ)) * 50
+
+    for _ in 1:3
+        time_step!(model, 60)
+    end
+
+    # Applied once per step, by SHOC
+    water = sum(non_precipitating_water(model) .+ column(μ.ρqʳ)) * 50
+    @test water - water₀ ≈ 3 * 60 * Jᵗ rtol=1e-9
 end
 
 @testset "Without ClosureCloud SHOC leaves the cloud liquid alone" begin
