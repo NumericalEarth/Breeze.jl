@@ -21,7 +21,7 @@ function reactant_compile_options(; ftz = false)
     return Reactant.CompileOptions(raise = true,
                                    raise_first = true,
                                    sync = true,
-                                   xla_debug_options)
+                                   xla_debug_options = xla_debug_options)
 end
 
 """
