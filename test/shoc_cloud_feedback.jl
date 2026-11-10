@@ -23,7 +23,10 @@ function shoc_p3_column(subgrid; arch = default_arch)
     grid = RectilinearGrid(arch; size=32, z=(0, 1600), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=290)
+    # Without P3's negative-moisture correction, whose species borrowing in `update_state!` moves
+    # traces of water between cloud liquid and the other species after the SHOC step
     microphysics = PredictedParticlePropertiesMicrophysics(; subgrid,
+                                                           negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
     model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics,
                             closure=SimplifiedHigherOrderClosure(), scalar_advection=implicit_transport())
@@ -73,9 +76,8 @@ end
     @test maximum(ql) > 1e-5
     @test 0 < maximum(column(diagnostics.shoc_cldfrac)) ≤ 1
 
-    # The cloud liquid of the model is SHOC's, the vapor is the rest (up to the species borrowing
-    # of P3's negative-moisture correction, which moves traces of water between species)
-    @test column(μ.ρqᶜˡ) ≈ ρ .* min.(max.(ql, 0), max.(qw, 0)) atol=1e-9
+    # The cloud liquid of the model is SHOC's, the vapor is the rest
+    @test column(μ.ρqᶜˡ) ≈ ρ .* min.(max.(ql, 0), max.(qw, 0)) rtol=1e-13
     @test all(column(model.moisture_density) .≥ 0)
 
     # P3 neither condenses nor evaporates cloud liquid, and forms rain from SHOC's cloud
