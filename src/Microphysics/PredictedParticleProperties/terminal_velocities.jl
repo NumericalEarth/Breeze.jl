@@ -49,7 +49,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute mass- and number-weighted rain terminal velocities together, sharing the
 slope-parameter, ρ-correction, and `log10(λ_r)` computations between the two
@@ -78,7 +78,7 @@ table lookups.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute mass-weighted terminal velocity for ice.
 
@@ -147,7 +147,7 @@ struct IceTerminalVelocities{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute both ice terminal velocities (mass- and number-weighted) in a single call,
 sharing the mean particle mass, the air density correction, and the 4D

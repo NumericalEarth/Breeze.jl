@@ -48,7 +48,7 @@ Create velocity fields from a velocity specification (e.g., `PrescribedVelocityF
 function materialize_velocities end
 
 """
-    update_dynamics_with_velocities(dynamics, velocities)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update dynamics with velocity specification. Default is a no-op.
 For `PrescribedDynamics`, stores the `PrescribedVelocityFields` for dispatch.
@@ -64,7 +64,7 @@ Returns `nothing` for dynamics that do not require a pressure solver (e.g., comp
 function dynamics_pressure_solver end
 
 """
-    update_pressure_solver!(solver, dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the parts of `solver` that depend on the state of `dynamics`, such as its reference density.
 Default is a no-op.
@@ -72,7 +72,7 @@ Default is a no-op.
 update_pressure_solver!(solver, dynamics) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the default timestepper symbol for the given dynamics.
 
@@ -86,7 +86,7 @@ default_timestepper(dynamics) = :SSPRungeKutta3
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the pressure correction for the given model. Default: no-op.
 For anelastic dynamics, solves the pressure Poisson equation.
@@ -94,7 +94,7 @@ For anelastic dynamics, solves the pressure Poisson equation.
 compute_pressure_correction!(model, Δt) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the pressure correction to the momentum fields. Default: no-op.
 For anelastic dynamics, projects momentum to enforce the divergence constraint.
@@ -142,7 +142,7 @@ Return the total pressure (mean + anomaly) in Pa.
 function total_pressure end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return pressure consistent with a prescribed temperature during thermodynamic initialization.
 
@@ -156,7 +156,7 @@ composition was changed immediately before setting temperature.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the saturation specific humidity at temperature `T` under the constraint that saturation
 adjustment applies for `dynamics`: the fixed [`dynamics_pressure`](@ref) by default (anelastic and
@@ -193,7 +193,7 @@ volume), not per unit of the continuity density. On the anelastic core the two d
 function continuity_density end
 
 """
-    total_density(dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the model's total air density ρ = ρᵈ + Σρˣ: the density of the model's mass, which
 converts the stored partial densities to mass fractions (``qˣ = ρqˣ / ρ``) and weights scalar
@@ -208,7 +208,7 @@ Thermodynamic relations of the local state, such as the saturation specific humi
 total_density(dynamics) = continuity_density(dynamics)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the change of the moisture mass fractions per unit mass of condensate `phase` that
 sediments out of a cell whose mass fractions are `q`, as a `MoistureMassFractions` difference
@@ -249,7 +249,7 @@ keeps its temperature.
     Δq.ice * absolute_zero_latent_heat(constants, constants.ice)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the density of the local thermodynamic state at `(i, j, k)`, with temperature `T` and
 moisture mass fractions `q`. This is the density in the equation of state, ``p = ρ Rᵐ T``, and the
@@ -271,7 +271,7 @@ and it is the density whose departure from ``ρᵣ`` is the anelastic buoyancy.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the equation-of-state density ``p / (Rᵐ(q) T)`` at the pressure
 [`dynamics_pressure`](@ref) of `dynamics` at `(i, j, k)`, with temperature `T` and moisture mass
@@ -284,7 +284,7 @@ fractions `q`. Dynamics closed on a reference or prescribed pressure extend
 end
 
 """
-    advecting_vertical_velocity(dynamics, velocities)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the vertical velocity that advects momentum through the grid's coordinate surfaces:
 the Cartesian `velocities.w` on height-coordinate grids, and the contravariant vertical
@@ -316,7 +316,7 @@ function buoyancy_forceᶜᶜᶜ end
 #####
 
 """
-    validate_velocity_boundary_conditions(dynamics, user_boundary_conditions)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Validate that velocity boundary conditions are only provided for dynamics that support them.
 
@@ -377,7 +377,7 @@ as the surface fluxes and the diagnostic hydrostatic pressure do.
 function surface_pressure end
 
 """
-    dynamics_reference_state(dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the dynamics' reference state (an anelastic `ReferenceState` or a split-explicit
 `ExnerReferenceState`), or `nothing` if the dynamics carries none. Dispatched so that
@@ -394,7 +394,7 @@ Default is 100000 Pa (1000 hPa).
 function standard_pressure end
 
 """
-    default_drag_surface_temperature(dynamics, grid, thermodynamic_constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a default surface temperature for `BulkDrag` when the user has not supplied
 one. Dispatched on the dynamics type because the notion of a "default" surface
@@ -413,7 +413,7 @@ default_drag_surface_temperature(dynamics, grid, thermodynamic_constants) =
         "`surface_temperature` explicitly when constructing `BulkDrag`."))
 
 """
-    initialize_model_thermodynamics!(model)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Initialize the thermodynamic state for a newly constructed model.
 For anelastic dynamics, sets initial θ to the reference potential temperature.
@@ -466,7 +466,7 @@ boundary conditions, so this returns `(:u, :v, :w)`.
 velocity_boundary_condition_names(::Any) = ()
 
 """
-    dynamics_prognostic_fields(dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a NamedTuple of prognostic fields specific to the dynamics formulation.
 
@@ -480,7 +480,7 @@ dynamics_prognostic_fields(dynamics) = NamedTuple()
 #####
 
 """
-    x_pressure_gradient(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the x-component of the pressure gradient force at (Face, Center, Center).
 
@@ -490,7 +490,7 @@ For compressible dynamics, returns `-∂p/∂x`.
 @inline x_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
-    y_pressure_gradient(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the y-component of the pressure gradient force at (Center, Face, Center).
 
@@ -500,7 +500,7 @@ For compressible dynamics, returns `-∂p/∂y`.
 @inline y_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
-    z_pressure_gradient(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the z-component of the pressure gradient force at (Center, Center, Face).
 
@@ -546,7 +546,7 @@ Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute tendencies for dynamics-specific prognostic fields.
 
@@ -564,7 +564,7 @@ compute_dynamics_tendency!(model) = nothing  # default: no dynamics-specific ten
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the velocity tuple used for scalar advection transport.
 
@@ -575,7 +575,7 @@ by the contravariant vertical velocity ``\\tilde{w}``.
 transport_velocities(model) = model.velocities
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the momentum tuple used for momentum advection transport
 and the continuity equation divergence.
@@ -587,7 +587,7 @@ replaced by the contravariant vertical momentum ``\\rho \\tilde{w}``.
 advecting_momentum(model) = model.momentum
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the part of `dynamics` that `timestepper` integrates through its tendencies: all of it,
 unless the time stepper integrates the pressure-gradient force and buoyancy separately, in which
@@ -596,7 +596,7 @@ case it returns `SlowDynamics(dynamics)`.
 slow_dynamics(timestepper, dynamics) = dynamics
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the velocity tuple used for thermodynamic-variable advection: `transport_velocities(model)`,
 unless the time stepper advects the thermodynamic variable with a different velocity than
@@ -609,7 +609,7 @@ thermodynamic_transport_velocities(model) = transport_velocities(model)
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute auxiliary (diagnostic) variables specific to the dynamics formulation.
 

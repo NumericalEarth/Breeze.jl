@@ -16,7 +16,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute ice self-collection (aggregation) rate using proper collision kernel.
 

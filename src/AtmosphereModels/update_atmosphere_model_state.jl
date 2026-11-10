@@ -69,7 +69,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute forcing-specific quantities needed before tendency calculation.
 For example, [`SubsidenceForcing`](@ref Breeze.Forcings.SubsidenceForcing)
@@ -139,7 +139,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute velocities from momentum: `u = ρu / ρ` for each velocity component.
 """
@@ -227,7 +227,7 @@ function compute_vertical_momentum_tendency!(model::AtmosphereModel, Gρw, w_arg
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute auxiliary model variables:
 
@@ -461,7 +461,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
@@ -488,7 +488,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Add a turbulence closure's own tendencies — the local sources of a prognostic the closure carries,
 such as the shear and buoyancy production of turbulent kinetic energy — to the model's tendencies
