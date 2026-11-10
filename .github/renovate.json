@@ -3,7 +3,6 @@
   "extends": ["config:recommended", ":disableDependencyDashboard"],
   "timezone": "UTC",
   "labels": ["dependencies 🖇️"],
-  "enabledManagers": ["github-actions", "julia"],
   "ignorePaths": ["validation/**", "utils/**"],
   "ignoreDeps": ["Breeze"],
   "packageRules": [
