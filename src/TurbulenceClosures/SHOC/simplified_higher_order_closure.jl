@@ -23,7 +23,7 @@ as implemented in E3SM (`shoc.F90`).
 
 $(TYPEDFIELDS)
 """
-struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, PDF, BL, CP, C, FT} <:
+struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, SK, PDF, BL, CP, C, FT} <:
        AbstractTurbulenceClosure{ExplicitTimeDiscretization, 1}
     "The mixing length"
     mixing_length :: ML
@@ -37,6 +37,8 @@ struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, PDF, BL, CP, C, FT} 
     second_moments :: SM
     "The third moment of vertical velocity"
     third_moment :: TM
+    "The limiter that keeps the third moment, and so the skewness, of vertical velocity bounded"
+    skewness :: SK
     "The assumed PDF: subgrid cloud and buoyancy flux"
     assumed_pdf :: PDF
     "The diagnosis of the boundary layer depth"
@@ -135,8 +137,11 @@ Each of the first eight takes a component; the first one named is the default, t
 - `buoyancy_source`: the buoyancy source of turbulent kinetic energy; [`PDFBuoyancyFlux`](@ref),
   or [`DowngradientBuoyancyFlux`](@ref) for comparison.
 - `second_moments`: [`DowngradientSecondMoments`](@ref).
-- `third_moment`: the third moment of vertical velocity; [`CanutoThirdMoment`](@ref) with
-  [`ResetBound`](@ref), or with [`ClampBound`](@ref) or [`TanhBound`](@ref).
+- `third_moment`: the diagnosis of the third moment of vertical velocity;
+  [`AlgebraicThirdMoment`](@ref).
+- `skewness`: how the third moment is kept within the bound `w3clip √(2 ww³)`;
+  [`ResetAboveThresholdSkewness`](@ref), or [`PolynomialSaturatedSkewness`](@ref),
+  [`ClampedSkewness`](@ref) or [`TanhSaturatedSkewness`](@ref).
 - `assumed_pdf`: the assumed PDF of the subgrid cloud; [`DoubleGaussianPDF`](@ref), or
   [`SmoothDoubleGaussianPDF`](@ref).
 - `clipping`: how bounds are imposed; [`HardClipping`](@ref), or [`SmoothClipping`](@ref).
@@ -163,7 +168,8 @@ SimplifiedHigherOrderClosure{Float64}
 ├── tke_update: ForwardEulerTKE{Float64}
 ├── buoyancy_source: PDFBuoyancyFlux
 ├── second_moments: DowngradientSecondMoments{Float64}
-├── third_moment: CanutoThirdMoment{Float64} with ResetBound
+├── third_moment: AlgebraicThirdMoment{Float64}
+├── skewness: ResetAboveThresholdSkewness{Float64}
 ├── assumed_pdf: DoubleGaussianPDF{Float64}
 ├── boundary_layer_depth: HoltslagBovilleDepth{Float64}
 ├── clipping: HardClipping
@@ -177,7 +183,8 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
                                       tke_update = ForwardEulerTKE(Float64),
                                       buoyancy_source = PDFBuoyancyFlux(),
                                       second_moments = DowngradientSecondMoments(Float64),
-                                      third_moment = CanutoThirdMoment(Float64),
+                                      third_moment = AlgebraicThirdMoment(Float64),
+                                      skewness = ResetAboveThresholdSkewness(Float64),
                                       assumed_pdf = DoubleGaussianPDF(Float64),
                                       clipping = HardClipping(),
                                       boundary_layer_depth = HoltslagBovilleDepth(Float64),
@@ -192,7 +199,7 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
     # The published coefficients are built in double precision, whatever the default float type,
     # and converted once here.
     components = (; mixing_length, turbulence_time_scale, tke_update, buoyancy_source, second_moments,
-                    third_moment, assumed_pdf, boundary_layer_depth, clipping, constants)
+                    third_moment, skewness, assumed_pdf, boundary_layer_depth, clipping, constants)
 
     check_component_slots(components)
     components = map(component -> convert_eltype(FT, component), values(components))

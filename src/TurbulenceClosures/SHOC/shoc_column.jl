@@ -5,7 +5,7 @@
 ##### The three drivers below own every vertical loop, every value carried from one level to the
 ##### next and every array read and write. The physics of each relation is in the component that
 ##### the closure holds for it (mixing length, time scale, TKE update, buoyancy source, second
-##### moments, third moment, assumed PDF), as scalar functions the sweeps call level by level; the
+##### moments, third moment and its limiter, assumed PDF), as scalar functions the sweeps call level by level; the
 ##### clipping policy `cp` and the constants `c` are handed to each.
 #####
 ##### Conventions
@@ -191,6 +191,7 @@ end
     tke_update = closure.tke_update
     second_moments = closure.second_moments
     third_moment_component = closure.third_moment
+    skewness = closure.skewness
 
     FT = eltype(tke)
     g = c.ggr
@@ -359,7 +360,7 @@ end
                             thl_sec_above - thl_sec_below, wthl_sec_above - wthl_sec_below,
                             w_sec_u - w_sec_l, tke_u - tke_l, wthl_k)
 
-        w3[i, j, k] = bound_third_moment(third_moment_component, cp, w_sec_zi, w3_k)
+        w3[i, j, k] = limit_third_moment(skewness, cp, w_sec_zi, w3_k)
 
         zt_l, iso_l, brunt_l, w_sec_l, thetal_l, tke_l, dz_l = zt_u, iso_u, brunt_u, w_sec_u, thetal_u, tke_u, dz_u
         thl_sec_below = thl_sec[i, j, k]

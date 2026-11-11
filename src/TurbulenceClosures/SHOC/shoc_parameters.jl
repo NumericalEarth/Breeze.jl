@@ -12,7 +12,7 @@ The fields of [`SimplifiedHigherOrderClosure`](@ref) that hold a component, in t
 [`closure_parameters`](@ref).
 """
 const COMPONENT_SLOTS = (:mixing_length, :turbulence_time_scale, :tke_update, :buoyancy_source, :second_moments,
-                         :third_moment, :assumed_pdf, :boundary_layer_depth, :clipping, :constants)
+                         :third_moment, :skewness, :assumed_pdf, :boundary_layer_depth, :clipping, :constants)
 
 closure_components(closure) = map(slot -> getfield(closure, slot), COMPONENT_SLOTS)
 
@@ -272,7 +272,7 @@ struct SHOCParameters{FT}
     tke_flux_ustar_min :: FT
     ufmin :: FT
     wtke_ustar_min :: FT
-    w3_reset :: FT
+    w3clipdef :: FT
     kbfs_min :: FT
     thl_tol :: FT
     rt_tol :: FT

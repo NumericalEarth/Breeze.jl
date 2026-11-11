@@ -9,7 +9,8 @@ const SLOT_COMPONENTS = (mixing_length = (BlendedMixingLength, GradientLimitedMi
                          tke_update = (ForwardEulerTKE, ImplicitSinkTKE),
                          buoyancy_source = (PDFBuoyancyFlux, DowngradientBuoyancyFlux),
                          second_moments = (DowngradientSecondMoments,),
-                         third_moment = (CanutoThirdMoment,),
+                         third_moment = (AlgebraicThirdMoment,),
+                         skewness = (ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness, TanhSaturatedSkewness),
                          assumed_pdf = (DoubleGaussianPDF, SmoothDoubleGaussianPDF),
                          boundary_layer_depth = (HoltslagBovilleDepth,),
                          clipping = (HardClipping, SmoothClipping),
@@ -39,7 +40,7 @@ component of the set, like any other keyword argument of the constructor.
 |:--------|:----------|:-------------------------------|
 | `clipping` | [`SmoothClipping`](@ref) of width 0.01 | every `max`, `min` and bound the state can reach |
 | `assumed_pdf` | [`SmoothDoubleGaussianPDF`](@ref) | the calm and uniform switches, the all-or-nothing saturation, the ramp of the skewness |
-| `third_moment` | [`CanutoThirdMoment`](@ref) with [`TanhBound`](@ref) | the reset of the third moment to 0.02 beyond its bound |
+| `skewness` | [`PolynomialSaturatedSkewness`](@ref) | the reset of the third moment to 0.02 beyond its bound |
 | `tke_update` | [`ImplicitSinkTKE`](@ref) with `ℂᴾ = 1` | the forward Euler step that the floor of the turbulent kinetic energy catches |
 | `mixing_length` | [`GradientLimitedMixingLength`](@ref) with `ℂˢ = 0.788`, `ℂⁱ = 1.778` | the mixing length of `shoc.F90` |
 | `turbulence_time_scale` | [`RichardsonStabilityFunctions`](@ref) of [`RationalStabilityFunction`](@ref) | the damping by the stability of the whole column |
@@ -71,7 +72,8 @@ SimplifiedHigherOrderClosure{Float64}
 ├── tke_update: ImplicitSinkTKE{Float64}
 ├── buoyancy_source: PDFBuoyancyFlux
 ├── second_moments: DowngradientSecondMoments{Float64}
-├── third_moment: CanutoThirdMoment{Float64} with TanhBound
+├── third_moment: AlgebraicThirdMoment{Float64}
+├── skewness: PolynomialSaturatedSkewness{Float64}
 ├── assumed_pdf: SmoothDoubleGaussianPDF{Float64}
 ├── boundary_layer_depth: HoltslagBovilleDepth{Float64}
 ├── clipping: SmoothClipping{Float64}
@@ -98,7 +100,8 @@ SimplifiedHigherOrderClosure{Float64}
 ├── tke_update: ImplicitSinkTKE{Float64}
 ├── buoyancy_source: PDFBuoyancyFlux
 ├── second_moments: DowngradientSecondMoments{Float64}
-├── third_moment: CanutoThirdMoment{Float64} with TanhBound
+├── third_moment: AlgebraicThirdMoment{Float64}
+├── skewness: PolynomialSaturatedSkewness{Float64}
 ├── assumed_pdf: SmoothDoubleGaussianPDF{Float64}
 ├── boundary_layer_depth: HoltslagBovilleDepth{Float64}
 ├── clipping: SmoothClipping{Float64}
@@ -125,7 +128,7 @@ function differentiable_shoc_components(FT::DataType = Oceananigans.defaults.Flo
     components = (mixing_length = GradientLimitedMixingLength(ℂˢ = 0.7877315198717979, ℂⁱ = 1.777871783491512),
                   turbulence_time_scale = RichardsonStabilityFunctions(RationalStabilityFunction(), Float64),
                   tke_update = ImplicitSinkTKE(Float64; ℂᴾ = 1),
-                  third_moment = CanutoThirdMoment(Float64; bound = TanhBound()),
+                  skewness = PolynomialSaturatedSkewness(Float64),
                   assumed_pdf = SmoothDoubleGaussianPDF(Float64),
                   clipping = SmoothClipping(Float64; width = 1e-2))
 

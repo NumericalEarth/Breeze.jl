@@ -6,15 +6,28 @@ using Breeze.AtmosphereModels: materialize_closure, closure_scalar_names
 using Breeze.TurbulenceClosures: convert_eltype
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: trainable_parameter_names, is_calibratable, component_scalar_names
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_min, clip_below, clip_between, clip_negative,
-                                      stable_damping, hard_floor, third_moment_bound, bound_third_moment,
+                                      stable_damping, hard_floor, third_moment_bound, limit_third_moment, third_moment,
                                       vd_shoc_decomp!, vd_shoc_solve!, tke_step, buoyancy_production,
                                       assumed_pdf, plume_saturation, plume_variance, smooth_scalar_plumes,
                                       time_scale_column, dissipation_coefficient, time_scale_and_diffusivities,
                                       mixing_length_column!, mixing_length
+using Enzyme: Enzyme
 using Test
 
 # Bitwise equality, with NaN equal to NaN and the two zeros distinct
 same_bits(a, b) = a === b
+
+# The limited third moment as a function of one scalar, for derivatives: of the diagnosed third
+# moment, of the vertical velocity variance, of `w3clip`, and of the coefficient `c` of the diagnosis
+limited_by_third_moment(w3, limiter, policy, w_sec) = limit_third_moment(limiter, policy, w_sec, w3)
+limited_by_variance(w_sec, limiter, policy, w3) = limit_third_moment(limiter, policy, w_sec, w3)
+limited_by_clip(w3clip, policy, w_sec, w3) = limit_third_moment(PolynomialSaturatedSkewness(w3clip), policy, w_sec, w3)
+limited_by_coefficient(c, limiter, policy, constants, arguments) =
+    limit_third_moment(limiter, policy, arguments[3], third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), constants, arguments...))
+
+# The derivative of `f(x, parameters...)` with respect to `x` by reverse-mode automatic differentiation
+derivative(f, x, parameters...) =
+    Enzyme.autodiff(Enzyme.Reverse, Enzyme.Const(f), Enzyme.Active, Enzyme.Active(x), map(Enzyme.Const, parameters)...)[1][1]
 
 @testset "SHOC clipping policies [$FT]" for FT in test_float_types()
     values = FT[-Inf, -100, -1, -floatmin(FT), -0.0, 0.0, floatmin(FT), 4e-4, 1, 100, 101, Inf, NaN]
@@ -83,7 +96,7 @@ same_bits(a, b) = a === b
             @test isapprox(clip_min(narrow, a, b, scale), min(a, b); atol = tolerance)
         end
 
-        # The smooth bound is differentiable at the bound, where the hard one has a kink:
+        # The smooth bound has a continuous slope at the bound, where the hard one has a kink:
         # the one-sided slopes of clip_max(0, x) at x = 0 are both 1/2, against 0 and 1
         if FT == Float64
             policy = SmoothClipping(FT(0.1))
@@ -155,33 +168,167 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         end
     end
 
-    @testset "Bounds of the third moment" begin
+    @testset "Third moment and skewness limiters" begin
         hard = HardClipping()
-        reset = CanutoThirdMoment(FT)
-        clamped = CanutoThirdMoment(FT; bound = ClampBound())
-        smooth = CanutoThirdMoment(FT; bound = TanhBound())
-        @test summary(clamped) == "CanutoThirdMoment{$FT} with ClampBound"
-        @test closure_parameters(SimplifiedHigherOrderClosure(FT; third_moment = smooth)).ℂʷ₂ == FT(7)
+        constants = SHOCConstants(FT)
+        diagnosis = AlgebraicThirdMoment(FT)
+        reset = ResetAboveThresholdSkewness(FT)
+        clamped = ClampedSkewness(FT)
+        tanh_saturated = TanhSaturatedSkewness(FT)
+        polynomial = PolynomialSaturatedSkewness(FT)
+        @test summary(polynomial) == "PolynomialSaturatedSkewness{$FT}"
+        @test closure_parameters(SimplifiedHigherOrderClosure(FT; skewness = polynomial)).ℂʷ₂ == FT(7)
+        @test_throws ArgumentError ResetAboveThresholdSkewness(FT; clip = 1)
+
+        # The diagnosis and the limiter of shoc.F90 with its literals written out: the components
+        # with their default fields must return the same bits
+        function literal_third_moment(ggr, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
+                                      thl_sec_diff, wthl_sec_diff, wsec_diff, tke_diff, wthl)
+            c = FT(7)
+            iso = isotropy_zi
+            isosqrd = iso * iso
+            buoy_sgs2 = isosqrd * brunt_zi
+            bet2 = ggr / thetal_zi
+            f0 = thedz2 * (bet2 * bet2 * bet2) * ((iso * iso) * (iso * iso)) * wthl * thl_sec_diff
+            f1 = thedz2 * (bet2 * bet2) * (iso * iso * iso) * (wthl * wthl_sec_diff + FT(0.5) * w_sec_zi * thl_sec_diff)
+            f2 = thedz * bet2 * isosqrd * wthl * wsec_diff + 2 * thedz2 * bet2 * isosqrd * w_sec_zi * wthl_sec_diff
+            f3 = thedz2 * bet2 * isosqrd * w_sec_zi * wthl_sec_diff + thedz * bet2 * isosqrd * (wthl * tke_diff)
+            f4 = thedz * iso * w_sec_zi * (wsec_diff + tke_diff)
+            f5 = thedz * iso * w_sec_zi * wsec_diff
+            a4 = FT(2.4) / (3 * c + 5)
+            a5 = FT(0.6) / (c * (3 + 5 * c))
+            omega0 = a4 / (1 - a5 * buoy_sgs2)
+            omega1 = omega0 / (2 * c)
+            omega2 = omega1 * f3 + (FT(5) / 4) * omega0 * f4
+            a0 = (FT(0.52) * (1 / (c * c))) / (c - 2)
+            a1 = FT(0.87) / (c * c)
+            a2 = FT(0.5) / c
+            a3 = FT(0.6) / (c * (c - 2))
+            x0 = (a2 * buoy_sgs2 * (1 - a3 * buoy_sgs2)) / (1 - (a1 + a3) * buoy_sgs2)
+            y0 = (2 * a2 * buoy_sgs2 * x0) / (1 - a3 * buoy_sgs2)
+            x1 = (a0 * f0 + a1 * f1 + a2 * (1 - a3 * buoy_sgs2) * f2) / (1 - (a1 + a3) * buoy_sgs2)
+            y1 = (2 * a2 * (buoy_sgs2 * x1 + (a0 / a1) * f0 + f1)) / (1 - a3 * buoy_sgs2)
+            aa0 = omega0 * x0 + omega1 * y0
+            aa1 = omega0 * x1 + omega1 * y1 + omega2
+            return (aa1 - FT(1.2) * x1 - FT(1.5) * f5) / (c - FT(1.2) * x0 + aa0)
+        end
+
+        function literal_limiter(theterm, w3)
+            cond = FT(1.2) * sqrt(2 * (theterm * theterm * theterm))
+            tsign = ifelse(w3 < 0, -one(FT), one(FT))
+            return ifelse(tsign * w3 > cond, FT(0.02), w3)
+        end
+
+        # Deterministic pseudo-random inputs over the ranges the column visits, across the poles
+        # of the diagnosis (b = τ² N² up to several hundred) and across the bound of the limiter
+        fraction(n, m) = FT(mod(n * 0.6180339887498949 + m * 0.7548776662466927, 1))
+        nreset = 0
+        for n in 1:2000
+            τ = FT(10)^(1 + FT(2.5) * fraction(n, 1))
+            N² = (fraction(n, 2) - FT(0.4)) * FT(4e-4)
+            w_sec = FT(4e-4) + 2 * fraction(n, 3)^2
+            θˡ = 280 + 40 * fraction(n, 4)
+            thedz = 1 / (10 + 90 * fraction(n, 5))
+            thedz2 = thedz / 2
+            arguments = (τ, N², w_sec, θˡ, thedz, thedz2, (fraction(n, 6) - FT(0.5)) * FT(0.1),
+                         (fraction(n, 7) - FT(0.5)) * FT(0.02), (fraction(n, 8) - FT(0.5)) * FT(0.5),
+                         (fraction(n, 9) - FT(0.5)) * FT(0.5), (fraction(n, 10) - FT(0.5)) * FT(0.1))
+            w3 = third_moment(diagnosis, constants, arguments...)
+            @test same_bits(w3, literal_third_moment(constants.ggr, arguments...))
+            @test same_bits(limit_third_moment(reset, hard, w_sec, w3), literal_limiter(w_sec, w3))
+            nreset += limit_third_moment(reset, hard, w_sec, w3) != w3
+        end
+        @test 0 < nreset < 2000 # the inputs are on both sides of the bound
 
         w_sec = FT(0.5)
         bound = reset.w3clip * sqrt(2 * w_sec^3)
-        @test third_moment_bound(reset, w_sec) ≈ bound
+        for limiter in (reset, clamped, tanh_saturated, polynomial)
+            @test third_moment_bound(limiter, w_sec) ≈ bound
+        end
 
-        for w3 in FT[-10, -1, -0.5, -1e-3, 0, 1e-3, 0.5, 1, 10] .* bound
+        for w3 in FT[-10, -1.875, -1, -0.5, -1e-3, 0, 1e-3, 0.5, 1, 1.875, 10] .* bound
             inside = abs(w3) ≤ bound
             # E3SM resets a third moment beyond the bound to 0.02
-            @test bound_third_moment(reset, hard, w_sec, w3) == (inside ? w3 : FT(0.02))
-            @test bound_third_moment(clamped, hard, w_sec, w3) == clamp(w3, -bound, bound)
-            @test abs(bound_third_moment(clamped, SmoothClipping(FT(0.1)), w_sec, w3)) ≤ bound
-            @test abs(bound_third_moment(smooth, hard, w_sec, w3)) ≤ bound
-            @test sign(bound_third_moment(smooth, hard, w_sec, w3)) == sign(w3)
+            @test limit_third_moment(reset, hard, w_sec, w3) == (inside ? w3 : FT(0.02))
+            @test limit_third_moment(clamped, hard, w_sec, w3) == clamp(w3, -bound, bound)
+            @test abs(limit_third_moment(clamped, SmoothClipping(FT(0.1)), w_sec, w3)) ≤ bound
+            for saturating in (tanh_saturated, polynomial)
+                @test abs(limit_third_moment(saturating, hard, w_sec, w3)) ≤ bound
+                @test sign(limit_third_moment(saturating, hard, w_sec, w3)) == sign(w3)
+                @test limit_third_moment(saturating, hard, w_sec, -w3) == -limit_third_moment(saturating, hard, w_sec, w3)
+            end
         end
-        # Well inside the bound the smooth bounds change little
-        @test isapprox(bound_third_moment(smooth, hard, w_sec, bound / 100), bound / 100; rtol = 1e-4)
-        @test bound_third_moment(smooth, hard, w_sec, zero(FT)) == 0
 
-        for third_moment in (clamped, smooth)
-            run = run_shoc_column(SimplifiedHigherOrderClosure(FT; third_moment, surface_forcing...))
+        # Well inside the bound the saturating limiters change little, and the polynomial less
+        # than the hyperbolic tangent
+        @test isapprox(limit_third_moment(tanh_saturated, hard, w_sec, bound / 100), bound / 100; rtol = 1e-4)
+        @test isapprox(limit_third_moment(polynomial, hard, w_sec, bound / 100), bound / 100; rtol = 1e-4)
+        @test isapprox(limit_third_moment(polynomial, hard, w_sec, bound / 2), bound / 2; rtol = 0.05)
+        @test limit_third_moment(polynomial, hard, w_sec, bound) > limit_third_moment(tanh_saturated, hard, w_sec, bound)
+        @test limit_third_moment(polynomial, hard, w_sec, zero(FT)) == 0
+
+        # The polynomial is the bound from 15/8 of it on, and increasing before
+        @test limit_third_moment(polynomial, hard, w_sec, FT(1.875) * bound) ≈ bound
+        @test limit_third_moment(polynomial, hard, w_sec, 100 * bound) ≈ bound
+        samples = range(-2 * bound, 2 * bound, length = 401)
+        limited = [limit_third_moment(polynomial, hard, w_sec, FT(w3)) for w3 in samples]
+        @test issorted(limited)
+
+        # Without vertical velocity variance the bound is zero and so is the third moment
+        @test limit_third_moment(polynomial, hard, zero(FT), FT(1)) == 0
+        @test limit_third_moment(polynomial, hard, -FT(1), FT(1)) == 0
+
+        if FT == Float64
+            # The slope of the polynomial limiter against central differences, on both sides of the
+            # bound at which shoc.F90 resets the third moment (ratio 1) and of the point where the
+            # polynomial reaches the bound (ratio 15/8): the exact slope is (1 - u²)², u = 8/15 ratio
+            h = 1e-6
+            for ratio in (-2.5, -1.2, -1, -0.3, 0.0, 0.3, 0.9, 1 - 1e-9, 1.0, 1 + 1e-9, 1.1, 1.5, 1.8, 1.874, 1.876, 2.5)
+                w3 = ratio * bound
+                difference = (limit_third_moment(polynomial, hard, w_sec, w3 + h * bound) -
+                              limit_third_moment(polynomial, hard, w_sec, w3 - h * bound)) / (2 * h * bound)
+                u = clamp(8 * ratio / 15, -1, 1)
+                @test isapprox(difference, (1 - u^2)^2; atol = 1e-6)
+
+                gradient = derivative(limited_by_third_moment, w3, polynomial, hard, w_sec)
+                @test isapprox(gradient, difference; atol = 1e-6)
+
+                # The limiter of shoc.F90 jumps at ratio 1; this one does not
+                if abs(ratio) > 0.5
+                    jump = limit_third_moment(polynomial, hard, w_sec, w3 * (1 + h)) - limit_third_moment(polynomial, hard, w_sec, w3 * (1 - h))
+                    @test abs(jump) ≤ 2 * h * abs(w3)
+                end
+            end
+            @test abs(limit_third_moment(reset, hard, w_sec, bound * (1 + h)) - limit_third_moment(reset, hard, w_sec, bound * (1 - h))) > bound / 2
+
+            # The slope with respect to the variance and to w3clip, through the bound
+            for ratio in (0.3, 1.1, 1.8, 2.5)
+                w3 = ratio * bound
+                for (func, x, parameters) in ((limited_by_variance, w_sec, (polynomial, hard, w3)),
+                                              (limited_by_clip, polynomial.w3clip, (hard, w_sec, w3)))
+                    difference = (func(x * (1 + h), parameters...) - func(x * (1 - h), parameters...)) / (2 * h * x)
+                    gradient = derivative(func, x, parameters...)
+                    @test isapprox(gradient, difference; rtol = 1e-6, atol = 1e-9)
+                end
+            end
+
+            # The diagnosis and the limiter together, with respect to the coefficient c, at a state
+            # whose diagnosed third moment is beyond the bound of shoc.F90
+            arguments = (300.0, 1e-4, 0.4, 300.0, 1 / 40, 1 / 80, 0.02, -0.004, 0.1, 0.15, 0.03)
+            raw = third_moment(diagnosis, constants, arguments...)
+            for ratio in (0.9, 1.2, 1.6)
+                limiter = PolynomialSaturatedSkewness(abs(raw) / (ratio * sqrt(2 * 0.4^3)))
+                @test abs(raw) / third_moment_bound(limiter, 0.4) ≈ ratio
+                parameters = (limiter, hard, constants, arguments)
+                difference = (limited_by_coefficient(7 + 1e-5, parameters...) - limited_by_coefficient(7 - 1e-5, parameters...)) / 2e-5
+                gradient = derivative(limited_by_coefficient, 7.0, parameters...)
+                @test gradient != 0
+                @test isapprox(gradient, difference; rtol = 1e-6)
+            end
+        end
+
+        for skewness in (clamped, tanh_saturated, polynomial)
+            run = run_shoc_column(SimplifiedHigherOrderClosure(FT; skewness, surface_forcing...))
             @test all_finite(run)
             @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
             @test isapprox(run.θ, original.θ; rtol = 1e-4)
@@ -495,7 +642,8 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test isbits(closure)
             @test closure.clipping === SmoothClipping(FT(1e-2))
             @test closure.assumed_pdf isa SmoothDoubleGaussianPDF{FT}
-            @test closure.third_moment isa CanutoThirdMoment{TanhBound, FT}
+            @test closure.third_moment isa AlgebraicThirdMoment{FT}
+            @test closure.skewness isa PolynomialSaturatedSkewness{FT}
             @test closure.tke_update isa ImplicitSinkTKE{FT}
             @test closure.buoyancy_source isa PDFBuoyancyFlux
             @test all(value -> value isa FT, values(closure_parameters(closure)))
@@ -544,7 +692,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
                    turbulence_time_scale = (ColumnStabilityDamping(), RichardsonStabilityFunctions(RationalStabilityFunction())),
                    tke_update = (ForwardEulerTKE(), ImplicitSinkTKE()),
                    buoyancy_source = (PDFBuoyancyFlux(), DowngradientBuoyancyFlux()),
-                   third_moment = (CanutoThirdMoment(), CanutoThirdMoment(bound = ClampBound()), CanutoThirdMoment(bound = TanhBound())),
+                   skewness = (ResetAboveThresholdSkewness(), ClampedSkewness(), PolynomialSaturatedSkewness()),
                    assumed_pdf = (DoubleGaussianPDF(), SmoothDoubleGaussianPDF()),
                    clipping = (HardClipping(), SmoothClipping()))
 

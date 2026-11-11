@@ -5,96 +5,76 @@
 #####
 #####     third_moment(tm, constants, τ_zi, N²_zi, w_sec_zi, thetal_zi, thedz, thedz2,
 #####                  Δthl_sec, Δwthl_sec, Δw_sec, Δtke, wthl) -> w3
-#####     bound_third_moment(tm, cp, w_sec_zi, w3) -> w3
 #####
-##### at an interior interface: the diagnosis, and the bound that keeps the skewness realizable.
+##### at an interior interface: the diagnosis of the third moment from the second moments.
+#####
+##### Slot: skewness (clipping_diag_third_shoc_moments)
+#####
+##### A skewness component keeps the diagnosed third moment realizable: it implements
+#####
+#####     limit_third_moment(skewness, cp, w_sec_zi, w3) -> w3
+#####
+##### which returns a third moment no larger in magnitude than a multiple of `√(2 w'w'³)`, that is,
+##### a bounded skewness `w'³ / w'w'^{3/2}`. The two slots are independent: any diagnosis goes with
+##### any limiter.
 #####
 
 """
 $(TYPEDEF)
 
-Beyond the bound, the third moment is reset to the constant `w3_reset` (0.02 m³ s⁻³), as in
-E3SM `shoc.F90` (`clipping_diag_third_shoc_moments`). The third moment jumps where it reaches the
-bound.
+The third moment of vertical velocity diagnosed algebraically from the second moments and their
+vertical gradients: the stationary third-moment equations of Canuto et al. (2001, J. Atmos. Sci.
+58, 1169–1172) solved for `w'³`, as E3SM `shoc.F90` computes it
+(`compute_diag_third_shoc_moment`). With the return-to-isotropy time scale `τ`, the stratification
+`N²` and `b = τ² N²`,
 
-$(TYPEDFIELDS)
-"""
-struct ResetBound{FT} <: AbstractSHOCComponent
-    "The value a third moment beyond its bound is reset to, m³ s⁻³ (literal `0.02`)"
-    w3_reset :: FT
-end
+    w'³ = (A₁ - ℂʷ₉ X₁ - ℂʷ₁₀ f₅) / (c - ℂʷ₉ X₀ + A₀),    c = ℂʷ₂
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
+where `f₀` to `f₅` are products of `τ`, the buoyancy parameter `g / θˡ`, the second moments and
+their gradients, and
 
-Return `ResetBound{FT}` with the reset value of E3SM `shoc.F90`.
-"""
-ResetBound(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(ResetBound, FT, (; w3_reset = 0.02), kw)
+    X₀ = a₂ b (1 - a₃ b) / (1 - (a₁ + a₃) b),               Y₀ = 2 a₂ b X₀ / (1 - a₃ b)
+    X₁ = (a₀ f₀ + a₁ f₁ + a₂ (1 - a₃ b) f₂) / (1 - (a₁ + a₃) b)
+    Y₁ = 2 a₂ (b X₁ + (a₀ / a₁) f₀ + f₁) / (1 - a₃ b)
+    ω₀ = a₄ / (1 - a₅ b),    ω₁ = ω₀ / (2 c),    ω₂ = ω₁ f₃ + ℂʷ₁₁ ω₀ f₄
+    A₀ = ω₀ X₀ + ω₁ Y₀,      A₁ = ω₀ X₁ + ω₁ Y₁ + ω₂
 
-Adapt.@adapt_structure ResetBound
-
-Base.summary(::ResetBound) = "ResetBound"
-
-"""
-$(TYPEDEF)
-
-Beyond the bound `b`, the third moment is the bound: `w3 ← clip_between(w3, -b, b)` through the
-clipping policy. Continuous, with a kink at the bound under [`HardClipping`](@ref) and smooth
-under [`SmoothClipping`](@ref), whose smoothing length is its width times `b`.
-"""
-struct ClampBound <: AbstractSHOCComponent end
-
-"""
-$(TYPEDEF)
-
-The third moment approaches the bound `b` smoothly: `w3 ← b tanh(w3 / b)`. Infinitely
-differentiable whatever the clipping policy; a third moment well inside the bound is changed by
-the relative amount `(w3 / b)² / 3`.
-"""
-struct TanhBound <: AbstractSHOCComponent end
-
-"""
-$(TYPEDEF)
-
-The diagnostic third moment of vertical velocity of Canuto et al. (2001) as
-E3SM `shoc.F90` computes it (`compute_diag_third_shoc_moment`), bounded in magnitude by
-`w3clip √(2 w'w'³)` in the manner of `bound`.
+The numbers `a₀` to `a₅` follow from `c` and the numerators below, so that changing `c` alone
+changes them as it does in `shoc.F90`:
 
 | coefficient | `shoc.F90` | default | meaning |
 |:------------|:-----------|:--------|:--------|
-| `ℂʷ₂`  | `c_diag_3rd_mom` | 7 | the coefficient `c` of the diagnostic third moment |
-| `ℂʷ₃`  | literal `0.52` | 0.52 | `a0 = ℂʷ₃ / (c² (c - 2))` |
-| `ℂʷ₄`  | literal `0.87` | 0.87 | `a1 = ℂʷ₄ / c²` |
-| `ℂʷ₅`  | literal `0.5`  | 0.5  | `a2 = ℂʷ₅ / c` |
-| `ℂʷ₆`  | literal `0.6`  | 0.6  | `a3 = ℂʷ₆ / (c (c - 2))` |
-| `ℂʷ₇`  | literal `2.4`  | 2.4  | `a4 = ℂʷ₇ / (3 c + 5)` |
-| `ℂʷ₈`  | literal `0.6`  | 0.6  | `a5 = ℂʷ₈ / (c (3 + 5 c))` |
-| `ℂʷ₉`  | literal `1.2`  | 1.2  | weight of `X₀` and `X₁` in `w'³ = (A₁ - ℂʷ₉ X₁ - ℂʷ₁₀ f₅) / (c - ℂʷ₉ X₀ + A₀)` |
-| `ℂʷ₁₀` | literal `1.5`  | 1.5  | weight of `f₅`, see `ℂʷ₉` |
-| `ℂʷ₁₁` | literal `5/4`  | 1.25 | weight of `f₄` in `ω₂ = ω₁ f₃ + ℂʷ₁₁ ω₀ f₄` |
+| `ℂʷ₂`  | `c_diag_3rd_mom` | 7 | the coefficient `c` |
+| `ℂʷ₃`  | literal `0.52` | 0.52 | `a₀ = ℂʷ₃ / (c² (c - 2))` |
+| `ℂʷ₄`  | literal `0.87` | 0.87 | `a₁ = ℂʷ₄ / c²` |
+| `ℂʷ₅`  | literal `0.5`  | 0.5  | `a₂ = ℂʷ₅ / c` |
+| `ℂʷ₆`  | literal `0.6`  | 0.6  | `a₃ = ℂʷ₆ / (c (c - 2))` |
+| `ℂʷ₇`  | literal `2.4`  | 2.4  | `a₄ = ℂʷ₇ / (3 c + 5)` |
+| `ℂʷ₈`  | literal `0.6`  | 0.6  | `a₅ = ℂʷ₈ / (c (3 + 5 c))` |
+| `ℂʷ₉`  | literal `1.2`  | 1.2  | weight of `X₀` and `X₁` |
+| `ℂʷ₁₀` | literal `1.5`  | 1.5  | weight of `f₅` |
+| `ℂʷ₁₁` | literal `5/4`  | 1.25 | weight of `f₄` in `ω₂` |
 
-`ℂʷ₃` to `ℂʷ₁₁` are the numbers of the closure of Canuto et al. (2001) that `shoc.F90` writes
-as literals; `shoc.F90` exposes only `c`. `w3clip` is a bound, not an empirical coefficient.
+The expression has poles in stable air, where `b` reaches `1 / (a₁ + a₃)`, `1 / a₃` and `1 / a₅`
+(28.7, 58.3 and 443 with the defaults). The integers `3`, `5` and `2` of `a₀` to `a₅` and of
+`ω₁`, and the factors `1/2` and `2` of `f₁` and `f₂`, belong to the derivation and are not fields.
 
 $(TYPEDFIELDS)
 """
-struct CanutoThirdMoment{B, FT} <: AbstractSHOCComponent
-    "How the third moment is kept within its bound"
-    bound :: B
-    "Coefficient of the diagnostic third moment of vertical velocity (`c_diag_3rd_mom`)"
+struct AlgebraicThirdMoment{FT} <: AbstractSHOCComponent
+    "Coefficient `c` of the diagnostic third moment of vertical velocity (`c_diag_3rd_mom`)"
     ℂʷ₂ :: FT
-    "Numerator of `a0` of the diagnostic third moment (literal `0.52`)"
+    "Numerator of `a₀` (literal `0.52`)"
     ℂʷ₃ :: FT
-    "Numerator of `a1` (literal `0.87`)"
+    "Numerator of `a₁` (literal `0.87`)"
     ℂʷ₄ :: FT
-    "Numerator of `a2` (literal `0.5`)"
+    "Numerator of `a₂` (literal `0.5`)"
     ℂʷ₅ :: FT
-    "Numerator of `a3` (literal `0.6`)"
+    "Numerator of `a₃` (literal `0.6`)"
     ℂʷ₆ :: FT
-    "Numerator of `a4` (literal `2.4`)"
+    "Numerator of `a₄` (literal `2.4`)"
     ℂʷ₇ :: FT
-    "Numerator of `a5` (literal `0.6`)"
+    "Numerator of `a₅` (literal `0.6`)"
     ℂʷ₈ :: FT
     "Weight of `X₀` and `X₁` in the third moment (literal `1.2`)"
     ℂʷ₉ :: FT
@@ -102,34 +82,25 @@ struct CanutoThirdMoment{B, FT} <: AbstractSHOCComponent
     ℂʷ₁₀ :: FT
     "Weight of `f₄` in `ω₂` (literal `5/4`)"
     ℂʷ₁₁ :: FT
-    "Bound on the third moment over `√(2 w'w'³)`"
-    w3clip :: FT
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a `CanutoThirdMoment` with the values of E3SM `shoc.F90`, bounded as `bound` prescribes.
-Every scalar field is a keyword argument.
+Return `AlgebraicThirdMoment{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
+argument.
 """
-function CanutoThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; bound = ResetBound(Float64), kw...)
-    defaults = (ℂʷ₂ = 7, ℂʷ₃ = 0.52, ℂʷ₄ = 0.87, ℂʷ₅ = 0.5, ℂʷ₆ = 0.6, ℂʷ₇ = 2.4, ℂʷ₈ = 0.6, ℂʷ₉ = 1.2, ℂʷ₁₀ = 1.5,
-                ℂʷ₁₁ = 1.25, w3clip = 1.2)
-    names = keys(defaults)
-    all(name -> name ∈ names, keys(kw)) ||
-        throw(ArgumentError("$(setdiff(keys(kw), names)) are not scalar fields of CanutoThirdMoment; they are $(names)."))
-    scalars = map(value -> convert(FT, value), Tuple(merge(defaults, NamedTuple(kw))))
-    return CanutoThirdMoment(convert_eltype(FT, bound), scalars...)
-end
+AlgebraicThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(AlgebraicThirdMoment, FT,
+                            (ℂʷ₂ = 7, ℂʷ₃ = 0.52, ℂʷ₄ = 0.87, ℂʷ₅ = 0.5, ℂʷ₆ = 0.6, ℂʷ₇ = 2.4, ℂʷ₈ = 0.6, ℂʷ₉ = 1.2,
+                             ℂʷ₁₀ = 1.5, ℂʷ₁₁ = 1.25), kw)
 
-Adapt.@adapt_structure CanutoThirdMoment
-
-Base.summary(tm::CanutoThirdMoment{B, FT}) where {B, FT} = string("CanutoThirdMoment{", FT, "} with ", summary(tm.bound))
+Adapt.@adapt_structure AlgebraicThirdMoment
 
 # The third moment at an interior interface from the interface values of isotropy, Brunt-Vaisala
 # frequency, w_sec and thetal, the inverse thicknesses `thedz` and `thedz2`, and the differences
 # of the moments across the interface; `wthl` is wthl_sec at the interface.
-@inline function third_moment(tm::CanutoThirdMoment, constants, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
+@inline function third_moment(tm::AlgebraicThirdMoment, constants, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
                               thl_sec_diff, wthl_sec_diff, wsec_diff, tke_diff, wthl)
     FT = typeof(wthl)
     c = tm.ℂʷ₂
@@ -172,19 +143,175 @@ Base.summary(tm::CanutoThirdMoment{B, FT}) where {B, FT} = string("CanutoThirdMo
     return (aa1 - tm.ℂʷ₉ * x1 - tm.ℂʷ₁₀ * f5) / (c - tm.ℂʷ₉ * x0 + aa0)
 end
 
+#####
+##### Skewness: how the third moment is kept within its bound
+#####
+
+"""
+Supertype of the components that limit the third moment of vertical velocity. Each holds
+`w3clip`, the largest magnitude of the third moment over `√(2 w'w'³)`: the bound is
+
+    w'³ᵐᵃˣ = w3clip √(2 w'w'³)
+
+so that the skewness `w'³ / w'w'^{3/2}` is at most `√2 w3clip` in magnitude.
+"""
+abstract type AbstractSkewnessLimiter <: AbstractSHOCComponent end
+
 # The largest magnitude of the third moment; `theterm` is w_sec interpolated to the interface
-@inline third_moment_bound(tm::CanutoThirdMoment, theterm) = tm.w3clip * sqrt(2 * (theterm * theterm * theterm))
+@inline third_moment_bound(skewness::AbstractSkewnessLimiter, theterm) =
+    skewness.w3clip * sqrt(2 * (theterm * theterm * theterm))
 
-@inline bound_third_moment(tm::CanutoThirdMoment, cp, theterm, w3) =
-    bound_third_moment(tm.bound, cp, third_moment_bound(tm, theterm), w3)
+"""
+$(TYPEDEF)
 
-# clipping_diag_third_shoc_moments: a value beyond the bound is reset to a constant, as in the Fortran
-@inline function bound_third_moment(bound::ResetBound, cp, cond, w3)
-    FT = typeof(w3)
-    tsign = ifelse(w3 < 0, -one(FT), one(FT))
-    return ifelse(tsign * w3 > cond, bound.w3_reset, w3)
+A third moment whose magnitude exceeds the bound `w3clip √(2 w'w'³)` is reset to the constant
+`w3clipdef`, whatever its sign; a third moment within the bound is unchanged. This is
+`clipping_diag_third_shoc_moments` of E3SM `shoc.F90`. The third moment jumps where it crosses
+the bound: from `±w'³ᵐᵃˣ` to `+w3clipdef`.
+
+$(TYPEDFIELDS)
+"""
+struct ResetAboveThresholdSkewness{FT} <: AbstractSkewnessLimiter
+    "Largest magnitude of the third moment over `√(2 w'w'³)` (`w3clip`)"
+    w3clip :: FT
+    "The value a third moment beyond the bound is reset to, m³ s⁻³ (`w3clipdef`); dimensional"
+    w3clipdef :: FT
 end
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `ResetAboveThresholdSkewness{FT}` with the values of E3SM `shoc.F90`. Every field is a
+keyword argument.
+"""
+ResetAboveThresholdSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(ResetAboveThresholdSkewness, FT, (w3clip = 1.2, w3clipdef = 0.02), kw)
+
+Adapt.@adapt_structure ResetAboveThresholdSkewness
+
+@inline function limit_third_moment(skewness::ResetAboveThresholdSkewness, cp, theterm, w3)
+    FT = typeof(w3)
+    cond = third_moment_bound(skewness, theterm)
+    tsign = ifelse(w3 < 0, -one(FT), one(FT))
+    return ifelse(tsign * w3 > cond, skewness.w3clipdef, w3)
+end
+
+"""
+$(TYPEDEF)
+
+The third moment saturates toward `±w'³ᵐᵃˣ = ±w3clip √(2 w'w'³)` along an odd quintic polynomial.
+With `u = (8 / 15) w'³ / w'³ᵐᵃˣ` limited to `[-1, 1]`,
+
+    w'³ ← (15 / 8) w'³ᵐᵃˣ u (1 - (2/3) u² + (1/5) u⁴)
+
+which
+
+- is odd, so the sign of the third moment is kept, and increasing: its slope is `(1 - u²)²`;
+- has slope one at zero: a third moment at a tenth of the bound is changed by 0.2 %, at half
+  the bound by 4.6 %, at the bound by 17 %;
+- reaches the bound exactly at `|w'³| = (15 / 8) w'³ᵐᵃˣ` with zero slope and zero curvature, and is
+  the bound beyond, so that value, first and second derivative are continuous everywhere;
+- costs one division and no transcendental function.
+
+The numbers `15/8`, `2/3` and `1/5` are fixed by those conditions, not fitted. The slope with
+respect to the diagnosed third moment is nonzero up to 1.875 times the bound, which covers the
+threshold at which [`ResetAboveThresholdSkewness`](@ref) jumps. The bound is taken as zero where
+the vertical velocity variance is not positive, and its square root is guarded there.
+
+$(TYPEDFIELDS)
+"""
+struct PolynomialSaturatedSkewness{FT} <: AbstractSkewnessLimiter
+    "Largest magnitude of the third moment over `√(2 w'w'³)` (`w3clip`)"
+    w3clip :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `PolynomialSaturatedSkewness{FT}` with the bound `w3clip` of E3SM `shoc.F90`.
+"""
+PolynomialSaturatedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(PolynomialSaturatedSkewness, FT, (; w3clip = 1.2), kw)
+
+Adapt.@adapt_structure PolynomialSaturatedSkewness
+
+# The bound with a guarded square root: zero, with zero slope, where the variance is not positive
+@inline function third_moment_bound(skewness::PolynomialSaturatedSkewness, theterm)
+    variance = max(theterm, zero(theterm))
+    return skewness.w3clip * zero_safe_sqrt(2 * (variance * variance * variance))
+end
+
+@inline function limit_third_moment(skewness::PolynomialSaturatedSkewness, cp, theterm, w3)
+    FT = typeof(w3)
+    cond = third_moment_bound(skewness, theterm)
+    reach = (convert(FT, 15) / 8) * cond # the magnitude at which the bound is reached
+    bounded = reach > 0
+    u = max(-one(FT), min(one(FT), w3 / ifelse(bounded, reach, one(FT))))
+    u² = u * u
+    saturated = reach * u * (1 - u² * (convert(FT, 2) / 3 - u² / 5))
+    # The polynomial is the bound at |u| = 1 but for round-off, which the hard bound removes
+    saturated = max(-cond, min(cond, saturated))
+    return ifelse(bounded, saturated, zero(FT))
+end
+
+"""
+$(TYPEDEF)
+
+A third moment beyond the bound `b = w3clip √(2 w'w'³)` is set to the bound of its sign:
+`w'³ ← clip_between(w'³, -b, b)` through the clipping policy. Continuous, with a kink at the bound
+under [`HardClipping`](@ref); under [`SmoothClipping`](@ref) the kink is rounded over its width
+times `b`.
+
+$(TYPEDFIELDS)
+"""
+struct ClampedSkewness{FT} <: AbstractSkewnessLimiter
+    "Largest magnitude of the third moment over `√(2 w'w'³)` (`w3clip`)"
+    w3clip :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `ClampedSkewness{FT}` with the bound `w3clip` of E3SM `shoc.F90`.
+"""
+ClampedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(ClampedSkewness, FT, (; w3clip = 1.2), kw)
+
+Adapt.@adapt_structure ClampedSkewness
+
 # The bound is positive: the interface variance it is made of is floored
-@inline bound_third_moment(::ClampBound, cp, cond, w3) = clip_between(cp, w3, -cond, cond, cond)
-@inline bound_third_moment(::TanhBound, cp, cond, w3) = cond * tanh(w3 / cond)
+@inline function limit_third_moment(skewness::ClampedSkewness, cp, theterm, w3)
+    cond = third_moment_bound(skewness, theterm)
+    return clip_between(cp, w3, -cond, cond, cond)
+end
+
+"""
+$(TYPEDEF)
+
+The third moment saturates toward the bound `b = w3clip √(2 w'w'³)` along a hyperbolic tangent,
+`w'³ ← b tanh(w'³ / b)`: odd, increasing, never reaching the bound, with every derivative
+continuous; a third moment well inside the bound is changed by the relative amount
+`(w'³ / b)² / 3`. It costs a transcendental function per interface, which
+[`PolynomialSaturatedSkewness`](@ref) avoids.
+
+$(TYPEDFIELDS)
+"""
+struct TanhSaturatedSkewness{FT} <: AbstractSkewnessLimiter
+    "Largest magnitude of the third moment over `√(2 w'w'³)` (`w3clip`)"
+    w3clip :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `TanhSaturatedSkewness{FT}` with the bound `w3clip` of E3SM `shoc.F90`.
+"""
+TanhSaturatedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(TanhSaturatedSkewness, FT, (; w3clip = 1.2), kw)
+
+Adapt.@adapt_structure TanhSaturatedSkewness
+
+@inline function limit_third_moment(skewness::TanhSaturatedSkewness, cp, theterm, w3)
+    cond = third_moment_bound(skewness, theterm)
+    return cond * tanh(w3 / cond)
+end

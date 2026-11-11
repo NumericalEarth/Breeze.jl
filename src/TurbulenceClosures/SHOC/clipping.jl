@@ -56,8 +56,8 @@ Base.show(io::IO, policy::HardClipping) = print(io, summary(policy), "()")
 """
 $(TYPEDEF)
 
-Impose SHOC's bounds with smooth functions, so that the clipped quantities are infinitely
-differentiable in the state and in the coefficients. With `d = a - b` and the smoothing length
+Impose SHOC's bounds with smooth functions, so that the clipped quantities have continuous
+derivatives of every order in the state and in the coefficients. With `d = a - b` and the smoothing length
 `δ = width × scale`, where `scale` is the magnitude each call site gives for its quantity,
 
     smooth_max(a, b) = (a + b + √(d² + δ²)) / 2,    smooth_min(a, b) = (a + b - √(d² + δ²)) / 2
