@@ -17,10 +17,10 @@ export TKEBasedTurbulenceClosure,
        PDFBuoyancyFlux, DowngradientBuoyancyFlux,
        DowngradientSecondMoments,
        AlgebraicThirdMoment,
-       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness, TanhSaturatedSkewness,
+       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF,
        HardClipping, SmoothClipping,
-       HoltslagBovilleDepth,
+       BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
        closure_parameters, with_parameters
 
@@ -196,10 +196,10 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
                                       PDFBuoyancyFlux, DowngradientBuoyancyFlux,
                                       DowngradientSecondMoments,
                                       AlgebraicThirdMoment,
-                                      ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness, TanhSaturatedSkewness,
+                                      ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness,
                                       DoubleGaussianPDF, SmoothDoubleGaussianPDF,
                                       HardClipping, SmoothClipping,
-                                      HoltslagBovilleDepth,
+                                      BulkRichardsonBoundaryLayerDepth,
                                       SHOCConstants,
                                       closure_parameters, with_parameters
 

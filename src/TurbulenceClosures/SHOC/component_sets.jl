@@ -10,9 +10,9 @@ const SLOT_COMPONENTS = (mixing_length = (BlendedMixingLength, GradientLimitedMi
                          buoyancy_source = (PDFBuoyancyFlux, DowngradientBuoyancyFlux),
                          second_moments = (DowngradientSecondMoments,),
                          third_moment = (AlgebraicThirdMoment,),
-                         skewness = (ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness, TanhSaturatedSkewness),
+                         skewness = (ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness),
                          assumed_pdf = (DoubleGaussianPDF, SmoothDoubleGaussianPDF),
-                         boundary_layer_depth = (HoltslagBovilleDepth,),
+                         boundary_layer_depth = (BulkRichardsonBoundaryLayerDepth,),
                          clipping = (HardClipping, SmoothClipping),
                          constants = (SHOCConstants,))
 
@@ -75,7 +75,7 @@ SimplifiedHigherOrderClosure{Float64}
 ├── third_moment: AlgebraicThirdMoment{Float64}
 ├── skewness: PolynomialSaturatedSkewness{Float64}
 ├── assumed_pdf: SmoothDoubleGaussianPDF{Float64}
-├── boundary_layer_depth: HoltslagBovilleDepth{Float64}
+├── boundary_layer_depth: BulkRichardsonBoundaryLayerDepth{Float64}
 ├── clipping: SmoothClipping{Float64}
 ├── surface fluxes: wthl_sfc = 0.0, wqw_sfc = 0.0, uw_sfc = 0.0, vw_sfc = 0.0, friction_velocity = 0.0
 └── host_grid_spacing: 100000.0
@@ -103,7 +103,7 @@ SimplifiedHigherOrderClosure{Float64}
 ├── third_moment: AlgebraicThirdMoment{Float64}
 ├── skewness: PolynomialSaturatedSkewness{Float64}
 ├── assumed_pdf: SmoothDoubleGaussianPDF{Float64}
-├── boundary_layer_depth: HoltslagBovilleDepth{Float64}
+├── boundary_layer_depth: BulkRichardsonBoundaryLayerDepth{Float64}
 ├── clipping: SmoothClipping{Float64}
 ├── surface fluxes: wthl_sfc = 0.0, wqw_sfc = 0.0, uw_sfc = 0.0, vw_sfc = 0.0, friction_velocity = 0.0
 └── host_grid_spacing: 100000.0

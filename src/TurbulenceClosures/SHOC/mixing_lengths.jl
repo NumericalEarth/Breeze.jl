@@ -110,6 +110,11 @@ end
 #####     it is consistent with `brunt` and with the state SHOC has just loaded;
 #####   * three scratch fields at interfaces: N², the envelope ℓˢ and the capped length ℓ.
 #####
+##### Only the formulation is shared with the TKE closure, not the coefficients: the closure holds
+##### its own `GradientLimitedMixingLength`, whose `ℂˢ` and `ℂⁱ` are scalars of the SHOC closure
+##### like any other (`closure_parameters`, `with_parameters`), to be calibrated for SHOC. The
+##### values published with `TKEBasedTurbulenceClosure` are only where the preset starts.
+#####
 ##### The length has no eddy turnover time scale: every coefficient of a SHOC with it is
 ##### non-dimensional. Its bounds are the hard `min` of the TKE closure in every clipping policy
 ##### (continuous, with kinks), and it is infinite in the envelope where the air is not stable.

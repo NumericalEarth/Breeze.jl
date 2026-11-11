@@ -18,10 +18,10 @@ export SimplifiedHigherOrderClosure, SHOC,
        PDFBuoyancyFlux, DowngradientBuoyancyFlux,
        DowngradientSecondMoments,
        AlgebraicThirdMoment,
-       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness, TanhSaturatedSkewness,
+       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF,
        HardClipping, SmoothClipping,
-       HoltslagBovilleDepth,
+       BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
        closure_parameters, with_parameters
 

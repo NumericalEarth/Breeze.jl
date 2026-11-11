@@ -171,10 +171,14 @@ component: the dissipation coefficient of the rational stability functions is so
 times smaller, and the time scale it implies puts `τ² N²` far beyond the poles of the
 diagnostic third moment.
 
-The default coefficients of `RationalStabilityFunction` were calibrated for the TKE closure
-with `GradientLimitedMixingLength` and a shear production `Kᵘ S²`, so they are a starting point
-for a calibration of SHOC rather than a tuned set, and they go with a shear production
-coefficient `ℂᴾ = 1` of the TKE update.
+Only the formulation is shared with the TKE closure. This component holds its own stability
+functions, so their coefficients (for `RationalStabilityFunction`: `ℂᵘ⁻, ℂᵘ⁰, ℂᵘ⁺, ℂᶜ⁻, ℂᶜ⁰, ℂᶜ⁺,
+ℂᴰ⁻, ℂᴰ⁰, ℂᴰ⁺, Ri⁻, Ri⁺`, and `ℂᵉ⁻, ℂᵉ⁰, ℂᵉ⁺`, which SHOC does not use) are scalars of the SHOC
+closure, listed by [`closure_parameters`](@ref) and replaced by [`with_parameters`](@ref)
+independently of any `TKEBasedTurbulenceClosure`. Their default values were calibrated for the
+TKE closure with `GradientLimitedMixingLength` and a shear production `Kᵘ S²`: they are where a
+calibration of SHOC starts, not a tuned set, and they go with a shear production coefficient
+`ℂᴾ = 1` of the TKE update, which is a coefficient of SHOC's TKE update as well.
 
 $(TYPEDFIELDS)
 """

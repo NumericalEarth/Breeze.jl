@@ -5,8 +5,10 @@
 """
 $(TYPEDEF)
 
-The boundary layer depth of Holtslag and Boville (1993), `pblintd`
-of E3SM `shoc.F90`: the height at which a bulk Richardson number reaches the critical value `ℂᴴ₁`.
+The boundary layer depth as the height at which a bulk Richardson number, formed between the
+lowest level and each level above it, reaches the critical value `ℂᴴ₁`; in convective conditions
+the lowest level is given the temperature excess of thermals. This is the diagnosis of Holtslag
+and Boville (1993, J. Climate 6, 1825–1842), `pblintd` of E3SM `shoc.F90`.
 The depth is a diagnostic; it feeds back to the state only in the cold-surface fallback of the
 diffusivities.
 
@@ -24,7 +26,7 @@ diffusivities.
 
 $(TYPEDFIELDS)
 """
-struct HoltslagBovilleDepth{FT} <: AbstractSHOCComponent
+struct BulkRichardsonBoundaryLayerDepth{FT} <: AbstractSHOCComponent
     "Critical bulk Richardson number (`ricr`)"
     ℂᴴ₁ :: FT
     "Friction-velocity factor in the bulk Richardson number (`fac`)"
@@ -52,15 +54,15 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `HoltslagBovilleDepth{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
+Return `BulkRichardsonBoundaryLayerDepth{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
 argument.
 """
-HoltslagBovilleDepth(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(HoltslagBovilleDepth, FT,
+BulkRichardsonBoundaryLayerDepth(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(BulkRichardsonBoundaryLayerDepth, FT,
                             (ℂᴴ₁ = 0.3, ℂᴴ₂ = 100, ℂᴴ₃ = 8.5, ℂᴴ₄ = 15, ℂᴴ₅ = 0.1, ℂᴴ₆ = 700, ℂᴴ₇ = 50,
                              ustar_min = 0.01, pblmaxp = 4e4, tinyw = 1e-36, kbfs_min = 1e-10), kw)
 
-Adapt.@adapt_structure HoltslagBovilleDepth
+Adapt.@adapt_structure BulkRichardsonBoundaryLayerDepth
 
 # Virtual potential temperature as pblintd_init_pot computes it
 @inline function pbl_thv(i, j, k, c, thetal, qw, shoc_ql)
@@ -110,7 +112,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 `pblmaxp`) is replaced by the per-column mask `pres ≥ pblmaxp`. None of the bounds here goes
 through the clipping policy: the depth is the outcome of a discrete search.
 """
-@inline function pbl_height(i, j, Nz, bl::HoltslagBovilleDepth, c, zt, zi, pres, thetal, qw, shoc_ql, shoc_cldfrac,
+@inline function pbl_height(i, j, Nz, bl::BulkRichardsonBoundaryLayerDepth, c, zt, zi, pres, thetal, qw, shoc_ql, shoc_cldfrac,
                             u_wind, v_wind, uw_sfc, vw_sfc, wthl_sfc, wqw_sfc)
 
     fak = bl.ℂᴴ₃                               # constant in surface temperature excess (fak)

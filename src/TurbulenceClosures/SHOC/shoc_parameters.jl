@@ -97,7 +97,7 @@ end
 The empirical coefficients of the components of SHOC that have a dimension: the eddy turnover
 time scale `ℂˡ₅` (s) of [`BlendedMixingLength`](@ref), the depth `ℂᶠ₅` (m) of the convective
 velocity scale of [`DowngradientSecondMoments`](@ref), and the least depths `ℂᴴ₆` (s, over the
-friction velocity) and `ℂᴴ₇` (m) of [`HoltslagBovilleDepth`](@ref).
+friction velocity) and `ℂᴴ₇` (m) of [`BulkRichardsonBoundaryLayerDepth`](@ref).
 """
 const DIMENSIONAL_COEFFICIENTS = (:ℂˡ₅, :ℂᶠ₅, :ℂᴴ₆, :ℂᴴ₇)
 

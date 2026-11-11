@@ -140,12 +140,12 @@ Each of the first eight takes a component; the first one named is the default, t
 - `third_moment`: the diagnosis of the third moment of vertical velocity;
   [`AlgebraicThirdMoment`](@ref).
 - `skewness`: how the third moment is kept within the bound `w3clip √(2 ww³)`;
-  [`ResetAboveThresholdSkewness`](@ref), or [`PolynomialSaturatedSkewness`](@ref),
-  [`ClampedSkewness`](@ref) or [`TanhSaturatedSkewness`](@ref).
+  [`ResetAboveThresholdSkewness`](@ref), or [`PolynomialSaturatedSkewness`](@ref) or
+  [`ClampedSkewness`](@ref).
 - `assumed_pdf`: the assumed PDF of the subgrid cloud; [`DoubleGaussianPDF`](@ref), or
   [`SmoothDoubleGaussianPDF`](@ref).
 - `clipping`: how bounds are imposed; [`HardClipping`](@ref), or [`SmoothClipping`](@ref).
-- `boundary_layer_depth`: [`HoltslagBovilleDepth`](@ref).
+- `boundary_layer_depth`: [`BulkRichardsonBoundaryLayerDepth`](@ref).
 - `constants`: the [`SHOCConstants`](@ref).
 - `surface_temperature_flux`, `surface_moisture_flux`, `surface_x_momentum_flux`,
   `surface_y_momentum_flux`: uniform kinematic surface fluxes.
@@ -171,7 +171,7 @@ SimplifiedHigherOrderClosure{Float64}
 ├── third_moment: AlgebraicThirdMoment{Float64}
 ├── skewness: ResetAboveThresholdSkewness{Float64}
 ├── assumed_pdf: DoubleGaussianPDF{Float64}
-├── boundary_layer_depth: HoltslagBovilleDepth{Float64}
+├── boundary_layer_depth: BulkRichardsonBoundaryLayerDepth{Float64}
 ├── clipping: HardClipping
 ├── surface fluxes: wthl_sfc = 0.1, wqw_sfc = 0.0, uw_sfc = 0.0, vw_sfc = 0.0, friction_velocity = 0.0
 └── host_grid_spacing: 100000.0
@@ -187,7 +187,7 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
                                       skewness = ResetAboveThresholdSkewness(Float64),
                                       assumed_pdf = DoubleGaussianPDF(Float64),
                                       clipping = HardClipping(),
-                                      boundary_layer_depth = HoltslagBovilleDepth(Float64),
+                                      boundary_layer_depth = BulkRichardsonBoundaryLayerDepth(Float64),
                                       constants = SHOCConstants(Float64),
                                       surface_temperature_flux = 0,
                                       surface_moisture_flux = 0,

@@ -174,7 +174,6 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         diagnosis = AlgebraicThirdMoment(FT)
         reset = ResetAboveThresholdSkewness(FT)
         clamped = ClampedSkewness(FT)
-        tanh_saturated = TanhSaturatedSkewness(FT)
         polynomial = PolynomialSaturatedSkewness(FT)
         @test summary(polynomial) == "PolynomialSaturatedSkewness{$FT}"
         @test closure_parameters(SimplifiedHigherOrderClosure(FT; skewness = polynomial)).ℂʷ₂ == FT(7)
@@ -242,7 +241,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
 
         w_sec = FT(0.5)
         bound = reset.w3clip * sqrt(2 * w_sec^3)
-        for limiter in (reset, clamped, tanh_saturated, polynomial)
+        for limiter in (reset, clamped, polynomial)
             @test third_moment_bound(limiter, w_sec) ≈ bound
         end
 
@@ -252,19 +251,15 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test limit_third_moment(reset, hard, w_sec, w3) == (inside ? w3 : FT(0.02))
             @test limit_third_moment(clamped, hard, w_sec, w3) == clamp(w3, -bound, bound)
             @test abs(limit_third_moment(clamped, SmoothClipping(FT(0.1)), w_sec, w3)) ≤ bound
-            for saturating in (tanh_saturated, polynomial)
-                @test abs(limit_third_moment(saturating, hard, w_sec, w3)) ≤ bound
-                @test sign(limit_third_moment(saturating, hard, w_sec, w3)) == sign(w3)
-                @test limit_third_moment(saturating, hard, w_sec, -w3) == -limit_third_moment(saturating, hard, w_sec, w3)
-            end
+            @test abs(limit_third_moment(polynomial, hard, w_sec, w3)) ≤ bound
+            @test sign(limit_third_moment(polynomial, hard, w_sec, w3)) == sign(w3)
+            @test limit_third_moment(polynomial, hard, w_sec, -w3) == -limit_third_moment(polynomial, hard, w_sec, w3)
         end
 
-        # Well inside the bound the saturating limiters change little, and the polynomial less
-        # than the hyperbolic tangent
-        @test isapprox(limit_third_moment(tanh_saturated, hard, w_sec, bound / 100), bound / 100; rtol = 1e-4)
+        # Well inside the bound the polynomial changes little: less than a hyperbolic tangent would
         @test isapprox(limit_third_moment(polynomial, hard, w_sec, bound / 100), bound / 100; rtol = 1e-4)
         @test isapprox(limit_third_moment(polynomial, hard, w_sec, bound / 2), bound / 2; rtol = 0.05)
-        @test limit_third_moment(polynomial, hard, w_sec, bound) > limit_third_moment(tanh_saturated, hard, w_sec, bound)
+        @test limit_third_moment(polynomial, hard, w_sec, bound) > bound * tanh(one(FT))
         @test limit_third_moment(polynomial, hard, w_sec, zero(FT)) == 0
 
         # The polynomial is the bound from 15/8 of it on, and increasing before
@@ -327,7 +322,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             end
         end
 
-        for skewness in (clamped, tanh_saturated, polynomial)
+        for skewness in (clamped, polynomial)
             run = run_shoc_column(SimplifiedHigherOrderClosure(FT; skewness, surface_forcing...))
             @test all_finite(run)
             @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
@@ -532,7 +527,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test SimplifiedHigherOrderClosure(FT; turbulence_time_scale = RichardsonStabilityFunctions(RationalStabilityFunction()),
                                            tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...) === closure
         @test isbits(closure)
-        ℂ = closure_parameters(closure)
+        ℂ = closure_parameters(differentiable)
         @test ℂ.ℂᶜ⁰ == functions.ℂᶜ⁰ && ℂ.Ri⁺ == functions.Ri⁺ && ℂ.ℂᵗ == 1
         @test !haskey(ℂ, :ℂᵝ₁)
         changed = with_parameters(closure; ℂᶜ⁰ = FT(0.3), ℂᵗ = FT(2))
@@ -558,7 +553,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         closure = SimplifiedHigherOrderClosure(FT; mixing_length = ml, surface_forcing...)
         @test isbits(closure)
         @test closure.mixing_length === ml
-        ℂ = closure_parameters(closure)
+        ℂ = closure_parameters(differentiable)
         @test ℂ.ℂˢ == FT(0.8) && ℂ.ℂⁱ == FT(1.8)
         @test !haskey(ℂ, :ℂˡ₅)      # no dimensional coefficient is left
         @test with_parameters(closure; ℂⁱ = FT(1.5)).mixing_length.ℂⁱ == FT(1.5)
@@ -677,6 +672,26 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test recalibrated.turbulence_time_scale.functions.Ri⁺ == 2 * published.stability_functions.Ri⁺
         @test typeof(recalibrated) === typeof(differentiable)
 
+        # Only the formulations are shared with the TKE closure: every coefficient of the reused
+        # components is a coefficient of the SHOC closure, replaced independently of the TKE closure
+        ℂ = closure_parameters(differentiable)
+        shared = (:ℂˢ, :ℂⁱ, :ℂᵘ⁻, :ℂᵘ⁰, :ℂᵘ⁺, :ℂᶜ⁻, :ℂᶜ⁰, :ℂᶜ⁺, :ℂᵉ⁻, :ℂᵉ⁰, :ℂᵉ⁺, :ℂᴰ⁻, :ℂᴰ⁰, :ℂᴰ⁺, :Ri⁻, :Ri⁺, :ℂᵗ, :ℂᴾ)
+        @test all(name -> haskey(ℂ, name), shared)
+        doubled = with_parameters(differentiable; NamedTuple{shared}(map(name -> 2 * ℂ[name], shared))...)
+        @test all(name -> closure_parameters(doubled)[name] == 2 * ℂ[name], shared)
+        @test doubled.mixing_length.ℂˢ == 2 * published.mixing_length.ℂˢ
+        @test doubled.turbulence_time_scale.functions.Ri⁺ == 2 * published.stability_functions.Ri⁺
+        @test TKEBasedTurbulenceClosure().mixing_length == published.mixing_length
+        # and the column responds to each (but to ℂⁱ: in this column the envelope of the stable
+        # layer is nowhere below the wall length)
+        unchanged = run_shoc_column(SimplifiedHigherOrderClosure(FT; components..., surface_forcing...))
+        for name in (:ℂˢ, :ℂᵘ⁰, :ℂᶜ⁺, :ℂᴰ⁰, :Ri⁺, :ℂᴾ)
+            changed = with_parameters(SimplifiedHigherOrderClosure(FT; components..., surface_forcing...); NamedTuple{(name,)}((FT(1.5) * ℂ[name],))...)
+            @testset "response to $name" begin
+                @test run_shoc_column(changed).θ != unchanged.θ
+            end
+        end
+
         # SHOC's own mixing length and time scale, with the published coefficients of shoc.F90
         @test own.mixing_length === SimplifiedHigherOrderClosure(FT).mixing_length
         @test own.turbulence_time_scale === SimplifiedHigherOrderClosure(FT).turbulence_time_scale
@@ -726,7 +741,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         # A component in a slot that is not its own is refused by the constructor
         @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; mixing_length = ColumnStabilityDamping())
         @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; mixing_length = IntegralMixingLength())
-        @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; clipping = TanhBound())
+        @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; clipping = ClampedSkewness())
         @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; mixing_length = :gradient_limited)
 
         # A sample of the combinations in which every component occurs takes steps in a column,

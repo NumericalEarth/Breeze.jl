@@ -284,34 +284,3 @@ Adapt.@adapt_structure ClampedSkewness
     cond = third_moment_bound(skewness, theterm)
     return clip_between(cp, w3, -cond, cond, cond)
 end
-
-"""
-$(TYPEDEF)
-
-The third moment saturates toward the bound `b = w3clip √(2 w'w'³)` along a hyperbolic tangent,
-`w'³ ← b tanh(w'³ / b)`: odd, increasing, never reaching the bound, with every derivative
-continuous; a third moment well inside the bound is changed by the relative amount
-`(w'³ / b)² / 3`. It costs a transcendental function per interface, which
-[`PolynomialSaturatedSkewness`](@ref) avoids.
-
-$(TYPEDFIELDS)
-"""
-struct TanhSaturatedSkewness{FT} <: AbstractSkewnessLimiter
-    "Largest magnitude of the third moment over `√(2 w'w'³)` (`w3clip`)"
-    w3clip :: FT
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return `TanhSaturatedSkewness{FT}` with the bound `w3clip` of E3SM `shoc.F90`.
-"""
-TanhSaturatedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(TanhSaturatedSkewness, FT, (; w3clip = 1.2), kw)
-
-Adapt.@adapt_structure TanhSaturatedSkewness
-
-@inline function limit_third_moment(skewness::TanhSaturatedSkewness, cp, theterm, w3)
-    cond = third_moment_bound(skewness, theterm)
-    return cond * tanh(w3 / cond)
-end
