@@ -123,6 +123,10 @@ end
                                      inputs.surface_temperature, inputs.temperature_tendency,
                                      inputs.pressure_tendency)
 
+    # Scale every transfer to what the coming stage leaves of the species it draws on.
+    φ = p3_sink_fractions(i, j, k, G, stage, p3, inputs.ρ, rates)
+    rates = patankar_limited_rates(rates, φ)
+
     result = p3_tendencies(p3, inputs.ρ, inputs.ℳ, inputs.properties, rates)
 
     # Read `G` before the process tendencies land on it: the relaxations are advanced
@@ -130,8 +134,224 @@ end
     relaxations = p3_number_relaxations(i, j, k, G, stage, p3, inputs.ρ, inputs.ℳ,
                                         inputs.properties, rates)
 
+    rime = p3_rime_limits(i, j, k, G, stage, result)
+
     add_p3_tendencies!(G, i, j, k, grid, p3, result)
     add_p3_number_relaxations!(G, i, j, k, p3, relaxations)
+    add_p3_rime_limits!(G, i, j, k, rime)
+end
+
+#####
+##### Patankar-limited sinks
+#####
+#
+# The process rates budget each sink against the state they are evaluated at, over
+# `sink_limiting_timescale`. The time stepper applies them to the state the coming stage
+# starts from, over the stage interval `Δt`, alongside transport. Neither the state nor the
+# interval need match, so the rates alone cannot keep a species non-negative.
+#
+# On the grid every sink is therefore advanced in Patankar form. With `c̃ = c⁰ + Δt Gᵒ` what
+# the stage start `c⁰` and every other tendency `Gᵒ` leave of a species, and `L` its total
+# microphysical loss rate, the loss is weighted by the ratio of the updated to the available
+# content, `L c⁺ / c̃`, so that
+#
+#     c⁺ = c̃ / (1 + Δt L / c̃)
+#
+# is non-negative for any `Δt`. That is the explicit loss scaled by `φ = c̃ / (c̃ + Δt L)`.
+# Each process is one transfer between species, so scaling a transfer by the `φ` of the
+# species it draws on (the smallest, where it draws on several) scales the recipient's gain
+# by the same factor and conserves the exchange exactly. Gains are left out of `c̃`, which
+# makes each `φ` a function of the explicit rates alone and avoids a coupled solve; the
+# cost is that a species cannot spend, within a stage, what it gains in that stage.
+
+struct P3SinkFractions{FT}
+    vapor :: FT
+    cloud :: FT
+    rain :: FT
+    rain_number :: FT
+    ice :: FT
+    ice_number :: FT
+    coating :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The Patankar weight `φ = c̃ / (c̃ + Δt L)` on the sinks of a species with loss rate `L`
+(a density tendency), where `c̃ = c⁰ + Δt Gᵒ` is what the state the coming stage starts
+from and every other tendency leave of it. `φ = 0` where nothing is left, and `φ = 1`
+before the first time step, when the stage interval is not known.
+"""
+@inline function patankar_sink_fraction(i, j, k, G, stage, name, L)
+    Δt = stage.Δt
+    c⁰ = AM.stage_start_value(i, j, k, stage, name)
+    @inbounds Gᵒ = G[i, j, k]
+    c̃ = max(0, c⁰ + Δt * Gᵒ)
+    demand = Δt * max(0, L)
+    φ = ifelse(c̃ + demand > 0, c̃ / (c̃ + demand), one(c̃))
+    known_interval = isfinite(Δt) & (Δt > 0)
+    return ifelse(known_interval, φ, one(φ))
+end
+
+@inline function p3_sink_fractions(i, j, k, G, stage, p3::P3, ρ, rates::P3ProcessRates)
+    liquid_on_ice = liquid_fraction_routing_active(p3.process_rates)
+    condensation = max(0, rates.condensation)
+    cloud_evaporation = max(0, -rates.condensation)
+    deposition = max(0, rates.deposition)
+    sublimation = max(0, -rates.deposition)
+
+    vapor_loss = condensation + deposition + rates.nucleation_mass + rates.ccn_activation_mass +
+                 rates.rain_condensation + rates.coating_condensation
+
+    cloud_loss = cloud_evaporation + rates.autoconversion + rates.accretion + rates.cloud_riming +
+                 rates.cloud_freezing_mass + rates.cloud_homogeneous_mass +
+                 rates.cloud_warm_collection + rates.wet_growth_cloud + rates.wet_growth_shedding
+
+    rain_loss = rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass +
+                rates.rain_homogeneous_mass + rates.rain_warm_collection + rates.wet_growth_rain
+
+    rain_number_loss = rates.rain_evaporation_number + rates.rain_self_collection +
+                       rates.rain_riming_number + rates.rain_freezing_number +
+                       rates.rain_homogeneous_number + rates.rain_warm_collection_number
+
+    ice_loss = sublimation + rates.partial_melting + rates.complete_melting
+
+    # `ni_limit` is a relaxation, advanced implicitly with the number corrections.
+    ice_number_loss = rates.melting_number + rates.sublimation_number + rates.aggregation +
+                      rates.homogeneous_number_excess
+
+    coating_loss = rates.shedding + rates.refreezing + rates.coating_evaporation +
+                   ifelse(liquid_on_ice, rates.wet_growth_shedding, zero(ρ))
+
+    return P3SinkFractions(
+        patankar_sink_fraction(i, j, k, G.ρqᵛ, stage, Val(:ρqᵛ), ρ * vapor_loss),
+        patankar_sink_fraction(i, j, k, G.ρqᶜˡ, stage, Val(:ρqᶜˡ), ρ * cloud_loss),
+        patankar_sink_fraction(i, j, k, G.ρqʳ, stage, Val(:ρqʳ), ρ * rain_loss),
+        patankar_sink_fraction(i, j, k, G.ρnʳ, stage, Val(:ρnʳ), ρ * rain_number_loss),
+        patankar_sink_fraction(i, j, k, G.ρqⁱ, stage, Val(:ρqⁱ), ρ * ice_loss),
+        patankar_sink_fraction(i, j, k, G.ρnⁱ, stage, Val(:ρnⁱ), ρ * ice_number_loss),
+        patankar_sink_fraction(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ), ρ * coating_loss))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The process `rates` with each transfer scaled by the [`P3SinkFractions`](@ref) `φ` of the
+species it draws on. A number rate that accompanies a mass transfer takes the smaller of
+the mass and number fractions, so it never removes more particles than its mass does mass.
+Sources that draw on no prognostic, and the number relaxations, are unchanged.
+"""
+@inline function patankar_limited_rates(rates::P3ProcessRates, φ::P3SinkFractions)
+    v, c, r, i, w = φ.vapor, φ.cloud, φ.rain, φ.ice, φ.coating
+    rn = min(r, φ.rain_number)
+    in = min(i, φ.ice_number)
+    cw = min(c, w)
+
+    return P3ProcessRates(
+        rates.condensation * ifelse(rates.condensation > 0, v, c),
+        rates.autoconversion * c,
+        rates.accretion * c,
+        rates.cloud_self_collection * c,
+        rates.rain_evaporation * r,
+        rates.rain_evaporation_number * rn,
+        rates.rain_self_collection * φ.rain_number,
+        rates.rain_breakup,
+        rates.deposition * ifelse(rates.deposition > 0, v, i),
+        rates.partial_melting * i,
+        rates.complete_melting * i,
+        rates.melting_number * in,
+        rates.clipping_dry_mass * i,
+        rates.clipping_rime_mass * i,
+        rates.clipping_rime_volume * i,
+        rates.post_process_clipping,
+        rates.sublimation_number * in,
+        rates.aggregation * φ.ice_number,
+        rates.ni_limit,
+        rates.cloud_riming * c,
+        rates.cloud_riming_number * c,
+        rates.rain_riming * r,
+        rates.rain_riming_number * rn,
+        rates.rime_density_new,
+        rates.shedding * w,
+        rates.shedding_number * w,
+        rates.refreezing * w,
+        rates.nucleation_mass * v,
+        rates.nucleation_number * v,
+        rates.cloud_freezing_mass * c,
+        rates.cloud_freezing_number * c,
+        rates.rain_freezing_mass * r,
+        rates.rain_freezing_number * rn,
+        rates.splintering_mass,
+        rates.splintering_number,
+        rates.cloud_homogeneous_mass * c,
+        rates.cloud_homogeneous_number * c,
+        rates.rain_homogeneous_mass * r,
+        rates.rain_homogeneous_number * rn,
+        rates.homogeneous_number_excess * min(c, rn),
+        rates.cloud_warm_collection * c,
+        rates.cloud_warm_collection_number * c,
+        rates.rain_warm_collection * r,
+        rates.rain_warm_collection_number * rn,
+        rates.wet_growth_cloud * c,
+        rates.wet_growth_rain * r,
+        rates.wet_growth_shedding * cw,
+        rates.wet_growth_shedding_number * cw,
+        rates.ccn_activation_mass * v,
+        rates.ccn_activation_number * v,
+        rates.rain_condensation * v,
+        rates.coating_condensation * v,
+        rates.coating_evaporation * w,
+        rates.wet_growth_densification_mass,
+        rates.wet_growth_densification_volume,
+        rates.cloud_number_correction,
+        rates.rain_number_correction,
+        rates.ice_number_correction,
+        rates.prognostic_vapor_excess_adjustment,
+        rates.prognostic_vapor_excess_tendency)
+end
+
+#####
+##### Rime limits
+#####
+#
+# Rime mass and volume are properties of the ice, not separate reservoirs: they lose in
+# proportion to the ice that melts or sublimates, at the rime fraction and density of the
+# state the rates were evaluated at. The stage-start state can hold less rime than that,
+# so their loss is bounded by what the coming stage leaves of each. No mass is exchanged
+# with another species by this bound.
+
+struct P3RimeLimits{FT}
+    mass :: FT    # tendency added to the rime mass tendency so it removes no more than there is
+    volume :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The tendency to add to the process tendency `Gᵖ` so that it removes no more than
+`c̃ = c⁰ + Δt Gᵒ`, what the state the coming stage starts from and every other tendency
+`Gᵒ` leave. Zero before the first time step, when the stage interval is not known.
+"""
+@inline function nonnegative_tendency_limit(i, j, k, G, stage, name, Gᵖ)
+    Δt = stage.Δt
+    c⁰ = AM.stage_start_value(i, j, k, stage, name)
+    @inbounds Gᵒ = G[i, j, k]
+    c̃ = max(0, c⁰ + Δt * Gᵒ)
+    limited = max(Gᵖ, -c̃ / Δt)
+    known_interval = isfinite(Δt) & (Δt > 0)
+    return ifelse(known_interval, limited - Gᵖ, zero(Gᵖ))
+end
+
+@inline p3_rime_limits(i, j, k, G, stage, result) =
+    P3RimeLimits(nonnegative_tendency_limit(i, j, k, G.ρqᶠ, stage, Val(:ρqᶠ), result.tendency_ρqᶠ),
+                 nonnegative_tendency_limit(i, j, k, G.ρbᶠ, stage, Val(:ρbᶠ), result.tendency_ρbᶠ))
+
+@inline function add_p3_rime_limits!(G, i, j, k, rime)
+    @inbounds begin
+        G.ρqᶠ[i, j, k] += rime.mass
+        G.ρbᶠ[i, j, k] += rime.volume
+    end
+    return nothing
 end
 
 #####
@@ -187,7 +407,7 @@ end
 
     # Rain: the correction relaxes the raw number towards the slope-bounded one.
     rain_explicit = ρ * rates.rain_number_correction
-    rain_target = ρ * ℳ.nʳ + τ * rain_explicit
+    rain_target = max(0, ρ * ℳ.nʳ + τ * rain_explicit)
     rain = semi_implicit_relaxation(i, j, k, G.ρnʳ, stage, Val(:ρnʳ), tendency_ρnʳ(rates, ρ, p3),
                                     rain_explicit, rain_target, τ, rain_explicit != 0)
 
@@ -210,7 +430,7 @@ end
 @inline function p3_cloud_number_relaxation(i, j, k, G, stage, p3, ::AerosolActivation, ρ, ℳ,
                                             properties, rates, τ)
     explicit = ρ * rates.cloud_number_correction
-    target = ρ * ℳ.nᶜˡ + τ * explicit
+    target = max(0, ρ * ℳ.nᶜˡ + τ * explicit)
     Gᵖ = tendency_ρnᶜˡ(rates, ρ, properties.Nᶜˡ, ℳ.qᶜˡ, p3)
     return semi_implicit_relaxation(i, j, k, G.ρnᶜˡ, stage, Val(:ρnᶜˡ), Gᵖ, explicit, target, τ,
                                     explicit != 0)
@@ -250,13 +470,6 @@ end
           p3_aerosol_tendency_fields(G, p3.aerosol),
           p3_vapor_excess_tendency_fields(G, p3.process_rates))
 
-# The number densities that are relaxed towards their bounds.
-@inline p3_number_fields(fields, p3::P3) =
-    merge((; fields.ρnʳ, fields.ρnⁱ), p3_cloud_number_fields(fields, p3.aerosol))
-
-@inline p3_cloud_number_fields(fields, ::Nothing) = (;)
-@inline p3_cloud_number_fields(fields, ::AerosolActivation) = (; fields.ρnᶜˡ)
-
 @inline p3_aerosol_tendency_fields(G, ::Nothing) = (;)
 @inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, false}) = (; G.ρnᶜˡ)
 @inline p3_aerosol_tendency_fields(G, ::AerosolActivation{<:Any, true}) = (; G.ρnᶜˡ, G.ρnᵃ)
@@ -273,7 +486,7 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
 
     compute_p3_surface_temperature!(μ.surface_temperature, model.temperature, grid)
 
-    stage = AM.StageStart(model, fields -> p3_number_fields(fields, p3))
+    stage = AM.StageStart(model, fields -> p3_tendency_fields(fields, p3))
 
     launch!(arch, grid, :xyz, _p3_add_tendencies_kernel!,
             p3_tendency_fields(model.timestepper.Gⁿ, p3), stage,
