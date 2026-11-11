@@ -9,14 +9,18 @@ end
 Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
 AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid) =
-    anelastic_pressure_solver(dynamics.pressure_solver_float_type, pressure_solver_grid(grid),
-                              dynamics.reference_state.density)
+    materialize_pressure_solver(dynamics.pressure_solver, dynamics, grid)
 
-# The solver is exact on a grid without an immersed boundary.
+# Default: the Fourier–tridiagonal solve, which is exact without an immersed boundary,
+# and the conjugate-gradient solve with one.
+materialize_pressure_solver(::Nothing, dynamics, grid) =
+    anelastic_pressure_solver(dynamics.pressure_solver_float_type, grid, dynamics.reference_state.density)
+
+materialize_pressure_solver(::Nothing, dynamics, grid::ImmersedBoundaryGrid) =
+    materialize_pressure_solver(AnelasticConjugateGradientSolver(), dynamics, grid)
+
+# The Fourier–tridiagonal solve (alone or as a preconditioner) ignores immersed boundaries.
 pressure_solver_grid(grid) = grid
-
-# With an immersed boundary we use an approximate solver on the underlying grid,
-# which produces a divergent velocity field near terrain.
 pressure_solver_grid(grid::ImmersedBoundaryGrid) = grid.underlying_grid
 
 # The grid is already in the solver's float type

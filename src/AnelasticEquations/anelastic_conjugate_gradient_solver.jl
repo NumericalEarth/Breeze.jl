@@ -25,9 +25,9 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Skeleton for a preconditioned conjugate-gradient anelastic pressure solve on an
-`ImmersedBoundaryGrid`; on other grids the exact Fourier–tridiagonal solve is used.
-Pass it as `AnelasticDynamics(reference_state; pressure_solver=...)`.
+Skeleton for a conjugate-gradient anelastic pressure solve, preconditioned by the
+Fourier–tridiagonal solve. It is the default on an `ImmersedBoundaryGrid` and can be passed on any
+grid as `AnelasticDynamics(reference_state; pressure_solver=...)`.
 `reltol` and `abstol` apply to the volume-normalized residual; `maxiter` caps the iterations per solve.
 """
 AnelasticConjugateGradientSolver(; reltol=1e-8, abstol=1e-10, maxiter=100) =
@@ -111,11 +111,9 @@ end
 ##### Construction and solve
 #####
 
-function AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics{<:Any, <:Any, <:Any, <:AnelasticConjugateGradientSolver},
-                                                   grid::ImmersedBoundaryGrid)
-    method = dynamics.pressure_solver
+function materialize_pressure_solver(method::AnelasticConjugateGradientSolver, dynamics, grid)
     ρᵣ = dynamics.reference_state.density
-    fourier_solver = anelastic_pressure_solver(dynamics.pressure_solver_float_type, grid.underlying_grid, ρᵣ)
+    fourier_solver = anelastic_pressure_solver(dynamics.pressure_solver_float_type, pressure_solver_grid(grid), ρᵣ)
     preconditioner = AnelasticFourierPreconditioner(fourier_solver)
     rhs = CenterField(grid)
 

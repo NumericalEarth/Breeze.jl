@@ -22,10 +22,10 @@ Keyword arguments
   horizontal waves under a tall, strongly stratified column, and can be unstable in `Float32` on
   large domains. When it differs from the grid's type, the solver is built on a copy of the grid in
   this type, and the pressure is returned in the model's precision.
-- `pressure_solver`: `nothing` (default) for the Fourier–tridiagonal solve, which is exact without an
-  immersed boundary and approximate with one (it solves on the underlying grid, so mass leaks
-  through immersed faces). On an `ImmersedBoundaryGrid`, `AnelasticConjugateGradientSolver()`
-  instead iterates on the masked operator, preconditioned by the Fourier–tridiagonal solve.
+- `pressure_solver`: `nothing` (default) chooses for the grid: the Fourier–tridiagonal solve, which is
+  exact without an immersed boundary, or `AnelasticConjugateGradientSolver()` on an
+  `ImmersedBoundaryGrid`. Pass `AnelasticConjugateGradientSolver(; reltol, abstol, maxiter)` to set
+  its tolerances, on any grid.
 """
 AnelasticDynamics(reference_state; pressure_solver_float_type=Float64, pressure_solver=nothing) =
     AnelasticDynamics(reference_state, nothing, pressure_solver_float_type, pressure_solver)

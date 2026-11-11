@@ -32,11 +32,21 @@ function near_body_divergence(pressure_solver)
     return maximum(abs, interior(div)[near .& .!inside])
 end
 
+# ρU / Δx ≈ 23 kg m⁻³ s⁻¹; the Fourier–tridiagonal solve alone leaves about 0.4 next to the body
 @testset "AnelasticConjugateGradientSolver on an ImmersedBoundaryGrid" begin
-    fourier_divergence = near_body_divergence(nothing)
-    conjugate_gradient_divergence = near_body_divergence(AnelasticConjugateGradientSolver(reltol=1e-10, abstol=1e-12))
+    @test near_body_divergence(nothing) < 1e-5
+    @test near_body_divergence(AnelasticConjugateGradientSolver(reltol=1e-10, abstol=1e-12)) < 1e-6
+end
 
-    # ρU / Δx ≈ 23 kg m⁻³ s⁻¹
-    @test fourier_divergence > 1e-2
-    @test conjugate_gradient_divergence < 1e-6
+@testset "AnelasticConjugateGradientSolver without an immersed boundary" begin
+    grid = RectilinearGrid(size = (16, 8, 8), x = (-8, 8), y = (-4, 4), z = (-4, 4),
+                           topology = (Periodic, Periodic, Bounded))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(), base_pressure=101325, potential_temperature=300)
+    dynamics = AnelasticDynamics(reference_state; pressure_solver=AnelasticConjugateGradientSolver(reltol=1e-10))
+    model = AtmosphereModel(grid; dynamics)
+    set!(model; θ=300, u=(x, y, z) -> 10 + sin(π * x / 8))
+    time_step!(model, 0.01)
+    div = Field(KernelFunctionOperation{Center, Center, Center}(divᶜᶜᶜ, grid, model.momentum...))
+    compute!(div)
+    @test maximum(abs, interior(div)) < 1e-6
 end
