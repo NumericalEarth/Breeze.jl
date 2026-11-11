@@ -1092,6 +1092,17 @@ end
     rain_hom_q = rain_hom_q * f_rain_hom
     rain_hom_n = rain_hom_n * f_rain_hom
 
+    # Homogeneous freezing hands ice the number of the liquid it freezes, which for cloud
+    # droplets is orders of magnitude above `maximum_ice_number_density`. Liquid loses every
+    # frozen drop, but ice keeps only the number that fits under that cap: the excess is
+    # removed in the same evaluation through `ni_limit`, rather than created now and relaxed
+    # away later, when the source may have switched off. The frozen mass is unchanged, so the
+    # same mass freezes onto fewer, larger particles.
+    homogeneous_number = cloud_hom_n + rain_hom_n
+    ice_number_capacity = max(0, parameters.maximum_ice_number_density / ρ - ice_number_remaining)
+    f_hom_number = sink_limiting_factor(homogeneous_number, ice_number_capacity, dt_safety)
+    ni_lim = ni_lim + (1 - f_hom_number) * homogeneous_number
+
     # DSD number correction feedback
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
