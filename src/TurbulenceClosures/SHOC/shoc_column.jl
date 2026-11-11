@@ -191,6 +191,7 @@ end
     tke_update = closure.tke_update
     second_moments = closure.second_moments
     third_moment_component = closure.third_moment
+    stratification_number_bound = closure.stratification_number_bound
     skewness = closure.skewness
 
     FT = eltype(tke)
@@ -356,7 +357,7 @@ end
         thedz = 1 / (zt_u - zt_l)
         thedz2 = 1 / (dz_l + dz_u)
 
-        w3_k = third_moment(third_moment_component, c, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
+        w3_k = third_moment(third_moment_component, stratification_number_bound, c, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
                             thl_sec_above - thl_sec_below, wthl_sec_above - wthl_sec_below,
                             w_sec_u - w_sec_l, tke_u - tke_l, wthl_k)
 

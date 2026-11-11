@@ -10,6 +10,7 @@ const SLOT_COMPONENTS = (mixing_length = (BlendedMixingLength, GradientLimitedMi
                          buoyancy_source = (PDFBuoyancyFlux, DowngradientBuoyancyFlux),
                          second_moments = (DowngradientSecondMoments,),
                          third_moment = (AlgebraicThirdMoment,),
+                         stratification_number_bound = (UnboundedStratificationNumber, RationalSaturatedStratificationNumber),
                          skewness = (ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness),
                          assumed_pdf = (DoubleGaussianPDF, SmoothDoubleGaussianPDF),
                          boundary_layer_depth = (BulkRichardsonBoundaryLayerDepth,),
@@ -40,6 +41,7 @@ component of the set, like any other keyword argument of the constructor.
 |:--------|:----------|:-------------------------------|
 | `clipping` | [`SmoothClipping`](@ref) of width 0.01 | every `max`, `min` and bound the state can reach |
 | `assumed_pdf` | [`SmoothDoubleGaussianPDF`](@ref) | the calm and uniform switches, the all-or-nothing saturation, the ramp of the skewness |
+| `stratification_number_bound` | [`RationalSaturatedStratificationNumber`](@ref) with `pole_fraction = 1/2` | the pole of the third moment at the stratification number `1 / (a₁ + a₃)` |
 | `skewness` | [`PolynomialSaturatedSkewness`](@ref) | the reset of the third moment to 0.02 beyond its bound |
 | `tke_update` | [`ImplicitSinkTKE`](@ref) with `ℂᴾ = 1` | the forward Euler step that the floor of the turbulent kinetic energy catches |
 | `mixing_length` | [`GradientLimitedMixingLength`](@ref) with `ℂˢ = 0.788`, `ℂⁱ = 1.778` | the mixing length of `shoc.F90` |
@@ -48,7 +50,7 @@ component of the set, like any other keyword argument of the constructor.
 The second moments, the buoyancy source and the boundary layer depth are not in the set: the
 closure keeps their defaults.
 
-The first four rows smooth the switches of SHOC. The last two replace SHOC's mixing length
+The first five rows smooth the switches and the pole of SHOC. The last two replace SHOC's mixing length
 and return-to-isotropy time scale by the mixing length and the stability functions that
 [`TKEBasedTurbulenceClosure`](@ref) also uses, with the coefficients published with that
 closure as a starting point and the shear production coefficient `ℂᴾ = 1` they go with. These
@@ -73,6 +75,7 @@ SimplifiedHigherOrderClosure{Float64}
 ├── buoyancy_source: PDFBuoyancyFlux
 ├── second_moments: DowngradientSecondMoments{Float64}
 ├── third_moment: AlgebraicThirdMoment{Float64}
+├── stratification_number_bound: RationalSaturatedStratificationNumber{Float64}
 ├── skewness: PolynomialSaturatedSkewness{Float64}
 ├── assumed_pdf: SmoothDoubleGaussianPDF{Float64}
 ├── boundary_layer_depth: BulkRichardsonBoundaryLayerDepth{Float64}
@@ -101,6 +104,7 @@ SimplifiedHigherOrderClosure{Float64}
 ├── buoyancy_source: PDFBuoyancyFlux
 ├── second_moments: DowngradientSecondMoments{Float64}
 ├── third_moment: AlgebraicThirdMoment{Float64}
+├── stratification_number_bound: RationalSaturatedStratificationNumber{Float64}
 ├── skewness: PolynomialSaturatedSkewness{Float64}
 ├── assumed_pdf: SmoothDoubleGaussianPDF{Float64}
 ├── boundary_layer_depth: BulkRichardsonBoundaryLayerDepth{Float64}
@@ -128,6 +132,7 @@ function smooth_shoc_components(FT::DataType = Oceananigans.defaults.FloatType)
     components = (mixing_length = GradientLimitedMixingLength(ℂˢ = 0.7877315198717979, ℂⁱ = 1.777871783491512),
                   turbulence_time_scale = RichardsonStabilityFunctions(RationalStabilityFunction(), Float64),
                   tke_update = ImplicitSinkTKE(Float64; ℂᴾ = 1),
+                  stratification_number_bound = RationalSaturatedStratificationNumber(Float64),
                   skewness = PolynomialSaturatedSkewness(Float64),
                   assumed_pdf = SmoothDoubleGaussianPDF(Float64),
                   clipping = SmoothClipping(Float64; width = 1e-2))

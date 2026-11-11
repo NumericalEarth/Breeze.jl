@@ -12,7 +12,7 @@ The fields of [`SimplifiedHigherOrderClosure`](@ref) that hold a component, in t
 [`closure_parameters`](@ref).
 """
 const COMPONENT_SLOTS = (:mixing_length, :turbulence_time_scale, :tke_update, :buoyancy_source, :second_moments,
-                         :third_moment, :skewness, :assumed_pdf, :boundary_layer_depth, :clipping, :constants)
+                         :third_moment, :stratification_number_bound, :skewness, :assumed_pdf, :boundary_layer_depth, :clipping, :constants)
 
 closure_components(closure) = map(slot -> getfield(closure, slot), COMPONENT_SLOTS)
 
@@ -84,7 +84,7 @@ closure = SimplifiedHigherOrderClosure(mixing_length = GradientLimitedMixingLeng
 keys(closure_parameters(closure))
 
 # output
-(:ℂˢ, :ℂⁱ, :ℂᵘ⁻, :ℂᵘ⁰, :ℂᵘ⁺, :ℂᶜ⁻, :ℂᶜ⁰, :ℂᶜ⁺, :ℂᵉ⁻, :ℂᵉ⁰, :ℂᵉ⁺, :ℂᴰ⁻, :ℂᴰ⁰, :ℂᴰ⁺, :Ri⁻, :Ri⁺, :ℂᵗ, :ℂᴾ, :ℂᵛ₁, :ℂᵛ₂, :ℂᵛ₃, :ℂʷ₁, :ℂᶠ, :ℂʷ₂, :ℂᵍ₁, :ℂᵍ₂, :ℂᵍ₃, :ℂᵍ₄, :ℂᴴ₁, :ℂᴴ₂, :ℂᴴ₃, :ℂᴴ₄)
+(:ℂˢ, :ℂⁱ, :ℂᵘ⁻, :ℂᵘ⁰, :ℂᵘ⁺, :ℂᶜ⁻, :ℂᶜ⁰, :ℂᶜ⁺, :ℂᵉ⁻, :ℂᵉ⁰, :ℂᵉ⁺, :ℂᴰ⁻, :ℂᴰ⁰, :ℂᴰ⁺, :Ri⁻, :Ri⁺, :ℂᵗ, :ℂᴾ, :ℂᵛ₁, :ℂᵛ₂, :ℂᵛ₃, :ℂʷ₁, :ℂᶠ, :ℂᶠ₂, :ℂᶠ₃, :ℂᶠ₄, :ℂᶠ₅, :ℂʷ₂, :ℂʷ₃, :ℂʷ₄, :ℂʷ₅, :ℂʷ₆, :ℂʷ₇, :ℂʷ₈, :ℂʷ₉, :ℂʷ₁₀, :ℂʷ₁₁, :ℂᵍ₁, :ℂᵍ₂, :ℂᵍ₃, :ℂᵍ₄, :ℂᴴ₁, :ℂᴴ₂, :ℂᴴ₃, :ℂᴴ₄, :ℂᴴ₅, :ℂᴴ₆, :ℂᴴ₇)
 ```
 """
 function closure_parameters(closure)

@@ -7,6 +7,7 @@ using Breeze.TurbulenceClosures: convert_eltype
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: trainable_parameter_names, is_calibratable, component_scalar_names
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_min, clip_below, clip_between, clip_negative,
                                       stable_damping, hard_floor, third_moment_bound, limit_third_moment, third_moment,
+                                      bound_stratification_number,
                                       vd_shoc_decomp!, vd_shoc_solve!, tke_step, buoyancy_production,
                                       assumed_pdf, plume_saturation, plume_variance, smooth_scalar_plumes,
                                       time_scale_column, dissipation_coefficient, time_scale_and_diffusivities,
@@ -341,6 +342,104 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         end
     end
 
+    @testset "Stratification number bound" begin
+        constants = SHOCConstants(FT)
+        diagnosis = AlgebraicThirdMoment(FT)
+        unbounded = UnboundedStratificationNumber()
+        rational = RationalSaturatedStratificationNumber(FT)
+        @test summary(rational) == "RationalSaturatedStratificationNumber{$FT}"
+        @test rational.pole_fraction == FT(1 / 2)
+        @test SimplifiedHigherOrderClosure(FT).stratification_number_bound === unbounded
+        @test smooth_shoc_components(FT).stratification_number_bound === rational
+        @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; stratification_number_bound = ClampedSkewness())
+        @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; skewness = rational)
+
+        # The first pole of the diagnosis, 1 / (a₁ + a₃), from its coefficients
+        c = FT(7)
+        first_pole = 1 / (FT(0.87) / c^2 + FT(0.6) / (c * (c - 2)))
+        @test isapprox(first_pole, FT(28.655); rtol = 1e-4)
+        αᴺᵐᵃˣ = first_pole / 2
+
+        # Unbounded: the identity, and the diagnosis with it is the diagnosis of shoc.F90
+        fraction(n, m) = FT(mod(n * 0.6180339887498949 + m * 0.7548776662466927, 1))
+        for n in 1:500
+            αᴺ = (fraction(n, 1) - FT(0.3)) * FT(10)^(3 * fraction(n, 2))
+            @test same_bits(bound_stratification_number(unbounded, αᴺ, first_pole), αᴺ)
+
+            τ = FT(10)^(1 + FT(2.5) * fraction(n, 1))
+            N² = (fraction(n, 2) - FT(0.4)) * FT(4e-4)
+            arguments = (τ, N², FT(0.4), FT(300), FT(1 / 40), FT(1 / 80), FT(0.02), FT(-0.004), FT(0.1), FT(0.15), FT(0.03))
+            @test same_bits(third_moment(diagnosis, unbounded, constants, arguments...),
+                            third_moment(diagnosis, constants, arguments...))
+        end
+
+        # Rational: the identity where αᴺ ≤ 0; increasing, and below αᴺᵐᵃˣ = γ × the first pole
+        # for every αᴺ > 0, so that 1 - (a₁ + a₃) αᴺ ≥ 1 - γ
+        # (to round-off where αᴺ ≫ αᴺᵐᵃˣ, where the bounded value rounds to αᴺᵐᵃˣ)
+        samples = sort(vcat(FT.(-50:0.5:0), FT(10) .^ range(FT(-6), FT(30); length = 400), first_pole))
+        bounded = [bound_stratification_number(rational, αᴺ, first_pole) for αᴺ in samples]
+        @test all(k -> bounded[k] == samples[k], findall(≤(0), samples))
+        @test all(≤(αᴺᵐᵃˣ * (1 + eps(FT))), bounded)
+        @test all(k -> bounded[k] < αᴺᵐᵃˣ, findall(αᴺ -> 0 < αᴺ < 1000 * αᴺᵐᵃˣ, samples))
+        @test all(αᴺ -> 1 - αᴺ / first_pole ≥ FT(1 / 2) - 2 * eps(FT), bounded)
+        @test issorted(bounded[samples .< 1000 * αᴺᵐᵃˣ])
+        @test all(k -> bounded[k + 1] ≥ bounded[k] * (1 - 2 * eps(FT)), 1:length(bounded) - 1)
+        @test isapprox(bounded[end], αᴺᵐᵃˣ; rtol = 4 * eps(FT))
+        @test isapprox(bound_stratification_number(rational, αᴺᵐᵃˣ, first_pole), αᴺᵐᵃˣ / 2)
+
+        # At and beyond the first pole the unbounded diagnosis diverges; the bounded one does not
+        τ = FT(300)
+        for N² in (first_pole / τ^2, (1 / (FT(0.6) / (c * (c - 2)))) / τ^2, FT(1e-2))
+            arguments = (τ, N², FT(0.4), FT(300), FT(1 / 40), FT(1 / 80), FT(0.02), FT(-0.004), FT(0.1), FT(0.15), FT(0.03))
+            @test isfinite(third_moment(diagnosis, rational, constants, arguments...))
+        end
+        # The first singularity of the unbounded diagnosis is where its denominator vanishes, at
+        # αᴺ ≈ 24.26 (0.85 of the first pole, where the poles of X₀ and X₁ cancel in the ratio):
+        # there the unbounded third moment is orders of magnitude larger than the bounded one
+        near_zero = (τ, FT(24.2589579) / τ^2, FT(0.4), FT(300), FT(1 / 40), FT(1 / 80), FT(0.02), FT(-0.004), FT(0.1), FT(0.15), FT(0.03))
+        @test abs(third_moment(diagnosis, unbounded, constants, near_zero...)) > 100 * abs(third_moment(diagnosis, rational, constants, near_zero...))
+
+        if FT == Float64
+            # The slope of the bound, 1 / (1 + αᴺ / αᴺᵐᵃˣ)² for αᴺ > 0 and 1 for αᴺ ≤ 0, against
+            # central differences and Enzyme; continuous through αᴺ = 0
+            bounded_by_number(αᴺ, bound, first_pole) = bound_stratification_number(bound, αᴺ, first_pole)
+            h = 1e-6
+            for αᴺ in (-30.0, -1.0, -1e-3, 0.0, 1e-3, 1.0, 5.0, αᴺᵐᵃˣ, first_pole, 100.0, 1e4)
+                exact = αᴺ > 0 ? 1 / (1 + αᴺ / αᴺᵐᵃˣ)^2 : 1.0
+                step = h * max(abs(αᴺ), 1)
+                difference = (bounded_by_number(αᴺ + step, rational, first_pole) - bounded_by_number(αᴺ - step, rational, first_pole)) / (2 * step)
+                @test isapprox(difference, exact; rtol = 1e-6, atol = 1e-9)
+                @test isapprox(derivative(bounded_by_number, αᴺ, rational, first_pole), exact; rtol = 1e-12)
+                @test derivative(bounded_by_number, αᴺ, unbounded, first_pole) == 1
+            end
+
+            # The diagnosed third moment with respect to N², to the pole fraction γ and to the
+            # coefficient c, which moves the first pole and so the bound: Enzyme against central
+            # differences, in weak and in strong stratification (αᴺ beyond the first pole)
+            moment_by_N²(N², bound, constants, arguments) = third_moment(diagnosis, bound, constants, arguments[1], N², arguments[2:end]...)
+            moment_by_fraction(γ, constants, arguments) = third_moment(diagnosis, RationalSaturatedStratificationNumber(Float64; pole_fraction = γ), constants, arguments...)
+            moment_by_c(c, constants, arguments) = third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), rational, constants, arguments...)
+            rest = (0.4, 300.0, 1 / 40, 1 / 80, 0.02, -0.004, 0.1, 0.15, 0.03)
+            for αᴺ in (-5.0, 0.5, 5.0, 20.0, 60.0)
+                N² = αᴺ / τ^2
+                arguments = (τ, N², rest...)
+                difference = (moment_by_N²(N² * (1 + h), rational, constants, (τ, rest...)) -
+                              moment_by_N²(N² * (1 - h), rational, constants, (τ, rest...))) / (2 * h * N²)
+                gradient = derivative(moment_by_N², N², rational, constants, (τ, rest...))
+                @test isapprox(gradient, difference; rtol = 1e-5)
+                for (func, x) in ((moment_by_fraction, 0.5), (moment_by_c, 7.0))
+                    difference = (func(x * (1 + h), constants, arguments) - func(x * (1 - h), constants, arguments)) / (2 * h * x)
+                    gradient = derivative(func, x, constants, arguments)
+                    @test isapprox(gradient, difference; rtol = 1e-5, atol = 1e-12)
+                end
+            end
+        end
+
+        run = run_shoc_column(SimplifiedHigherOrderClosure(FT; stratification_number_bound = rational, surface_forcing...))
+        @test all_finite(run)
+        @test isapprox(run.θ, original.θ; rtol = 1e-4)
+    end
+
     @testset "ImplicitSinkTKE" begin
         # Without a sink the factorization is that of the diffusion alone; with one, the solve
         # damps a uniform profile by 1 / (1 + Δt ω) where the diffusivity vanishes
@@ -631,7 +730,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
 
     @testset "smooth_shoc_components" begin
         components = smooth_shoc_components(FT)
-        @test keys(components) == (:mixing_length, :turbulence_time_scale, :tke_update, :skewness, :assumed_pdf, :clipping)
+        @test keys(components) == (:mixing_length, :turbulence_time_scale, :tke_update, :stratification_number_bound, :skewness, :assumed_pdf, :clipping)
         @test smooth_shoc_components() === components
         @test smooth_shoc_components(Float32).clipping === SmoothClipping(Float32(1e-2))
 
@@ -649,6 +748,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test closure.clipping === SmoothClipping(FT(1e-2))
             @test closure.assumed_pdf isa SmoothDoubleGaussianPDF{FT}
             @test closure.third_moment isa AlgebraicThirdMoment{FT}
+            @test closure.stratification_number_bound isa RationalSaturatedStratificationNumber{FT}
             @test closure.skewness isa PolynomialSaturatedSkewness{FT}
             @test closure.tke_update isa ImplicitSinkTKE{FT}
             @test closure.buoyancy_source isa PDFBuoyancyFlux
@@ -718,12 +818,13 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
                    turbulence_time_scale = (ColumnStabilityDamping(), RichardsonStabilityFunctions(RationalStabilityFunction())),
                    tke_update = (ForwardEulerTKE(), ImplicitSinkTKE()),
                    buoyancy_source = (PDFBuoyancyFlux(), DowngradientBuoyancyFlux()),
+                   stratification_number_bound = (UnboundedStratificationNumber(), RationalSaturatedStratificationNumber()),
                    skewness = (ResetAboveThresholdSkewness(), ClampedSkewness(), PolynomialSaturatedSkewness()),
                    assumed_pdf = (DoubleGaussianPDF(), SmoothDoubleGaussianPDF()),
                    clipping = (HardClipping(), SmoothClipping()))
 
         combinations = vec([NamedTuple{keys(choices)}(combination) for combination in Iterators.product(values(choices)...)])
-        @test length(combinations) == 192
+        @test length(combinations) == 384
 
         # Every combination constructs, and its coefficients are collected and replaced
         constructed = map(combinations) do components

@@ -23,7 +23,7 @@ as implemented in E3SM (`shoc.F90`).
 
 $(TYPEDFIELDS)
 """
-struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, SK, PDF, BL, CP, C, FT} <:
+struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, SB, SK, PDF, BL, CP, C, FT} <:
        AbstractTurbulenceClosure{ExplicitTimeDiscretization, 1}
     "The mixing length"
     mixing_length :: ML
@@ -37,6 +37,8 @@ struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, SK, PDF, BL, CP, C, 
     second_moments :: SM
     "The third moment of vertical velocity"
     third_moment :: TM
+    "The bound of the stratification number in the diagnosis of the third moment"
+    stratification_number_bound :: SB
     "The limiter that keeps the third moment, and so the skewness, of vertical velocity bounded"
     skewness :: SK
     "The assumed PDF: subgrid cloud and buoyancy flux"
@@ -125,7 +127,7 @@ the cloud fraction and keeps the precipitation.
 Keyword arguments
 =================
 
-Each of the first eight takes a component; the first one named is the default, that of `shoc.F90`.
+Each of the keyword arguments up to `constants` takes a component; the first one named is the default, that of `shoc.F90`.
 
 - `mixing_length`: the mixing length; [`BlendedMixingLength`](@ref), or
   [`GradientLimitedMixingLength`](@ref).
@@ -139,6 +141,9 @@ Each of the first eight takes a component; the first one named is the default, t
 - `second_moments`: [`DowngradientSecondMoments`](@ref).
 - `third_moment`: the diagnosis of the third moment of vertical velocity;
   [`AlgebraicThirdMoment`](@ref).
+- `stratification_number_bound`: the bound of the stratification number `αᴺ = τ² N²` in the
+  diagnosis of the third moment; [`UnboundedStratificationNumber`](@ref), or
+  [`RationalSaturatedStratificationNumber`](@ref).
 - `skewness`: how the third moment is kept within the bound `maximum_skewness (w'w')^{3/2}`;
   [`ResetAboveThresholdSkewness`](@ref), or [`PolynomialSaturatedSkewness`](@ref) or
   [`ClampedSkewness`](@ref).
@@ -169,6 +174,7 @@ SimplifiedHigherOrderClosure{Float64}
 ├── buoyancy_source: PDFBuoyancyFlux
 ├── second_moments: DowngradientSecondMoments{Float64}
 ├── third_moment: AlgebraicThirdMoment{Float64}
+├── stratification_number_bound: UnboundedStratificationNumber
 ├── skewness: ResetAboveThresholdSkewness{Float64}
 ├── assumed_pdf: DoubleGaussianPDF{Float64}
 ├── boundary_layer_depth: BulkRichardsonBoundaryLayerDepth{Float64}
@@ -184,6 +190,7 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
                                       buoyancy_source = PDFBuoyancyFlux(),
                                       second_moments = DowngradientSecondMoments(Float64),
                                       third_moment = AlgebraicThirdMoment(Float64),
+                                      stratification_number_bound = UnboundedStratificationNumber(),
                                       skewness = ResetAboveThresholdSkewness(Float64),
                                       assumed_pdf = DoubleGaussianPDF(Float64),
                                       clipping = HardClipping(),
@@ -199,7 +206,7 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
     # The published coefficients are built in double precision, whatever the default float type,
     # and converted once here.
     components = (; mixing_length, turbulence_time_scale, tke_update, buoyancy_source, second_moments,
-                    third_moment, skewness, assumed_pdf, boundary_layer_depth, clipping, constants)
+                    third_moment, stratification_number_bound, skewness, assumed_pdf, boundary_layer_depth, clipping, constants)
 
     check_component_slots(components)
     components = map(component -> convert_eltype(FT, component), values(components))
