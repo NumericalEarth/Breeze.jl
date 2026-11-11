@@ -128,19 +128,18 @@ end
                                       grid::AbstractGrid, clock, model_fields, dynamics_fields)
     fields = surface_layer_state(model_fields, dynamics_fields)
     i, j, k = near_wall_indices(ℓ, m, grid, df.side)
-    return outward_flux_sign(df.side) * bulk_drag_magnitude(df, ℓ, m, i, j, k, grid, clock, fields)
+    return outward_flux_sign(df.side) * bulk_drag_magnitude(df, (ℓ, m), i, j, k, grid, clock, fields)
 end
 
 # On an immersed facet, with the fields already merged with the dynamics fields
 @inline function OceananigansBC.getbc(df::BulkDragFunction, i::Integer, j::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields)
-    ℓ, m = wall_tangential_indices(i, j, k, df.side)
-    return - bulk_drag_magnitude(df, ℓ, m, i, j, k, grid, clock, fields)
+    return - bulk_drag_magnitude(df, (i, j, k), i, j, k, grid, clock, fields)
 end
 
-@inline function bulk_drag_magnitude(df, ℓ, m, i, j, k, grid, clock, fields)
+@inline function bulk_drag_magnitude(df, wall_point, i, j, k, grid, clock, fields)
     side = df.side
-    Tˢ = wall_value(ℓ, m, grid, side, df.surface_temperature, clock)
+    Tˢ = wall_value(wall_point, grid, side, df.surface_temperature, clock)
     u  = near_wall_velocity(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     U² = wall_wind_speed²(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     Uᵍ² = gustiness_squared(i, j, k, grid, df.gustiness, fields)

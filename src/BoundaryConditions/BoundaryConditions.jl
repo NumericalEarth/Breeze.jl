@@ -56,7 +56,7 @@ using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        Bottom, Top, West, East, South, North
 using Oceananigans.Fields: Field
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryCondition
-using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, node, znode
+using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, node, znode, peripheral_node
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑyzᵃᶠᶜ, ℑyzᵃᶜᶠ, ℑxzᶠᵃᶜ, ℑxzᶜᵃᶠ,
                               ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
 using Oceananigans.TurbulenceClosures: closure_required_tracers

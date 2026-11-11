@@ -143,18 +143,17 @@ end
                                       grid::AbstractGrid, clock, model_fields, dynamics_fields)
     fields = surface_layer_state(model_fields, dynamics_fields)
     i, j, k = near_wall_indices(ℓ, m, grid, bf.side)
-    return outward_flux_sign(bf.side) * bulk_sensible_heat_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+    return outward_flux_sign(bf.side) * bulk_sensible_heat_flux_magnitude(bf, (ℓ, m), i, j, k, grid, clock, fields)
 end
 
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields)
-    ℓ, m = wall_tangential_indices(i, j, k, bf.side)
-    return - bulk_sensible_heat_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+    return - bulk_sensible_heat_flux_magnitude(bf, (i, j, k), i, j, k, grid, clock, fields)
 end
 
-@inline function bulk_sensible_heat_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+@inline function bulk_sensible_heat_flux_magnitude(bf, wall_point, i, j, k, grid, clock, fields)
     side = bf.side
-    Tˢ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
+    Tˢ = wall_value(wall_point, grid, side, bf.surface_temperature, clock)
 
     U² = wall_wind_speed²(i, j, k, grid, side, nothing, fields, bf.filtered_velocities)
     Uᵍ² = gustiness_squared(i, j, k, grid, bf.gustiness, fields)
@@ -278,22 +277,21 @@ end
                                       grid::AbstractGrid, clock, model_fields, dynamics_fields)
     fields = surface_layer_state(model_fields, dynamics_fields)
     i, j, k = near_wall_indices(ℓ, m, grid, bf.side)
-    return outward_flux_sign(bf.side) * bulk_vapor_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+    return outward_flux_sign(bf.side) * bulk_vapor_flux_magnitude(bf, (ℓ, m), i, j, k, grid, clock, fields)
 end
 
 @inline function OceananigansBC.getbc(bf::BulkVaporFluxFunction, i::Integer, j::Integer, k::Integer,
                                       grid::AbstractGrid, clock, fields)
-    ℓ, m = wall_tangential_indices(i, j, k, bf.side)
-    return - bulk_vapor_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+    return - bulk_vapor_flux_magnitude(bf, (i, j, k), i, j, k, grid, clock, fields)
 end
 
-@inline function bulk_vapor_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+@inline function bulk_vapor_flux_magnitude(bf, wall_point, i, j, k, grid, clock, fields)
     side = bf.side
     constants = bf.thermodynamic_constants
-    Tˢ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
+    Tˢ = wall_value(wall_point, grid, side, bf.surface_temperature, clock)
     pˢ = wall_air_pressure(i, j, k, grid, side, nothing, fields, constants)
     ρˢ = surface_density(pˢ, Tˢ, constants)
-    qᵛˢ = wall_specific_humidity(ℓ, m, grid, side, bf, Tˢ, clock, pˢ)
+    qᵛˢ = wall_specific_humidity(wall_point, grid, side, bf, Tˢ, clock, pˢ)
 
     Δq = bulk_vapor_difference(i, j, k, fields, bf.filtered_scalar, qᵛˢ)
 
@@ -310,9 +308,9 @@ end
 end
 
 # Specific humidity of the air in contact with the wet part of the wall, qˢ = ℋˢ qᵛ⁺(Tˢ, ρˢ)
-@inline function wall_specific_humidity(ℓ, m, grid, side, bf, Tˢ, clock, pˢ)
+@inline function wall_specific_humidity(wall_point, grid, side, bf, Tˢ, clock, pˢ)
     constants = bf.thermodynamic_constants
-    ℋˢ = wall_value(ℓ, m, grid, side, bf.surface_relative_humidity, clock)
+    ℋˢ = wall_value(wall_point, grid, side, bf.surface_relative_humidity, clock)
     ρˢ = surface_density(pˢ, Tˢ, constants)
     return ℋˢ * saturation_specific_humidity(Tˢ, ρˢ, constants, bf.surface)
 end
