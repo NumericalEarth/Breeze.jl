@@ -12,7 +12,7 @@ module SimplifiedHigherOrderClosures
 export SimplifiedHigherOrderClosure, SHOC,
        OriginalSHOC,
        SHOCMixingLength,
-       ColumnStabilityDamping,
+       ColumnStabilityDamping, RichardsonStabilityFunctions,
        ForwardEulerTKE, ImplicitSinkTKE,
        PDFBuoyancyFlux, DowngradientBuoyancyFlux,
        DowngradientSecondMoments,
@@ -42,7 +42,9 @@ using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure, getclosure
 using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using Breeze.AtmosphereModels: AtmosphereModels, ClosureCloud, ClosureCloudStatistics
-using Breeze.TurbulenceClosures: TurbulenceClosures, convert_eltype
+using Breeze.TurbulenceClosures: TurbulenceClosures, convert_eltype,
+                                 RationalStabilityFunction, richardson_number, momentum_stability_function,
+                                 tracer_stability_function, dissipation_stability_function
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 include("shoc_constants.jl")

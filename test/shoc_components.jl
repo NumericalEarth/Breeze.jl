@@ -5,7 +5,8 @@ using Oceananigans
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_min, clip_below, clip_between, clip_negative,
                                       stable_damping, hard_floor, third_moment_bound, bound_third_moment,
                                       vd_shoc_decomp!, vd_shoc_solve!, tke_step, buoyancy_production,
-                                      assumed_pdf, plume_saturation, plume_variance, smooth_scalar_plumes
+                                      assumed_pdf, plume_saturation, plume_variance, smooth_scalar_plumes,
+                                      time_scale_column, dissipation_coefficient, time_scale_and_diffusivities
 using Test
 
 # Bitwise equality, with NaN equal to NaN and the two zeros distinct
@@ -333,6 +334,57 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
 
         for clipping in (HardClipping(), SmoothClipping(FT; width = 1e-2))
             run = run_shoc_column(SHOC(OriginalSHOC(), FT; assumed_pdf = SmoothDoubleGaussianPDF(), clipping, surface_forcing...))
+            @test all_finite(run)
+            @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
+            @test all(≥(0), run.cloud_liquid)
+            @test isapprox(run.θ, original.θ; rtol = 2e-3)
+        end
+    end
+
+    @testset "RichardsonStabilityFunctions" begin
+        hard = HardClipping()
+        constants = SHOCConstants(FT)
+        richardson = RichardsonStabilityFunctions(FT)
+        @test richardson.functions isa RationalStabilityFunction{FT}
+        @test isbits(richardson)
+        @test summary(richardson) == "RichardsonStabilityFunctions with RationalStabilityFunction{$FT}"
+
+        # The shear term of the TKE update is its ℂᴾ times the squared shear
+        tke_update = ForwardEulerTKE(FT; ℂᴾ = 0.5)
+        N², S², e, ℓ = FT(1e-4), FT(4e-4), FT(0.3), FT(120)
+        Ri = N² / (S² + richardson.minimum_shear_squared)
+        functions = richardson.functions
+        @test time_scale_column(richardson, hard, constants, FT(0.01)) === nothing
+        @test dissipation_coefficient(richardson, nothing, N², tke_update.ℂᴾ * S², tke_update) ≈
+              Breeze.TurbulenceClosures.dissipation_stability_function(functions, Ri)
+        τ, Kᶜ, Kᵘ = time_scale_and_diffusivities(richardson, hard, constants, nothing, e, FT(1e-3), ℓ, N², tke_update.ℂᴾ * S²,
+                                                 tke_update, false)
+        @test Kᶜ ≈ Breeze.TurbulenceClosures.tracer_stability_function(functions, Ri) * ℓ * sqrt(e)
+        @test Kᵘ ≈ Breeze.TurbulenceClosures.momentum_stability_function(functions, Ri) * ℓ * sqrt(e)
+        τ₀ = richardson.ℂᵗ * ℓ / sqrt(e)
+        @test τ ≈ τ₀ / sqrt(1 + τ₀^2 * N²)
+        @test τ^2 * N² < 1
+        # In unstable air the time scale is the turnover time
+        τ, _, _ = time_scale_and_diffusivities(richardson, hard, constants, nothing, e, FT(1e-3), ℓ, -N², tke_update.ℂᴾ * S²,
+                                               tke_update, false)
+        @test τ ≈ τ₀
+
+        # The coefficients of the stability functions are coefficients of the closure
+        closure = SHOC(OriginalSHOC(), FT; turbulence_time_scale = RichardsonStabilityFunctions(),
+                       tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...)
+        @test isbits(closure)
+        ℂ = closure_parameters(closure)
+        @test ℂ.ℂᶜ⁰ == functions.ℂᶜ⁰ && ℂ.Ri⁺ == functions.Ri⁺ && ℂ.ℂᵗ == 1
+        @test !haskey(ℂ, :ℂᵝ₁)
+        changed = with_parameters(closure; ℂᶜ⁰ = FT(0.3), ℂᵗ = FT(2))
+        @test changed.turbulence_time_scale.functions.ℂᶜ⁰ == FT(0.3)
+        @test changed.turbulence_time_scale.ℂᵗ == FT(2)
+        @test typeof(changed) === typeof(closure)
+
+        for tke_update in (ForwardEulerTKE(ℂᴾ = 1), ImplicitSinkTKE(ℂᴾ = 1))
+            closure = SHOC(OriginalSHOC(), FT; turbulence_time_scale = RichardsonStabilityFunctions(), tke_update,
+                           surface_forcing...)
+            run = run_shoc_column(closure)
             @test all_finite(run)
             @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
             @test all(≥(0), run.cloud_liquid)

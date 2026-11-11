@@ -115,3 +115,87 @@ end
 
     return iso, tkh_k, tk_k
 end
+
+#####
+##### Stability functions of the local Richardson number
+#####
+
+"""
+$(TYPEDEF)
+
+Eddy diffusivities and dissipation from stability functions of the local gradient Richardson
+number, as in [`TKEBasedTurbulenceClosure`](@ref) and with its functions (by default
+[`RationalStabilityFunction`](@ref), reused as it is):
+
+    Kᶜ = Sᶜ(Ri) ℓ √e,    Kᵘ = Sᵘ(Ri) ℓ √e,    ε = Sᴰ(Ri) e^{3/2} / ℓ,    Ri = N² / (S² + S²ᵐⁱⁿ)
+
+in place of the damping by the stability of the whole column of
+[`ColumnStabilityDamping`](@ref), which is one number per column and jumps to zero where the
+air is unstable. There is no cold-surface fallback.
+
+The second and third moments need a return-to-isotropy time scale, which is taken as `ℂᵗ`
+eddy turnover times, limited by the buoyancy period in stable air:
+
+    τ = τ₀ / √(1 + τ₀² N²⁺),    τ₀ = ℂᵗ ℓ / √e
+
+With `ℂᵗ = 1`, `τ₀` is that of `ColumnStabilityDamping` with its published dissipation
+coefficient for the same length (`2 e / ε` is `1.01 ℓ / √e` there). It is not `2 e / ε` of this
+component: the dissipation coefficient of the rational stability functions is some thirty
+times smaller, and the time scale it implies puts `τ² N²` far beyond the poles of the
+diagnostic third moment.
+
+The default coefficients of `RationalStabilityFunction` were calibrated for the TKE closure
+with `GradientLimitedMixingLength` and a shear production `Kᵘ S²`, so they are a starting point
+for a calibration of SHOC rather than a tuned set, and they go with a shear production
+coefficient `ℂᴾ = 1` of the TKE update.
+
+$(TYPEDFIELDS)
+"""
+struct RichardsonStabilityFunctions{SF, FT} <: AbstractSHOCComponent
+    "The stability functions of the Richardson number"
+    functions :: SF
+    "Return-to-isotropy time scale of the moments in eddy turnover times `ℓ / √e`"
+    ℂᵗ :: FT
+    "Shear floor `S²ᵐⁱⁿ` in `Ri = N² / (S² + S²ᵐⁱⁿ)`, s⁻²"
+    minimum_shear_squared :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `RichardsonStabilityFunctions` with the stability `functions`, by default the
+`RationalStabilityFunction` with its published coefficients.
+"""
+RichardsonStabilityFunctions(FT::DataType = Oceananigans.defaults.FloatType;
+                             functions = RationalStabilityFunction(), ℂᵗ = 1, minimum_shear_squared = 1e-10) =
+    RichardsonStabilityFunctions(convert_eltype(FT, functions), convert(FT, ℂᵗ), convert(FT, minimum_shear_squared))
+
+Adapt.@adapt_structure RichardsonStabilityFunctions
+
+Base.summary(ts::RichardsonStabilityFunctions) = string("RichardsonStabilityFunctions with ", summary(ts.functions))
+
+# The Richardson number of a level: the shear term of the TKE update is its ℂᴾ times S²
+@inline level_richardson_number(ts::RichardsonStabilityFunctions, brunt_k, shear_term, tke_update) =
+    richardson_number(brunt_k, shear_term / tke_update.ℂᴾ, ts.minimum_shear_squared)
+
+@inline time_scale_column(::RichardsonStabilityFunctions, cp, c, brunt_int) = nothing
+
+@inline dissipation_coefficient(ts::RichardsonStabilityFunctions, column, brunt_k, shear_term, tke_update) =
+    dissipation_stability_function(ts.functions, level_richardson_number(ts, brunt_k, shear_term, tke_update))
+
+@inline function time_scale_and_diffusivities(ts::RichardsonStabilityFunctions, cp, c, column, tke_k, a_diss, mix,
+                                              brunt_k, shear_term, tke_update, runaway)
+    FT = typeof(tke_k)
+    brunt_scale = convert(FT, 1e-6) # scale of the squared buoyancy frequency for the clipping policy [s⁻²]
+
+    Ri = level_richardson_number(ts, brunt_k, shear_term, tke_update)
+    turbulent_velocity = sqrt(clip_max(cp, c.mintke, tke_k, c.mintke))
+
+    tkh_k = tracer_stability_function(ts.functions, Ri) * mix * turbulent_velocity
+    tk_k = momentum_stability_function(ts.functions, Ri) * mix * turbulent_velocity
+
+    iso_scale = ts.ℂᵗ * mix / turbulent_velocity
+    iso = iso_scale / sqrt(1 + iso_scale * iso_scale * clip_negative(cp, brunt_k, brunt_scale))
+
+    return iso, tkh_k, tk_k
+end
