@@ -25,23 +25,23 @@ using Test
 struct Uniform end
 struct Sinusoidal end
 
-struct UpwindTransport{I, P, FT} <: AbstractTurbulenceClosure{VerticallyImplicitTimeDiscretization, 1}
-    w :: FT
+struct UpwindVerticalTransport{I, P, FT} <: AbstractTurbulenceClosure{VerticallyImplicitTimeDiscretization, 1}
+    vertical_velocity :: FT
     profile :: P
     conservative :: Bool
 end
 
-UpwindTransport{I}(w, profile = Uniform(); conservative = true) where I =
-    UpwindTransport{I, typeof(profile), typeof(w)}(w, profile, conservative)
+UpwindVerticalTransport{I}(w, profile = Uniform(); conservative = true) where I =
+    UpwindVerticalTransport{I, typeof(profile), typeof(w)}(w, profile, conservative)
 
 @inline face_velocity(k, grid, w, ::Uniform) = w * (1 < k) * (k ≤ grid.Nz)
 @inline face_velocity(k, grid, w, ::Sinusoidal) = w * sin(π * (k - 1) / grid.Nz) * (1 < k) * (k ≤ grid.Nz)
-@inline face_velocity(k, grid, closure::UpwindTransport) = face_velocity(k, grid, closure.w, closure.profile)
+@inline face_velocity(k, grid, closure::UpwindVerticalTransport) = face_velocity(k, grid, closure.vertical_velocity, closure.profile)
 
 # A closure that does not extend the hook
 struct InertClosure <: AbstractTurbulenceClosure{VerticallyImplicitTimeDiscretization, 1} end
 
-const TestClosure = Union{UpwindTransport, InertClosure}
+const TestClosure = Union{UpwindVerticalTransport, InertClosure}
 
 @inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, ::TestClosure, args...) = zero(grid)
 @inline AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρ, ::TestClosure, args...) = zero(grid)
@@ -49,7 +49,7 @@ const TestClosure = Union{UpwindTransport, InertClosure}
 @inline AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρ, ::TestClosure, args...) = zero(grid)
 
 # Row k, column k + 1: the downward (min) part of the flux through face k + 1. Zero for k = Nz.
-@inline function AtmosphereModels.closure_implicit_upper_diagonal(i, j, k, grid, closure::UpwindTransport{I}, K, ::Val{I},
+@inline function AtmosphereModels.closure_implicit_upper_diagonal(i, j, k, grid, closure::UpwindVerticalTransport{I}, K, ::Val{I},
                                                                   ℓx, ℓy, ::Center, Δt, clock, fields, ρ) where I
     w = face_velocity(k+1, grid, closure)
     ρᶠ = ℑzᵃᵃᶠ(i, j, k+1, grid, ρ)
@@ -57,7 +57,7 @@ const TestClosure = Union{UpwindTransport, InertClosure}
 end
 
 # Row k′ + 1, column k′: the upward (max) part of the flux through face k′ + 1. Zero for k′ = 0.
-@inline function AtmosphereModels.closure_implicit_lower_diagonal(i, j, k′, grid, closure::UpwindTransport{I}, K, ::Val{I},
+@inline function AtmosphereModels.closure_implicit_lower_diagonal(i, j, k′, grid, closure::UpwindVerticalTransport{I}, K, ::Val{I},
                                                                   ℓx, ℓy, ::Center, Δt, clock, fields, ρ) where I
     k = k′ + 1
     w = face_velocity(k, grid, closure)
@@ -66,7 +66,7 @@ end
 end
 
 # λ = - ∂ŵ/∂z, the density-weighted divergence of the closure velocity (see the docstring)
-@inline function AtmosphereModels.closure_implicit_linear_coefficient(i, j, k, grid, closure::UpwindTransport{I}, K, ::Val{I},
+@inline function AtmosphereModels.closure_implicit_linear_coefficient(i, j, k, grid, closure::UpwindVerticalTransport{I}, K, ::Val{I},
                                                                       ℓx, ℓy, ::Center, Δt, clock, fields, ρ) where I
     w⁺ = face_velocity(k+1, grid, closure)
     w⁻ = face_velocity(k,   grid, closure)
@@ -145,7 +145,7 @@ column(field) = Array(interior(field))[1, 1, :]
             # The closure acts on ρc alone, whose index among the closure scalars it is built with
             index_model = upwind_column_model(nothing)
             I = typeof(closure_scalar_index(index_model, name)).parameters[1]
-            closure = UpwindTransport{I}(w)
+            closure = UpwindVerticalTransport{I}(w)
 
             model = upwind_column_model(closure)
             grid = model.grid
@@ -186,7 +186,7 @@ column(field) = Array(interior(field))[1, 1, :]
             index_model = upwind_column_model(nothing)
             I = typeof(closure_scalar_index(index_model, name)).parameters[1]
 
-            model = upwind_column_model(UpwindTransport{I}(w, Sinusoidal()))
+            model = upwind_column_model(UpwindVerticalTransport{I}(w, Sinusoidal()))
             grid = model.grid
             ρ = implicit_advection_density(model.dynamics, model.formulation, name)
             Δz = [Δzᶜᶜᶜ(1, 1, k, grid) for k in 1:grid.Nz]
@@ -201,7 +201,7 @@ column(field) = Array(interior(field))[1, 1, :]
             @test sum(q¹ .* Δz) ≈ sum(q⁰ .* Δz) rtol = 1e-13
 
             # Without the linear coefficient the solve is in advective form: it does not conserve
-            advective = upwind_column_model(UpwindTransport{I}(w, Sinusoidal(); conservative = false))
+            advective = upwind_column_model(UpwindVerticalTransport{I}(w, Sinusoidal(); conservative = false))
             implicit_stage_step!(advective, name, advective.tracers.ρc, Δt)
             q¹ₐ = column(advective.tracers.ρc)
             @test abs(sum(q¹ₐ .* Δz) - sum(q⁰ .* Δz)) > 1e-3 * sum(q⁰ .* Δz)

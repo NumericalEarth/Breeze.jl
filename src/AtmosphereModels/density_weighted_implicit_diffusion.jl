@@ -248,8 +248,7 @@ The closure's contribution to the diagonal is not supplied separately: it is der
 [`closure_implicit_linear_coefficient`](@ref). The solver also evaluates this function at
 `k = Nz` for the diagonal, so a closure must return zero across the top boundary face.
 """
-@inline closure_implicit_upper_diagonal(i, j, k, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) =
-    zero(grid)
+@inline closure_implicit_upper_diagonal(i, j, k, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) = zero(grid)
 
 """
 $(TYPEDSIGNATURES)
@@ -260,8 +259,7 @@ The arguments and conventions are those of [`closure_implicit_upper_diagonal`](@
 also evaluates this function at `k′ = 0` for the diagonal of row 1, so a closure must return zero
 across the bottom boundary face. The default is zero.
 """
-@inline closure_implicit_lower_diagonal(i, j, k′, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) =
-    zero(grid)
+@inline closure_implicit_lower_diagonal(i, j, k′, grid, closure, closure_fields, id, ℓx, ℓy, ℓz, Δt, clock, fields, ρ) = zero(grid)
 
 """
 $(TYPEDSIGNATURES)
