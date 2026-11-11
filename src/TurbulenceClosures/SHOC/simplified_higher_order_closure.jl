@@ -62,19 +62,27 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a `SimplifiedHigherOrderClosure` (SHOC) for an `AtmosphereModel`, assembled from the
-components of `preset` with scalars of type `FT`. `SHOC` is a shorter name for the same
-constructor.
+Return a `SimplifiedHigherOrderClosure` (SHOC) for an `AtmosphereModel`, with scalars of type `FT`.
 
-The closure is made of components, one per relation of the scheme, each holding the empirical
-coefficients (written ℂ) of its relation. The preset [`OriginalSHOC`](@ref), the default, selects
-the relations of E3SM `shoc.F90` with the published coefficients. A keyword argument replaces the
-component of one slot, either to change coefficients,
-`SHOC(turbulence_time_scale = ColumnStabilityDamping(ℂᶜ=0.2))`, or to swap the relation. The preset
-[`DifferentiableSHOC`](@ref) selects components without the hard switches and clips of `shoc.F90`,
-for calibration with gradients.
+The closure is made of components, one per relation of the scheme, each given by its own keyword
+argument and each holding the empirical coefficients (written ℂ) of its relation. With no
+keyword arguments the components are those of E3SM `shoc.F90` (pinned at E3SM `ba53243f`) with
+the published coefficients, and the column physics reproduces `shoc.F90` to round-off. Every
+component is replaced independently of the others, either to change coefficients,
+`SimplifiedHigherOrderClosure(turbulence_time_scale = ColumnStabilityDamping(ℂᶜ=0.2))`, or to
+swap the relation,
+`SimplifiedHigherOrderClosure(mixing_length = GradientLimitedMixingLength(), clipping = SmoothClipping())`;
+any combination of the components listed below is a valid closure.
+[`differentiable_shoc_components`](@ref) returns a set of components without the hard switches
+and clips of `shoc.F90`, for calibration with gradients, to splat into the keyword arguments.
+
 [`closure_parameters`](@ref) lists the coefficients of all components and
-[`with_parameters`](@ref) replaces some of them, whichever components hold them.
+[`with_parameters`](@ref) replaces some of them, whichever components hold them. A component
+that another closure of Breeze also uses ([`GradientLimitedMixingLength`](@ref),
+[`RationalStabilityFunction`](@ref)) is passed under its own name, and the closure holds its own
+copy of its coefficients: they are coefficients of this closure like any other, listed by
+`closure_parameters`, replaced by `with_parameters` and calibrated within SHOC, and are not tied
+to the values that [`TKEBasedTurbulenceClosure`](@ref) holds or was calibrated to.
 
 SHOC is operator split from the dynamics: it contributes nothing during the Runge–Kutta stages,
 and once per time step every column takes one SHOC step over the whole time step. The closure
@@ -115,22 +123,23 @@ the cloud fraction and keeps the precipitation.
 Keyword arguments
 =================
 
-- `mixing_length`: the mixing length; [`SHOCMixingLength`](@ref) in `OriginalSHOC`, or
+Each of the first eight takes a component; the first one named is the default, that of `shoc.F90`.
+
+- `mixing_length`: the mixing length; [`SHOCMixingLength`](@ref), or
   [`GradientLimitedMixingLength`](@ref).
 - `turbulence_time_scale`: the return-to-isotropy time scale, the eddy diffusivities and the
-  dissipation coefficient; [`ColumnStabilityDamping`](@ref) in `OriginalSHOC`, or
-  [`RichardsonStabilityFunctions`](@ref).
-- `tke_update`: the update of turbulent kinetic energy; [`ForwardEulerTKE`](@ref) in `OriginalSHOC`,
-  or [`ImplicitSinkTKE`](@ref).
-- `buoyancy_source`: the buoyancy source of turbulent kinetic energy; [`PDFBuoyancyFlux`](@ref)
-  in `OriginalSHOC`, or [`DowngradientBuoyancyFlux`](@ref) for comparison.
+  dissipation coefficient; [`ColumnStabilityDamping`](@ref), or
+  [`RichardsonStabilityFunctions`](@ref) of a [`RationalStabilityFunction`](@ref).
+- `tke_update`: the update of turbulent kinetic energy; [`ForwardEulerTKE`](@ref), or
+  [`ImplicitSinkTKE`](@ref).
+- `buoyancy_source`: the buoyancy source of turbulent kinetic energy; [`PDFBuoyancyFlux`](@ref),
+  or [`DowngradientBuoyancyFlux`](@ref) for comparison.
 - `second_moments`: [`DowngradientSecondMoments`](@ref).
 - `third_moment`: the third moment of vertical velocity; [`CanutoThirdMoment`](@ref) with
-  [`ResetBound`](@ref) in `OriginalSHOC`, or with [`ClampBound`](@ref) or [`TanhBound`](@ref).
-- `assumed_pdf`: the assumed PDF of the subgrid cloud; [`DoubleGaussianPDF`](@ref) in `OriginalSHOC`,
-  or [`SmoothDoubleGaussianPDF`](@ref).
-- `clipping`: how bounds are imposed; [`HardClipping`](@ref) in `OriginalSHOC`, or
-  [`SmoothClipping`](@ref).
+  [`ResetBound`](@ref), or with [`ClampBound`](@ref) or [`TanhBound`](@ref).
+- `assumed_pdf`: the assumed PDF of the subgrid cloud; [`DoubleGaussianPDF`](@ref), or
+  [`SmoothDoubleGaussianPDF`](@ref).
+- `clipping`: how bounds are imposed; [`HardClipping`](@ref), or [`SmoothClipping`](@ref).
 - `boundary_layer_depth`: [`HoltslagBovilleDepth`](@ref).
 - `constants`: the [`SHOCConstants`](@ref).
 - `surface_temperature_flux`, `surface_moisture_flux`, `surface_x_momentum_flux`,
@@ -162,16 +171,15 @@ SimplifiedHigherOrderClosure{Float64}
 └── host_grid_spacing: 100000.0
 ```
 """
-function SimplifiedHigherOrderClosure(preset::AbstractSHOCPreset = OriginalSHOC(),
-                                      FT::DataType = Oceananigans.defaults.FloatType;
-                                      mixing_length = default_component(preset, Val(:mixing_length)),
-                                      turbulence_time_scale = default_component(preset, Val(:turbulence_time_scale)),
-                                      tke_update = default_component(preset, Val(:tke_update)),
-                                      buoyancy_source = default_component(preset, Val(:buoyancy_source)),
-                                      second_moments = default_component(preset, Val(:second_moments)),
-                                      third_moment = default_component(preset, Val(:third_moment)),
-                                      assumed_pdf = default_component(preset, Val(:assumed_pdf)),
-                                      clipping = default_component(preset, Val(:clipping)),
+function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.FloatType;
+                                      mixing_length = SHOCMixingLength(Float64),
+                                      turbulence_time_scale = ColumnStabilityDamping(Float64),
+                                      tke_update = ForwardEulerTKE(Float64),
+                                      buoyancy_source = PDFBuoyancyFlux(),
+                                      second_moments = DowngradientSecondMoments(Float64),
+                                      third_moment = CanutoThirdMoment(Float64),
+                                      assumed_pdf = DoubleGaussianPDF(Float64),
+                                      clipping = HardClipping(),
                                       boundary_layer_depth = HoltslagBovilleDepth(Float64),
                                       constants = SHOCConstants(Float64),
                                       surface_temperature_flux = 0,
@@ -181,10 +189,13 @@ function SimplifiedHigherOrderClosure(preset::AbstractSHOCPreset = OriginalSHOC(
                                       friction_velocity = 0,
                                       host_grid_spacing = 100000)
 
-    components = map(component -> convert_eltype(FT, component),
-                     (mixing_length, turbulence_time_scale, tke_update, buoyancy_source, second_moments,
-                      third_moment, assumed_pdf, boundary_layer_depth, clipping, constants))
+    # The published coefficients are built in double precision, whatever the default float type,
+    # and converted once here.
+    components = (; mixing_length, turbulence_time_scale, tke_update, buoyancy_source, second_moments,
+                    third_moment, assumed_pdf, boundary_layer_depth, clipping, constants)
 
+    check_component_slots(components)
+    components = map(component -> convert_eltype(FT, component), values(components))
     check_unique_scalar_names(components)
 
     return SimplifiedHigherOrderClosure(components...,
@@ -196,10 +207,8 @@ function SimplifiedHigherOrderClosure(preset::AbstractSHOCPreset = OriginalSHOC(
                                         convert(FT, host_grid_spacing))
 end
 
-SimplifiedHigherOrderClosure(FT::DataType; kw...) = SimplifiedHigherOrderClosure(OriginalSHOC(), FT; kw...)
-
 """
-A shorter name for [`SimplifiedHigherOrderClosure`](@ref): `SHOC(OriginalSHOC())`.
+A shorter name for [`SimplifiedHigherOrderClosure`](@ref).
 """
 const SHOC = SimplifiedHigherOrderClosure
 

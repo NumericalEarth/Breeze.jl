@@ -2,6 +2,9 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Oceananigans
+using Breeze.AtmosphereModels: materialize_closure, closure_scalar_names
+using Breeze.TurbulenceClosures: convert_eltype
+using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: trainable_parameter_names, is_calibratable, component_scalar_names
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_min, clip_below, clip_between, clip_negative,
                                       stable_damping, hard_floor, third_moment_bound, bound_third_moment,
                                       vd_shoc_decomp!, vd_shoc_solve!, tke_step, buoyancy_production,
@@ -128,13 +131,13 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
 
 @testset "SHOC component swaps in a column [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    original = run_shoc_column(SHOC(OriginalSHOC(), FT; surface_forcing...))
+    original = run_shoc_column(SimplifiedHigherOrderClosure(FT; surface_forcing...))
     @test all_finite(original)
 
     @testset "SmoothClipping" begin
-        closure = SHOC(OriginalSHOC(), FT; clipping = SmoothClipping(FT; width = 1e-2), surface_forcing...)
+        closure = SimplifiedHigherOrderClosure(FT; clipping = SmoothClipping(FT; width = 1e-2), surface_forcing...)
         @test isbits(closure)
-        @test closure_parameters(closure) == closure_parameters(SHOC(OriginalSHOC(), FT))
+        @test closure_parameters(closure) == closure_parameters(SimplifiedHigherOrderClosure(FT))
         smooth = run_shoc_column(closure)
         @test all_finite(smooth)
         @test all(smooth.e .> closure.constants.mintke)
@@ -147,7 +150,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         # With a narrower smoothing the solution is closer to that of the hard bounds (in single
         # precision both differences are a few units of round-off of θ)
         if FT == Float64
-            narrower = run_shoc_column(SHOC(OriginalSHOC(), FT; clipping = SmoothClipping(FT; width = 1e-4), surface_forcing...))
+            narrower = run_shoc_column(SimplifiedHigherOrderClosure(FT; clipping = SmoothClipping(FT; width = 1e-4), surface_forcing...))
             @test maximum(abs, narrower.θ .- original.θ) < maximum(abs, smooth.θ .- original.θ)
         end
     end
@@ -158,7 +161,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         clamped = CanutoThirdMoment(FT; bound = ClampBound())
         smooth = CanutoThirdMoment(FT; bound = TanhBound())
         @test summary(clamped) == "CanutoThirdMoment{$FT} with ClampBound"
-        @test closure_parameters(SHOC(OriginalSHOC(), FT; third_moment = smooth)).ℂʷ₂ == FT(7)
+        @test closure_parameters(SimplifiedHigherOrderClosure(FT; third_moment = smooth)).ℂʷ₂ == FT(7)
 
         w_sec = FT(0.5)
         bound = reset.w3clip * sqrt(2 * w_sec^3)
@@ -178,7 +181,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test bound_third_moment(smooth, hard, w_sec, zero(FT)) == 0
 
         for third_moment in (clamped, smooth)
-            run = run_shoc_column(SHOC(OriginalSHOC(), FT; third_moment, surface_forcing...))
+            run = run_shoc_column(SimplifiedHigherOrderClosure(FT; third_moment, surface_forcing...))
             @test all_finite(run)
             @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
             @test isapprox(run.θ, original.θ; rtol = 1e-4)
@@ -207,11 +210,11 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         vd_shoc_solve!(1, 1, Nz, f..., e)
         @test all(e .≈ 1 / (1 + Δt * ω))
 
-        closure = SHOC(OriginalSHOC(), FT; tke_update = ImplicitSinkTKE(), surface_forcing...)
+        closure = SimplifiedHigherOrderClosure(FT; tke_update = ImplicitSinkTKE(), surface_forcing...)
         @test isbits(closure)
         @test closure_parameters(closure).ℂᴾ == FT(0.1)
         @test haskey(shoc_column_model(closure).closure_fields.scratch, :tke_sink_rate)
-        @test !haskey(shoc_column_model(SHOC(OriginalSHOC(), FT)).closure_fields.scratch, :tke_sink_rate)
+        @test !haskey(shoc_column_model(SimplifiedHigherOrderClosure(FT)).closure_fields.scratch, :tke_sink_rate)
 
         # The update is positive without a floor for any time step, production and stratification,
         # where forward Euler leaves a negative value for the floor to catch
@@ -254,7 +257,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test buoyancy_production(DowngradientBuoyancyFlux(), constants, wthv, tkh, N²) == -tkh * N²
         @test buoyancy_production(DowngradientBuoyancyFlux(), constants, wthv, tkh, -N²) > 0
 
-        downgradient = run_shoc_column(SHOC(OriginalSHOC(), FT; buoyancy_source = DowngradientBuoyancyFlux(), surface_forcing...))
+        downgradient = run_shoc_column(SimplifiedHigherOrderClosure(FT; buoyancy_source = DowngradientBuoyancyFlux(), surface_forcing...))
         @test all_finite(downgradient)
         @test maximum(downgradient.e) > FT(0.01)
         @test isapprox(downgradient.θ, original.θ; rtol = 2e-3)
@@ -265,8 +268,8 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         constants = SHOCConstants(FT)
         original_pdf = DoubleGaussianPDF(FT)
         smooth_pdf = SmoothDoubleGaussianPDF(FT)
-        @test keys(closure_parameters(SHOC(OriginalSHOC(), FT; assumed_pdf = smooth_pdf))) ==
-              keys(closure_parameters(SHOC(OriginalSHOC(), FT)))
+        @test keys(closure_parameters(SimplifiedHigherOrderClosure(FT; assumed_pdf = smooth_pdf))) ==
+              keys(closure_parameters(SimplifiedHigherOrderClosure(FT)))
 
         # One level at 900 hPa and 285 K, close to saturation, between interfaces that carry the
         # same moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec)
@@ -334,7 +337,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test isapprox(first(pdf_of(smooth_pdf, qˢ, calm, still)), 0.5; atol = 0.05)
 
         for clipping in (HardClipping(), SmoothClipping(FT; width = 1e-2))
-            run = run_shoc_column(SHOC(OriginalSHOC(), FT; assumed_pdf = SmoothDoubleGaussianPDF(), clipping, surface_forcing...))
+            run = run_shoc_column(SimplifiedHigherOrderClosure(FT; assumed_pdf = SmoothDoubleGaussianPDF(), clipping, surface_forcing...))
             @test all_finite(run)
             @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
             @test all(≥(0), run.cloud_liquid)
@@ -371,8 +374,16 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test τ ≈ τ₀
 
         # The coefficients of the stability functions are coefficients of the closure
-        closure = SHOC(OriginalSHOC(), FT; turbulence_time_scale = RichardsonStabilityFunctions(),
-                       tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...)
+        closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = RichardsonStabilityFunctions(),
+                                               tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...)
+
+        # The functions may be given first, under their own name; without any, they are the
+        # rational functions, and the closure holds its own copy of their coefficients
+        @test RichardsonStabilityFunctions(RationalStabilityFunction(), FT) === RichardsonStabilityFunctions(FT)
+        @test RichardsonStabilityFunctions(RationalStabilityFunction(ℂᶜ⁰ = 0.3), FT; ℂᵗ = 2) ===
+              RichardsonStabilityFunctions(FT; functions = RationalStabilityFunction(ℂᶜ⁰ = 0.3), ℂᵗ = 2)
+        @test SimplifiedHigherOrderClosure(FT; turbulence_time_scale = RichardsonStabilityFunctions(RationalStabilityFunction()),
+                                           tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...) === closure
         @test isbits(closure)
         ℂ = closure_parameters(closure)
         @test ℂ.ℂᶜ⁰ == functions.ℂᶜ⁰ && ℂ.Ri⁺ == functions.Ri⁺ && ℂ.ℂᵗ == 1
@@ -383,8 +394,8 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test typeof(changed) === typeof(closure)
 
         for tke_update in (ForwardEulerTKE(ℂᴾ = 1), ImplicitSinkTKE(ℂᴾ = 1))
-            closure = SHOC(OriginalSHOC(), FT; turbulence_time_scale = RichardsonStabilityFunctions(), tke_update,
-                           surface_forcing...)
+            closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = RichardsonStabilityFunctions(), tke_update,
+                                                   surface_forcing...)
             run = run_shoc_column(closure)
             @test all_finite(run)
             @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
@@ -397,7 +408,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         hard = HardClipping()
         constants = SHOCConstants(FT)
         ml = GradientLimitedMixingLength(FT(0.8), FT(1.8))
-        closure = SHOC(OriginalSHOC(), FT; mixing_length = ml, surface_forcing...)
+        closure = SimplifiedHigherOrderClosure(FT; mixing_length = ml, surface_forcing...)
         @test isbits(closure)
         @test closure.mixing_length === ml
         ℂ = closure_parameters(closure)
@@ -455,9 +466,9 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
 
         for (label, closure) in ("SHOC diffusivities" => closure,
                                  "Richardson diffusivities" =>
-                                     SHOC(OriginalSHOC(), FT; mixing_length = GradientLimitedMixingLength(FT(0.8), FT(1.8)),
-                                          turbulence_time_scale = RichardsonStabilityFunctions(),
-                                          tke_update = ImplicitSinkTKE(ℂᴾ = 1), surface_forcing...))
+                                     SimplifiedHigherOrderClosure(FT; mixing_length = GradientLimitedMixingLength(FT(0.8), FT(1.8)),
+                                                                  turbulence_time_scale = RichardsonStabilityFunctions(),
+                                                                  tke_update = ImplicitSinkTKE(ℂᴾ = 1), surface_forcing...))
             run = run_shoc_column(closure)
             @test all_finite(run)
             @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
@@ -465,13 +476,22 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         end
     end
 
-    @testset "DifferentiableSHOC" begin
-        @test DifferentiableSHOC() === DifferentiableSHOC(core = :tke_closure)
-        @test_throws ArgumentError DifferentiableSHOC(core = :mass_flux)
+    @testset "differentiable_shoc_components" begin
+        components = differentiable_shoc_components(FT)
+        @test keys(components) == (:mixing_length, :turbulence_time_scale, :tke_update, :third_moment, :assumed_pdf, :clipping)
+        @test differentiable_shoc_components() === components
+        @test differentiable_shoc_components(Float32).clipping === SmoothClipping(Float32(1e-2))
 
-        # The smoothed switches are those of both cores
-        for core in (:tke_closure, :shoc)
-            closure = SHOC(DifferentiableSHOC(; core), FT; surface_forcing...)
+        # The set, and the set with SHOC's own mixing length and time scale named after it
+        differentiable = SimplifiedHigherOrderClosure(FT; components..., surface_forcing...)
+        own = SimplifiedHigherOrderClosure(FT; components...,
+                                           mixing_length = SHOCMixingLength(),
+                                           turbulence_time_scale = ColumnStabilityDamping(),
+                                           tke_update = ImplicitSinkTKE(),
+                                           surface_forcing...)
+
+        # The switches are smooth in both
+        for closure in (differentiable, own)
             @test isbits(closure)
             @test closure.clipping === SmoothClipping(FT(1e-2))
             @test closure.assumed_pdf isa SmoothDoubleGaussianPDF{FT}
@@ -489,22 +509,107 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test isapprox(run.θ, original.θ; rtol = 5e-3)
         end
 
-        # The default core is the eddy diffusivity of the TKE closure, with its published
-        # coefficients and no dimensional coefficient
-        closure = SHOC(DifferentiableSHOC(), FT)
+        # The set has the mixing length and the stability functions that the TKE closure also
+        # uses, starting from its published coefficients, and no dimensional coefficient
         published = TKEBasedTurbulenceClosure()
-        @test closure.mixing_length == published.mixing_length
-        @test closure.turbulence_time_scale.functions == published.stability_functions
-        @test closure.tke_update.ℂᴾ == 1
-        @test !haskey(closure_parameters(closure), :ℂˡ₅)
+        @test differentiable.mixing_length == published.mixing_length
+        @test differentiable.turbulence_time_scale.functions == published.stability_functions
+        @test differentiable.tke_update.ℂᴾ == 1
+        ℂ = closure_parameters(differentiable)
+        @test !haskey(ℂ, :ℂˡ₅)
+
+        # The closure holds its own copies of the coefficients of these components: they are
+        # coefficients of the closure, all trainable, and are replaced like the others
+        reused = (fieldnames(GradientLimitedMixingLength)..., fieldnames(RationalStabilityFunction)...)
+        @test length(reused) == 16
+        @test all(name -> haskey(ℂ, name), reused)
+        @test all(name -> name ∈ trainable_parameter_names(differentiable), reused)
+        recalibrated = with_parameters(differentiable; NamedTuple{reused}(map(name -> 2 * ℂ[name], reused))...)
+        @test recalibrated.mixing_length.ℂˢ == 2 * published.mixing_length.ℂˢ
+        @test recalibrated.turbulence_time_scale.functions.Ri⁺ == 2 * published.stability_functions.Ri⁺
+        @test typeof(recalibrated) === typeof(differentiable)
 
         # SHOC's own mixing length and time scale, with the published coefficients of shoc.F90
-        own = SHOC(DifferentiableSHOC(core = :shoc), FT)
-        @test own.mixing_length === SHOC(OriginalSHOC(), FT).mixing_length
-        @test own.turbulence_time_scale === SHOC(OriginalSHOC(), FT).turbulence_time_scale
+        @test own.mixing_length === SimplifiedHigherOrderClosure(FT).mixing_length
+        @test own.turbulence_time_scale === SimplifiedHigherOrderClosure(FT).turbulence_time_scale
         @test own.tke_update.ℂᴾ == FT(0.1)
+        @test keys(closure_parameters(own)) == keys(closure_parameters(SimplifiedHigherOrderClosure(FT)))
 
-        # A keyword replaces a component of the preset
-        @test SHOC(DifferentiableSHOC(), FT; clipping = HardClipping()).clipping isa HardClipping
+        # A keyword after the set replaces one of its components
+        @test SimplifiedHigherOrderClosure(FT; components..., clipping = HardClipping()).clipping isa HardClipping
+    end
+
+    @testset "Every combination of components" begin
+        choices = (mixing_length = (SHOCMixingLength(), GradientLimitedMixingLength()),
+                   turbulence_time_scale = (ColumnStabilityDamping(), RichardsonStabilityFunctions(RationalStabilityFunction())),
+                   tke_update = (ForwardEulerTKE(), ImplicitSinkTKE()),
+                   buoyancy_source = (PDFBuoyancyFlux(), DowngradientBuoyancyFlux()),
+                   third_moment = (CanutoThirdMoment(), CanutoThirdMoment(bound = ClampBound()), CanutoThirdMoment(bound = TanhBound())),
+                   assumed_pdf = (DoubleGaussianPDF(), SmoothDoubleGaussianPDF()),
+                   clipping = (HardClipping(), SmoothClipping()))
+
+        combinations = vec([NamedTuple{keys(choices)}(combination) for combination in Iterators.product(values(choices)...)])
+        @test length(combinations) == 192
+
+        # Every combination constructs, and its coefficients are collected and replaced
+        constructed = map(combinations) do components
+            closure = SimplifiedHigherOrderClosure(FT; components..., surface_forcing...)
+            ℂ = closure_parameters(closure)
+            held = filter(is_calibratable, mapreduce(component_scalar_names, (a, b) -> (a..., b...), values(components)))
+            scaled = map(value -> value * FT(1.25), ℂ)
+            changed = with_parameters(closure; scaled...)
+            promoted = with_parameters(closure; ℂᴾ = big(0.5))
+
+            isbits(closure) &&
+                all(slot -> getfield(closure, slot) === convert_eltype(FT, components[slot]), keys(components)) &&
+                all(value -> value isa FT, values(ℂ)) &&
+                allunique(keys(ℂ)) &&
+                all(name -> haskey(ℂ, name), held) &&
+                all(name -> name ∈ keys(ℂ), trainable_parameter_names(closure)) &&
+                typeof(changed) === typeof(closure) &&
+                closure_parameters(changed) == scaled &&
+                changed.constants === closure.constants &&
+                changed.surface_moisture_flux === closure.surface_moisture_flux &&
+                all(value -> value isa BigFloat, values(closure_parameters(promoted))) &&
+                promoted.tke_update.ℂᴾ == big(0.5)
+        end
+        @test all(constructed)
+
+        # A component in a slot that is not its own is refused by the constructor
+        @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; mixing_length = ColumnStabilityDamping())
+        @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; mixing_length = IntegralMixingLength())
+        @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; clipping = TanhBound())
+        @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; mixing_length = :gradient_limited)
+
+        # A sample of the combinations in which every component occurs takes steps in a column,
+        # and again after its closure is rebuilt with other coefficients and materialized
+        sample = combinations[1:19:end]
+        @test all(slot -> all(choice -> any(components -> components[slot] === choice, sample), choices[slot]), keys(choices))
+
+        for components in sample
+            closure = SimplifiedHigherOrderClosure(FT; components..., surface_forcing...)
+            model = shoc_column_model(closure)
+            for _ in 1:10
+                time_step!(model, 60)
+            end
+
+            ℂ = closure_parameters(model.closure)
+            rebuilt = with_parameters(model.closure; ℂᴾ = ℂ.ℂᴾ * FT(1.1), ℂʷ₂ = ℂ.ℂʷ₂ * FT(0.9))
+            model.closure = materialize_closure(rebuilt, closure_scalar_names(model), model.grid.architecture)
+            @test model.closure.tke_update.ℂᴾ == ℂ.ℂᴾ * FT(1.1)
+            for _ in 1:10
+                time_step!(model, 60)
+            end
+
+            diagnostics = model.closure_fields.diagnostics
+            @testset "$(join(map(summary, values(components)), ", "))" begin
+                @test all(isfinite, Array(interior(model.formulation.potential_temperature_density)))
+                @test all(isfinite, Array(interior(model.moisture_density)))
+                @test all(isfinite, Array(interior(model.tracers.ρe)))
+                @test all(isfinite, Array(interior(diagnostics.w3)))
+                @test all(x -> 0 ≤ x ≤ 1, Array(interior(diagnostics.shoc_cldfrac)))
+                @test all(≥(0), Array(interior(diagnostics.shoc_ql)))
+            end
+        end
     end
 end

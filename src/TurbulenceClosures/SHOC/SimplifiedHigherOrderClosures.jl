@@ -5,12 +5,13 @@ The Simplified Higher-Order Closure (SHOC) of Bogenschutz and Krueger (2013), re
 E3SM's `shoc.F90` (pinned at E3SM `ba53243f`) as allocation-free column functions that run one
 thread per column on CPUs and GPUs, and wired into `AtmosphereModel` as
 [`SimplifiedHigherOrderClosure`](@ref). The closure is assembled from swappable components, one
-per relation of the scheme; the preset [`OriginalSHOC`](@ref) selects those of `shoc.F90`.
+per relation of the scheme, each a keyword argument of the constructor; the defaults are those
+of `shoc.F90`.
 """
 module SimplifiedHigherOrderClosures
 
 export SimplifiedHigherOrderClosure, SHOC,
-       OriginalSHOC, DifferentiableSHOC,
+       differentiable_shoc_components,
        SHOCMixingLength,
        ColumnStabilityDamping, RichardsonStabilityFunctions,
        ForwardEulerTKE, ImplicitSinkTKE,
@@ -62,7 +63,7 @@ include("third_moments.jl")
 include("assumed_pdfs.jl")
 include("smooth_assumed_pdf.jl")
 include("shoc_column.jl")
-include("shoc_presets.jl")
+include("component_sets.jl")
 include("simplified_higher_order_closure.jl")
 include("shoc_parameters.jl")
 include("shoc_cloud.jl")

@@ -55,7 +55,14 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the empirical coefficients of every component of `closure` in one flat `NamedTuple`,
-in the order of the components. Which coefficients there are depends on the components.
+in the order of the components. Which coefficients there are depends on the components, and
+every combination of components has them collected here.
+
+The coefficients of a component that another closure also uses, such as
+[`GradientLimitedMixingLength`](@ref) or the [`RationalStabilityFunction`](@ref) of
+[`RichardsonStabilityFunctions`](@ref), are the copies this closure holds: coefficients of
+SHOC like the others, to be calibrated within it and not tied to the values of
+[`TKEBasedTurbulenceClosure`](@ref).
 
 ```jldoctest
 using Breeze
@@ -65,6 +72,19 @@ keys(closure_parameters(closure))
 
 # output
 (:ℂˡ₁, :ℂˡ₂, :ℂˡ₃, :ℂˡ₄, :ℂˡ₅, :ℂᵘ, :ℂᶜ, :ℂᵘₛ, :ℂᶜₛ, :ℂᵝ₁, :ℂᵝ₂, :ℂᵝ₃, :ℂᵝ₄, :ℂᴰ₁, :ℂᴰ₂, :ℂᴾ, :ℂᵛ₁, :ℂᵛ₂, :ℂᵛ₃, :ℂʷ₁, :ℂᶠ, :ℂʷ₂, :ℂᵍ₁, :ℂᵍ₂, :ℂᵍ₃, :ℂᵍ₄, :ℂᴴ₁, :ℂᴴ₂, :ℂᴴ₃, :ℂᴴ₄)
+```
+
+With the mixing length and the stability functions that `TKEBasedTurbulenceClosure` also uses:
+
+```jldoctest
+using Breeze
+
+closure = SimplifiedHigherOrderClosure(mixing_length = GradientLimitedMixingLength(),
+                                       turbulence_time_scale = RichardsonStabilityFunctions(RationalStabilityFunction()))
+keys(closure_parameters(closure))
+
+# output
+(:ℂˢ, :ℂⁱ, :ℂᵘ⁻, :ℂᵘ⁰, :ℂᵘ⁺, :ℂᶜ⁻, :ℂᶜ⁰, :ℂᶜ⁺, :ℂᵉ⁻, :ℂᵉ⁰, :ℂᵉ⁺, :ℂᴰ⁻, :ℂᴰ⁰, :ℂᴰ⁺, :Ri⁻, :Ri⁺, :ℂᵗ, :ℂᴾ, :ℂᵛ₁, :ℂᵛ₂, :ℂᵛ₃, :ℂʷ₁, :ℂᶠ, :ℂʷ₂, :ℂᵍ₁, :ℂᵍ₂, :ℂᵍ₃, :ℂᵍ₄, :ℂᴴ₁, :ℂᴴ₂, :ℂᴴ₃, :ℂᴴ₄)
 ```
 """
 function closure_parameters(closure)
@@ -130,7 +150,7 @@ function with_parameters(closure::SimplifiedHigherOrderClosure; kw...)
 end
 
 """
-The empirical coefficients of [`OriginalSHOC`](@ref), each with the name it has in E3SM's
+The empirical coefficients of the default components, each with the name it has in E3SM's
 `shoc.F90` (`nothing` where `shoc.F90` has only a literal).
 """
 const SHOC_COEFFICIENT_NAMES = (ℂᵘ = :Ckm, ℂᶜ = :Ckh, ℂᵘₛ = :Ckm_s, ℂᶜₛ = :Ckh_s,
@@ -143,8 +163,8 @@ const SHOC_COEFFICIENT_NAMES = (ℂᵘ = :Ckm, ℂᶜ = :Ckh, ℂᵘₛ = :Ckm_s
                                 ℂᴴ₁ = :ricr, ℂᴴ₂ = :fac, ℂᴴ₃ = :fak, ℂᴴ₄ = :betam)
 
 """
-The run-time tunables of `shoc_init` in E3SM's `shoc.F90`, by their coefficient name in
-[`OriginalSHOC`](@ref).
+The run-time tunables of `shoc_init` in E3SM's `shoc.F90`, by their coefficient name in the
+default components.
 """
 const SHOC_INIT_TUNABLE_NAMES = (ℂᵛ₁ = :thl2tune, ℂᵛ₂ = :qw2tune, ℂᵛ₃ = :qwthl2tune, ℂʷ₁ = :w2tune,
                                  ℂˡ₁ = :length_fac, ℂʷ₂ = :c_diag_3rd_mom,
@@ -155,7 +175,7 @@ const SHOC_INIT_TUNABLE_NAMES = (ℂᵛ₁ = :thl2tune, ℂᵛ₂ = :qw2tune, �
 $(TYPEDEF)
 
 A flat, read-only snapshot of the numbers that E3SM `shoc.F90` depends on, taken from a closure
-with the components of [`OriginalSHOC`](@ref): `SHOCParameters(closure)`. The closure does not
+with the default components: `SHOCParameters(closure)`. The closure does not
 store it; to change a coefficient use [`with_parameters`](@ref) on the closure. The coefficients
 are documented with the component that holds them.
 """
@@ -214,7 +234,7 @@ function SHOCParameters(closure::SimplifiedHigherOrderClosure)
     scalars = closure_scalars(closure)
     names = fieldnames(SHOCParameters)
     all(name -> haskey(scalars, name), names) ||
-        throw(ArgumentError("SHOCParameters is a snapshot of the components of OriginalSHOC, but $(summary(closure)) " *
+        throw(ArgumentError("SHOCParameters is a snapshot of the default components, but $(summary(closure)) " *
                             "has no $(filter(name -> !haskey(scalars, name), names))."))
     return SHOCParameters(promote(map(name -> scalars[name], names)...)...)
 end

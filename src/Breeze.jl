@@ -250,7 +250,7 @@ export
     GradientLimitedMixingLength, ConstantStabilityFunctions,
     RationalStabilityFunction,
     DryStaticStability, MoistStaticStability,
-    SimplifiedHigherOrderClosure, SHOC, OriginalSHOC, DifferentiableSHOC,
+    SimplifiedHigherOrderClosure, SHOC, differentiable_shoc_components,
     SHOCMixingLength, ColumnStabilityDamping, RichardsonStabilityFunctions, ForwardEulerTKE, ImplicitSinkTKE, PDFBuoyancyFlux, DowngradientBuoyancyFlux, DowngradientSecondMoments,
     CanutoThirdMoment, ResetBound, ClampBound, TanhBound, DoubleGaussianPDF, SmoothDoubleGaussianPDF, HardClipping, SmoothClipping, HoltslagBovilleDepth, SHOCConstants,
     closure_parameters, with_parameters,

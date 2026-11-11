@@ -35,7 +35,8 @@ column_data(field) = Array(interior(field))
         closure = SimplifiedHigherOrderClosure(FT; surface_temperature_flux = 0.1)
         @test isbits(closure)
         @test SHOC === SimplifiedHigherOrderClosure
-        @test SHOC(OriginalSHOC(), FT; surface_temperature_flux = 0.1) === closure
+        @test SimplifiedHigherOrderClosure(; surface_temperature_flux = 0.1) === closure
+        @test_throws MethodError SimplifiedHigherOrderClosure(FT; core = nothing)
         @test closure.mixing_length isa SHOCMixingLength{FT}
         @test closure.turbulence_time_scale isa ColumnStabilityDamping{FT}
         @test closure.tke_update isa ForwardEulerTKE{FT}
@@ -77,7 +78,7 @@ column_data(field) = Array(interior(field))
         @test closure.turbulence_time_scale.ℂᶜ == FT(0.2)
         @test_throws ArgumentError ColumnStabilityDamping(Ckh = 0.2)
 
-        # Two components must not share a coefficient name
+        # A component is refused in a slot that is not its own
         @test_throws ArgumentError SimplifiedHigherOrderClosure(FT; second_moments = ForwardEulerTKE())
     end
 

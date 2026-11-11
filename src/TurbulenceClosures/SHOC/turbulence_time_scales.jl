@@ -164,11 +164,21 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `RichardsonStabilityFunctions` with the stability `functions`, by default the
-`RationalStabilityFunction` with its published coefficients.
+`RationalStabilityFunction` with its published coefficients. The component holds its own copy
+of the coefficients of `functions`.
 """
 RichardsonStabilityFunctions(FT::DataType = Oceananigans.defaults.FloatType;
                              functions = RationalStabilityFunction(), ℂᵗ = 1, minimum_shear_squared = 1e-10) =
     RichardsonStabilityFunctions(convert_eltype(FT, functions), convert(FT, ℂᵗ), convert(FT, minimum_shear_squared))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `RichardsonStabilityFunctions` with the stability `functions` given first, as in
+`RichardsonStabilityFunctions(RationalStabilityFunction())`.
+"""
+RichardsonStabilityFunctions(functions, FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    RichardsonStabilityFunctions(FT; functions, kw...)
 
 Adapt.@adapt_structure RichardsonStabilityFunctions
 

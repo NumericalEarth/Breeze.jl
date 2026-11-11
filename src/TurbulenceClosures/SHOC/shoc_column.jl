@@ -15,7 +15,7 @@
 #####     interfaces ("zi") are `k = 1:Nz+1`; interface `k` lies between levels `k-1` and `k`, so
 #####     the Fortran level `kF` is `k = Nz + 1 - kF` and the Fortran interface `kF` is
 #####     `k = Nz + 2 - kF`. Two-dimensional quantities are indexed `[i, j, 1]`.
-#####   * With the components of `OriginalSHOC` the arithmetic (operation order, association, sweep
+#####   * With the default components of the closure the arithmetic (operation order, association, sweep
 #####     direction of the sums and of the Thomas algorithm) is that of the Fortran, so that the
 #####     results match the reference port `ShocColumn` to round-off.
 #####   * Fortran temporaries that are pure functions of stored arrays (layer thicknesses,
