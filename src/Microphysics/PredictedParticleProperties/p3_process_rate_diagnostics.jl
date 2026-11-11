@@ -8,7 +8,9 @@ using Oceananigans.Fields: Field
 # cell from the same inputs the tendency kernel assembles (`p3_grid_process_inputs`), and
 # returns one field (or the sum of several fields) of the resulting `P3ProcessRates`. The rate
 # names are a type parameter of the kernel function, so the field access is resolved at
-# compile time.
+# compile time. With a subgrid distribution (`p3.subgrid`) the kernel function also carries the
+# closure, its fields and the conserved subgrid state, and builds the same subgrid statistics as
+# the tendency kernel, so the diagnosed rates are the subgrid-averaged ones the model integrates.
 
 """
 $(TYPEDEF)
@@ -16,7 +18,7 @@ $(TYPEDEF)
 Kernel function for the sum of the P3 process rates `names` (a tuple of fields of
 `P3ProcessRates`), evaluated at the current model state. See [`MicrophysicalProcessRate`](@ref Breeze.AtmosphereModels.MicrophysicalProcessRate).
 """
-struct P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U}
+struct P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U, CL, CF, S}
     microphysics :: P
     microphysical_fields :: M
     formulation :: F
@@ -24,17 +26,24 @@ struct P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U}
     thermodynamic_constants :: C
     density :: R
     velocities :: U
+    closure :: CL
+    closure_fields :: CF
+    subgrid_state :: S
 end
 
 function P3ProcessRateKernelFunction{names}(microphysics, microphysical_fields, formulation, dynamics,
-                                           thermodynamic_constants, density, velocities) where names
+                                           thermodynamic_constants, density, velocities,
+                                           closure, closure_fields, subgrid_state) where names
     P, M, F = typeof(microphysics), typeof(microphysical_fields), typeof(formulation)
     D, C = typeof(dynamics), typeof(thermodynamic_constants)
     R, U = typeof(density), typeof(velocities)
-    return P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U}(microphysics, microphysical_fields,
-                                                                  formulation, dynamics,
-                                                                  thermodynamic_constants,
-                                                                  density, velocities)
+    CL, CF, S = typeof(closure), typeof(closure_fields), typeof(subgrid_state)
+    return P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U, CL, CF, S}(microphysics, microphysical_fields,
+                                                                             formulation, dynamics,
+                                                                             thermodynamic_constants,
+                                                                             density, velocities,
+                                                                             closure, closure_fields,
+                                                                             subgrid_state)
 end
 
 Utils.prettysummary(::P3ProcessRateKernelFunction{names}) where names =
@@ -47,7 +56,10 @@ Adapt.adapt_structure(to, k::P3ProcessRateKernelFunction{names}) where names =
                                       Adapt.adapt(to, k.dynamics),
                                       Adapt.adapt(to, k.thermodynamic_constants),
                                       Adapt.adapt(to, k.density),
-                                      Adapt.adapt(to, k.velocities))
+                                      Adapt.adapt(to, k.velocities),
+                                      Adapt.adapt(to, k.closure),
+                                      Adapt.adapt(to, k.closure_fields),
+                                      Adapt.adapt(to, k.subgrid_state))
 
 @inline function (kernel::P3ProcessRateKernelFunction{names})(i, j, k, grid) where names
     p3 = kernel.microphysics
@@ -56,9 +68,14 @@ Adapt.adapt_structure(to, k::P3ProcessRateKernelFunction{names}) where names =
                                     kernel.formulation, kernel.dynamics, constants,
                                     kernel.density, kernel.velocities)
 
+    # Subgrid statistics from the closure, as in `_p3_add_tendencies_kernel!`; `DiracStatistics`
+    # (the grid-mean rates) without a subgrid distribution.
+    𝒮 = AM.subgrid_statisticsᶜᶜᶜ(i, j, k, grid, p3.subgrid, kernel.closure, kernel.closure_fields,
+                                 kernel.subgrid_state)
+
     rates = compute_p3_process_rates(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants,
                                      inputs.properties, inputs.surface_temperature,
-                                     inputs.temperature_tendency, inputs.pressure_tendency)
+                                     inputs.temperature_tendency, inputs.pressure_tendency, 𝒮)
 
     return sum_process_rates(rates, names)
 end
@@ -77,6 +94,11 @@ function p3_process_rate_fields(p3, microphysical_fields)
     return NamedTuple{names}(map(name -> microphysical_fields[name], names))
 end
 
+# The closure and its fields feed the subgrid statistics only; without a subgrid distribution the
+# kernel function does not carry them.
+p3_subgrid_closure(::NoSubgridCorrelation, model) = (nothing, nothing)
+p3_subgrid_closure(subgrid, model) = (model.closure, model.closure_fields)
+
 function P3ProcessRate(model, p3, names)
     for name in names
         name ∈ fieldnames(P3ProcessRates) ||
@@ -84,12 +106,16 @@ function P3ProcessRate(model, p3, names)
                                        join(fieldnames(P3ProcessRates), ", :"), ".")))
     end
 
+    closure, closure_fields = p3_subgrid_closure(p3.subgrid, model)
+
     # The P3 microphysical state reads only the vertical velocity
     kernel = P3ProcessRateKernelFunction{names}(p3, p3_process_rate_fields(p3, model.microphysical_fields),
                                                 model.formulation, model.dynamics,
                                                 model.thermodynamic_constants,
                                                 AM.total_density(model.dynamics),
-                                                (; w = model.velocities.w))
+                                                (; w = model.velocities.w),
+                                                closure, closure_fields,
+                                                p3_subgrid_state(p3.subgrid, model))
 
     return KernelFunctionOperation{Center, Center, Center}(kernel, model.grid)
 end
@@ -114,7 +140,9 @@ Number rates (for example `:rain_self_collection`) are in kg⁻¹ s⁻¹.
 
 The rates are the instantaneous, sink-limited rates that P3 evaluates from the current model
 state to form its tendencies: P3 has no operator-split or substepped update, so these are
-exactly the rates the time stepper integrates at the start of the next stage. As in the
+exactly the rates the time stepper integrates at the start of the next stage. With a subgrid
+distribution (`subgrid = GaussianSubgridCorrelation(FT)`) they are the subgrid-averaged rates,
+built from the same closure statistics as the tendencies. As in the
 tendency evaluation, the diffusional-growth driver uses the adiabatic temperature and
 pressure tendency of the local vertical velocity, and the surface temperature that gates
 rime splintering is the one stored by the most recent tendency evaluation.

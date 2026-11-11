@@ -568,3 +568,65 @@ end
         end
     end
 end
+
+@testset "Cloud fraction and process-rate diagnostics use the subgrid distribution" begin
+    PPP = Breeze.Microphysics.PredictedParticleProperties
+    AM = Breeze.AtmosphereModels
+    Δt = 900
+    condensation = ExponentialRateCondensateFormation(1 / 120, Δt)
+    names = (:condensation, :autoconversion, :accretion, :rain_evaporation)
+    for Sk in (0, 2)
+        subgrid = skewed_correlation(Sk; condensation)
+        model = initialize!(p3_column_model(subgrid; sink_limiting_timescale=Δt, scalar_advection=implicit_transport()))
+        set!(model; ρqʳ=z -> ifelse(z < 800, 2e-5, 0.0))
+        time_step!(model, Δt)
+        grid = model.grid
+        Nz = size(grid, 3)
+        p3 = model.microphysics
+        constants = model.thermodynamic_constants
+
+        # The cloud fraction is that of the correlation's distribution
+        operation = cloud_fraction(model)
+        C = Array(interior(compute!(Field(operation))))[:]
+        cells = [@allowscalar(PPP.p3_cell_saturation_deficit(1, 1, k, grid, operation.kernel_function)) for k in 1:Nz]
+        @test C ≈ [subgrid_cloud(subgrid, cell.𝒮, cell.s̄, cell.a, cell.b, cell.σ₀).C for cell in cells]
+        gaussian_C = [subgrid_cloud(cell.𝒮, cell.s̄, cell.a, cell.b, cell.σ₀).C for cell in cells]
+        @test (C ≈ gaussian_C) == (Sk == 0)
+
+        # The process rates are the ones the tendency kernel evaluates: the same inputs and the
+        # same closure statistics
+        diagnosed = map(name -> Array(interior(compute!(Field(MicrophysicalProcessRate(model, name)))))[:], names)
+        ρ = AM.total_density(model.dynamics)
+        subgrid_state = PPP.p3_subgrid_state(subgrid, model)
+        kernel_rates(k, statistics) = @allowscalar begin
+            inputs = PPP.p3_grid_process_inputs(1, 1, k, grid, p3, model.microphysical_fields, model.formulation,
+                                                model.dynamics, constants, ρ, model.velocities)
+            𝒮 = statistics(k)
+            compute_p3_process_rates(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants, inputs.properties,
+                                     inputs.surface_temperature, inputs.temperature_tendency,
+                                     inputs.pressure_tendency, 𝒮)
+        end
+        closure_statistics(k) = AM.subgrid_statisticsᶜᶜᶜ(1, 1, k, grid, subgrid, model.closure, model.closure_fields, subgrid_state)
+        subgrid_rates = [kernel_rates(k, closure_statistics) for k in 1:Nz]
+        grid_mean_rates = [kernel_rates(k, k -> DiracStatistics{Float64}()) for k in 1:Nz]
+        @test @allowscalar(closure_statistics(Nz ÷ 2)) isa GaussianStatistics
+        for (n, name) in enumerate(names)
+            @test diagnosed[n] ≈ [getproperty(rates, name) for rates in subgrid_rates]
+        end
+        @test !(diagnosed[1] ≈ [rates.condensation for rates in grid_mean_rates])
+        @test any(!iszero, diagnosed[1]) && any(!iszero, diagnosed[2])
+
+        P = Array(interior(compute!(precipitation_rate(model, :liquid))))[:]
+        @test P ≈ [rates.autoconversion + rates.accretion for rates in subgrid_rates]
+
+        # The kernel function carries the closure only with a subgrid distribution
+        kernel = MicrophysicalProcessRate(model, :condensation).kernel_function
+        @test kernel.closure === model.closure && kernel.closure_fields === model.closure_fields
+    end
+
+    # Without a subgrid distribution the diagnostics are the grid-mean rates, and carry no closure
+    grid_mean = initialize!(p3_column_model(NoSubgridCorrelation()))
+    time_step!(grid_mean, 1)
+    kernel = MicrophysicalProcessRate(grid_mean, :condensation).kernel_function
+    @test kernel.closure === nothing && kernel.closure_fields === nothing && kernel.subgrid_state === nothing
+end
