@@ -113,15 +113,19 @@ end
     return (; ρ, ℳ, 𝒰, properties, surface_temperature, temperature_tendency, pressure_tendency)
 end
 
-@kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
+@kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities,
+                                            subgrid_fields)
     i, j, k = @index(Global, NTuple)
 
     inputs = p3_grid_process_inputs(i, j, k, grid, p3, μ, formulation, dynamics,
                                     constants, ρ_field, velocities)
 
+    # Statistics for the subgrid supersaturation model; `nothing` without one
+    statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.subgrid_supersaturation, subgrid_fields)
+
     result = p3_tendency_compute(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants, inputs.properties,
                                  inputs.surface_temperature, inputs.temperature_tendency,
-                                 inputs.pressure_tendency)
+                                 inputs.pressure_tendency, statistics)
 
     add_p3_tendencies!(G, i, j, k, grid, p3, result)
 end
@@ -164,7 +168,8 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
             p3_tendency_fields(model.timestepper.Gⁿ, p3),
             μ, model.formulation, model.dynamics, grid,
             model.thermodynamic_constants, p3, ρ_field,
-            model.velocities)
+            model.velocities,
+            subgrid_supersaturation_fields(p3.subgrid_supersaturation, model))
 
     return nothing
 end

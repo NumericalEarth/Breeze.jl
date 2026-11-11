@@ -223,7 +223,8 @@ cloud/precipitation fraction framework is handled separately.
                                                      μᶜˡ, λᶜˡ, nᶜˡ_bounded,
                                                      temperature_tendency,
                                                      pressure_tendency,
-                                                     lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ))
+                                                     lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ),
+                                                     Γ = nothing)
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
     floors = parameters.floors
@@ -276,8 +277,10 @@ cloud/precipitation fraction framework is handled separately.
                                                     pressure_tendency, constants)
     total_driver = external_driver + bergeron_driver
 
+    # Cloud liquid sees the subgrid supersaturation correlation Γ, when a subgrid model supplies it
+    cloud_excess = cloud_vapor_excess(Γ, vapor_excess)
     raw_cloud_growth = growth_share(cloud_relaxation, ξˡ, total_driver, total_relaxation,
-                                    vapor_excess, transient_response)
+                                    cloud_excess, transient_response)
     raw_rain_growth = growth_share(rain_relaxation, ξˡ, total_driver, total_relaxation,
                                    vapor_excess, transient_response)
     raw_ice_growth = growth_share(dry_ice_relaxation, ξⁱ, total_driver, total_relaxation,
@@ -296,7 +299,8 @@ cloud/precipitation fraction framework is handled separately.
     # rain, and the total ice mass `qⁱ_total` (computed above) for both ice clauses.
     tiny_mass = parameters.tiny_mass_evaporation_threshold
     subsaturated = -parameters.subsaturation_evaporation_threshold
-    raw_cloud_growth = ifelse((𝒮ˡ < subsaturated) & (qᶜˡ < tiny_mass),
+    𝒮ˡᶜ = cloud_excess / max(qᵛ⁺ˡ, FT(floors.divisor))
+    raw_cloud_growth = ifelse((𝒮ˡᶜ < subsaturated) & (qᶜˡ < tiny_mass),
                               -qᶜˡ / τ, raw_cloud_growth)
     raw_rain_growth = ifelse((𝒮ˡ < subsaturated) & (qʳ < tiny_mass),
                              -qʳ / τ, raw_rain_growth)

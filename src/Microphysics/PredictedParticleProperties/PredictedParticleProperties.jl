@@ -238,6 +238,7 @@ include("rain_quadrature.jl")
 ##### and the coupled saturation-adjustment solver
 #####
 
+include("subgrid_supersaturation.jl")
 include("process_rate_helpers.jl")
 include("tabulated_kernels.jl")
 include("cloud_droplet_activation_rates.jl")

@@ -117,6 +117,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)`, `Supersaturation(model)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``            |
 | ``ξ``                               | `ξ`    | `psychrometric_correction`           | Psychrometric correction, ``ξ = 1 + ℒ² qᵛ⁺ / (cᵖ Rᵛ T²)``; ``ξˡ`` and ``ξⁱ`` name the liquid and ice phase |
 | ``δqˡ``, ``δqⁱ``                    | `δqˡ`, `δqⁱ` |                               | Saturation-adjustment increments, ``δq = (qᵛ - qᵛ⁺) / ξ`` for the liquid and ice phase |
+| ``Γ``                               | `Γ`    | `subgrid_supersaturation`            | Subgrid supersaturation correlation added to the vapor excess ``qᵛ - qᵛ⁺ˡ`` in P3 cloud condensation and evaporation (kg/kg) |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
 | ``c^{ac}``                          | `cᵃᶜ`  |                                     | Acoustic sound speed, ``cᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
 | ``\mathbb{C}_{X,i}``               | `ℂˣᵢ`  | descriptive parameter property      | The ``i``-th calibratable empirical coefficient in relation ``X``; source uses modifier letters because Unicode lacks general subscript letters; state, physical constants, case inputs, switches, and numerical safeguards do not receive ``\mathbb{C}`` |

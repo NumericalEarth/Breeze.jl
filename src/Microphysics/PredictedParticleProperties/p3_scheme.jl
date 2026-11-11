@@ -15,7 +15,7 @@ using LazyArtifacts: LazyArtifacts
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS, SGS}
     # Top-level thresholds
     minimum_mass_mixing_ratio :: FT
     minimum_number_mixing_ratio :: FT
@@ -33,7 +33,17 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     aerosol :: AERO
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
     warm_rain_scheme :: WRS
+    # Subgrid supersaturation model for cloud condensation and evaporation, or nothing
+    subgrid_supersaturation :: SGS
 end
+
+# Without a subgrid supersaturation model
+PredictedParticlePropertiesMicrophysics(minimum_mass_mixing_ratio, minimum_number_mixing_ratio, ice, rain, cloud,
+                                        process_rates, precipitation_boundary_condition,
+                                        negative_moisture_correction, aerosol, warm_rain_scheme) =
+    PredictedParticlePropertiesMicrophysics(minimum_mass_mixing_ratio, minimum_number_mixing_ratio, ice, rain, cloud,
+                                            process_rates, precipitation_boundary_condition,
+                                            negative_moisture_correction, aerosol, warm_rain_scheme, nothing)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -126,6 +136,13 @@ Pass `aerosol = AerosolActivation(AerosolMode())` to predict droplet number from
 aerosol activation. Set `prognostic=true` in [`AerosolActivation`](@ref) to also
 track depletion of the unactivated aerosol reservoir.
 
+# Subgrid supersaturation
+
+`subgrid_supersaturation` is a hook for an external model of the subgrid correlation Γ that is
+added to the grid-mean vapor excess `qᵛ - qᵛ⁺ˡ` in the condensation and evaporation of cloud
+liquid (see [`subgrid_supersaturation`](@ref Breeze.Microphysics.PredictedParticleProperties.subgrid_supersaturation)).
+The default `nothing` is the grid-mean scheme.
+
 # Configuring the empirical warm-phase parameters
 
 The cloud-width, rain fall-speed, and rain-ventilation fits are each owned by a small
@@ -197,7 +214,8 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  process_rates = nothing,
                                                  vapor_excess = DiagnosticVaporExcess(),
                                                  liquid_fraction = PrognosticLiquidFraction(),
-                                                 warm_rain_scheme = KhairoutdinovKogan2000())
+                                                 warm_rain_scheme = KhairoutdinovKogan2000(),
+                                                 subgrid_supersaturation = nothing)
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
                                     vapor_excess, liquid_fraction)
@@ -207,7 +225,8 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                               minimum_mass_mixing_ratio, minimum_number_mixing_ratio,
                               precipitation_boundary_condition,
                               negative_moisture_correction,
-                              aerosol, cloud, rain, process_rates, warm_rain_scheme)
+                              aerosol, cloud, rain, process_rates, warm_rain_scheme,
+                              subgrid_supersaturation)
 end
 
 # Shorthand alias
