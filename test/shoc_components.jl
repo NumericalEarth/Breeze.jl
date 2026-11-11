@@ -538,7 +538,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test SimplifiedHigherOrderClosure(FT; turbulence_time_scale = RichardsonStabilityFunctions(RationalStabilityFunction()),
                                            tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...) === closure
         @test isbits(closure)
-        ℂ = closure_parameters(smooth_closure)
+        ℂ = closure_parameters(closure)
         @test ℂ.ℂᶜ⁰ == functions.ℂᶜ⁰ && ℂ.Ri⁺ == functions.Ri⁺ && ℂ.ℂᵗ == 1
         @test !haskey(ℂ, :ℂᵝ₁)
         changed = with_parameters(closure; ℂᶜ⁰ = FT(0.3), ℂᵗ = FT(2))
@@ -564,7 +564,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         closure = SimplifiedHigherOrderClosure(FT; mixing_length = ml, surface_forcing...)
         @test isbits(closure)
         @test closure.mixing_length === ml
-        ℂ = closure_parameters(smooth_closure)
+        ℂ = closure_parameters(closure)
         @test ℂ.ℂˢ == FT(0.8) && ℂ.ℂⁱ == FT(1.8)
         @test !haskey(ℂ, :ℂˡ₅)      # no dimensional coefficient is left
         @test with_parameters(closure; ℂⁱ = FT(1.5)).mixing_length.ℂⁱ == FT(1.5)
@@ -631,7 +631,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
 
     @testset "smooth_shoc_components" begin
         components = smooth_shoc_components(FT)
-        @test keys(components) == (:mixing_length, :turbulence_time_scale, :tke_update, :third_moment, :assumed_pdf, :clipping)
+        @test keys(components) == (:mixing_length, :turbulence_time_scale, :tke_update, :skewness, :assumed_pdf, :clipping)
         @test smooth_shoc_components() === components
         @test smooth_shoc_components(Float32).clipping === SmoothClipping(Float32(1e-2))
 
