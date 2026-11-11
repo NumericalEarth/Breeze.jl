@@ -31,7 +31,7 @@ using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_s
                                     implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
                                     factor_vertical_solver!, StoredTridiagonalFactors, factor_tridiagonal!,
                                     substitute_tridiagonal!, solve_tridiagonal_in_place!, substep_halo_mirror,
-                                    PeriodicHaloMirror
+                                    PeriodicHaloMirror, solve_tridiagonal_columns_in_place!
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, continuity_density, standard_pressure
@@ -494,6 +494,22 @@ for arch in arches
         substituted_in_place = copy(rhs)
         substitute_tridiagonal!(substituted_in_place, factors, grid)
         @test Array(substituted_in_place) == reference
+
+        # Several right-hand sides per column thread
+        other_rhs = (wave(2, 2, 1), wave(1, 1, 4))
+        other_references = map(other_rhs) do f
+            ϕ = similar(f)
+            solve!(ϕ, solver, f)
+            Array(ϕ)
+        end
+        no_arguments(shared, specific, ϕ) = ()
+        scratch = (similar(rhs), similar(rhs), similar(rhs))
+        batch = (copy(rhs), copy(other_rhs[1]), copy(other_rhs[2]))
+        solve_tridiagonal_columns_in_place!(batch, solver, scratch, no_arguments, nothing,
+                                            (nothing, nothing, nothing))
+        @test Array(batch[1]) == reference
+        @test Array(batch[2]) == other_references[1]
+        @test Array(batch[3]) == other_references[2]
     end
 
     # `_build_vertical_rhs!` reads (ρw)′ at faces k−1, k, k+1 for the implicit vertical-damping
