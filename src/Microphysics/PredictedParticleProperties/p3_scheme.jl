@@ -135,7 +135,9 @@ distribution of the saturation deficit whose spread the turbulence closure suppl
 `subgrid_statisticsᶜᶜᶜ`: cloud liquid relaxes toward the partial-cloud equilibrium σₛ G(Q)
 instead of grid-mean saturation, autoconversion and accretion act on the cloudy fraction, rain
 evaporates in the clear fraction, and activation sees the supersaturated tail. Ice processes are
-unchanged. The default `NoSubgridCorrelation()` is the grid-mean scheme.
+unchanged. With `saturation_deficit_skewness = Sk` the distribution is a skewed mixture of two
+Gaussians with the same mean and variance, which holds more liquid in its wet tail.
+The default `NoSubgridCorrelation()` is the grid-mean scheme.
 
 # Configuring the empirical warm-phase parameters
 

@@ -77,13 +77,15 @@ end
 
     # Every number of the process rates and subgrid correlation is traced, including the
     # condensate formation's rate. The limiter pass count is a type parameter, so tracking
-    # all `Number`s leaves it alone.
+    # all `Number`s leaves it alone. The traced skewness selects the skewed two-Gaussian
+    # distribution by value.
     condensation = ExponentialRateCondensateFormation(1 / 120, Δt)
-    subgrid = GaussianSubgridCorrelation(Float64; condensation)
+    subgrid = GaussianSubgridCorrelation(Float64; condensation, saturation_deficit_skewness=2)
     process_rates = Reactant.to_rarray(ProcessRate(Float64); track_numbers=Number)
     subgrid = Reactant.to_rarray(subgrid; track_numbers=Number)
     @test process_rates.autoconversion_coefficient isa Reactant.ConcreteRNumber
     @test subgrid.condensation.rate isa Reactant.ConcreteRNumber
+    @test subgrid.saturation_deficit_skewness isa Reactant.ConcreteRNumber
     microphysics = rebuild(P3Microphysics(); process_rates, subgrid)
 
     grid = RectilinearGrid(ReactantState(); size=ColumnEnsembleSize(Nz=8, ensemble=(2, 1), Hz=3),
@@ -114,6 +116,9 @@ end
         @test isfinite(loss_value)
         @test all(isfinite, ad_grad)
         @test any(!iszero, ad_grad)
+        ∂Sk = Float64(dmodel.microphysics.subgrid.saturation_deficit_skewness)
+        @info "saturation_deficit_skewness gradient" loss_value ∂Sk
+        @test isfinite(∂Sk)
     end
 end
 

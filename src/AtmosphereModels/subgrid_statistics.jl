@@ -175,6 +175,16 @@ kept. The spread may be regularized smoothly with `spread_regularization` ε (de
 σₛ² = σ² + σ₀² + (ε qᵛ⁺)²: with no variance and no floor the distribution is a step of width
 ~1e-19 in s̄, whose derivative ∂C/∂s̄ is unbounded, which an in-cloud quantity such as the
 phase-relaxation radius r̄ ∝ (qᶜˡ / C)^(1/3) passes to the gradient; ε keeps it finite.
+A non-zero `saturation_deficit_skewness` Sk replaces the Gaussian with a skewed mixture of two
+Gaussians of equal width (a binormal; [Larson et al. (2001)](@cite Larson2001)): each component
+holds the fraction γ = `component_variance_fraction` of the variance σₛ², and the weight
+aʷ = [1 - Sk / √(4 (1 - γ)³ + Sk²)] / 2 of the wet component and the component offsets
++σₛ √((1 - γ)(1 - aʷ) / aʷ) and -σₛ √((1 - γ) aʷ / (1 - aʷ)) are such that the mixture keeps the
+mean s̄ and the variance σₛ² (floor included) and has the third moment Sk σₛ³. It applies to the
+Gaussian statistics of closures without a mass-flux member; a mixture supplied by a closure
+(`DoubleGaussianStatistics`) is used as it is. Sk = 0 (the default) is exactly the Gaussian;
+the symmetric binormal that Sk → 0 tends to is not, so the distribution is discontinuous in Sk
+at Sk = 0 and smooth everywhere else.
 Autoconversion is averaged over an in-cloud gamma distribution of shape ν, which multiplies the
 in-cloud rate by `autoconversion_enhancement` E = Γ(ν + p) / (Γ(ν) νᵖ)
 (Morrison and Gettelman 2008); the cloud fraction used to form in-cloud means is floored at
@@ -192,7 +202,7 @@ julia> c.grid_variance_coefficient, c.minimum_saturation_deficit_spread
 (0.08333333333333333, 0.0001)
 
 julia> round(c.autoconversion_enhancement, digits=4)
-3.0247
+3.2156
 
 julia> c.relative_minimum_saturation_deficit_spread === nothing
 true
@@ -202,6 +212,12 @@ julia> GaussianSubgridCorrelation(Float64; relative_minimum_saturation_deficit_s
 
 julia> GaussianSubgridCorrelation(Float64; phase_relaxation_coefficient=1).phase_relaxation_coefficient
 1.0
+
+julia> c.saturation_deficit_skewness, c.component_variance_fraction
+(0.0, 0.4)
+
+julia> GaussianSubgridCorrelation(Float64; saturation_deficit_skewness=2).saturation_deficit_skewness
+2.0
 ```
 """
 struct GaussianSubgridCorrelation{FT, CF, RF, PR} <: AbstractSubgridCorrelation
@@ -225,6 +241,10 @@ struct GaussianSubgridCorrelation{FT, CF, RF, PR} <: AbstractSubgridCorrelation
     activation_radius :: FT
     "non-dimensional spread regularization ε, added in quadrature as σₛ² += (ε qᵛ⁺)²"
     spread_regularization :: FT
+    "non-dimensional skewness Sk = ⟨s'³⟩ / σₛ³ of the saturation deficit; 0 is the Gaussian"
+    saturation_deficit_skewness :: FT
+    "fraction γ of the variance σₛ² within each component of the skewed (binormal) distribution"
+    component_variance_fraction :: FT
 end
 
 # Walk the fields so that traced numbers (`Reactant.to_rarray`) are converted for the kernel.
@@ -238,7 +258,9 @@ Adapt.adapt_structure(to, c::GaussianSubgridCorrelation) =
                                adapt(to, c.relative_minimum_saturation_deficit_spread),
                                adapt(to, c.phase_relaxation_coefficient),
                                adapt(to, c.activation_radius),
-                               adapt(to, c.spread_regularization))
+                               adapt(to, c.spread_regularization),
+                               adapt(to, c.saturation_deficit_skewness),
+                               adapt(to, c.component_variance_fraction))
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -251,6 +273,8 @@ is computed from the in-cloud gamma shape `cloud_liquid_shape` ν and the autoco
 α replaces the constant condensation timescale with the droplet phase-relaxation time
 1 / (α 4π Dᵛ N r̄), r̄ floored at `activation_radius`; `nothing` (the default) keeps the constant
 timescale. A number `spread_regularization` ε adds (ε qᵛ⁺)² to the saturation-deficit variance.
+A non-zero `saturation_deficit_skewness` Sk selects the skewed two-Gaussian distribution, whose
+components each hold the fraction `component_variance_fraction` γ, 0 < γ < 1, of the variance.
 """
 function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatType;
                                     variance_coefficient = 1,
@@ -263,7 +287,11 @@ function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatTy
                                     relative_minimum_saturation_deficit_spread = nothing,
                                     phase_relaxation_coefficient = nothing,
                                     activation_radius = 1e-6,
-                                    spread_regularization = 0)
+                                    spread_regularization = 0,
+                                    saturation_deficit_skewness = 0,
+                                    component_variance_fraction = 0.4)
+    0 < component_variance_fraction < 1 ||
+        throw(ArgumentError("component_variance_fraction must lie between 0 and 1 (exclusive)."))
     ν = cloud_liquid_shape
     p = autoconversion_exponent
     E = gamma(ν + p) / (gamma(ν) * ν^p)
@@ -276,7 +304,9 @@ function GaussianSubgridCorrelation(FT::DataType = Oceananigans.defaults.FloatTy
                                       convert_or_nothing(FT, relative_minimum_saturation_deficit_spread),
                                       convert_or_nothing(FT, phase_relaxation_coefficient),
                                       convert(FT, activation_radius),
-                                      convert(FT, spread_regularization))
+                                      convert(FT, spread_regularization),
+                                      convert(FT, saturation_deficit_skewness),
+                                      convert(FT, component_variance_fraction))
 end
 
 convert_or_nothing(FT, ::Nothing) = nothing

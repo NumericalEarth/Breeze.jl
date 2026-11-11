@@ -19,6 +19,10 @@
 # * activation sees the supersaturated tail, with in-cloud vapor excess Γ (q⁺ - qᶜˡ) / C,
 #   weighted by C.
 #
+# The distribution is the one `subgrid_cloud` assigns to the correlation and the statistics: with
+# a non-zero `saturation_deficit_skewness`, Gaussian statistics become the skewed two-Gaussian
+# (binormal) distribution, and every rate above uses its C and q⁺.
+#
 # The distribution applies to warm cells (T ≥ T₀); colder cells, and every ice process, keep the
 # grid-mean form. The spread floor is capped at a tenth of qᵛ⁺ so that it cannot condense the
 # vapor of dry, cold air. `DiracStatistics` returns the grid-mean rates unchanged.
@@ -73,7 +77,7 @@ end
     deficit = p3_saturation_deficit(correlation, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, 𝒰, constants)
     Γ = deficit.Γ
     s̄ = deficit.s̄
-    cloud = subgrid_cloud(𝒮, s̄, deficit.a, deficit.b, deficit.σ₀)
+    cloud = subgrid_cloud(correlation, 𝒮, s̄, deficit.a, deficit.b, deficit.σ₀)
     C = cloud.C
     q⁺ = min(cloud.q⁺, max(0, qᵛ) + qᶜˡ)
     Cᶠ = max(C, correlation.minimum_cloud_fraction)

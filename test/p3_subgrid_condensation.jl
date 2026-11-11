@@ -175,7 +175,7 @@ end
         σₛ = Breeze.Microphysics.saturation_deficit_spread(cell.𝒮, cell.a, cell.b, cell.σ₀)
         @test σₛ > 0
         @test C[k] ≈ normal_cumulative_distribution(cell.s̄ / σₛ)
-        @test C[k] == PPP.subgrid_cloud(cell.𝒮, cell.s̄, cell.a, cell.b, cell.σ₀).C
+        @test C[k] ≈ PPP.subgrid_cloud(cell.𝒮, cell.s̄, cell.a, cell.b, cell.σ₀).C
     end
 
     # σₛ = 0: saturated cells are cloudy, unsaturated cells clear
@@ -394,4 +394,177 @@ end
     @test PPP.saturation_deficit_spread_floor(default, qᵛ⁺) === min(1e-4, qᵛ⁺ / 10)
     regularized = GaussianSubgridCorrelation(Float64; minimum_saturation_deficit_spread=0, spread_regularization=1e-4)
     @test PPP.saturation_deficit_spread_floor(regularized, qᵛ⁺) ≈ 1e-4 * qᵛ⁺
+end
+
+#####
+##### Skewed two-Gaussian (binormal) distribution of the saturation deficit
+#####
+
+using Breeze.Microphysics: binormal_components
+
+skewed_correlation(Sk; γ = 0.4, options...) =
+    GaussianSubgridCorrelation(Float64; saturation_deficit_skewness=Sk, component_variance_fraction=γ, options...)
+
+@testset "Skewed two-Gaussian distribution: zero skewness is the Gaussian, bitwise" begin
+    default = GaussianSubgridCorrelation(Float64)
+    @test default.saturation_deficit_skewness === 0.0
+    @test default.component_variance_fraction === 0.4
+    @test GaussianSubgridCorrelation(Float32; saturation_deficit_skewness=2).saturation_deficit_skewness === 2f0
+    @test_throws ArgumentError GaussianSubgridCorrelation(Float64; component_variance_fraction=1)
+    @test_throws ArgumentError GaussianSubgridCorrelation(Float64; component_variance_fraction=0)
+
+    a, b = 0.4, 1e-3
+    for 𝒮 in (GaussianStatistics(1e-8, 0.01, -5e-6), GaussianStatistics(4e-7, 0.0, 0.0), GaussianStatistics{Float64}()),
+        s̄ in (-1e-3, -2e-4, 0.0, 3e-4), σ₀ in (0.0, 1e-4), γ in (0.4, 0.6)
+        gaussian = subgrid_cloud(𝒮, s̄, a, b, σ₀)
+        @test subgrid_cloud(skewed_correlation(0; γ), 𝒮, s̄, a, b, σ₀) === gaussian
+        @test subgrid_cloud(NoSubgridCorrelation(), 𝒮, s̄, a, b, σ₀) === gaussian
+        skewed = subgrid_cloud(skewed_correlation(2; γ), 𝒮, s̄, a, b, σ₀)
+        @test isfinite(skewed.C) && isfinite(skewed.q⁺)
+        @test 0 ≤ skewed.C ≤ 1 && skewed.q⁺ ≥ 0
+    end
+
+    # A mixture supplied by a closure is used as it is
+    𝒢 = GaussianStatistics(1e-8, 0.01, -5e-6)
+    mixture = DoubleGaussianStatistics(0.1, 1e-4, -0.1, 𝒢, 𝒢)
+    @test subgrid_cloud(skewed_correlation(2), mixture, -2e-4, a, b, 1e-4) === subgrid_cloud(mixture, -2e-4, a, b, 1e-4)
+
+    # Float32 statistics and parameters give the number types of the Gaussian
+    𝒮₃₂ = GaussianStatistics(1f-7, 0f0, 0f0)
+    gaussian = subgrid_cloud(𝒮₃₂, -2f-4, 1f0, 0f0, 0f0)
+    skewed = subgrid_cloud(GaussianSubgridCorrelation(Float32; saturation_deficit_skewness=2), 𝒮₃₂, -2f-4, 1f0, 0f0, 0f0)
+    @test typeof(skewed.C) === typeof(gaussian.C) && typeof(skewed.q⁺) === typeof(gaussian.q⁺)
+    @test subgrid_cloud(GaussianSubgridCorrelation(Float32), 𝒮₃₂, -2f-4, 1f0, 0f0, 0f0) === gaussian
+    @test skewed.C ≈ subgrid_cloud(skewed_correlation(2), GaussianStatistics(1e-7, 0.0, 0.0), -2e-4, 1.0, 0.0, 0.0).C rtol=1e-4
+
+    # A column stepped with an explicit zero skewness is the default column
+    Δt = 900
+    condensation = ExponentialRateCondensateFormation(1 / 120, Δt)
+    columns = map((GaussianSubgridCorrelation(Float64; condensation), skewed_correlation(0; γ=0.6, condensation),
+                   skewed_correlation(2; condensation))) do subgrid
+        model = initialize!(p3_column_model(subgrid; sink_limiting_timescale=Δt, scalar_advection=implicit_transport()))
+        for _ in 1:4
+            time_step!(model, Δt)
+        end
+        map(name -> @allowscalar(Array(interior(Oceananigans.fields(model)[name]))), (:ρqᵛ, :ρqᶜˡ, :ρqʳ, :ρθ, :ρe))
+    end
+    @test columns[1] == columns[2]
+    @test all(values -> all(isfinite, values), columns[3])
+    @test columns[1][2] != columns[3][2] # the skewness changes the cloud liquid
+end
+
+@testset "Skewed two-Gaussian distribution: mean, variance and skewness" begin
+    σₛ = 3e-4
+    for Sk in (-1.0, 0.0, 0.3, 1.0, 2.0, 4.0), γ in (0.4, 0.6)
+        c = binormal_components(σₛ, Sk, γ)
+        aʷ = c.aʷ
+        @test 0 < aʷ < 1
+        @test c.σ² ≈ γ * σₛ^2
+        mean_offset = aʷ * c.δsʷ + (1 - aʷ) * c.δsᵈ
+        variance = aʷ * c.δsʷ^2 + (1 - aʷ) * c.δsᵈ^2 + c.σ²
+        third_moment = aʷ * c.δsʷ^3 + (1 - aʷ) * c.δsᵈ^3 + 3 * c.σ² * mean_offset
+        @test abs(mean_offset) ≤ 1e-12 * σₛ
+        @test variance ≈ σₛ^2 rtol=1e-12
+        @test third_moment / σₛ^3 ≈ Sk rtol=1e-11 atol=1e-12
+
+        # C and q⁺ are the integrals of the indicator and of max(0, s) over the mixture density,
+        # whose first three moments, integrated directly, are (s̄, σₛ², Sk σₛ³)
+        s̄ = -2e-4
+        σ = sqrt(c.σ²)
+        mixture_integral(f) = aʷ * gaussian_quadrature(f, s̄ + c.δsʷ, σ) + (1 - aʷ) * gaussian_quadrature(f, s̄ + c.δsᵈ, σ)
+        @test mixture_integral(s -> s) ≈ s̄ rtol=1e-6
+        @test mixture_integral(s -> (s - s̄)^2) ≈ σₛ^2 rtol=1e-6
+        @test mixture_integral(s -> (s - s̄)^3) / σₛ^3 ≈ Sk rtol=1e-5 atol=1e-6
+        cloud = subgrid_cloud(skewed_correlation(Sk; γ), GaussianStatistics(σₛ^2, 0.0, 0.0), s̄, 1.0, 0.0, 0.0)
+        Sk == 0 && continue # zero skewness is the Gaussian, not the symmetric mixture
+        @test cloud.C ≈ mixture_integral(s -> s > 0) rtol=1e-4 atol=1e-9 # midpoint rule on a step
+        @test cloud.q⁺ ≈ mixture_integral(s -> max(0, s)) rtol=1e-5 atol=1e-12
+    end
+
+    # The spread floor σ₀ is part of the variance the mixture preserves
+    floored = subgrid_cloud(skewed_correlation(2), GaussianStatistics(3e-8, 0.0, 0.0), -2e-4, 1.0, 0.0, 1e-4)
+    unfloored = subgrid_cloud(skewed_correlation(2), GaussianStatistics(4e-8, 0.0, 0.0), -2e-4, 1.0, 0.0, 0.0)
+    @test floored.C ≈ unfloored.C && floored.q⁺ ≈ unfloored.q⁺
+end
+
+@testset "Skewed two-Gaussian distribution: the offline LES analysis values" begin
+    # `gauss2(s̄, σ, Sk; γ)` and `binormal` of squall-campaign/jobs/les-subgrid-analysis/load.jl
+    # (GAMMA = 0.4), evaluated there with the exact error function
+    reference = ((s = -0.0002, σ = 0.0002, Sk = 2.0, γ = 0.4, C = 0.07710838260703108, q = 2.4840410821788686e-5, a = 0.04657734368124272, x1 = 0.0005009079667224059, x2 = -0.00023424130005573926),
+                 (s = -0.0006, σ = 0.0003, Sk = 2.0, γ = 0.4, C = 0.04645752642493493, q = 2.1062640249349156e-5, a = 0.04657734368124272, x1 = 0.00045136195008360885, x2 = -0.0006513619500836088),
+                 (s = 0.0001, σ = 0.00025, Sk = 1.0, γ = 0.4, C = 0.6189118508422988, q = 0.00014491236723564405, a = 0.13377579043184518, x1 = 0.0005927674694312671, x2 = 2.3899197235399816e-5),
+                 (s = -0.0004, σ = 0.0002, Sk = 3.0, γ = 0.6, C = 0.010955235217562927, q = 7.924587973741758e-6, a = 0.00696291608107813, x1 = 0.0011105918747922594, x2 = -0.0004105918747922568),
+                 (s = -0.0001, σ = 0.0004, Sk = 0.3, γ = 0.4, C = 0.37685078406185385, q = 0.00012462916748235783, a = 0.3464262207915122, x1 = 0.00032557641192199413, x2 = -0.00032557641192199413),
+                 (s = -0.0008, σ = 0.0002, Sk = 4.0, γ = 0.4, C = 0.012976659477037635, q = 7.151443406981145e-6, a = 0.012976745058421335, x1 = 0.0005510966809445646, x2 = -0.000817763347611232),
+                 (s = -0.0003, σ = 0.0003, Sk = -0.4, γ = 0.4, C = 0.15302016080901684, q = 1.6633295000578075e-5, a = 0.6976423537605237, x1 = -0.00014701778718652963, x2 = -0.0006529822128134703),
+                 (s = 0.0, σ = 0.0001, Sk = 2.0, γ = 0.4, C = 0.42156839824819997, q = 3.309378780827038e-5, a = 0.04657734368124272, x1 = 0.00035045398336120293, x2 = -1.7120650027869627e-5))
+    for r in reference
+        c = binormal_components(r.σ, r.Sk, r.γ)
+        @test c.aʷ ≈ r.a rtol=1e-12
+        @test r.s + c.δsʷ ≈ r.x1 rtol=1e-11
+        @test r.s + c.δsᵈ ≈ r.x2 rtol=1e-11
+        # qᵗ variance σ² with a = 1, b = 0 and no floor, then the same σ² split between qᵗ and the floor
+        for (σ²ᵗ, σ₀) in ((r.σ^2, 0.0), (r.σ^2 / 2, r.σ / sqrt(2)))
+            cloud = subgrid_cloud(skewed_correlation(r.Sk; γ=r.γ), GaussianStatistics(σ²ᵗ, 0.0, 0.0), r.s, 1.0, 0.0, σ₀)
+            @test cloud.C ≈ r.C rtol=2e-6
+            @test cloud.q⁺ ≈ r.q rtol=2e-6
+        end
+    end
+end
+
+# The P3 scheme with the skewness of its subgrid correlation replaced, as a calibration does
+function with_skewness(p3, Sk)
+    c = p3.subgrid
+    subgrid = GaussianSubgridCorrelation(ntuple(n -> getfield(c, n), Val(10))..., Sk, c.component_variance_fraction)
+    return PredictedParticlePropertiesMicrophysics(ntuple(n -> getfield(p3, n), Val(10))..., subgrid)
+end
+
+@testset "Skewed two-Gaussian distribution: Enzyme against finite differences" begin
+    # C and q⁺ are smooth in the skewness and in the moments
+    for Sk₀ in (0.3, 1.0, 2.0, 4.0), s̄₀ in (-6e-4, -2e-4, 1e-4), output in (:C, :q⁺)
+        x₀ = (Sk₀, s̄₀, 9e-8)
+        cloud(x) = getproperty(subgrid_cloud(skewed_correlation(x[1]), GaussianStatistics(x[3], 0.0, 0.0), x[2], 1.0, 0.0, 0.0), output)
+        for j in 1:3
+            f = v -> cloud(ntuple(k -> k == j ? v : x₀[k], 3))
+            ad = only(Enzyme.autodiff(Enzyme.Forward, f, Enzyme.Duplicated(x₀[j], 1.0)))
+            fd = central_difference(f, x₀[j], 1e-5)
+            @test isfinite(ad)
+            @test abs(ad - fd) ≤ 1e-4 * abs(fd) + 1e-9 * abs(f(x₀[j]) / x₀[j])
+        end
+    end
+
+    # The subgrid P3 tendencies: reverse mode in the state at Sk = 2, and in the skewness itself
+    Δt = 900.0
+    constants = ThermodynamicConstants(Float64)
+    T = 280.0
+    qᵛ⁺ = saturation_specific_humidity(T, 1.0, constants, PlanarLiquidSurface())
+    @test with_skewness(p3_subgrid_cell(1 / Δt, Δt), 2.0).subgrid.saturation_deficit_skewness === 2.0
+    for α in (nothing, 1.0), x_rate in (0.1, 10.0, 1000.0)
+        p3 = p3_subgrid_cell(x_rate / Δt, Δt; phase_relaxation_coefficient=α, saturation_deficit_skewness=2,
+                             variance_coefficient=4, grid_variance_coefficient=0)
+        for (qᵛ, qᶜˡ) in ((qᵛ⁺ - 2e-4, 1e-4), (qᵛ⁺ + 1e-5, 1e-4), (qᵛ⁺ - 5e-4, 0.0))
+            x₀ = (qᵛ, qᶜˡ, T, 1e-8, 0.02)
+            gaussian = condensation_increment(x₀, with_skewness(p3, 0.0), constants)
+            @test condensation_increment(x₀, p3, constants) != gaussian
+            for output in 1:2
+                for j in 1:5
+                    x₀[j] == 0 && continue
+                    f = v -> condensation_increment(ntuple(k -> k == j ? v : x₀[k], 5), p3, constants)[output]
+                    ad = reverse_gradient(f, x₀[j])
+                    fd = central_difference(f, x₀[j], 1e-5)
+                    scale = max(abs(fd), 1e-12 * abs(f(x₀[j]) / x₀[j]))
+                    @test isfinite(ad)
+                    @test abs(ad - fd) ≤ 1e-3 * scale
+                end
+                for Sk in (0.3, 1.0, 2.0, 4.0)
+                    f = v -> condensation_increment(x₀, with_skewness(p3, v), constants)[output]
+                    ad = reverse_gradient(f, Sk)
+                    fd = central_difference(f, Sk, 1e-5)
+                    scale = max(abs(fd), 1e-12 * abs(f(Sk) / Sk))
+                    @test isfinite(ad)
+                    @test abs(ad - fd) ≤ 1e-3 * scale
+                end
+            end
+        end
+    end
 end

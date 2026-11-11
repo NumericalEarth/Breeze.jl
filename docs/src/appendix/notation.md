@@ -111,6 +111,9 @@ The following table also uses a few conventions that suffuse the source code and
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |
 | ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation specific humidity over a planar liquid surface                      |
 | ``qᵛ⁺ⁱ``                            | `qᵛ⁺ⁱ` |                                     | Saturation specific humidity over a planar ice surface                         |
+| ``σₛ``                              | `σₛ`   |                                     | Subgrid spread (standard deviation) of the saturation deficit ``s``            |
+| ``Sk``                              | `Sk`   | `GaussianSubgridCorrelation.saturation_deficit_skewness` | Non-dimensional subgrid skewness of the saturation deficit, ``Sk = ⟨s'^3⟩ / σₛ^3`` |
+| ``aʷ``                              | `aʷ`   |                                     | Weight of the wet component of the skewed two-Gaussian saturation-deficit distribution; ``δsʷ`` and ``δsᵈ`` are the offsets of the wet and dry component means |
 | ``pᵛ``                              | `pᵛ`   |                                     | Vapor pressure (partial pressure of water vapor), ``pᵛ = ρ qᵛ Rᵛ T``           |
 | ``pᵛ⁺``                             | `pᵛ⁺`  |                                     | Saturation vapor pressure                                                      |
 | ``\mathscr{H}``                     | `ℋ`    | `RelativeHumidity(model)`           | Relative humidity, ``ℋ = pᵛ / pᵛ⁺``                                            |

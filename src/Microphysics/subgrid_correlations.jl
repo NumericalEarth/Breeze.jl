@@ -123,8 +123,11 @@ julia> round(cloud.C, digits=6)
 0.5
 ```
 """
-@inline function subgrid_cloud(𝒮::GaussianStatistics, s̄, a, b, σ₀)
-    σ² = saturation_deficit_variance(𝒮, a, b, σ₀)
+@inline subgrid_cloud(𝒮::GaussianStatistics, s̄, a, b, σ₀) =
+    gaussian_cloud(s̄, saturation_deficit_variance(𝒮, a, b, σ₀))
+
+# Cloud fraction and mean condensate of a Gaussian saturation deficit with mean s̄ and variance σ²
+@inline function gaussian_cloud(s̄, σ²)
     σₛ = sqrt(max(σ², minimum_saturation_deficit_variance))
     # A vanishing spread is the Dirac limit: all-or-nothing cloud (C = 0 at s̄ = 0, where Φ(0) = 1/2)
     dirac = σ² < minimum_saturation_deficit_variance
@@ -141,6 +144,108 @@ end
     C = aᵘ * updraft.C + (1 - aᵘ) * environment.C
     q⁺ = aᵘ * updraft.q⁺ + (1 - aᵘ) * environment.q⁺
     return (; C, q⁺)
+end
+
+#####
+##### Skewed two-Gaussian (binormal) distribution of the saturation deficit
+#####
+#
+# Cumulus layers hold their liquid in a positively skewed tail that a Gaussian of the same variance
+# misses. The binormal is the mixture of two Gaussians of equal width that has the Gaussian's mean
+# s̄ and variance σₛ² and a prescribed non-dimensional skewness Sk = ⟨s'³⟩ / σₛ³. With each
+# component holding the fraction γ of the variance, a wet component of weight aʷ at s̄ + δsʷ and
+# a dry one of weight 1 - aʷ at s̄ + δsᵈ,
+#
+#   aʷ = [1 - Sk / √(4 (1 - γ)³ + Sk²)] / 2,
+#   δsʷ = σₛ √((1 - γ) (1 - aʷ) / aʷ),    δsᵈ = -σₛ √((1 - γ) aʷ / (1 - aʷ)),    σ² = γ σₛ²,
+#
+# so that aʷ δsʷ + (1 - aʷ) δsᵈ = 0, the offsets carry the variance (1 - γ) σₛ² and the third
+# moment aʷ δsʷ³ + (1 - aʷ) δsᵈ³ = Sk σₛ³. Everything is smooth in Sk and σₛ. The weight is kept
+# within [1e-4, 1 - 1e-4], which binds only for |Sk| ≳ 100 (1 - γ)^(3/2).
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Components of the skewed two-Gaussian (binormal) distribution with spread `σₛ`, non-dimensional
+skewness `Sk` and component variance fraction `γ`: the weight `aʷ` of the wet component, the
+offsets `δsʷ` and `δsᵈ` of the wet and dry component means from the mean, and the component
+variance `σ²`. The mixture has zero mean offset, variance σₛ² and third moment Sk σₛ³.
+
+```jldoctest
+julia> using Breeze.Microphysics: binormal_components
+
+julia> c = binormal_components(1.0, 2.0, 0.4);
+
+julia> round(c.aʷ, digits=4), round(c.δsʷ, digits=4), round(c.δsᵈ, digits=4), round(c.σ², digits=4)
+(0.0466, 3.5045, -0.1712, 0.4)
+
+julia> round(c.aʷ * c.δsʷ^3 + (1 - c.aʷ) * c.δsᵈ^3, digits=12) # the skewness
+2.0
+```
+"""
+@inline function binormal_components(σₛ, Sk, γ)
+    aʷ = (1 - Sk / sqrt(4 * (1 - γ)^3 + Sk^2)) / 2
+    ϵ = oftype(aʷ, 1e-4)
+    aʷ = min(max(aʷ, ϵ), 1 - ϵ)
+    δsʷ = σₛ * sqrt((1 - γ) * (1 - aʷ) / aʷ)
+    δsᵈ = -σₛ * sqrt((1 - γ) * aʷ / (1 - aʷ))
+    return (; aʷ, δsʷ, δsᵈ, σ² = γ * σₛ^2)
+end
+
+# Cloud fraction and mean condensate of the binormal with mean s̄, variance σ², skewness Sk
+@inline function binormal_cloud(s̄, σ², Sk, γ)
+    σₛ = sqrt(max(σ², minimum_saturation_deficit_variance))
+    components = binormal_components(σₛ, Sk, γ)
+    aʷ = components.aʷ
+    wet = gaussian_cloud(s̄ + components.δsʷ, γ * σ²)
+    dry = gaussian_cloud(s̄ + components.δsᵈ, γ * σ²)
+    C = aʷ * wet.C + (1 - aʷ) * dry.C
+    q⁺ = aʷ * wet.q⁺ + (1 - aʷ) * dry.q⁺
+    return (; C, q⁺)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Cloud fraction `C` and equilibrium mean condensate `q⁺` of the subgrid distribution that
+`correlation` assigns to the statistics `𝒮`. A
+[`GaussianSubgridCorrelation`](@ref Breeze.AtmosphereModels.GaussianSubgridCorrelation) with a
+non-zero `saturation_deficit_skewness` turns Gaussian statistics into the skewed two-Gaussian
+distribution of [`binormal_components`](@ref Breeze.Microphysics.binormal_components); zero skewness returns the Gaussian values exactly.
+Any other pair is the distribution of `𝒮` itself.
+
+```jldoctest
+julia> using Breeze.Microphysics: subgrid_cloud
+
+julia> using Breeze.AtmosphereModels: GaussianStatistics, GaussianSubgridCorrelation
+
+julia> 𝒮 = GaussianStatistics(1e-7, 0.0, 0.0);
+
+julia> gaussian = subgrid_cloud(GaussianSubgridCorrelation(Float64), 𝒮, -4e-4, 1.0, 0.0, 0.0);
+
+julia> skewed = subgrid_cloud(GaussianSubgridCorrelation(Float64; saturation_deficit_skewness=2), 𝒮, -4e-4, 1.0, 0.0, 0.0);
+
+julia> gaussian == subgrid_cloud(𝒮, -4e-4, 1.0, 0.0, 0.0)
+true
+
+julia> round(skewed.q⁺ / gaussian.q⁺, digits=1) # the skewed tail holds more liquid
+2.2
+```
+"""
+@inline subgrid_cloud(correlation, 𝒮, s̄, a, b, σ₀) = subgrid_cloud(𝒮, s̄, a, b, σ₀)
+
+@inline function subgrid_cloud(correlation::GaussianSubgridCorrelation, 𝒮::GaussianStatistics, s̄, a, b, σ₀)
+    σ² = saturation_deficit_variance(𝒮, a, b, σ₀)
+    # The parameters take the number type of the state, so that a traced parameter mixes with
+    # the literals below like any other value.
+    Sk = correlation.saturation_deficit_skewness * one(σ²)
+    γ = correlation.component_variance_fraction * one(σ²)
+    gaussian = gaussian_cloud(s̄, σ²)
+    skewed = binormal_cloud(s̄, σ², Sk, γ)
+    # Selected by value, so that Sk can be a traced or differentiated parameter; both branches
+    # are finite for every Sk.
+    symmetric = Sk == 0
+    return (; C = ifelse(symmetric, gaussian.C, skewed.C), q⁺ = ifelse(symmetric, gaussian.q⁺, skewed.q⁺))
 end
 
 #####

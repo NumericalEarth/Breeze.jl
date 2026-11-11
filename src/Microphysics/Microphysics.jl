@@ -33,7 +33,7 @@ using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fr
     materialize_microphysical_fields, update_microphysical_fields!,
     NothingMicrophysicalState, WarmRainState, thermodynamic_state_density,
     specific_prognostic_moisture, total_density, invalid_time_step,
-    GaussianStatistics, DoubleGaussianStatistics
+    GaussianStatistics, DoubleGaussianStatistics, GaussianSubgridCorrelation
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")

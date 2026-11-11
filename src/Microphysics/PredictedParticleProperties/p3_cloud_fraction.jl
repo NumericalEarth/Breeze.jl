@@ -49,6 +49,10 @@ Microphysics.cloud_fraction(model, p3::P3) =
 
 @inline subgrid_cloud_fraction(𝒮, s̄, a, b, σ₀) = subgrid_cloud(𝒮, s̄, a, b, σ₀).C
 
+# The distribution the correlation assigns to the statistics (skewed for a non-zero skewness)
+@inline subgrid_cloud_fraction(correlation, 𝒮::DiracStatistics, s̄, a, b, σ₀) = subgrid_cloud_fraction(𝒮, s̄, a, b, σ₀)
+@inline subgrid_cloud_fraction(correlation, 𝒮, s̄, a, b, σ₀) = subgrid_cloud(correlation, 𝒮, s̄, a, b, σ₀).C
+
 # The subgrid statistics 𝒮 and mean saturation deficit of cell (i, j, k), from the same state
 # `_p3_add_tendencies_kernel!` and `compute_p3_process_rates` build.
 @inline function p3_cell_saturation_deficit(i, j, k, grid, d::P3CloudFractionKernelFunction)
@@ -79,5 +83,5 @@ end
 
 @inline function (d::P3CloudFractionKernelFunction)(i, j, k, grid)
     cell = p3_cell_saturation_deficit(i, j, k, grid, d)
-    return subgrid_cloud_fraction(cell.𝒮, cell.s̄, cell.a, cell.b, cell.σ₀)
+    return subgrid_cloud_fraction(d.microphysics.subgrid, cell.𝒮, cell.s̄, cell.a, cell.b, cell.σ₀)
 end
