@@ -429,8 +429,8 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     # with the pre-balance density still leaves `nᵃ = ρnᵃ / ρ` at the configured value.
     aerosol_number_given || set_default_aerosol_number!(model)
 
-    # Apply a mask
-    foreach(mask_immersed_field!, prognostic_fields(model))
+    # Zero momentum inside immersed cells; masking density would make every specific field 0/0 there.
+    foreach(mask_immersed_field!, model.momentum)
     update_state!(model, compute_tendencies=false)
 
     # Recompute the hydrostatic reference state from the just-set state, before the
