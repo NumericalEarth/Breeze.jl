@@ -86,3 +86,78 @@ Adapt.@adapt_structure SHOCMixingLength
 
     return mix
 end
+
+#####
+##### The gradient-limited mixing length of the TKE closure, reused
+#####
+##### `GradientLimitedMixingLength` is not a function of one level: it is the lower envelope, over
+##### the column, of the buoyancy penetration depth √e / N of every face carried away at the slope
+##### ℂⁱ, bounded by the wall length ℂˢ z. Breeze's `fill_mixing_length!` computes the envelope of
+##### a column in two sweeps and `mixing_lengthᶜᶜᶜ` reconstructs the length of a level from it;
+##### both are called here as they are, with
+#####
+#####   * a `MixingLengthContext` in the place of the TKE closure, which gives them the mixing
+#####     length and the floor of `e` they read;
+#####   * SHOC's turbulent kinetic energy, with the level above the top set to the top level;
+#####   * the stratification N² at the interfaces from SHOC's own virtual potential temperature
+#####     (the gradient across each interior interface; zero at the surface and at the top), so that
+#####     it is consistent with `brunt` and with the state SHOC has just loaded;
+#####   * three scratch fields at interfaces: N², the envelope ℓˢ and the capped length ℓ.
+#####
+##### The length has no eddy turnover time scale: every coefficient of a SHOC with it is
+##### non-dimensional. Its bounds are the hard `min` of the TKE closure in every clipping policy
+##### (continuous, with kinks), and it is infinite in the envelope where the air is not stable.
+#####
+
+"""
+$(TYPEDEF)
+
+What Breeze's mixing length functions read of a closure: the mixing length and the floor of the
+turbulent kinetic energy inside the turbulent velocity `√e`.
+"""
+struct MixingLengthContext{ML, FT}
+    mixing_length :: ML
+    minimum_tke :: FT
+end
+
+Adapt.@adapt_structure MixingLengthContext
+
+component_fields(grid, ::GradientLimitedMixingLength) =
+    (gradient_limited_length = ZFaceField(grid),
+     stratification_envelope = ZFaceField(grid),
+     interface_stratification = ZFaceField(grid))
+
+# The envelope of the column, from the turbulent kinetic energy floored by the sweep before
+@inline function mixing_length_column!(ml::GradientLimitedMixingLength, cp, c, i, j, grid, Nz, tke_weighted_height,
+                                       state, host, diagnostics, scratch)
+    tke, thv, zt = state.tke, host.thv, host.zt_grid
+    N² = scratch.interface_stratification
+
+    @inbounds begin
+        # The reconstruction of √e at the top face reads the level above the top
+        tke[i, j, Nz+1] = tke[i, j, Nz]
+
+        N²[i, j, 1] = 0
+        thv_l = thv[i, j, 1]
+        zt_l = zt[i, j, 1]
+        for k in 2:Nz
+            thv_u = thv[i, j, k]
+            zt_u = zt[i, j, k]
+            N²[i, j, k] = (2 * c.ggr / (thv_u + thv_l)) * (thv_u - thv_l) / (zt_u - zt_l)
+            thv_l, zt_l = thv_u, zt_u
+        end
+        N²[i, j, Nz+1] = 0
+    end
+
+    context = MixingLengthContext(ml, c.mintke)
+    fill_mixing_length!(scratch.gradient_limited_length, scratch.stratification_envelope, i, j, grid, ml, context, tke, N²)
+
+    return context
+end
+
+@inline function mixing_length(ml::GradientLimitedMixingLength, cp, c, context, i, j, k, grid, tke_k, brunt_k, zt_k,
+                               host_scale, state, scratch)
+    envelope = (ℓˢ = scratch.stratification_envelope, N² = scratch.interface_stratification)
+    mix = mixing_lengthᶜᶜᶜ(i, j, k, grid, context, state.tke, envelope)
+    return min(host_scale, mix)
+end

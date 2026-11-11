@@ -6,7 +6,8 @@ using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_mi
                                       stable_damping, hard_floor, third_moment_bound, bound_third_moment,
                                       vd_shoc_decomp!, vd_shoc_solve!, tke_step, buoyancy_production,
                                       assumed_pdf, plume_saturation, plume_variance, smooth_scalar_plumes,
-                                      time_scale_column, dissipation_coefficient, time_scale_and_diffusivities
+                                      time_scale_column, dissipation_coefficient, time_scale_and_diffusivities,
+                                      mixing_length_column!, mixing_length
 using Test
 
 # Bitwise equality, with NaN equal to NaN and the two zeros distinct
@@ -389,6 +390,78 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
             @test all(≥(0), run.cloud_liquid)
             @test isapprox(run.θ, original.θ; rtol = 2e-3)
+        end
+    end
+
+    @testset "GradientLimitedMixingLength" begin
+        hard = HardClipping()
+        constants = SHOCConstants(FT)
+        ml = GradientLimitedMixingLength(FT(0.8), FT(1.8))
+        closure = SHOC(OriginalSHOC(), FT; mixing_length = ml, surface_forcing...)
+        @test isbits(closure)
+        @test closure.mixing_length === ml
+        ℂ = closure_parameters(closure)
+        @test ℂ.ℂˢ == FT(0.8) && ℂ.ℂⁱ == FT(1.8)
+        @test !haskey(ℂ, :ℂˡ₅)      # no dimensional coefficient is left
+        @test with_parameters(closure; ℂⁱ = FT(1.5)).mixing_length.ℂⁱ == FT(1.5)
+
+        # The adapter computes the lengths of the TKE closure for the same e and N²: a stable
+        # layer between two neutral ones, with turbulence that decays upward
+        model = shoc_column_model(closure)
+        grid = model.grid
+        Nz = size(grid, 3)
+        fields = model.closure_fields
+        state, host, scratch = fields.state, fields.host, fields.scratch
+        @test keys(scratch) == (:du, :dl, :d, :gradient_limited_length, :stratification_envelope, :interface_stratification)
+
+        z = znodes(grid, Center())
+        set!(state.tke, z -> 0.02 + 0.5 * exp(-z / 800))
+        set!(host.thv, z -> 300 + 5e-3 * clamp(z - 1000, 0, 800))
+        set!(host.zt_grid, z -> z)
+
+        context = @allowscalar mixing_length_column!(ml, hard, constants, 1, 1, grid, Nz, zero(FT), state, host,
+                                                     fields.diagnostics, scratch)
+        @test context.minimum_tke == constants.mintke
+        lengths = @allowscalar [mixing_length(ml, hard, constants, context, 1, 1, k, grid, zero(FT), zero(FT), zero(FT),
+                                              FT(1e5), state, scratch) for k in 1:Nz]
+
+        # The same through the TKE closure and its own stratification field
+        tke_closure = TKEBasedTurbulenceClosure(; mixing_length = ml, minimum_tke = constants.mintke)
+        ℓ, ℓˢ = ZFaceField(grid), ZFaceField(grid)
+        N² = scratch.interface_stratification
+        @allowscalar Breeze.TurbulenceClosures.fill_mixing_length!(ℓ, ℓˢ, 1, 1, grid, ml, tke_closure, state.tke, N²)
+        expected = @allowscalar [Breeze.TurbulenceClosures.mixing_lengthᶜᶜᶜ(1, 1, k, grid, tke_closure, state.tke, (; ℓˢ, N²))
+                                 for k in 1:Nz]
+        @test Array(interior(scratch.gradient_limited_length)) == Array(interior(ℓ))
+        @test Array(interior(scratch.stratification_envelope)) == Array(interior(ℓˢ))
+        @test lengths == expected
+        @test all(isfinite, lengths) && all(>(0), lengths)
+
+        # N² is that of the virtual potential temperature across each interior interface
+        N²_column = vec(Array(interior(N²)))
+        θᵥ = vec(Array(interior(host.thv)))
+        @test N²_column[1] == 0 && N²_column[end] == 0
+        @test isapprox(maximum(N²_column), constants.ggr / 302 * 5e-3; rtol = 2e-2)
+        @test (N²_column[2:Nz] .> 0) == (diff(θᵥ) .> 0)
+        @test any(>(0), N²_column) && any(==(0), N²_column[2:Nz])
+
+        # In the neutral layer below, the length is the wall length ℂˢ z until the stable layer
+        # above limits it; a host mesh finer than the length caps it
+        @test lengths[1] ≈ ml.ℂˢ * @allowscalar(z[1])
+        @test maximum(lengths) < ml.ℂˢ * 3000
+        capped = @allowscalar mixing_length(ml, hard, constants, context, 1, 1, 2, grid, zero(FT), zero(FT), zero(FT),
+                                            FT(1), state, scratch)
+        @test capped == 1
+
+        for (label, closure) in ("SHOC diffusivities" => closure,
+                                 "Richardson diffusivities" =>
+                                     SHOC(OriginalSHOC(), FT; mixing_length = GradientLimitedMixingLength(FT(0.8), FT(1.8)),
+                                          turbulence_time_scale = RichardsonStabilityFunctions(),
+                                          tke_update = ImplicitSinkTKE(ℂᴾ = 1), surface_forcing...))
+            run = run_shoc_column(closure)
+            @test all_finite(run)
+            @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
+            @test maximum(run.e) > FT(0.01)
         end
     end
 end
