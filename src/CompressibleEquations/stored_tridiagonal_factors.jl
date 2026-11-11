@@ -1,7 +1,7 @@
 #####
 ##### Column (z-direction) Thomas sweeps for `BatchedTridiagonalSolver` systems
 #####
-##### Two specializations of `Oceananigans.Solvers`' `solve_batched_tridiagonal_system_z!`, whose arithmetic
+##### Three specializations of `Oceananigans.Solvers`' `solve_batched_tridiagonal_system_z!`, whose arithmetic
 ##### they follow operation for operation, so results are bitwise identical:
 #####
 ##### 1. Stored factors for systems solved many times with the same coefficients. The acoustic loop solves
@@ -13,10 +13,10 @@
 #####    array (`solve_tridiagonal_in_place!`).
 #####
 ##### 3. The same in-place solve for several fields per column thread, each with its own coefficient
-#####    arguments (`solve_tridiagonal_columns_in_place!`), which can also evaluate each level's
-#####    coefficients one level ahead of its use.
+#####    arguments (`solve_tridiagonal_columns_in_place!`), which evaluates each level's coefficients
+#####    one level ahead of its use.
 #####
-##### Both sweeps carry the recurrence in registers. The Thomas recurrence makes level k depend on level
+##### All sweeps carry the recurrence in registers. The Thomas recurrence makes level k depend on level
 ##### k ∓ 1, and a column kernel runs one thread per column, so its run time is the length of that
 ##### dependency chain rather than the memory it streams. Oceananigans' kernel reads `ϕ[i, j, k-1]`,
 ##### `t[i, j, k]` and `ϕ[i, j, k+1]` back from the arrays it has just stored them in: without aliasing
@@ -183,7 +183,7 @@ end
 ##### A column thread that sweeps one field waits, at every level, for that level's loads. Sweeping
 ##### several fields level by level gives it as many independent recurrences: each level first loads
 ##### the coefficients and right-hand sides of every field, then eliminates, so the loads overlap.
-##### `prefetch` moves a level's loads ahead of the stores of the level before, which the compiler
+##### A level's loads are also issued ahead of the stores of the level before, which the compiler
 ##### cannot do itself for want of aliasing information. Neither changes the arithmetic of a field.
 #####
 
@@ -198,30 +198,31 @@ The coefficient arguments of system `n` are `arguments(shared, specific[n], ϕ[n
 all systems have in common and is passed to the kernel once, which keeps a kernel's arguments from
 growing with every field by the size of, say, the model's fields (GPU kernels limit the total size of
 their arguments). `scratch` is a tuple of at least `length(ϕ)` arrays of the solver's scratch size, one
-per system. With `prefetch`, the coefficients of each level are evaluated one level ahead of their use.
+per system. The coefficients of each level are evaluated one level ahead of their use.
 """
 function solve_tridiagonal_columns_in_place!(ϕ::Tuple, solver::BatchedTridiagonalSolver, scratch::Tuple,
-                                             arguments, shared, specific::Tuple; prefetch = true)
+                                             arguments, shared, specific::Tuple)
     grid = solver.grid
     t = ntuple(n -> scratch[n], length(ϕ))
     launch!(architecture_of(grid), grid, :xy, _solve_tridiagonal_columns_in_place_z!, ϕ, t,
             solver.a, solver.b, solver.c, grid, solver.parameters, arguments, shared, specific,
-            ZDirection(), Val(prefetch))
+            ZDirection())
     return nothing
 end
 
 @kernel function _solve_tridiagonal_columns_in_place_z!(ϕ, t, sa, sb, sc, grid, p, arguments, shared, specific,
-                                                        direction, prefetch)
+                                                        direction)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
     # (βᵏ, ϕ⁻) of each field: the pivot and the solution of the level just solved
     pivots = first_rows!(i, j, ϕ, sb, grid, p, arguments, shared, specific, direction)
-    ahead = rows_ahead(prefetch, i, j, min(2, Nz), ϕ, sa, sb, sc, grid, p, arguments, shared, specific, direction)
+    # The rows of level k are loaded during level k - 1, before that level's stores.
+    ahead = load_rows(i, j, min(2, Nz), ϕ, sa, sb, sc, grid, p, arguments, shared, specific, direction)
 
     for k = 2:Nz
-        rows = current_rows(ahead, i, j, k, ϕ, sa, sb, sc, grid, p, arguments, shared, specific, direction)
-        ahead = rows_ahead(prefetch, i, j, min(k + 1, Nz), ϕ, sa, sb, sc, grid, p, arguments, shared, specific, direction)
+        rows = ahead
+        ahead = load_rows(i, j, min(k + 1, Nz), ϕ, sa, sb, sc, grid, p, arguments, shared, specific, direction)
         pivots = eliminate_rows!(i, j, k, ϕ, t, pivots, rows)
     end
 
@@ -256,12 +257,6 @@ end
     return ((cᵏ⁻¹, bᵏ, aᵏ⁻¹, fᵏ),
             load_rows(i, j, k, Base.tail(ϕ), sa, sb, sc, grid, p, arguments, shared, Base.tail(specific), direction)...)
 end
-
-# With prefetch the rows of level k were loaded during level k - 1; without, they are loaded now.
-@inline rows_ahead(::Val{true}, i, j, k, args...) = load_rows(i, j, k, args...)
-@inline rows_ahead(::Val{false}, i, j, k, args...) = nothing
-@inline current_rows(ahead::Tuple, i, j, k, args...) = ahead
-@inline current_rows(::Nothing, i, j, k, args...) = load_rows(i, j, k, args...)
 
 # Forward elimination of row k of each system, as in `_solve_tridiagonal_in_place_z!`.
 @inline eliminate_rows!(i, j, k, ::Tuple{}, ::Tuple{}, ::Tuple{}, ::Tuple{}) = ()

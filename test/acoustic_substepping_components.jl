@@ -497,7 +497,7 @@ for arch in arches
         substitute_tridiagonal!(substituted_in_place, factors, grid)
         @test Array(substituted_in_place) == reference
 
-        # Several right-hand sides per column thread, with and without coefficient prefetch
+        # Several right-hand sides per column thread
         other_rhs = (wave(2, 2, 1), wave(1, 1, 4))
         other_references = map(other_rhs) do f
             ϕ = similar(f)
@@ -506,14 +506,12 @@ for arch in arches
         end
         no_arguments(shared, specific, ϕ) = ()
         scratch = (similar(rhs), similar(rhs), similar(rhs))
-        for prefetch in (true, false)
-            batch = (copy(rhs), copy(other_rhs[1]), copy(other_rhs[2]))
-            solve_tridiagonal_columns_in_place!(batch, solver, scratch, no_arguments, nothing,
-                                                (nothing, nothing, nothing); prefetch)
-            @test Array(batch[1]) == reference
-            @test Array(batch[2]) == other_references[1]
-            @test Array(batch[3]) == other_references[2]
-        end
+        batch = (copy(rhs), copy(other_rhs[1]), copy(other_rhs[2]))
+        solve_tridiagonal_columns_in_place!(batch, solver, scratch, no_arguments, nothing,
+                                            (nothing, nothing, nothing))
+        @test Array(batch[1]) == reference
+        @test Array(batch[2]) == other_references[1]
+        @test Array(batch[3]) == other_references[2]
     end
 
     # `_build_vertical_rhs!` reads (ρw)′ at faces k−1, k, k+1 for the implicit vertical-damping

@@ -177,32 +177,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.implicit_advection_factors))
 
 #####
-##### Switches for acoustic-loop optimizations that GPU profiling has yet to confirm
+##### Halo points written by the substep kernels
 #####
-##### Each is on by default and can be turned off at run time to compare, e.g.
-##### `Breeze.CompressibleEquations.fuse_divergence_damping[] = false`. They change launch counts
-##### and memory traffic, not results. TODO: remove each switch, and the path profiling rejects.
-#####
-
-# Apply `ThermalDivergenceDamping` inside the explicit horizontal step of the next substep
-# (`_damped_explicit_horizontal_step!`) instead of in a kernel of its own after each substep.
-const fuse_divergence_damping = Ref(true)
-
-# On grids that are periodic (or flat) in both horizontal directions, let the substep kernels
-# write the few periodic halo points the loop reads themselves (`PeriodicHaloMirror`) instead of
-# launching halo fills for (ρu)′, (ρv)′, (ρθ)′ and (ρθ)′ˢ⁻ in every substep.
-const mirror_periodic_halos = Ref(true)
-
-# The per-stage implicit steps (scalars; momentum and the thermodynamic variable) solve up to this
-# many fields per column thread (`solve_tridiagonal_columns_in_place!`). 1 solves each field with
-# a kernel of its own. The limit is the number of scratch arrays (`implicit_step_scratch`, 4) and
-# the size of a GPU kernel's arguments, which each field of a batch adds to (CUDA allows 4 KiB,
-# and the model's fields, passed once, take much of that): lower it if a kernel fails to compile
-# with a formal-parameter-space overflow.
-const column_solve_batch_size = Ref(3)
-
-# Evaluate each level's coefficients one level ahead in the implicit steps' column sweeps.
-const prefetch_column_coefficients = Ref(true)
 
 """
 $(TYPEDEF)
@@ -243,7 +219,7 @@ function substep_halo_mirror(model)
     TX, TY, _ = topology(grid)
     periodic = (TX === Periodic || TX === Flat) && (TY === Periodic || TY === Flat)
     serial = architecture(grid) isa Union{CPU, GPU}
-    return (mirror_periodic_halos[] && periodic && serial) ? PeriodicHaloMirror{TX === Periodic, TY === Periodic}() : nothing
+    return (periodic && serial) ? PeriodicHaloMirror{TX === Periodic, TY === Periodic}() : nothing
 end
 
 # Store `value` at (i, j, k) and at its periodic image in the east or north halo (faces, read at
@@ -1071,7 +1047,7 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     # The stashed (ρθ)′ˢ⁻ starts equal to (ρθ)′: the divergence damping measures the change of
     # (ρθ)′ over a substep, and none has run. A damping applied at the start of the first
-    # substep (see `fuse_divergence_damping`) then adds exactly zero.
+    # substep (see `deferred_divergence_damping`) then adds exactly zero.
     launch!(arch, grid, :xyz, _initialize_stage_perturbations!,
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
@@ -1376,12 +1352,10 @@ end
 # is `NoDivergenceDamping`. Only `ThermalDivergenceDamping` can be deferred: its correction is
 # a single pass over fields that stay put until the next substep's predictors.
 deferred_divergence_damping(damping) = NoDivergenceDamping()
-deferred_divergence_damping(damping::ThermalDivergenceDamping) =
-    fuse_divergence_damping[] ? damping : NoDivergenceDamping()
+deferred_divergence_damping(damping::ThermalDivergenceDamping) = damping
 
 immediate_divergence_damping(damping) = damping
-immediate_divergence_damping(damping::ThermalDivergenceDamping) =
-    fuse_divergence_damping[] ? NoDivergenceDamping() : damping
+immediate_divergence_damping(::ThermalDivergenceDamping) = NoDivergenceDamping()
 
 # The fields whose halos are filled after `_post_solve_recovery!`, in one launch per side: (ρθ)′,
 # whose horizontal and vertical neighbors the next substep reads, and what the damping reads next
@@ -1885,6 +1859,14 @@ function implicit_step_closures(closure, closure_fields)
     return implicit_closure === () ? (nothing, nothing) : (implicit_closure, implicit_closure_fields)
 end
 
+# The per-stage implicit steps (scalars; momentum and the thermodynamic variable) solve up to this
+# many fields per column thread (`solve_tridiagonal_columns_in_place!`); 1 solves each field with a
+# kernel of its own. The limits are the number of scratch arrays (`implicit_step_scratch`, 4) and
+# the size of a GPU kernel's arguments, which each field of a batch adds to (CUDA allows 4 KiB,
+# and the model's fields, passed once, take much of that): lower it if a kernel fails to compile
+# with a formal-parameter-space overflow.
+const column_solve_batch_size = Ref(3)
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -1913,8 +1895,7 @@ function implicit_steps_in_place!(requests, implicit_solver::BatchedTridiagonalS
     isempty(needed) && return nothing
 
     batch_size = clamp(column_solve_batch_size[], 1, length(scratch))
-    prefetch = prefetch_column_coefficients[]
-    one_by_one = (batch_size == 1 && !prefetch) || size(implicit_solver.grid, 3) < 2
+    one_by_one = batch_size == 1 || size(implicit_solver.grid, 3) < 2
 
     for batch in Iterators.partition(needed, one_by_one ? 1 : batch_size)
         fields = Tuple(first(request) for request in batch)
@@ -1924,7 +1905,7 @@ function implicit_steps_in_place!(requests, implicit_solver::BatchedTridiagonalS
             solve_tridiagonal_in_place!(first(fields), implicit_solver, args)
         else
             solve_tridiagonal_columns_in_place!(fields, implicit_solver, scratch, implicit_step_arguments,
-                                                shared, columns; prefetch)
+                                                shared, columns)
         end
     end
 
