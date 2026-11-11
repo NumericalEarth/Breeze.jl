@@ -680,6 +680,7 @@ using Oceananigans.Fields: interior
             FT(1e5),    # cloud_homogeneous_number
             FT(1e-7),   # rain_homogeneous_mass
             FT(500.0),  # rain_homogeneous_number
+            FT(0.0),    # homogeneous_number_excess
             FT(1e-8),   # cloud_warm_collection (above-freezing cloud collection → qʷⁱ)
             FT(1e4),    # cloud_warm_collection_number
             FT(5e-9),   # rain_warm_collection (above-freezing rain collection → qʷⁱ)

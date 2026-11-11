@@ -531,6 +531,7 @@ end
             FT(0.0),    # cloud_homogeneous_number
             FT(0.0),    # rain_homogeneous_mass
             FT(0.0),    # rain_homogeneous_number
+            FT(0.0),    # homogeneous_number_excess
             FT(0.0),    # cloud_warm_collection (warm environment test)
             FT(0.0),    # cloud_warm_collection_number
             FT(0.0),    # rain_warm_collection

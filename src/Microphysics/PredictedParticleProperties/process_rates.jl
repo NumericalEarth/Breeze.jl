@@ -214,6 +214,7 @@ struct P3ProcessRates{FT}
     cloud_homogeneous_number :: FT # Cloud number → ice [1/kg/s]
     rain_homogeneous_mass :: FT    # Rain → ice from homogeneous freezing [kg/kg/s]
     rain_homogeneous_number :: FT  # Rain number → ice [1/kg/s]
+    homogeneous_number_excess :: FT # Frozen number above the ice number cap, not handed to ice [1/kg/s]
 
     # Above-freezing collection (T > T₀). Cloud collection goes to qʷⁱ in
     # liquid-fraction mode and sheds to rain otherwise; rain mass transfers only to qʷⁱ.
@@ -1105,13 +1106,13 @@ end
     # Homogeneous freezing hands ice the number of the liquid it freezes, which for cloud
     # droplets is orders of magnitude above `maximum_ice_number_density`. Liquid loses every
     # frozen drop, but ice keeps only the number that fits under that cap: the excess is
-    # removed in the same evaluation through `ni_limit`, rather than created now and relaxed
-    # away later, when the source may have switched off. The frozen mass is unchanged, so the
-    # same mass freezes onto fewer, larger particles.
+    # never handed to ice, rather than created now and relaxed away later, when the source
+    # may have switched off. The frozen mass is unchanged, so the same mass freezes onto
+    # fewer, larger particles.
     homogeneous_number = cloud_hom_n + rain_hom_n
     ice_number_capacity = max(0, parameters.maximum_ice_number_density / ρ - ice_number_remaining)
     f_hom_number = sink_limiting_factor(homogeneous_number, ice_number_capacity, dt_safety)
-    ni_lim = ni_lim + (1 - f_hom_number) * homogeneous_number
+    hom_n_excess = (1 - f_hom_number) * homogeneous_number
 
     # DSD number correction feedback
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
@@ -1153,7 +1154,7 @@ end
         shed, shed_n, refrz,
         nuc_q, nuc_n, cloud_frz_q, cloud_frz_n, rain_frz_q, rain_frz_n,
         spl_q, spl_n,
-        cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n,
+        cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n, hom_n_excess,
         cloud_warm_q, cloud_warm_n, rain_warm_q, rain_warm_n,
         wg_cloud, wg_rain,
         wg_shed, wg_shed_n,
