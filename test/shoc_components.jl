@@ -4,7 +4,8 @@ using Breeze
 using Oceananigans
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_min, clip_below, clip_between, clip_negative,
                                       stable_damping, hard_floor, third_moment_bound, bound_third_moment,
-                                      vd_shoc_decomp!, vd_shoc_solve!, tke_step, buoyancy_production
+                                      vd_shoc_decomp!, vd_shoc_solve!, tke_step, buoyancy_production,
+                                      assumed_pdf, plume_saturation, plume_variance, smooth_scalar_plumes
 using Test
 
 # Bitwise equality, with NaN equal to NaN and the two zeros distinct
@@ -255,5 +256,87 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test all_finite(downgradient)
         @test maximum(downgradient.e) > FT(0.01)
         @test isapprox(downgradient.θ, original.θ; rtol = 2e-3)
+    end
+
+    @testset "SmoothDoubleGaussianPDF" begin
+        hard = HardClipping()
+        constants = SHOCConstants(FT)
+        original_pdf = DoubleGaussianPDF(FT)
+        smooth_pdf = SmoothDoubleGaussianPDF(FT)
+        @test keys(closure_parameters(SHOC(OriginalSHOC(), FT; assumed_pdf = smooth_pdf))) ==
+              keys(closure_parameters(SHOC(OriginalSHOC(), FT)))
+
+        # One level at 900 hPa and 285 K, close to saturation, between interfaces that carry the
+        # same moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec)
+        pressure, θˡ = FT(9e4), FT(285) * (FT(1e5) / FT(9e4))^(constants.rgas / constants.cp)
+        qˢ = first(plume_saturation(FT(285), pressure, constants))
+        pdf_of(pdf, qᵗ, w_sec, moments; policy = hard) =
+            assumed_pdf(pdf, policy, constants, FT(1020), FT(980), FT(1000), pressure, θˡ, zero(FT), qᵗ, w_sec, moments, moments)
+
+        # Away from the switches (resolved variances, plumes well apart) the smooth PDF is the
+        # original one as its tolerances vanish, and within a few percent of it with the
+        # tolerances of shoc.F90, which are a sixth of the standard deviation of total water here
+        sharp_pdf = SmoothDoubleGaussianPDF(FT; thl_tol = 1e-5, rt_tol = 1e-7, w_tol = 1e-4, minimum_saturation_spread = 1e-9)
+        w_sec = FT(0.6)
+        for w3 in FT[-0.2, 0.05, 0.4], qᵗ in (FT(0.97), FT(1.0), FT(1.03)) .* qˢ
+            moments = (w3, FT(0.25), FT(-0.25), FT(-1.3e-4), FT(2.9e-4), FT(4e-7))
+            a = pdf_of(original_pdf, qᵗ, w_sec, moments)
+            b = pdf_of(smooth_pdf, qᵗ, w_sec, moments)
+            sharp = pdf_of(sharp_pdf, qᵗ, w_sec, moments)
+            @test isapprox(b[1], a[1]; atol = 0.03)        # cloud fraction
+            @test isapprox(b[2], a[2]; rtol = 0.05)        # liquid water
+            @test isapprox(b[4], a[4]; rtol = 0.05)        # liquid water flux
+            if FT == Float64
+                @test isapprox(sharp[1], a[1]; atol = 1e-4)
+                @test isapprox(sharp[2], a[2]; rtol = 1e-3)
+                @test isapprox(sharp[4], a[4]; rtol = 1e-3)
+                @test isapprox(sharp[5], a[5]; atol = 1e-4)
+            end
+        end
+
+        # Calm and uniform air: the plumes collapse onto the mean, saturated air is cloud and
+        # unsaturated air is clear, as with the switches
+        still = ntuple(_ -> zero(FT), 6)
+        calm = FT(2e-4)
+        for pdf in (original_pdf, smooth_pdf)
+            cloud_fraction, liquid, liquid_variance, liquid_flux, buoyancy_flux = pdf_of(pdf, FT(1.02) * qˢ, calm, still)
+            @test isapprox(cloud_fraction, 1; atol = 1e-3)
+            @test liquid > 0
+            @test liquid_flux == 0
+            @test first(pdf_of(pdf, FT(0.98) * qˢ, calm, still)) < 1e-3
+        end
+        @test isapprox(pdf_of(smooth_pdf, FT(1.02) * qˢ, calm, still)[2], pdf_of(original_pdf, FT(1.02) * qˢ, calm, still)[2]; rtol = 1e-2)
+
+        # No jump where the switches of the original are: the outputs are continuous in the
+        # vertical velocity variance across w_tol² and in the scalar variance across its tolerance²
+        variable = (FT(1e-4), FT(0.02), FT(-2e-3), FT(-2e-6), FT(3e-6), FT(4e-8))
+        step(pdf, f) = maximum(abs, f(pdf, 1 + FT(1e-3)) .- f(pdf, 1 - FT(1e-3)))
+        across_calm(pdf, x) = pdf_of(pdf, qˢ, original_pdf.w_tol^2 * x, variable)[1:2]
+        across_uniform(pdf, x) = pdf_of(pdf, qˢ, FT(0.3), (variable[1], variable[2], variable[3], variable[4], variable[5],
+                                                         original_pdf.rt_tol^2 * x))[1:2]
+        @test step(smooth_pdf, across_calm)[1] < 1e-3
+        @test step(smooth_pdf, across_uniform)[1] < 1e-3
+
+        # The in-plume variance ratio tends to one as the correlation with w vanishes
+        w̃₁, w̃₂ = sqrt(FT(0.6)), -sqrt(FT(0.6))
+        _, _, ratio₁, ratio₂ = smooth_scalar_plumes(smooth_pdf, hard, zero(FT), w̃₁, w̃₂, zero(FT), FT(0.5), true)
+        @test ratio₁ ≈ 1 && ratio₂ ≈ 1
+        # and is that of the original where the original is defined
+        corr = FT(0.3)
+        x̃₁, x̃₂, ratio₁, ratio₂ = smooth_scalar_plumes(smooth_pdf, hard, corr, w̃₁, w̃₂, zero(FT), FT(0.5), false)
+        @test ratio₁ ≈ plume_variance(hard, true, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT))
+        @test ratio₂ ≈ plume_variance(hard, false, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT))
+
+        # A spread of the saturation deficit that does not vanish: the cloud fraction passes
+        # through one half at saturation instead of jumping
+        @test isapprox(first(pdf_of(smooth_pdf, qˢ, calm, still)), 0.5; atol = 0.05)
+
+        for clipping in (HardClipping(), SmoothClipping(FT; width = 1e-2))
+            run = run_shoc_column(SHOC(OriginalSHOC(), FT; assumed_pdf = SmoothDoubleGaussianPDF(), clipping, surface_forcing...))
+            @test all_finite(run)
+            @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
+            @test all(≥(0), run.cloud_liquid)
+            @test isapprox(run.θ, original.θ; rtol = 2e-3)
+        end
     end
 end

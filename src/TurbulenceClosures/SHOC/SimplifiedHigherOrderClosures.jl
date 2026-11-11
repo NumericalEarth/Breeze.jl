@@ -17,7 +17,7 @@ export SimplifiedHigherOrderClosure, SHOC,
        PDFBuoyancyFlux, DowngradientBuoyancyFlux,
        DowngradientSecondMoments,
        CanutoThirdMoment, ResetBound, ClampBound, TanhBound,
-       DoubleGaussianPDF,
+       DoubleGaussianPDF, SmoothDoubleGaussianPDF,
        HardClipping, SmoothClipping,
        HoltslagBovilleDepth,
        SHOCConstants,
@@ -57,6 +57,7 @@ include("buoyancy_sources.jl")
 include("second_moments.jl")
 include("third_moments.jl")
 include("assumed_pdfs.jl")
+include("smooth_assumed_pdf.jl")
 include("shoc_column.jl")
 include("shoc_presets.jl")
 include("simplified_higher_order_closure.jl")
