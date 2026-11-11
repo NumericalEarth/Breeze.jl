@@ -4,7 +4,7 @@
 
 # The components of each slot. The constructor checks against it, so that a component in a slot
 # it does not belong to fails there and not inside a kernel.
-const SLOT_COMPONENTS = (mixing_length = (SHOCMixingLength, GradientLimitedMixingLength),
+const SLOT_COMPONENTS = (mixing_length = (BlendedMixingLength, GradientLimitedMixingLength),
                          turbulence_time_scale = (ColumnStabilityDamping, RichardsonStabilityFunctions),
                          tke_update = (ForwardEulerTKE, ImplicitSinkTKE),
                          buoyancy_source = (PDFBuoyancyFlux, DowngradientBuoyancyFlux),
@@ -87,13 +87,13 @@ switch and clip of the closure is smooth), name them after the splat:
 using Breeze
 
 closure = SimplifiedHigherOrderClosure(; differentiable_shoc_components()...,
-                                       mixing_length = SHOCMixingLength(),
+                                       mixing_length = BlendedMixingLength(),
                                        turbulence_time_scale = ColumnStabilityDamping(),
                                        tke_update = ImplicitSinkTKE())
 
 # output
 SimplifiedHigherOrderClosure{Float64}
-├── mixing_length: SHOCMixingLength{Float64}
+├── mixing_length: BlendedMixingLength{Float64}
 ├── turbulence_time_scale: ColumnStabilityDamping{Float64}
 ├── tke_update: ImplicitSinkTKE{Float64}
 ├── buoyancy_source: PDFBuoyancyFlux

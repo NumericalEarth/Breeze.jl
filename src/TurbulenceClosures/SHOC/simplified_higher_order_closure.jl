@@ -125,7 +125,7 @@ Keyword arguments
 
 Each of the first eight takes a component; the first one named is the default, that of `shoc.F90`.
 
-- `mixing_length`: the mixing length; [`SHOCMixingLength`](@ref), or
+- `mixing_length`: the mixing length; [`BlendedMixingLength`](@ref), or
   [`GradientLimitedMixingLength`](@ref).
 - `turbulence_time_scale`: the return-to-isotropy time scale, the eddy diffusivities and the
   dissipation coefficient; [`ColumnStabilityDamping`](@ref), or
@@ -158,7 +158,7 @@ closure = SimplifiedHigherOrderClosure(surface_temperature_flux=0.1)
 
 # output
 SimplifiedHigherOrderClosure{Float64}
-├── mixing_length: SHOCMixingLength{Float64}
+├── mixing_length: BlendedMixingLength{Float64}
 ├── turbulence_time_scale: ColumnStabilityDamping{Float64}
 ├── tke_update: ForwardEulerTKE{Float64}
 ├── buoyancy_source: PDFBuoyancyFlux
@@ -172,7 +172,7 @@ SimplifiedHigherOrderClosure{Float64}
 ```
 """
 function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.FloatType;
-                                      mixing_length = SHOCMixingLength(Float64),
+                                      mixing_length = BlendedMixingLength(Float64),
                                       turbulence_time_scale = ColumnStabilityDamping(Float64),
                                       tke_update = ForwardEulerTKE(Float64),
                                       buoyancy_source = PDFBuoyancyFlux(),

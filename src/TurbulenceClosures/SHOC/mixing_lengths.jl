@@ -17,14 +17,18 @@
 """
 $(TYPEDEF)
 
-The mixing length of [Bogenschutz and Krueger (2013)](@cite Bogenschutz2013) as E3SM `shoc.F90`
-computes it (`compute_shoc_mix_shoc_length`): a blend of the distance to the surface `κ z`, an
-asymptotic length `l∞` (the fraction `ℂˡ₄` of the height weighted by `√e` over the column) and,
-in stable air, the buoyancy length `√e / N`,
+A mixing length that blends three lengths by the sum of their inverses: the distance to the
+surface `κ z`, an asymptotic length `l∞` (the fraction `ℂˡ₄` of the height weighted by `√e` over
+the column) and, in stable air, the buoyancy length `√e / N`,
 
     ℓ = (ℂˡ₂ / ℂˡ₁) [1 / (ℂˡ₅ √e κ z) + 1 / (ℂˡ₅ √e l∞) + ℂˡ₃ N²⁺ / e]^(-1/2)
 
-bounded by `minlen`, `maxlen` and the horizontal mesh size.
+bounded by `minlen`, `maxlen` and the horizontal mesh size. Each level is a function of that
+level and of one number of the column, `l∞`.
+
+This is the length of [Bogenschutz and Krueger (2013)](@cite Bogenschutz2013) as E3SM `shoc.F90`
+computes it (`compute_shoc_mix_shoc_length`, `check_length_scale_shoc_length`), and the mixing
+default mixing length of `SimplifiedHigherOrderClosure`.
 
 | coefficient | `shoc.F90` | default | meaning |
 |:------------|:-----------|:--------|:--------|
@@ -36,7 +40,7 @@ bounded by `minlen`, `maxlen` and the horizontal mesh size.
 
 $(TYPEDFIELDS)
 """
-struct SHOCMixingLength{FT} <: AbstractSHOCComponent
+struct BlendedMixingLength{FT} <: AbstractSHOCComponent
     "Mixing length divisor (`length_fac`)"
     ℂˡ₁ :: FT
     "Mixing length prefactor (literal `2.8284`)"
@@ -56,20 +60,20 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `SHOCMixingLength{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
+Return `BlendedMixingLength{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
 argument.
 """
-SHOCMixingLength(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(SHOCMixingLength, FT,
+BlendedMixingLength(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(BlendedMixingLength, FT,
                             (ℂˡ₁ = 0.5, ℂˡ₂ = 2.8284, ℂˡ₃ = 0.01, ℂˡ₄ = 0.1, ℂˡ₅ = 400, maxlen = 20000, minlen = 20), kw)
 
-Adapt.@adapt_structure SHOCMixingLength
+Adapt.@adapt_structure BlendedMixingLength
 
 # The asymptotic length l∞ of the column
-@inline mixing_length_column!(ml::SHOCMixingLength, cp, c, i, j, grid, Nz, tke_weighted_height,
+@inline mixing_length_column!(ml::BlendedMixingLength, cp, c, i, j, grid, Nz, tke_weighted_height,
                               state, host, diagnostics, scratch) = ml.ℂˡ₄ * tke_weighted_height
 
-@inline function mixing_length(ml::SHOCMixingLength, cp, c, l_inf, i, j, k, grid, tke_k, brunt_k, zt_k,
+@inline function mixing_length(ml::BlendedMixingLength, cp, c, l_inf, i, j, k, grid, tke_k, brunt_k, zt_k,
                                host_scale, state, scratch)
     FT = typeof(tke_k)
     tscale = ml.ℂˡ₅ # turnover time scale [s]
@@ -90,9 +94,12 @@ end
 #####
 ##### The gradient-limited mixing length of the TKE closure, reused
 #####
+#####     ℓ(z) = min(ℂˢ z, min over z′ of [ℓᵇ(z′) + ℂⁱ |z - z′|]),    ℓᵇ = √e / N where N² > 0
+#####
 ##### `GradientLimitedMixingLength` is not a function of one level: it is the lower envelope, over
 ##### the column, of the buoyancy penetration depth √e / N of every face carried away at the slope
-##### ℂⁱ, bounded by the wall length ℂˢ z. Breeze's `fill_mixing_length!` computes the envelope of
+##### ℂⁱ, bounded by the wall length ℂˢ z. Level 1 is the lowest level here as in the grid (SHOC's
+##### arrays are not flipped in Breeze; E3SM counts from the top). Breeze's `fill_mixing_length!` computes the envelope of
 ##### a column in two sweeps and `mixing_lengthᶜᶜᶜ` reconstructs the length of a level from it;
 ##### both are called here as they are, with
 #####

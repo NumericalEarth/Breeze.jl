@@ -485,7 +485,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         # The set, and the set with SHOC's own mixing length and time scale named after it
         differentiable = SimplifiedHigherOrderClosure(FT; components..., surface_forcing...)
         own = SimplifiedHigherOrderClosure(FT; components...,
-                                           mixing_length = SHOCMixingLength(),
+                                           mixing_length = BlendedMixingLength(),
                                            turbulence_time_scale = ColumnStabilityDamping(),
                                            tke_update = ImplicitSinkTKE(),
                                            surface_forcing...)
@@ -540,7 +540,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
     end
 
     @testset "Every combination of components" begin
-        choices = (mixing_length = (SHOCMixingLength(), GradientLimitedMixingLength()),
+        choices = (mixing_length = (BlendedMixingLength(), GradientLimitedMixingLength()),
                    turbulence_time_scale = (ColumnStabilityDamping(), RichardsonStabilityFunctions(RationalStabilityFunction())),
                    tke_update = (ForwardEulerTKE(), ImplicitSinkTKE()),
                    buoyancy_source = (PDFBuoyancyFlux(), DowngradientBuoyancyFlux()),

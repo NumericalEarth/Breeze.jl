@@ -98,7 +98,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the names of the coefficients of `closure` that a calibration may train: those of
 [`closure_parameters`](@ref) except the dimensional time scale `ℂˡ₅` of
-[`SHOCMixingLength`](@ref) and the coefficients `ℂᴴ` of the boundary layer depth, which is a
+[`BlendedMixingLength`](@ref) and the coefficients `ℂᴴ` of the boundary layer depth, which is a
 diagnostic.
 """
 trainable_parameter_names(closure) =

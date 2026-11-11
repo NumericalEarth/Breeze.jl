@@ -37,7 +37,7 @@ column_data(field) = Array(interior(field))
         @test SHOC === SimplifiedHigherOrderClosure
         @test SimplifiedHigherOrderClosure(; surface_temperature_flux = 0.1) === closure
         @test_throws MethodError SimplifiedHigherOrderClosure(FT; core = nothing)
-        @test closure.mixing_length isa SHOCMixingLength{FT}
+        @test closure.mixing_length isa BlendedMixingLength{FT}
         @test closure.turbulence_time_scale isa ColumnStabilityDamping{FT}
         @test closure.tke_update isa ForwardEulerTKE{FT}
         @test closure.buoyancy_source isa PDFBuoyancyFlux

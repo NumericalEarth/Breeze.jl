@@ -12,7 +12,7 @@ module SimplifiedHigherOrderClosures
 
 export SimplifiedHigherOrderClosure, SHOC,
        differentiable_shoc_components,
-       SHOCMixingLength,
+       BlendedMixingLength,
        ColumnStabilityDamping, RichardsonStabilityFunctions,
        ForwardEulerTKE, ImplicitSinkTKE,
        PDFBuoyancyFlux, DowngradientBuoyancyFlux,
