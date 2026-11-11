@@ -30,7 +30,8 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
                                     implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
                                     factor_vertical_solver!, StoredTridiagonalFactors, factor_tridiagonal!,
-                                    substitute_tridiagonal!, solve_tridiagonal_in_place!
+                                    substitute_tridiagonal!, solve_tridiagonal_in_place!, substep_halo_mirror,
+                                    PeriodicHaloMirror
 using Breeze.Microphysics: adjust_thermodynamic_state
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
@@ -83,7 +84,7 @@ as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float
     fill!(ρv′, 0)
 
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Cᴸ, Gρu, Gρv)
+            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Cᴸ, Gρu, Gρv, nothing)
 
     # −Δτ (∂x pᴸ + ∂x(Cᴸ (ρθ)′)) with Cᴸ = 1
     @test @allowscalar(ρu′[2, 2, 2]) == -0.5 * (2 + 1)
@@ -420,8 +421,10 @@ for arch in arches
     end
 
     # The substep fills only the halos its kernels read: none of ρ′ (never read off its own column
-    # except into the discarded boundary rows of the vertical right-hand side). Poisoned halos
-    # must therefore not reach the interior.
+    # except into the discarded boundary rows of the vertical right-hand side), and those of
+    # (ρu)′, (ρv)′ only after it has updated them — on this horizontally periodic grid by writing
+    # the periodic images in the kernels themselves. Poisoned halos must therefore not reach the
+    # interior.
     @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
@@ -437,14 +440,19 @@ for arch in arches
 
         # The perturbations and slow tendencies of the last stage are a valid substep state.
         substepper = model.timestepper.substepper
-        ρ′ = substepper.density_perturbation
-        values = copy(interior(ρ′))
-        fill!(parent(ρ′), NaN)
-        copyto!(interior(ρ′), values)
+        for field in (substepper.density_perturbation,
+                      substepper.momentum_perturbation.u,
+                      substepper.momentum_perturbation.v)
+            values = copy(interior(field))
+            fill!(parent(field), NaN)
+            copyto!(interior(field), values)
+        end
 
         Δτ = FT(1//2)
         ω = FT(substepper.forward_weight)
-        stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ)
+        stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ,
+                 halo_mirror = substep_halo_mirror(model))
+        @test stage.halo_mirror isa PeriodicHaloMirror{true, true}
         factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
         acoustic_substep_loop!(2, model, substepper, stage, nothing)
 

@@ -278,6 +278,10 @@ end
 ##### Terrain-specialized acoustic substep helpers
 #####
 
+# The terrain metric terms read more halo points of the perturbations than a `PeriodicHaloMirror`
+# writes (vertical and diagonal neighbors of the horizontal momenta, vertical neighbors of (ρθ)′).
+substep_halo_mirror(::TerrainCompressibleModel) = nothing
+
 function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
