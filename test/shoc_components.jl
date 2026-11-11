@@ -464,4 +464,47 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test maximum(run.e) > FT(0.01)
         end
     end
+
+    @testset "DifferentiableSHOC" begin
+        @test DifferentiableSHOC() === DifferentiableSHOC(core = :tke_closure)
+        @test_throws ArgumentError DifferentiableSHOC(core = :mass_flux)
+
+        # The smoothed switches are those of both cores
+        for core in (:tke_closure, :shoc)
+            closure = SHOC(DifferentiableSHOC(; core), FT; surface_forcing...)
+            @test isbits(closure)
+            @test closure.clipping === SmoothClipping(FT(1e-2))
+            @test closure.assumed_pdf isa SmoothDoubleGaussianPDF{FT}
+            @test closure.third_moment isa CanutoThirdMoment{TanhBound, FT}
+            @test closure.tke_update isa ImplicitSinkTKE{FT}
+            @test closure.buoyancy_source isa PDFBuoyancyFlux
+            @test all(value -> value isa FT, values(closure_parameters(closure)))
+
+            run = run_shoc_column(closure)
+            @test all_finite(run)
+            @test all(run.e .> 0)
+            @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
+            @test all(≥(0), run.cloud_liquid)
+            @test maximum(run.e) > FT(0.01)
+            @test isapprox(run.θ, original.θ; rtol = 5e-3)
+        end
+
+        # The default core is the eddy diffusivity of the TKE closure, with its published
+        # coefficients and no dimensional coefficient
+        closure = SHOC(DifferentiableSHOC(), FT)
+        published = TKEBasedTurbulenceClosure()
+        @test closure.mixing_length == published.mixing_length
+        @test closure.turbulence_time_scale.functions == published.stability_functions
+        @test closure.tke_update.ℂᴾ == 1
+        @test !haskey(closure_parameters(closure), :ℂˡ₅)
+
+        # SHOC's own mixing length and time scale, with the published coefficients of shoc.F90
+        own = SHOC(DifferentiableSHOC(core = :shoc), FT)
+        @test own.mixing_length === SHOC(OriginalSHOC(), FT).mixing_length
+        @test own.turbulence_time_scale === SHOC(OriginalSHOC(), FT).turbulence_time_scale
+        @test own.tke_update.ℂᴾ == FT(0.1)
+
+        # A keyword replaces a component of the preset
+        @test SHOC(DifferentiableSHOC(), FT; clipping = HardClipping()).clipping isa HardClipping
+    end
 end

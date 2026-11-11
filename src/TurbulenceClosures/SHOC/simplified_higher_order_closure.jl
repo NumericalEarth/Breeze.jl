@@ -70,7 +70,9 @@ The closure is made of components, one per relation of the scheme, each holding 
 coefficients (written ℂ) of its relation. The preset [`OriginalSHOC`](@ref), the default, selects
 the relations of E3SM `shoc.F90` with the published coefficients. A keyword argument replaces the
 component of one slot, either to change coefficients,
-`SHOC(turbulence_time_scale = ColumnStabilityDamping(ℂᶜ=0.2))`, or to swap the relation.
+`SHOC(turbulence_time_scale = ColumnStabilityDamping(ℂᶜ=0.2))`, or to swap the relation. The preset
+[`DifferentiableSHOC`](@ref) selects components without the hard switches and clips of `shoc.F90`,
+for calibration with gradients.
 [`closure_parameters`](@ref) lists the coefficients of all components and
 [`with_parameters`](@ref) replaces some of them, whichever components hold them.
 
@@ -113,17 +115,22 @@ the cloud fraction and keeps the precipitation.
 Keyword arguments
 =================
 
-- `mixing_length`: the mixing length; [`SHOCMixingLength`](@ref) in `OriginalSHOC`.
+- `mixing_length`: the mixing length; [`SHOCMixingLength`](@ref) in `OriginalSHOC`, or
+  [`GradientLimitedMixingLength`](@ref).
 - `turbulence_time_scale`: the return-to-isotropy time scale, the eddy diffusivities and the
-  dissipation coefficient; [`ColumnStabilityDamping`](@ref) in `OriginalSHOC`.
-- `tke_update`: the update of turbulent kinetic energy; [`ForwardEulerTKE`](@ref) in `OriginalSHOC`.
+  dissipation coefficient; [`ColumnStabilityDamping`](@ref) in `OriginalSHOC`, or
+  [`RichardsonStabilityFunctions`](@ref).
+- `tke_update`: the update of turbulent kinetic energy; [`ForwardEulerTKE`](@ref) in `OriginalSHOC`,
+  or [`ImplicitSinkTKE`](@ref).
 - `buoyancy_source`: the buoyancy source of turbulent kinetic energy; [`PDFBuoyancyFlux`](@ref)
-  in `OriginalSHOC`.
+  in `OriginalSHOC`, or [`DowngradientBuoyancyFlux`](@ref) for comparison.
 - `second_moments`: [`DowngradientSecondMoments`](@ref).
 - `third_moment`: the third moment of vertical velocity; [`CanutoThirdMoment`](@ref) with
-  [`ResetBound`](@ref) in `OriginalSHOC`.
-- `assumed_pdf`: the assumed PDF of the subgrid cloud; [`DoubleGaussianPDF`](@ref) in `OriginalSHOC`.
-- `clipping`: how bounds are imposed; [`HardClipping`](@ref) in `OriginalSHOC`.
+  [`ResetBound`](@ref) in `OriginalSHOC`, or with [`ClampBound`](@ref) or [`TanhBound`](@ref).
+- `assumed_pdf`: the assumed PDF of the subgrid cloud; [`DoubleGaussianPDF`](@ref) in `OriginalSHOC`,
+  or [`SmoothDoubleGaussianPDF`](@ref).
+- `clipping`: how bounds are imposed; [`HardClipping`](@ref) in `OriginalSHOC`, or
+  [`SmoothClipping`](@ref).
 - `boundary_layer_depth`: [`HoltslagBovilleDepth`](@ref).
 - `constants`: the [`SHOCConstants`](@ref).
 - `surface_temperature_flux`, `surface_moisture_flux`, `surface_x_momentum_flux`,
@@ -165,8 +172,8 @@ function SimplifiedHigherOrderClosure(preset::AbstractSHOCPreset = OriginalSHOC(
                                       third_moment = default_component(preset, Val(:third_moment)),
                                       assumed_pdf = default_component(preset, Val(:assumed_pdf)),
                                       clipping = default_component(preset, Val(:clipping)),
-                                      boundary_layer_depth = HoltslagBovilleDepth(),
-                                      constants = SHOCConstants(),
+                                      boundary_layer_depth = HoltslagBovilleDepth(Float64),
+                                      constants = SHOCConstants(Float64),
                                       surface_temperature_flux = 0,
                                       surface_moisture_flux = 0,
                                       surface_x_momentum_flux = 0,

@@ -10,7 +10,7 @@ per relation of the scheme; the preset [`OriginalSHOC`](@ref) selects those of `
 module SimplifiedHigherOrderClosures
 
 export SimplifiedHigherOrderClosure, SHOC,
-       OriginalSHOC,
+       OriginalSHOC, DifferentiableSHOC,
        SHOCMixingLength,
        ColumnStabilityDamping, RichardsonStabilityFunctions,
        ForwardEulerTKE, ImplicitSinkTKE,
