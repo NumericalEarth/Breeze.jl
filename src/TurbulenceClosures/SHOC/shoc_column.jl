@@ -136,9 +136,6 @@ end
     ##### adv_sgs_tke, isotropic_ts, eddy_diffusivities
     #####
 
-    temp_crit = convert(FT, 182) # surface temperature below which extra mixing applies [K]
-    pbl_trans = convert(FT, 200) # transition depth above the boundary layer top [m]
-
     host_scale = sqrt(host_dx * host_dy)
 
     # The shear production term of the interface below the level, carried up the column
@@ -166,7 +163,7 @@ end
         store_tke_sink_rate!(scratch, i, j, k, sink_rate)
 
         # isotropic_ts, eddy_diffusivities
-        runaway = (tabs_sfc < temp_crit) & (zt[i, j, k] < pblh + pbl_trans)
+        runaway = cold_surface_fallback(time_scale, tabs_sfc, zt[i, j, k], pblh)
         iso, tkh_k, tk_k = time_scale_and_diffusivities(time_scale, cp, c, time_scale_of_column, tke_k, a_diss, mix,
                                                         brunt_k, sterm_zt, tke_update, runaway)
         isotropy[i, j, k] = iso
@@ -213,8 +210,8 @@ end
     rdp_zt_sfc = rdp_zt(i, j, 1, c, zi, pdel)
 
     # impli_srf_stress_term
-    wsmin = one(FT) # minimum wind speed for ksrf [m/s]
-    ksrfmin = convert(FT, 1e-4) # minimum surface drag coefficient [kg/s/m²]
+    wsmin = c.wsmin # minimum wind speed for ksrf [m/s]
+    ksrfmin = c.ksrfmin # minimum surface drag coefficient [kg/s/m²]
     taux = rho_zi_sfc * uw_sfc
     tauy = rho_zi_sfc * vw_sfc
     @inbounds ws = clip_max(cp, zero_safe_sqrt(u_wind[i, j, 1] * u_wind[i, j, 1] + v_wind[i, j, 1] * v_wind[i, j, 1]), wsmin, wsmin)
@@ -222,7 +219,7 @@ end
     ksrf = clip_max(cp, tau / ws, ksrfmin, ksrfmin)
 
     # tke_srf_flux_term
-    ustar = clip_max(cp, zero_safe_sqrt(zero_safe_sqrt(uw_sfc * uw_sfc + vw_sfc * vw_sfc)), convert(FT, 0.01), convert(FT, 0.01))
+    ustar = clip_max(cp, zero_safe_sqrt(zero_safe_sqrt(uw_sfc * uw_sfc + vw_sfc * vw_sfc)), c.tke_flux_ustar_min, c.tke_flux_ustar_min)
     wtke_sfc = ustar * ustar * ustar
 
     # sfc_fluxes

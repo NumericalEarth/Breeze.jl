@@ -31,7 +31,8 @@ the plumes collapse onto the mean.
 
 Between `ℂᵍ₃` and `ℂᵍ₄` the skewness of total water ramps linearly; the Fortran writes the width
 of the ramp as the literal `0.2`, which is taken here as `ℂᵍ₄ - ℂᵍ₃` so that the ramp stays
-continuous when the two are changed. `ℂᵍ₃ < ℂᵍ₄` is required.
+continuous when the two are changed. `ℂᵍ₃ < ℂᵍ₄` is required. The fields after the coefficients
+are tolerances and bounds, not empirical coefficients.
 
 $(TYPEDFIELDS)
 """
@@ -52,6 +53,12 @@ struct DoubleGaussianPDF{FT} <: AbstractSHOCComponent
     w_tol :: FT
     "Lowest liquid water temperature of a plume, K"
     Tl_min :: FT
+    "Lowest fraction of the first plume (literal `0.01`)"
+    plume_fraction_min :: FT
+    "Highest fraction of the first plume (literal `0.99`)"
+    plume_fraction_max :: FT
+    "Highest variance of a scalar within a plume over its variance (literal `100`)"
+    plume_variance_ratio_max :: FT
 end
 
 """
@@ -62,7 +69,8 @@ argument.
 """
 DoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
     component_from_keywords(DoubleGaussianPDF, FT,
-                            (ℂᵍ₁ = 0.4, ℂᵍ₂ = 1.2, ℂᵍ₃ = 0.2, ℂᵍ₄ = 0.4, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2, Tl_min = 100), kw)
+                            (ℂᵍ₁ = 0.4, ℂᵍ₂ = 1.2, ℂᵍ₃ = 0.2, ℂᵍ₄ = 0.4, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2, Tl_min = 100,
+                             plume_fraction_min = 0.01, plume_fraction_max = 0.99, plume_variance_ratio_max = 100), kw)
 
 Adapt.@adapt_structure DoubleGaussianPDF
 
@@ -78,7 +86,7 @@ end
 # shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters share one form: the plume
 # means and variances of a scalar from its variance `sec`, its flux correlation with w, and the
 # skewness `skew` of the scalar (identically zero for thetal, where `dothetal_skew = false`).
-@inline function plume_variance(cp, first_plume, x1_1, x1_2, a, skew, sec)
+@inline function plume_variance(cp, first_plume, x1_1, x1_2, a, skew, sec, ratio_max)
     one_minus = 1 - a * (x1_1 * x1_1) - (1 - a) * (x1_2 * x1_2)
     third = skew - a * (x1_1 * x1_1 * x1_1) - (1 - a) * (x1_2 * x1_2 * x1_2)
     numerator = ifelse(first_plume, 3 * x1_2 * one_minus - third, -3 * x1_1 * one_minus + third)
@@ -86,7 +94,7 @@ end
     # Where the plume means coincide the Fortran forms 0/0 and MAX(0, NaN) drops it; that is zero.
     degenerate = denominator == 0
     ratio = ifelse(degenerate, zero(numerator), numerator / ifelse(degenerate, one(denominator), denominator))
-    return clip_between(cp, ratio, 0, 100, 1) * sec
+    return clip_between(cp, ratio, 0, ratio_max, 1) * sec
 end
 
 @inline function scalar_plume_parameters(cp, flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed, p::DoubleGaussianPDF)
@@ -105,8 +113,8 @@ end
                             ((p.ℂᵍ₂ * Skew_w) / (p.ℂᵍ₄ - p.ℂᵍ₃)) * (tsign - p.ℂᵍ₃)))
     skew = ifelse(skewed, skew_qw, zero(FT))
 
-    x2_1 = plume_variance(cp, true, x1_1, x1_2, a, skew, sec)
-    x2_2 = plume_variance(cp, false, x1_1, x1_2, a, skew, sec)
+    x2_1 = plume_variance(cp, true, x1_1, x1_2, a, skew, sec, p.plume_variance_ratio_max)
+    x2_2 = plume_variance(cp, false, x1_1, x1_2, a, skew, sec, p.plume_variance_ratio_max)
 
     x1_1 = x1_1 * sqrt_sec + x_first
     x1_2 = x1_2 * sqrt_sec + x_first
@@ -202,7 +210,7 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     w2_1 = pdf.ℂᵍ₁
     omw = 1 - w2_1
     a = clip_between(cp, convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))),
-                     convert(FT, 0.01), convert(FT, 0.99), 1)
+                     pdf.plume_fraction_min, pdf.plume_fraction_max, 1)
     sqrtw2t = sqrt(1 - w2_1)
     w1_1 = sqrt((1 - a) / a) * sqrtw2t
     w1_2 = -1 * sqrt(a / (1 - a)) * sqrtw2t

@@ -13,10 +13,28 @@
 """
 $(TYPEDEF)
 
-Beyond the bound, the third moment is reset to the constant 0.02 m³ s⁻³, as in E3SM `shoc.F90`
-(`clipping_diag_third_shoc_moments`). The third moment jumps where it reaches the bound.
+Beyond the bound, the third moment is reset to the constant `w3_reset` (0.02 m³ s⁻³), as in
+E3SM `shoc.F90` (`clipping_diag_third_shoc_moments`). The third moment jumps where it reaches the
+bound.
+
+$(TYPEDFIELDS)
 """
-struct ResetBound <: AbstractSHOCComponent end
+struct ResetBound{FT} <: AbstractSHOCComponent
+    "The value a third moment beyond its bound is reset to, m³ s⁻³ (literal `0.02`)"
+    w3_reset :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `ResetBound{FT}` with the reset value of E3SM `shoc.F90`.
+"""
+ResetBound(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(ResetBound, FT, (; w3_reset = 0.02), kw)
+
+Adapt.@adapt_structure ResetBound
+
+Base.summary(::ResetBound) = "ResetBound"
 
 """
 $(TYPEDEF)
@@ -45,7 +63,19 @@ E3SM `shoc.F90` computes it (`compute_diag_third_shoc_moment`), bounded in magni
 
 | coefficient | `shoc.F90` | default | meaning |
 |:------------|:-----------|:--------|:--------|
-| `ℂʷ₂` | `c_diag_3rd_mom` | 7 | the coefficient `c` of the diagnostic third moment |
+| `ℂʷ₂`  | `c_diag_3rd_mom` | 7 | the coefficient `c` of the diagnostic third moment |
+| `ℂʷ₃`  | literal `0.52` | 0.52 | `a0 = ℂʷ₃ / (c² (c - 2))` |
+| `ℂʷ₄`  | literal `0.87` | 0.87 | `a1 = ℂʷ₄ / c²` |
+| `ℂʷ₅`  | literal `0.5`  | 0.5  | `a2 = ℂʷ₅ / c` |
+| `ℂʷ₆`  | literal `0.6`  | 0.6  | `a3 = ℂʷ₆ / (c (c - 2))` |
+| `ℂʷ₇`  | literal `2.4`  | 2.4  | `a4 = ℂʷ₇ / (3 c + 5)` |
+| `ℂʷ₈`  | literal `0.6`  | 0.6  | `a5 = ℂʷ₈ / (c (3 + 5 c))` |
+| `ℂʷ₉`  | literal `1.2`  | 1.2  | weight of `X₀` and `X₁` in `w'³ = (A₁ - ℂʷ₉ X₁ - ℂʷ₁₀ f₅) / (c - ℂʷ₉ X₀ + A₀)` |
+| `ℂʷ₁₀` | literal `1.5`  | 1.5  | weight of `f₅`, see `ℂʷ₉` |
+| `ℂʷ₁₁` | literal `5/4`  | 1.25 | weight of `f₄` in `ω₂ = ω₁ f₃ + ℂʷ₁₁ ω₀ f₄` |
+
+`ℂʷ₃` to `ℂʷ₁₁` are the numbers of the closure of Canuto et al. (2001) that `shoc.F90` writes
+as literals; `shoc.F90` exposes only `c`. `w3clip` is a bound, not an empirical coefficient.
 
 $(TYPEDFIELDS)
 """
@@ -54,6 +84,24 @@ struct CanutoThirdMoment{B, FT} <: AbstractSHOCComponent
     bound :: B
     "Coefficient of the diagnostic third moment of vertical velocity (`c_diag_3rd_mom`)"
     ℂʷ₂ :: FT
+    "Numerator of `a0` of the diagnostic third moment (literal `0.52`)"
+    ℂʷ₃ :: FT
+    "Numerator of `a1` (literal `0.87`)"
+    ℂʷ₄ :: FT
+    "Numerator of `a2` (literal `0.5`)"
+    ℂʷ₅ :: FT
+    "Numerator of `a3` (literal `0.6`)"
+    ℂʷ₆ :: FT
+    "Numerator of `a4` (literal `2.4`)"
+    ℂʷ₇ :: FT
+    "Numerator of `a5` (literal `0.6`)"
+    ℂʷ₈ :: FT
+    "Weight of `X₀` and `X₁` in the third moment (literal `1.2`)"
+    ℂʷ₉ :: FT
+    "Weight of `f₅` in the third moment (literal `1.5`)"
+    ℂʷ₁₀ :: FT
+    "Weight of `f₄` in `ω₂` (literal `5/4`)"
+    ℂʷ₁₁ :: FT
     "Bound on the third moment over `√(2 w'w'³)`"
     w3clip :: FT
 end
@@ -62,9 +110,17 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `CanutoThirdMoment` with the values of E3SM `shoc.F90`, bounded as `bound` prescribes.
+Every scalar field is a keyword argument.
 """
-CanutoThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; bound = ResetBound(), ℂʷ₂ = 7, w3clip = 1.2) =
-    CanutoThirdMoment(bound, convert(FT, ℂʷ₂), convert(FT, w3clip))
+function CanutoThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; bound = ResetBound(Float64), kw...)
+    defaults = (ℂʷ₂ = 7, ℂʷ₃ = 0.52, ℂʷ₄ = 0.87, ℂʷ₅ = 0.5, ℂʷ₆ = 0.6, ℂʷ₇ = 2.4, ℂʷ₈ = 0.6, ℂʷ₉ = 1.2, ℂʷ₁₀ = 1.5,
+                ℂʷ₁₁ = 1.25, w3clip = 1.2)
+    names = keys(defaults)
+    all(name -> name ∈ names, keys(kw)) ||
+        throw(ArgumentError("$(setdiff(keys(kw), names)) are not scalar fields of CanutoThirdMoment; they are $(names)."))
+    scalars = map(value -> convert(FT, value), Tuple(merge(defaults, NamedTuple(kw))))
+    return CanutoThirdMoment(convert_eltype(FT, bound), scalars...)
+end
 
 Adapt.@adapt_structure CanutoThirdMoment
 
@@ -92,17 +148,17 @@ Base.summary(tm::CanutoThirdMoment{B, FT}) where {B, FT} = string("CanutoThirdMo
     f5 = thedz * iso * w_sec_zi * wsec_diff
 
     # omega_terms_diag_third_shoc_moment
-    a4 = convert(FT, 2.4) / (3 * c + 5)
-    a5 = convert(FT, 0.6) / (c * (3 + 5 * c))
+    a4 = tm.ℂʷ₇ / (3 * c + 5)
+    a5 = tm.ℂʷ₈ / (c * (3 + 5 * c))
     omega0 = a4 / (1 - a5 * buoy_sgs2)
     omega1 = omega0 / (2 * c)
-    omega2 = omega1 * f3 + (convert(FT, 5) / 4) * omega0 * f4
+    omega2 = omega1 * f3 + tm.ℂʷ₁₁ * omega0 * f4
 
     # x_y_terms_diag_third_shoc_moment
-    a0 = (convert(FT, 0.52) * (1 / (c * c))) / (c - 2)
-    a1 = convert(FT, 0.87) / (c * c)
-    a2 = convert(FT, 0.5) / c
-    a3 = convert(FT, 0.6) / (c * (c - 2))
+    a0 = (tm.ℂʷ₃ * (1 / (c * c))) / (c - 2)
+    a1 = tm.ℂʷ₄ / (c * c)
+    a2 = tm.ℂʷ₅ / c
+    a3 = tm.ℂʷ₆ / (c * (c - 2))
     x0 = (a2 * buoy_sgs2 * (1 - a3 * buoy_sgs2)) / (1 - (a1 + a3) * buoy_sgs2)
     y0 = (2 * a2 * buoy_sgs2 * x0) / (1 - a3 * buoy_sgs2)
     x1 = (a0 * f0 + a1 * f1 + a2 * (1 - a3 * buoy_sgs2) * f2) / (1 - (a1 + a3) * buoy_sgs2)
@@ -113,7 +169,7 @@ Base.summary(tm::CanutoThirdMoment{B, FT}) where {B, FT} = string("CanutoThirdMo
     aa1 = omega0 * x1 + omega1 * y1 + omega2
 
     # w3_diag_third_shoc_moment
-    return (aa1 - convert(FT, 1.2) * x1 - convert(FT, 1.5) * f5) / (c - convert(FT, 1.2) * x0 + aa0)
+    return (aa1 - tm.ℂʷ₉ * x1 - tm.ℂʷ₁₀ * f5) / (c - tm.ℂʷ₉ * x0 + aa0)
 end
 
 # The largest magnitude of the third moment; `theterm` is w_sec interpolated to the interface
@@ -122,11 +178,11 @@ end
 @inline bound_third_moment(tm::CanutoThirdMoment, cp, theterm, w3) =
     bound_third_moment(tm.bound, cp, third_moment_bound(tm, theterm), w3)
 
-# clipping_diag_third_shoc_moments: a value beyond the bound is reset to 0.02, as in the Fortran
-@inline function bound_third_moment(::ResetBound, cp, cond, w3)
+# clipping_diag_third_shoc_moments: a value beyond the bound is reset to a constant, as in the Fortran
+@inline function bound_third_moment(bound::ResetBound, cp, cond, w3)
     FT = typeof(w3)
     tsign = ifelse(w3 < 0, -one(FT), one(FT))
-    return ifelse(tsign * w3 > cond, convert(FT, 0.02), w3)
+    return ifelse(tsign * w3 > cond, bound.w3_reset, w3)
 end
 
 # The bound is positive: the interface variance it is made of is floored

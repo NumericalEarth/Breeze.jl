@@ -5,13 +5,18 @@
 #####
 #####     time_scale_column(ts, cp, c, brunt_int)                -> column
 #####     dissipation_coefficient(ts, column, N², shear_term, tke_update) -> Sᴰ, with ε = Sᴰ e^{3/2} / ℓ
+#####     cold_surface_fallback(ts, tabs_sfc, z, pblh)           -> runaway
 #####     time_scale_and_diffusivities(ts, cp, c, column, e, ε, ℓ, N², shear_term, tke_update, runaway) -> (τ, Kᶜ, Kᵘ)
 #####
 ##### `brunt_int` is the stability integrated over the lower troposphere, `shear_term` the shear
 ##### production term of the TKE update (the squared shear times its `ℂᴾ`), `e` the turbulent
 ##### kinetic energy after the TKE update and `ε` the dissipation the update used. `τ` is the
-##### return-to-isotropy time scale that the second and third moments use.
+##### return-to-isotropy time scale that the second and third moments use. `runaway` says whether
+##### the level takes the fallback diffusivities of a very cold surface (of temperature `tabs_sfc`,
+##### under a boundary layer of depth `pblh`); a component without that fallback returns `false`.
 #####
+
+@inline cold_surface_fallback(time_scale, tabs_sfc, zt_k, pblh) = false
 
 """
 $(TYPEDEF)
@@ -22,9 +27,10 @@ The return-to-isotropy time scale and eddy diffusivities of E3SM `shoc.F90` (`is
     τ = min(maxiso, τ₀ / (1 + λ N²⁺ τ₀²)),    Kᶜ = ℂᶜ τ e,    Kᵘ = ℂᵘ τ e
 
 where `λ = ℂᵝ₁ + (∫N² dz / g - ℂᵝ₄) ℂᵝ₃`, kept between `ℂᵝ₁` and `ℂᵝ₂`, is one number per column,
-and the dissipation is `ε = Sᴰ e^{3/2} / ℓ` with the constant `Sᴰ = ℂᴰ₁³ / ℂᴰ₂⁴`. Over a surface
-colder than 182 K the diffusivities fall back to `ℂᶜₛ ℓ² |∂z u|` and `ℂᵘₛ ℓ² |∂z u|` up to 200 m
-above the boundary layer top.
+and the dissipation is `ε = Sᴰ e^{3/2} / ℓ` with the constant
+`Sᴰ = (ℂᴰ₃ + ℂᴰ₄) / ℂᴰ₅ × ℂᴰ₁³ / ℂᴰ₂⁴`. Over a surface colder than `temp_crit` (182 K) the
+diffusivities fall back to `ℂᶜₛ ℓ² |∂z u|` and `ℂᵘₛ ℓ² |∂z u|` up to `pbl_trans` (200 m) above
+the boundary layer top.
 
 | coefficient | `shoc.F90` | default | meaning |
 |:------------|:-----------|:--------|:--------|
@@ -36,8 +42,15 @@ above the boundary layer top.
 | `ℂᵝ₂` | `lambda_high`    | 0.08   | highest value of `λ` |
 | `ℂᵝ₃` | `lambda_slope`   | 2.65   | slope of `λ` in the integrated column stability |
 | `ℂᵝ₄` | `lambda_thresh`  | 0.02   | integrated column stability at which `λ` starts to rise |
-| `ℂᴰ₁` | `Ck` (`adv_sgs_tke`) | 0.1  | dissipation: `Ce = ℂᴰ₁³ / ℂᴰ₂⁴`, `ε = (0.19 + 0.51) / 0.7 Ce e^{3/2} / ℓ` |
+| `ℂᴰ₁` | `Ck` (`adv_sgs_tke`) | 0.1  | dissipation: `Ce = ℂᴰ₁³ / ℂᴰ₂⁴`, `ε = (ℂᴰ₃ + ℂᴰ₄) / ℂᴰ₅ Ce e^{3/2} / ℓ` |
 | `ℂᴰ₂` | `Cs` (`adv_sgs_tke`) | 0.15 | dissipation, see `ℂᴰ₁` |
+| `ℂᴰ₃` | literal `0.19` (`Ce1 = Ce / 0.7 × 0.19`) | 0.19 | dissipation, see `ℂᴰ₁` |
+| `ℂᴰ₄` | literal `0.51` (`Ce2 = Ce / 0.7 × 0.51`) | 0.51 | dissipation, see `ℂᴰ₁` |
+| `ℂᴰ₅` | literal `0.7`  | 0.7  | dissipation, see `ℂᴰ₁` |
+
+The five `ℂᴰ` enter the closure only through the one product `Sᴰ`, so a calibration can
+determine no more than one of them. The fields after them are bounds and switches, all
+dimensional; none is an empirical coefficient.
 
 $(TYPEDFIELDS)
 """
@@ -62,8 +75,20 @@ struct ColumnStabilityDamping{FT} <: AbstractSHOCComponent
     ℂᴰ₁ :: FT
     "Dissipation coefficient (`Cs` of `adv_sgs_tke`)"
     ℂᴰ₂ :: FT
+    "Dissipation coefficient (literal `0.19` of `Ce1`)"
+    ℂᴰ₃ :: FT
+    "Dissipation coefficient (literal `0.51` of `Ce2`)"
+    ℂᴰ₄ :: FT
+    "Dissipation coefficient (literal `0.7` that divides `Ce` in `Ce1` and `Ce2`)"
+    ℂᴰ₅ :: FT
     "Maximum return-to-isotropy time scale, s"
     maxiso :: FT
+    "Surface temperature below which the diffusivities take the cold-surface fallback, K (`temp_crit`)"
+    temp_crit :: FT
+    "Depth above the boundary layer top over which the cold-surface fallback applies, m (`pbl_trans`)"
+    pbl_trans :: FT
+    "Magnitude of the time scale that scales the smoothing of its upper bound, s; `HardClipping` ignores it"
+    isotropy_scale :: FT
 end
 
 """
@@ -75,19 +100,18 @@ argument.
 ColumnStabilityDamping(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
     component_from_keywords(ColumnStabilityDamping, FT,
                             (ℂᵘ = 0.1, ℂᶜ = 0.1, ℂᵘₛ = 0.1, ℂᶜₛ = 0.1, ℂᵝ₁ = 0.001, ℂᵝ₂ = 0.08, ℂᵝ₃ = 2.65, ℂᵝ₄ = 0.02,
-                             ℂᴰ₁ = 0.1, ℂᴰ₂ = 0.15, maxiso = 20000), kw)
+                             ℂᴰ₁ = 0.1, ℂᴰ₂ = 0.15, ℂᴰ₃ = 0.19, ℂᴰ₄ = 0.51, ℂᴰ₅ = 0.7,
+                             maxiso = 20000, temp_crit = 182, pbl_trans = 200, isotropy_scale = 100), kw)
 
 Adapt.@adapt_structure ColumnStabilityDamping
 
 # The stability damping λ of the column and the dissipation coefficient
 @inline function time_scale_column(ts::ColumnStabilityDamping, cp, c, brunt_int)
-    FT = typeof(brunt_int)
-
     Cs = ts.ℂᴰ₂
     Ck = ts.ℂᴰ₁
     Ce = (Ck * Ck * Ck) / ((Cs * Cs) * (Cs * Cs))
-    Ce1 = Ce / convert(FT, 0.7) * convert(FT, 0.19)
-    Ce2 = Ce / convert(FT, 0.7) * convert(FT, 0.51)
+    Ce1 = Ce / ts.ℂᴰ₅ * ts.ℂᴰ₃
+    Ce2 = Ce / ts.ℂᴰ₅ * ts.ℂᴰ₄
     Cee = Ce1 + Ce2
 
     lambda_column = ts.ℂᵝ₁ + ((brunt_int / c.ggr) - ts.ℂᵝ₄) * ts.ℂᵝ₃
@@ -98,11 +122,14 @@ end
 
 @inline dissipation_coefficient(::ColumnStabilityDamping, column, brunt_k, shear_term, tke_update) = column.Cee
 
+# The fallback applies over a surface colder than `temp_crit`, up to `pbl_trans` above the boundary layer top
+@inline cold_surface_fallback(ts::ColumnStabilityDamping, tabs_sfc, zt_k, pblh) =
+    (tabs_sfc < ts.temp_crit) & (zt_k < pblh + ts.pbl_trans)
+
 @inline function time_scale_and_diffusivities(ts::ColumnStabilityDamping, cp, c, column, tke_k, a_diss, mix,
                                               brunt_k, shear_term, tke_update, runaway)
-    FT = typeof(tke_k)
-    brunt_scale = convert(FT, 1e-6) # scale of the squared buoyancy frequency for the clipping policy [s⁻²]
-    iso_scale_floor = convert(FT, 100) # scale of the time scale for the clipping policy [s]
+    brunt_scale = c.brunt_scale # scale of the squared buoyancy frequency for the clipping policy [s⁻²]
+    iso_scale_floor = ts.isotropy_scale # scale of the time scale for the clipping policy [s]
 
     # isotropic_ts
     iso_scale = (2 * tke_k) / a_diss
@@ -195,8 +222,7 @@ Base.summary(ts::RichardsonStabilityFunctions) = string("RichardsonStabilityFunc
 
 @inline function time_scale_and_diffusivities(ts::RichardsonStabilityFunctions, cp, c, column, tke_k, a_diss, mix,
                                               brunt_k, shear_term, tke_update, runaway)
-    FT = typeof(tke_k)
-    brunt_scale = convert(FT, 1e-6) # scale of the squared buoyancy frequency for the clipping policy [s⁻²]
+    brunt_scale = c.brunt_scale # scale of the squared buoyancy frequency for the clipping policy [s⁻²]
 
     Ri = level_richardson_number(ts, brunt_k, shear_term, tke_update)
     turbulent_velocity = sqrt(clip_max(cp, c.mintke, tke_k, c.mintke))

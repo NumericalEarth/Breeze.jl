@@ -71,7 +71,7 @@ closure = SimplifiedHigherOrderClosure()
 keys(closure_parameters(closure))
 
 # output
-(:ℂˡ₁, :ℂˡ₂, :ℂˡ₃, :ℂˡ₄, :ℂˡ₅, :ℂᵘ, :ℂᶜ, :ℂᵘₛ, :ℂᶜₛ, :ℂᵝ₁, :ℂᵝ₂, :ℂᵝ₃, :ℂᵝ₄, :ℂᴰ₁, :ℂᴰ₂, :ℂᴾ, :ℂᵛ₁, :ℂᵛ₂, :ℂᵛ₃, :ℂʷ₁, :ℂᶠ, :ℂʷ₂, :ℂᵍ₁, :ℂᵍ₂, :ℂᵍ₃, :ℂᵍ₄, :ℂᴴ₁, :ℂᴴ₂, :ℂᴴ₃, :ℂᴴ₄)
+(:ℂˡ₁, :ℂˡ₂, :ℂˡ₃, :ℂˡ₄, :ℂˡ₅, :ℂᵘ, :ℂᶜ, :ℂᵘₛ, :ℂᶜₛ, :ℂᵝ₁, :ℂᵝ₂, :ℂᵝ₃, :ℂᵝ₄, :ℂᴰ₁, :ℂᴰ₂, :ℂᴰ₃, :ℂᴰ₄, :ℂᴰ₅, :ℂᴾ, :ℂᵛ₁, :ℂᵛ₂, :ℂᵛ₃, :ℂʷ₁, :ℂᶠ, :ℂᶠ₂, :ℂᶠ₃, :ℂᶠ₄, :ℂᶠ₅, :ℂʷ₂, :ℂʷ₃, :ℂʷ₄, :ℂʷ₅, :ℂʷ₆, :ℂʷ₇, :ℂʷ₈, :ℂʷ₉, :ℂʷ₁₀, :ℂʷ₁₁, :ℂᵍ₁, :ℂᵍ₂, :ℂᵍ₃, :ℂᵍ₄, :ℂᴴ₁, :ℂᴴ₂, :ℂᴴ₃, :ℂᴴ₄, :ℂᴴ₅, :ℂᴴ₆, :ℂᴴ₇)
 ```
 
 With the mixing length and the stability functions that `TKEBasedTurbulenceClosure` also uses:
@@ -94,15 +94,27 @@ function closure_parameters(closure)
 end
 
 """
+The empirical coefficients of the components of SHOC that have a dimension: the eddy turnover
+time scale `ℂˡ₅` (s) of [`BlendedMixingLength`](@ref), the depth `ℂᶠ₅` (m) of the convective
+velocity scale of [`DowngradientSecondMoments`](@ref), and the least depths `ℂᴴ₆` (s, over the
+friction velocity) and `ℂᴴ₇` (m) of [`HoltslagBovilleDepth`](@ref).
+"""
+const DIMENSIONAL_COEFFICIENTS = (:ℂˡ₅, :ℂᶠ₅, :ℂᴴ₆, :ℂᴴ₇)
+
+"""
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the names of the coefficients of `closure` that a calibration may train: those of
-[`closure_parameters`](@ref) except the dimensional time scale `ℂˡ₅` of
-[`BlendedMixingLength`](@ref) and the coefficients `ℂᴴ` of the boundary layer depth, which is a
-diagnostic.
+[`closure_parameters`](@ref) except the dimensional ones (`DIMENSIONAL_COEFFICIENTS`) and the
+coefficients `ℂᴴ` of the boundary layer depth, which is a diagnostic.
+
+Not every name returned can be determined independently of the others: the five `ℂᴰ` of
+[`ColumnStabilityDamping`](@ref) enter through one product, `ℂᶠ` of
+[`DowngradientSecondMoments`](@ref) only multiplies `ℂᶠ₂` and `ℂᶠ₃`, and `ℂˡ₂` of
+[`BlendedMixingLength`](@ref) only divides by `ℂˡ₁`.
 """
 trainable_parameter_names(closure) =
-    filter(name -> name !== :ℂˡ₅ && !startswith(string(name), "ℂᴴ"), keys(closure_parameters(closure)))
+    filter(name -> name ∉ DIMENSIONAL_COEFFICIENTS && !startswith(string(name), "ℂᴴ"), keys(closure_parameters(closure)))
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -160,7 +172,12 @@ const SHOC_COEFFICIENT_NAMES = (ℂᵘ = :Ckm, ℂᶜ = :Ckh, ℂᵘₛ = :Ckm_s
                                 ℂᵝ₁ = :lambda_low, ℂᵝ₂ = :lambda_high, ℂᵝ₃ = :lambda_slope, ℂᵝ₄ = :lambda_thresh,
                                 ℂᴰ₁ = :Ck, ℂᴰ₂ = :Cs, ℂᴾ = :Ck_sh, ℂᶠ = :a_const,
                                 ℂᵍ₁ = :w2_1, ℂᵍ₂ = nothing, ℂᵍ₃ = nothing, ℂᵍ₄ = nothing,
-                                ℂᴴ₁ = :ricr, ℂᴴ₂ = :fac, ℂᴴ₃ = :fak, ℂᴴ₄ = :betam)
+                                ℂᴴ₁ = :ricr, ℂᴴ₂ = :fac, ℂᴴ₃ = :fak, ℂᴴ₄ = :betam,
+                                ℂᴰ₃ = nothing, ℂᴰ₄ = nothing, ℂᴰ₅ = nothing,
+                                ℂᶠ₂ = nothing, ℂᶠ₃ = nothing, ℂᶠ₄ = nothing, ℂᶠ₅ = :z_const,
+                                ℂʷ₃ = nothing, ℂʷ₄ = nothing, ℂʷ₅ = nothing, ℂʷ₆ = nothing, ℂʷ₇ = nothing,
+                                ℂʷ₈ = nothing, ℂʷ₉ = nothing, ℂʷ₁₀ = nothing, ℂʷ₁₁ = nothing,
+                                ℂᴴ₅ = :sffrac, ℂᴴ₆ = nothing, ℂᴴ₇ = nothing)
 
 """
 The run-time tunables of `shoc_init` in E3SM's `shoc.F90`, by their coefficient name in the
@@ -210,6 +227,25 @@ struct SHOCParameters{FT}
     ℂᴴ₂ :: FT
     ℂᴴ₃ :: FT
     ℂᴴ₄ :: FT
+    ℂᴰ₃ :: FT
+    ℂᴰ₄ :: FT
+    ℂᴰ₅ :: FT
+    ℂᶠ₂ :: FT
+    ℂᶠ₃ :: FT
+    ℂᶠ₄ :: FT
+    ℂᶠ₅ :: FT
+    ℂʷ₃ :: FT
+    ℂʷ₄ :: FT
+    ℂʷ₅ :: FT
+    ℂʷ₆ :: FT
+    ℂʷ₇ :: FT
+    ℂʷ₈ :: FT
+    ℂʷ₉ :: FT
+    ℂʷ₁₀ :: FT
+    ℂʷ₁₁ :: FT
+    ℂᴴ₅ :: FT
+    ℂᴴ₆ :: FT
+    ℂᴴ₇ :: FT
     ggr :: FT
     rgas :: FT
     rv :: FT
@@ -228,6 +264,23 @@ struct SHOCParameters{FT}
     maxtke :: FT
     mintke :: FT
     tinyw :: FT
+    maxiso :: FT
+    temp_crit :: FT
+    pbl_trans :: FT
+    wsmin :: FT
+    ksrfmin :: FT
+    tke_flux_ustar_min :: FT
+    ufmin :: FT
+    wtke_ustar_min :: FT
+    w3_reset :: FT
+    kbfs_min :: FT
+    thl_tol :: FT
+    rt_tol :: FT
+    w_tol :: FT
+    Tl_min :: FT
+    plume_fraction_min :: FT
+    plume_fraction_max :: FT
+    plume_variance_ratio_max :: FT
 end
 
 function SHOCParameters(closure::SimplifiedHigherOrderClosure)

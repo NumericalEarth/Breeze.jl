@@ -45,8 +45,18 @@ struct SmoothDoubleGaussianPDF{FT} <: AbstractSHOCComponent
     w_tol :: FT
     "Lowest liquid water temperature of a plume, K"
     Tl_min :: FT
+    "Lowest fraction of the first plume (literal `0.01`)"
+    plume_fraction_min :: FT
+    "Highest fraction of the first plume (literal `0.99`)"
+    plume_fraction_max :: FT
+    "Highest variance of a scalar within a plume over its variance (literal `100`)"
+    plume_variance_ratio_max :: FT
     "Smallest spread of the saturation deficit within a plume, kg kg⁻¹"
     minimum_saturation_spread :: FT
+    "Floor of the width of a plume over the tolerance of its scalar, which keeps the derivative of the width finite"
+    plume_width_floor :: FT
+    "Regularization of the in-plume correlation of θˡ and qᵗ: the fraction of `thl_tol × rt_tol` added to the product of the widths"
+    correlation_regularization :: FT
 end
 
 """
@@ -58,7 +68,8 @@ Every field is a keyword argument.
 SmoothDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
     component_from_keywords(SmoothDoubleGaussianPDF, FT,
                             (ℂᵍ₁ = 0.4, ℂᵍ₂ = 1.2, ℂᵍ₃ = 0.2, ℂᵍ₄ = 0.4, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2, Tl_min = 100,
-                             minimum_saturation_spread = 1e-6), kw)
+                             plume_fraction_min = 0.01, plume_fraction_max = 0.99, plume_variance_ratio_max = 100,
+                             minimum_saturation_spread = 1e-6, plume_width_floor = 1e-3, correlation_regularization = 0.1), kw)
 
 Adapt.@adapt_structure SmoothDoubleGaussianPDF
 
@@ -96,7 +107,8 @@ end
     ratio_1 = s² * (3 / α * unexplained + asymmetry) / (3 * a * (α + β)) - skew_over_separation / (3 * a)
     ratio_2 = s² * (3 / β * unexplained - asymmetry) / (3 * (1 - a) * (α + β)) + skew_over_separation / (3 * (1 - a))
 
-    return x1_1, x1_2, clip_between(cp, ratio_1, 0, 100, 1), clip_between(cp, ratio_2, 0, 100, 1)
+    ratio_max = pdf.plume_variance_ratio_max
+    return x1_1, x1_2, clip_between(cp, ratio_1, 0, ratio_max, 1), clip_between(cp, ratio_2, 0, ratio_max, 1)
 end
 
 # shoc_assumed_pdf_compute_s with a spread that does not vanish
@@ -151,7 +163,7 @@ end
     w2_1 = pdf.ℂᵍ₁
     omw = 1 - w2_1
     a = clip_between(cp, convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))),
-                     convert(FT, 0.01), convert(FT, 0.99), 1)
+                     pdf.plume_fraction_min, pdf.plume_fraction_max, 1)
     sqrtw2t = sqrt(omw)
     w1_1 = sqrt((1 - a) / a) * sqrtw2t
     w1_2 = -1 * sqrt(a / (1 - a)) * sqrtw2t
@@ -178,8 +190,8 @@ end
     qw2_2 = qw_ratio_2 * qwsec
 
     # Widths with a floor far below the tolerances, so that their derivative stays finite
-    thl_width_floor = convert(FT, 1e-3) * thl_tol
-    qw_width_floor = convert(FT, 1e-3) * rt_tol
+    thl_width_floor = pdf.plume_width_floor * thl_tol
+    qw_width_floor = pdf.plume_width_floor * rt_tol
     sqrtthl2_1 = sqrt(thl2_1 + thl_width_floor * thl_width_floor)
     sqrtthl2_2 = sqrt(thl2_2 + thl_width_floor * thl_width_floor)
     sqrtqw2_1 = sqrt(qw2_1 + qw_width_floor * qw_width_floor)
@@ -193,7 +205,7 @@ end
     testvar = a * sqrtqw2_1 * sqrtthl2_1 + (1 - a) * sqrtqw2_2 * sqrtthl2_2
     r_qwthl_1 = clip_between(cp, (qwthlsec - a * (qw1_1 - qw_first) * (thl1_1 - thl_first)
                                   - (1 - a) * (qw1_2 - qw_first) * (thl1_2 - thl_first)) /
-                                 (testvar + convert(FT, 0.1) * thl_tol * rt_tol), -1, 1, 1)
+                                 (testvar + pdf.correlation_regularization * thl_tol * rt_tol), -1, 1, 1)
 
     # Liquid water temperature and saturation of the plumes
     exner_inverse = (c.basepres / pval)^(c.rgas / c.cp)

@@ -329,8 +329,8 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         # and is that of the original where the original is defined
         corr = FT(0.3)
         x̃₁, x̃₂, ratio₁, ratio₂ = smooth_scalar_plumes(smooth_pdf, hard, corr, w̃₁, w̃₂, zero(FT), FT(0.5), false)
-        @test ratio₁ ≈ plume_variance(hard, true, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT))
-        @test ratio₂ ≈ plume_variance(hard, false, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT))
+        @test ratio₁ ≈ plume_variance(hard, true, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT), FT(100))
+        @test ratio₂ ≈ plume_variance(hard, false, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT), FT(100))
 
         # A spread of the saturation deficit that does not vanish: the cloud fraction passes
         # through one half at saturation instead of jumping

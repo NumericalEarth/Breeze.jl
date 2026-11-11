@@ -42,18 +42,32 @@ column_data(field) = Array(interior(field))
         @test closure.tke_update isa ForwardEulerTKE{FT}
         @test closure.buoyancy_source isa PDFBuoyancyFlux
         @test closure.second_moments isa DowngradientSecondMoments{FT}
-        @test closure.third_moment isa CanutoThirdMoment{ResetBound, FT}
+        @test closure.third_moment isa CanutoThirdMoment{ResetBound{FT}, FT}
         @test closure.assumed_pdf isa DoubleGaussianPDF{FT}
         @test closure.clipping isa HardClipping
         @test closure.constants.eps ≈ closure.constants.rv / closure.constants.rgas - 1
 
         # The flat view of the coefficients, and the snapshot of the numbers of shoc.F90
         ℂ = closure_parameters(closure)
-        @test length(ℂ) == 30
+        @test length(ℂ) == 49
         @test all(value -> value isa FT, values(ℂ))
         @test ℂ.ℂᶜ == FT(0.1) && ℂ.ℂˡ₂ == FT(2.8284) && ℂ.ℂʷ₂ == FT(7) && ℂ.ℂᴴ₃ == FT(8.5)
-        @test length(trainable_parameter_names(closure)) == 25
+        @test length(trainable_parameter_names(closure)) == 40
         @test :ℂˡ₅ ∉ trainable_parameter_names(closure)
+        @test :ℂᶠ₅ ∉ trainable_parameter_names(closure)
+
+        # The literals of shoc.F90 are fields with the values of shoc.F90
+        @test ℂ.ℂᴰ₃ == FT(0.19) && ℂ.ℂᴰ₄ == FT(0.51) && ℂ.ℂᴰ₅ == FT(0.7)
+        @test ℂ.ℂᶠ₂ == FT(0.4) && ℂ.ℂᶠ₃ == FT(0.2) && ℂ.ℂᶠ₄ == FT(0.3) && ℂ.ℂᶠ₅ == 1
+        @test ℂ.ℂʷ₃ == FT(0.52) && ℂ.ℂʷ₄ == FT(0.87) && ℂ.ℂʷ₅ == FT(0.5) && ℂ.ℂʷ₆ == FT(0.6) && ℂ.ℂʷ₇ == FT(2.4)
+        @test ℂ.ℂʷ₈ == FT(0.6) && ℂ.ℂʷ₉ == FT(1.2) && ℂ.ℂʷ₁₀ == FT(1.5) && ℂ.ℂʷ₁₁ == FT(1.25)
+        @test ℂ.ℂᴴ₅ == FT(0.1) && ℂ.ℂᴴ₆ == 700 && ℂ.ℂᴴ₇ == 50
+        @test closure.turbulence_time_scale.temp_crit == 182 && closure.turbulence_time_scale.pbl_trans == 200
+        @test closure.third_moment.bound.w3_reset == FT(0.02)
+        @test closure.constants.wsmin == 1 && closure.constants.ksrfmin == FT(1e-4)
+        @test closure.assumed_pdf.plume_fraction_min == FT(0.01) && closure.assumed_pdf.plume_fraction_max == FT(0.99)
+        @test with_parameters(closure; w3_reset = FT(0.01)).third_moment.bound.w3_reset == FT(0.01)
+        @test with_parameters(closure; ℂʷ₁₁ = FT(1)).third_moment.ℂʷ₁₁ == 1
         p = SHOCParameters(closure)
         @test p isa SHOCParameters{FT}
         @test p.ℂᶜ == ℂ.ℂᶜ && p.mintke == closure.constants.mintke && p.w3clip == closure.third_moment.w3clip

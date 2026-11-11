@@ -15,7 +15,12 @@ diffusivities.
 | `ℂᴴ₁` | `ricr`  | 0.3 | critical bulk Richardson number of the boundary layer top |
 | `ℂᴴ₂` | `fac`   | 100 | friction velocity factor in the squared wind of the bulk Richardson number |
 | `ℂᴴ₃` | `fak`   | 8.5 | surface temperature excess of convective thermals |
-| `ℂᴴ₄` | `betam` | 15  | wind-gradient constant of the temperature excess (enters as `ℂᴴ₄ × 0.1`, with `sffrac = 0.1`) |
+| `ℂᴴ₄` | `betam` | 15  | wind-gradient constant of the temperature excess (enters as `ℂᴴ₄ ℂᴴ₅`) |
+| `ℂᴴ₅` | `sffrac` | 0.1 | surface layer as a fraction of the boundary layer depth |
+| `ℂᴴ₆` | literal `700` | 700 | least boundary layer depth over the friction velocity, **in seconds** |
+| `ℂᴴ₇` | literal `50`  | 50  | least boundary layer depth above the second interface, **in meters** |
+
+`ℂᴴ₆` and `ℂᴴ₇` are dimensional. The other fields are safeguards.
 
 $(TYPEDFIELDS)
 """
@@ -28,12 +33,20 @@ struct HoltslagBovilleDepth{FT} <: AbstractSHOCComponent
     ℂᴴ₃ :: FT
     "Wind-gradient constant of the surface temperature excess (`betam`)"
     ℂᴴ₄ :: FT
+    "Surface layer as a fraction of the boundary layer depth (`sffrac`)"
+    ℂᴴ₅ :: FT
+    "Least boundary layer depth over the friction velocity, s (literal `700` of `pblintd_check_pblh`); dimensional"
+    ℂᴴ₆ :: FT
+    "Least boundary layer depth above the second interface, m (literal `50` of `pblintd_cldcheck`); dimensional"
+    ℂᴴ₇ :: FT
     "Minimum surface friction velocity, m s⁻¹"
     ustar_min :: FT
     "Lowest pressure at which the boundary layer top may be diagnosed, Pa"
     pblmaxp :: FT
     "Lower bound on the squared wind in the bulk Richardson number, m² s⁻²"
     tinyw :: FT
+    "Magnitude of the offset that keeps the surface buoyancy flux of the Obukhov length from zero, K m s⁻¹ (literal `1e-10`)"
+    kbfs_min :: FT
 end
 
 """
@@ -44,7 +57,8 @@ argument.
 """
 HoltslagBovilleDepth(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
     component_from_keywords(HoltslagBovilleDepth, FT,
-                            (ℂᴴ₁ = 0.3, ℂᴴ₂ = 100, ℂᴴ₃ = 8.5, ℂᴴ₄ = 15, ustar_min = 0.01, pblmaxp = 4e4, tinyw = 1e-36), kw)
+                            (ℂᴴ₁ = 0.3, ℂᴴ₂ = 100, ℂᴴ₃ = 8.5, ℂᴴ₄ = 15, ℂᴴ₅ = 0.1, ℂᴴ₆ = 700, ℂᴴ₇ = 50,
+                             ustar_min = 0.01, pblmaxp = 4e4, tinyw = 1e-36, kbfs_min = 1e-10), kw)
 
 Adapt.@adapt_structure HoltslagBovilleDepth
 
@@ -99,9 +113,8 @@ through the clipping policy: the depth is the outcome of a discrete search.
 @inline function pbl_height(i, j, Nz, bl::HoltslagBovilleDepth, c, zt, zi, pres, thetal, qw, shoc_ql, shoc_cldfrac,
                             u_wind, v_wind, uw_sfc, vw_sfc, wthl_sfc, wqw_sfc)
 
-    FT = typeof(uw_sfc)
     fak = bl.ℂᴴ₃                               # constant in surface temperature excess (fak)
-    binm = bl.ℂᴴ₄ * convert(FT, 0.1)           # betam * sffrac
+    binm = bl.ℂᴴ₄ * bl.ℂᴴ₅                     # betam * sffrac
 
     # shoc_diag_obklen
     @inbounds begin
@@ -113,7 +126,7 @@ through the clipping policy: the depth is the outcome of a discrete search.
     ustar = max(zero_safe_sqrt(uw_sfc * uw_sfc + vw_sfc * vw_sfc), bl.ustar_min)
     kbfs = wthl_sfc + c.eps * th_sfc * wqw_sfc
     # sign(1e-10, kbfs), in the form of the C++ (differs from the Fortran only for kbfs = -0.0)
-    kbfs_offset = ifelse(kbfs >= 0, convert(FT, 1e-10), -convert(FT, 1e-10))
+    kbfs_offset = ifelse(kbfs >= 0, bl.kbfs_min, -bl.kbfs_min)
     obklen = -thv_sfc * (ustar * ustar * ustar) / (c.ggr * c.vk * (kbfs + kbfs_offset))
 
     # pblintd_init, pblintd_height
@@ -134,10 +147,10 @@ through the clipping policy: the depth is the outcome of a discrete search.
 
     # pblintd_check_pblh
     pblh = ifelse(check, z_pbl_max, pblh)
-    pblh = max(pblh, 700 * ustar)
+    pblh = max(pblh, bl.ℂᴴ₆ * ustar)
 
     # pblintd_cldcheck (as in the Fortran, true for any non-negative cloud fraction)
-    @inbounds pblh = ifelse(shoc_cldfrac[i, j, 1] >= 0, max(pblh, zi[i, j, 2] + 50), pblh)
+    @inbounds pblh = ifelse(shoc_cldfrac[i, j, 1] >= 0, max(pblh, zi[i, j, 2] + bl.ℂᴴ₇), pblh)
 
     return pblh
 end

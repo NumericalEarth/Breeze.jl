@@ -75,9 +75,8 @@ Adapt.@adapt_structure BlendedMixingLength
 
 @inline function mixing_length(ml::BlendedMixingLength, cp, c, l_inf, i, j, k, grid, tke_k, brunt_k, zt_k,
                                host_scale, state, scratch)
-    FT = typeof(tke_k)
     tscale = ml.ℂˡ₅ # turnover time scale [s]
-    brunt_scale = convert(FT, 1e-6) # scale of the squared buoyancy frequency for the clipping policy [s⁻²]
+    brunt_scale = c.brunt_scale # scale of the squared buoyancy frequency for the clipping policy [s⁻²]
 
     tkes = sqrt(tke_k)
     brunt2 = clip_negative(cp, brunt_k, brunt_scale)

@@ -56,21 +56,24 @@ $(TYPEDFIELDS)
 struct ForwardEulerTKE{FT} <: AbstractSHOCComponent
     "Shear production coefficient (`Ck_sh`)"
     ℂᴾ :: FT
+    "Magnitude of the production that scales the smoothing of its positive part, m² s⁻³; `HardClipping` ignores it"
+    production_scale :: FT
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `ForwardEulerTKE{FT}` with the shear production coefficient of E3SM `shoc.F90`.
+Return `ForwardEulerTKE{FT}` with the shear production coefficient of E3SM `shoc.F90`. Every field is a
+keyword argument.
 """
 ForwardEulerTKE(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(ForwardEulerTKE, FT, (; ℂᴾ = 0.1), kw)
+    component_from_keywords(ForwardEulerTKE, FT, (ℂᴾ = 0.1, production_scale = 1e-6), kw)
 
 Adapt.@adapt_structure ForwardEulerTKE
 
-@inline function tke_step(::ForwardEulerTKE, cp, c, dtime, tke_k, a_prod_sh, a_prod_bu, mix, Cee)
+@inline function tke_step(tke_update::ForwardEulerTKE, cp, c, dtime, tke_k, a_prod_sh, a_prod_bu, mix, Cee)
     FT = typeof(tke_k)
-    production_scale = convert(FT, 1e-6) # scale of the production for the clipping policy [m² s⁻³]
+    production_scale = tke_update.production_scale # scale of the production for the clipping policy [m² s⁻³]
 
     tke_k = max(0, tke_k)
     a_diss = Cee / mix * tke_k^convert(FT, 1.5)
@@ -126,23 +129,26 @@ $(TYPEDFIELDS)
 struct ImplicitSinkTKE{FT} <: AbstractSHOCComponent
     "Shear production coefficient (`Ck_sh`)"
     ℂᴾ :: FT
+    "Magnitude of the production that scales the smoothing of its positive part, m² s⁻³; `HardClipping` ignores it"
+    production_scale :: FT
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `ImplicitSinkTKE{FT}` with the shear production coefficient of E3SM `shoc.F90`.
+Return `ImplicitSinkTKE{FT}` with the shear production coefficient of E3SM `shoc.F90`. Every field is a
+keyword argument.
 """
 ImplicitSinkTKE(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(ImplicitSinkTKE, FT, (; ℂᴾ = 0.1), kw)
+    component_from_keywords(ImplicitSinkTKE, FT, (ℂᴾ = 0.1, production_scale = 1e-6), kw)
 
 Adapt.@adapt_structure ImplicitSinkTKE
 
 component_fields(grid, ::ImplicitSinkTKE) = (; tke_sink_rate = CenterField(grid))
 
-@inline function tke_step(::ImplicitSinkTKE, cp, c, dtime, tke_k, a_prod_sh, a_prod_bu, mix, Cee)
+@inline function tke_step(tke_update::ImplicitSinkTKE, cp, c, dtime, tke_k, a_prod_sh, a_prod_bu, mix, Cee)
     FT = typeof(tke_k)
-    production_scale = convert(FT, 1e-6) # scale of the production for the clipping policy [m² s⁻³]
+    production_scale = tke_update.production_scale # scale of the production for the clipping policy [m² s⁻³]
 
     # The buoyancy production in its positive part, a source, and its negative part, a sink
     buoyancy_source = clip_max(cp, 0, a_prod_bu, production_scale)

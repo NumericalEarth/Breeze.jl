@@ -96,8 +96,10 @@ end
 $(TYPEDEF)
 
 The physical constants that SHOC is handed by its host (E3SM's `shr_const`), the reference values
-of `shoc.F90` and the bounds on turbulent kinetic energy, which several components share. None is
-an empirical coefficient of the closure.
+of `shoc.F90`, and the bounds and safeguards that several components or the column sweeps
+themselves use: the bounds on turbulent kinetic energy, the floors of the surface stress and of
+the surface source of turbulent kinetic energy, and the scale of the stratification for the
+clipping policy. None is an empirical coefficient of the closure; all are dimensional.
 
 $(TYPEDFIELDS)
 """
@@ -126,6 +128,14 @@ struct SHOCConstants{FT} <: AbstractSHOCComponent
     mintke :: FT
     "Maximum turbulent kinetic energy, m² s⁻²"
     maxtke :: FT
+    "Minimum wind speed of the lowest level in the implicit surface stress, m s⁻¹ (`wsmin`)"
+    wsmin :: FT
+    "Minimum surface drag coefficient of the implicit surface stress, kg m⁻² s⁻¹ (`ksrfmin`)"
+    ksrfmin :: FT
+    "Minimum friction velocity in the surface source of turbulent kinetic energy, m s⁻¹ (literal `0.01` of `tke_srf_flux_term`)"
+    tke_flux_ustar_min :: FT
+    "Magnitude of the squared buoyancy frequency that scales the smoothing of its bounds, s⁻²; `HardClipping` ignores it"
+    brunt_scale :: FT
 end
 
 """
@@ -145,9 +155,14 @@ function SHOCConstants(FT::DataType = Oceananigans.defaults.FloatType;
                        basepres = 100000,
                        troppres = 80000,
                        mintke = 0.0004,
-                       maxtke = 50)
+                       maxtke = 50,
+                       wsmin = 1,
+                       ksrfmin = 1e-4,
+                       tke_flux_ustar_min = 0.01,
+                       brunt_scale = 1e-6)
 
-    return SHOCConstants{FT}(ggr, rgas, rv, cp, lcond, eps, vk, basetemp, basepres, troppres, mintke, maxtke)
+    return SHOCConstants{FT}(ggr, rgas, rv, cp, lcond, eps, vk, basetemp, basepres, troppres, mintke, maxtke,
+                             wsmin, ksrfmin, tke_flux_ustar_min, brunt_scale)
 end
 
 # Kernels receive the components through `adapt`: on `ReactantState` every traced scalar must be
