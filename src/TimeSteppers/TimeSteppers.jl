@@ -13,15 +13,18 @@ export SSPRungeKutta3, AcousticRungeKutta3,
        maybe_prepare_first_time_step!,
        prepare_first_time_step!
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+
+using DocStringExtensions: TYPEDEF
 using Oceananigans: Oceananigans
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!, maybe_prepare_first_time_step!, reconcile_state!
 using Breeze.AtmosphereModels: kernel_time_step
+using Breeze.RoundingTreatments: RoundToNearest, materialize_rounding, rounded_add, rounding_key
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Prepare `model`, at iteration 0, for a first time step of `Δt`: set `clock.last_Δt`, reconcile
 the state and `update_state!`, which at initialization also computes the initial radiative

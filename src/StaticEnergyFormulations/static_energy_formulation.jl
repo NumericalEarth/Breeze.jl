@@ -67,7 +67,7 @@ end
 #####
 
 function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation::StaticEnergyFormulation, dynamics, i, j, k, grid)
-    ρ = dynamics_density(dynamics)
+    ρ = continuity_density(dynamics)
     @inbounds begin
         ρᵢ = ρ[i, j, k]
         ρs = formulation.energy_density[i, j, k]
@@ -81,7 +81,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a `StaticEnergyState` at grid point `(i, j, k)` from the given
 `formulation`, `dynamics`, and pre-computed moisture mass fractions `q`.

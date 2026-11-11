@@ -16,7 +16,7 @@ abstract type AbstractReferencePressureState{FT} <: AbstractThermodynamicState{F
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the air pressure of the thermodynamic state `𝒰`, in Pa.
 
@@ -95,7 +95,7 @@ Base.summary(::DryExponent) = "DryExponent()"
 Base.show(io::IO, κ̂::AbstractExnerExponent) = print(io, summary(κ̂))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the value ``κ`` of the Exner exponent for moisture mass fractions `q`:
 ``κ̂ = R̂ / ĉᵖ`` for [`VaporEquivalentExponent`](@ref) and ``κᵈ = Rᵈ / cᵖᵈ`` for [`DryExponent`](@ref).
@@ -190,7 +190,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute temperature from liquid-ice potential temperature and pressure,
 ``T = (ĉᵖ Π θˡⁱ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ) / cᵖᵐ``.
@@ -225,7 +225,7 @@ end
     temperature_from_potential_temperature(θ, p, 1e5, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute liquid-ice potential temperature from temperature and pressure,
 ``θˡⁱ = (cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ) / (ĉᵖ Π)``.
@@ -323,7 +323,7 @@ end
 # Invert θˡⁱ at constant density: cᵖᵐ T = ĉᵖ (ρ Rᵐ T / pˢᵗ)^κ θˡⁱ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ, that is,
 # solve  r(T) = T − (ρ Rᵐ T / pˢᵗ)^κ θ̃ − L = 0  with θ̃ = ĉᵖ θˡⁱ / cᵖᵐ and L = (ℒˡ₀ qˡ + ℒⁱ₀ qⁱ) / cᵖᵐ.
 # Newton converges quadratically (r′ = 1 − κ Φ/T ≈ 1 − κ ≈ 0.72 is well away from zero). With no
-# condensate (L = 0) the dry closed form is already the root, so a Newton step is exactly zero.
+# condensate (L = 0) the closed form T̃ below is already the root, so a Newton step is exactly zero.
 #
 # The iteration form is selected by the solver type (see Breeze.Solvers):
 #   • NewtonSolver     : tolerance-based `while` early-exit — fewest Newton steps on vanilla CPU/GPU.
@@ -331,8 +331,27 @@ end
 #     to an XLA `while` op whose reverse-mode is pathological under Reactant/Enzyme (it hangs the
 #     differentiable acoustic_wave docs example — NumericalEarth/Breeze.jl#767); the unrolled form
 #     differentiates cheaply. Use `FixedIterations` for differentiable / Reactant runs.
-#   • nothing          : the non-iterated closed form below (dry inversion + latent shift).
-@inline function temperature(𝒰::LiquidIceDensityState, constants::ThermodynamicConstants)
+#   • nothing          : the non-iterated closed form below.
+#
+# The closed form, which also starts the iterations, is the condensate-free root
+# T̃ = θ̃^γ (ρ Rᵐ / pˢᵗ)^(γ − 1), γ = 1 / (1 − κ), plus γ L: since dT/dL = 1 / r′ = γ at L = 0,
+# condensate heats at constant volume. It overshoots the root by about κ (γ L)² / (2 T̃), 0.14 K
+# for L = 12 K; the isobaric shift L would undershoot by about κ γ L, 4.7 K.
+#
+# The sensitivity runs the same steps; `temperature` passes `nothing` to skip its arithmetic.
+@inline temperature(𝒰::LiquidIceDensityState, constants::ThermodynamicConstants) =
+    first(temperature_solution(𝒰, constants, nothing))
+
+# (T, θ ∂T/∂θ) at fixed density and composition, the sensitivity of the returned T. Scaling by θ
+# keeps the uninitialized θ = 0 finite, with zero sensitivity.
+@inline temperature_and_sensitivity(𝒰::LiquidIceDensityState, constants) =
+    temperature_solution(𝒰, constants, Val(true))
+
+# θ ∂T₁/∂θ = γ T̃: T̃ ∝ θ^γ, and γ L does not depend on θ.
+@inline initial_temperature_sensitivity(::Nothing, T̃, γ) = nothing
+@inline initial_temperature_sensitivity(::Val{true}, T̃, γ) = γ * T̃
+
+@inline function temperature_solution(𝒰, constants, sensitivity)
     θ   = 𝒰.potential_temperature
     ρ   = 𝒰.density
     pˢᵗ = 𝒰.standard_pressure
@@ -344,36 +363,54 @@ end
     θ̃   = θ * (vapor_equivalent_heat_capacity(q, constants) / cᵖᵐ)
     L   = condensate_latent_energy(q, constants) / cᵖᵐ
 
-    T₁ = θ̃^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1) + L     # dry closed form + latent shift (the non-iterated guess)
+    T̃  = θ̃ * (θ̃ * ρ * Rᵐ / pˢᵗ)^(γ - 1)       # condensate-free root θ̃^γ (ρ Rᵐ / pˢᵗ)^(γ − 1), one power
+    T₁ = T̃ + γ * L                            # plus the latent shift at fixed density (the non-iterated closed form)
+    θ∂T∂θ = initial_temperature_sensitivity(sensitivity, T̃, γ)
 
-    return solve_temperature(𝒰.temperature_solver, T₁, θ̃, ρ, Rᵐ, pˢᵗ, κ, L)
+    return solve_temperature(𝒰.temperature_solver, T₁, θ∂T∂θ, θ̃, ρ, Rᵐ, pˢᵗ, κ, L)
 end
 
-# The Newton iteration below is written with the loop body inline and plain scalar
+# The Newton iteration below uses an inline step with plain scalar
 # arguments — NOT through `Solvers.newton_solve` with a residual closure — because the
 # Reactant GPU kernel-raising pipeline fails on the closure form ("failed to run pass
 # manager on module") when Enzyme reverse-differentiates the compressible time step
 # (NumericalEarth/Breeze.jl#780). The solver abstraction is preserved through dispatch.
-@inline solve_temperature(::Nothing, T, θ, ρ, Rᵐ, pˢᵗ, κ, L) = T
+@inline solve_temperature(::Nothing, T, θ∂T∂θ, θ, ρ, Rᵐ, pˢᵗ, κ, L) = (T, θ∂T∂θ)
 
-@inline function solve_temperature(solver::NewtonSolver, T, θ, ρ, Rᵐ, pˢᵗ, κ, L)
+@inline function solve_temperature(solver::NewtonSolver, T, θ∂T∂θ, θ, ρ, Rᵐ, pˢᵗ, κ, L)
     ΔT = T                                     # guarantees the convergence test fails before the first step
     iter = 0
     while abs(ΔT) > max(solver.abstol, solver.reltol * T) && iter < solver.maxiter
-        Φ  = (ρ * Rᵐ * T / pˢᵗ)^κ * θ          # = T − L at the root
-        ΔT = -(T - Φ - L) / (1 - κ * Φ / T)
-        T += ΔT
+        T, θ∂T∂θ, ΔT = newton_temperature_step(T, θ∂T∂θ, θ, ρ, Rᵐ, pˢᵗ, κ, L)
         iter += 1
     end
-    return T
+    return T, θ∂T∂θ
 end
 
-@inline function solve_temperature(solver::FixedIterations, T, θ, ρ, Rᵐ, pˢᵗ, κ, L)
+@inline function solve_temperature(solver::FixedIterations, T, θ∂T∂θ, θ, ρ, Rᵐ, pˢᵗ, κ, L)
     for _ in 1:solver.iterations               # fixed trip count → unrolls (Reactant/Enzyme-safe)
-        Φ = (ρ * Rᵐ * T / pˢᵗ)^κ * θ
-        T += -(T - Φ - L) / (1 - κ * Φ / T)
+        T, θ∂T∂θ, _ = newton_temperature_step(T, θ∂T∂θ, θ, ρ, Rᵐ, pˢᵗ, κ, L)
     end
-    return T
+    return T, θ∂T∂θ
+end
+
+@inline function newton_temperature_step(T, θ∂T∂θ, θ, ρ, Rᵐ, pˢᵗ, κ, L)
+    Φ = (ρ * Rᵐ * T / pˢᵗ)^κ * θ             # = T − L at the root
+    T̂ = ifelse(T == 0, one(T), T)              # keep the θ = T = 0 initialization finite
+    r′ = 1 - κ * Φ / T̂
+    ΔT = -(T - Φ - L) / r′
+    θ∂T∂θ = newton_temperature_sensitivity(θ∂T∂θ, T̂, Φ, κ, r′, ΔT)
+    return T + ΔT, θ∂T∂θ, ΔT
+end
+
+@inline newton_temperature_sensitivity(::Nothing, T, Φ, κ, r′, ΔT) = nothing
+
+@inline function newton_temperature_sensitivity(θ∂T∂θ, T, Φ, κ, r′, ΔT)
+    # Differentiate T⁺ = T − r/r′ with respect to ln θ, including the dependence of r′ on T.
+    # Since θ ∂Φ/∂θ = Φ (1 + κ θ∂T∂θ/T), r′ θ∂T∂θ − θ∂r∂θ = Φ.
+    θ∂Φ∂θ = Φ * (1 + κ * θ∂T∂θ / T)
+    θ∂r′∂θ = -κ * (θ∂Φ∂θ - Φ * θ∂T∂θ / T) / T
+    return (Φ - ΔT * θ∂r′∂θ) / r′
 end
 
 # Exner function at the diagnosed (actual) pressure p = ρRᵐT: Π = (p/pˢᵗ)^κ.

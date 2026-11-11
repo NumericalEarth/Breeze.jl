@@ -1,5 +1,5 @@
 using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant, absolute_zero_latent_heat,
-                             VaporEquivalentExponent
+                             VaporEquivalentExponent, density
 
 #####
 ##### Dynamics Interface
@@ -48,7 +48,7 @@ Create velocity fields from a velocity specification (e.g., `PrescribedVelocityF
 function materialize_velocities end
 
 """
-    update_dynamics_with_velocities(dynamics, velocities)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update dynamics with velocity specification. Default is a no-op.
 For `PrescribedDynamics`, stores the `PrescribedVelocityFields` for dispatch.
@@ -64,7 +64,7 @@ Returns `nothing` for dynamics that do not require a pressure solver (e.g., comp
 function dynamics_pressure_solver end
 
 """
-    update_pressure_solver!(solver, dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the parts of `solver` that depend on the state of `dynamics`, such as its reference density.
 Default is a no-op.
@@ -72,7 +72,7 @@ Default is a no-op.
 update_pressure_solver!(solver, dynamics) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the default timestepper symbol for the given dynamics.
 
@@ -86,7 +86,7 @@ default_timestepper(dynamics) = :SSPRungeKutta3
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the pressure correction for the given model. Default: no-op.
 For anelastic dynamics, solves the pressure Poisson equation.
@@ -94,7 +94,7 @@ For anelastic dynamics, solves the pressure Poisson equation.
 compute_pressure_correction!(model, Δt) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the pressure correction to the momentum fields. Default: no-op.
 For anelastic dynamics, projects momentum to enforce the divergence constraint.
@@ -142,7 +142,7 @@ Return the total pressure (mean + anomaly) in Pa.
 function total_pressure end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return pressure consistent with a prescribed temperature during thermodynamic initialization.
 
@@ -160,41 +160,46 @@ end
 #####
 
 """
-    dynamics_density(dynamics)
+    continuity_density(dynamics)
 
-Return the *coupling density* — the density weighting the momentum (`ρu = ρᵈ u`) and the
-thermodynamic flux variable (`ρθ = ρᵈ θ`), and the divisor for diagnosing velocity (`u = ρu/ρᵈ`)
-and potential temperature (`θ = ρθ/ρᵈ`). It is the prognostic mass variable advanced by continuity.
+Return the *continuity density*: the density whose continuity equation the model solves,
+``∇·(ρᵣ u) = 0`` on the anelastic core and ``∂ₜρᵈ + ∇·(ρᵈ u) = 0`` on the compressible core.
+Momentum and the thermodynamic variable are stored per unit of it (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`), so it
+is also the divisor for diagnosing velocity (`u = ρu/ρᵈ`) and potential temperature (`θ = ρθ/ρᵈ`).
 
 - `AnelasticDynamics`: the time-independent reference density `ρᵣ`.
 - `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`.
 
-The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species) is a separate, diagnosed
-quantity — see [`total_density`](@ref) — used wherever total mass enters the physics: the
-moisture **mass-fraction** recovery (`qˣ = ρˣ/ρ`, so the thermodynamics stays in mass fractions),
-scalar and water advection, the equation of state, and buoyancy. The water densities (`ρqᵛ`, `ρqˡ`,
-…) are stored as partial densities (mass per volume), *not* coupling-weighted. On the anelastic core
-the two densities coincide (`total_density === dynamics_density`).
+The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species) is a separate quantity,
+[`total_density`](@ref): it recovers the moisture mass fractions (`qˣ = ρˣ/ρ`) and weights scalar and
+water advection. The water densities (`ρqᵛ`, `ρqˡ`, …) are stored as partial densities (mass per
+volume), not per unit of the continuity density. On the anelastic core the two densities coincide
+(`total_density === continuity_density`).
 """
-function dynamics_density end
+function continuity_density end
 
 """
-    total_density(dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the total air density ρ = ρᵈ + Σρˣ used by the thermodynamics, scalar advection,
-equation of state, and buoyancy. Defaults to [`dynamics_density`](@ref) — correct for
-formulations with a single density (e.g. the anelastic reference density). `CompressibleDynamics`
-overrides it with a diagnosed total-density field, distinct from the coupling density ρᵈ.
+Return the model's total air density ρ = ρᵈ + Σρˣ: the density of the model's mass, which
+converts the stored partial densities to mass fractions (``qˣ = ρqˣ / ρ``) and weights scalar
+advection, hydrostatics and radiation. `CompressibleDynamics` diagnoses it from the prognostic
+dry density and the partial densities. Defaults to [`continuity_density`](@ref), so on
+`AnelasticDynamics` it is the reference density ``ρᵣ(z)``: the anelastic approximation replaces
+the total density by ``ρᵣ``, consistent with the reference pressure ``pᵣ``.
+
+Thermodynamic relations of the local state, such as the saturation specific humidity, use
+[`thermodynamic_state_density`](@ref) instead.
 """
-total_density(dynamics) = dynamics_density(dynamics)
+total_density(dynamics) = continuity_density(dynamics)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the change of the moisture mass fractions per unit mass of condensate `phase` that
 sediments out of a cell whose mass fractions are `q`, as a `MoistureMassFractions` difference
-vector (the dry-air change is implied by `Σq = 1`). Continuity advances the coupling density
-([`dynamics_density`](@ref)) without a sedimentation source on every core, so the increment
+vector (the dry-air change is implied by `Σq = 1`). Continuity advances the continuity density
+([`continuity_density`](@ref)) without a sedimentation source on every core, so the increment
 depends on what the total density does:
 
 - fixed (the default; `AnelasticDynamics`): the total density the mass fractions are referenced
@@ -230,28 +235,42 @@ keeps its temperature.
     Δq.ice * absolute_zero_latent_heat(constants, constants.ice)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the density ``ρ`` at `(i, j, k)` that mass fractions are referenced to, so that ``qˣ`` and
-``ρ`` give a partial pressure — the vapor pressure is ``pᵛ = ρ qᵛ Rᵛ T``.
+Return the density of the local thermodynamic state at `(i, j, k)`, with temperature `T` and
+moisture mass fractions `q`. This is the density in the equation of state, ``p = ρ Rᵐ T``, and the
+one the saturation specific humidity ``qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)`` is referenced to, so microphysics
+schemes and saturation diagnostics evaluate saturation with it.
 
-This is the *total* density, condensate loading included, not the gas-phase density ``ρᵈ + ρᵛ``:
-``Rᵐ(q) = qᵈ Rᵈ + qᵛ Rᵛ`` uses ``qᵈ = 1 - qᵛ - qˡ - qⁱ``, so ``p / (Rᵐ(q) T)`` returns the total
-and the two differ by ``1 - qˡ - qⁱ``. Total is required for consistency with
-`saturation_specific_humidity(T, ρ, …) = pᵛ⁺ / (ρ Rᵛ T)`, which references ``qᵛ⁺`` to the same
-``ρ``; mixing the two would break ``qᵛ / qᵛ⁺`` as the saturation ratio. The name is inherited and
-does not describe this.
+It is the *total* density, condensate loading included: ``Rᵐ(q) = qᵈ Rᵈ + qᵛ Rᵛ`` uses
+``qᵈ = 1 - qᵛ - qˡ - qⁱ``, so ``p / (Rᵐ(q) T)`` is the total, not the gas-phase density
+``ρᵈ + ρᵛ``.
 
-The default returns `total_density(dynamics)`. `AnelasticDynamics` overrides it because its
-`dynamics_density` is the *dry* reference profile ``ρᵣ(z)``, so the override rediagnoses the local
-moist total density at the reference pressure.
+The default returns [`total_density`](@ref), which is the state density on `CompressibleDynamics`.
+Dynamics closed on a reference or prescribed pressure (`AnelasticDynamics`, `PrescribedDynamics`)
+override it with [`fixed_pressure_state_density`](@ref), ``p / (Rᵐ T)``. On the anelastic core
+this differs from ``total_density = ρᵣ`` wherever ``T`` or ``q`` depart from the reference state,
+and it is the density whose departure from ``ρᵣ`` is the anelastic buoyancy.
 """
-@inline function gas_phase_density(i, j, k, dynamics, T, q, constants)
+@inline function thermodynamic_state_density(i, j, k, dynamics, T, q, constants)
     return @inbounds total_density(dynamics)[i, j, k]
 end
 
 """
-    advecting_vertical_velocity(dynamics, velocities)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the equation-of-state density ``p / (Rᵐ(q) T)`` at the pressure
+[`dynamics_pressure`](@ref) of `dynamics` at `(i, j, k)`, with temperature `T` and moisture mass
+fractions `q`. Dynamics closed on a reference or prescribed pressure extend
+[`thermodynamic_state_density`](@ref) with it, since their total density is not the local state's.
+"""
+@inline function fixed_pressure_state_density(i, j, k, dynamics, T, q, constants)
+    p = @inbounds dynamics_pressure(dynamics)[i, j, k]
+    return density(T, p, q, constants)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the vertical velocity that advects momentum through the grid's coordinate surfaces:
 the Cartesian `velocities.w` on height-coordinate grids, and the contravariant vertical
@@ -283,7 +302,7 @@ function buoyancy_forceᶜᶜᶜ end
 #####
 
 """
-    validate_velocity_boundary_conditions(dynamics, user_boundary_conditions)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Validate that velocity boundary conditions are only provided for dynamics that support them.
 
@@ -344,7 +363,7 @@ as the surface fluxes and the diagnostic hydrostatic pressure do.
 function surface_pressure end
 
 """
-    dynamics_reference_state(dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the dynamics' reference state (an anelastic `ReferenceState` or a split-explicit
 `ExnerReferenceState`), or `nothing` if the dynamics carries none. Dispatched so that
@@ -361,7 +380,7 @@ Default is 100000 Pa (1000 hPa).
 function standard_pressure end
 
 """
-    default_drag_surface_temperature(dynamics, grid, thermodynamic_constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a default surface temperature for `BulkDrag` when the user has not supplied
 one. Dispatched on the dynamics type because the notion of a "default" surface
@@ -380,7 +399,7 @@ default_drag_surface_temperature(dynamics, grid, thermodynamic_constants) =
         "`surface_temperature` explicitly when constructing `BulkDrag`."))
 
 """
-    initialize_model_thermodynamics!(model)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Initialize the thermodynamic state for a newly constructed model.
 For anelastic dynamics, sets initial θ to the reference potential temperature.
@@ -433,7 +452,7 @@ boundary conditions, so this returns `(:u, :v, :w)`.
 velocity_boundary_condition_names(::Any) = ()
 
 """
-    dynamics_prognostic_fields(dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a NamedTuple of prognostic fields specific to the dynamics formulation.
 
@@ -447,7 +466,7 @@ dynamics_prognostic_fields(dynamics) = NamedTuple()
 #####
 
 """
-    x_pressure_gradient(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the x-component of the pressure gradient force at (Face, Center, Center).
 
@@ -457,7 +476,7 @@ For compressible dynamics, returns `-∂p/∂x`.
 @inline x_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
-    y_pressure_gradient(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the y-component of the pressure gradient force at (Center, Face, Center).
 
@@ -467,7 +486,7 @@ For compressible dynamics, returns `-∂p/∂y`.
 @inline y_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
-    z_pressure_gradient(i, j, k, grid, dynamics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the z-component of the pressure gradient force at (Center, Center, Face).
 
@@ -498,8 +517,8 @@ end
 
 Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 
-# Forward dynamics_density to the wrapped dynamics
-@inline dynamics_density(s::SlowDynamics) = dynamics_density(s.dynamics)
+# Forward continuity_density to the wrapped dynamics
+@inline continuity_density(s::SlowDynamics) = continuity_density(s.dynamics)
 
 # Fast terms return zero for slow dynamics
 @inline x_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
@@ -513,7 +532,7 @@ Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute tendencies for dynamics-specific prognostic fields.
 
@@ -531,7 +550,7 @@ compute_dynamics_tendency!(model) = nothing  # default: no dynamics-specific ten
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the velocity tuple used for scalar advection transport.
 
@@ -542,7 +561,7 @@ by the contravariant vertical velocity ``\\tilde{w}``.
 transport_velocities(model) = model.velocities
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the momentum tuple used for momentum advection transport
 and the continuity equation divergence.
@@ -554,7 +573,7 @@ replaced by the contravariant vertical momentum ``\\rho \\tilde{w}``.
 advecting_momentum(model) = model.momentum
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the part of `dynamics` that `timestepper` integrates through its tendencies: all of it,
 unless the time stepper integrates the pressure-gradient force and buoyancy separately, in which
@@ -563,7 +582,7 @@ case it returns `SlowDynamics(dynamics)`.
 slow_dynamics(timestepper, dynamics) = dynamics
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the velocity tuple used for thermodynamic-variable advection: `transport_velocities(model)`,
 unless the time stepper advects the thermodynamic variable with a different velocity than
@@ -576,7 +595,7 @@ thermodynamic_transport_velocities(model) = transport_velocities(model)
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute auxiliary (diagnostic) variables specific to the dynamics formulation.
 

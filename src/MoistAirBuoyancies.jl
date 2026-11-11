@@ -14,12 +14,10 @@ using ..Thermodynamics:
     density,
     exner_function
 
-using DocStringExtensions: TYPEDSIGNATURES
-
 using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
 using Oceananigans.BuoyancyFormulations: BuoyancyFormulations,
-    AbstractBuoyancyFormulation,
-    buoyancy_perturbationᶜᶜᶜ
+                                         AbstractBuoyancyFormulation,
+                                         buoyancy_perturbationᶜᶜᶜ
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
@@ -36,6 +34,7 @@ using ..Thermodynamics:
     adjustment_saturation_specific_humidity
 
 using Breeze.Solvers: SecantSolver, secant_solve
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_state :: RS
@@ -47,7 +46,7 @@ Adapt.adapt_structure(to, mb::MoistAirBuoyancy) =
                      adapt(to, mb.thermodynamic_constants))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `MoistAirBuoyancy` formulation that can be provided as input to an
 `Oceananigans.NonhydrostaticModel`.
@@ -157,7 +156,7 @@ end
 # root of: f(T) = T - (ĉᵖ Π θ + ℒˡ₀ qˡ) / cᵖᵐ
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the temperature ``T`` corresponding to thermodynamic equilibrium between the
 specific humidity and liquid mass fractions of the input thermodynamic state `𝒰₀`,

@@ -44,7 +44,7 @@ const LOG_LAMBDA_R_MAX = -log10(1.24^1 * 10e-6)
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Parse one whitespace-separated data line of a table file into a vector of
 Float64. Handles the `E`-exponent scientific notation the files are written in
@@ -60,7 +60,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Parse the P3 ice ASCII table file, which carries both table blocks.
 
@@ -162,7 +162,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a one- through five-dimensional `TabulatedFunction` directly from a
 pre-computed data array and axis ranges.
