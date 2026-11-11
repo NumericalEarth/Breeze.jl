@@ -14,14 +14,14 @@ AtmosphereModels.initialize_model_thermodynamics!(::CompressibleModel) = nothing
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 No-op for `CompressibleDynamics` - pressure is computed diagnostically from the equation of state.
 """
 AtmosphereModels.compute_pressure_correction!(::CompressibleModel, Δt) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 No-op for `CompressibleDynamics` - no pressure projection is needed.
 """
@@ -32,7 +32,7 @@ AtmosphereModels.make_pressure_correction!(::CompressibleModel, Δt) = nothing
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 No-op for `CompressibleDynamics` - pressure is computed from the equation of state, not solved.
 """
@@ -349,7 +349,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute temperature and pressure jointly for `CompressibleModel`.
 

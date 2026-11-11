@@ -82,7 +82,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a `StaticEnergyState` at grid point `(i, j, k)` from the given
 `formulation`, `dynamics`, and pre-computed moisture mass fractions `q`.

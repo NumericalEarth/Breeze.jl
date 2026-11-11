@@ -90,8 +90,8 @@ from a reference.
   `Module.function_name(...) = ...`, not `import`. Exports go at the top of module files. Import
   Oceananigans/Breeze names first, then external packages; internal imports use absolute paths.
   Examples and docs use `using Oceananigans` and `using Breeze`.
-- Docstrings use `$(TYPEDSIGNATURES)` (never a hand-written signature) and `jldoctest` examples;
-  details are in `.claude/rules/docstring-rules.md`.
+- Docstrings use `$(TYPEDSIGNATURES_WITH_DEFAULTS)` from `Breeze.Utils` (never a hand-written
+  signature) and `jldoctest` examples; details are in `.claude/rules/docstring-rules.md`.
 - Variable names are full English (`latitude`, not `lat`) or Unicode math from
   `docs/src/appendix/notation.md`, never a mix in one expression. Add new symbols to that table.
 - A leading `_` is reserved for `@kernel` functions. Helpers, including "private" ones, get plain

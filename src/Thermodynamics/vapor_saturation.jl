@@ -39,7 +39,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the saturation specific humidity for a gas at temperature `T`, total
 density `ρ`, `constants`dynamics, and over `surface` via:
@@ -97,7 +97,7 @@ qᵛ⁺ᵐ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the supersaturation ``𝒮 = pᵛ/pᵛ⁺ - 1`` over a given `surface`.
 
@@ -123,7 +123,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the psychrometric correction ``ξ``, the factor by which latent heating reduces
 the supersaturation available to drive a phase change,
@@ -153,7 +153,7 @@ the P3 scheme.
 abstract type AbstractPhaseEquilibrium end
 
 """
-    WarmPhaseEquilibrium()
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Represents a warm-phase equilibrium where only liquid water condensate is considered.
 The equilibrated surface is always a planar liquid surface.
@@ -213,7 +213,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the *equilibrium saturation specific humidity* ``qᵛ⁺`` for air at temperature `T`, reference pressure `p`,
 and total specific moisture `qᵗ`, over a given `surface`. The function returns the correct saturation specific humidity
@@ -258,7 +258,7 @@ the documentation for a derivation.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the *saturation specific humidity* ``qᵛ⁺`` for use in saturation adjustment,
 assuming **saturated conditions** where condensate is present.
@@ -284,7 +284,7 @@ saturation adjustment iteration where we assume saturated conditions throughout.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the equilibrium saturation specific humidity using a phase `equilibrium`
 model to determine the condensation surface based on temperature `T`.
@@ -295,7 +295,7 @@ model to determine the condensation surface based on temperature `T`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the adjustment saturation specific humidity using a phase `equilibrium`
 model to determine the condensation surface based on temperature `T`.
@@ -310,7 +310,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the dewpoint temperature ``T⁺`` given the vapor pressure `pᵛ`,
 actual temperature `T`, thermodynamic `constants`, and condensation `surface`.
@@ -362,7 +362,7 @@ end
     dewpoint_temperature(pᵛ, T, constants, surface, default_dewpoint_solver(T))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the dewpoint temperature using a phase `equilibrium` model to determine
 the condensation surface based on temperature `T`.

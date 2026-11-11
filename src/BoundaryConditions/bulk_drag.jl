@@ -13,8 +13,7 @@ struct BulkDragFunction{D, S, C, G, T, FV, TC}
 end
 
 """
-    BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=DefaultGustiness(),
-                       surface_temperature=nothing, filtered_velocities=nothing)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create a bulk drag function for computing wall momentum fluxes using bulk aerodynamic
 formulas. The momentum flux is computed in the same form as the scalar bulk fluxes,

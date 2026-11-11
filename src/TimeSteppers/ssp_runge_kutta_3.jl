@@ -65,7 +65,7 @@ struct SSPRungeKutta3{FT, U0, TG, TI, R} <: AbstractTimeStepper
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields` as described
 by [Shu and Osher (1988)](@cite Shu1988Efficient).
@@ -126,7 +126,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply an SSP RK3 substep with coefficient ``α``:
 ```math
@@ -175,7 +175,7 @@ function ssp_rk3_substep!(model, Δt, α)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the vertically-implicit solve of the prognostic `u` named `name` over `Δt`: the
 first-order upwind remainder of adaptive implicit vertical advection and the vertically-implicit
@@ -239,7 +239,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Copy prognostic fields to `U⁰` storage for use in later RK3 stages.
 """
@@ -256,7 +256,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Step forward `model` one time step ``Δt`` with the SSP RK3 method.
 

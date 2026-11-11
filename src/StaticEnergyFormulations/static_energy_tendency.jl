@@ -200,7 +200,7 @@ end
 #####
 
 """
-    $(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the thermodynamic state from temperature ``T``.
 

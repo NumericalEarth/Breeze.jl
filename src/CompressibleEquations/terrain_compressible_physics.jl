@@ -99,7 +99,7 @@ end
 @inline physical_heightᶜᶜᶜ(i, j, k, grid) = znode(i, j, k, grid, Center(), Center(), Center())
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Reduce a 3D `field` to a `HorizontalMeanProfile` of its horizontal mean **at constant physical
 height**. On a terrain-following grid the cell-center height `znode(i, j, k, …)` varies with
@@ -184,7 +184,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the contravariant vertical velocity ``\\tilde{w}`` and
 contravariant vertical momentum ``\\rho \\tilde{w}`` from the
@@ -780,7 +780,7 @@ function terrain_reference_profiles(ref_spec::NamedTuple)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fill the 3D fields `pᵣ`, `ρᵣ` and `πᵣ` with the hydrostatic reference pressure, density and Exner
 function, solving the discrete hydrostatic balance per column. On a terrain-following grid,
@@ -856,7 +856,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fill `pˢ` with the reference pressure at the terrain surface — the bottom face of each column —
 and return the matching `(θˢ, qᵛˢ)` there as 2D fields. `pˢ` is the *continuous* hydrostatic
@@ -939,7 +939,7 @@ terrain_surface_field(host_values, grid) =
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build the single 3D `ExnerReferenceState` for a terrain-following compressible model from an
 explicit reference profile `ref_spec` (a `reference_potential_temperature` — constant or `θ(z)` —
@@ -973,7 +973,7 @@ build_reference_state(grid, ::TerrainMetrics, ref_spec, base_pressure, standard_
     terrain_exner_reference_state(grid, base_pressure, ref_spec, standard_pressure, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build the reference specification (`reference_potential_temperature`,
 `reference_vapor_mass_fraction`) for a terrain-following compressible model from the
@@ -989,7 +989,7 @@ function terrain_reference_mean_profiles(model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the terrain-following model's 3D `ExnerReferenceState` in place from the height-resolved
 horizontal-mean state, via `compute_terrain_reference_state!`. Unlike the flat Exner / anelastic

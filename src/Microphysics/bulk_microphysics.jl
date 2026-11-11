@@ -1,3 +1,6 @@
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using DocStringExtensions: TYPEDEF
+
 using Breeze.Thermodynamics:
     AbstractReferencePressureState,
     LiquidIceDensityState,
@@ -9,8 +12,6 @@ using Breeze.Thermodynamics:
     condensate_latent_energy,
     exner_exponent,
     specific_heat_difference
-
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 """
 $(TYPEDEF)
@@ -168,7 +169,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the thermodynamic adjustment factor `Γ = 1 + dqᵛ⁺/dqᶜ` used in
 relaxation-to-saturation condensation/evaporation tendencies, so that condensation alone relaxes
@@ -187,7 +188,7 @@ its chosen Exner exponent and the temperature its `temperature_solver` returns.
     1 + saturation_response(𝒰, qᵛ⁺, T, ℒ, Δcᵖ, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the thermodynamic adjustment factor `Γ` used in relaxation-to-saturation
 deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_factor`).
@@ -197,7 +198,7 @@ deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_fac
                                     specific_heat_difference(constants, constants.ice), constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the condensation/evaporation rate for cloud liquid water in a relaxation-to-saturation model.
 
@@ -215,7 +216,7 @@ condensation; negative values indicate evaporation. Evaporation is limited by th
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the deposition/sublimation rate for cloud ice in a relaxation-to-saturation model.
 
@@ -249,7 +250,7 @@ const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories}
 Base.summary(::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `BulkMicrophysics` microphysics scheme.
 
