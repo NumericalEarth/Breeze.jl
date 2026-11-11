@@ -394,6 +394,58 @@ using Oceananigans.Fields: interior
         end
     end
 
+    @testset "Rain immersion freezing cannot freeze more drops than exist [$FT]" for FT in (Float32, Float64)
+        # Cold, wet ice sheds rain mass onto a sparse rain population. The shed mass keeps
+        # the rain mass budget open, and the per-drop immersion-freezing rate is uncapped,
+        # so without a number limit the frozen number exceeds the drops present and the
+        # rain number goes negative within one limiter interval.
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        thermodynamics = Breeze.Thermodynamics
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
+        τ = p3.process_rates.sink_limiting_timescale
+
+        # (T, p, qᵛ / qᵛ⁺ˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, qʷⁱ)
+        states = ((223.18, 23414, 0.984, 1.436e-7, 2.219e2, 2.786e-4, 1.276e2, 6.830e-5, 8.296e-5),
+                  (211.55, 43624, 0.855, 2.983e-7, 7.574e3, 5.761e-4, 5.278e2, 1.096e-4, 9.169e-5),
+                  (225.71, 37938, 0.814, 1.655e-7, 4.619e2, 2.684e-4, 3.568e2, 9.213e-5, 1.048e-4))
+
+        for state in states
+            T, p, ℋ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, qʷⁱ = FT.(state)
+            bᶠ = qᶠ / 400
+
+            qᵛ = FT(1e-6)
+            for _ in 1:10
+                q = MoistureMassFractions(qᵛ, qʳ + qʷⁱ, qⁱ)
+                𝒰 = thermodynamics.with_temperature(
+                    LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), p), T, constants)
+                ρ = thermodynamics.density(𝒰, constants)
+                qᵛ⁺ˡ = thermodynamics.saturation_specific_humidity(
+                    T, ρ, constants, thermodynamics.PlanarLiquidSurface())
+                qᵛ = ℋ * qᵛ⁺ˡ
+            end
+
+            q = MoistureMassFractions(qᵛ, qʳ + qʷⁱ, qⁱ)
+            𝒰 = thermodynamics.with_temperature(
+                LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), p), T, constants)
+            ρ = thermodynamics.density(𝒰, constants)
+
+            z = zero(FT)
+            ℳ = P3MicrophysicalState(z, FT(p3.cloud.number_concentration), qʳ, nʳ, qⁱ, nⁱ,
+                                     qᶠ, bᶠ, qʷⁱ, z, z, z)
+            properties = PPP.p3_process_properties(p3, ρ, ℳ)
+            rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z)
+
+            # Immersion freezing is active and number-limited...
+            @test rates.rain_freezing_number > 0
+
+            # ...so one limiter interval, or any shorter step, leaves the rain number non-negative.
+            Gⁿ = tendency_ρnʳ(rates, ρ, p3) / ρ
+            @test nʳ + τ * Gⁿ ≥ -10 * eps(FT) * nʳ
+            @test nʳ + τ / 2 * Gⁿ ≥ 0
+        end
+    end
+
     @testset "Immersion freezing PSD weighting" begin
         p3 = PredictedParticlePropertiesMicrophysics(Float64)
 

@@ -966,6 +966,16 @@ end
 
     ni_correction = ifelse(whole_particle_clipping, zero(FT),
                            (nⁱ - nⁱ_global) / dt_safety)
+
+    # Immersion freezing removes whole drops, so it cannot freeze more drops than rain
+    # holds. The mass budget `f_rain` does not bound the number: the per-drop freezing
+    # rate is uncapped, and rain mass sources (shedding, melting) can keep `f_rain`
+    # near one while the frozen number exceeds the drops present. Limit the frozen
+    # number against the existing drops plus the drops that sources deliver.
+    rain_freezing_number_available = max(0, nʳ) / dt_safety +
+                                     autoconv / rain_seed_drop_mass(p3) + shed_n + wg_shed_n
+    rain_frz_n = min(rain_frz_n, rain_freezing_number_available)
+
     ice_number_source_total = nuc_n + cloud_frz_n + rain_frz_n + spl_n
     # Global and DSD corrections conceptually replace the raw population with
     # the bounded one before physical processes act. Give particle-removing
@@ -1004,9 +1014,9 @@ end
     clipping_rime_volume = clipping_rime_volume + post_clip_rime_volume
     post_process_clipping = ifelse(post_process_clipping_active, one(FT), zero(FT))
 
-    # Reserve the immersion-frozen drops first: their number companion must retain
-    # the same species-budget ratio as rain_freezing_mass.
-    # Project the remaining number-only sinks onto the population left afterward.
+    # Reserve the immersion-frozen drops first (their number was limited against the
+    # available drops above), then project the remaining number-only sinks onto the
+    # population left afterward.
     cloud_warm_rain_number = ifelse(
         tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q / parameters.shed_drop_mass)
 
