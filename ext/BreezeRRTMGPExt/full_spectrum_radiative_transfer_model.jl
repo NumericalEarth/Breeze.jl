@@ -44,7 +44,7 @@ const full_spectrum_keywords_docstring = """
 $(column_batches_docstring)"""
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a full-spectrum `RadiativeTransferModel` that solves with `radiation_method`. Clear-sky
 passes `nothing` for `cloud_state` and the effective radii; all-sky passes a `CloudState` and the
@@ -252,7 +252,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the full-spectrum radiative fluxes from the current model state, including the cloud
 state for all-sky radiation.

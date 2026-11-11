@@ -116,13 +116,13 @@ end
 # and `β` the content, enthalpy and heating response of that phase per cell. The flux through
 # the upper face of cell k drains cell k + 1 (clamped at the top, where the flux vanishes) and
 # delivers χ[k] + β[k] (h[k+1] − h[k]); the flux through its lower face drains the cell itself
-# and delivers χ[k]. `coupling` is the cell's coupling-to-total density ratio.
-function expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, χ, h, β; coupling = ones(Nz))
+# and delivers χ[k]. `density_ratio` is the cell's continuity-to-total density ratio.
+function expected_sedimentation_tendency(Nz, Δz, ρᶠ, Φ, χ, h, β; density_ratio = ones(Nz))
     above(k) = min(k, Nz)
     G = zeros(Nz)
     for k in 1:Nz
         delivered⁺ = χ[k] + β[k] * (h[above(k + 1)] - h[k])
-        G[k] = -coupling[k] * (ρᶠ[k+1] * Φ[k+1] * delivered⁺ - ρᶠ[k] * Φ[k] * χ[k]) / Δz
+        G[k] = -density_ratio[k] * (ρᶠ[k+1] * Φ[k+1] * delivered⁺ - ρᶠ[k] * Φ[k] * χ[k]) / Δz
     end
     return G
 end

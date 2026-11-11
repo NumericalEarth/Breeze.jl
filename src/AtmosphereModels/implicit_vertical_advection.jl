@@ -59,9 +59,9 @@ implicit_step_scheme(advection, density=nothing) = DensityWeightedImplicitOperat
 # (see `scalar_tendency`). The implicit solve must weight its upwind coefficients with the same
 # density the explicit flux divergence uses; on the anelastic core the two densities coincide.
 function implicit_advection_density(dynamics, formulation, name::Symbol)
-    coupling = name === :ρu || name === :ρv || name === :ρw ||
-               name === thermodynamic_density_name(formulation)
-    return coupling ? continuity_density(dynamics) : total_density(dynamics)
+    continuity_weighted = name === :ρu || name === :ρv || name === :ρw ||
+                          name === thermodynamic_density_name(formulation)
+    return continuity_weighted ? continuity_density(dynamics) : total_density(dynamics)
 end
 
 """

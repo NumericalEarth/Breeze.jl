@@ -2,7 +2,7 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: set!
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convert the total-water density staged by `set!` in `model.moisture_density` into the
 scheme's prognostic moisture density by subtracting the independent condensate densities,

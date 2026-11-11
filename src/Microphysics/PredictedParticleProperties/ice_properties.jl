@@ -25,7 +25,7 @@ struct IceFallSpeed{FT, N, M}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `IceFallSpeed` with parameters and quadrature-based integrals.
 
@@ -89,7 +89,7 @@ struct IceDeposition{Vent, VentRe, SC, SR, LC, LR}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `IceDeposition` with quadrature-based ventilation integrals.
 
@@ -152,7 +152,7 @@ struct IceBulk{FT, EF, DM, RH, RF, LA, MU, SH}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `IceBulk` with parameters and quadrature-based integrals.
 
@@ -224,7 +224,7 @@ struct IceCollection{AG, CW, WA, IA}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `IceCollection` with placeholder (`nothing`) integrals, following the
 materialization pattern: [`read_lookup_tables`](@ref) replaces each field
@@ -284,7 +284,7 @@ struct IceLambdaLimiter{S, L}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `IceLambdaLimiter` with quadrature-based integrals.
 
@@ -330,7 +330,7 @@ struct IceRainCollection{QR, NR}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a placeholder `IceRainCollection` with `nothing` fields.
 
@@ -369,7 +369,7 @@ struct IceParticles{FT, FS, DP, BP, CL, LL, IR}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct ice particle properties with parameters and integrals for the P3 scheme.
 

@@ -60,7 +60,7 @@ function allocate_formulation(f::TwoLevelDecay, FT, arch, sz, halo, topo, z_top)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fill the terrain components of a `TerrainFollowingVerticalDiscretization` grid
 in place from `topography(x, y)`. Must be called after the grid is built (the
@@ -200,7 +200,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a `TerrainMetrics` for a materialized `TerrainFollowingVerticalDiscretization`
 grid. On such grids the terrain *slope* used by the dynamics comes from the grid

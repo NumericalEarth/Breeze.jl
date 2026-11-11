@@ -148,7 +148,7 @@ struct ParcelDynamics{S, TS, D, P, U, FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `ParcelDynamics` with default (uninitialized) state.
 
@@ -276,7 +276,7 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create the parcel microphysics prognostic variables for the given microphysics scheme.
 
@@ -298,7 +298,7 @@ function materialize_parcel_microphysics_prognostics(FT, microphysics)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `μ` with its aerosol reservoir `ρnᵃ` [m⁻³] set from the parcel's environmental
 density `ρ`: to `ρ * nᵃ` if `nᵃ` [kg⁻¹] is given, to `ρnᵃ` if that is given, and otherwise
@@ -374,7 +374,7 @@ Oceananigans.Architectures.on_architecture(to, d::ParcelDynamics) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the environmental profiles and initial parcel state for a [`ParcelModel`](@ref).
 
@@ -530,7 +530,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set temperature field from potential temperature, using proper thermodynamic relations.
 
@@ -561,7 +561,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set specific humidity field from relative humidity, computing
 
@@ -583,7 +583,7 @@ function set_moisture_from_relative_humidity!(qᵗ_field, ℋ, T_field, ρ_field
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Initialize the parcel state by interpolating environmental conditions at the given position.
 The thermodynamic variable is initialized at the environmental temperature with
@@ -642,7 +642,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the parcel model state, computing tendencies and auxiliary variables.
 
@@ -662,7 +662,7 @@ function TimeSteppers.update_state!(model::ParcelModel, callbacks=[]; compute_te
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute tendencies for the parcel prognostic variables.
 
@@ -713,7 +713,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the net buoyancy acceleration for a parcel.
 
@@ -745,7 +745,7 @@ condensate loading effect (condensate reduces ``qᵈ``, reducing ``Rᵐ``, incre
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute vertical velocity tendencies for [`PrescribedVerticalVelocity`](@ref).
 
@@ -759,7 +759,7 @@ The parcel velocity tendency `Gw` is zero (unused prognostic).
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute vertical velocity tendencies for [`PrognosticVerticalVelocity`](@ref).
 
@@ -841,7 +841,7 @@ struct ParcelTimestepper{GT, U0, FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `ParcelTimestepper` for SSP RK3 time-stepping.
 """
@@ -878,7 +878,7 @@ function ParcelInitialState(state::ParcelState{FT, TH, MP}) where {FT, TH, MP}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Copy current prognostic state values to the initial state storage.
 """
@@ -901,7 +901,7 @@ copy_microphysics_prognostics(μ::NamedTuple) = μ  # NamedTuples of scalars are
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Check that the parcel remains within the vertical grid domain `[0, Lz]`.
 
@@ -925,7 +925,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply an SSP RK3 substep with coefficient ``α``:
 
@@ -987,7 +987,7 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Keep parcel condensates nonnegative and within the conserved total-water budget.
 Excess condensate is reduced proportionally at fixed energy.
@@ -1035,7 +1035,7 @@ function update_parcel_moisture!(model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Reconstruct a thermodynamic state with a new conserved variable value and updated z, p.
 """
@@ -1057,7 +1057,7 @@ end
 @inline thermodynamic_variable_name(::LiquidIcePotentialTemperatureState) = Val(:θ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply SSP RK3 substep formula to microphysics prognostic variables.
 
@@ -1084,7 +1084,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Step the parcel state forward using Forward Euler:
 
@@ -1146,7 +1146,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the parcel model by one time step ``Δt`` using SSP RK3.
 
@@ -1209,7 +1209,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Adjust the thermodynamic state for adiabatic ascent/descent to a new height.
 Conserves the thermodynamic variable (static energy or potential temperature).

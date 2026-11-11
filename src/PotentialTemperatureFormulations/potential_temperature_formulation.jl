@@ -58,7 +58,7 @@ struct LiquidIcePotentialTemperatureFormulation{F, T, S, E}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `LiquidIcePotentialTemperatureFormulation` with the given `temperature_solver` and
 Exner exponent `exner_exponent`, either `VaporEquivalentExponent()` (the default) or `DryExponent()`.
@@ -180,7 +180,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a `LiquidIcePotentialTemperatureState` at grid point `(i, j, k)` from the
 given `formulation`, `dynamics`, and pre-computed moisture mass fractions `q`.

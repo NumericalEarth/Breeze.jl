@@ -10,7 +10,7 @@ using Oceananigans.Fields: ConstantField
 using InteractiveUtils: subtypes
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the initial radiative fluxes of `rtm` from the current model state; the computation
 itself is `_update_radiation!(rtm, model)`. Called by `update_state!`.
@@ -48,7 +48,7 @@ end
 radiation_initialization_due(clock) = clock.iteration == 0 && clock.stage == 1
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the radiative fluxes of `model.radiation` at the end of a time step, when its schedule
 actuates on the end-of-step clock, and rebuild the tendencies with the new fluxes so that the
@@ -89,7 +89,7 @@ function update_radiation_and_tendencies!(rtm, model, callbacks)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `schedule` if radiation can be updated on it on architecture `arch`, and throw an
 `ArgumentError` otherwise. Every schedule is valid on native architectures; `BreezeReactantExt`
@@ -132,7 +132,7 @@ struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS,
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Number of whole j-rows of columns in each radiation batch when the domain's `Ny` rows are split
 into at most `column_batches` batches. `nothing` means one unbatched solve over all `Ny` rows.
@@ -269,7 +269,7 @@ struct EcCKDOptics{M, C, S} <: AbstractOptics
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct [`EcCKDOptics`](@ref) with the reference `gas_model` (default `:climate_32x32`) and,
 for all-sky radiation, [`CloudScatteringTables`](@ref) as `clouds` (default `nothing`: clear sky).
@@ -295,7 +295,7 @@ function Base.show(io::IO, optics::EcCKDOptics)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `RadiativeTransferModel` on `grid` using the specified `optics`.
 
@@ -471,7 +471,7 @@ struct BackgroundAtmosphere{N2, O2, CO2, CH4, N2O, CO, NO2, O3, CFC11, CFC12, CF
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 An idealized climatological ozone volume mixing ratio (mol/mol) as a function of height
 `z` (m): a weak tropospheric background increasing toward the tropopause, blended into a
@@ -490,7 +490,7 @@ for an observed or model ozone climatology.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `BackgroundAtmosphere` with volume mixing ratios for radiatively active gases.
 All values are dimensionless molar fractions.
@@ -596,7 +596,7 @@ end
 using Oceananigans.Fields: field
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Materialize a `BackgroundAtmosphere` by converting O₃ functions to fields and
 converting constant gases to the grid's float type.
@@ -689,7 +689,7 @@ using Oceananigans.Grids: xnode, ynode, znode, Center, Face
 using Breeze.CelestialMechanics: SingleColumnGrid
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The column index `c = i + (j - 1) Nx` of horizontal cell `(i, j)`: every column-based radiation
 backend stores its per-column arrays in this order.
@@ -719,7 +719,7 @@ maybe_infer_solar_position(sp::AbstractSolarPosition, grid) = sp
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The scalar behind a surface property that is constant in space and time, or `nothing` when the
 property carries no such scalar.
@@ -733,7 +733,7 @@ surface_fraction_scalar(x::ConstantField) = surface_fraction_scalar(x.constant)
 surface_fraction_scalar(x) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Throw an `ArgumentError` for any keyword whose value is a spatially uniform scalar outside ``[0, 1]``.
 
@@ -752,7 +752,7 @@ function validate_surface_fractions(; kw...)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Wrap a scalar surface property in a `ConstantField` of the working precision, passing anything
 already field-valued through unchanged, so that emissivity and both albedos are uniformly
@@ -762,7 +762,7 @@ constant_field_property(x::Number, FT) = ConstantField(convert(FT, x))
 constant_field_property(x, FT) = x
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Resolve the albedo keywords of a `RadiativeTransferModel` constructor into a
 `(direct, diffuse)` pair of materialized surface albedos.
@@ -825,7 +825,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Pressure on the bottom face of column `(i, j)`, extrapolated hydrostatically from the lowest
 cell center: `p₁ + ρ₁ g (z₁ᶜ - z₁ᶠ)`.
@@ -837,7 +837,7 @@ cell center: `p₁ + ρ₁ g (z₁ᶜ - z₁ᶠ)`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Pressure on the top face of column `(i, j)`, extrapolated hydrostatically from the highest
 cell center: `p_Nz - ρ_Nz g (z_{Nz+1}ᶠ - z_Nzᶜ)`.
@@ -854,7 +854,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute `rtm.flux_divergence = -∂F_net/∂z` (W m⁻³) from the four `ZFaceField` fluxes of `rtm`,
 with `F_net` the sum of the up- and downwelling longwave and shortwave fluxes, all signed
@@ -897,7 +897,7 @@ const ISA_1976_BASE_HEIGHTS = (0, 11e3, 20e3, 32e3, 47e3, 51e3, 71e3, 84852)
 const ISA_1976_BASE_TEMPERATURES = (288.15, 216.65, 216.65, 228.65, 270.65, 270.65, 214.65, 186.946)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The temperature (K) of the U.S. Standard Atmosphere 1976 ([NOAA, NASA & USAF (1976)](@cite USStandardAtmosphere1976))
 at height `z` (m): piecewise linear through the seven layers between 0 and 86 km, with the
@@ -937,7 +937,7 @@ function standard_atmosphere_temperature(z)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 An idealized specific humidity (kg kg⁻¹) at height `z` (m): 10 g kg⁻¹ at the surface decaying
 with a 2.5 km scale height, floored at 3 mg kg⁻¹ (about 5 ppmv) for the dry stratosphere,
@@ -1043,7 +1043,7 @@ struct OverlyingAtmosphereColumn{FT, T, Q, O, B, V}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`OverlyingAtmosphereColumn`](@ref) of float type `FT` reaching `top` (default 65 km) with
 `layers` layers (default 40), a `blending_height` of 1 km for the temperature anchor, and
@@ -1119,7 +1119,7 @@ function geometric_stack_depth(Δz₁, r, N)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The ratio `r` between successive layers of a geometric stretching of `N` layers whose first layer
 is `Δz₁` thick and which together span `depth`, i.e. the root of
@@ -1164,7 +1164,7 @@ function geometric_stretching_ratio(Δz₁, depth, N)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The face heights of the extension layers of `extension` above a grid whose top face is at `z_top`
 and whose top layer is `Δz_top` thick: a vector of `Nₑ + 1` heights starting at `z_top` and ending
