@@ -4,7 +4,7 @@ using Breeze
 using Oceananigans
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_min, clip_below, clip_between, clip_negative,
                                       stable_damping, hard_floor, third_moment_bound, bound_third_moment,
-                                      vd_shoc_decomp!, vd_shoc_solve!, tke_step
+                                      vd_shoc_decomp!, vd_shoc_solve!, tke_step, buoyancy_production
 using Test
 
 # Bitwise equality, with NaN equal to NaN and the two zeros distinct
@@ -242,5 +242,18 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test all_finite(run)
             @test all(run.e .> 0)
         end
+    end
+
+    @testset "DowngradientBuoyancyFlux" begin
+        constants = SHOCConstants(FT)
+        wthv, tkh, N² = FT(0.02), FT(30), FT(1e-4)
+        @test buoyancy_production(PDFBuoyancyFlux(), constants, wthv, tkh, N²) == (constants.ggr / constants.basetemp) * wthv
+        @test buoyancy_production(DowngradientBuoyancyFlux(), constants, wthv, tkh, N²) == -tkh * N²
+        @test buoyancy_production(DowngradientBuoyancyFlux(), constants, wthv, tkh, -N²) > 0
+
+        downgradient = run_shoc_column(SHOC(OriginalSHOC(), FT; buoyancy_source = DowngradientBuoyancyFlux(), surface_forcing...))
+        @test all_finite(downgradient)
+        @test maximum(downgradient.e) > FT(0.01)
+        @test isapprox(downgradient.θ, original.θ; rtol = 2e-3)
     end
 end

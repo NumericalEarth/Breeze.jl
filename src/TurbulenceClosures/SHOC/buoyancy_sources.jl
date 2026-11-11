@@ -20,3 +20,17 @@ water in partly cloudy air.
 struct PDFBuoyancyFlux <: AbstractSHOCComponent end
 
 @inline buoyancy_production(::PDFBuoyancyFlux, c, wthv_sec_k, tkh_k, brunt_k) = (c.ggr / c.basetemp) * wthv_sec_k
+
+"""
+$(TYPEDEF)
+
+The buoyancy production of a dry eddy diffusivity closure, `B = -Kᶜ N²`, with the heat
+diffusivity of the previous step and the stratification `N²` of this one, which SHOC computes
+from the virtual potential temperature. It has no part for the condensation in partly cloudy
+air, so it is a term to compare [`PDFBuoyancyFlux`](@ref) with, not a candidate to replace it:
+in a cloud layer that is stable to dry displacements it is a sink where the buoyancy flux of
+the assumed PDF is a source.
+"""
+struct DowngradientBuoyancyFlux <: AbstractSHOCComponent end
+
+@inline buoyancy_production(::DowngradientBuoyancyFlux, c, wthv_sec_k, tkh_k, brunt_k) = -(tkh_k * brunt_k)
