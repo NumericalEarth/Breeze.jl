@@ -1,7 +1,8 @@
 #####
 ##### Wall faces
 #####
-##### The bulk fluxes may be placed on any of the six boundaries of a bounded domain.
+##### The bulk fluxes may be placed on any of the six boundaries of a bounded domain,
+##### or on the six facets of the fluid cells next to an immersed boundary.
 ##### Oceananigans evaluates a boundary condition with the two indices tangential to its
 ##### face: (i, j) on the bottom and top, (j, k) on the west and east, and (i, k) on the
 ##### south and north. Everything that distinguishes the faces — the near-wall cell, the
@@ -24,9 +25,20 @@ const RightWall = Union{East, North, Top}
 @inline near_wall_indices(ℓ, m, grid, ::South) = (ℓ, 1, m)
 @inline near_wall_indices(ℓ, m, grid, ::North) = (ℓ, grid.Ny, m)
 
+# Boundary-tangential indices (ℓ, m) of the near-wall cell (i, j, k), for an immersed facet
+@inline wall_tangential_indices(i, j, k, ::HorizontalWall) = (i, j)
+@inline wall_tangential_indices(i, j, k, ::XNormalWall) = (j, k)
+@inline wall_tangential_indices(i, j, k, ::YNormalWall) = (i, k)
+
+# Location of a field in the direction normal to a wall
+facet_normal_location(::XNormalWall, loc) = loc[1]
+facet_normal_location(::YNormalWall, loc) = loc[2]
+facet_normal_location(::HorizontalWall, loc) = loc[3]
+
 # Fluxes point along the positive coordinate direction, so a positive flux enters the
 # domain through a left wall and leaves it through a right wall. A flux of magnitude F
 # directed out of the domain is therefore -F on a left wall and +F on a right wall.
+# An immersed facet flux is instead positive into the fluid on every facet.
 @inline outward_flux_sign(::LeftWall) = -1
 @inline outward_flux_sign(::RightWall) = 1
 

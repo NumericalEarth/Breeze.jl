@@ -16,7 +16,6 @@ using Oceananigans
 using Oceananigans: prognostic_fields
 using Oceananigans.BoundaryConditions: getbc, West, East, South, North, Bottom, Top
 using Oceananigans.Grids: xnode, ynode, znode, XDirection, YDirection, ZDirection
-using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models: boundary_condition_args
 using Test
 
@@ -367,7 +366,7 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
         @test wall_height(1, 1, 3, grid, West())   ≈ FT(2.5) * Δz
     end
 
-    @testset "Summaries, adaptation, and immersed boundaries" begin
+    @testset "Summaries and adaptation" begin
         model = closed_box_model(FT)
         for (field, name, T) in ((prognostic_fields(model).ρθ, "BulkSensibleHeatFluxFunction", BulkSensibleHeatFluxFunction),
                                  (prognostic_fields(model).ρqᵛ, "BulkVaporFluxFunction", BulkVaporFluxFunction),
@@ -376,12 +375,6 @@ wall_pressure(model, side, i, j, k, direction=nothing) =
             @test occursin(name, summary(bc.condition))
             @test Adapt.adapt(Array, bc.condition) isa T
         end
-        # Bulk fluxes are not supported on immersed boundaries
-        grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1),
-                               topology=(Bounded, Bounded, Bounded))
-        immersed_grid = ImmersedBoundaryGrid(grid, GridFittedBottom(FT(0.1)))
-        ρθ_bcs = FieldBoundaryConditions(immersed=BulkSensibleHeatFlux(; coefficient=C, surface_temperature=FT(300)))
-        @test_throws ArgumentError AtmosphereModel(immersed_grid; boundary_conditions=(; ρθ=ρθ_bcs))
     end
 
     @testset "Static energy with a filtered surface state" begin

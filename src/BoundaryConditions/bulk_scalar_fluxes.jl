@@ -49,7 +49,8 @@ used to define potential temperature.
 
 The flux may be placed on any of the six boundaries of a bounded domain. The sign above
 is for the bottom; on every wall the flux carries heat *into* the domain when the wall is
-warmer than the adjacent air.
+warmer than the adjacent air. As the `immersed` condition on an `ImmersedBoundaryGrid`, it acts
+on every facet of the immersed boundary.
 
 The `formulation` is set automatically during model construction based on the
 thermodynamic formulation.
@@ -115,36 +116,44 @@ end
 end
 
 # No filtered scalar: read from the near-wall cell of the 3D field
-@inline function bulk_sensible_heat_difference(i, j, k, grid, side, flux::PotentialTemperatureFlux, bf, Tˢ, fields, pˢ, ::Nothing)
+@inline function bulk_sensible_heat_difference(i, j, k, grid, side, flux::PotentialTemperatureFlux, bf, Tˢ, fields, pˢ, zˢ, ::Nothing)
     θ = @inbounds fields.θ[i, j, k]
     return θ - wall_potential_temperature(i, j, k, grid, bf, Tˢ, fields, pˢ, flux.exner_exponent)
 end
 
 # The filtered scalar stores the complete thermodynamic difference.
-@inline function bulk_sensible_heat_difference(i, j, k, grid, side, formulation, bf, Tˢ, fields, pˢ, fs::FilteredSurfaceScalar)
+@inline function bulk_sensible_heat_difference(i, j, k, grid, side, formulation, bf, Tˢ, fields, pˢ, zˢ, fs::FilteredSurfaceScalar)
     return @inbounds fs.field[i, j, 1]
 end
 
-@inline function wall_static_energy(i, j, k, grid, side, bf, Tˢ, fields, pˢ)
+@inline function wall_static_energy(i, j, k, grid, bf, Tˢ, fields, pˢ, zˢ)
     constants = bf.thermodynamic_constants
     q = wall_moisture_fractions(i, j, k, grid, bf.microphysics, fields)
-    k₀ = ifelse(side isa Bottom, 1, k)
-    zˢ = wall_height(i, j, k₀, grid, side)
     𝒰ˢ = StaticEnergyState(zero(q.vapor), q, zˢ, pˢ)
     𝒰 = with_temperature(𝒰ˢ, oftype(q.vapor, Tˢ), constants)
     return 𝒰.static_energy
 end
 
-@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::StaticEnergyFlux, bf, Tˢ, fields, pˢ, ::Nothing)
+@inline function bulk_sensible_heat_difference(i, j, k, grid, side, ::StaticEnergyFlux, bf, Tˢ, fields, pˢ, zˢ, ::Nothing)
     s = @inbounds fields.s[i, j, k]
-    return s - wall_static_energy(i, j, k, grid, side, bf, Tˢ, fields, pˢ)
+    return s - wall_static_energy(i, j, k, grid, bf, Tˢ, fields, pˢ, zˢ)
 end
 
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, ℓ::Integer, m::Integer,
                                       grid::AbstractGrid, clock, model_fields, dynamics_fields)
     fields = surface_layer_state(model_fields, dynamics_fields)
+    i, j, k = near_wall_indices(ℓ, m, grid, bf.side)
+    return outward_flux_sign(bf.side) * bulk_sensible_heat_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+end
+
+@inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer, k::Integer,
+                                      grid::AbstractGrid, clock, fields)
+    ℓ, m = wall_tangential_indices(i, j, k, bf.side)
+    return - bulk_sensible_heat_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+end
+
+@inline function bulk_sensible_heat_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
     side = bf.side
-    i, j, k = near_wall_indices(ℓ, m, grid, side)
     Tˢ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
 
     U² = wall_wind_speed²(i, j, k, grid, side, nothing, fields, bf.filtered_velocities)
@@ -157,8 +166,9 @@ end
 
     Cᵀ = bulk_coefficient(i, j, k, grid, side, bf.coefficient, fields, Tˢ, bf.filtered_velocities, pˢ, Uᵍ²)
 
-    Δϕ = bulk_sensible_heat_difference(i, j, k, grid, side, bf.formulation, bf, Tˢ, fields, pˢ, bf.filtered_scalar)
-    return outward_flux_sign(side) * ρˢ * Cᵀ * Ũ * Δϕ
+    zˢ = wall_height(i, j, k, grid, side)
+    Δϕ = bulk_sensible_heat_difference(i, j, k, grid, side, bf.formulation, bf, Tˢ, fields, pˢ, zˢ, bf.filtered_scalar)
+    return ρˢ * Cᵀ * Ũ * Δϕ
 end
 
 const BulkSensibleHeatFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkSensibleHeatFluxFunction}
@@ -202,7 +212,8 @@ and the near-wall humidity are seen at the same times, as for [`BulkSensibleHeat
 
 The flux may be placed on any of the six boundaries of a bounded domain. The sign above is
 for the bottom; on every wall the flux carries vapor *into* the domain when the wall is
-moister than the adjacent air.
+moister than the adjacent air. As the `immersed` condition on an `ImmersedBoundaryGrid`, it acts
+on every facet of the immersed boundary.
 
 # Keyword Arguments
 
@@ -266,8 +277,18 @@ end
 @inline function OceananigansBC.getbc(bf::BulkVaporFluxFunction, ℓ::Integer, m::Integer,
                                       grid::AbstractGrid, clock, model_fields, dynamics_fields)
     fields = surface_layer_state(model_fields, dynamics_fields)
+    i, j, k = near_wall_indices(ℓ, m, grid, bf.side)
+    return outward_flux_sign(bf.side) * bulk_vapor_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+end
+
+@inline function OceananigansBC.getbc(bf::BulkVaporFluxFunction, i::Integer, j::Integer, k::Integer,
+                                      grid::AbstractGrid, clock, fields)
+    ℓ, m = wall_tangential_indices(i, j, k, bf.side)
+    return - bulk_vapor_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
+end
+
+@inline function bulk_vapor_flux_magnitude(bf, ℓ, m, i, j, k, grid, clock, fields)
     side = bf.side
-    i, j, k = near_wall_indices(ℓ, m, grid, side)
     constants = bf.thermodynamic_constants
     Tˢ = wall_value(ℓ, m, grid, side, bf.surface_temperature, clock)
     pˢ = wall_air_pressure(i, j, k, grid, side, nothing, fields, constants)
@@ -285,7 +306,7 @@ end
     # Over the wet fraction β of the wall the air in contact with it holds qᵛˢ = ℋˢ qᵛ⁺(Tˢ), and
     # over the dry fraction the humidity of the air itself, so that qᵛ - qˢ = β (qᵛ - qᵛˢ)
     β = bf.moisture_availability
-    return outward_flux_sign(side) * ρˢ * Cᵛ * Ũ * β * Δq
+    return ρˢ * Cᵛ * Ũ * β * Δq
 end
 
 # Specific humidity of the air in contact with the wet part of the wall, qˢ = ℋˢ qᵛ⁺(Tˢ, ρˢ)
