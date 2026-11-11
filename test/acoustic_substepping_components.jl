@@ -28,7 +28,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors, prepare_acoustic_cache!
+                                    implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, continuity_density, standard_pressure
@@ -412,6 +412,45 @@ for arch in arches
 
         @test model.clock.iteration == 3
         @test !any(isnan, parent(model.dynamics.dry_density))
+        Oceananigans.defaults.FloatType = old_FT
+    end
+
+    # The substep fills only the halos its kernels read: none of ρ′ (never read off its own column
+    # except into the discarded boundary rows of the vertical right-hand side), and those of the
+    # stashed (ρθ)′ˢ⁻ only before the damping. Poisoned halos must therefore not reach the interior.
+    @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+
+        td = SplitExplicitTimeDiscretization(substeps=8, damping=ThermalDivergenceDamping(coefficient=FT(0.1)))
+        dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics)
+        θᵢ(x, y, z) = 300 + 2 * exp(-((x - 4kilometers)^2 + (y - 4kilometers)^2 + (z - 4kilometers)^2) / (1kilometers)^2)
+        set!(model; θ=θᵢ, qᵗ=0, ρ=model.dynamics.reference_state.density)
+        time_step!(model, 6)
+
+        # The perturbations and slow tendencies of the last stage are a valid substep state.
+        substepper = model.timestepper.substepper
+        for field in (substepper.density_perturbation,
+                      substepper.previous_density_potential_temperature_perturbation)
+            values = copy(interior(field))
+            fill!(parent(field), NaN)
+            copyto!(interior(field), values)
+        end
+
+        Δτ = FT(1//2)
+        ω = FT(substepper.forward_weight)
+        stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ)
+        acoustic_substep_loop!(2, model, substepper, stage, nothing)
+
+        for field in (substepper.density_perturbation,
+                      substepper.density_potential_temperature_perturbation,
+                      substepper.momentum_perturbation...)
+            @test all(isfinite, Array(interior(field)))
+        end
+        @test maximum(abs, interior(substepper.momentum_perturbation.w)) > 0
         Oceananigans.defaults.FloatType = old_FT
     end
 
