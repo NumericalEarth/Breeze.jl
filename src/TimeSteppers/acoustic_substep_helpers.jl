@@ -272,8 +272,8 @@ acoustic loop with its time-averaged transport velocity, adding them to the stag
 callbacks again on the result; assemble the scalars' stage forcing from it
 (`assemble_post_loop_stage_forcing!`, a no-op for Wicker–Skamarock RK3); and freeze the transport
 velocity for the implicit remainder of the scalar update. The tracers are converted to specific
-values around the build and the callbacks, as in `update_state!`, with the stage-entry total
-density that the moisture flux is weighted by.
+values around the build, as in `update_state!`, with the stage-entry total density that the
+moisture flux is weighted by.
 """
 compute_post_loop_scalar_tendencies!(::PreLoopScalarTendencies, model, Δt, callbacks) = nothing
 
@@ -286,10 +286,8 @@ function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model,
         callback.callsite isa TendencyCallsite && callback(model)
     end
 
-    # The assembly reads the scalars as densities (a multirate stepper forms its stage increments
-    # from them), so the tracers are converted back first.
-    tracer_specific_to_density!(model)
     assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
+    tracer_specific_to_density!(model)
     cache_transport_velocity!(model)
     return nothing
 end

@@ -165,3 +165,73 @@ end
         @test maximum(abs, slow .+ fast .- full[name]) < 1e-13 * scale
     end
 end
+
+#####
+##### Stage increments of a multirate infinitesimal step with an active negative-moisture correction
+#####
+##### `update_state!` corrects negative moisture between stages, so an increment ΔYᵢ = Yᵢ − Uⁿ formed
+##### after it carries the correction into the forcing and start state of later stages. The increments
+##### of the moisture and microphysical fields are therefore stored when a stage completes, and only
+##### those of the acoustic prognostics, which nothing changes in between, are formed in the next
+##### stage's assembly. Either way the step must reproduce the one that stores every increment.
+#####
+
+using CloudMicrophysics
+using Breeze.AtmosphereModels: SpeciesBorrowing
+using Breeze.TimeSteppers: fold_stage_increments, stage_increment_source, acoustic_prognostic_names,
+                           IncrementFromState, StoredIncrement
+using Oceananigans: prognostic_fields
+
+const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt).OneMomentCloudMicrophysics
+
+# Sharp-edged rain in a sheared, overturning flow: unbounded WENO undershoots at its edges, so the
+# correction has negative rain to repair after every stage.
+function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correction = SpeciesBorrowing())
+    grid = RectilinearGrid(default_arch; size = (16, 16), halo = (5, 5), x = (-8e3, 8e3), z = (0, 8e3),
+                           topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
+                            microphysics = OneMomentCloudMicrophysics(; negative_moisture_correction),
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients = :MIS3C, post_loop_scalar_tendencies))
+    constants = model.thermodynamic_constants
+    set!(model; θ = θ_bubble, qᵗ = 0.018, ρ = (x, z) -> adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, constants),
+                u = (x, z) -> 15 * sin(2π * z / 8e3), w = (x, z) -> 4 * sin(2π * x / 16e3))
+    set!(model; ρqʳ = (x, z) -> ifelse(abs(x) < 2e3 && 2e3 < z < 5e3, 2e-3, 0.0),
+                ρc = (x, z) -> exp(-((z - 2e3) / 1e3)^2 - (x / 2e3)^2))
+    return model
+end
+
+function raining_bubble_state(Nt; fold, kw...)
+    fold_stage_increments[] = fold
+    model = raining_bubble(; kw...)
+    for _ in 1:Nt
+        time_step!(model, 6)
+    end
+    fold_stage_increments[] = true
+    return map(field -> Array(interior(field)), prognostic_fields(model))
+end
+
+@testset "MIS stage increments with an active negative-moisture correction [post_loop = $post_loop_scalar_tendencies]" for post_loop_scalar_tendencies in (false, true)
+    # The setup gives the correction something to do: uncorrected, a step leaves negative rain.
+    uncorrected = raining_bubble_state(1; fold = true, post_loop_scalar_tendencies, negative_moisture_correction = nothing)
+    @test minimum(uncorrected.ρqʳ) < 0
+
+    # Only the prognostics the acoustic loop advances form their increments in the assembly.
+    model = raining_bubble(; post_loop_scalar_tendencies)
+    for name in keys(prognostic_fields(model))
+        source = stage_increment_source(model, name)
+        @test source isa (name ∈ acoustic_prognostic_names(model) ? IncrementFromState : StoredIncrement)
+    end
+
+    for Nt in (1, 3)
+        folded = raining_bubble_state(Nt; fold = true, post_loop_scalar_tendencies)
+        stored = raining_bubble_state(Nt; fold = false, post_loop_scalar_tendencies)
+        @test minimum(folded.ρqʳ) ≥ 0
+        for name in keys(folded)
+            scale = maximum(abs, stored[name])
+            @test maximum(abs, folded[name] .- stored[name]) ≤ 100 * eps(scale)
+        end
+    end
+end

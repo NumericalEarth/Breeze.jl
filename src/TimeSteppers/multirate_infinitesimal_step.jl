@@ -34,9 +34,9 @@ Fields
 - `Uⁿ`: the outer-step-start state.
 - `accumulators`: for each stage ``k = 3, …, s``, the parts of its forcing and start state known so far,
   `forcing` ``= (1/dₖ) Σⱼ (βₖⱼ Sⱼ + γₖⱼ ΔYⱼ / Δt)`` and `offset` ``= Σⱼ αₖⱼ ΔYⱼ``, accumulated as each
-  ``Sⱼ`` and ``ΔYⱼ = Yⱼ - Uⁿ`` becomes available, so no ``Sⱼ`` or ``ΔYⱼ`` is stored: the assembly of
-  stage ``j + 1`` forms ``ΔYⱼ`` from the prognostic fields, which still hold ``Yⱼ`` then. Until stage 2
-  consumes it, stage 3's forcing holds the raw ``S₁``.
+  ``Sⱼ`` and ``ΔYⱼ = Yⱼ - Uⁿ`` becomes available, so no ``Sⱼ`` or ``ΔYⱼ`` is stored. Until stage 2
+  consumes them, stage 3's pair holds the raw ``S₁`` and, for the moisture, microphysical and tracer
+  fields, the raw ``ΔY₁`` (see `stage_increment_source`).
 - `fast_tendency`: scratch for the fast parts of the tendencies: with [`PreLoopScalarTendencies`](@ref)
   one field, for the stage-entry fast thermodynamic tendency; with [`PostLoopScalarTendencies`](@ref)
   one per prognostic the acoustic loop does not advance by continuity or momentum — the
@@ -246,20 +246,50 @@ end
     end
 end
 
-# The increment ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ of the stage before is formed here, from the prognostic field
-# `u`, rather than stored when that stage completes: `u` holds Yᵢ₋₁ until stage i advances it,
-# and this kernel reads Uⁿ anyway. Yᵢ₋₁ is thus the state the tendency in `G` was evaluated at,
-# with whatever `update_state!` did to it (the negative-moisture fix, the tracers' round trip
-# through specific values, `UpdateStateCallsite` callbacks).
+# Where a stage's assembly finds the increment ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ of the stage before
+# (`stage_increment_source`): formed on the spot from the prognostic field `u`, which the assembly
+# of the acoustic prognostics can do because nothing changes them between the end of a stage and
+# the next assembly, or already stored in the accumulators by `store_stage_increment!`.
+struct IncrementFromState{U}
+    u :: U
+end
+
+struct StoredIncrement end
+
+Adapt.adapt_structure(to, source::IncrementFromState) = IncrementFromState(adapt(to, source.u))
+
+# ΔY₁, for stage 2: `Z[1]` is where `store_stage_increment!` keeps it raw.
+@inline first_increment(source::IncrementFromState, Z, uⁿ, i, j, k) = @inbounds source.u[i, j, k] - uⁿ
+@inline first_increment(::StoredIncrement, Z, uⁿ, i, j, k) = @inbounds Z[1][i, j, k]
+
+# Stage i's own accumulators, completed with ΔYᵢ₋₁ in registers (they are not needed again) when
+# it has not been folded in already.
+@inline function completed_accumulators(source::IncrementFromState, Fᵢ, Zᵢ, wγᵢ, αᵢ, uⁿ, i, j, k)
+    ΔY = @inbounds source.u[i, j, k] - uⁿ
+    return @inbounds (Fᵢ[i, j, k] + wγᵢ * ΔY, Zᵢ[i, j, k] + αᵢ * ΔY)
+end
+
+@inline completed_accumulators(::StoredIncrement, Fᵢ, Zᵢ, wγᵢ, αᵢ, uⁿ, i, j, k) = @inbounds (Fᵢ[i, j, k], Zᵢ[i, j, k])
+
+# Add Sᵢ, and ΔYᵢ₋₁ when it has not been folded in already, to the accumulators of later stages.
+@inline function accumulate_later_stages!(source::IncrementFromState, F, Z, wγᵏ, wβᵏ, αᵏ, slow, uⁿ, i, j, k)
+    ΔY = @inbounds source.u[i, j, k] - uⁿ
+    accumulate!(i, j, k, F, wγᵏ, ΔY, wβᵏ, slow)
+    accumulate!(i, j, k, Z, αᵏ, ΔY)
+    return nothing
+end
+
+@inline accumulate_later_stages!(::StoredIncrement, F, Z, wγᵏ, wβᵏ, αᵏ, slow, uⁿ, i, j, k) =
+    accumulate!(i, j, k, F, wβᵏ, slow)
 
 # Stage 2 reads the raw S₁ and turns it, with ΔY₁ and S₂, into the accumulators of stages k ≥ 3
-# (whose first forcing is where S₁ was kept: it is read before being overwritten).
-@kernel function _second_multirate_stage!(G, U⁰, Uⁿ, u, split, wᵢ, wβ₁, wγ₁, α₁, F, Z, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, α₁ᵏ)
+# (whose first pair is where S₁ and a stored ΔY₁ were kept: they are read before being overwritten).
+@kernel function _second_multirate_stage!(G, U⁰, Uⁿ, source, split, wᵢ, wβ₁, wγ₁, α₁, F, Z, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, α₁ᵏ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         S₁ = F[1][i, j, k]
         uⁿ = Uⁿ[i, j, k]
-        ΔY₁ = u[i, j, k] - uⁿ
+        ΔY₁ = first_increment(source, Z, uⁿ, i, j, k)
         S₂ = slow_part(split, G, i, j, k)
         G[i, j, k] = full_tendency(split, G, i, j, k) + wᵢ * S₂ + wβ₁ * S₁ + wγ₁ * ΔY₁
         U⁰[i, j, k] = uⁿ + α₁ * ΔY₁
@@ -268,19 +298,31 @@ end
     end
 end
 
-# Stage i ≥ 3 completes its accumulators Fᵢ, Zᵢ with ΔYᵢ₋₁ (in registers: they are not needed
-# again) and adds ΔYᵢ₋₁ and Sᵢ to those of later stages.
-@kernel function _later_multirate_stage!(G, U⁰, Uⁿ, u, split, wᵢ, Fᵢ, Zᵢ, wγᵢ, αᵢ, F, Z, wγᵏ, wβᵏ, αᵏ)
+# Stage i ≥ 3 uses its completed accumulators and adds Sᵢ to those of later stages.
+@kernel function _later_multirate_stage!(G, U⁰, Uⁿ, source, split, wᵢ, Fᵢ, Zᵢ, wγᵢ, αᵢ, F, Z, wγᵏ, wβᵏ, αᵏ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         uⁿ = Uⁿ[i, j, k]
-        ΔY = u[i, j, k] - uⁿ
         slow = slow_part(split, G, i, j, k)
-        forcing = Fᵢ[i, j, k] + wγᵢ * ΔY
-        offset = Zᵢ[i, j, k] + αᵢ * ΔY
+        forcing, offset = completed_accumulators(source, Fᵢ, Zᵢ, wγᵢ, αᵢ, uⁿ, i, j, k)
         G[i, j, k] = full_tendency(split, G, i, j, k) + wᵢ * slow + forcing
         U⁰[i, j, k] = uⁿ + offset
-        accumulate!(i, j, k, F, wγᵏ, ΔY, wβᵏ, slow)
+        accumulate_later_stages!(source, F, Z, wγᵏ, wβᵏ, αᵏ, slow, uⁿ, i, j, k)
+    end
+end
+
+# After stage i, for the fields whose increment is stored: ΔYᵢ = Yᵢ - Uⁿ, kept raw after stage 1
+# and accumulated after later stages.
+@kernel function _store_first_increment!(ΔY₁, u, Uⁿ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ΔY₁[i, j, k] = u[i, j, k] - Uⁿ[i, j, k]
+end
+
+@kernel function _accumulate_increment!(F, Z, u, Uⁿ, wγᵏ, αᵏ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ΔY = u[i, j, k] - Uⁿ[i, j, k]
+        accumulate!(i, j, k, F, wγᵏ, ΔY)
         accumulate!(i, j, k, Z, αᵏ, ΔY)
     end
 end
@@ -333,8 +375,8 @@ Assemble the start state (see `stage_start_state`) and slow forcing `Gⁿ` of MI
 entry `Gⁿ` holds the full tendency at ``Yᵢ₋₁``. The continuity forcing keeps the current (fast)
 mass-flux divergence, and the thermodynamic forcing keeps the current fast flux divergence at
 weight one, so only slow parts are recombined across stages; the slow part ``Sᵢ`` is folded into
-the accumulators of the later stages, with the increment ``ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ`` of the stage before,
-which is formed from the prognostic fields: they must still hold ``Yᵢ₋₁``.
+the accumulators of the later stages, with the increment ``ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ`` of the stage before
+where `store_stage_increment!` has not folded it in already (see `stage_increment_source`).
 
 Before the acoustic loop this assembles every prognostic, or, with
 [`PostLoopScalarTendencies`](@ref), only the ones the loop advances; the scalars are then
@@ -404,7 +446,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
     G = ts.Gⁿ[name]
     U⁰ = ts.U⁰[name]
     Uⁿ = ts.Uⁿ[name]
-    u = prognostic_fields(model)[name]
+    source = stage_increment_source(model, name)
     F = accumulator_fields(ts, name, ks, :forcing)
     parameters = stage_assembly_parameters(model, G)
 
@@ -413,7 +455,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
                 ts.accumulators[1].forcing[name])
     elseif i == 2
         Z = accumulator_fields(ts, name, ks, :offset)
-        launch!(arch, grid, parameters, _second_multirate_stage!, G, U⁰, Uⁿ, u, split, wᵢ,
+        launch!(arch, grid, parameters, _second_multirate_stage!, G, U⁰, Uⁿ, source, split, wᵢ,
                 β[2, 1] / d[2], γ[2, 1] / (d[2] * Δt), α[2, 1], F, Z,
                 forcing_weights(β, d, 1, ks), increment_weights(γ, d, Δt, 1, ks),
                 forcing_weights(β, d, 2, ks), offset_weights(α, 1, ks))
@@ -421,10 +463,68 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
         Fᵢ = ts.accumulators[i - 2].forcing[name]
         Zᵢ = ts.accumulators[i - 2].offset[name]
         Z = accumulator_fields(ts, name, ks, :offset)
-        launch!(arch, grid, parameters, _later_multirate_stage!, G, U⁰, Uⁿ, u, split, wᵢ,
+        launch!(arch, grid, parameters, _later_multirate_stage!, G, U⁰, Uⁿ, source, split, wᵢ,
                 Fᵢ, Zᵢ, γ[i, i - 1] / (d[i] * Δt), α[i, i - 1], F, Z,
                 increment_weights(γ, d, Δt, i - 1, ks), forcing_weights(β, d, i, ks),
                 offset_weights(α, i - 1, ks))
+    end
+
+    return nothing
+end
+
+# Form the increments of the acoustic prognostics in the next stage's assembly, which reads `Uⁿ`
+# anyway, instead of storing them when a stage completes. Off, every field's increment is stored.
+const fold_stage_increments = Ref(true)
+
+"""
+$(TYPEDSIGNATURES)
+
+Where the assembly of a stage finds the increment ``ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ`` of prognostic `name`.
+
+``Yᵢ₋₁`` is the state a stage ends with. For the prognostics the acoustic loop advances (the dry
+density, momentum and the thermodynamic variable), that is still what the prognostic field holds
+when the next stage is assembled, so the assembly forms the increment itself (`IncrementFromState`)
+and no kernel stores it.
+
+Not so for moisture, the microphysical prognostics and tracers: `update_state!` runs in between,
+and its negative-moisture correction (`fix_negative_moisture!`) moves mass between species and
+resets number concentrations, while tracers make a round trip through specific values. An
+increment formed afterwards would carry that correction, which is a jump, not part of the stage's
+tendency, into the forcing ``γᵢⱼ ΔYⱼ / Δt`` and the start state ``Uⁿ + αᵢⱼ ΔYⱼ`` of later stages.
+Their increments are stored when the stage completes (`store_stage_increment!`), before
+`update_state!`.
+"""
+function stage_increment_source(model, name)
+    folded = fold_stage_increments[] && name ∈ acoustic_prognostic_names(model)
+    return folded ? IncrementFromState(prognostic_fields(model)[name]) : StoredIncrement()
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Fold the increment ``ΔYᵢ = Yᵢ - Uⁿ`` of the stage just completed into the accumulators of the
+stages after it (after stage 1, keep it raw for stage 2), for the prognostics whose increment the
+next assembly cannot form itself (see `stage_increment_source`).
+"""
+function store_stage_increment!(ts::MultirateInfinitesimalStep, model, i, Δt)
+    (; α, γ, d) = ts.tableau
+    s = length(d)
+    grid = model.grid
+    arch = architecture(grid)
+    ks = later_stages(max(i, 2), s)
+
+    for (name, u) in pairs(prognostic_fields(model))
+        stage_increment_source(model, name) isa StoredIncrement || continue
+        Uⁿ = ts.Uⁿ[name]
+        parameters = stage_assembly_parameters(model, u)
+        if i == 1
+            launch!(arch, grid, parameters, _store_first_increment!,
+                    ts.accumulators[1].offset[name], u, Uⁿ)
+        else
+            launch!(arch, grid, parameters, _accumulate_increment!,
+                    accumulator_fields(ts, name, ks, :forcing), accumulator_fields(ts, name, ks, :offset),
+                    u, Uⁿ, increment_weights(γ, d, Δt, i, ks), offset_weights(α, i, ks))
+        end
     end
 
     return nothing
@@ -469,6 +569,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
         acoustic_rk3_substep!(model, Δt, d[i]; callbacks)
 
         if i < s
+            store_stage_increment!(ts, model, i, Δt)
             ts.next_stage[] = i + 1
             Δc = i == 1 ? c[1] : c[i] - c[i-1]
             tick_stage!(model.clock, Δc * Δt)
