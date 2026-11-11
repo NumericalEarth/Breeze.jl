@@ -10,7 +10,9 @@ module PotentialTemperatureFormulations
 
 export LiquidIcePotentialTemperatureFormulation
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+
+using DocStringExtensions: TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -20,7 +22,7 @@ using Oceananigans.Operators: ℑzᵃᵃᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
-    set_thermodynamic_variable!, dynamics_density, total_density, dynamics_pressure, standard_pressure,
+    set_thermodynamic_variable!, continuity_density, total_density, dynamics_pressure, standard_pressure,
     pressure_from_density_temperature,
     dynamics_prognostic_fields, grid_moisture_fractions, maybe_adjust_thermodynamic_state,
     div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy,

@@ -194,7 +194,7 @@ end
 const EnergyFluxBCType = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create a boundary condition that wraps an energy flux and converts it to a potential
 temperature flux for use with `LiquidIcePotentialTemperatureFormulation`.
@@ -324,7 +324,7 @@ end
 const ThetaFluxBCType = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create a boundary condition that wraps a potential temperature flux and converts it to
 an energy flux for use with diagnostic energy density fields.
@@ -410,7 +410,7 @@ const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundary
 function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
                                                    side, loc, grid, dynamics, microphysics, constants, closure)
     ef = bc.condition
-    density = dynamics_density(dynamics)
+    density = continuity_density(dynamics)
     pˢᵗ = convert(eltype(grid), standard_pressure(dynamics))
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density, pˢᵗ,
                                                  ef.exner_exponent)
@@ -422,7 +422,7 @@ const UnregularizedStaticEnergyFluxBC =
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedStaticEnergyFluxBC,
                                                    side, loc, grid, dynamics, microphysics, constants, closure)
-    density = dynamics_density(dynamics)
+    density = continuity_density(dynamics)
     new_sf = StaticEnergyFluxBoundaryConditionFunction(bc.condition.condition, side, density)
     return BoundaryCondition(Flux(), new_sf)
 end
@@ -433,7 +433,7 @@ const UnregularizedThetaFluxBC = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryCo
 function materialize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
                                                    side, loc, grid, dynamics, microphysics, constants, closure)
     tf = bc.condition
-    density = dynamics_density(dynamics)
+    density = continuity_density(dynamics)
     pˢᵗ = convert(eltype(grid), standard_pressure(dynamics))
     new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density, pˢᵗ,
                                                 tf.exner_exponent)

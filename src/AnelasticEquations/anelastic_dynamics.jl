@@ -10,7 +10,7 @@ struct AnelasticDynamics{R, P, FT, B}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `AnelasticDynamics` representing incompressible fluid dynamics expanded about `reference_state`.
 
@@ -39,7 +39,7 @@ Adapt.adapt_structure(to, dynamics::AnelasticDynamics) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a "stub" `AnelasticDynamics` with just the `reference_state`.
 The pressure anomaly field is materialized later in the model constructor.
@@ -50,7 +50,7 @@ function AtmosphereModels.default_dynamics(grid, constants)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Materialize a stub `AnelasticDynamics` into a full dynamics object with the pressure anomaly field.
 """
@@ -65,7 +65,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the dynamics pressure field for `AnelasticDynamics`, in Pa.
 
@@ -75,7 +75,7 @@ pressure ``pᵣ(z)``.
 AtmosphereModels.dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the non-hydrostatic pressure anomaly for `AnelasticDynamics`, in Pa.
 
@@ -91,7 +91,7 @@ function AtmosphereModels.pressure_anomaly(dynamics::AnelasticDynamics)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the total pressure for `AnelasticDynamics`, in Pa.
 That is ``p = p̄ + p'``, where ``p̄`` is the hydrostatic reference pressure
@@ -104,7 +104,7 @@ function AtmosphereModels.total_pressure(dynamics::AnelasticDynamics)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Default surface temperature for `BulkDrag` under `AnelasticDynamics`: the
 reference-state temperature at the bottom face of the domain.
@@ -120,22 +120,20 @@ AtmosphereModels.default_drag_surface_temperature(dynamics::AnelasticDynamics, g
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the reference density field for `AnelasticDynamics`.
 
-For anelastic models, the dynamics density is the time-independent
+For anelastic models, the continuity density is the time-independent
 reference state density ``ρᵣ(z)``.
 """
-AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
+AtmosphereModels.continuity_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
-# The anelastic reference density ρᵣ(z) is a dry reference state evaluated at the reference
-# temperature, so it is not the local moist density that mass fractions are referenced to.
-# Rediagnose that at the reference pressure: ρ = pᵣ(z) / (Rᵐ(q) T).
-@inline function AtmosphereModels.gas_phase_density(i, j, k, dynamics::AnelasticDynamics, T, q, constants)
-    @inbounds p = dynamics.reference_state.pressure[i, j, k]
-    return density(T, p, q, constants)
-end
+# The total density ρᵣ(z) is the reference state's, not the local state's, so evaluate the
+# equation of state at the reference pressure with the local temperature and moisture:
+# ρ = pᵣ(z) / (Rᵐ(q) T). This is also the density in the anelastic buoyancy.
+@inline AtmosphereModels.thermodynamic_state_density(i, j, k, dynamics::AnelasticDynamics, T, q, constants) =
+    fixed_pressure_state_density(i, j, k, dynamics, T, q, constants)
 
 #####
 ##### Prognostic fields
@@ -146,21 +144,21 @@ AtmosphereModels.prognostic_dynamics_field_names(::AnelasticDynamics) = ()
 AtmosphereModels.additional_dynamics_field_names(::AnelasticDynamics) = ()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the surface pressure from the reference state for boundary condition regularization.
 """
 AtmosphereModels.base_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.base_pressure
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the reference pressure at the bottom face of the domain, as a 2D field.
 """
 AtmosphereModels.surface_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.surface_pressure
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the standard pressure from the reference state for potential temperature calculations.
 """

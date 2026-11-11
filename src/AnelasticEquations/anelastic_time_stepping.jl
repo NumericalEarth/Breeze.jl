@@ -7,7 +7,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Initialize thermodynamic state for anelastic models.
 Sets the initial potential temperature to the reference state value.
@@ -19,7 +19,7 @@ function AtmosphereModels.initialize_model_thermodynamics!(model::AnelasticModel
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the pressure correction for anelastic dynamics by solving the pressure Poisson equation.
 """
@@ -57,7 +57,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic pressure via
 

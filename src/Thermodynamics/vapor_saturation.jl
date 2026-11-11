@@ -39,7 +39,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the saturation specific humidity for a gas at temperature `T`, total
 density `ρ`, `constants`dynamics, and over `surface` via:
@@ -97,7 +97,7 @@ qᵛ⁺ᵐ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the supersaturation ``𝒮 = pᵛ/pᵛ⁺ - 1`` over a given `surface`.
 
@@ -123,7 +123,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the psychrometric correction ``ξ``, the factor by which latent heating reduces
 the supersaturation available to drive a phase change,
@@ -137,9 +137,12 @@ against it, and `cᵖ` the heat capacity the caller's energy budget is written w
 effective relaxation timescale is `ξ τ`, and an effective supersaturation excess is
 `(qᵛ - qᵛ⁺) / ξ`.
 
-`Microphysics.thermodynamic_adjustment_factor` is the same correction written with the
-mixture heat capacity and with the ideal-gas ``-1/T`` term of ``dqᵛ⁺/dT`` retained; the
-form here drops that term, matching the convention of the P3 scheme.
+`Microphysics.thermodynamic_adjustment_factor` follows the constraint the thermodynamic
+state is closed on. At fixed pressure it is this form with ``cᵖ = cᵖᵐ``, less the
+``qᵛ⁺ Rᵛ / Rᵐ`` by which the vapor lost to condensate lowers ``qᵛ⁺``. At fixed
+density it differentiates the state's θ–density relation for the heating response and
+keeps the ideal-gas ``-1/T`` term of ``dqᵛ⁺/dT``. The form here matches the convention of
+the P3 scheme.
 """
 @inline psychrometric_correction(ℒ, qᵛ⁺, cᵖ, Rᵛ, T) = 1 + ℒ^2 * qᵛ⁺ / (cᵖ * Rᵛ * T^2)
 
@@ -150,7 +153,7 @@ form here drops that term, matching the convention of the P3 scheme.
 abstract type AbstractPhaseEquilibrium end
 
 """
-    WarmPhaseEquilibrium()
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Represents a warm-phase equilibrium where only liquid water condensate is considered.
 The equilibrated surface is always a planar liquid surface.
@@ -210,7 +213,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the *equilibrium saturation specific humidity* ``qᵛ⁺`` for air at temperature `T`, reference pressure `p`,
 and total specific moisture `qᵗ`, over a given `surface`. The function returns the correct saturation specific humidity
@@ -255,7 +258,7 @@ the documentation for a derivation.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the *saturation specific humidity* ``qᵛ⁺`` for use in saturation adjustment,
 assuming **saturated conditions** where condensate is present.
@@ -281,7 +284,7 @@ saturation adjustment iteration where we assume saturated conditions throughout.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the equilibrium saturation specific humidity using a phase `equilibrium`
 model to determine the condensation surface based on temperature `T`.
@@ -292,7 +295,7 @@ model to determine the condensation surface based on temperature `T`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the adjustment saturation specific humidity using a phase `equilibrium`
 model to determine the condensation surface based on temperature `T`.
@@ -307,7 +310,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the dewpoint temperature ``T⁺`` given the vapor pressure `pᵛ`,
 actual temperature `T`, thermodynamic `constants`, and condensation `surface`.
@@ -359,7 +362,7 @@ end
     dewpoint_temperature(pᵛ, T, constants, surface, default_dewpoint_solver(T))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the dewpoint temperature using a phase `equilibrium` model to determine
 the condensation surface based on temperature `T`.

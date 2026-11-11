@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze: SpecificForcing
-using Breeze.AtmosphereModels: dynamics_density, is_density_tendency_forcing, total_density
+using Breeze.AtmosphereModels: continuity_density, is_density_tendency_forcing, total_density
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Forcings: MultipleForcings, Relaxation
 using Oceananigans.Fields: interior
@@ -235,12 +235,12 @@ end
     update_state!(model)
 
     Gρθ = interior(model.timestepper.Gⁿ.ρθ) |> Array
-    ρ = interior(Breeze.AtmosphereModels.dynamics_density(model.dynamics)) |> Array
+    ρ = interior(Breeze.AtmosphereModels.continuity_density(model.dynamics)) |> Array
     expected = ρ .* F_θ
     @test maximum(abs.(Gρθ .- expected)) < eps(FT) * 100
 end
 
-@testset "Specific forcing selects the compressible density carrier [$(FT)]" for FT in test_float_types()
+@testset "Specific forcing selects the compressible weighting density [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch;
                            size = (8, 8, 8), halo = (5, 5, 5),
@@ -263,7 +263,7 @@ end
                                          qᵛ=Returns(F),
                                          c=Returns(F)))
 
-    ρᵈ = dynamics_density(model.dynamics)
+    ρᵈ = continuity_density(model.dynamics)
     ρ = total_density(model.dynamics)
     @test ρ !== ρᵈ
 
@@ -276,7 +276,7 @@ end
     @test model.forcing.ρqᵛ.density === ρ
     @test model.forcing.c.density === ρ
 
-    # Make the two carriers observably different and verify the total-density
+    # Make the two densities observably different and verify the total-density
     # multiplier reaches the scalar tendency kernels.
     set!(model, ρ=FT(1.25), qᵛ=FT(0.2), θ=FT(300))
     update_state!(model)

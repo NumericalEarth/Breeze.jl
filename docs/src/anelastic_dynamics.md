@@ -150,6 +150,10 @@ The solver fixes ``\phi`` to within a constant by zeroing the mean of the soluti
 
 In Breeze this projection is implemented as a Fourier-tridiagonal solve in the vertical with variable ``ρᵣ(z)``, aligning with the hydrostatic reference state. The hydrostatic pressure anomaly ``p_h'`` can be obtained diagnostically by vertical integration of buoyancy and used when desired to separate hydrostatic and nonhydrostatic pressure effects.
 
+The stage updates accept a round-off treatment, for example
+`timestepper_kwargs = (; rounding = StochasticRounding())`; see
+[Round-off in reduced precision](@ref round-off-section).
+
 ## Symbols
 
 - ``ρᵣ(z)``, ``pᵣ(z)``: Reference density and pressure satisfying hydrostatic balance for a constant ``θ₀``.

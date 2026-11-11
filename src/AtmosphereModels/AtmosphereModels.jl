@@ -9,7 +9,7 @@ export
     AdiabaticBalancer,
     HydrostaticallyBalancedDensity,
     # Dynamics interface (dynamics types exported by their respective modules)
-    dynamics_density,
+    continuity_density,
     dynamics_pressure,
     total_density,
     sedimentation_composition_increment,
@@ -136,7 +136,9 @@ export
     # Radiation schedules that the architecture can evaluate
     validate_schedule
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+
+using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 

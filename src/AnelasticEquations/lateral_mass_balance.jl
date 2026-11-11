@@ -3,7 +3,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `dynamics` holding the boundary transports that
 [`enforce_lateral_mass_balance!`](@ref Breeze.AtmosphereModels.enforce_lateral_mass_balance!)
@@ -17,7 +17,7 @@ AtmosphereModels.materialize_boundary_transport(dynamics::AnelasticDynamics, mom
                       initialize_boundary_transport(momentum))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Remove the net mass flux through the boundaries of an anelastic domain,
 
