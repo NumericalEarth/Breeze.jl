@@ -24,7 +24,7 @@ using Breeze.AtmosphereModels:
     tracer_density_to_specific!,
     tracer_specific_to_density!
 
-using Breeze.CompressibleEquations: CompressibleDynamics, implicit_step_in_place!
+using Breeze.CompressibleEquations: CompressibleDynamics, implicit_steps_in_place!, implicit_step_scratch
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 const TerrainCompressibleAcousticModel =
@@ -117,6 +117,8 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     # average, while `Gⁿ` was scaled by the previous one.
     ρ = total_density(model.dynamics)
     velocities = tendency_transport_velocities(model)
+    implicit_solver = model.timestepper.implicit_solver
+    implicit_requests = []
 
     for (field_number, (name, u, u⁰, G)) in enumerate(zip(names, prognostic, U⁰, Gⁿ))
         name ∈ acoustic_names && continue
@@ -129,26 +131,25 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
 
         # Guarded on the solver rather than on `needs_implicit_solver(advection)`; see the note in
         # ssp_runge_kutta_3.jl for why that predicate would drop the mass-flux weighting.
-        if !isnothing(model.timestepper.implicit_solver)
+        if !isnothing(implicit_solver)
             # The explicit tendency advected this species with the full transport velocity —
             # dynamical plus microphysical (terminal) — so the implicit half must split the
             # same combined velocity, or precipitating species lose the withheld fraction of
             # their sedimentation flux wherever the split engages (issue #914);
             # `implicit_advection_velocities` forms that sum and lets the implicit remainder
             # carry sedimenting condensate out through the bottom.
-            implicit_step_in_place!(u,
-                                    model.timestepper.implicit_solver,
-                                    model.closure,
-                                    model.closure_fields,
-                                    field_index,
-                                    model.clock,
-                                    fields(model),
-                                    kernel_Δt,
-                                    implicit_step_scheme(advection),
-                                    implicit_advection_velocities(model.dynamics, velocities, name,
-                                                                  model.microphysics, model.microphysical_fields),
-                                    ρ)
+            w = implicit_advection_velocities(model.dynamics, velocities, name,
+                                              model.microphysics, model.microphysical_fields)
+            push!(implicit_requests, (u, field_index, implicit_step_scheme(advection), w))
         end
+    end
+
+    # The scalars' implicit solves, several fields per column thread, once every scalar has taken
+    # its explicit update: no scalar's implicit coefficients depend on another scalar.
+    if !isnothing(implicit_solver)
+        scratch = implicit_step_scratch(model.timestepper.substepper, implicit_solver)
+        implicit_steps_in_place!(implicit_requests, implicit_solver, scratch, model.closure, model.closure_fields,
+                                 model.clock, fields(model), kernel_Δt, ρ)
     end
 
     # The tracers' solves have just moved sedimenting condensate implicitly; move its latent
@@ -449,34 +450,22 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
     Δt = kernel_time_step(architecture(grid), grid, Δt_stage)
 
     prognostic = prognostic_fields(model)
-    momentum_advection = model.advection.momentum
-    for name in (:ρu, :ρv, :ρw)
-        implicit_step_in_place!(prognostic[name],
-                                implicit_solver,
-                                model.closure,
-                                model.closure_fields,
-                                nothing,
-                                model.clock,
-                                fields(model),
-                                Δt,
-                                implicit_step_scheme(momentum_advection, diffusion_density),
-                                (; w),
-                                ρᵈ)
-    end
+    momentum_scheme = implicit_step_scheme(model.advection.momentum, diffusion_density)
 
     θ_name = thermodynamic_density_name(model.formulation)
     θ_advection = field_advection_scheme(model.advection, θ_name)
-    implicit_step_in_place!(prognostic[θ_name],
-                            implicit_solver,
-                            model.closure,
-                            model.closure_fields,
-                            closure_scalar_index(model, θ_name),
-                            model.clock,
-                            fields(model),
-                            Δt,
-                            postloop_thermodynamic_scheme(θ_advection, diffusion_density),
-                            merge(slow_thermodynamic_velocities(model), (; w)),
-                            ρᵈ)
+    θ_scheme = postloop_thermodynamic_scheme(θ_advection, diffusion_density)
+    θ_velocities = merge(slow_thermodynamic_velocities(model), (; w))
+
+    # One request per field: (field, closure tracer index, scheme, velocities).
+    requests = [(prognostic.ρu, nothing, momentum_scheme, (; w)),
+                (prognostic.ρv, nothing, momentum_scheme, (; w)),
+                (prognostic.ρw, nothing, momentum_scheme, (; w)),
+                (prognostic[θ_name], closure_scalar_index(model, θ_name), θ_scheme, θ_velocities)]
+
+    scratch = implicit_step_scratch(model.timestepper.substepper, implicit_solver)
+    implicit_steps_in_place!(requests, implicit_solver, scratch, model.closure, model.closure_fields,
+                             model.clock, fields(model), Δt, ρᵈ)
 
     return nothing
 end

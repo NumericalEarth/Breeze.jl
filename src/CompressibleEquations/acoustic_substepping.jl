@@ -193,6 +193,17 @@ const fuse_divergence_damping = Ref(true)
 # launching halo fills for (ρu)′, (ρv)′, (ρθ)′ and (ρθ)′ˢ⁻ in every substep.
 const mirror_periodic_halos = Ref(true)
 
+# The per-stage implicit steps (scalars; momentum and the thermodynamic variable) solve up to this
+# many fields per column thread (`solve_tridiagonal_columns_in_place!`). 1 solves each field with
+# a kernel of its own. The limit is the number of scratch arrays (`implicit_step_scratch`, 4) and
+# the size of a GPU kernel's arguments, which each field of a batch adds to (CUDA allows 4 KiB,
+# and the model's fields, passed once, take much of that): lower it if a kernel fails to compile
+# with a formal-parameter-space overflow.
+const column_solve_batch_size = Ref(3)
+
+# Evaluate each level's coefficients one level ahead in the implicit steps' column sweeps.
+const prefetch_column_coefficients = Ref(true)
+
 """
 $(TYPEDEF)
 
@@ -1877,29 +1888,81 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Advance `field` over `Δt` by its vertically implicit terms — closure diffusion, the implicit remainder
-of adaptive implicit vertical advection, implicit boundary fluxes — as
-`Oceananigans.TimeSteppers.implicit_step!` does and with the same arguments, bitwise, but with the
-column sweep of [`solve_tridiagonal_in_place!`](@ref), which keeps the Thomas recurrence in registers.
-Like `implicit_step!`, a no-op when nothing about `field` is vertically implicit.
+Advance each of `requests` over `Δt` by its vertically implicit terms — closure diffusion, the implicit
+remainder of adaptive implicit vertical advection, implicit boundary fluxes — as
+`Oceananigans.TimeSteppers.implicit_step!` does for one field, with the same coefficients and
+arithmetic. A request is a tuple `(field, tracer_index, advection, velocities)`; `closure`,
+`closure_fields`, `clock`, `model_fields`, `Δt` and `density` are common to all. Like `implicit_step!`,
+a field about which nothing is vertically implicit is left alone.
+
+The column sweeps keep the Thomas recurrence in registers and solve up to `column_solve_batch_size[]`
+fields per thread (see `solve_tridiagonal_columns_in_place!`), with `scratch` holding one array per
+field of a batch. The coefficients of every field are evaluated from the state on entry, except for
+its own boundary rows: no field's coefficients may depend on another field of `requests`.
 
 `Δt` enters every coefficient of every level, so pass it in the float type of the grid
 (`kernel_time_step`): a `Float64` step on a `Float32` grid makes the whole sweep double precision.
 """
-function implicit_step_in_place!(field, implicit_solver::BatchedTridiagonalSolver, closure, closure_fields,
-                                 tracer_index, clock, model_fields, Δt,
-                                 advection = nothing, velocities = nothing, density = nothing)
-    w = isnothing(velocities) ? nothing : velocities.w
-    args = implicit_step_solver_arguments(field, closure, closure_fields, tracer_index, clock, model_fields, Δt,
-                                          advection, w, density)
-    implicit_closure = first(args)
-    bcs = field.boundary_conditions
-    isnothing(implicit_closure) && !needs_implicit_solver(advection) && !needs_implicit_solver(bcs) && return nothing
-    solve_tridiagonal_in_place!(field, implicit_solver, args)
+function implicit_steps_in_place!(requests, implicit_solver::BatchedTridiagonalSolver, scratch,
+                                  closure, closure_fields, clock, model_fields, Δt, density)
+    implicit_closure, implicit_closure_fields = implicit_step_closures(closure, closure_fields)
+    shared = (; closure = implicit_closure, closure_fields = implicit_closure_fields,
+                Δt, clock, model_fields, density)
+
+    needed = filter(request -> needs_implicit_step(implicit_closure, request...), requests)
+    isempty(needed) && return nothing
+
+    batch_size = clamp(column_solve_batch_size[], 1, length(scratch))
+    prefetch = prefetch_column_coefficients[]
+    one_by_one = (batch_size == 1 && !prefetch) || size(implicit_solver.grid, 3) < 2
+
+    for batch in Iterators.partition(needed, one_by_one ? 1 : batch_size)
+        fields = Tuple(first(request) for request in batch)
+        columns = Tuple(implicit_step_column(request...) for request in batch)
+        if one_by_one
+            args = implicit_step_arguments(shared, first(columns), first(fields))
+            solve_tridiagonal_in_place!(first(fields), implicit_solver, args)
+        else
+            solve_tridiagonal_columns_in_place!(fields, implicit_solver, scratch, implicit_step_arguments,
+                                                shared, columns; prefetch)
+        end
+    end
+
     return nothing
 end
 
-implicit_step_in_place!(field, ::Nothing, args...) = nothing
+implicit_steps_in_place!(requests, ::Nothing, args...) = nothing
+
+needs_implicit_step(implicit_closure, field, tracer_index, advection, velocities) =
+    !isnothing(implicit_closure) || needs_implicit_solver(advection) || needs_implicit_solver(field.boundary_conditions)
+
+# What the coefficients of one field's implicit step take beyond the arguments common to a batch.
+function implicit_step_column(field, tracer_index, advection, velocities)
+    LX, LY, LZ = location(field)
+    bcs = field.boundary_conditions
+    w = isnothing(velocities) ? nothing : velocities.w
+    return (; tracer_index, ℓx = LX(), ℓy = LY(), ℓz = LZ(), advection, w,
+              top = bcs.top, bottom = bcs.bottom, immersed = bcs.immersed)
+end
+
+# The coefficient arguments `implicit_step!` passes to `solve!` (see `implicit_step_solver_arguments`),
+# from the arguments common to a batch and those of one field.
+@inline implicit_step_arguments(shared, column, ϕ) =
+    (shared.closure, shared.closure_fields, column.tracer_index, column.ℓx, column.ℓy, column.ℓz,
+     shared.Δt, shared.clock, shared.model_fields, column.advection, column.w, shared.density,
+     column.top, column.bottom, column.immersed, ϕ)
+
+"""
+$(TYPEDSIGNATURES)
+
+Scratch arrays for the column sweeps of the implicit steps that follow a stage's acoustic loop: the
+implicit solver's own, and the stored factors of the loop's ``(ρw)′`` system, which are free once the
+loop has run and are rebuilt before the next one (`factor_vertical_solver!`).
+"""
+function implicit_step_scratch(substepper, implicit_solver)
+    factors = substepper.vertical_solver_factors
+    return (implicit_solver.t, factors.β, factors.t, factors.a)
+end
 
 """
 $(TYPEDSIGNATURES)
