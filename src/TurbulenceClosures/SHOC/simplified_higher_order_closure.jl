@@ -308,6 +308,12 @@ uniform_surface_value(closure::SimplifiedHigherOrderClosure, name) = getproperty
 # the fields of `closure_fields.surface_specification` for column-by-column values.
 uniform_surface_value(closures::SHOCClosureArray, name) = getproperty(@allowscalar(first(closures)), name)
 
+closure_component_fields(grid, closure::SimplifiedHigherOrderClosure) =
+    merge(map(component -> component_fields(grid, component), closure_components(closure))...)
+
+# The members of an ensemble array of closures have the same components
+closure_component_fields(grid, closures::SHOCClosureArray) = closure_component_fields(grid, @allowscalar(first(closures)))
+
 function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, tracer_names, bcs, closure::FlavorOfSHOC)
     state = (thetal = CenterField(grid),
              qw = CenterField(grid),
@@ -342,7 +348,9 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     interface_diagnostics = NamedTuple{INTERFACE_DIAGNOSTICS}(map(name -> ZFaceField(grid), INTERFACE_DIAGNOSTICS))
     diagnostics = merge(level_diagnostics, interface_diagnostics, (; pblh = surface_field(grid)))
 
-    scratch = (du = CenterField(grid), dl = CenterField(grid), d = CenterField(grid))
+    # The tridiagonal factorization, and the fields of the components that need their own
+    scratch = merge((du = CenterField(grid), dl = CenterField(grid), d = CenterField(grid)),
+                    closure_component_fields(grid, closure))
     increments = (u = CenterField(grid), v = CenterField(grid))
 
     return SHOCFields(state, host, surface, surface_specification, diagnostics, scratch, increments)

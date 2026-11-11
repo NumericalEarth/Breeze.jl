@@ -251,7 +251,7 @@ export
     RationalStabilityFunction,
     DryStaticStability, MoistStaticStability,
     SimplifiedHigherOrderClosure, SHOC, OriginalSHOC,
-    SHOCMixingLength, ColumnStabilityDamping, ForwardEulerTKE, PDFBuoyancyFlux, DowngradientSecondMoments,
+    SHOCMixingLength, ColumnStabilityDamping, ForwardEulerTKE, ImplicitSinkTKE, PDFBuoyancyFlux, DowngradientSecondMoments,
     CanutoThirdMoment, ResetBound, ClampBound, TanhBound, DoubleGaussianPDF, HardClipping, SmoothClipping, HoltslagBovilleDepth, SHOCConstants,
     closure_parameters, with_parameters,
     LagrangianParticles, ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,

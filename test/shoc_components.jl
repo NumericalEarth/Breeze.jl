@@ -3,7 +3,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Oceananigans
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_min, clip_below, clip_between, clip_negative,
-                                      stable_damping, hard_floor, third_moment_bound, bound_third_moment
+                                      stable_damping, hard_floor, third_moment_bound, bound_third_moment,
+                                      vd_shoc_decomp!, vd_shoc_solve!, tke_step
 using Test
 
 # Bitwise equality, with NaN equal to NaN and the two zeros distinct
@@ -178,6 +179,68 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test all_finite(run)
             @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
             @test isapprox(run.θ, original.θ; rtol = 1e-4)
+        end
+    end
+
+    @testset "ImplicitSinkTKE" begin
+        # Without a sink the factorization is that of the diffusion alone; with one, the solve
+        # damps a uniform profile by 1 / (1 + Δt ω) where the diffusivity vanishes
+        Nz = 8
+        Δt = FT(100)
+        constants = SHOCConstants(FT)
+        level() = zeros(FT, 1, 1, Nz)
+        zi = reshape(FT.(0:100:100Nz), 1, 1, Nz + 1)
+        zt = (zi[:, :, 1:Nz] .+ zi[:, :, 2:Nz+1]) ./ 2
+        pdel = fill(FT(1000), 1, 1, Nz)
+        kv = reshape(FT.(range(5, 50, length = Nz)), 1, 1, Nz)
+        factorize(sink...) = (f = (level(), level(), level());
+                              vd_shoc_decomp!(1, 1, Nz, Δt, constants, zt, zi, pdel, kv, zero(FT), f..., sink...); f)
+        @test factorize() == factorize(nothing) == factorize(level())
+
+        ω = FT(1e-3)
+        f = (level(), level(), level())
+        vd_shoc_decomp!(1, 1, Nz, Δt, constants, zt, zi, pdel, level(), zero(FT), f..., fill(ω, 1, 1, Nz))
+        e = ones(FT, 1, 1, Nz)
+        vd_shoc_solve!(1, 1, Nz, f..., e)
+        @test all(e .≈ 1 / (1 + Δt * ω))
+
+        closure = SHOC(OriginalSHOC(), FT; tke_update = ImplicitSinkTKE(), surface_forcing...)
+        @test isbits(closure)
+        @test closure_parameters(closure).ℂᴾ == FT(0.1)
+        @test haskey(shoc_column_model(closure).closure_fields.scratch, :tke_sink_rate)
+        @test !haskey(shoc_column_model(SHOC(OriginalSHOC(), FT)).closure_fields.scratch, :tke_sink_rate)
+
+        # The update is positive without a floor for any time step, production and stratification,
+        # where forward Euler leaves a negative value for the floor to catch
+        hard = HardClipping()
+        implicit_update = ImplicitSinkTKE(FT)
+        euler = ForwardEulerTKE(FT)
+        unfloored = SHOCConstants(FT; mintke = 0, maxtke = floatmax(FT))
+        ℓ, Sᴰ = FT(50), FT(2)
+        for Δt in FT[60, 300, 900, 3600], e in FT[1e-6, 4e-4, 0.1, 5], P in FT[0, 1e-4, 1e-2], B in FT[-1e-2, -1e-4, 0, 1e-3]
+            estimate, ε, ω, stored = tke_step(implicit_update, hard, constants, Δt, e, P, B, ℓ, Sᴰ)
+            @test estimate > 0 && stored > 0 && ω ≥ 0 && ε ≥ 0
+            @test estimate ≤ stored
+            # The same sources and sinks as forward Euler, to first order in the time step
+            small = FT(1e-5)
+            estimate, _, _, _ = tke_step(implicit_update, hard, unfloored, small, e, P, B, ℓ, Sᴰ)
+            explicit, _, _, _ = tke_step(euler, hard, unfloored, small, e, P, B, ℓ, Sᴰ)
+            P + B ≥ 0 && e ≥ constants.mintke && @test isapprox(estimate, explicit; rtol = FT == Float64 ? 1e-4 : 1e-3)
+        end
+        @test first(tke_step(euler, hard, unfloored, FT(900), FT(0.1), zero(FT), zero(FT), ℓ, Sᴰ)) == 0
+
+        implicit = run_shoc_column(closure)
+        @test all_finite(implicit)
+        @test maximum(implicit.e) > FT(0.01)
+        @test all(implicit.e .> 0)
+        # The turbulence the column starts with decays over several steps in the stable air aloft
+        # rather than in one, which mixes it a little more
+        @test isapprox(implicit.θ, original.θ; rtol = 2e-3)
+
+        for Δt in (300, 900)
+            run = run_shoc_column(closure; steps = 10, Δt)
+            @test all_finite(run)
+            @test all(run.e .> 0)
         end
     end
 end

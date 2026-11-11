@@ -161,8 +161,8 @@ end
         a_prod_bu = buoyancy_production(buoyancy_source, c, wthv_sec[i, j, k], tkh[i, j, k], brunt_k)
         a_prod_sh = tk[i, j, k] * sterm_zt
         dissipation = dissipation_coefficient(time_scale, time_scale_of_column, brunt_k, sterm_zt, tke_update)
-        tke_k, a_diss, sink_rate = tke_step(tke_update, cp, c, dtime, tke_k, a_prod_sh, a_prod_bu, mix, dissipation)
-        tke[i, j, k] = tke_k
+        tke_k, a_diss, sink_rate, tke_stored = tke_step(tke_update, cp, c, dtime, tke_k, a_prod_sh, a_prod_bu, mix, dissipation)
+        tke[i, j, k] = tke_stored
         store_tke_sink_rate!(scratch, i, j, k, sink_rate)
 
         # isotropic_ts, eddy_diffusivities

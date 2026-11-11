@@ -24,7 +24,14 @@
     return du_k, dl_l
 end
 
-@inline function vd_shoc_decomp!(i, j, Nz, dtime, p, zt, zi, pdel, kv, flux, du, dl, d)
+# The diagonal of level k with the implicit sink of rate `sink[i, j, k]` added; without a sink the
+# diagonal is returned as it is (not as `diagonal + 0`).
+@inline diagonal_with_sink(diagonal, ::Nothing, i, j, k, dtime) = diagonal
+@inline diagonal_with_sink(diagonal, sink, i, j, k, dtime) = @inbounds diagonal + dtime * sink[i, j, k]
+
+# With `sink`, a level array of non-negative rates ω, the matrix is that of
+# (1 + Δt ω - Δt ∂z K ∂z): the diffusion with a linear sink treated implicitly.
+@inline function vd_shoc_decomp!(i, j, Nz, dtime, p, zt, zi, pdel, kv, flux, du, dl, d, sink=nothing)
     FT = typeof(flux)
 
     @inbounds begin
@@ -40,7 +47,7 @@ end
         rdp_l = rdp_zt(i, j, Nz-1, p, zi, pdel)
 
         du_u, dl_k = interface_coupling(dtime, p, zt_u, zt_l, kv_u, kv_l, rho_u, rho_l, rdp_u, rdp_l, zi[i, j, Nz])
-        d_u = 1 - du_u
+        d_u = diagonal_with_sink(1 - du_u, sink, i, j, Nz, dtime)
         du[i, j, Nz] = du_u
         dl[i, j, Nz] = 0
         d[i, j, Nz] = d_u
@@ -55,7 +62,7 @@ end
 
             du_k, dl_l = interface_coupling(dtime, p, zt_u, zt_l, kv_u, kv_l, rho_u, rho_l, rdp_u, rdp_l, zi[i, j, k])
 
-            d_k = 1 - du_k - dl_k
+            d_k = diagonal_with_sink(1 - du_k - dl_k, sink, i, j, k, dtime)
             dl_k = dl_k / d_u
             d_k = d_k - dl_k * du_u
 
@@ -67,7 +74,7 @@ end
         end
 
         # Level 1, with the implicit surface flux
-        d_1 = 1 - dl_k + flux * dtime * p.ggr * rdp_l
+        d_1 = diagonal_with_sink(1 - dl_k + flux * dtime * p.ggr * rdp_l, sink, i, j, 1, dtime)
         dl_k = dl_k / d_u
         d_1 = d_1 - dl_k * du_u
         du[i, j, 1] = 0
