@@ -688,15 +688,21 @@ end
                                      constants, properties::P3ProcessProps,
                                      surface_temperature, temperature_tendency,
                                      pressure_tendency)
-    Fᶠ = properties.Fᶠ
-    ρᶠ = properties.ρᶠ
     # Passing `properties` lets compute_p3_process_rates skip the redundant
     # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                      surface_temperature, temperature_tendency,
                                      pressure_tendency)
 
-    # Tendency extraction
+    return p3_tendencies(p3, ρ, ℳ, properties, rates)
+end
+
+# The tendency of every P3 prognostic from one set of process rates.
+@inline function p3_tendencies(p3::P3, ρ, ℳ::P3MicrophysicalState, properties::P3ProcessProps,
+                               rates::P3ProcessRates)
+    Fᶠ = properties.Fᶠ
+    ρᶠ = properties.ρᶠ
+
     cloud_mass_tendency = tendency_ρqᶜˡ(rates, ρ)
     # Prescribed-Nᶜˡ path: nc is a scheme parameter (not advected); tendency = 0.
     cloud_number_tendency = isnothing(p3.aerosol) ? zero(typeof(ρ)) :

@@ -13,7 +13,7 @@ using Breeze.ParcelModels: step_parcel_state!
 using GPUArraysCore: @allowscalar
 
 using Oceananigans: Bounded, CPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
-                     ImmersedBoundaryGrid, RectilinearGrid, compute!, set!, time_step!
+                     ImmersedBoundaryGrid, RectilinearGrid, WENO, compute!, set!, time_step!
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.Fields: interior, location
@@ -140,6 +140,67 @@ using Oceananigans.TimeSteppers: update_state!
         @test second_fall_speed != first_fall_speed
         @test second_rain_source != first_rain_source
     end
+
+@testset "P3 number relaxations are stable for any time step [$FT]" for FT in test_float_types()
+    # Rain and ice number with no mass, in dry air: the only process acting is the
+    # relaxation of each number towards its bound, which is zero without mass. Advanced
+    # explicitly over τ = sink_limiting_timescale it overshoots through zero for Δt > τ
+    # and is unstable for Δt ≳ 2.5 τ under Wicker–Skamarock RK3. Advanced implicitly over
+    # each stage, the final stage leaves τ / (τ + Δt) of the step-start number for any Δt.
+    grid = RectilinearGrid(default_arch, FT; size = (6, 6, 6), halo = (5, 5, 5),
+                           x = (0, 6e3), y = (0, 6e3), z = (0, 6e3))
+    p3 = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = nothing)
+    τ = p3.process_rates.sink_limiting_timescale
+
+    compressible = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature = 300)
+
+    for (dynamics, Δt) in ((compressible, 5), (compressible, 45), (nothing, 45))
+        model = if isnothing(dynamics)
+            constants = ThermodynamicConstants(FT)
+            reference_state = ReferenceState(grid, constants; base_pressure = FT(101325),
+                                             potential_temperature = FT(300))
+            AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
+                            thermodynamic_constants = constants, microphysics = p3)
+        else
+            AtmosphereModel(grid; advection = WENO(), dynamics, microphysics = p3)
+        end
+
+        if isnothing(dynamics)
+            set!(model; θ = FT(300), qᵛ = FT(1e-4), enforce_mass_conservation = false)
+        else
+            set!(model; θ = 300, u = 0, qᵗ = FT(1e-4), ρ = model.dynamics.reference_state.density)
+        end
+
+        μ = model.microphysical_fields
+        fill!(parent(μ.ρnʳ), 1)
+        fill!(parent(μ.ρnⁱ), 1000)
+        update_state!(model)
+
+        time_step!(model, Δt)
+        time_step!(model, Δt)
+
+        ρnʳ₁ = Array(interior(μ.ρnʳ))
+        ρnⁱ₁ = Array(interior(μ.ρnⁱ))
+        time_step!(model, Δt)
+        ρnʳ₂ = Array(interior(μ.ρnʳ))
+        ρnⁱ₂ = Array(interior(μ.ρnⁱ))
+
+        @test all(ρnʳ₂ .> 0)
+        @test all(ρnⁱ₂ .> 0)
+
+        # The compressible stepper restarts its last stage from the step-start state, so
+        # the decay over a step is exactly backward Euler over Δt.
+        if !isnothing(dynamics)
+            decay = FT(τ / (τ + Δt))
+            @test all(isapprox.(ρnʳ₂ ./ ρnʳ₁, decay; rtol = 1e-3))
+            @test all(isapprox.(ρnⁱ₂ ./ ρnⁱ₁, decay; rtol = 1e-3))
+        else
+            @test all(ρnʳ₂ .< ρnʳ₁)
+            @test all(ρnⁱ₂ .< ρnⁱ₁)
+        end
+    end
+end
 
 @testset "P3 has no droplet-number state in the prescribed-Nᶜˡ path" begin
         # In the prescribed-Nᶜˡ path the droplet number is the scheme parameter at every
