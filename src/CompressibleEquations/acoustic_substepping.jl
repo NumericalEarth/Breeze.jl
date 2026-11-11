@@ -176,6 +176,18 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.implicit_advection_factors))
 
 #####
+##### Switches for acoustic-loop optimizations that GPU profiling has yet to confirm
+#####
+##### Each is on by default and can be turned off at run time to compare, e.g.
+##### `Breeze.CompressibleEquations.fuse_divergence_damping[] = false`. They change launch counts
+##### and memory traffic, not results. TODO: remove each switch, and the path profiling rejects.
+#####
+
+# Apply `ThermalDivergenceDamping` inside the explicit horizontal step of the next substep
+# (`_damped_explicit_horizontal_step!`) instead of in a kernel of its own after each substep.
+const fuse_divergence_damping = Ref(true)
+
+#####
 ##### Section 2 — Constructor
 #####
 
@@ -951,7 +963,6 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     # then accumulate raw `momentum_perturbation` each substep and are normalized
     # by `finalize_time_averaged_velocity!` at stage end.
     launch!(arch, grid, :xyz, _zero_stage_workspaces!,
-            substepper.previous_density_potential_temperature_perturbation,
             substepper.density_predictor,
             substepper.density_potential_temperature_predictor,
             substepper.time_averaged_velocities.u,
@@ -964,9 +975,13 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     # linearization base.
     ρᵡ = thermodynamic_density(model.formulation)
     ρᵡ_name = thermodynamic_density_name(model.formulation)
+    # The stashed (ρθ)′ˢ⁻ starts equal to (ρθ)′: the divergence damping measures the change of
+    # (ρθ)′ over a substep, and none has run. A damping applied at the start of the first
+    # substep (see `fuse_divergence_damping`) then adds exactly zero.
     launch!(arch, grid, :xyz, _initialize_stage_perturbations!,
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
+            substepper.previous_density_potential_temperature_perturbation,
             substepper.momentum_perturbation.u,
             substepper.momentum_perturbation.v,
             Uᴸ_outer.ρᵈ, Uᴸ_outer[ρᵡ_name], Uᴸ_outer.ρu, Uᴸ_outer.ρv,
@@ -976,19 +991,19 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
 
     # The only fill of the ρ′ halos in the stage: no substep kernel reads ρ′ off its own column, and the
     # k = 0, Nz+1 values that `_build_vertical_rhs!` reads only feed its discarded boundary rows. Filled
-    # here, with (ρθ)′ in one launch per side, so those discarded reads stay finite.
+    # here, with (ρθ)′ and its stash in one launch per side, so those discarded reads stay finite.
     fill_halo_regions!((substepper.density_perturbation,
-                        substepper.density_potential_temperature_perturbation))
+                        substepper.density_potential_temperature_perturbation,
+                        substepper.previous_density_potential_temperature_perturbation))
     map(fill_halo_regions!, substepper.momentum_perturbation)
 
     return nothing
 end
 
-# Zero the six stage-start workspace/accumulator fields in one launch.
-@kernel function _zero_stage_workspaces!(a, b, c, d, e, f)
+# Zero the five stage-start workspace/accumulator fields in one launch.
+@kernel function _zero_stage_workspaces!(b, c, d, e, f)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        a[i, j, k] = 0
         b[i, j, k] = 0
         c[i, j, k] = 0
         d[i, j, k] = 0
@@ -998,13 +1013,14 @@ end
 end
 
 # Rewind-initialize the four non-vertical perturbations (ρ′, ρθ′, ρu′, ρv′) in one launch.
-@kernel function _initialize_stage_perturbations!(ρ′, ρθ′, ρu′, ρv′,
+@kernel function _initialize_stage_perturbations!(ρ′, ρθ′, ρθ′ˢ⁻, ρu′, ρv′,
                                                   ρ_outer, ρθ_outer, ρu_outer, ρv_outer,
                                                   ρ_stage, ρθ_stage, ρu_stage, ρv_stage)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         ρ′[i, j, k]  = ρ_outer[i, j, k]  - ρ_stage[i, j, k]
         ρθ′[i, j, k] = ρθ_outer[i, j, k] - ρθ_stage[i, j, k]
+        ρθ′ˢ⁻[i, j, k] = ρθ_outer[i, j, k] - ρθ_stage[i, j, k]
         ρu′[i, j, k] = ρu_outer[i, j, k] - ρu_stage[i, j, k]
         ρv′[i, j, k] = ρv_outer[i, j, k] - ρv_stage[i, j, k]
     end
@@ -1055,6 +1071,68 @@ end
     end
 end
 
+# The same step preceded by the `ThermalDivergenceDamping` correction of the substep before,
+#
+#   (ρu)′^{τ+Δτ} = [(ρu)′^τ − γˣ ∂x D / θᴸ] + Δτ (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′)),   D = (ρθ)′ − (ρθ)′ˢ⁻,
+#
+# in the order the two separate kernels apply them, so the result is the same. Nothing reads
+# (ρu)′, (ρv)′ between that damping and this step, and (ρθ)′, (ρθ)′ˢ⁻ and θᴸ do not change in
+# between, so the damping can wait for this kernel, which already reads and writes (ρu)′, (ρv)′.
+# The first substep of a stage finds D = 0 (`initialize_stage_perturbations!`); the damping of
+# the last is applied by `finish_horizontal_momentum_perturbations!`.
+@kernel function _damped_explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Cᴸ, Gⁿρu, Gⁿρv,
+                                                   ρθ′ˢ⁻, θᴸ, x_damping_scale, y_damping_scale)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        ∂x_pᴸ  = AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
+        ∂x_p′  = ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ)
+        ∂y_pᴸ  = AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
+        ∂y_p′  = ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ)
+
+        ∂x_p = ∂x_pᴸ + ∂x_p′
+        ∂y_p = ∂y_pᴸ + ∂y_p′
+
+        ρu′ᵈ = ρu′[i, j, k] - x_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, x_damping_scale)
+        ρv′ᵈ = ρv′[i, j, k] - y_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, y_damping_scale)
+
+        ρu′[i, j, k] = ρu′ᵈ + Δτ * (Gⁿρu[i, j, k] - ∂x_p)
+        ρv′[i, j, k] = ρv′ᵈ + Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+    end
+end
+
+# Step A of a substep, with the damping of the substep before when it is deferred to this step
+# (`deferred_divergence_damping`).
+function explicit_horizontal_step!(::NoDivergenceDamping, substepper, model, Δτ)
+    grid = model.grid
+    Gⁿ = model.timestepper.Gⁿ
+    launch!(architecture(grid), grid, :xyz, _explicit_horizontal_step!,
+            substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v,
+            grid, model.dynamics, Δτ,
+            substepper.density_potential_temperature_perturbation,
+            substepper.linearization_pressure_coefficient,
+            Gⁿ.ρu, Gⁿ.ρv)
+    return nothing
+end
+
+function explicit_horizontal_step!(damping::ThermalDivergenceDamping, substepper, model, Δτ)
+    grid = model.grid
+    Gⁿ = model.timestepper.Gⁿ
+    x_damping_scale, y_damping_scale = horizontal_damping_scales(damping, grid)
+    launch!(architecture(grid), grid, :xyz, _damped_explicit_horizontal_step!,
+            substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v,
+            grid, model.dynamics, Δτ,
+            substepper.density_potential_temperature_perturbation,
+            substepper.linearization_pressure_coefficient,
+            Gⁿ.ρu, Gⁿ.ρv,
+            substepper.previous_density_potential_temperature_perturbation,
+            substepper.linearization_potential_temperature,
+            x_damping_scale, y_damping_scale)
+    return nothing
+end
+
 @inline δpᴸ(i, j, k, grid, ρθ′, Cᴸ) = @inbounds Cᴸ[i, j, k] * ρθ′[i, j, k]
 
 @inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
@@ -1075,21 +1153,24 @@ function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
     @trace mincut=true track_numbers=false for _ in 1:Nτ
         acoustic_substep!(model, substepper, stage, advection)
     end
-    finish_horizontal_momentum_perturbations!(model, substepper)
+    finish_horizontal_momentum_perturbations!(model, substepper, stage)
     return nothing
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Fill the halos of ``(ρu)′`` and ``(ρv)′`` and enforce impenetrability on them after the last acoustic
-substep of a stage. The divergence damping that ends each substep writes their interior, and inside
-the loop the next reader of their halos and wall faces is the predictor of the following substep,
-which comes after that substep's own explicit step, fill and enforcement. So only the last
-substep's damped values need them, for the recovery of the full state.
+Apply the divergence damping of the last acoustic substep of a stage, when it is deferred to the
+explicit step of the substep after (`deferred_divergence_damping`), then fill the halos of ``(ρu)′``
+and ``(ρv)′`` and enforce impenetrability on them. The divergence damping that ends each substep
+writes their interior, and inside the loop the next reader of their halos and wall faces is the
+predictor of the following substep, which comes after that substep's own explicit step, fill and
+enforcement. So only the last substep's damped values need them, for the recovery of the full state.
 """
-function finish_horizontal_momentum_perturbations!(model, substepper)
+function finish_horizontal_momentum_perturbations!(model, substepper, stage)
     grid = model.grid
+    apply_divergence_damping!(deferred_divergence_damping(substepper.damping), substepper, grid, stage.Δτ,
+                              model.thermodynamic_constants)
     fill_halo_regions!(substepper.momentum_perturbation.u)
     fill_halo_regions!(substepper.momentum_perturbation.v)
     enforce_wall_impenetrability!(substepper, model, grid, architecture(grid))
@@ -1195,6 +1276,18 @@ end
 # No-op default
 @inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
 
+# The damping that each substep's explicit horizontal step applies for the substep before
+# (`explicit_horizontal_step!`), and the damping applied right after each substep: one of the two
+# is `NoDivergenceDamping`. Only `ThermalDivergenceDamping` can be deferred: its correction is
+# a single pass over fields that stay put until the next substep's predictors.
+deferred_divergence_damping(damping) = NoDivergenceDamping()
+deferred_divergence_damping(damping::ThermalDivergenceDamping) =
+    fuse_divergence_damping[] ? damping : NoDivergenceDamping()
+
+immediate_divergence_damping(damping) = damping
+immediate_divergence_damping(damping::ThermalDivergenceDamping) =
+    fuse_divergence_damping[] ? NoDivergenceDamping() : damping
+
 # The fields whose halos are filled after `_post_solve_recovery!`, in one launch per side: (ρθ)′,
 # whose horizontal and vertical neighbors the next substep reads, and what the damping reads next
 # to it. Nothing else read off-column is written in a substep except (ρu)′, (ρv)′.
@@ -1258,11 +1351,7 @@ end
 function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
     FT   = eltype(grid)
     arch = architecture(grid)
-    α    = damping.coefficient
-
-    TX, TY, _ = topology(grid)
-    x_damping_scale = TX === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
-    y_damping_scale = TY === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    x_damping_scale, y_damping_scale = horizontal_damping_scales(damping, grid)
 
     launch!(arch, grid, :xyz, _thermal_divergence_damping!,
             substepper.momentum_perturbation.u,
@@ -1273,6 +1362,14 @@ function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper
             grid, convert(FT, Δτ), x_damping_scale, y_damping_scale)
 
     return nothing
+end
+
+function horizontal_damping_scales(damping::ThermalDivergenceDamping, grid)
+    α = damping.coefficient
+    TX, TY, _ = topology(grid)
+    x_damping_scale = TX === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    y_damping_scale = TY === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    return x_damping_scale, y_damping_scale
 end
 
 @inline dρθ′(i, j, k, grid, ρθ′, ρθ′ˢ⁻) = @inbounds ρθ′[i, j, k] - ρθ′ˢ⁻[i, j, k]
@@ -1344,16 +1441,24 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
-        θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        γˣ = κˣ(i, j, k, grid, x_damping_scale, Δτ)
-        ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ
-
-        ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
-        θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
-        γʸ = κʸ(i, j, k, grid, y_damping_scale, Δτ)
-        ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ
+        ρu′[i, j, k] -= x_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, x_damping_scale)
+        ρv′[i, j, k] -= y_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, y_damping_scale)
     end
+end
+
+# The corrections γˣ ∂x D / θᴸ and γʸ ∂y D / θᴸ that the damping subtracts from (ρu)′ and (ρv)′.
+@inline function x_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, x_damping_scale)
+    ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
+    θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+    γˣ = κˣ(i, j, k, grid, x_damping_scale, Δτ)
+    return γˣ * ∂x_div / θᴸᶠᶜᶜ
+end
+
+@inline function y_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, y_damping_scale)
+    ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
+    θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+    γʸ = κʸ(i, j, k, grid, y_damping_scale, Δτ)
+    return γʸ * ∂y_div / θᴸᶜᶠᶜ
 end
 
 # Direct divergence damping (`DirectDivergenceDamping`): form the *horizontal* Θ-flux divergence
@@ -1750,14 +1855,9 @@ function acoustic_substep!(model, substepper, stage, advection)
     Gⁿ = model.timestepper.Gⁿ
     (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
 
-    # Step A: explicit horizontal forward of (ρu)′, (ρv)′.
-    launch!(arch, grid, :xyz, _explicit_horizontal_step!,
-            substepper.momentum_perturbation.u,
-            substepper.momentum_perturbation.v,
-            grid, model.dynamics, Δτ,
-            substepper.density_potential_temperature_perturbation,
-            substepper.linearization_pressure_coefficient,
-            Gⁿ.ρu, Gⁿ.ρv)
+    # Step A: explicit horizontal forward of (ρu)′, (ρv)′, after the divergence damping of the
+    # substep before when that is deferred to this step.
+    explicit_horizontal_step!(deferred_divergence_damping(substepper.damping), substepper, model, Δτ)
 
     fill_halo_regions!(substepper.momentum_perturbation.u)
     fill_halo_regions!(substepper.momentum_perturbation.v)
@@ -1845,7 +1945,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # this substep's last reader of them: the next substep's explicit step adds to them and then
     # fills their halos and enforces impenetrability, and the last substep's are finished by
     # `finish_horizontal_momentum_perturbations!`.
-    apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
+    apply_divergence_damping!(immediate_divergence_damping(substepper.damping), substepper, grid, Δτ, constants)
     # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
     return nothing
 end

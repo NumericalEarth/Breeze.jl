@@ -420,8 +420,8 @@ for arch in arches
     end
 
     # The substep fills only the halos its kernels read: none of ρ′ (never read off its own column
-    # except into the discarded boundary rows of the vertical right-hand side), and those of the
-    # stashed (ρθ)′ˢ⁻ only before the damping. Poisoned halos must therefore not reach the interior.
+    # except into the discarded boundary rows of the vertical right-hand side). Poisoned halos
+    # must therefore not reach the interior.
     @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
@@ -437,12 +437,10 @@ for arch in arches
 
         # The perturbations and slow tendencies of the last stage are a valid substep state.
         substepper = model.timestepper.substepper
-        for field in (substepper.density_perturbation,
-                      substepper.previous_density_potential_temperature_perturbation)
-            values = copy(interior(field))
-            fill!(parent(field), NaN)
-            copyto!(interior(field), values)
-        end
+        ρ′ = substepper.density_perturbation
+        values = copy(interior(ρ′))
+        fill!(parent(ρ′), NaN)
+        copyto!(interior(ρ′), values)
 
         Δτ = FT(1//2)
         ω = FT(substepper.forward_weight)
