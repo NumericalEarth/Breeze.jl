@@ -362,8 +362,9 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
     # is needed for the horizontal direction. Vertical reference subtraction
     # for the slow tendency is handled by `assemble_slow_vertical_momentum_tendency!`.
 
-    fill_halo_regions!(substepper.linearization_potential_temperature)
-    fill_halo_regions!(substepper.linearization_pressure_coefficient)
+    # One tuple fill: fields that share a location and halo-filling kernels fill in one launch per side.
+    fill_halo_regions!((substepper.linearization_potential_temperature,
+                        substepper.linearization_pressure_coefficient))
 
     return nothing
 end
@@ -967,8 +968,11 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     # ρw is dispatched: terrain models initialize the contravariant ρw̃ instead.
     initialize_vertical_momentum_perturbation!(substepper, model, Uᴸ_outer)
 
-    fill_halo_regions!(substepper.density_perturbation)
-    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+    # The only fill of the ρ′ halos in the stage: no substep kernel reads ρ′ off its own column, and the
+    # k = 0, Nz+1 values that `_build_vertical_rhs!` reads only feed its discarded boundary rows. Filled
+    # here, with (ρθ)′ in one launch per side, so those discarded reads stay finite.
+    fill_halo_regions!((substepper.density_perturbation,
+                        substepper.density_potential_temperature_perturbation))
     map(fill_halo_regions!, substepper.momentum_perturbation)
 
     return nothing
@@ -1065,6 +1069,24 @@ function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
     @trace mincut=true track_numbers=false for _ in 1:Nτ
         acoustic_substep!(model, substepper, stage, advection)
     end
+    finish_horizontal_momentum_perturbations!(model, substepper)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Fill the halos of ``(ρu)′`` and ``(ρv)′`` and enforce impenetrability on them after the last acoustic
+substep of a stage. The divergence damping that ends each substep writes their interior, and inside
+the loop the next reader of their halos and wall faces is the predictor of the following substep,
+which comes after that substep's own explicit step, fill and enforcement. So only the last
+substep's damped values need them, for the recovery of the full state.
+"""
+function finish_horizontal_momentum_perturbations!(model, substepper)
+    grid = model.grid
+    fill_halo_regions!(substepper.momentum_perturbation.u)
+    fill_halo_regions!(substepper.momentum_perturbation.v)
+    enforce_wall_impenetrability!(substepper, model, grid, architecture(grid))
     return nothing
 end
 
@@ -1166,6 +1188,17 @@ end
 
 # No-op default
 @inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
+
+# The fields whose halos are filled after `_post_solve_recovery!`, in one launch per side: (ρθ)′,
+# whose horizontal and vertical neighbors the next substep reads, and what the damping reads next
+# to it. Nothing else read off-column is written in a substep except (ρu)′, (ρv)′.
+post_recovery_halo_fields(damping, substepper) = (substepper.density_potential_temperature_perturbation,)
+
+# `ThermalDivergenceDamping` differentiates (ρθ)′ − (ρθ)′ˢ⁻ horizontally, and reads no halo of
+# (ρθ)′ˢ⁻ before this fill.
+post_recovery_halo_fields(::ThermalDivergenceDamping, substepper) =
+    (substepper.density_potential_temperature_perturbation,
+     substepper.previous_density_potential_temperature_perturbation)
 
 # Implicit-vertical-damping prefactors threaded into the column tridiag and
 # its RHS. Returns `(dᵐ⁺, dˢ⁻) = (ω, 1−ω) · α · Δz²` for
@@ -1673,7 +1706,8 @@ function acoustic_substep!(model, substepper, stage, advection)
     # predictor takes their horizontal divergence (mass conservation).
     enforce_wall_impenetrability!(substepper, model, grid, arch)
 
-    # (old (ρθ)′ is stashed into ρθ′ˢ⁻ inside `_build_predictors!`, then halo-filled.)
+    # (old (ρθ)′ is stashed into ρθ′ˢ⁻ inside `_build_predictors!`; its halos are filled with
+    # those of the new (ρθ)′ after Step D, before the damping that reads them.)
 
     # Implicit-vertical-damping prefactors. When the damping strategy
     # is `ThermalDivergenceDamping(damp_vertical=true)`, the
@@ -1685,7 +1719,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, grid, FT)
 
     # Step B: build predictors ρ′★, ρθ′★ (3D), then the (ρw)′ᵐ⁺ tridiag RHS (3D).
-    # `_build_predictors!` also stashes old (ρθ)′ into ρθ′ˢ⁻; halo-fill it for the damping.
+    # `_build_predictors!` also stashes old (ρθ)′ into ρθ′ˢ⁻.
     launch!(arch, grid, :xyz, _build_predictors!,
             substepper.density_predictor,
             substepper.density_potential_temperature_predictor,
@@ -1697,7 +1731,6 @@ function acoustic_substep!(model, substepper, stage, advection)
             grid, model.dynamics, Δτ, δτˢ⁻,
             Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
             substepper.linearization_potential_temperature)
-    fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
     # Implicit half of the IMEX vertical-advection split for the thermodynamic
     # perturbation, applied to the predictor between Step B and Step C so the pressure
@@ -1746,20 +1779,15 @@ function acoustic_substep!(model, substepper, stage, advection)
     # the halo fill, so the boundary cell tracks the prescribed inflow state.
     apply_open_boundary_relaxation!(substepper, model, grid, arch)
 
-    fill_halo_regions!(substepper.density_perturbation)
-    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+    # ρ′ takes no fill: nothing in the loop reads its halos (see `initialize_stage_perturbations!`).
+    fill_halo_regions!(post_recovery_halo_fields(substepper.damping, substepper))
 
     # Step E: optional Klemp 2018 post-substep damping (no-op for
-    # `NoDivergenceDamping`).
+    # `NoDivergenceDamping`). It writes (ρu)′, (ρv)′, including the south/west wall face, after
+    # this substep's last reader of them: the next substep's explicit step adds to them and then
+    # fills their halos and enforces impenetrability, and the last substep's are finished by
+    # `finish_horizontal_momentum_perturbations!`.
     apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
-
-    fill_halo_regions!(substepper.momentum_perturbation.u)
-    fill_halo_regions!(substepper.momentum_perturbation.v)
-
-    # The damping kernel also writes the south/west wall face; re-enforce
-    # impenetrability so the next substep's divergence and the accumulated
-    # transport velocity see a closed wall (mass conservation).
-    enforce_wall_impenetrability!(substepper, model, grid, arch)
     # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
     return nothing
 end
@@ -1846,8 +1874,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
     # Thread clock + model fields so time-dependent Open BCs on the recovered
     # prognostic state dispatch correctly in `getbc` (see #717).
-    fill_halo_regions!(model.dynamics.dry_density, boundary_condition_args(model)...)
-    fill_halo_regions!(ρᵡ, boundary_condition_args(model)...)
+    fill_halo_regions!((model.dynamics.dry_density, ρᵡ), boundary_condition_args(model)...)
     fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
     AtmosphereModels.compute_velocities!(model)
 
