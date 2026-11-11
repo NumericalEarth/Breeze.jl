@@ -203,7 +203,7 @@ refresh_stage_linearization!(::AcousticRungeKutta3, substepper, model) = prepare
 function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = RoundToNearest(); callbacks = [])
     ts = model.timestepper
     substepper = ts.substepper
-    U⁰ = ts.U⁰
+    U⁰ = stage_start_state(ts)
 
     # Per-stage cache prep. The linearization coefficients are refreshed
     # to the current RK stage-entry state; the substep perturbations are
