@@ -6,8 +6,6 @@ using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, vertical_scheme
 using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: launch!, KernelParameters
 
-using Oceananigans.TimeSteppers: implicit_step!
-
 using Breeze.AtmosphereModels:
     AtmosphereModel,
     advecting_vertical_velocity,
@@ -26,7 +24,7 @@ using Breeze.AtmosphereModels:
     tracer_density_to_specific!,
     tracer_specific_to_density!
 
-using Breeze.CompressibleEquations: CompressibleDynamics
+using Breeze.CompressibleEquations: CompressibleDynamics, implicit_step_in_place!
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 const TerrainCompressibleAcousticModel =
@@ -138,18 +136,18 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
             # their sedimentation flux wherever the split engages (issue #914);
             # `implicit_advection_velocities` forms that sum and lets the implicit remainder
             # carry sedimenting condensate out through the bottom.
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           Δt_stage,
-                           implicit_step_scheme(advection),
-                           implicit_advection_velocities(model.dynamics, velocities, name,
-                                                         model.microphysics, model.microphysical_fields),
-                           ρ)
+            implicit_step_in_place!(u,
+                                    model.timestepper.implicit_solver,
+                                    model.closure,
+                                    model.closure_fields,
+                                    field_index,
+                                    model.clock,
+                                    fields(model),
+                                    kernel_Δt,
+                                    implicit_step_scheme(advection),
+                                    implicit_advection_velocities(model.dynamics, velocities, name,
+                                                                  model.microphysics, model.microphysical_fields),
+                                    ρ)
         end
     end
 
@@ -446,35 +444,39 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
     # advective split it has no explicit fraction to pair with the frozen state.
     diffusion_density = continuity_density(model.dynamics)
 
+    # The step enters every coefficient of the column sweeps: in the float type of the grid.
+    grid = model.grid
+    Δt = kernel_time_step(architecture(grid), grid, Δt_stage)
+
     prognostic = prognostic_fields(model)
     momentum_advection = model.advection.momentum
     for name in (:ρu, :ρv, :ρw)
-        implicit_step!(prognostic[name],
-                       implicit_solver,
-                       model.closure,
-                       model.closure_fields,
-                       nothing,
-                       model.clock,
-                       fields(model),
-                       Δt_stage,
-                       implicit_step_scheme(momentum_advection, diffusion_density),
-                       (; w),
-                       ρᵈ)
+        implicit_step_in_place!(prognostic[name],
+                                implicit_solver,
+                                model.closure,
+                                model.closure_fields,
+                                nothing,
+                                model.clock,
+                                fields(model),
+                                Δt,
+                                implicit_step_scheme(momentum_advection, diffusion_density),
+                                (; w),
+                                ρᵈ)
     end
 
     θ_name = thermodynamic_density_name(model.formulation)
     θ_advection = field_advection_scheme(model.advection, θ_name)
-    implicit_step!(prognostic[θ_name],
-                   implicit_solver,
-                   model.closure,
-                   model.closure_fields,
-                   closure_scalar_index(model, θ_name),
-                   model.clock,
-                   fields(model),
-                   Δt_stage,
-                   postloop_thermodynamic_scheme(θ_advection, diffusion_density),
-                   merge(slow_thermodynamic_velocities(model), (; w)),
-                   ρᵈ)
+    implicit_step_in_place!(prognostic[θ_name],
+                            implicit_solver,
+                            model.closure,
+                            model.closure_fields,
+                            closure_scalar_index(model, θ_name),
+                            model.clock,
+                            fields(model),
+                            Δt,
+                            postloop_thermodynamic_scheme(θ_advection, diffusion_density),
+                            merge(slow_thermodynamic_velocities(model), (; w)),
+                            ρᵈ)
 
     return nothing
 end

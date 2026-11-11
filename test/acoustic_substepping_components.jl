@@ -28,7 +28,9 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!
+                                    implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
+                                    factor_vertical_solver!, StoredTridiagonalFactors, factor_tridiagonal!,
+                                    substitute_tridiagonal!, solve_tridiagonal_in_place!
 using Breeze.Microphysics: adjust_thermodynamic_state
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
@@ -38,10 +40,10 @@ using Breeze.Thermodynamics: ExnerReferenceState, surface_density, LiquidIceDens
                              mixture_heat_capacity, dry_air_gas_constant, condensate_latent_energy
 using GPUArraysCore: @allowscalar
 using Oceananigans
-using Oceananigans.Architectures: architecture
+using Oceananigans.Architectures: architecture, on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Solvers: get_coefficient
+using Oceananigans.Solvers: BatchedTridiagonalSolver, get_coefficient, solve!
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Units
 using Oceananigans.Utils: KernelParameters, launch!
@@ -445,6 +447,7 @@ for arch in arches
         Δτ = FT(1//2)
         ω = FT(substepper.forward_weight)
         stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ)
+        factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
         acoustic_substep_loop!(2, model, substepper, stage, nothing)
 
         for field in (substepper.density_perturbation,
@@ -454,6 +457,39 @@ for arch in arches
         end
         @test maximum(abs, interior(substepper.momentum_perturbation.w)) > 0
         Oceananigans.defaults.FloatType = old_FT
+    end
+
+    # Breeze's column sweeps carry the Thomas recurrence in registers; they must reproduce the
+    # Oceananigans solve bit for bit, zero off-diagonals (masked products) included.
+    @testset "Column Thomas sweeps reproduce BatchedTridiagonalSolver [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        grid = RectilinearGrid(arch, FT; size=(4, 3, 9), x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Periodic, Periodic, Bounded))
+        Nx, Ny, Nz = size(grid)
+        wave(α, β, γ) = on_architecture(arch, FT[sin(α * i + β * j + γ * k) for i in 1:Nx, j in 1:Ny, k in 1:Nz])
+        lower = on_architecture(arch, FT[ifelse(k == 4, 0, -(3 + sin(i + 2j + 3k)) / 10) for i in 1:Nx, j in 1:Ny, k in 1:Nz])
+        upper = wave(2, 1, 5) ./ 4 .- FT(1//2)
+        diagonal = wave(3, 5, 1) ./ 5 .+ 2
+        rhs = wave(1, 3, 2)
+
+        solver = BatchedTridiagonalSolver(grid; lower_diagonal=lower, diagonal, upper_diagonal=upper)
+        reference = similar(rhs)
+        solve!(reference, solver, rhs)
+        reference = Array(reference)
+
+        in_place = copy(rhs)
+        solve_tridiagonal_in_place!(in_place, solver, ())
+        @test Array(in_place) == reference
+
+        factors = StoredTridiagonalFactors(grid)
+        factor_tridiagonal!(factors, solver, ())
+
+        substituted = similar(rhs)
+        substitute_tridiagonal!(substituted, factors, grid, rhs)
+        @test Array(substituted) == reference
+
+        substituted_in_place = copy(rhs)
+        substitute_tridiagonal!(substituted_in_place, factors, grid)
+        @test Array(substituted_in_place) == reference
     end
 
     # `_build_vertical_rhs!` reads (ρw)′ at faces k−1, k, k+1 for the implicit vertical-damping
