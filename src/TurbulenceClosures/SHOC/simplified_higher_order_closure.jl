@@ -75,7 +75,7 @@ component is replaced independently of the others, either to change coefficients
 swap the relation,
 `SimplifiedHigherOrderClosure(mixing_length = GradientLimitedMixingLength(), clipping = SmoothClipping())`;
 any combination of the components listed below is a valid closure.
-[`differentiable_shoc_components`](@ref) returns a set of components without the hard switches
+[`smooth_shoc_components`](@ref) returns a set of components without the hard switches
 and clips of `shoc.F90`, for calibration with gradients, to splat into the keyword arguments.
 
 [`closure_parameters`](@ref) lists the coefficients of all components and
@@ -139,7 +139,7 @@ Each of the first eight takes a component; the first one named is the default, t
 - `second_moments`: [`DowngradientSecondMoments`](@ref).
 - `third_moment`: the diagnosis of the third moment of vertical velocity;
   [`AlgebraicThirdMoment`](@ref).
-- `skewness`: how the third moment is kept within the bound `w3clip √(2 ww³)`;
+- `skewness`: how the third moment is kept within the bound `maximum_skewness (w'w')^{3/2}`;
   [`ResetAboveThresholdSkewness`](@ref), or [`PolynomialSaturatedSkewness`](@ref) or
   [`ClampedSkewness`](@ref).
 - `assumed_pdf`: the assumed PDF of the subgrid cloud; [`DoubleGaussianPDF`](@ref), or

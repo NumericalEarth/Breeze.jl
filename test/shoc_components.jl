@@ -18,10 +18,11 @@ using Test
 same_bits(a, b) = a === b
 
 # The limited third moment as a function of one scalar, for derivatives: of the diagnosed third
-# moment, of the vertical velocity variance, of `w3clip`, and of the coefficient `c` of the diagnosis
+# moment, of the vertical velocity variance, of `maximum_skewness`, and of the coefficient `c` of the diagnosis
 limited_by_third_moment(w3, limiter, policy, w_sec) = limit_third_moment(limiter, policy, w_sec, w3)
 limited_by_variance(w_sec, limiter, policy, w3) = limit_third_moment(limiter, policy, w_sec, w3)
-limited_by_clip(w3clip, policy, w_sec, w3) = limit_third_moment(PolynomialSaturatedSkewness(w3clip), policy, w_sec, w3)
+limited_by_maximum_skewness(maximum_skewness, policy, w_sec, w3) =
+    limit_third_moment(PolynomialSaturatedSkewness(maximum_skewness), policy, w_sec, w3)
 limited_by_coefficient(c, limiter, policy, constants, arguments) =
     limit_third_moment(limiter, policy, arguments[3], third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), constants, arguments...))
 
@@ -179,8 +180,11 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test closure_parameters(SimplifiedHigherOrderClosure(FT; skewness = polynomial)).ℂʷ₂ == FT(7)
         @test_throws ArgumentError ResetAboveThresholdSkewness(FT; clip = 1)
 
-        # The diagnosis and the limiter of shoc.F90 with its literals written out: the components
-        # with their default fields must return the same bits
+        # The diagnosis and the limiter of shoc.F90 with its literals written out. The diagnosis with
+        # its default fields returns the same bits. The limiter writes the bound as
+        # maximum_skewness (w'w')^{3/2} where shoc.F90 writes 1.2 √(2 w'w'³): the two bounds agree to
+        # round-off, and the limited third moments are equal but where the third moment is within
+        # round-off of the bound
         function literal_third_moment(ggr, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
                                       thl_sec_diff, wthl_sec_diff, wsec_diff, tke_diff, wthl)
             c = FT(7)
@@ -234,13 +238,20 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
                          (fraction(n, 9) - FT(0.5)) * FT(0.5), (fraction(n, 10) - FT(0.5)) * FT(0.1))
             w3 = third_moment(diagnosis, constants, arguments...)
             @test same_bits(w3, literal_third_moment(constants.ggr, arguments...))
-            @test same_bits(limit_third_moment(reset, hard, w_sec, w3), literal_limiter(w_sec, w3))
+            literal_bound = FT(1.2) * sqrt(2 * (w_sec * w_sec * w_sec))
+            @test isapprox(third_moment_bound(reset, w_sec), literal_bound; rtol = 8 * eps(FT))
+            if abs(abs(w3) - literal_bound) > 8 * eps(FT) * literal_bound
+                @test same_bits(limit_third_moment(reset, hard, w_sec, w3), literal_limiter(w_sec, w3))
+            end
             nreset += limit_third_moment(reset, hard, w_sec, w3) != w3
         end
         @test 0 < nreset < 2000 # the inputs are on both sides of the bound
 
         w_sec = FT(0.5)
-        bound = reset.w3clip * sqrt(2 * w_sec^3)
+        bound = third_moment_bound(reset, w_sec)
+        @test reset.maximum_skewness ≈ FT(1.2) * sqrt(FT(2))
+        @test bound ≈ reset.maximum_skewness * w_sec^FT(1.5)
+        @test bound ≈ FT(1.2) * sqrt(2 * w_sec^3) # as shoc.F90 writes it
         for limiter in (reset, clamped, polynomial)
             @test third_moment_bound(limiter, w_sec) ≈ bound
         end
@@ -296,11 +307,11 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             end
             @test abs(limit_third_moment(reset, hard, w_sec, bound * (1 + h)) - limit_third_moment(reset, hard, w_sec, bound * (1 - h))) > bound / 2
 
-            # The slope with respect to the variance and to w3clip, through the bound
+            # The slope with respect to the variance and to maximum_skewness, through the bound
             for ratio in (0.3, 1.1, 1.8, 2.5)
                 w3 = ratio * bound
                 for (func, x, parameters) in ((limited_by_variance, w_sec, (polynomial, hard, w3)),
-                                              (limited_by_clip, polynomial.w3clip, (hard, w_sec, w3)))
+                                              (limited_by_maximum_skewness, polynomial.maximum_skewness, (hard, w_sec, w3)))
                     difference = (func(x * (1 + h), parameters...) - func(x * (1 - h), parameters...)) / (2 * h * x)
                     gradient = derivative(func, x, parameters...)
                     @test isapprox(gradient, difference; rtol = 1e-6, atol = 1e-9)
@@ -312,7 +323,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             arguments = (300.0, 1e-4, 0.4, 300.0, 1 / 40, 1 / 80, 0.02, -0.004, 0.1, 0.15, 0.03)
             raw = third_moment(diagnosis, constants, arguments...)
             for ratio in (0.9, 1.2, 1.6)
-                limiter = PolynomialSaturatedSkewness(abs(raw) / (ratio * sqrt(2 * 0.4^3)))
+                limiter = PolynomialSaturatedSkewness(abs(raw) / (ratio * 0.4^1.5))
                 @test abs(raw) / third_moment_bound(limiter, 0.4) ≈ ratio
                 parameters = (limiter, hard, constants, arguments)
                 difference = (limited_by_coefficient(7 + 1e-5, parameters...) - limited_by_coefficient(7 - 1e-5, parameters...)) / 2e-5
@@ -527,7 +538,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test SimplifiedHigherOrderClosure(FT; turbulence_time_scale = RichardsonStabilityFunctions(RationalStabilityFunction()),
                                            tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...) === closure
         @test isbits(closure)
-        ℂ = closure_parameters(differentiable)
+        ℂ = closure_parameters(smooth_closure)
         @test ℂ.ℂᶜ⁰ == functions.ℂᶜ⁰ && ℂ.Ri⁺ == functions.Ri⁺ && ℂ.ℂᵗ == 1
         @test !haskey(ℂ, :ℂᵝ₁)
         changed = with_parameters(closure; ℂᶜ⁰ = FT(0.3), ℂᵗ = FT(2))
@@ -553,7 +564,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         closure = SimplifiedHigherOrderClosure(FT; mixing_length = ml, surface_forcing...)
         @test isbits(closure)
         @test closure.mixing_length === ml
-        ℂ = closure_parameters(differentiable)
+        ℂ = closure_parameters(smooth_closure)
         @test ℂ.ℂˢ == FT(0.8) && ℂ.ℂⁱ == FT(1.8)
         @test !haskey(ℂ, :ℂˡ₅)      # no dimensional coefficient is left
         @test with_parameters(closure; ℂⁱ = FT(1.5)).mixing_length.ℂⁱ == FT(1.5)
@@ -618,14 +629,14 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         end
     end
 
-    @testset "differentiable_shoc_components" begin
-        components = differentiable_shoc_components(FT)
+    @testset "smooth_shoc_components" begin
+        components = smooth_shoc_components(FT)
         @test keys(components) == (:mixing_length, :turbulence_time_scale, :tke_update, :third_moment, :assumed_pdf, :clipping)
-        @test differentiable_shoc_components() === components
-        @test differentiable_shoc_components(Float32).clipping === SmoothClipping(Float32(1e-2))
+        @test smooth_shoc_components() === components
+        @test smooth_shoc_components(Float32).clipping === SmoothClipping(Float32(1e-2))
 
         # The set, and the set with SHOC's own mixing length and time scale named after it
-        differentiable = SimplifiedHigherOrderClosure(FT; components..., surface_forcing...)
+        smooth_closure = SimplifiedHigherOrderClosure(FT; components..., surface_forcing...)
         own = SimplifiedHigherOrderClosure(FT; components...,
                                            mixing_length = BlendedMixingLength(),
                                            turbulence_time_scale = ColumnStabilityDamping(),
@@ -633,7 +644,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
                                            surface_forcing...)
 
         # The switches are smooth in both
-        for closure in (differentiable, own)
+        for closure in (smooth_closure, own)
             @test isbits(closure)
             @test closure.clipping === SmoothClipping(FT(1e-2))
             @test closure.assumed_pdf isa SmoothDoubleGaussianPDF{FT}
@@ -655,10 +666,10 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         # The set has the mixing length and the stability functions that the TKE closure also
         # uses, starting from its published coefficients, and no dimensional coefficient
         published = TKEBasedTurbulenceClosure()
-        @test differentiable.mixing_length == published.mixing_length
-        @test differentiable.turbulence_time_scale.functions == published.stability_functions
-        @test differentiable.tke_update.ℂᴾ == 1
-        ℂ = closure_parameters(differentiable)
+        @test smooth_closure.mixing_length == published.mixing_length
+        @test smooth_closure.turbulence_time_scale.functions == published.stability_functions
+        @test smooth_closure.tke_update.ℂᴾ == 1
+        ℂ = closure_parameters(smooth_closure)
         @test !haskey(ℂ, :ℂˡ₅)
 
         # The closure holds its own copies of the coefficients of these components: they are
@@ -666,18 +677,18 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         reused = (fieldnames(GradientLimitedMixingLength)..., fieldnames(RationalStabilityFunction)...)
         @test length(reused) == 16
         @test all(name -> haskey(ℂ, name), reused)
-        @test all(name -> name ∈ trainable_parameter_names(differentiable), reused)
-        recalibrated = with_parameters(differentiable; NamedTuple{reused}(map(name -> 2 * ℂ[name], reused))...)
+        @test all(name -> name ∈ trainable_parameter_names(smooth_closure), reused)
+        recalibrated = with_parameters(smooth_closure; NamedTuple{reused}(map(name -> 2 * ℂ[name], reused))...)
         @test recalibrated.mixing_length.ℂˢ == 2 * published.mixing_length.ℂˢ
         @test recalibrated.turbulence_time_scale.functions.Ri⁺ == 2 * published.stability_functions.Ri⁺
-        @test typeof(recalibrated) === typeof(differentiable)
+        @test typeof(recalibrated) === typeof(smooth_closure)
 
         # Only the formulations are shared with the TKE closure: every coefficient of the reused
         # components is a coefficient of the SHOC closure, replaced independently of the TKE closure
-        ℂ = closure_parameters(differentiable)
+        ℂ = closure_parameters(smooth_closure)
         shared = (:ℂˢ, :ℂⁱ, :ℂᵘ⁻, :ℂᵘ⁰, :ℂᵘ⁺, :ℂᶜ⁻, :ℂᶜ⁰, :ℂᶜ⁺, :ℂᵉ⁻, :ℂᵉ⁰, :ℂᵉ⁺, :ℂᴰ⁻, :ℂᴰ⁰, :ℂᴰ⁺, :Ri⁻, :Ri⁺, :ℂᵗ, :ℂᴾ)
         @test all(name -> haskey(ℂ, name), shared)
-        doubled = with_parameters(differentiable; NamedTuple{shared}(map(name -> 2 * ℂ[name], shared))...)
+        doubled = with_parameters(smooth_closure; NamedTuple{shared}(map(name -> 2 * ℂ[name], shared))...)
         @test all(name -> closure_parameters(doubled)[name] == 2 * ℂ[name], shared)
         @test doubled.mixing_length.ℂˢ == 2 * published.mixing_length.ℂˢ
         @test doubled.turbulence_time_scale.functions.Ri⁺ == 2 * published.stability_functions.Ri⁺

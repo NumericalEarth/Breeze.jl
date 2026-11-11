@@ -11,7 +11,7 @@ of `shoc.F90`.
 module SimplifiedHigherOrderClosures
 
 export SimplifiedHigherOrderClosure, SHOC,
-       differentiable_shoc_components,
+       smooth_shoc_components,
        BlendedMixingLength,
        ColumnStabilityDamping, RichardsonStabilityFunctions,
        ForwardEulerTKE, ImplicitSinkTKE,

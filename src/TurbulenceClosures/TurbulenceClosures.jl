@@ -10,7 +10,7 @@ export TKEBasedTurbulenceClosure,
        DryStaticStability,
        MoistStaticStability,
        SimplifiedHigherOrderClosure, SHOC,
-       differentiable_shoc_components,
+       smooth_shoc_components,
        BlendedMixingLength,
        ColumnStabilityDamping, RichardsonStabilityFunctions,
        ForwardEulerTKE, ImplicitSinkTKE,
@@ -189,7 +189,7 @@ include("richardson_number_stability_functions.jl")
 
 include("SHOC/SimplifiedHigherOrderClosures.jl")
 using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedHigherOrderClosure, SHOC,
-                                      differentiable_shoc_components,
+                                      smooth_shoc_components,
                                       BlendedMixingLength,
                                       ColumnStabilityDamping, RichardsonStabilityFunctions,
                                       ForwardEulerTKE, ImplicitSinkTKE,

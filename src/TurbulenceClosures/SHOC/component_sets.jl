@@ -31,9 +31,9 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the components of a [`SimplifiedHigherOrderClosure`](@ref) without the hard switches and
-clips of E3SM `shoc.F90`, so that a calibration loss is a differentiable function of the
-coefficients. The result is a `NamedTuple` of keyword arguments of the constructor, with scalars
-of type `FT`, to be splatted into it; a keyword argument given after the splat replaces one
+clips of E3SM `shoc.F90`, so that a calibration loss varies smoothly with the coefficients. The
+result is a `NamedTuple` of keyword arguments of the constructor, with scalars of type `FT`, to
+be splatted into it; a keyword argument given after the splat replaces one
 component of the set, like any other keyword argument of the constructor.
 
 | keyword | component | what it replaces of `shoc.F90` |
@@ -63,7 +63,7 @@ turbulent kinetic energy, so `ℂᵉ⁻`, `ℂᵉ⁰`, `ℂᵉ⁺` have no effec
 ```jldoctest
 using Breeze
 
-closure = SimplifiedHigherOrderClosure(; differentiable_shoc_components()...)
+closure = SimplifiedHigherOrderClosure(; smooth_shoc_components()...)
 
 # output
 SimplifiedHigherOrderClosure{Float64}
@@ -88,7 +88,7 @@ switch and clip of the closure is smooth), name them after the splat:
 ```jldoctest
 using Breeze
 
-closure = SimplifiedHigherOrderClosure(; differentiable_shoc_components()...,
+closure = SimplifiedHigherOrderClosure(; smooth_shoc_components()...,
                                        mixing_length = BlendedMixingLength(),
                                        turbulence_time_scale = ColumnStabilityDamping(),
                                        tke_update = ImplicitSinkTKE())
@@ -123,7 +123,7 @@ against round-off whose bound the exact value already satisfies.
 
 The coefficients are a starting point for calibration, not a tuned set.
 """
-function differentiable_shoc_components(FT::DataType = Oceananigans.defaults.FloatType)
+function smooth_shoc_components(FT::DataType = Oceananigans.defaults.FloatType)
     # Built in double precision, whatever the default float type, and converted once
     components = (mixing_length = GradientLimitedMixingLength(ℂˢ = 0.7877315198717979, ℂⁱ = 1.777871783491512),
                   turbulence_time_scale = RichardsonStabilityFunctions(RationalStabilityFunction(), Float64),

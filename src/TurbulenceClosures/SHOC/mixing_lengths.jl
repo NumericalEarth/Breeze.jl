@@ -113,7 +113,7 @@ end
 ##### Only the formulation is shared with the TKE closure, not the coefficients: the closure holds
 ##### its own `GradientLimitedMixingLength`, whose `ℂˢ` and `ℂⁱ` are scalars of the SHOC closure
 ##### like any other (`closure_parameters`, `with_parameters`), to be calibrated for SHOC. The
-##### values published with `TKEBasedTurbulenceClosure` are only where the preset starts.
+##### values published with `TKEBasedTurbulenceClosure` are only where `smooth_shoc_components` starts.
 #####
 ##### The length has no eddy turnover time scale: every coefficient of a SHOC with it is
 ##### non-dimensional. Its bounds are the hard `min` of the TKE closure in every clipping policy

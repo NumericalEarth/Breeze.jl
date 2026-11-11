@@ -64,15 +64,16 @@ column_data(field) = Array(interior(field))
         @test ℂ.ℂʷ₈ == FT(0.6) && ℂ.ℂʷ₉ == FT(1.2) && ℂ.ℂʷ₁₀ == FT(1.5) && ℂ.ℂʷ₁₁ == FT(1.25)
         @test ℂ.ℂᴴ₅ == FT(0.1) && ℂ.ℂᴴ₆ == 700 && ℂ.ℂᴴ₇ == 50
         @test closure.turbulence_time_scale.temp_crit == 182 && closure.turbulence_time_scale.pbl_trans == 200
-        @test closure.skewness.w3clip == FT(1.2) && closure.skewness.w3clipdef == FT(0.02)
+        @test closure.skewness.maximum_skewness == FT(1.2 * sqrt(2)) && closure.skewness.reset_third_moment == FT(0.02)
         @test closure.constants.wsmin == 1 && closure.constants.ksrfmin == FT(1e-4)
         @test closure.assumed_pdf.plume_fraction_min == FT(0.01) && closure.assumed_pdf.plume_fraction_max == FT(0.99)
-        @test with_parameters(closure; w3clipdef = FT(0.01)).skewness.w3clipdef == FT(0.01)
+        @test with_parameters(closure; reset_third_moment = FT(0.01)).skewness.reset_third_moment == FT(0.01)
+        @test with_parameters(closure; maximum_skewness = FT(2)).skewness.maximum_skewness == FT(2)
         @test SimplifiedHigherOrderClosure(FT; skewness = PolynomialSaturatedSkewness()).skewness isa PolynomialSaturatedSkewness{FT}
         @test with_parameters(closure; ℂʷ₁₁ = FT(1)).third_moment.ℂʷ₁₁ == 1
         p = SHOCParameters(closure)
         @test p isa SHOCParameters{FT}
-        @test p.ℂᶜ == ℂ.ℂᶜ && p.mintke == closure.constants.mintke && p.w3clip == closure.skewness.w3clip
+        @test p.ℂᶜ == ℂ.ℂᶜ && p.mintke == closure.constants.mintke && p.maximum_skewness == closure.skewness.maximum_skewness
 
         # Coefficients are replaced through the closure, whichever component holds them
         changed = with_parameters(closure; ℂᶜ = FT(0.2), ℂˡ₁ = FT(0.4), ℂʷ₂ = FT(6), mintke = FT(1e-4))

@@ -258,7 +258,7 @@ struct SHOCParameters{FT}
     troppres :: FT
     ustar_min :: FT
     pblmaxp :: FT
-    w3clip :: FT
+    maximum_skewness :: FT
     maxlen :: FT
     minlen :: FT
     maxtke :: FT
@@ -272,7 +272,7 @@ struct SHOCParameters{FT}
     tke_flux_ustar_min :: FT
     ufmin :: FT
     wtke_ustar_min :: FT
-    w3clipdef :: FT
+    reset_third_moment :: FT
     kbfs_min :: FT
     thl_tol :: FT
     rt_tol :: FT
