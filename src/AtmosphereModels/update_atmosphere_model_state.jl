@@ -69,7 +69,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute forcing-specific quantities needed before tendency calculation.
 For example, [`SubsidenceForcing`](@ref Breeze.Forcings.SubsidenceForcing)
@@ -139,7 +139,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute velocities from momentum: `u = ρu / ρ` for each velocity component.
 """
@@ -227,7 +227,7 @@ function compute_vertical_momentum_tendency!(model::AtmosphereModel, Gρw, w_arg
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute auxiliary model variables:
 
@@ -384,7 +384,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether `compute_tendencies!` builds the moisture, microphysical and tracer tendencies.
 `true` by default; a time stepper that rebuilds them after its acoustic substep loop, with
@@ -409,7 +409,7 @@ scalar_tendency_arguments(model, model_fields, advecting_velocities) = (
     model_fields)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build the moisture, microphysical and tracer density tendencies — advection by
 `advecting_velocities`, closure diffusion and forcing — into `Gⁿ` with `kernel`, which is
@@ -543,7 +543,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
@@ -570,7 +570,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Add a turbulence closure's own tendencies — the local sources of a prognostic the closure carries,
 such as the shear and buoyancy production of turbulent kinetic energy — to the model's tendencies

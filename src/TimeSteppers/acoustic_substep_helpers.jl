@@ -63,7 +63,7 @@ end
 stage_start_state(timestepper) = timestepper.U⁰
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Freeze the time-averaged transport velocity that `update_state!` just built the moisture and
 tracer tendencies from. The next acoustic loop resets and rebuilds `time_averaged_velocities`
@@ -81,7 +81,7 @@ function cache_transport_velocity!(model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The transport velocities the moisture and tracer tendencies in `Gⁿ` were built with: the live
 horizontal components and the frozen vertical one. Only `w` is frozen — under adaptive implicit
@@ -92,7 +92,7 @@ tendency_transport_velocities(model) =
     merge(transport_velocities(model), (; w = model.timestepper.substepper.time_averaged_vertical_velocity_cache))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update non-acoustic scalar fields (moisture, microphysics, tracers) with the
 Wicker–Skamarock stage update ``u = u⁰ + Δt G``, rounded with the round-off
@@ -164,7 +164,7 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The prognostic fields the acoustic substep loop advances — the dynamics-specific prognostics
 (the compressible dry density), momentum and the thermodynamic variable — and which
@@ -175,7 +175,7 @@ acoustic_prognostic_names(model) = tuple(keys(dynamics_prognostic_fields(model.d
                                          thermodynamic_density_name(model.formulation))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The prognostic fields `scalar_substep!` advances — moisture, the microphysical prognostics and
 the tracers: every prognostic the acoustic substep loop does not.
@@ -247,7 +247,7 @@ scalar_tendencies_in_update_state(::PreLoopScalarTendencies) = true
 scalar_tendencies_in_update_state(::PostLoopScalarTendencies) = false
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Prepare the scalar tendencies for the stage-entry sources added before the acoustic loop. With
 `PostLoopScalarTendencies`, zero them: `update_state!` left no tendency there, and the flux
@@ -264,7 +264,7 @@ function prepare_scalar_tendencies!(::PostLoopScalarTendencies, model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 With `PostLoopScalarTendencies`, build the moisture and tracer tendencies after the stage's
 acoustic loop with its time-averaged transport velocity, adding them to the stage-entry sources
@@ -293,7 +293,7 @@ function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model,
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The `compute_scalar_tendencies!` kernel of the post-loop scalar tendency build: by default
 `add_scalar_tendency!`, the full tendency added to the stage-entry sources in `Gⁿ`. A stepper that
@@ -307,7 +307,7 @@ post_loop_scalar_tendency_kernel(timestepper) = add_scalar_tendency!
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Freeze the stage-entry advecting velocity and the density that weights it so `implicit_substep!` sizes
 the withheld remainder from the state whose fluxes the slow tendencies split (invariant:
@@ -349,7 +349,7 @@ advecting_state(::Nothing, ::Nothing, model) = (advecting_vertical_velocity(mode
 advecting_state(w_cache, ρ_cache, model) = (w_cache, ρ_cache)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the vertically-implicit tridiagonal solve to the prognostics that the acoustic substep
 loop advances: momentum and the thermodynamic variable. Dispatch on the timestepper's
@@ -393,7 +393,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fold the base-state part of the IMEX vertical-advection split's implicit half into the
 slow tendency: `Gˢρθ` gains the first-order upwind flux divergence of the frozen stage-entry

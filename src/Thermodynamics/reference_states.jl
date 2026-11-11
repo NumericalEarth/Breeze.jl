@@ -60,7 +60,7 @@ Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
 #####
 
 """
-    surface_density(reference_state)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the density at the bottom face of the domain by interpolating the reference density field.
 """
@@ -71,7 +71,7 @@ function surface_density(ref::ReferenceState)
 end
 
 """
-    surface_density(p₀, T₀, constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the surface air density from surface pressure `p₀`, surface temperature `T₀`,
 and thermodynamic `constants` using the ideal gas law for dry air.
@@ -82,7 +82,7 @@ and thermodynamic `constants` using the ideal gas law for dry air.
 end
 
 """
-    surface_density(p₀, θ₀, pˢᵗ, constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the surface air density from surface pressure `p₀`, potential temperature `θ₀`,
 standard pressure `pˢᵗ`, and thermodynamic `constants` using the ideal gas law for dry air.
@@ -99,7 +99,7 @@ The temperature is computed from potential temperature using the Exner function:
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the reference pressure at height `z` that associated with the reference pressure `p₀`,
 potential temperature `θ₀`, and standard pressure `pˢᵗ`. The reference pressure is defined as
@@ -114,7 +114,7 @@ the pressure of dry air at the reference pressure and temperature.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the reference density at height `z` that associated with the reference pressure `p₀`,
 potential temperature `θ₀`, and standard pressure `pˢᵗ`. The reference density is defined as
@@ -129,7 +129,7 @@ the density of dry air at the reference pressure and temperature.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the density that keeps pressure unchanged when applying a potential-temperature
 perturbation at fixed composition.
@@ -215,7 +215,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 A 2D `(Center, Center, Nothing)` field holding a surface (bottom-face) quantity, initialized to
 `value`. Bottom-face quantities are stored in fields rather than as plain scalars so that the
@@ -228,7 +228,7 @@ the dynamics that owns them is passed directly to GPU kernels.
 surface_state_field(grid, value) = set_surface_state!(Field{Center, Center, Nothing}(grid), value)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Write `value` into a surface field and fill its halos. The halo fill is the load-bearing half: the
 field is aliased into a `ValueBoundaryCondition` by [`surface_boundary_value`](@ref) and read by the
@@ -241,7 +241,7 @@ function set_surface_state!(field, value)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 A surface quantity in the form Oceananigans' boundary conditions expect. A
 `Field{Center, Center, Nothing}` already *is* that form: Oceananigans defines
@@ -258,7 +258,7 @@ surface_boundary_value(field::AbstractField) = field
 surface_boundary_value(value::Number) = value
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Reject the old `surface_pressure` keyword, which named the reference pressure datum at ``z = 0``
 and is now `base_pressure`.
@@ -279,7 +279,7 @@ reject_renamed_surface_pressure(surface_pressure) =
                          $(surface_pressure) here would not mean what it used to."))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The bottom-face pressure of `ref` as a scalar. Only valid for a reference whose bottom-face
 pressure is horizontally uniform. For a horizontally varying 3D reference or over terrain,
@@ -288,7 +288,7 @@ pressure is horizontally uniform. For a horizontally varying 3D reference or ove
 surface_pressure_value(ref) = @allowscalar ref.surface_pressure[1, 1, 1]
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The horizontally uniform bottom-face temperature of `ref` as a scalar. Stored rather than recovered
 from `surface_pressure` and `surface_density` through a gas law, because which gas constant closes
@@ -340,7 +340,7 @@ function update_reference_surface_state!(ref::ReferenceState, constants)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the hydrostatic reference pressure and density profiles from the
 temperature and moisture mass fraction profiles stored in `ref`.
@@ -377,7 +377,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Evaluate `integrate(nsteps)` with the step count repeatedly doubled from `initial_steps`, returning
 the first refinement whose value changes by less than the relative `tolerance`. Returns `y₀`
@@ -409,7 +409,7 @@ function converge_by_step_doubling(integrate, y₀, z, tolerance, initial_steps,
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Midpoint quadrature of ``∂y/∂z = \\mathrm{dydz}(z)`` from ``0`` to `z` in `nsteps` steps, for an
 integrand that depends on height alone.
@@ -429,7 +429,7 @@ function midpoint_integral(z, y₀, dydz, nsteps)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Explicit midpoint (RK2) integration of ``∂y/∂z = \\mathrm{dydz}(z, y)`` from ``0`` to `z` in
 `nsteps` steps, for an integrand that also depends on the solution.
@@ -457,7 +457,7 @@ converged_hydrostatic_integral(z, Π₀, dΠdz;
                               Π₀, z, tolerance, initial_steps, max_steps)
 
 """
-    numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the dry hydrostatic pressure at height ``z`` by numerically integrating
 ``∂p/∂z = -g ρ`` from ``z=0``, where ``ρ = p/(Rᵈ T)`` and ``T = θ(z) (p/pˢᵗ)^κ``.
@@ -479,7 +479,7 @@ function numerically_integrated_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, c
 end
 
 """
-    numerically_integrated_hydrostatic_density(z, p₀, θ_func, pˢᵗ, constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the dry hydrostatic density at height `z` from the numerically integrated pressure
 and the given potential temperature profile `θ_func(z)`.
@@ -499,7 +499,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Dry hydrostatic pressure at height `z`, reduced from the datum `p₀` at ``z = 0`` along the
 reference potential temperature, with `pˢᵗ` the standard pressure of the Exner function.
@@ -562,7 +562,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Integrate the hydrostatic equation ``∂p/∂z = \\mathrm{dpdz}(z, p)`` from ``z = 0`` to
 height ``z``, repeatedly doubling the number of steps until the pressure at ``z`` changes
@@ -577,7 +577,7 @@ converged_hydrostatic_pressure(z, p₀, dpdz;
                               p₀, z, tolerance, initial_steps, max_steps)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Continuous hydrostatic pressure at physical height `z`, reduced from the datum `p₀` at
 ``z = 0`` along the reference profiles `θᵣ` and `qᵛᵣ`. A dry reference (`qᵛᵣ = nothing`)
@@ -645,7 +645,7 @@ function columnwise_surface_pressure_field(grid, zˢ, p₀, θᵣ, qᵛᵣ, pˢ�
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Height of the bottom face of column `(1, 1)`, the level at which a height-coordinate
 reference state is anchored. Zero for the usual domain that starts at the ground.
@@ -659,7 +659,7 @@ bottom_face_height(grid) = @allowscalar znode(1, 1, 1, grid, Center(), Center(),
 @inline column_surface_pressure(pˢ, i, j) = @inbounds pˢ[i, j, 1]
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Extrapolate pressure from the first cell center to the bottom face using the local
 hydrostatic scale height ``p / (ρg)``. This provides a live surface pressure from the
@@ -668,7 +668,7 @@ model state without assuming where the reference-pressure datum is located.
 @inline surface_pressure_from_cell_center(p, ρ, Δz, g) = p * exp(g * Δz * ρ / (2 * p))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The same extrapolation, reading the pressure and density fields at `(i, j, k)`. Every consumer of
 "the live pressure at the bottom face" — the surface fluxes, the diagnostic hydrostatic pressure,
@@ -697,7 +697,7 @@ end
 reference_horizontal_location(grid) = is_column_ensemble(grid) ? (Center, Center) : (Nothing, Nothing)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `ReferenceState` on `grid`, with [`ThermodynamicConstants`](@ref) `constants`
 that includes the hydrostatic reference pressure and reference density.
@@ -838,7 +838,7 @@ column_parameter(x::Number, FT, arch) = convert(FT, x)
 column_parameter(x::AbstractArray, FT, arch) = on_architecture(arch, FT.(x))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a per-column `ReferenceState` on a column-ensemble grid, where `base_pressure` and/or
 `potential_temperature` are `(Nx, Ny)` arrays supplying one adiabatic profile per column. Scalars are
@@ -1195,7 +1195,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `ExnerReferenceState` by discrete Exner integration on `grid`.
 
@@ -1384,7 +1384,7 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether `ref` stores a single reference column broadcast to every `(i, j)`, as opposed to genuinely
 column-dependent 3D fields. Selects between the single-column and per-column integration kernels on
@@ -1425,7 +1425,7 @@ end
 end
 
 """
-    enforce_discrete_hydrostatic_balance!(pᵣ, ρᵣ, grid, g)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the reference pressure `pᵣ` from the reference density `ρᵣ` by discrete
 upward integration, ensuring that the discrete hydrostatic balance
@@ -1469,7 +1469,7 @@ set_reference_field!(::ZeroField, value) = nothing
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the reference pressure and density profiles by setting the
 reference temperature to `T̄` and moisture mass fractions to `q̄ᵛ`, `q̄ˡ`, `q̄ⁱ`,
@@ -1493,7 +1493,7 @@ function compute_reference_state!(ref::ReferenceState, T̄, q̄ᵛ, q̄ˡ, q̄�
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convenience method that assumes all moisture is vapor (no condensate in the
 reference state). Equivalent to `compute_reference_state!(reference_state, T̄, q̄ᵗ, 0, 0, constants)`.

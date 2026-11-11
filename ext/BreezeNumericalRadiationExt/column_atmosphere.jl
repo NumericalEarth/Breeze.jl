@@ -9,7 +9,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 NumericalRadiation's `PhysicalConstants` in float type `FT` with the values of Breeze's
 `constants::ThermodynamicConstants` (gravity, the dry-air heat capacity, the molar masses and
@@ -29,7 +29,7 @@ function physical_constants(FT, constants::ThermodynamicConstants, gas_model, so
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Column `(i, j)` of `model` as NumericalRadiation's `ColumnAtmosphere` on the host: the layer and
 interface states that the layer pass of `rtm` computes (with the extension pressures of the batch

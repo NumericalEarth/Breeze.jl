@@ -18,7 +18,7 @@ using Oceananigans.Architectures: architecture
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @index, @kernel
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 """
     struct InstantaneousPrecipitation{S}
@@ -45,7 +45,7 @@ struct InstantaneousPrecipitation{S}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `InstantaneousPrecipitation` scheme. `equilibrium` selects the phase
 equilibrium used by the underlying saturation solve (default warm-phase), and `solver`
@@ -96,7 +96,7 @@ AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:liquid}) = model.microph
 AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:ice}) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the bottom precipitation flux for the instantaneous-precipitation scheme.
 
@@ -113,7 +113,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Condense supersaturation, retain the released latent heat, and remove the
 condensate as precipitation — applied directly to the prognostic vapor `ρqᵛ`

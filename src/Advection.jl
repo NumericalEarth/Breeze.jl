@@ -41,7 +41,8 @@ using Oceananigans.Grids: Center
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_discretization
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using DocStringExtensions: TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using Breeze.TimeSteppers: tendencies_feed_first_stage
 
@@ -200,7 +201,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the downward advective mass flux per unit area at the bottom face (`k = 1`)
 for tracer `c` advected by vertical velocity `w` through density field `ρ`, using the
@@ -337,7 +338,7 @@ struct FrozenWeightsWENO{N, FT, TD, W, S} <: AbstractUpwindBiasedAdvectionScheme
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`FrozenWeightsWENO`](@ref) from `weno`, or from the `WENO` built with `FT` and the
 keyword arguments of `WENO`.
@@ -391,7 +392,7 @@ AtmosphereModels.validate_momentum_advection(::FrozenWeightsWENO, grid) =
     _biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme.weno, bias, ψ, scheme.smoothness_stencil)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Refresh the step-start copy of `tracer` that `scheme` computes its smoothness weights from, when the
 tendencies about to be built feed the first stage of an outer step; between the stages of a

@@ -59,7 +59,7 @@ end
 number_of_stages(tableau::MultirateInfinitesimalStepTableau) = length(tableau.d)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the [`MultirateInfinitesimalStepTableau`](@ref) named `name` in float type `FT`.
 Available: `:WickerSkamarock3`, `:MIS2`, `:MIS3C`, `:MIS4`, `:MIS4a`, `:TVDMISA`, `:TVDMISB`, and the

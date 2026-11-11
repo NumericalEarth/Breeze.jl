@@ -63,7 +63,7 @@ function StoredTridiagonalFactors(grid)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Factor the z-direction tridiagonal system of `solver` with coefficient arguments `args` (as `solve!` would receive
 them) into `F`.
@@ -95,7 +95,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve the factored system for the right-hand side `rhs`, writing the solution to `ϕ`. By default the
 solve is in place: `ϕ` holds the right-hand side on entry and the solution on return.
@@ -131,7 +131,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve in place the z-direction tridiagonal system of `solver` with coefficient arguments `args` (as
 `solve!` would receive them): `ϕ` holds the right-hand side on entry and the solution on return.
@@ -188,7 +188,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve in place the z-direction tridiagonal systems of `solver` for the tuple of fields `ϕ`, in one
 kernel that sweeps all of them in each column thread: `ϕ[n]` holds the right-hand side of system `n` on

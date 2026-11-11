@@ -51,7 +51,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fill `surface_temperature` with the air temperature of the bottom-most active cell in
 each column. Without an immersed boundary every column is active down to `k = 1`, so

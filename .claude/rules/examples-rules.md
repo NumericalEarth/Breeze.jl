@@ -24,8 +24,13 @@ paths:
 
 ## Plotting
 
-**CRITICAL**: NEVER use `interior(field, ...)`. Makie plots `Field` objects directly.
-Use `view(field, i, j, k)` to window fields. Works with `@lift` for animations too.
+Makie plots `Field` objects directly, so don't extract data with `interior(field, ...)`. Use
+`view(field, i, j, k)` to window fields; this works with `@lift` for animations too:
+
+```julia
+field_n = @lift field_ts[$n]
+heatmap!(ax, field_n)
+```
 
 - Always add axis labels and colorbars
 - **Color palette**: `:dodgerblue` (vapor), `:lime` (cloud), `:orangered` (rain), `:magenta` (temperature)
@@ -39,4 +44,6 @@ Use `view(field, i, j, k)` to window fields. Works with `@lift` for animations t
 - Invoke `set!` ideally once (it calls `update_state!` internally)
 - Call models `model` and simulations `simulation`
 - Use suffix `ts` for time series, `n` for time-indexed fields
-- **Testing examples**: Reduce resolution and switch to CPU for debugging. **Always revert** before committing.
+- Use `xnode`/`ynode`/`znode` in `discrete_form=true` forcing and boundary conditions; never access
+  grid metrics by hand
+- To debug an example, reduce the resolution and switch to the CPU, then revert both before committing

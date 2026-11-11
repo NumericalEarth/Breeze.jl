@@ -71,7 +71,7 @@ struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC, ST} <: Acousti
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`MultirateInfinitesimalStep`](@ref) time stepper. `coefficients` is a `Symbol`
 naming a set in [`multirate_infinitesimal_step_tableau`](@ref) (default `:MIS2`) or a
@@ -138,7 +138,7 @@ refresh_stage_linearization!(ts::MultirateInfinitesimalStep, substepper, model) 
     ts.relinearize_stages ? prepare_acoustic_cache!(substepper, model) : nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The adaptive-implicit split time step for the MIS stage that the tendencies about to be built will
 drive: its fast interval ``dᵢ Δt``, so the explicit fraction frozen into those tendencies pairs with the
@@ -153,7 +153,7 @@ with weights ``βᵢⱼ/dᵢ``, so the explicit/implicit pairing is exact only f
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether the tendencies the next `update_state!` builds feed the first stage of an outer step, so that
 state an advection scheme freezes for the whole step (see `Breeze.Advection.FrozenWeightsWENO`) is
@@ -333,7 +333,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The indices of `field` that the stage assembly, the stage increments and the outer-step-start
 copy cover: the interior, boundary faces included. No kernel reads the halos of `Uⁿ`, `U⁰`,
@@ -351,7 +351,7 @@ stage_assembly_parameters(::TerrainCompressibleAcousticModel, field) =
     KernelParameters(size(parent(field)), field.data.offsets)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The state the acoustic integration of the current stage starts from, and the scalars update
 from: `Uⁿ` in stage 1, whose start state has no offset, and `U⁰ = Uⁿ + Zᵢ` after that. Both
@@ -369,7 +369,7 @@ offset_weights(α, j, ks) = map(k -> α[k, j], ks)
 accumulator_fields(ts, name, ks, part) = map(k -> getproperty(ts.accumulators[k - 2], part)[name], ks)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Assemble the start state (see `stage_start_state`) and slow forcing `Gⁿ` of MIS stage ``i = `` `ts.stage[]`. On
 entry `Gⁿ` holds the full tendency at ``Yᵢ₋₁``. The continuity forcing keeps the current (fast)
@@ -398,7 +398,7 @@ pre_loop_assembly_names(::PreLoopScalarTendencies, model) = keys(prognostic_fiel
 pre_loop_assembly_names(::PostLoopScalarTendencies, model) = acoustic_prognostic_names(model)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 With [`PostLoopScalarTendencies`](@ref), assemble the moisture and tracer stage forcing after the
 acoustic loop, from the tendencies just built with the loop's time-averaged transport velocity.
@@ -477,7 +477,7 @@ end
 const fold_stage_increments = Ref(true)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Where the assembly of a stage finds the increment ``ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ`` of prognostic `name`.
 
@@ -500,7 +500,7 @@ function stage_increment_source(model, name)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fold the increment ``ΔYᵢ = Yᵢ - Uⁿ`` of the stage just completed into the accumulators of the
 stages after it (after stage 1, keep it raw for stage 2), for the prognostics whose increment the
@@ -545,7 +545,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Step forward `model` one time step `Δt` with a multirate infinitesimal step method and
 linearized acoustic substepping.

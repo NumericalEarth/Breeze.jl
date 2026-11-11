@@ -16,7 +16,7 @@ abstract type AbstractReferencePressureState{FT} <: AbstractThermodynamicState{F
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the air pressure of the thermodynamic state `𝒰`, in Pa.
 
@@ -95,7 +95,7 @@ Base.summary(::DryExponent) = "DryExponent()"
 Base.show(io::IO, κ̂::AbstractExnerExponent) = print(io, summary(κ̂))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the value ``κ`` of the Exner exponent for moisture mass fractions `q`:
 ``κ̂ = R̂ / ĉᵖ`` for [`VaporEquivalentExponent`](@ref) and ``κᵈ = Rᵈ / cᵖᵈ`` for [`DryExponent`](@ref).
@@ -190,7 +190,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute temperature from liquid-ice potential temperature and pressure,
 ``T = (ĉᵖ Π θˡⁱ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ) / cᵖᵐ``.
@@ -225,7 +225,7 @@ end
     temperature_from_potential_temperature(θ, p, 1e5, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute liquid-ice potential temperature from temperature and pressure,
 ``θˡⁱ = (cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ) / (ĉᵖ Π)``.

@@ -233,7 +233,7 @@ depend on location). With them the fills could stay explicit at one or two launc
 struct PeriodicHaloMirror{X, Y} end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The [`PeriodicHaloMirror`](@ref) the substep kernels of `model` use, or `nothing` when the loop
 fills halos with `fill_halo_regions!` instead.
@@ -286,7 +286,7 @@ fill_substep_halos!(::PeriodicHaloMirror, fields) = nothing
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `AcousticSubstepper`. The perturbation face fields ``(ρu)′, (ρv)′, (ρw)′`` and the
 scalar-transport velocities use topology-derived BCs (periodic wrap / impenetrability), **not** the
@@ -392,7 +392,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the background quantities used by the substepper as the first
 linearization point of an outer step. Subsequent RK stages call
@@ -411,7 +411,7 @@ function freeze_linearization_state!(substepper::AcousticSubstepper, model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Seed the time-averaged transport velocity with the outer-step-start velocities: stage 1 has no
 prior acoustic loop in this outer step to average over. Called at outer-step start by
@@ -590,7 +590,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Stage-start cache preparation. Refreshes the cached linearization
 quantities (θᴸ, Cᴸ) to the **stage-entry state** ``Uᴸ_\\mathrm{stage}``
@@ -608,7 +608,7 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the number of acoustic substeps ``N`` from the horizontal
 acoustic CFL:
@@ -640,7 +640,7 @@ compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_cfl) =
     compute_acoustic_substeps(minimum_horizontal_spacing(grid), Δt, thermodynamic_constants, acoustic_cfl)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The smallest horizontal spacing of `grid`, in the grid's float type: the length the acoustic
 Courant number of [`compute_acoustic_substeps`](@ref) is measured against. A `Flat` direction
@@ -798,7 +798,7 @@ end
 materialize_sponge(grid, ::Nothing) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build the grid-dependent form of `sponge` by evaluating its ramp into a 1D profile of the damping
 rate ``γ(z) = \\text{rate} × \\text{ramp}(z)`` over z-faces. Called by the
@@ -1234,7 +1234,7 @@ end
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Run the `Nτ` acoustic substeps of one RK3 stage by calling [`acoustic_substep!`](@ref) for each.
 
@@ -1252,7 +1252,7 @@ function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the divergence damping of the last acoustic substep of a stage, when it is deferred to the
 explicit step of the substep after (`deferred_divergence_damping`), then fill the halos of ``(ρu)′``
@@ -1835,7 +1835,7 @@ function enforce_wall_impenetrability!(substepper, model, grid, arch)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the implicit half of the IMEX split for the thermodynamic perturbation over one
 substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor between Step B and Step C so
@@ -1886,7 +1886,7 @@ function implicit_step_closures(closure, closure_fields)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance each of `requests` over `Δt` by its vertically implicit terms — closure diffusion, the implicit
 remainder of adaptive implicit vertical advection, implicit boundary fluxes — as
@@ -1953,7 +1953,7 @@ end
      column.top, column.bottom, column.immersed, ϕ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Scratch arrays for the column sweeps of the implicit steps that follow a stage's acoustic loop: the
 implicit solver's own, and the stored factors of the loop's ``(ρw)′`` system, which are free once the
@@ -1965,7 +1965,7 @@ function implicit_step_scratch(substepper, implicit_solver)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Factor the column system of the implicit ``(ρw)′`` update for the stage about to run. Its coefficients
 depend on the linearization state ``θᴸ``, ``Cᴸ``, on the implicit substep weight `δτᵐ⁺`, and on the
@@ -1984,7 +1984,7 @@ function factor_vertical_solver!(substepper, grid, thermodynamic_constants, δτ
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the acoustic perturbation fields of `substepper` by one substep of size `stage.Δτ`.
 `stage` holds the loop-invariant quantities of the current RK3 stage: the substep size `Δτ`,
@@ -2100,7 +2100,7 @@ function acoustic_substep!(model, substepper, stage, advection)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
@@ -2190,7 +2190,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute into `C` the stage-entry thermodynamic flux divergence in the discretization of the
 substep loop, ``C = -∇·(θᴸ (ρu)ᴸ)`` with ``θᴸ`` the substepper's cached linearization potential

@@ -33,14 +33,14 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Interpolate buoyancy force to z-face location.
 """
 @inline buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...) = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy_forceᶜᶜᶜ, args...)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the product of vertical velocity and buoyancy force at z-face location.
 Used for the buoyancy flux term in the energy equation.
@@ -160,7 +160,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The advective part of [`scalar_tendency`](@ref): the flux divergence ``-∇·(ρ 𝐔ᵗ c)`` of the specific
 scalar `c`, weighted by the total density, by the transport velocity plus the species' sedimentation
@@ -174,7 +174,7 @@ velocity (`microphysical_velocities`), ``𝐔ᵗ = 𝐔 + 𝐔ᵖ``.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The non-advective part of [`scalar_tendency`](@ref), with its signature: closure diffusion, forcing and
 the flux-form correction of prescribed dynamics — everything but [`scalar_advective_tendency`](@ref).
