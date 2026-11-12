@@ -30,8 +30,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
                                     implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
                                     factor_vertical_solver!,
-                                    substep_halo_mirror,
-                                    PeriodicHaloMirror, solve_tridiagonal_columns_in_place!
+                                    solve_tridiagonal_columns_in_place!
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, continuity_density, standard_pressure
@@ -82,7 +81,7 @@ as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float
     fill!(ρv′, 0)
 
     launch!(CPU(), grid, :xyz, _explicit_horizontal_step!,
-            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Cᴸ, Gρu, Gρv, nothing)
+            ρu′, ρv′, grid, model.dynamics, FT(0.5), ρθ′, Cᴸ, Gρu, Gρv)
 
     # −Δτ (∂x pᴸ + ∂x(Cᴸ (ρθ)′)) with Cᴸ = 1
     @test @allowscalar(ρu′[2, 2, 2]) == -0.5 * (2 + 1)
@@ -418,18 +417,20 @@ for arch in arches
         Oceananigans.defaults.FloatType = old_FT
     end
 
-    # The substep fills only the halos its kernels read: none of ρ′ (never read off its own column
-    # except into the discarded boundary rows of the vertical right-hand side), and those of
-    # (ρu)′, (ρv)′ only after it has updated them — on this horizontally periodic grid by writing
-    # the periodic images in the kernels themselves. Poisoned halos must therefore not reach the
-    # interior.
-    @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+    # On a periodic or bounded horizontal grid the substep kernels difference the perturbations with
+    # topology-aware operators, so the substep loop reads no horizontal halo of the fields it writes
+    # (and only the discarded boundary rows of the vertical right-hand side read their vertical halos).
+    # Poisoned halos must therefore not reach the interior.
+    @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT), $(TX), $(Damping)]" for FT in as_test_float_types(arch),
+                                                                                         TX in (Periodic, Bounded),
+                                                                                         Damping in (ThermalDivergenceDamping, DirectDivergenceDamping)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
-        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5), topology=(TX, Periodic, Bounded),
                                x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
 
-        td = SplitExplicitTimeDiscretization(substeps=8, damping=ThermalDivergenceDamping(coefficient=FT(0.1)))
+        damping = Damping(coefficient=FT(0.1))
+        td = SplitExplicitTimeDiscretization(; substeps=8, damping)
         dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
         model = AtmosphereModel(grid; advection=WENO(), dynamics)
         θᵢ(x, y, z) = 300 + 2 * exp(-((x - 4kilometers)^2 + (y - 4kilometers)^2 + (z - 4kilometers)^2) / (1kilometers)^2)
@@ -439,6 +440,8 @@ for arch in arches
         # The perturbations and slow tendencies of the last stage are a valid substep state.
         substepper = model.timestepper.substepper
         for field in (substepper.density_perturbation,
+                      substepper.density_potential_temperature_perturbation,
+                      substepper.previous_density_potential_temperature_perturbation,
                       substepper.momentum_perturbation.u,
                       substepper.momentum_perturbation.v)
             values = copy(interior(field))
@@ -448,9 +451,7 @@ for arch in arches
 
         Δτ = FT(1//2)
         ω = FT(substepper.forward_weight)
-        stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ,
-                 halo_mirror = substep_halo_mirror(model))
-        @test stage.halo_mirror isa PeriodicHaloMirror{true, true}
+        stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ)
         factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
         acoustic_substep_loop!(2, model, substepper, stage, nothing)
 
