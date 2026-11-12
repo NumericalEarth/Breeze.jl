@@ -120,7 +120,8 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
 - `cloud_liquid_fall_velocity`: `StokesRegimeVelType` for cloud droplet terminal velocity
 - `rain_fall_velocity`: `SB2006VelType` or `Chen2022VelTypeRain` for raindrop terminal velocity
 - `aerosol_activation`: `AerosolActivation` parameters for cloud droplet nucleation (or `nothing` to disable)
-- `τⁿᵘᵐ`: Timescale [s] for per-reservoir tendency limiting (default: 10)
+- `τⁿᵘᵐ`: Numerical timescale [s] for relaxing negative values, and for per-reservoir sink
+  limiting of the gridless tendencies (default: 10)
 
 # References
 
@@ -154,9 +155,12 @@ parameters and aerosol activation.
 - `rain_fall_velocity`: Terminal velocity parameters for rain drops
 - `aerosol_activation`: Aerosol activation parameters (default: continental aerosol).
   Set to `nothing` to disable activation (not recommended for physical simulations).
-- `τⁿᵘᵐ`: Timescale [s] for per-reservoir tendency limiting.
-  Must satisfy `τⁿᵘᵐ ≥ Δt` to prevent reservoir overdraw.
-  Default: 10 seconds.
+- `τⁿᵘᵐ`: Numerical timescale [s]. In an `AtmosphereModel`, sinks are budgeted against
+  the state and interval of each time-stepper stage, which keeps every reservoir
+  non-negative for any time step, and `τⁿᵘᵐ` is the timescale over which a value that
+  transport left negative relaxes back to zero. For the gridless tendencies used by parcel
+  models it is also the timescale for per-reservoir sink limiting, which prevents overdraw
+  within a step no longer than `τⁿᵘᵐ`. Default: 10 seconds.
 
 # References
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
@@ -528,11 +532,11 @@ end
 # then grows existing droplets with the remaining supersaturation.
 #####
 
-@inline function wpne2m_tendencies(bμp::WPNE2M, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function wpne2m_tendencies(bμp::WPNE2M, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants,
+                                   budget = TimescaleSinkBudget(bμp.categories.τⁿᵘᵐ))
     categories = bμp.categories
     sb = categories.warm_processes
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
-    τⁿᵘᵐ = categories.τⁿᵘᵐ
 
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
@@ -569,7 +573,7 @@ end
 
     # Rain evaporation (mass and number)
     evap = rain_evaporation_2m(sb, categories.air, q, max(0, qʳ), ρ, ρᵗʰ, Nʳ, T, constants)
-    Sᵉᵛᵃᵖ = max(evap.evap_rate_1, -max(0, qʳ) / τⁿᵘᵐ)
+    Sᵉᵛᵃᵖ = max(evap.evap_rate_1, -sink_rate_cap(budget, qʳ))
     dNʳ_evap = evap.evap_rate_0
 
     # Collection: cloud liquid ↔ rain
@@ -598,94 +602,81 @@ end
 
     # ===== Coupled per-reservoir sink limiting =====
     #
-    # For each reservoir we compute separate limiting factors for mass and number,
-    # then use the MOST RESTRICTIVE (minimum) for both. This ensures microphysics
-    # cannot deplete mass faster than number or vice versa.
-
-    ε = eps(typeof(qᵛ))
+    # Each reservoir's sinks are scaled to what it can give (see `sink_fraction`). Cloud and
+    # rain carry a mass and a number, which are budgeted separately and then coupled (see
+    # `coupled_sink_fractions`), so that microphysics cannot remove more particles than mass.
 
     # Vapor (mass only — no number counterpart, no coupling needed)
     vapor_sink = max(0, Sᶜᵒⁿᵈ_eff) + max(0, Sᵃᶜᵗ)
-    max_vapor_rate = max(0, qᵛ) / τⁿᵘᵐ
-    α_vapor = ifelse(vapor_sink > max_vapor_rate, max_vapor_rate / max(vapor_sink, ε), one(qᵛ))
+    α_vapor = sink_fraction(budget, Val(:ρqᵛ), ρ, qᵛ, vapor_sink)
 
-    # Cloud liquid: coupled mass + number
+    # Cloud liquid: coupled mass + number. The number sinks are density tendencies.
     cloud_mass_sink   = -au.dq_lcl_dt - ac.dq_lcl_dt + max(0, -Sᶜᵒⁿᵈ_eff)
-    max_cloud_mass    = max(0, qᶜˡ) / τⁿᵘᵐ
-    α_cloud_mass      = ifelse(cloud_mass_sink > max_cloud_mass,
-                               max_cloud_mass / max(cloud_mass_sink, ε), one(qᶜˡ))
-
     cloud_number_sink = -au.dN_lcl_dt - dNᶜˡ_sc - ac.dN_lcl_dt - dNᶜˡ_adj_dn
-    max_cloud_number  = max(0, Nᶜˡ) / τⁿᵘᵐ
-    α_cloud_number    = ifelse(cloud_number_sink > max_cloud_number,
-                               max_cloud_number / max(cloud_number_sink, ε), one(Nᶜˡ))
-
-    α_cloud = min(α_cloud_mass, α_cloud_number)
+    α_cloud_mass      = sink_fraction(budget, Val(:ρqᶜˡ), ρ, qᶜˡ, cloud_mass_sink)
+    α_cloud_number    = sink_fraction(budget, Val(:ρnᶜˡ), ρ, nᶜˡ, cloud_number_sink / ρ)
+    α_cloudᵐ, α_cloud, α_cloudⁿ = coupled_sink_fractions(budget, α_cloud_mass, α_cloud_number)
 
     # Rain: coupled mass + number
     rain_mass_sink   = max(0, -Sᵉᵛᵃᵖ)
-    max_rain_mass    = max(0, qʳ) / τⁿᵘᵐ
-    α_rain_mass      = ifelse(rain_mass_sink > max_rain_mass,
-                              max_rain_mass / max(rain_mass_sink, ε), one(qʳ))
-
     rain_number_sink = -dNʳ_sc - dNʳ_evap - dNʳ_adj_dn
-    max_rain_number  = max(0, Nʳ) / τⁿᵘᵐ
-    α_rain_number    = ifelse(rain_number_sink > max_rain_number,
-                              max_rain_number / max(rain_number_sink, ε), one(Nʳ))
-
-    α_rain = min(α_rain_mass, α_rain_number)
+    α_rain_mass      = sink_fraction(budget, Val(:ρqʳ), ρ, qʳ, rain_mass_sink)
+    α_rain_number    = sink_fraction(budget, Val(:ρnʳ), ρ, nʳ, rain_number_sink / ρ)
+    α_rainᵐ, α_rain, α_rainⁿ = coupled_sink_fractions(budget, α_rain_mass, α_rain_number)
 
     # Aerosol (number only — no mass counterpart)
     aerosol_source = max(0, dNᶜˡ_act)
-    max_aerosol_rate = max(0, Nᵃ) / τⁿᵘᵐ
-    α_aerosol = ifelse(aerosol_source > max_aerosol_rate,
-                       max_aerosol_rate / max(aerosol_source, ε), one(Nᵃ))
+    α_aerosol = sink_fraction(budget, Val(:ρnᵃ), ρ, nᵃ, aerosol_source / ρ)
 
     # ===== Apply coupled limiting =====
 
     # Limited process rates
-    Sᶜᵒⁿᵈ_lim    = α_vapor * max(0, Sᶜᵒⁿᵈ_eff) - α_cloud * max(0, -Sᶜᵒⁿᵈ_eff)
+    Sᶜᵒⁿᵈ_lim    = α_vapor * max(0, Sᶜᵒⁿᵈ_eff) - α_cloudᵐ * max(0, -Sᶜᵒⁿᵈ_eff)
     Sᵃᶜᵗ_lim     = α_vapor * Sᵃᶜᵗ
-    Sᵉᵛᵃᵖ_lim    = α_rain * Sᵉᵛᵃᵖ
-    au_dq_lcl_lim = α_cloud * au.dq_lcl_dt
-    ac_dq_lcl_lim = α_cloud * ac.dq_lcl_dt
+    Sᵉᵛᵃᵖ_lim    = α_rainᵐ * Sᵉᵛᵃᵖ
+    au_dq_lcl_lim = α_cloudᵐ * au.dq_lcl_dt
+    ac_dq_lcl_lim = α_cloudᵐ * ac.dq_lcl_dt
 
     # Mass tendencies — conserved: ρqᵛ_phys + ρqᶜˡ_phys + ρqʳ_phys = 0
     ρqᵛ_phys  = ρ * (-(Sᶜᵒⁿᵈ_lim + Sᵃᶜᵗ_lim) - Sᵉᵛᵃᵖ_lim)
     ρqᶜˡ_phys = ρ * (  Sᶜᵒⁿᵈ_lim + Sᵃᶜᵗ_lim  + au_dq_lcl_lim + ac_dq_lcl_lim)
     ρqʳ_phys  = ρ * (                           -au_dq_lcl_lim - ac_dq_lcl_lim + Sᵉᵛᵃᵖ_lim)
 
-    # Cloud number: sinks use SAME α_cloud as mass, sources limited by aerosol budget
-    Σ_dNᶜˡ = (α_cloud * (au.dN_lcl_dt + dNᶜˡ_sc + ac.dN_lcl_dt + dNᶜˡ_adj_dn)
+    # Cloud number: the sinks that accompany a mass transfer are coupled to it, those that
+    # change number alone are limited by the number; sources are limited by the aerosol budget
+    Σ_dNᶜˡ = (α_cloud * (au.dN_lcl_dt + ac.dN_lcl_dt)
+              + α_cloudⁿ * (dNᶜˡ_sc + dNᶜˡ_adj_dn)
               + dNᶜˡ_adj_up
               + α_aerosol * dNᶜˡ_act)
 
-    # Rain number: cloud→rain sources scaled by α_cloud, rain sinks by α_rain
+    # Rain number: cloud→rain sources scaled as the cloud sinks they come from, rain sinks by the rain budget
     Σ_dNʳ = (α_cloud * au.dN_rai_dt + dNʳ_br + dNʳ_adj_up
-             + α_rain * (dNʳ_sc + dNʳ_evap + dNʳ_adj_dn))
+             + α_rain * dNʳ_evap
+             + α_rainⁿ * (dNʳ_sc + dNʳ_adj_dn))
 
     # Aerosol number: activation sink
     dNᵃ_lim = -α_aerosol * dNᶜˡ_act
 
     # ===== Numerical relaxation guards =====
 
-    # Mass: conserved routing v→cl, cl→r, r→v
-    δᵛ  = ifelse(qᵛ  ≥ 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
-    δᶜˡ = ifelse(qᶜˡ ≥ 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ - ρqᶜˡ_phys)
-    δʳ  = ifelse(qʳ  ≥ 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
+    # Mass: conserved by taking each correction from the reservoir's exchange partner. Negative
+    # vapor relaxes by drawing on cloud liquid, negative cloud liquid on rain, negative rain on vapor.
+    δᵛ  = negative_value_relaxation(budget, Val(:ρqᵛ),  ρ, qᵛ,  ρqᵛ_phys)
+    δᶜˡ = negative_value_relaxation(budget, Val(:ρqᶜˡ), ρ, qᶜˡ, ρqᶜˡ_phys)
+    δʳ  = negative_value_relaxation(budget, Val(:ρqʳ),  ρ, qʳ,  ρqʳ_phys)
 
-    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δʳ
-    ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
-    ρqʳ  = ρqʳ_phys  + δʳ  - δᶜˡ
+    gᵛ  = relaxation_donor_fraction(budget, Val(:ρqᵛ),  ρqᵛ_phys,  δʳ)
+    gᶜˡ = relaxation_donor_fraction(budget, Val(:ρqᶜˡ), ρqᶜˡ_phys, δᵛ)
+    gʳ  = relaxation_donor_fraction(budget, Val(:ρqʳ),  ρqʳ_phys,  δᶜˡ)
 
-    # Number: relaxation for negative values
-    Sⁿᵘᵐ_cl   = -Nᶜˡ / τⁿᵘᵐ
-    Sⁿᵘᵐ_rain = -Nʳ  / τⁿᵘᵐ
-    Sⁿᵘᵐ_aer  = -Nᵃ  / τⁿᵘᵐ
+    ρqᵛ  = ρqᵛ_phys  + gᶜˡ * δᵛ  - gᵛ  * δʳ
+    ρqᶜˡ = ρqᶜˡ_phys + gʳ  * δᶜˡ - gᶜˡ * δᵛ
+    ρqʳ  = ρqʳ_phys  + gᵛ  * δʳ  - gʳ  * δᶜˡ
 
-    ρnᶜˡ = ifelse(nᶜˡ ≥ 0, Σ_dNᶜˡ, Sⁿᵘᵐ_cl)
-    ρnʳ  = ifelse(nʳ  ≥ 0, Σ_dNʳ,  Sⁿᵘᵐ_rain)
-    ρnᵃ  = ifelse(nᵃ  ≥ 0, dNᵃ_lim, Sⁿᵘᵐ_aer)
+    # Number: relaxation for negative values. Numbers are not conserved, so nothing is drawn on.
+    ρnᶜˡ = Σ_dNᶜˡ  + negative_value_relaxation(budget, Val(:ρnᶜˡ), ρ, nᶜˡ, Σ_dNᶜˡ)
+    ρnʳ  = Σ_dNʳ   + negative_value_relaxation(budget, Val(:ρnʳ),  ρ, nʳ,  Σ_dNʳ)
+    ρnᵃ  = dNᵃ_lim + negative_value_relaxation(budget, Val(:ρnᵃ),  ρ, nᵃ,  dNᵃ_lim)
 
     return (; ρqᵛ, ρqᶜˡ, ρqʳ, ρnᶜˡ, ρnʳ, ρnᵃ)
 end
@@ -902,48 +893,15 @@ end
 ##### Fused microphysics tendency for WPNE2M
 #####
 #
-# All 6 tendencies are computed together in `wpne2m_tendencies`. We override
-# `compute_microphysical_tendencies!` to compute the bundle once per cell and
-# write to all 6 G fields in a single kernel.
+# All 6 tendencies are computed together in `wpne2m_tendencies`, budgeted against the
+# coming stage, and written to their G fields in a single kernel (see sink_budgets.jl).
 
-@kernel function _compute_wpne2m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqʳ, Gρnᶜˡ, Gρnʳ, Gρnᵃ,
-                                             grid, microphysics, dynamics, formulation,
-                                             constants, specific_prognostic_moisture,
-                                             microphysical_fields, velocities)
-    i, j, k = @index(Global, NTuple)
+@inline fused_tendencies(bμp::WPNE2M, ρ, ℳ, 𝒰, constants, budget) = wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants, budget)
 
-    ρ_field = AtmosphereModels.total_density(dynamics)
-    @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
+# WPNE2M's microphysical_state stores velocities (aerosol activation depends on w),
+# so we need the full grid_microphysical_state which interpolates u, v, w to centers.
+@inline fused_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, velocities) =
+    AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp, μ, ρ, 𝒰, velocities)
 
-    # Reconstruct moisture fractions and thermodynamic state at this cell.
-    q = AtmosphereModels.grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
-    𝒰 = AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
-
-    # WPNE2M's microphysical_state stores velocities (aerosol activation depends on w),
-    # so we need the full grid_microphysical_state which interpolates u, v, w to centers.
-    ℳ = AtmosphereModels.grid_microphysical_state(i, j, k, grid, microphysics, microphysical_fields, ρ, 𝒰, velocities)
-
-    G = wpne2m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
-
-    @inbounds Gρqᵛ[i, j, k]  += G.ρqᵛ
-    @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
-    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
-    @inbounds Gρnᶜˡ[i, j, k] += G.ρnᶜˡ
-    @inbounds Gρnʳ[i, j, k]  += G.ρnʳ
-    @inbounds Gρnᵃ[i, j, k]  += G.ρnᵃ
-end
-
-function AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M, model)
-    grid = model.grid
-    arch = grid.architecture
-    G = model.timestepper.Gⁿ
-
-    launch!(arch, grid, :xyz, _compute_wpne2m_tendencies!,
-            G.ρqᵛ, G.ρqᶜˡ, G.ρqʳ, G.ρnᶜˡ, G.ρnʳ, G.ρnᵃ,
-            grid, microphysics, model.dynamics, model.formulation,
-            model.thermodynamic_constants, AtmosphereModels.specific_prognostic_moisture(model),
-            model.microphysical_fields, model.velocities)
-
-    return nothing
-end
+AtmosphereModels.compute_microphysical_tendencies!(microphysics::WPNE2M, model) =
+    compute_fused_bulk_tendencies!(microphysics, model)

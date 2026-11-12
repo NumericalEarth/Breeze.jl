@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 #####
-##### Patankar-limited sinks of the CloudMicrophysics one-moment schemes: the sink
+##### Patankar-limited sinks of the CloudMicrophysics one- and two-moment schemes: the sink
 ##### budgets, and non-negativity and water conservation in an AtmosphereModel at time steps
 ##### much longer than the numerical timescale τⁿᵘᵐ.
 #####
@@ -16,11 +16,13 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Test
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
-using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics,
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMicrophysics,
                                    one_moment_cloud_microphysics_categories,
+                                   two_moment_cloud_microphysics_categories,
                                    TimescaleSinkBudget, StageSinkBudget, donor_limiter,
                                    sink_fraction, diagnostic_sink_fraction, sink_rate_cap,
-                                   negative_value_relaxation, relaxation_donor_fraction
+                                   negative_value_relaxation, relaxation_donor_fraction,
+                                   coupled_sink_fractions
 
 mixed_phase_non_equilibrium_1M(FT; kw...) =
     OneMomentCloudMicrophysics(FT; cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT)), kw...)
@@ -106,6 +108,11 @@ is_water(name) = startswith(string(name), "ρq")
     @test relaxation_donor_fraction(budget, Val(:ρq), Gᵖ, zero(FT)) == 1
     @test relaxation_donor_fraction(gridless, Val(:ρq), Gᵖ, FT(1e-3)) == 1
 
+    # Mass and number: on the grid each transfer takes the fraction of what it draws on.
+    @test coupled_sink_fractions(budget, FT(0.5), FT(0.25)) == (FT(0.5), FT(0.25), FT(0.25))
+    @test coupled_sink_fractions(budget, FT(0.25), FT(0.5)) == (FT(0.25), FT(0.25), FT(0.5))
+    @test coupled_sink_fractions(gridless, FT(0.5), FT(0.25)) == (FT(0.25), FT(0.25), FT(0.25))
+    @test coupled_sink_fractions(unknown, FT(0.5), FT(0.25)) == (FT(0.25), FT(0.25), FT(0.25))
 end
 
 # A single cell with no transport: a closed column one cell deep, whose precipitation
@@ -169,6 +176,17 @@ end
         @test drift < 100 * eps(FT)
     end
 
+    @testset "Warm-phase non-equilibrium 2M [θ = $θ]" for θ in (285, 300)
+        microphysics = TwoMomentCloudMicrophysics(FT; precipitation_boundary_condition)
+        @test microphysics.categories.τⁿᵘᵐ == 10
+        model = single_cell_model(FT, microphysics)
+        set!(model; θ, qᵗ = 5e-3, qᶜˡ = 1e-3, nᶜˡ = 1e8, qʳ = 1e-3, nʳ = 1e4)
+        minima, drift = minima_and_water_drift!(model, Δt, steps)
+
+        @test keys(minima) == Set((:ρqᵛ, :ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρnᵃ))
+        @test all(minimum ≥ 0 for minimum in values(minima))
+        @test drift < 100 * eps(FT)
+    end
 end
 
 # The moist bubble of the P3 positivity test (multirate_infinitesimal_step.jl): bounded
@@ -192,12 +210,14 @@ function bounded_bubble_model(microphysics)
     return model
 end
 
-@testset "Bulk microphysics stays non-negative under strong-stability-preserving MIS [$scheme]" for scheme in (:one_moment,)
+@testset "Bulk microphysics stays non-negative under strong-stability-preserving MIS [$scheme]" for scheme in (:one_moment, :two_moment)
     # The sinks are budgeted over the stage interval Δt / C, so the result does not rely on
     # τⁿᵘᵐ exceeding it: τⁿᵘᵐ = 1 s is well below Δt / C ≈ 5.6 s.
     FT = Float64
     τⁿᵘᵐ = 1
-    microphysics = mixed_phase_non_equilibrium_1M(FT; categories = one_moment_cloud_microphysics_categories(FT; τⁿᵘᵐ))
+    microphysics = scheme === :one_moment ?
+        mixed_phase_non_equilibrium_1M(FT; categories = one_moment_cloud_microphysics_categories(FT; τⁿᵘᵐ)) :
+        TwoMomentCloudMicrophysics(FT; categories = two_moment_cloud_microphysics_categories(FT; τⁿᵘᵐ = FT(τⁿᵘᵐ)))
     @test isnothing(microphysics.negative_moisture_correction)
 
     model = bounded_bubble_model(microphysics)

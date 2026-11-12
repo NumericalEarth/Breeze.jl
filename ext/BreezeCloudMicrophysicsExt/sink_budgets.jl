@@ -151,6 +151,31 @@ processes leave of the reservoir, so a relaxation never takes its donor below ze
     return ifelse(AM.stage_interval_is_known(stage), φ, one(φ))
 end
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The fractions `(mass, both, number)` applied to the sinks of a reservoir that carries both
+a mass and a number, given the fraction `φᵐ` of its mass sinks and `φⁿ` of its number sinks
+that can be honoured: `mass` scales the mass transfers, `both` the number rates that
+accompany a mass transfer, and `number` the processes that change number alone.
+
+On the grid a transfer is scaled by the fraction of the reservoir it draws on, and a number
+rate that accompanies a mass transfer by the smaller of the two, so it never removes more
+particles than its mass does mass. The gridless budget scales every sink of the reservoir by
+the smaller fraction.
+"""
+@inline function coupled_sink_fractions(budget::TimescaleSinkBudget, φᵐ, φⁿ)
+    φ = min(φᵐ, φⁿ)
+    return (φ, φ, φ)
+end
+
+@inline function coupled_sink_fractions(budget::StageSinkBudget, φᵐ, φⁿ)
+    φᵐ, φⁿ = promote(φᵐ, φⁿ)
+    φ = min(φᵐ, φⁿ)
+    known = AM.stage_interval_is_known(budget.stage)
+    return (ifelse(known, φᵐ, φ), φ, ifelse(known, φⁿ, φ))
+end
+
 #####
 ##### Fused tendencies on the grid
 #####
