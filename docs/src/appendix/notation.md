@@ -200,6 +200,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
+| ``ℂˢᵗ`` | `ℂˢᵗ` | `turbulence_shear_coefficient` | Coefficient of the squared eddy turnover rate ``e / ℓ²`` added to ``S²`` by `TurbulenceAugmentedShear` |
+| ``N²ᵈ, N²ˢ`` | `N²ᵈ`, `N²ˢ` | | Dry and saturated squared buoyancy frequencies, which `SubgridCloudStaticStability` blends with the weight ``w`` |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
 | ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
 | ``h^{bl}``                          | `hᵇˡ`  |                                     | Boundary-layer depth, m; a diagnostic (the height of the capping inversion in convective conditions) |

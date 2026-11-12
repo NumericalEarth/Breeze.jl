@@ -251,8 +251,8 @@ primary mixing length ([`AbstractMixingLength`](@ref): [`GradientLimitedMixingLe
 ([`ConstantStabilityFunctions`](@ref) or
 [`RationalStabilityFunction`](@ref)). ``N²`` is
 diagnosed once per time-step stage at the cell
-interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default, or
-[`DryStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
+interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default,
+[`DryStaticStability`](@ref) or [`SubgridCloudStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
 the tracer `ρe`, which the
 closure adds to the model; it is advected and vertically diffused like every other scalar, and the
 closure applies the local production, buoyancy flux and dissipation.
@@ -261,10 +261,12 @@ The square root of ``e`` is floored at `minimum_tke` wherever it enters a diffus
 scale, and negative ``e`` — which advection can produce — is damped on
 `negative_tke_damping_time_scale` rather than clipped. The three `maximum_*` diffusivities clip
 the diffusivities, `Inf` by default. The Richardson number of
-[`RationalStabilityFunction`](@ref) is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, with ``S²ᵐⁱⁿ`` the
-`minimum_shear_squared`, so that it is finite and continuous where the shear vanishes.
+[`RationalStabilityFunction`](@ref) is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, with the squared shear ``S²``
+and its floor ``S²ᵐⁱⁿ`` from the `shear` component: [`GridMeanShear`](@ref) by default, the shear of
+the resolved wind, or [`TurbulenceAugmentedShear`](@ref), which adds the turnover rate of the
+subgrid eddies. The floor keeps ``Ri`` finite and continuous where the shear vanishes.
 """
-struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
+struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
     mixing_length :: ML                   # the primary mixing length ℓ
     stability_functions :: SF             # Sᵘ, Sᶜ, Sᵉ, Sᴰ
     static_stability :: SS                # how N² is diagnosed
@@ -272,7 +274,7 @@ struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT} <: AbstractScalarDiffusivit
     maximum_tracer_diffusivity :: FT      # upper bound on Kᶜ, m² s⁻¹
     maximum_tke_diffusivity :: FT         # upper bound on Kᵉ, m² s⁻¹
     minimum_tke :: FT                     # floor on e inside √e, m² s⁻²
-    minimum_shear_squared :: FT           # shear floor S²ᵐⁱⁿ in Ri = N² / (S² + S²ᵐⁱⁿ), s⁻²
+    shear :: SH                           # the squared shear S² and its floor S²ᵐⁱⁿ in Ri = N² / (S² + S²ᵐⁱⁿ)
     negative_tke_damping_time_scale :: FT # time scale on which negative e is damped, s
 end
 
@@ -286,7 +288,7 @@ function Adapt.adapt_structure(to, closure::TKEBasedTurbulenceClosure{TD}) where
                                          adapt(to, closure.maximum_tracer_diffusivity),
                                          adapt(to, closure.maximum_tke_diffusivity),
                                          adapt(to, closure.minimum_tke),
-                                         adapt(to, closure.minimum_shear_squared),
+                                         adapt(to, closure.shear),
                                          adapt(to, closure.negative_tke_damping_time_scale))
 end
 
@@ -296,13 +298,13 @@ const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureAr
 function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::SF, static_stability::SS,
                                        maximum_viscosity::FT, maximum_tracer_diffusivity::FT,
                                        maximum_tke_diffusivity::FT, minimum_tke::FT,
-                                       minimum_shear_squared::FT,
-                                       negative_tke_damping_time_scale::FT) where {TD, ML, SF, SS, FT}
-    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT}(mixing_length, stability_functions, static_stability,
-                                                         maximum_viscosity, maximum_tracer_diffusivity,
-                                                         maximum_tke_diffusivity, minimum_tke,
-                                                         minimum_shear_squared,
-                                                         negative_tke_damping_time_scale)
+                                       shear::SH,
+                                       negative_tke_damping_time_scale::FT) where {TD, ML, SF, SS, FT, SH}
+    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH}(mixing_length, stability_functions, static_stability,
+                                                             maximum_viscosity, maximum_tracer_diffusivity,
+                                                             maximum_tke_diffusivity, minimum_tke,
+                                                             shear,
+                                                             negative_tke_damping_time_scale)
 end
 
 """
@@ -314,21 +316,23 @@ stability and numerical parameters. The defaults are calibrated to the Shen et a
 rational stability functions, wall coefficient 0.7877315198717979 and interior slope
 1.777871783491512.
 
-`minimum_shear_squared` (default `1e-10` s⁻²) is the floor ``S²ᵐⁱⁿ > 0`` added to the squared
-shear in the Richardson number of [`RationalStabilityFunction`](@ref),
-``Ri = N² / (S² + S²ᵐⁱⁿ)``. It makes the stability functions continuous where the shear vanishes,
+`shear` is the squared shear ``S²`` of the Richardson number of [`RationalStabilityFunction`](@ref),
+``Ri = N² / (S² + S²ᵐⁱⁿ)``: [`GridMeanShear`](@ref) (the default) or
+[`TurbulenceAugmentedShear`](@ref). It carries the floor ``S²ᵐⁱⁿ > 0`` (default `1e-10` s⁻²) as
+`shear.minimum_shear_squared`; the keyword `minimum_shear_squared`, if given, replaces the floor
+of `shear`. The floor makes the stability functions continuous where the shear vanishes,
 as in uniform or absent wind, where ``N² / S²`` would jump between the stable and unstable limits
 with the sign of a rounding-level ``N²``. There the stability functions pass from neutral to their
 limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``; where ``S² ≫ S²ᵐⁱⁿ`` they are unchanged to relative order
-``S²ᵐⁱⁿ / S²``. It does not enter [`ConstantStabilityFunctions`](@ref).
+``S²ᵐⁱⁿ / S²``. The shear does not enter [`ConstantStabilityFunctions`](@ref).
 
 ```jldoctest
 using Breeze
 
-TKEBasedTurbulenceClosure().minimum_shear_squared
+TKEBasedTurbulenceClosure(minimum_shear_squared=1e-12).shear
 
 # output
-1.0e-10
+GridMeanShear(minimum_shear_squared = 1.0e-12)
 ```
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
@@ -340,14 +344,14 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    maximum_tracer_diffusivity = Inf,
                                    maximum_tke_diffusivity = Inf,
                                    minimum_tke = 1e-6,
-                                   minimum_shear_squared = 1e-10,
+                                   shear = GridMeanShear(),
+                                   minimum_shear_squared = nothing,
                                    # CATKE's value; atmospheric turbulence evolves faster than the
                                    # ocean's, so a shorter time scale may be more appropriate here.
                                    negative_tke_damping_time_scale = 1minute) where TD
 
-    minimum_shear_squared > 0 ||
-        throw(ArgumentError("minimum_shear_squared must be positive, so that the Richardson number " *
-                            "N² / (S² + minimum_shear_squared) is finite, but it is $minimum_shear_squared"))
+    shear = with_minimum_shear_squared(shear, minimum_shear_squared)
+    validate_shear(shear)
 
     mixing_length = convert_eltype(FT, mixing_length)
     stability_functions = convert_eltype(FT, stability_functions)
@@ -360,7 +364,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                          convert(FT, maximum_tracer_diffusivity),
                                          convert(FT, maximum_tke_diffusivity),
                                          convert(FT, minimum_tke),
-                                         convert(FT, minimum_shear_squared),
+                                         convert_eltype(FT, shear),
                                          convert(FT, negative_tke_damping_time_scale))
 end
 
@@ -371,6 +375,7 @@ TKEBasedTurbulenceClosure(FT::DataType; kw...) =
     ConstantStabilityFunctions{FT}(convert(FT, sf.ℂᵘ), convert(FT, sf.ℂᶜ), convert(FT, sf.ℂᵉ), convert(FT, sf.ℂᴰ))
 @inline convert_eltype(::Type{FT}, ss::DryStaticStability) where FT = ss
 @inline convert_eltype(::Type{FT}, ss::MoistStaticStability) where FT = ss
+@inline convert_eltype(::Type{FT}, ss::SubgridCloudStaticStability) where FT = ss
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -508,8 +513,8 @@ end
 
 #####
 ##### Stability functions: dispatch on the stability-function type. The arguments beyond the
-##### closure — the velocities and the stored N² — are what a Richardson-number-dependent variant
-##### needs.
+##### closure — the velocities, the stored N², the specific TKE and the stored mixing length — are
+##### what a Richardson-number-dependent variant needs.
 #####
 
 const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ConstantStabilityFunctions}
@@ -699,10 +704,10 @@ end
 #####
 
 # The static stability at the faces, diagnosed once per stage and read by everything downstream
-@kernel function _compute_tke_static_stability!(N², grid, closure, tracers, buoyancy)
+@kernel function _compute_tke_static_stability!(N², grid, closure, tracers, buoyancy, closure_fields)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
-    @inbounds N²[i, j, k] = static_stabilityᶜᶜᶠ(i, j, k, grid, closure_ij.static_stability, buoyancy, tracers)
+    @inbounds N²[i, j, k] = static_stabilityᶜᶜᶠ(i, j, k, grid, closure_ij.static_stability, buoyancy, tracers, closure_fields)
 end
 
 @kernel function _compute_tke_closure_fields!(closure_fields, grid, closure, velocities, tracers)
@@ -715,12 +720,13 @@ end
     # The one diffusivity the closure forms, ℓ √e — with the stored mixing length and √e floored
     # at the minimum TKE and reconstructed from the centers to the face — which the stability
     # functions scale into Kᵘ, Kᶜ and Kᵉ.
-    ℓ = @inbounds closure_fields.ℓᵐ[i, j, k]
+    ℓᵐ = closure_fields.ℓᵐ
+    ℓ = @inbounds ℓᵐ[i, j, k]
     K = ℓ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
 
-    Sᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N²)
-    Sᶜ = tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N²)
-    Sᵉ = tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N²)
+    Sᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
+    Sᶜ = tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
+    Sᵉ = tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
 
     Kᵘ = min(Sᵘ * K, closure_ij.maximum_viscosity)
     Kᶜ = min(Sᶜ * K, closure_ij.maximum_tracer_diffusivity)
@@ -760,7 +766,7 @@ closure's TKE budget with a large-eddy simulation's. Negative ``e`` dissipates n
 @inline function dissipationᶜᶜᶜ(i, j, k, grid, closure, e, velocities, closure_fields)
     eᵢ = max(0, @inbounds e[i, j, k])
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
-    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N²)
+    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
     return Sᴰ * eᵢ * sqrt(eᵢ) / ℓ
 end
 
@@ -779,7 +785,7 @@ stays positive for any time step.
     eᵐⁱⁿ = closure.minimum_tke
     eᵢ = @inbounds e[i, j, k]
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
-    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N²)
+    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
 
     # `minimum_tke` floors only the turbulent velocity of the mixing length above; the dissipation
     # rate follows √e all the way down, so that ε ∝ e^{3/2} below the floor too (as in CATKE).
@@ -825,7 +831,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
 
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
-            closure_fields.N², grid, closure, tracers, buoyancy)
+            closure_fields.N², grid, closure, tracers, buoyancy, closure_fields)
 
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
 
@@ -914,7 +920,9 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
               "├── maximum_tracer_diffusivity: ", prettysummary(closure.maximum_tracer_diffusivity), '\n',
               "├── maximum_tke_diffusivity: ", prettysummary(closure.maximum_tke_diffusivity), '\n',
               "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
-              "├── minimum_shear_squared: ", prettysummary(closure.minimum_shear_squared), '\n',
+              "├── shear: ")
+    show(io, closure.shear)
+    print(io, '\n',
               "└── negative_tke_damping_time_scale: ", prettysummary(closure.negative_tke_damping_time_scale))
 end
 

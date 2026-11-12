@@ -95,11 +95,23 @@ using the local moist density and excludes precipitation, while the loading term
 condensate. ``N²_s`` nearly vanishes
 on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 
+[`SubgridCloudStaticStability`](@ref) replaces the switch at grid-mean saturation with a blend,
+``N² = (1 - w) N²_d + w N²_s``, the moist-buoyancy weighting of
+[Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993). The weight ``w`` comes from an
+external subgrid cloud model, which extends `Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ`;
+Breeze holds no model of it. A weight that reads the mixing length reads the stored
+`closure_fields.ℓᵐ` of the previous update, because ``N²`` is diagnosed before ``ℓ``.
+
 ### Stability functions
 
 The default is [`RationalStabilityFunction`](@ref),
 ``S(Ri) = C⁰ + (C^± - C⁰) x / (1 + x)`` with ``x = |Ri| / Ri^±``, which is continuous but kinked at
-neutral. The Richardson number is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, with the closure's
+neutral. The Richardson number is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, where the squared shear ``S²`` and
+its floor come from the closure's `shear`. [`GridMeanShear`](@ref), the default, is the shear of
+the resolved wind, ``S² = (∂_z u)² + (∂_z v)²``. [`TurbulenceAugmentedShear`](@ref) adds the squared
+turnover rate of the subgrid eddies, ``S² + ℂˢᵗ e / ℓ²``, with ``e`` floored as in the
+diffusivities and ``ℓ`` the stored mixing length, so that a turbulent layer without resolved shear
+has ``Ri ∼ N² ℓ² / (ℂˢᵗ e)``; ``ℂˢᵗ = 0`` recovers the grid-mean shear exactly. Both carry the
 `minimum_shear_squared` ``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` by default. The floor keeps ``Ri`` finite and
 continuous where the shear vanishes, as in uniform or absent wind: there ``N² / S²`` would jump
 between the stable and unstable limits with the sign of a rounding-level ``N²``. With the floor the
