@@ -35,7 +35,7 @@ using Oceananigans.Grids: znode
 using Oceananigans.Operators: Δzᶜᶜᶠ
 
 using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
-                                      third_moment, limit_third_moment, assumed_pdf,
+                                      third_moment, limit_third_moment, assumed_pdf, buoyancy_flux_coefficients,
                                       clip_below, shoc_saturation_thermodynamics,
                                       rate_norm_factor
 
@@ -184,13 +184,19 @@ positive part enters the stage tendency; the negative part enters the implicit l
 [`ModelThermodynamicsSaturation`](@ref).
 
 With `stability = true` the static stability seen by the mixing length and by the stability
-functions becomes, at the faces where `Kᶜ` is positive, `N²ᵇ = -B / Kᶜ`, the stratification
-consistent with the cloud buoyancy flux; the diffusivities are then formed again from it.
+functions becomes, at the interior faces,
+
+    N²ᵇ = (g / θ) (∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ,    Bˡ = (g / θ) A_c w′qˡ′,
+
+the stratification of the conserved variables less the part carried by the subgrid liquid flux,
+so that `-Kᶜ N²ᵇ` is the buoyancy flux of the distribution (with `g / θ` of the level in place of
+`g / θ₀`); `Bˡ / Kᶜ` is left out where `Kᶜ` vanishes. In clear air it is the stratification of
+θᵥ. The mixing length and the diffusivities are then formed again from it.
 
 $(TYPEDFIELDS)
 """
 struct CloudBuoyancyFlux
-    "Whether the stability of the diffusivities and the mixing length is `-B / Kᶜ`"
+    "Whether the stability of the diffusivities and the mixing length is that of the cloud buoyancy flux"
     stability :: Bool
 end
 
@@ -274,7 +280,8 @@ $(TYPEDEF)
 The fields of a [`SubgridCloudFormulation`](@ref) in the closure fields of
 [`TKEBasedTurbulenceClosure`](@ref): the moments at faces (`τ`, `θˡ′²`, `qᵗ′²`, `θˡ′qᵗ′`,
 `w′θˡ′`, `w′qᵗ′`, `w′³`) and the cloud at centers (`w′²`, cloud fraction `C`, liquid `qˡ`, its
-variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, and the buoyancy production `B`).
+variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, the buoyancy production `B` and its part
+`Bˡ = (g / θ₀) A_c w′qˡ′` carried by the liquid flux).
 """
 struct SubgridCloudFields{BF, CO, M, C}
     buoyancy_flux :: BF
@@ -292,7 +299,8 @@ function build_subgrid_cloud_fields(grid, f::SubgridCloudFormulation)
     moments = (τ = ZFaceField(grid), θˡ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡ′qᵗ′ = ZFaceField(grid),
                w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid), w′³ = ZFaceField(grid))
     cloud = (w′² = CenterField(grid), C = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
-             w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), B = CenterField(grid))
+             w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), B = CenterField(grid), Bˡ = CenterField(grid),
+             gθ = CenterField(grid), gA = CenterField(grid))
     return SubgridCloudFields(f.buoyancy_flux, f.cloud, moments, cloud)
 end
 
@@ -451,7 +459,13 @@ end
             cl.qˡ′²[i, j, k] = qˡ′²
             cl.w′qˡ′[i, j, k] = w′qˡ′
             cl.w′θᵥ′[i, j, k] = w′θᵥ′
-            cl.B[i, j, k] = cloud_buoyancy_parameter(d.saturation, c, thermodynamics, θᵏ) * w′θᵥ′
+            g_θ₀ = cloud_buoyancy_parameter(d.saturation, c, thermodynamics, θᵏ)
+            A_q, A_c = buoyancy_flux_coefficients(d.saturation, thermodynamics, c, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
+            cl.B[i, j, k] = g_θ₀ * w′θᵥ′
+            # The stability uses the buoyancy parameter of the level, g / θˡⁱ
+            cl.gθ[i, j, k] = c.ggr / θᵏ
+            cl.gA[i, j, k] = c.ggr / θᵏ * A_q
+            cl.Bˡ[i, j, k] = c.ggr / θᵏ * A_c * w′qˡ′
         end
     end
 
@@ -486,21 +500,34 @@ end
 
 cloud_buoyancy_stability!(buoyancy_flux, args...) = nothing
 
-# N²ᵇ = -B / Kᶜ at the faces, then the mixing length and the diffusivities again from it
-@kernel function _cloud_buoyancy_stability!(N², grid, B, Kᶜ)
+# N²ᵇ = (g / θ)(∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces, then the mixing length and the
+# diffusivities again from it
+@kernel function _cloud_buoyancy_stability!(N², grid, θ, qᵗ, gθ, gA, Bˡ, Kᶜ)
     i, j, k = @index(Global, NTuple)
     FT = eltype(grid)
-    Bᶠ = ℑzᵃᵃᶠ(i, j, k, grid, B)
-    Kᶜᵢ = @inbounds Kᶜ[i, j, k]
-    resolved = (Kᶜᵢ > sqrt(floatmin(FT))) & (k > 1)
-    @inbounds N²[i, j, k] = ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜᵢ, one(FT)), N²[i, j, k])
+    @inbounds begin
+        interior_face = k > 1
+        km = max(k - 1, 1)
+        Δz = Δzᶜᶜᶠ(i, j, k, grid)
+        ∂zθ = (θ[i, j, k] - θ[i, j, km]) / Δz
+        ∂zq = (qᵗ[i, j, k] - qᵗ[i, j, km]) / Δz
+        gθᶠ = (gθ[i, j, k] + gθ[i, j, km]) / 2
+        gAᶠ = (gA[i, j, k] + gA[i, j, km]) / 2
+        Bᶠ = (Bˡ[i, j, k] + Bˡ[i, j, km]) / 2
+        Kᶜᵢ = Kᶜ[i, j, k]
+        resolved = Kᶜᵢ > sqrt(floatmin(FT))
+        N²ᵇ = gθᶠ * ∂zθ + gAᶠ * ∂zq - ifelse(resolved, Bᶠ / ifelse(resolved, Kᶜᵢ, one(FT)), zero(FT))
+        N²[i, j, k] = ifelse(interior_face, N²ᵇ, N²[i, j, k])
+    end
 end
 
 function cloud_buoyancy_stability!(buoyancy_flux::CloudBuoyancyFlux, fields, closure_fields, closure, model, tracers, parameters)
     buoyancy_flux.stability || return nothing
     grid = model.grid
     arch = grid.architecture
-    launch!(arch, grid, parameters, _cloud_buoyancy_stability!, closure_fields.N², grid, fields.cloud.B, closure_fields.Kᶜ)
+    s = distribution_state(model, nothing)
+    cl = fields.cloud
+    launch!(arch, grid, parameters, _cloud_buoyancy_stability!, closure_fields.N², grid, s.θ, s.qᵗ, cl.gθ, cl.gA, cl.Bˡ, closure_fields.Kᶜ)
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
     launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
     return nothing

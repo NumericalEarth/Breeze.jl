@@ -175,14 +175,26 @@ end
     @test all(column(model.tracers.ρe) .≥ 0)
     @test all(isfinite, column(model.tracers.ρe))
 
-    # Optionally the stability of the diffusivities is -B / Kᶜ
+    # Optionally the stability of the diffusivities is that of the cloud buoyancy flux:
+    # (g / θ)(∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ, with Bˡ the part carried by the liquid flux
     model = tke_p3_column(with_buoyancy_flux(; stability = true))
     update_state!(model)
     cf = model.closure_fields
-    B = column(cf.subgrid_cloud.cloud.B)
-    Kᶜ = column(cf.Kᶜ)
+    cl = cf.subgrid_cloud.cloud
+    ρ = column(model.dynamics.reference_state.density)
+    θ = column(model.formulation.potential_temperature_density) ./ ρ
+    qᵗ = (column(model.moisture_density) .+ column(model.microphysical_fields.ρqᶜˡ)) ./ ρ
+    zc = znodes(model.grid, Center())
+    # Kᶜ of the first pass, from which Bˡ / Kᶜ was formed, is overwritten by the second; check where Bˡ = 0
+    gθ, gA, Bˡ = column(cl.gθ), column(cl.gA), column(cl.Bˡ)
+    for k in 2:size(model.grid, 3)
+        Bˡ[k] == 0 && Bˡ[k-1] == 0 || continue
+        N²ᵇ = (gθ[k] + gθ[k-1]) / 2 * (θ[k] - θ[k-1]) / (zc[k] - zc[k-1]) + (gA[k] + gA[k-1]) / 2 * (qᵗ[k] - qᵗ[k-1]) / (zc[k] - zc[k-1])
+        @test column(cf.N²)[k] ≈ N²ᵇ rtol=1e-12
+    end
+    @test any(!=(0), Bˡ)
     @test all(isfinite, column(cf.N²))
-    @test all(isfinite, Kᶜ)
+    @test all(isfinite, column(cf.Kᶜ))
     for _ in 1:4
         time_step!(model, 30)
     end
