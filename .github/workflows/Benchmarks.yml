@@ -85,17 +85,20 @@ jobs:
             kernelad_block_size: '256'
             # TEMPORARY: dump every MLIR pass pipeline to check the launch shapes of the compiled kernels
             dump_mlir: 'mlir_dumps'
-            timeout: 60
+            # The compile of the checkpointed program, with about twice the jit regions of the
+            # 704 s one without, and a first execution that took 30 minutes before failing
+            # (run 42909083305) need more than the 60 minutes the entry had
+            timeout: 120
             # TEMPORARY: the AD job's window is 64 steps with binomial checkpointing (2 and 8).
-            # Under kernel AD each kernel launch of the loop body becomes its own jit region;
-            # 8 steps without checkpointing keep the whole tape on the GPU and the region count
-            # at 1378 (1606 GPU modules). lower-jit was killed at 29 GiB on them because each
-            # call's submodule carried every module's constructor and fat binary
-            # (EnzymeAD/Enzyme-JAX#3908 fixes that; runs 42863400682 to 42890370661 and
+            # Under kernel AD each kernel launch of the loop body becomes its own jit region.
+            # Checkpointing was off here while lower-jit copied every module's constructor and
+            # fat binary into each call, which killed the compile at 29 GiB (fixed by
+            # EnzymeAD/Enzyme-JAX#3908; runs 42863400682 to 42890370661 and
             # benchmarking/kernelad_memprobe.jl, which `probe_run: <run id>` on this entry runs
-            # on that run's dump instead of the benchmark). Restore the AD job's window once
-            # the fix is in and the compile fits.
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 8 --checkpoints none --kernels kernelad'
+            # on that run's dump instead of the benchmark). With the fix, 8 steps without
+            # checkpointing compiled, but their tape needed 44 GiB of the L4's 24 GB
+            # (run 42909083305), so Binomial(2) is back. Restore the AD job's window once this fits.
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 8 --checkpoints 2 --checkpointing_mode binomial --kernels kernelad'
     defaults:
       run:
         shell: bash
