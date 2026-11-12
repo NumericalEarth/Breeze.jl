@@ -641,9 +641,17 @@ end
 
 # Substeps for a stage covering Δt_stage = β·Δt: ⌈β·N⌉ for a fixed full-step count N,
 # or the acoustic-CFL count for the stage interval when adaptive (substeps = nothing).
+#
+# When adaptive, a stage covering more than half of Δt takes at least two substeps. A single
+# acoustic substep over most of the outer step is unstable even below the acoustic CFL target:
+# SSPMIS43 (first stage 0.56 Δt) on a 5 km tropical-cyclone grid grew a near-surface mode and
+# failed for every Δt between 11 and 12.5 s, where its first stage got one substep of 6.2–7 s,
+# while Δt ≥ 13 s, with two substeps, ran 6 h. Short stages keep the CFL count.
+@inline minimum_stage_substeps(β) = ifelse(β > 1//2, 2, 1)
+
 @inline _stage_substeps(N::Integer, β, Δt_stage, Δx_min, constants, acoustic_cfl) = max(1, ceil(Int, β * N))
 @inline _stage_substeps(::Nothing, β, Δt_stage, Δx_min, constants, acoustic_cfl) =
-    compute_acoustic_substeps(Δx_min, Δt_stage, constants, acoustic_cfl)
+    max(minimum_stage_substeps(β), compute_acoustic_substeps(Δx_min, Δt_stage, constants, acoustic_cfl))
 
 # Uniform full-step count N rounded up to a multiple of 6 so β·N is integral (ConstantSubstepSize,
 # MonolithicFirstStage stages 2–3).
