@@ -91,13 +91,20 @@ no cloud liquid of its own and owns precipitation only. Autoconversion and accre
 in-cloud liquid, the cloud liquid over the cloud fraction, and are weighted by the cloud
 fraction. A closure without subgrid cloud supplies a cloud fraction of zero.
 
+With `microphysics_aligns_vapor_excess = false` (the default) the cloud liquid is the closure's
+alone: a microphysics that would move cloud liquid toward its own saturation before its rates
+(the alignment of P3 to its prognostic vapor excess, `PrognosticVaporExcess`) does not, so that
+water condenses once, in the closure. `true` keeps that alignment, which condenses the vapor
+excess of the cell over the saturation of the microphysics on top of the liquid of the closure;
+it is the coupling before this option existed.
+
 $(TYPEDFIELDS)
 
 ```jldoctest
 julia> using Breeze.AtmosphereModels: ClosureCloud
 
 julia> ClosureCloud(Float64)
-ClosureCloud{Float64}(1.0, 0.01)
+ClosureCloud{Float64}(1.0, 0.01, false)
 ```
 """
 struct ClosureCloud{FT} <: AbstractSubgridCorrelation
@@ -105,12 +112,15 @@ struct ClosureCloud{FT} <: AbstractSubgridCorrelation
     autoconversion_enhancement :: FT
     "Floor on the cloud fraction used to form in-cloud means"
     minimum_cloud_fraction :: FT
+    "Whether the microphysics also condenses toward its own saturation (see above)"
+    microphysics_aligns_vapor_excess :: Bool
 end
 
 # Walk the fields so that traced numbers (`Reactant.to_rarray`) are converted for the kernel.
 Adapt.adapt_structure(to, correlation::ClosureCloud) =
     ClosureCloud(adapt(to, correlation.autoconversion_enhancement),
-                 adapt(to, correlation.minimum_cloud_fraction))
+                 adapt(to, correlation.minimum_cloud_fraction),
+                 correlation.microphysics_aligns_vapor_excess)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -121,8 +131,10 @@ and an autoconversion rate ∝ qᵖ gives Γ(ν + p) / (Γ(ν) νᵖ), about 3.0
 """
 function ClosureCloud(FT::DataType = Oceananigans.defaults.FloatType;
                       autoconversion_enhancement = 1,
-                      minimum_cloud_fraction = 0.01)
-    return ClosureCloud(convert(FT, autoconversion_enhancement), convert(FT, minimum_cloud_fraction))
+                      minimum_cloud_fraction = 0.01,
+                      microphysics_aligns_vapor_excess = false)
+    return ClosureCloud(convert(FT, autoconversion_enhancement), convert(FT, minimum_cloud_fraction),
+                        microphysics_aligns_vapor_excess)
 end
 
 """

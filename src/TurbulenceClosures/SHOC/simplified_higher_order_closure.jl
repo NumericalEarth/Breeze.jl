@@ -23,7 +23,7 @@ as implemented in E3SM (`shoc.F90`).
 
 $(TYPEDFIELDS)
 """
-struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, SB, SK, PDF, BL, CP, C, FT} <:
+struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, SB, SK, PDF, PS, BL, CP, C, FT} <:
        AbstractTurbulenceClosure{ExplicitTimeDiscretization, 1}
     "The mixing length"
     mixing_length :: ML
@@ -43,6 +43,8 @@ struct SimplifiedHigherOrderClosure{ML, TS, TK, BS, SM, TM, SB, SK, PDF, BL, CP,
     skewness :: SK
     "The assumed PDF: subgrid cloud and buoyancy flux"
     assumed_pdf :: PDF
+    "The saturation thermodynamics of the assumed PDF"
+    pdf_saturation :: PS
     "The diagnosis of the boundary layer depth"
     boundary_layer_depth :: BL
     "How bounds are imposed"
@@ -151,6 +153,10 @@ Each of the keyword arguments up to `constants` takes a component; the first one
   [`ClampedSkewness`](@ref).
 - `assumed_pdf`: the assumed PDF of the subgrid cloud; [`DoubleGaussianPDF`](@ref), or
   [`SmoothDoubleGaussianPDF`](@ref).
+- `pdf_saturation`: the saturation thermodynamics of the plumes of the assumed PDF;
+  [`FixedConstantsLiquidSaturation`](@ref) (the fixed constants and liquid saturation of
+  `shoc.F90`), or [`ModelThermodynamicsSaturation`](@ref) (the saturation, latent heats, heat
+  capacity and Exner function of the model).
 - `clipping`: how bounds are imposed; [`HardClipping`](@ref), or [`SmoothClipping`](@ref).
 - `boundary_layer_depth`: [`BulkRichardsonBoundaryLayerDepth`](@ref).
 - `constants`: the [`SHOCConstants`](@ref).
@@ -179,6 +185,7 @@ SimplifiedHigherOrderClosure{Float64}
 ├── stratification_number_bound: UnboundedStratificationNumber
 ├── skewness: ResetAboveThresholdSkewness{Float64}
 ├── assumed_pdf: DoubleGaussianPDF{Float64}
+├── pdf_saturation: FixedConstantsLiquidSaturation
 ├── boundary_layer_depth: BulkRichardsonBoundaryLayerDepth{Float64}
 ├── clipping: HardClipping
 ├── surface fluxes: wthl_sfc = 0.1, wqw_sfc = 0.0, uw_sfc = 0.0, vw_sfc = 0.0, friction_velocity = 0.0
@@ -195,6 +202,7 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
                                       stratification_number_bound = UnboundedStratificationNumber(),
                                       skewness = ResetAboveThresholdSkewness(Float64),
                                       assumed_pdf = DoubleGaussianPDF(Float64),
+                                      pdf_saturation = FixedConstantsLiquidSaturation(),
                                       clipping = HardClipping(),
                                       boundary_layer_depth = BulkRichardsonBoundaryLayerDepth(Float64),
                                       constants = SHOCConstants(Float64),
@@ -208,7 +216,7 @@ function SimplifiedHigherOrderClosure(FT::DataType = Oceananigans.defaults.Float
     # The published coefficients are built in double precision, whatever the default float type,
     # and converted once here.
     components = (; mixing_length, turbulence_time_scale, tke_update, buoyancy_source, second_moments,
-                    third_moment, stratification_number_bound, skewness, assumed_pdf, boundary_layer_depth, clipping, constants)
+                    third_moment, stratification_number_bound, skewness, assumed_pdf, pdf_saturation, boundary_layer_depth, clipping, constants)
 
     check_component_slots(components)
     components = map(component -> convert_eltype(FT, component), values(components))
@@ -555,12 +563,12 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The last part of a SHOC step of every column: `shoc_cloud!`, then store θˡ, qᵗ and turbulent
 kinetic energy back as densities.
 """
-@kernel function _step_shoc_cloud!(grid, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+@kernel function _step_shoc_cloud!(grid, thermodynamics, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     Nz = size(grid, 3)
 
-    shoc_cloud!(i, j, Nz, closure_ij, grid, fields.state, fields.host, fields.surface, fields.diagnostics)
+    shoc_cloud!(i, j, Nz, closure_ij, grid, fields.state, fields.host, fields.surface, fields.diagnostics, thermodynamics)
 
     store_shoc_column!(i, j, grid, fields, ρ, ρθ, ρqᵗ, ρe)
 end
@@ -596,18 +604,18 @@ function shoc_gpu_workgroup(Nx, Ny; target_blocks = 216, maxthreads = 128)
 end
 
 # Only the first kernel, which loads the column, evaluates the bottom boundary conditions.
-function launch_shoc_columns!(arch, grid, bottom_bcs, bc_args, args...)
+function launch_shoc_columns!(arch, grid, bottom_bcs, bc_args, thermodynamics, args...)
     dev = device(arch)
     if dev isa KernelAbstractions.GPU
         Nx, Ny, _ = size(grid)
         workgroup = shoc_gpu_workgroup(Nx, Ny)
         _step_shoc_turbulence!(dev, workgroup, (Nx, Ny))(grid, args..., bottom_bcs, bc_args)
         _step_shoc_implicit!(dev, workgroup, (Nx, Ny))(grid, args...)
-        _step_shoc_cloud!(dev, workgroup, (Nx, Ny))(grid, args...)
+        _step_shoc_cloud!(dev, workgroup, (Nx, Ny))(grid, thermodynamics, args...)
     else
         launch!(arch, grid, :xy, _step_shoc_turbulence!, grid, args..., bottom_bcs, bc_args)
         launch!(arch, grid, :xy, _step_shoc_implicit!, grid, args...)
-        launch!(arch, grid, :xy, _step_shoc_cloud!, grid, args...)
+        launch!(arch, grid, :xy, _step_shoc_cloud!, grid, thermodynamics, args...)
     end
     return nothing
 end
@@ -645,7 +653,9 @@ function Oceananigans.TimeSteppers.step_closure_prognostics!(fields::SHOCFields,
                   ρv = ρv.boundary_conditions.bottom)
     bc_args = boundary_condition_args(model)
 
-    launch_shoc_columns!(arch, grid, bottom_bcs, bc_args, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
+    thermodynamics = shoc_saturation_thermodynamics(model)
+
+    launch_shoc_columns!(arch, grid, bottom_bcs, bc_args, thermodynamics, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)
 
     fill_halo_regions!((fields.increments.u, fields.increments.v))
 

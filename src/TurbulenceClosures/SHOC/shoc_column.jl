@@ -53,10 +53,11 @@ The other arguments are `NamedTuple`s of arrays indexed `[i, j, k]`, with `k = 1
   (two-dimensional).
 - `scratch`: `du`, `dl`, `d` on levels, and the fields of the components that need their own.
 """
-@inline function shoc_column!(i, j, Nz, dtime, closure, grid, state, host, surface, diagnostics, scratch)
+@inline function shoc_column!(i, j, Nz, dtime, closure, grid, state, host, surface, diagnostics, scratch,
+                              thermodynamics = nothing)
     shoc_turbulence!(i, j, Nz, dtime, closure, grid, state, host, surface, diagnostics, scratch)
     shoc_implicit_moments!(i, j, Nz, dtime, closure, grid, state, host, surface, diagnostics, scratch)
-    shoc_cloud!(i, j, Nz, closure, grid, state, host, surface, diagnostics)
+    shoc_cloud!(i, j, Nz, closure, grid, state, host, surface, diagnostics, thermodynamics)
     return nothing
 end
 
@@ -384,8 +385,9 @@ end
 end
 
 # The second part of the step: the assumed PDF (subgrid cloud and buoyancy flux), check_tke and the
-# boundary layer depth of the updated state.
-@inline function shoc_cloud!(i, j, Nz, closure, grid, state, host, surface, diagnostics)
+# boundary layer depth of the updated state. `thermodynamics` are those of the model, for a saturation
+# component that uses them (`nothing` outside a model).
+@inline function shoc_cloud!(i, j, Nz, closure, grid, state, host, surface, diagnostics, thermodynamics = nothing)
     thetal, qw, u_wind, v_wind, tke = state.thetal, state.qw, state.u_wind, state.v_wind, state.tke
     zt, zi, pres, w_field = host.zt_grid, host.zi_grid, host.pres, host.w_field
     wthv_sec, shoc_ql, shoc_cldfrac, shoc_ql2 = diagnostics.wthv_sec, diagnostics.shoc_ql, diagnostics.shoc_cldfrac, diagnostics.shoc_ql2
@@ -396,6 +398,7 @@ end
     c = closure.constants
     cp = closure.clipping
     pdf = closure.assumed_pdf
+    sat = closure.pdf_saturation
 
     @inbounds begin
         wthl_sfc = surface.wthl_sfc[i, j, 1]
@@ -415,7 +418,7 @@ end
     @inbounds for k in 1:Nz
         moments_u = interface_moments(k+1)
         cldfrac_k, ql_k, ql2_k, wqls_k, wthv_k =
-            assumed_pdf(pdf, cp, c, zi[i, j, k+1], zi[i, j, k], zt[i, j, k], pres[i, j, k],
+            assumed_pdf(pdf, sat, thermodynamics, cp, c, zi[i, j, k+1], zi[i, j, k], zt[i, j, k], pres[i, j, k],
                         thetal[i, j, k], w_field[i, j, k], qw[i, j, k], w_sec[i, j, k], moments_l, moments_u)
         moments_l = moments_u
 

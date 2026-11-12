@@ -60,9 +60,12 @@ psychrometric convention of the Morrison–Gettelman rates that follow it.
     prognostic_vapor_excess_adjustment(p3.process_rates, p3, qᶜˡ, qᵛ⁺ˡ,
                                          δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
 
-@inline function prognostic_vapor_excess_adjustment(
+@inline prognostic_vapor_excess_adjustment(
     ::ProcessRate{FT, DiagnosticVaporExcess}, p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants
-) where FT
+) where FT = no_vapor_excess_adjustment(qᶜˡ, qᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
+
+# The state unchanged, in the form of `prognostic_vapor_excess_adjustment`
+@inline function no_vapor_excess_adjustment(qᶜˡ, qᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     cloud_water_adjustment = zero(qᶜˡ)
     return (; cloud_water_adjustment,

@@ -3,7 +3,7 @@
 #####
 ##### An assumed-PDF component implements
 #####
-#####     assumed_pdf(pdf, cp, c, zi_u, zi_l, zt_k, pval, thl, w, qw, w_sec, moments_l, moments_u)
+#####     assumed_pdf(pdf, saturation, thermodynamics, cp, c, zi_u, zi_l, zt_k, pval, thl, w, qw, w_sec, moments_l, moments_u)
 #####         -> (cldfrac, ql, ql2, wqls, wthv_sec)
 #####
 ##### for a level at height `zt_k` between the interfaces at `zi_l` and `zi_u`: from the pressure,
@@ -127,24 +127,19 @@ end
     return x1_1, x1_2, x2_1, x2_2, zero_safe_sqrt(x2_1), zero_safe_sqrt(x2_2)
 end
 
-# shoc_assumed_pdf_compute_qs for one plume
-@inline function plume_saturation(Tl, pval, p)
-    FT = typeof(Tl)
-    esval = murphy_koop_liquid_svp(Tl)
-    qs = convert(FT, 0.622) * esval / max(esval, pval - esval)
-    beta = (p.rgas / p.rv) * (p.lcond / (p.rgas * Tl)) * (p.lcond / (p.cp * Tl))
-    return qs, beta
-end
+# shoc_assumed_pdf_compute_qs for one plume, with the fixed constants of shoc.F90
+@inline plume_saturation(Tl, pval, p) =
+    plume_saturation(FixedConstantsLiquidSaturation(), nothing, p, Tl, zero(Tl), pval)[1:2]
 
-# shoc_assumed_pdf_compute_s
-@inline function plume_condensate(qw1, qs1, beta, pval, thl2, qw2, sqrtthl2, sqrtqw2, r_qwthl, p)
+# shoc_assumed_pdf_compute_s, with `cp_over_L` and `Π` of the saturation component
+@inline function plume_condensate(qw1, qs1, beta, cp_over_L, Π, thl2, qw2, sqrtthl2, sqrtqw2, r_qwthl)
     FT = typeof(qw1)
     sqrt2 = sqrt(convert(FT, 2))
     sqrt2pi = sqrt(2 * convert(FT, 3.14159265358979323))
 
     s = qw1 - qs1 * ((1 + beta * qw1) / (1 + beta * qs1))
     opbq = 1 + beta * qs1
-    cthl = ((1 + beta * qw1) / (opbq * opbq)) * (p.cp / p.lcond) * beta * qs1 * (pval / p.basepres)^(p.rgas / p.cp)
+    cthl = ((1 + beta * qw1) / (opbq * opbq)) * cp_over_L * beta * qs1 * Π
     cqt = 1 / (1 + beta * qs1)
     tmp_val = max(0, (cthl * cthl) * thl2 + (cqt * cqt) * qw2 - 2 * cthl * sqrtthl2 * cqt * sqrtqw2 * r_qwthl)
     std_s = zero_safe_sqrt(tmp_val)
@@ -177,9 +172,11 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The assumed PDF of level `k` (Analytic Double Gaussian 1 of Larson et al. 2002): return the
 subgrid cloud fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
+The plumes saturate by the saturation component `sat` (see [`FixedConstantsLiquidSaturation`](@ref)
+and [`ModelThermodynamicsSaturation`](@ref)), with the `thermodynamics` of the model.
 """
-@inline function assumed_pdf(pdf::DoubleGaussianPDF, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first, wsec,
-                             moments_l, moments_u)
+@inline function assumed_pdf(pdf::DoubleGaussianPDF, sat, thermodynamics, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first,
+                             qw_first, wsec, moments_l, moments_u)
     p = c # the physical constants, under the name they have in the expressions below
     FT = typeof(thl_first)
     largeneg = convert(FT, -99999999.99)
@@ -187,7 +184,6 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     rt_tol = pdf.rt_tol
     w_tol_sqd = pdf.w_tol * pdf.w_tol
     Tl_min = pdf.Tl_min
-    epsterm = p.rgas / p.rv
 
     # Interpolate the interface moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec of the
     # interfaces below, `moments_l`, and above, `moments_u`, the level) to the level
@@ -240,19 +236,18 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
     r_qwthl_1 = ifelse(uncorrelated, zero(FT), r_qwthl_1)
 
     # shoc_assumed_pdf_compute_temperature
-    exner_inverse = (p.basepres / pval)^(p.rgas / p.cp)
-    Tl1_1 = thl1_1 / exner_inverse
-    Tl1_2 = thl1_2 / exner_inverse
+    Tl1_1 = plume_liquid_water_temperature(sat, thermodynamics, p, thl1_1, qw1_1, pval)
+    Tl1_2 = plume_liquid_water_temperature(sat, thermodynamics, p, thl1_2, qw1_2, pval)
     Tl1_1 = ifelse(Tl1_1 <= Tl_min, Tl_min, Tl1_1)
     Tl1_2 = ifelse(Tl1_2 <= Tl_min, Tl_min, Tl1_2)
 
     # shoc_assumed_pdf_compute_qs
-    qs1, beta1 = plume_saturation(Tl1_1, pval, p)
-    qs2, beta2 = plume_saturation(Tl1_2, pval, p)
+    qs1, beta1, cp_over_L1, Π1 = plume_saturation(sat, thermodynamics, p, Tl1_1, qw1_1, pval)
+    qs2, beta2, cp_over_L2, Π2 = plume_saturation(sat, thermodynamics, p, Tl1_2, qw1_2, pval)
 
     # shoc_assumed_pdf_compute_s
-    s1, std_s1, qn1, C1 = plume_condensate(qw1_1, qs1, beta1, pval, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r_qwthl_1, p)
-    s2, std_s2, qn2, C2 = plume_condensate(qw1_2, qs2, beta2, pval, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r_qwthl_1, p)
+    s1, std_s1, qn1, C1 = plume_condensate(qw1_1, qs1, beta1, cp_over_L1, Π1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r_qwthl_1)
+    s2, std_s2, qn2, C2 = plume_condensate(qw1_2, qs2, beta2, cp_over_L2, Π2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r_qwthl_1)
 
     ql1 = clip_min(cp, qn1, qw1_1, rt_tol)
     ql2 = clip_min(cp, qn2, qw1_2, rt_tol)
@@ -265,8 +260,13 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
 
     wqls = a * ((w1_1 - w_first) * ql1) + (1 - a) * ((w1_2 - w_first) * ql2)
 
-    wthv_sec = wthlsec + ((1 - epsterm) / epsterm) * p.basetemp * wqwsec +
-               ((p.lcond / p.cp) * (p.basepres / pval)^(p.rgas / p.cp) - (1 / epsterm) * p.basetemp) * wqls
+    A_q, A_c = buoyancy_flux_coefficients(sat, thermodynamics, p, pval, thl_first, qw_first, shoc_ql)
+    wthv_sec = wthlsec + A_q * wqwsec + A_c * wqls
 
     return shoc_cldfrac, shoc_ql, shoc_ql2, wqls, wthv_sec
 end
+
+# The saturation of shoc.F90, when none is given
+@inline assumed_pdf(pdf, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first, wsec, moments_l, moments_u) =
+    assumed_pdf(pdf, FixedConstantsLiquidSaturation(), nothing, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first,
+                wsec, moments_l, moments_u)

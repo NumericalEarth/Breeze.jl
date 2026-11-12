@@ -21,6 +21,7 @@ export SimplifiedHigherOrderClosure, SHOC,
        UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
        ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF,
+       FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
        HardClipping, SmoothClipping,
        BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
@@ -50,6 +51,10 @@ using Breeze.TurbulenceClosures: TurbulenceClosures, convert_eltype,
                                  RationalStabilityFunction, richardson_number, momentum_stability_function,
                                  tracer_stability_function, dissipation_stability_function
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equilibrated_surface, saturation_vapor_pressure,
+                             PlanarLiquidSurface, PlanarIceSurface, dry_air_gas_constant, vapor_gas_constant,
+                             liquid_latent_heat, ice_latent_heat, MoistureMassFractions, vapor_equivalent_heat_capacity,
+                             exner_exponent
 
 include("shoc_constants.jl")
 include("clipping.jl")
@@ -62,6 +67,7 @@ include("tke_updates.jl")
 include("buoyancy_sources.jl")
 include("second_moments.jl")
 include("third_moments.jl")
+include("pdf_saturation.jl")
 include("assumed_pdfs.jl")
 include("smooth_assumed_pdf.jl")
 include("shoc_column.jl")

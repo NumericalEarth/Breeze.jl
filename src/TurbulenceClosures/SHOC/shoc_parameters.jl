@@ -12,7 +12,7 @@ The fields of [`SimplifiedHigherOrderClosure`](@ref) that hold a component, in t
 [`closure_parameters`](@ref).
 """
 const COMPONENT_SLOTS = (:mixing_length, :turbulence_time_scale, :tke_update, :buoyancy_source, :second_moments,
-                         :third_moment, :stratification_number_bound, :skewness, :assumed_pdf, :boundary_layer_depth, :clipping, :constants)
+                         :third_moment, :stratification_number_bound, :skewness, :assumed_pdf, :pdf_saturation, :boundary_layer_depth, :clipping, :constants)
 
 closure_components(closure) = map(slot -> getfield(closure, slot), COMPONENT_SLOTS)
 

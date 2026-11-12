@@ -13,6 +13,7 @@ const SLOT_COMPONENTS = (mixing_length = (BlendedMixingLength, GradientLimitedMi
                          stratification_number_bound = (UnboundedStratificationNumber, RationalSaturatedStratificationNumber),
                          skewness = (ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness),
                          assumed_pdf = (DoubleGaussianPDF, SmoothDoubleGaussianPDF),
+                         pdf_saturation = (FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation),
                          boundary_layer_depth = (BulkRichardsonBoundaryLayerDepth,),
                          clipping = (HardClipping, SmoothClipping),
                          constants = (SHOCConstants,))
@@ -78,6 +79,7 @@ SimplifiedHigherOrderClosure{Float64}
 ├── stratification_number_bound: RationalSaturatedStratificationNumber{Float64}
 ├── skewness: PolynomialSaturatedSkewness{Float64}
 ├── assumed_pdf: SmoothDoubleGaussianPDF{Float64}
+├── pdf_saturation: FixedConstantsLiquidSaturation
 ├── boundary_layer_depth: BulkRichardsonBoundaryLayerDepth{Float64}
 ├── clipping: SmoothClipping{Float64}
 ├── surface fluxes: wthl_sfc = 0.0, wqw_sfc = 0.0, uw_sfc = 0.0, vw_sfc = 0.0, friction_velocity = 0.0
@@ -107,6 +109,7 @@ SimplifiedHigherOrderClosure{Float64}
 ├── stratification_number_bound: RationalSaturatedStratificationNumber{Float64}
 ├── skewness: PolynomialSaturatedSkewness{Float64}
 ├── assumed_pdf: SmoothDoubleGaussianPDF{Float64}
+├── pdf_saturation: FixedConstantsLiquidSaturation
 ├── boundary_layer_depth: BulkRichardsonBoundaryLayerDepth{Float64}
 ├── clipping: SmoothClipping{Float64}
 ├── surface fluxes: wthl_sfc = 0.0, wqw_sfc = 0.0, uw_sfc = 0.0, vw_sfc = 0.0, friction_velocity = 0.0

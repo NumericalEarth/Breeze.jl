@@ -8,6 +8,19 @@
 
 @inline p3_subgrid_phase1_rates(::DiracStatistics, phase1, p3, ρ, ℳ, constants, state) = phase1
 
+# The alignment of the cloud liquid to the prognostic vapor excess (`PrognosticVaporExcess`), which
+# condenses or evaporates cloud liquid toward the saturation of P3 before the rates. Where the
+# closure owns the cloud it is skipped, unless `ClosureCloud(microphysics_aligns_vapor_excess = true)`:
+# the vapor excess left by the saturation of the closure would otherwise condense a second time.
+@inline subgrid_vapor_excess_adjustment(𝒮, p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants) =
+    prognostic_vapor_excess_adjustment(p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
+
+@inline function subgrid_vapor_excess_adjustment(::ClosureCloudStatistics, p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
+    aligned = prognostic_vapor_excess_adjustment(p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
+    unaligned = no_vapor_excess_adjustment(qᶜˡ, qᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
+    return ifelse(p3.subgrid.microphysics_aligns_vapor_excess, aligned, unaligned)
+end
+
 #####
 ##### Cloud owned by the turbulence closure (`ClosureCloud`)
 #####

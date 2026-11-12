@@ -624,8 +624,8 @@ end
     ρᵗʰ = density(𝒰, constants)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
 
-    vapor_excess_adjustment = prognostic_vapor_excess_adjustment(
-        p3, qᶜˡ, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
+    vapor_excess_adjustment = subgrid_vapor_excess_adjustment(
+        𝒮, p3, qᶜˡ, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
     saturation_alignment_rate = vapor_excess_adjustment.rate
     qᶜˡ = vapor_excess_adjustment.qᶜˡ
     qᵛ = vapor_excess_adjustment.qᵛ

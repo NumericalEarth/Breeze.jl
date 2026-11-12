@@ -112,14 +112,14 @@ end
 end
 
 # shoc_assumed_pdf_compute_s with a spread that does not vanish
-@inline function smooth_plume_condensate(pdf, qw1, qs1, beta, pval, thl2, qw2, sqrtthl2, sqrtqw2, r_qwthl, c)
+@inline function smooth_plume_condensate(pdf, qw1, qs1, beta, cp_over_L, Π, thl2, qw2, sqrtthl2, sqrtqw2, r_qwthl)
     FT = typeof(qw1)
     sqrt2 = sqrt(convert(FT, 2))
     sqrt2pi = sqrt(2 * convert(FT, 3.14159265358979323))
 
     s = qw1 - qs1 * ((1 + beta * qw1) / (1 + beta * qs1))
     opbq = 1 + beta * qs1
-    cthl = ((1 + beta * qw1) / (opbq * opbq)) * (c.cp / c.lcond) * beta * qs1 * (pval / c.basepres)^(c.rgas / c.cp)
+    cthl = ((1 + beta * qw1) / (opbq * opbq)) * cp_over_L * beta * qs1 * Π
     cqt = 1 / (1 + beta * qs1)
     # Not negative but for round-off
     variance = max(0, (cthl * cthl) * thl2 + (cqt * cqt) * qw2 - 2 * cthl * sqrtthl2 * cqt * sqrtqw2 * r_qwthl)
@@ -133,14 +133,13 @@ end
     return s, std_s, qn, C
 end
 
-@inline function assumed_pdf(pdf::SmoothDoubleGaussianPDF, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first, wsec,
-                             moments_l, moments_u)
+@inline function assumed_pdf(pdf::SmoothDoubleGaussianPDF, sat, thermodynamics, cp, c, zi_u, zi_l, zt_k, pval, thl_first,
+                             w_first, qw_first, wsec, moments_l, moments_u)
     FT = typeof(thl_first)
     largeneg = convert(FT, -99999999.99)
     thl_tol = pdf.thl_tol
     rt_tol = pdf.rt_tol
     w_tol_sqd = pdf.w_tol * pdf.w_tol
-    epsterm = c.rgas / c.rv
 
     # Interpolate the interface moments to the level
     interpolate(n, minthresh) = hard_floor(linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k), minthresh)
@@ -208,15 +207,14 @@ end
                                  (testvar + pdf.correlation_regularization * thl_tol * rt_tol), -1, 1, 1)
 
     # Liquid water temperature and saturation of the plumes
-    exner_inverse = (c.basepres / pval)^(c.rgas / c.cp)
-    Tl1_1 = max(pdf.Tl_min, thl1_1 / exner_inverse)
-    Tl1_2 = max(pdf.Tl_min, thl1_2 / exner_inverse)
+    Tl1_1 = max(pdf.Tl_min, plume_liquid_water_temperature(sat, thermodynamics, c, thl1_1, qw1_1, pval))
+    Tl1_2 = max(pdf.Tl_min, plume_liquid_water_temperature(sat, thermodynamics, c, thl1_2, qw1_2, pval))
 
-    qs1, beta1 = plume_saturation(Tl1_1, pval, c)
-    qs2, beta2 = plume_saturation(Tl1_2, pval, c)
+    qs1, beta1, cp_over_L1, Π1 = plume_saturation(sat, thermodynamics, c, Tl1_1, qw1_1, pval)
+    qs2, beta2, cp_over_L2, Π2 = plume_saturation(sat, thermodynamics, c, Tl1_2, qw1_2, pval)
 
-    s1, std_s1, qn1, C1 = smooth_plume_condensate(pdf, qw1_1, qs1, beta1, pval, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r_qwthl_1, c)
-    s2, std_s2, qn2, C2 = smooth_plume_condensate(pdf, qw1_2, qs2, beta2, pval, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r_qwthl_1, c)
+    s1, std_s1, qn1, C1 = smooth_plume_condensate(pdf, qw1_1, qs1, beta1, cp_over_L1, Π1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r_qwthl_1)
+    s2, std_s2, qn2, C2 = smooth_plume_condensate(pdf, qw1_2, qs2, beta2, cp_over_L2, Π2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r_qwthl_1)
 
     ql1 = clip_min(cp, qn1, qw1_1, rt_tol)
     ql2 = clip_min(cp, qn2, qw1_2, rt_tol)
@@ -229,8 +227,8 @@ end
 
     wqls = a * ((w1_1 - w_first) * ql1) + (1 - a) * ((w1_2 - w_first) * ql2)
 
-    wthv_sec = wthlsec + ((1 - epsterm) / epsterm) * c.basetemp * wqwsec +
-               ((c.lcond / c.cp) * (c.basepres / pval)^(c.rgas / c.cp) - (1 / epsterm) * c.basetemp) * wqls
+    A_q, A_c = buoyancy_flux_coefficients(sat, thermodynamics, c, pval, thl_first, qw_first, shoc_ql)
+    wthv_sec = wthlsec + A_q * wqwsec + A_c * wqls
 
     return shoc_cldfrac, shoc_ql, shoc_ql2, wqls, wthv_sec
 end
