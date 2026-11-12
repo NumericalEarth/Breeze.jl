@@ -10,9 +10,10 @@
 #   qᵛ - qᵛ⁺ˡ + Γ,
 #
 # with Γ the subgrid supersaturation correlation [kg kg⁻¹]. P3 carries no model for Γ. An
-# external subgrid model, stored in `p3.subgrid_supersaturation`, supplies it by extending the
-# three functions below. The default `nothing` is plain P3: no value is added and no code
-# path changes.
+# external subgrid model, stored in the `subgrid` slot of P3 (`P3Microphysics(; subgrid = model)`),
+# supplies it by extending the three functions below. The subgrid choices of Breeze
+# (`AbstractSubgridCorrelation`: the default `NoSubgridCorrelation()`, and `ClosureCloud`, under
+# which P3 does not condense) supply no Γ: no value is added and no code path changes.
 #
 # Γ enters the vapor exchange of cloud liquid only: its diffusional growth and decay, the seed
 # mass with which prescribed-number droplets start that growth, and the saturation-adjustment
@@ -26,7 +27,7 @@ Return what the subgrid supersaturation model `subgrid` reads on the grid (for e
 fields and the conserved variables), as an object that is passed to the P3 kernels and then to
 [`subgrid_supersaturation_statistics`](@ref Breeze.Microphysics.PredictedParticleProperties.subgrid_supersaturation_statistics). `nothing` without a subgrid model.
 """
-subgrid_supersaturation_fields(::Nothing, model) = nothing
+subgrid_supersaturation_fields(::AbstractSubgridCorrelation, model) = nothing
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -36,7 +37,7 @@ Return the subgrid statistics of cell `(i, j, k)` that the subgrid supersaturati
 statistics are passed, with the thermodynamic state of the cell, to
 [`subgrid_supersaturation`](@ref Breeze.Microphysics.PredictedParticleProperties.subgrid_supersaturation). `nothing` without a subgrid model.
 """
-@inline subgrid_supersaturation_statistics(i, j, k, grid, ::Nothing, fields) = nothing
+@inline subgrid_supersaturation_statistics(i, j, k, grid, ::AbstractSubgridCorrelation, fields) = nothing
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -51,7 +52,9 @@ the result is `nothing` and P3 uses the grid-mean vapor excess unchanged.
 ```jldoctest
 julia> using Breeze.Microphysics.PredictedParticleProperties: subgrid_supersaturation, cloud_vapor_excess
 
-julia> Γ = subgrid_supersaturation(nothing, nothing, 1e-2, 1.1e-2, 0.0, 285.0, 9e4, 1.1, nothing)
+julia> using Breeze.AtmosphereModels: NoSubgridCorrelation
+
+julia> Γ = subgrid_supersaturation(NoSubgridCorrelation(), nothing, 1e-2, 1.1e-2, 0.0, 285.0, 9e4, 1.1, nothing)
 
 julia> cloud_vapor_excess(Γ, -1e-3)
 -0.001
@@ -60,7 +63,7 @@ julia> cloud_vapor_excess(0.5, -1.0)
 -0.5
 ```
 """
-@inline subgrid_supersaturation(::Nothing, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) = nothing
+@inline subgrid_supersaturation(::AbstractSubgridCorrelation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) = nothing
 
 # The vapor excess, and the vapor, that cloud liquid sees
 @inline cloud_vapor_excess(::Nothing, vapor_excess) = vapor_excess

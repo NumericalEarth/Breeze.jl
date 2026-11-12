@@ -691,8 +691,8 @@ end
                         surface_temperature, temperature_tendency, pressure_tendency,
                         nothing, DiracStatistics())
 
-# `subgrid_statistics` feed the subgrid supersaturation model (`nothing` without one);
-# `𝒮` are the subgrid statistics of the cell from the turbulence closure.
+# `subgrid_statistics` feed an external subgrid supersaturation model in `p3.subgrid` (`nothing`
+# otherwise); `𝒮` are the subgrid statistics of the cell from the turbulence closure.
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
                                      constants, properties::P3ProcessProps,
                                      surface_temperature, temperature_tendency,

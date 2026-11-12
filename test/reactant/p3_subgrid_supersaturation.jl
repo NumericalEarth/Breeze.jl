@@ -22,7 +22,7 @@ PredictedParticleProperties.subgrid_supersaturation_fields(::ScaledSupersaturati
 @testset "reactant_p3_subgrid_supersaturation" begin
     Δt = 0.02
     Ns = 1
-    microphysics = P3Microphysics(; subgrid_supersaturation = ScaledSupersaturation(5e-4))
+    microphysics = P3Microphysics(; subgrid = ScaledSupersaturation(5e-4))
     initial_state = (; qᵛ=0.01, qᶜˡ=1e-4, qʳ=1e-5, nʳ=1e6, qⁱ=0, nⁱ=0)
 
     grid = RectilinearGrid(ReactantState(); size=(4, 4, 8), extent=(1e3, 1e3, 1e3),

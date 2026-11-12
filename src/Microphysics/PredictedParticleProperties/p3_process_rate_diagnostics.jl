@@ -66,7 +66,7 @@ Adapt.adapt_structure(to, k::P3ProcessRateKernelFunction{names}) where names =
                                     kernel.density, kernel.velocities, kernel.subgrid_closure...)
 
     # The statistics of the subgrid supersaturation model, as in `_p3_add_tendencies_kernel!`
-    statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.subgrid_supersaturation,
+    statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.subgrid,
                                                     kernel.subgrid_fields)
 
     rates = compute_p3_process_rates(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants,
@@ -104,7 +104,7 @@ function P3ProcessRate(model, p3, names)
                                                 model.thermodynamic_constants,
                                                 AM.total_density(model.dynamics),
                                                 (; w = model.velocities.w),
-                                                subgrid_supersaturation_fields(p3.subgrid_supersaturation, model),
+                                                subgrid_supersaturation_fields(p3.subgrid, model),
                                                 p3_subgrid_closure(p3.subgrid, model))
 
     return KernelFunctionOperation{Center, Center, Center}(kernel, model.grid)

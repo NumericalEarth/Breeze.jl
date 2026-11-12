@@ -8,12 +8,6 @@
 
 @inline p3_subgrid_phase1_rates(::DiracStatistics, phase1, p3, ρ, ℳ, constants, state) = phase1
 
-# The subgrid supersaturation correlation Γ of `p3.subgrid_supersaturation` acts only where P3
-# condenses cloud liquid. Where the closure owns the cloud, ownership takes precedence: Γ is dropped
-# from the condensation, the saturation-adjustment caps and the droplet seed mass alike.
-@inline closure_owned_supersaturation(𝒮, Γ) = Γ
-@inline closure_owned_supersaturation(::ClosureCloudStatistics, Γ) = nothing
-
 # The alignment of the cloud liquid to the prognostic vapor excess (`PrognosticVaporExcess`), which
 # condenses or evaporates cloud liquid toward the saturation of P3 before the rates. Where the
 # closure owns the cloud it is skipped, unless `ClosureCloud(microphysics_aligns_vapor_excess = true)`:

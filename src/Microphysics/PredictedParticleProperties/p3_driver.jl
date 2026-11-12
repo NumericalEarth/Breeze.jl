@@ -111,7 +111,7 @@ end
     properties = p3_process_properties(p3, ρ, ℳ)
 
     # Subgrid statistics from the closure; `DiracStatistics` without a subgrid choice.
-    𝒮 = AM.subgrid_statisticsᶜᶜᶜ(i, j, k, grid, p3.subgrid, closure, closure_fields)
+    𝒮 = p3_closure_statistics(i, j, k, grid, p3.subgrid, closure, closure_fields)
 
     return (; ρ, ℳ, 𝒰, properties, surface_temperature, temperature_tendency, pressure_tendency, 𝒮)
 end
@@ -124,7 +124,7 @@ end
                                     constants, ρ_field, velocities, closure, closure_fields)
 
     # Statistics for the subgrid supersaturation model; `nothing` without one
-    statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.subgrid_supersaturation, subgrid_fields)
+    statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.subgrid, subgrid_fields)
 
     result = p3_tendency_compute(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants, inputs.properties,
                                  inputs.surface_temperature, inputs.temperature_tendency,
@@ -172,7 +172,7 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
             μ, model.formulation, model.dynamics, grid,
             model.thermodynamic_constants, p3, ρ_field,
             model.velocities,
-            subgrid_supersaturation_fields(p3.subgrid_supersaturation, model),
+            subgrid_supersaturation_fields(p3.subgrid, model),
             p3_subgrid_closure(p3.subgrid, model)...)
 
     return nothing
@@ -180,9 +180,20 @@ end
 
 AM.subgrid_correlation(p3::P3) = p3.subgrid
 
+# The one `subgrid` slot of P3 selects the subgrid model by its type:
+#   * `NoSubgridCorrelation()` (default): plain P3;
+#   * another `AbstractSubgridCorrelation` (`ClosureCloud`): the closure owns the cloud, and P3
+#     reads the closure's subgrid statistics;
+#   * any other object: an external model of the subgrid supersaturation correlation Γ (see
+#     subgrid_supersaturation.jl), which reads its own fields and not the closure statistics.
 # The closure and its fields reach the P3 kernels only when the subgrid choice reads them.
 p3_subgrid_closure(::NoSubgridCorrelation, model) = (nothing, nothing)
-p3_subgrid_closure(subgrid, model) = (model.closure, model.closure_fields)
+p3_subgrid_closure(::AbstractSubgridCorrelation, model) = (model.closure, model.closure_fields)
+p3_subgrid_closure(subgrid, model) = (nothing, nothing)
+
+@inline p3_closure_statistics(i, j, k, grid, subgrid::AbstractSubgridCorrelation, closure, closure_fields) =
+    AM.subgrid_statisticsᶜᶜᶜ(i, j, k, grid, subgrid, closure, closure_fields)
+@inline p3_closure_statistics(i, j, k, grid, subgrid, closure, closure_fields) = DiracStatistics()
 
 #####
 ##### Number concentration diagnostic

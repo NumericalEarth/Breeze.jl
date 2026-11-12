@@ -124,6 +124,7 @@ using Oceananigans.Architectures: CPU, on_architecture
 using Breeze.AtmosphereModels: prognostic_field_names,
                                 DiracStatistics,
                                 ClosureCloudStatistics,
+                                AbstractSubgridCorrelation,
                                 NoSubgridCorrelation
 using Breeze.Microphysics: thermodynamic_adjustment_factor
 using Breeze.Thermodynamics: MoistureMassFractions,
