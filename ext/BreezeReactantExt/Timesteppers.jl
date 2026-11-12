@@ -4,7 +4,6 @@ using Oceananigans.Utils: IterationInterval
 using Reactant: TracedRNumber, @trace
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!, reconcile_state!
 using Breeze.AtmosphereModels: AtmosphereModels
-using Breeze.CompressibleEquations: CompressibleEquations
 using Breeze.Microphysics: Microphysics, DCMIP2016KesslerMicrophysics
 using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel
 
@@ -37,9 +36,8 @@ function OceananigansTimeSteppers.first_time_step!(model::ReactantSSPRungeKutta3
     return nothing
 end
 
-# Reactant tracing breaks if Δt is materialized via `convert` outside the kernel;
-# pass it through unchanged and let in-kernel arithmetic see the traced value.
-@inline AtmosphereModels.kernel_time_step(::ReactantState, grid, Δt) = Δt
+@inline AtmosphereModels.kernel_time_step(arch, grid, Δt::TracedRNumber) =
+    convert(TracedRNumber{eltype(grid)}, Δt)
 
 # A traced Δt is a time step: traced stepping sets `last_Δt` before the first step, and the
 # eager guard cannot branch on a traced value.
@@ -93,6 +91,3 @@ function AtmosphereModels.validate_microphysics_architecture(microphysics::DCMIP
                         "`model.microphysical_fields.sedimentation_substeps` records the most substeps each " *
                         "column needed."))
 end
-
-# A traced time step cannot be converted to a plain float; it is already at its traced precision.
-@inline CompressibleEquations.substep_time_step(FT, Δt::TracedRNumber) = Δt

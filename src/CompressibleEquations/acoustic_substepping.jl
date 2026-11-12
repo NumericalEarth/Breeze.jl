@@ -451,11 +451,6 @@ function minimum_horizontal_spacing(grid)
     return min(Δx, Δy)
 end
 
-# A time step at the grid's float type `FT`. A traced time step (Reactant) is already at the
-# precision it was traced with and cannot be converted to a plain float, so BreezeReactantExt
-# passes it through unchanged.
-@inline substep_time_step(FT, Δt) = convert(FT, Δt)
-
 @inline acoustic_substeps(N::Int, Δx_min, Δt, constants, acoustic_cfl) = N
 @inline acoustic_substeps(::Nothing, Δx_min, Δt, constants, acoustic_cfl) =
     compute_acoustic_substeps(Δx_min, Δt, constants, acoustic_cfl)
@@ -771,7 +766,7 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
     FT   = eltype(grid)
     g    = convert(FT, model.thermodynamic_constants.gravitational_acceleration)
     Gⁿρw = model.timestepper.Gⁿ.ρw
-    direction = sign(substep_time_step(FT, Δτ))
+    direction = sign(kernel_time_step(arch, grid, Δτ))
 
     ref = model.dynamics.reference_state
 
@@ -1145,7 +1140,7 @@ function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper
             substepper.density_potential_temperature_perturbation,
             substepper.previous_density_potential_temperature_perturbation,
             substepper.linearization_potential_temperature,
-            grid, substep_time_step(FT, Δτ), x_damping_scale, y_damping_scale)
+            grid, kernel_time_step(arch, grid, Δτ), x_damping_scale, y_damping_scale)
 
     return nothing
 end
@@ -1660,7 +1655,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Substep count Nτ and size Δτ for this stage (WS-RK3 weights β = (1/3, 1/2, 1)).
     # The distribution decides how to split: ProportionalSubsteps fits ⌈β·N⌉ substeps to
     # each stage's β·Δt interval; ConstantSubstepSize/MonolithicFirstStage share one Δτ = Δt/N.
-    Δt_FT = substep_time_step(FT, Δt)
+    Δt_FT = kernel_time_step(arch, grid, Δt)
     Nτ, Δτ = stage_substep_count_and_size(substepper.substep_distribution, β_stage, Δt_FT,
                                           substepper.minimum_horizontal_spacing, constants,
                                           substepper.acoustic_cfl, substepper.substeps)
