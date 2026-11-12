@@ -305,8 +305,11 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         seed_pressure!(pressure, grid, base_pressure)
     end
 
-    # Dry-air mass fraction qᵈ = ρᵈ/ρ at the momentum locations (see `compute_dry_mass_fraction!`)
+    # Dry-air mass fraction qᵈ = ρᵈ/ρ at the momentum locations (see `compute_dry_mass_fraction!`).
+    # It starts at one, the value `compute_dry_mass_fraction!` gives where there is no air yet, so
+    # a model whose state has not been set weights forces as dry air does.
     dry_mass_fraction = (x=XFaceField(grid), y=YFaceField(grid), z=ZFaceField(grid))
+    foreach(qᵈ -> fill!(parent(qᵈ), 1), dry_mass_fraction)
 
     return CompressibleDynamics(dynamics.time_discretization, density, total_density, pressure,
                                 standard_pressure, base_pressure, reference_state,
