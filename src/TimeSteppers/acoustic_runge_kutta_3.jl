@@ -1,6 +1,5 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: TendencyCallsite
 using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -25,6 +24,16 @@ using Breeze.CompressibleEquations:
     prepare_acoustic_cache!,
     freeze_linearization_state!,
     seed_time_averaged_velocities!
+
+"""
+$(TYPEDEF)
+
+Abstract supertype for outer time steppers that drive the linearized acoustic substep loop
+of [`AcousticSubstepper`](@ref): [`AcousticRungeKutta3`](@ref) and
+[`MultirateInfinitesimalStep`](@ref). Subtypes carry `U⁰` (the state each stage's acoustic
+integration starts from), `Gⁿ` (the slow forcing it applies), `implicit_solver` and `substepper`.
+"""
+abstract type AcousticTimeStepper <: AbstractTimeStepper end
 
 """
 $(TYPEDEF)
@@ -58,6 +67,9 @@ Fields
   substep loop.
 - `rounding`: Round-off treatment of the final stage's update, [`RoundToNearest`](@ref)
   or [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding).
+- `scalar_tendencies`: when the moisture and tracer tendencies are built,
+  [`PreLoopScalarTendencies`](@ref) (between stages, the default) or
+  [`PostLoopScalarTendencies`](@ref) (after each stage's own acoustic loop).
 
 References
 ==========
@@ -65,7 +77,7 @@ References
 Wicker, L. J. & Skamarock, W. C. (2002). *Time-splitting methods for
 elastic models using forward time schemes.* MWR 130, 2088–2097.
 """
-struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R} <: AbstractTimeStepper
+struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R, ST} <: AcousticTimeStepper
     β₁ :: FT
     β₂ :: FT
     β₃ :: FT
@@ -74,6 +86,7 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R} <: AbstractTimeStepper
     implicit_solver :: TI
     substepper :: AS
     rounding :: R
+    scalar_tendencies :: ST
 end
 
 """
@@ -91,6 +104,10 @@ prognostics from their stage-entry values plus the accumulated perturbations, an
 ``u⁰ + Δt G`` of the other scalars, are rounded stochastically in the third stage. The
 perturbations themselves, the first two stages, and the vertically-implicit solves stay
 round-to-nearest.
+
+`post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
+stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
+between stages with the preceding loop's (see [`PostLoopScalarTendencies`](@ref)).
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
@@ -98,11 +115,14 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                              cache_advecting_state = false,
                              Gⁿ::TG = map(similar, prognostic_fields),
                              U⁰::U0 = map(similar, prognostic_fields),
-                             rounding = RoundToNearest()) where {TI, TG, U0}
+                             rounding = RoundToNearest(),
+                             post_loop_scalar_tendencies = false) where {TI, TG, U0}
 
     FT = eltype(grid)
     rounding = materialize_rounding(rounding, grid.architecture)
     R = typeof(rounding)
+    scalar_tendencies = scalar_tendency_timing(post_loop_scalar_tendencies)
+    ST = typeof(scalar_tendencies)
 
     # Stage fractions come from the outer-scheme interface. Today the only
     # supported subtype is WickerSkamarock3 with canonical (1/3, 1/2, 1);
@@ -113,16 +133,21 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     β₂ = FT(β[2])
     β₃ = FT(β[3])
 
-    substepper = AcousticSubstepper(grid, dynamics.time_discretization;
-                                    cache_advecting_state,
-                                    prognostic_momentum = (ρu = prognostic_fields.ρu,
-                                                           ρv = prognostic_fields.ρv,
-                                                           ρw = prognostic_fields.ρw))
+    substepper = build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_state)
     AS = typeof(substepper)
 
-    return AcousticRungeKutta3{FT, U0, TG, TI, AS, R}(β₁, β₂, β₃, U⁰, Gⁿ,
-                                                      implicit_solver, substepper, rounding)
+    return AcousticRungeKutta3{FT, U0, TG, TI, AS, R, ST}(β₁, β₂, β₃, U⁰, Gⁿ,
+                                                          implicit_solver, substepper, rounding,
+                                                          scalar_tendencies)
 end
+
+# The substepper every `AcousticTimeStepper` drives, built from the model's prognostic fields.
+build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_state = false) =
+    AcousticSubstepper(grid, dynamics.time_discretization;
+                       cache_advecting_state,
+                       prognostic_momentum = (ρu = prognostic_fields.ρu,
+                                              ρv = prognostic_fields.ρv,
+                                              ρw = prognostic_fields.ρw))
 
 #####
 ##### Adaptive-implicit vertical advection split time step
@@ -130,12 +155,13 @@ end
 
 # An `AtmosphereModel` stepped by `AcousticRungeKutta3`; the free parameter is the
 # architecture, so `BreezeReactantExt` can specialize on `{<:ReactantState}`.
-const CompressibleAcousticModel{Arc} = AtmosphereModel{<:CompressibleDynamics, <:Any, Arc, <:AcousticRungeKutta3}
+const CompressibleAcousticModel{Arc} = AtmosphereModel{<:CompressibleDynamics, <:Any, Arc, <:AcousticTimeStepper}
 
 # Stage fractions, and the increment each stage adds to the clock. `ifelse` rather than
 # branching: `clock.stage` is traced under Reactant.
 @inline stage_fraction(ts, stage) = ifelse(stage == 1, ts.β₁, ifelse(stage == 2, ts.β₂, ts.β₃))
 @inline stage_increment(ts, stage) = ifelse(stage == 1, ts.β₁, ifelse(stage == 2, ts.β₂ - ts.β₁, 1 - ts.β₂))
+@inline final_stage_increment(ts::AcousticRungeKutta3) = stage_increment(ts, 3)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -165,22 +191,33 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Run one Wicker–Skamarock RK3 stage: complete the slow tendencies built by
 `update_state!`, then execute the linearized-acoustic substep loop, then
 update remaining scalars. The stage's updates are rounded with the round-off treatment `rounding`.
+With [`PostLoopScalarTendencies`](@ref) the scalar tendencies are rebuilt between the loop and the
+scalar update, and `callbacks` with a `TendencyCallsite` fire again on them.
 """
-function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = RoundToNearest())
+assemble_stage_forcing!(::AcousticRungeKutta3, model, Δt) = nothing
+assemble_post_loop_stage_forcing!(::AcousticRungeKutta3, model, Δt) = nothing
+
+# Wicker–Skamarock re-linearizes the fast operator about each stage's entry state.
+refresh_stage_linearization!(::AcousticRungeKutta3, substepper, model) = prepare_acoustic_cache!(substepper, model)
+
+function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = RoundToNearest(); callbacks = [])
     ts = model.timestepper
     substepper = ts.substepper
-    U⁰ = ts.U⁰
+    U⁰ = stage_start_state(ts)
 
     # Per-stage cache prep. The linearization coefficients are refreshed
     # to the current RK stage-entry state; the substep perturbations are
     # initialized with a rewind term inside the substep loop so the
     # WS-RK3 invariant still starts from Uⁿ.
-    prepare_acoustic_cache!(substepper, model)
+    refresh_stage_linearization!(ts, substepper, model)
     cache_advecting_state!(model)
 
     # `update_state!` built the slow tendencies (advection + Coriolis + diffusion; PGF and
     # buoyancy are excluded — those are handled inside the substep loop in linearized form
     # about the RK stage-entry state). Add the boundary flux and closure tendencies to them.
+    # With `PostLoopScalarTendencies`, `update_state!` built no scalar tendencies: zero them
+    # first, so the boundary flux and closure sources are what the post-loop build adds to.
+    prepare_scalar_tendencies!(ts.scalar_tendencies, model)
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
 
@@ -189,9 +226,20 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = Round
     # substep inside the loop, dispatched on the scheme type.
     add_implicit_advection_tendency!(model)
 
+    # Combine the stored stage tendencies and increments into this stage's slow forcing and
+    # start state (a no-op for Wicker–Skamarock RK3, whose stages all start from Uⁿ and apply
+    # only the latest tendency). With `PostLoopScalarTendencies` the scalars are assembled after
+    # the loop, from their post-loop tendencies.
+    assemble_stage_forcing!(ts, model, Δt)
+
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
     acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection; rounding)
+
+    # With `PostLoopScalarTendencies`, build the scalar tendencies now, with the transport
+    # velocity this loop just averaged, and assemble the scalars' stage forcing from them
+    # (see acoustic_substep_helpers.jl).
+    compute_post_loop_scalar_tendencies!(ts.scalar_tendencies, model, Δt, callbacks)
 
     # Update remaining scalars (tracers) using WS-RK3, their implicit solves included. It runs
     # before the post-loop solves because it ends by moving the condensate content of the mass
@@ -255,7 +303,7 @@ function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::Compress
     clock = model.clock
     if clock.iteration == 0 || !isfinite(clock.last_stage_Δt)
         clock.last_Δt = Δt
-        clock.last_stage_Δt = stage_increment(model.timestepper, 3) * Δt
+        clock.last_stage_Δt = final_stage_increment(model.timestepper) * Δt
         reconcile_state!(model)
 
         # Seed the transport velocity *before* the tendencies below: `set!` has already
@@ -293,16 +341,17 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     freeze_linearization_state!(ts.substepper, model)
 
     # Stage 1: U* = Uⁿ + (Δt/3) R(Uⁿ)
-    acoustic_rk3_substep!(model, Δt, β₁)
+    acoustic_rk3_substep!(model, Δt, β₁; callbacks)
 
     tick_stage!(model.clock, β₁ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     # Freeze the transport velocity the scalar tendencies were just built with; the next
     # stage's acoustic loop overwrites the live field before `scalar_substep!` reads it.
+    # (With `PostLoopScalarTendencies` the stage refreezes it after its own loop.)
     cache_transport_velocity!(model)
 
     # Stage 2: U** = Uⁿ + (Δt/2) R(U*)
-    acoustic_rk3_substep!(model, Δt, β₂)
+    acoustic_rk3_substep!(model, Δt, β₂; callbacks)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
@@ -310,8 +359,21 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**). Every stage restarts from Uⁿ, so only this stage's
     # rounding reaches Uⁿ⁺¹, and only this stage takes the time stepper's round-off treatment.
-    acoustic_rk3_substep!(model, Δt, β₃, ts.rounding)
+    acoustic_rk3_substep!(model, Δt, β₃, ts.rounding; callbacks)
 
+    complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Finish an outer step of an `AcousticTimeStepper` after its last stage: land the clock on
+`tⁿ⁺¹`, step the closure prognostics, rebuild the tendencies stage 1 of the next step uses,
+apply the once-per-step microphysics update, and advect particles.
+"""
+function complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
@@ -362,9 +424,11 @@ skip_pre_microphysics_tendencies(microphysics, Δt, callbacks) =
 ##### 1). Like WRF's `rk_scalar_tend` (called with `grid%ru_m, grid%rv_m,
 ##### grid%ww_m`) and MPAS's `ruAvg`-driven tracer transport, scalars are
 ##### advected by the acoustic-mean velocity rather than the RK predictor.
-##### The stage alignment differs, though: WRF builds these tendencies inside
-##### the stage, after its own substep loop, while Breeze builds them between
-##### stages and so advects with the *preceding* loop's average.
+##### The stage alignment differs by default, though: WRF builds these tendencies
+##### inside the stage, after its own substep loop, while Breeze builds them between
+##### stages and so advects with the *preceding* loop's average (issue #1089).
+##### `PostLoopScalarTendencies` (`post_loop_scalar_tendencies = true`) restores
+##### WRF's alignment; see acoustic_substep_helpers.jl.
 #####
 ##### Theta's slow tendency does NOT consume this — `thermodynamic_transport_velocities`
 ##### routes it to `model.velocities` (matching WRF's `rk_tendency`; see
@@ -384,7 +448,7 @@ skip_pre_microphysics_tendencies(microphysics, Δt, callbacks) =
 #####
 
 function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:CompressibleDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, Nothing},
-                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+                                                                      <:Any, <:Any, <:AcousticTimeStepper})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,
             v = sub.time_averaged_velocities.v,
@@ -392,7 +456,7 @@ function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:Compress
 end
 
 function AtmosphereModels.transport_velocities(model::AtmosphereModel{<:TerrainCompressibleDynamics,
-                                                                      <:Any, <:Any, <:AcousticRungeKutta3})
+                                                                      <:Any, <:Any, <:AcousticTimeStepper})
     sub = model.timestepper.substepper
     return (u = sub.time_averaged_velocities.u,
             v = sub.time_averaged_velocities.v,
@@ -401,16 +465,19 @@ end
 
 # `update_state!` builds the slow tendencies the stages apply: momentum without the pressure-gradient
 # force and buoyancy, which the substep loop integrates, and the thermodynamic variable advected by
-# the RK predictor velocity rather than the time-averaged transport velocity.
-AtmosphereModels.slow_dynamics(::AcousticRungeKutta3, dynamics) = SlowDynamics(dynamics)
+# the RK predictor velocity rather than the time-averaged transport velocity. It builds the scalar
+# tendencies too, unless the stepper rebuilds them after each stage's loop.
+AtmosphereModels.slow_dynamics(::AcousticTimeStepper, dynamics) = SlowDynamics(dynamics)
+AtmosphereModels.scalar_tendencies_in_update_state(ts::AcousticTimeStepper) =
+    scalar_tendencies_in_update_state(ts.scalar_tendencies)
 AtmosphereModels.thermodynamic_transport_velocities(model::CompressibleAcousticModel) = slow_thermodynamic_velocities(model)
 
-Oceananigans.prognostic_state(timestepper::AcousticRungeKutta3) =
+Oceananigans.prognostic_state(timestepper::AcousticTimeStepper) =
     (substepper = Oceananigans.prognostic_state(timestepper.substepper),)
 
-function Oceananigans.restore_prognostic_state!(restored::AcousticRungeKutta3, from)
+function Oceananigans.restore_prognostic_state!(restored::AcousticTimeStepper, from)
     Oceananigans.restore_prognostic_state!(restored.substepper, from.substepper)
     return restored
 end
 
-Oceananigans.restore_prognostic_state!(timestepper::AcousticRungeKutta3, ::Nothing) = timestepper
+Oceananigans.restore_prognostic_state!(timestepper::AcousticTimeStepper, ::Nothing) = timestepper

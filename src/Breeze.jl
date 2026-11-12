@@ -19,6 +19,9 @@ export
     CompressibleDynamics,
     CompressibleModel,
     SplitExplicitTimeDiscretization,
+    AcousticPressureCoefficient,
+    FrozenCompositionPressureCoefficient,
+    PhaseEquilibriumPressureCoefficient,
     AcousticOuterScheme,
     WickerSkamarock3,
     AcousticSubstepDistribution,
@@ -70,6 +73,9 @@ export
     continuity_density,
     dynamics_pressure,
     total_density,
+
+    # Advection
+    FrozenWeightsWENO,
 
     # Advective timescale control for the time-step wizard
     CellAdvectionTimescale,
@@ -182,6 +188,7 @@ export
     # TimeSteppers
     SSPRungeKutta3,
     AcousticRungeKutta3,
+    MultirateInfinitesimalStep,
     AcousticSubstepper,
     RoundToNearest,
     StochasticRounding,
@@ -303,6 +310,8 @@ using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
                               SplitExplicitTimeDiscretization,
+                              AcousticPressureCoefficient, FrozenCompositionPressureCoefficient,
+                              PhaseEquilibriumPressureCoefficient,
                               AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,
