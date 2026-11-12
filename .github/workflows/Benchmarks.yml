@@ -36,92 +36,69 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dynamics: 'anelastic'
-            microphysics: 'nothing'
-            grid: '256x256x128, 512x512x256, 768x768x256'
-            advection: 'WENO5, WENO9'
-            backend: 'vanilla'
-            topology: 'PPB'
-            extra_flags: '--warmup_steps 5 --time_steps 150'
-          - dynamics: 'compressible_splitexplicit'
-            microphysics: 'nothing'
-            grid: '512x512x256'
-            advection: 'WENO5'
-            backend: 'vanilla'
-            topology: 'PPB'
-            extra_flags: ''
-          - dynamics: 'anelastic'
-            microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
-            grid: '512x512x256'
-            advection: 'WENO5'
-            backend: 'vanilla'
-            topology: 'PPB'
-            extra_flags: ''
-          # Reactant vs vanilla on the AD job's physics: a LatitudeLongitudeGrid
-          # with SphericalCoriolis, split-explicit compressible dynamics (12
-          # acoustic substeps), WENO5 and no microphysics, on a PBB grid, at the
-          # AD job's size and a larger one. Uses --simplified to drop the
-          # geostrophic forcing and field-dependent surface drag BCs (which do
-          # not currently materialize on ReactantState).
-          - dynamics: 'compressible_splitexplicit'
-            microphysics: 'nothing'
-            grid: '128x128x32, 256x256x128'
-            advection: 'WENO5'
-            backend: 'vanilla, reactant'
-            topology: 'PBB'
-            # Two Reactant compiles of the split-explicit step
-            timeout: 60
-            # Profile the vanilla cases' kernels once every case is timed (--profile_kernels)
-            profile_kernels: true
-            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude'
-          # AD: forward+backward via Enzyme reverse-mode through the same
-          # @trace checkpointed loop. Reactant-only by construction. No
-          # microphysics in v1 (Enzyme correctness through the 1M scheme is
-          # untested). Small grid to keep the gradient compile bounded. The
-          # loop body is compiled once regardless of Nsteps, so 64 steps cost
-          # little extra compile; --checkpoints sweeps the checkpoint budget of
-          # the binomial (revolve) schedule Enzyme uses for the reverse pass
-          # (each value is a separate compile + run, recorded as its own
-          # result). The model is the regional-forecast configuration: a
-          # LatitudeLongitudeGrid with SphericalCoriolis (the AD default) and
-          # split-explicit compressible dynamics (12 acoustic substeps). To reproduce locally
-          # on CPU see benchmarking/README.md ("AD benchmark").
+          # TEMPORARY: only the kernel AD entry runs, and the "Publish benchmarks" job is
+          # removed with it; restore both from main before merging
+          # Kernel AD: the AD job's model and loop, differentiating the kernel bodies
+          # themselves (--kernels kernelad, EnzymeAD/Reactant.jl#3472) instead of the
+          # raised kernels. The Julia side is Reactant.jl#3472 at `reactant_rev`
+          # (pb/kernel-ad f439eef3: upstream main at 025e4a59, Reactant 0.2.304). The
+          # pipeline's passes come from EnzymeAD/Enzyme-JAX#3533, which no registered
+          # Reactant_jll has, so the entry needs a libReactantExtra of that branch, from
+          # one of two sources (see the steps below):
+          # - `enzyme_jax_branch`: the newest successful "Build Reactant_jll" run on the
+          #   Enzyme-JAX branch whose products have not expired. They are kept for about
+          #   two days, so the branch's workflow has to be rerun when they lapse, and the
+          #   job fails at its first step until then; `enzyme_jax_run` would pin one run.
+          # - `reactant_jll_url` and `reactant_jll_rev`: a Reactant_jll package with
+          #   published builds, added to the environment, with `reactant_jll_gpu_version`
+          #   its CUDA version (the image's preference is 13.1) and `reactant_jll_compat`
+          #   the Reactant_jll compat to give the copy of Reactant.jl when the build's
+          #   version lies outside Reactant's. Reactant.jl#3472 itself sources
+          #   Pangoraw/Reactant_jll.jl this way, but its newest build (11cfdccc, 0.0.435+4
+          #   of 2026-10-29, x86_64 Linux CUDA 12.9) is too old: it has none of
+          #   nvvm-attach-target, which every kernel AD commit's GPU pipeline runs, so the
+          #   compile fails at its first pipeline (run 42651955060), nor the renamed
+          #   lower-kernel-to-polygeist. Switch to this source once a newer build is published.
+          # Every other entry keeps the registered Reactant and Reactant_jll. `mode` keeps
+          # its artifact names apart from the AD job's.
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '128x128x32'
             advection: 'WENO5'
             backend: 'reactant'
             topology: 'PBB'
-            # The gradient compile needs more than the default 30-minute job
-            timeout: 60
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial'
-          # Scalar-tendency kernel sweep (no model): time the bare WENO
-          # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
-          # the Reactant-compiled XLA program and the eager vanilla launch.
-          # --mode tendency skips model construction, so there is no
-          # dynamics/microphysics.
-          - dynamics: 'none'
-            microphysics: 'none'
-            grid: '256x256x128'
-            advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
-            topology: 'PPB'
-            # `mode` distinguishes the two tendency entries in the artifact names
-            # (their other matrix fields are identical, so without this they
-            # collide and only one set of results survives the publish merge).
-            mode: 'scalar_tendency'
-            extra_flags: '--mode scalar_tendency --float_type=Float32,BFloat16 --time_steps 320'
-          # Full-model tendency: time compute_tendencies! for a compressible
-          # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
-          # model_tendency builds the model, so dynamics/microphysics are unused.
-          - dynamics: 'none'
-            microphysics: 'none'
-            grid: '256x256x128'
-            advection: 'WENO5, WENO7, WENO9'
-            backend: 'vanilla, reactant'
-            topology: 'PPB'
-            mode: 'model_tendency'
-            extra_flags: '--mode model_tendency --float_type=Float32 --time_steps 320'
+            mode: 'kernelad'
+            reactant_rev: 'f439eef39171e3225908be5722367aee6f24a29d'
+            # pb/kernel-ad plus EnzymeAD/Enzyme-JAX#3908, the lower-jit fix for the 29 GiB
+            # below, built by its builds-only PR against main; back to pb/kernel-ad once
+            # #3908 is on it
+            enzyme_jax_branch: 'dkz/lower-jit-constructor-closure'
+            # reactant_jll_url: 'https://github.com/Pangoraw/Reactant_jll.jl'
+            # reactant_jll_rev: '<a build newer than 11cfdccc>'
+            # reactant_jll_gpu_version: '12.9'
+            # reactant_jll_compat: '0.0.435'
+            # TEMPORARY: the kernel AD pipeline's convert-parallel-to-gpu1{emit_single_alternative=true}
+            # rebuilds each launch from its original shape, which lower-kernel-to-polygeist does not
+            # record: every kernel got one thread per block, and a kernel whose loop was delinearized
+            # into 4 dimensions failed with "no block size splits this kernel". Without the option,
+            # POLYGEIST_GPU_KERNEL_BLOCK_SIZE picks each kernel's block from its loop bounds instead.
+            kernelad_block_size: '256'
+            # TEMPORARY: dump every MLIR pass pipeline to check the launch shapes of the compiled kernels
+            dump_mlir: 'mlir_dumps'
+            # The compile of the checkpointed program, with about twice the jit regions of the
+            # 704 s one without, and a first execution that took 30 minutes before failing
+            # (run 42909083305) need more than the 60 minutes the entry had
+            timeout: 120
+            # TEMPORARY: the AD job's window is 64 steps with binomial checkpointing (2 and 8).
+            # Under kernel AD each kernel launch of the loop body becomes its own jit region.
+            # Checkpointing was off here while lower-jit copied every module's constructor and
+            # fat binary into each call, which killed the compile at 29 GiB (fixed by
+            # EnzymeAD/Enzyme-JAX#3908; runs 42863400682 to 42890370661 and
+            # benchmarking/kernelad_memprobe.jl, which `probe_run: <run id>` on this entry runs
+            # on that run's dump instead of the benchmark). With the fix, 8 steps without
+            # checkpointing compiled, but their tape needed 44 GiB of the L4's 24 GB
+            # (run 42909083305), so Binomial(2) is back. Restore the AD job's window once this fits.
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 8 --checkpoints 2 --checkpointing_mode binomial --kernels kernelad'
     defaults:
       run:
         shell: bash
@@ -133,6 +110,9 @@ jobs:
         # Mount host `/usr/local` so that we can delete some stuff afterwards
         - /usr/local:/host-usr-local
     timeout-minutes: ${{ matrix.timeout || 30 }}
+    # TEMPORARY: with the kernel AD entry alone, its result is the workflow's; restore
+    # `continue-on-error: ${{ matrix.mode == 'kernelad' }}` with the other entries
+    continue-on-error: false
     steps:
       - name: "Check out repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -146,6 +126,139 @@ jobs:
       - name: df after cleanup
         run: |
           df -hT
+      - name: Find the Enzyme-JAX Reactant_jll build
+        # The newest successful "Build Reactant_jll" run on the Enzyme-JAX branch whose
+        # products have not expired (they are kept for a couple of days). The image has
+        # neither curl nor gh, so Julia's Downloads fetches the API.
+        if: ${{ matrix.enzyme_jax_branch }}
+        id: enzyme_jax_build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: 'products-x86_64-linux-gnu-cxx11-gpu_version+13.1-gpu+cuda-mode+opt'
+        run: |
+          github_api() {
+              julia --startup-file=no -e 'using Downloads; Downloads.download(ARGS[1], stdout; headers = ["Authorization" => "Bearer " * ENV["GH_TOKEN"], "Accept" => "application/vnd.github+json"])' "https://api.github.com/repos/EnzymeAD/Enzyme-JAX/$1"
+          }
+          if [[ -n "${{ matrix.enzyme_jax_run }}" ]]; then
+              runs="$(github_api "actions/runs/${{ matrix.enzyme_jax_run }}" | jq -r '"\(.id) \(.head_sha)"')"
+          else
+              # Any status: each platform uploads its products when its own job finishes, so
+              # a run still building the other platforms may already have ours
+              runs="$(github_api "actions/workflows/build-reactantjll.yml/runs?branch=${{ matrix.enzyme_jax_branch }}&per_page=10" | jq -r '.workflow_runs[] | "\(.id) \(.head_sha)"')"
+          fi
+          while read -r run_id sha; do
+              [[ -n "${run_id}" ]] || continue
+              # `+` must be percent-encoded in the query, or it reads as a space
+              if github_api "actions/runs/${run_id}/artifacts?name=${ARTIFACT//+/%2B}" < /dev/null | jq -e '[.artifacts[] | select(.expired | not)] | length > 0' > /dev/null; then
+                  echo "Using Enzyme-JAX run ${run_id} (commit ${sha}) of ${{ matrix.enzyme_jax_branch }}"
+                  echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+                  exit 0
+              fi
+          done <<< "${runs}"
+          echo "No unexpired ${ARTIFACT} on Enzyme-JAX's ${{ matrix.enzyme_jax_branch }}: rerun its Build Reactant_jll workflow" >&2
+          exit 1
+      - name: Download the Enzyme-JAX Reactant_jll build
+        if: ${{ matrix.enzyme_jax_branch }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: 'products-x86_64-linux-gnu-cxx11-gpu_version+13.1-gpu+cuda-mode+opt'
+          repository: EnzymeAD/Enzyme-JAX
+          run-id: ${{ steps.enzyme_jax_build.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: reactant_jll_products
+      - name: Use the Enzyme-JAX libReactantExtra
+        # Unpack the build (lib/libReactantExtra.so with its lib/cuda next to it) and point
+        # Reactant_jll's libReactantExtra at it in the image's @breeze preferences, which
+        # list Reactant_jll; before instantiating, so everything compiles against it
+        if: ${{ matrix.enzyme_jax_branch }}
+        working-directory: .
+        run: |
+          ls -l reactant_jll_products
+          mkdir -p reactant_jll
+          # The image has no xz; Pkg unpacks the .tar.xz with the p7zip that ships with Julia
+          julia --startup-file=no -e 'using Pkg; Pkg.PlatformEngines.unpack(ARGS[1], ARGS[2])' \
+              reactant_jll_products/Reactant.v*.tar.* reactant_jll
+          lib="${GITHUB_WORKSPACE}/reactant_jll/lib/libReactantExtra.so"
+          ls -l "${lib}"
+          julia --startup-file=no -e '
+              using TOML
+              file = "/usr/local/share/julia/environments/breeze/LocalPreferences.toml"
+              preferences = TOML.parsefile(file)
+              preferences["Reactant_jll"]["libReactantExtra_path"] = ARGS[1]
+              open(io -> TOML.print(io, preferences), file, "w")
+              print(read(file, String))' "${lib}"
+      - name: Use the published kernel AD Reactant_jll's CUDA version
+        # Reactant_jll picks its artifact by the `gpu_version` preference in the image's
+        # @breeze environment, which lists Reactant_jll; a published build has one CUDA
+        # version, so the preference follows it. Before instantiating, so everything
+        # compiles against it
+        if: ${{ matrix.reactant_jll_url }}
+        working-directory: .
+        run: |
+          julia --startup-file=no -e '
+              using TOML
+              file = "/usr/local/share/julia/environments/breeze/LocalPreferences.toml"
+              preferences = TOML.parsefile(file)
+              preferences["Reactant_jll"]["gpu_version"] = ARGS[1]
+              delete!(preferences["Reactant_jll"], "libReactantExtra_path")
+              open(io -> TOML.print(io, preferences), file, "w")
+              print(read(file, String))' "${{ matrix.reactant_jll_gpu_version }}"
+      - name: Use Reactant.jl's kernel AD branch
+        # Reactant.jl#3472 at `reactant_rev`, for the entry whose Reactant_jll build matches it
+        if: ${{ matrix.reactant_rev }}
+        shell: julia --color=yes --project {0}
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          using Pkg
+          # `reactant_rev` fixes Reactant here, and the branch's version can lag the project's
+          # exact Reactant compat, so drop the bound for this entry. `Pkg.compat` checks the
+          # manifest against `[sources]`, so resolve first: the manifest is gitignored.
+          # The image rebuilt on 2026-11-05 has no registry, which `resolve` does not install
+          isempty(Pkg.Registry.reachable_registries()) && Pkg.Registry.add("General")
+          Pkg.resolve()
+          Pkg.compat("Reactant", nothing)
+          Pkg.add(url = "https://github.com/EnzymeAD/Reactant.jl", rev = "${{ matrix.reactant_rev }}")
+      - name: Patch the kernel AD branch for the block size and a published Reactant_jll
+        # Develop a copy of the Reactant.jl branch whose kernel AD pipeline runs
+        # convert-parallel-to-gpu1 without emit_single_alternative, so that the
+        # POLYGEIST_GPU_KERNEL_BLOCK_SIZE set for the run below takes effect, and whose
+        # Reactant_jll compat admits a published build (see the entry); then add that build.
+        # The branch's `[sources]` pins Reactant_jll to Pangoraw/Reactant_jll.jl (0.0.435+4),
+        # which the add above follows, while the branch's own compat (0.0.438) is enforced
+        # when the copy is developed: without a published build, drop the pin so the
+        # registered Reactant_jll resolves; the preference above replaces its library
+        if: ${{ matrix.kernelad_block_size || matrix.reactant_jll_url }}
+        shell: julia --color=yes --project {0}
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          using Pkg
+          installed = only(p for p in values(Pkg.dependencies()) if p.name == "Reactant").source
+          reactant = joinpath(ENV["GITHUB_WORKSPACE"], "Reactant.jl")
+          cp(installed, reactant; force = true)
+          chmod(reactant, 0o755; recursive = true)
+          function replace_once!(file, old, new)
+              source = read(file, String)
+              count(old, source) == 1 || error("expected one $old in $file")
+              write(file, replace(source, old => new))
+          end
+          compiler = joinpath(reactant, "src", "compiler", "Compiler.jl")
+          if !isempty("${{ matrix.kernelad_block_size }}")
+              replace_once!(compiler, "convert-parallel-to-gpu1{emit_single_alternative=true}", "convert-parallel-to-gpu1")
+          end
+          if !isempty("${{ matrix.reactant_jll_compat }}")
+              replace_once!(joinpath(reactant, "Project.toml"), "Reactant_jll = \"0.0.438\"", "Reactant_jll = \"${{ matrix.reactant_jll_compat }}\"")
+          end
+          if isempty("${{ matrix.reactant_jll_url }}")
+              replace_once!(joinpath(reactant, "Project.toml"), r"\nReactant_jll = \{url = [^\n]*\}\n", "\n")
+          end
+          Pkg.develop(path = reactant)
+          run(`grep -n Reactant_jll $(joinpath(reactant, "Project.toml"))`)
+          run(`grep -n convert-parallel-to-gpu1 $compiler`)
+          if !isempty("${{ matrix.reactant_jll_url }}")
+              Pkg.add(url = "${{ matrix.reactant_jll_url }}", rev = "${{ matrix.reactant_jll_rev }}")
+          end
       - name: Instantiate benchmarking environment
         shell: julia --color=yes --project {0}
         run: |
@@ -156,11 +269,36 @@ jobs:
         run: |
           earlyoom -m 2 -s 100 -r 60 --prefer 'julia'
         background: true
+      - name: Download the MLIR dump to probe
+        if: ${{ matrix.probe_run }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: 'mlir-dumps-*'
+          run-id: ${{ matrix.probe_run }}
+          github-token: ${{ github.token }}
+          path: probe_dumps
+          merge-multiple: true
       - name: Run benchmarks
         timeout-minutes: ${{ matrix.timeout || 45 }}
         env:
           XLA_FLAGS: '--xla_disable_hlo_passes=multi_output_fusion'
+          BREEZE_DUMP_MLIR: ${{ matrix.dump_mlir }}
+          PROBE_EXPERIMENTS: ${{ matrix.probe_experiments }}
+          PROBE_STRIP_CTORS: ${{ matrix.probe_strip_ctors }}
         run: |
+          # An empty POLYGEIST_GPU_KERNEL_BLOCK_SIZE would still be read, as a block size of 0
+          if [[ -n "${{ matrix.kernelad_block_size }}" ]]; then
+              export POLYGEIST_GPU_KERNEL_BLOCK_SIZE="${{ matrix.kernelad_block_size }}"
+          fi
+          if [[ -n "${{ matrix.probe_run }}" ]]; then
+              if [[ -n "${{ matrix.probe_cuda_module_loading }}" ]]; then
+                  export CUDA_MODULE_LOADING="${{ matrix.probe_cuda_module_loading }}"
+              fi
+              dump="$(find "${GITHUB_WORKSPACE}/probe_dumps" -name 'module_*_pre_kernelad_binary_pm.mlir' | head -n1)"
+              ls -l "${dump}"
+              julia --color=yes --project kernelad_memprobe.jl "${dump}"
+              exit $?
+          fi
           julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --backend "${{ matrix.backend }}" --topology "${{ matrix.topology }}" --warmup_steps 8 --time_steps 80 ${{ matrix.extra_flags }} ${{ matrix.profile_kernels && '--profile_kernels' || '' }}
       - name: Stop earlyoom
         cancel: earlyoom
@@ -174,8 +312,8 @@ jobs:
           retention-days: 90
           overwrite: false
       - name: "Upload MLIR dumps as artifacts"
-        # Only the tendency / model_tendency matrix entries dump MLIR (Reactant
-        # backend); other entries produce no files and are skipped.
+        # Only the tendency / model_tendency matrix entries and those with `dump_mlir`
+        # dump MLIR (Reactant backend); other entries produce no files and are skipped.
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -205,283 +343,9 @@ jobs:
           retention-days: 90
           overwrite: false
       - name: Create job summary
+        # The probe writes no results
+        if: ${{ !matrix.probe_run }}
         timeout-minutes: 1
         run: |
           cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
           if [ -f "kernel_profile.md" ]; then cat "kernel_profile.md" >> "${GITHUB_STEP_SUMMARY}"; fi
-
-  publish-benchmarks:
-    name: "Publish benchmarks"
-    needs: run-benchmarks
-    permissions:
-      actions: write
-      contents: write
-      pull-requests: write
-      statuses: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: "Download benchmark results"
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: benchmarks-*
-      - name: Merge results and create JSON for github-action-benchmark
-        shell: python
-        run: |
-          # Merge benchmark_results.json from all artifact directories,
-          # then create the JSON file for github-action-benchmark.
-          import json, glob
-
-          all_data = []
-          for path in sorted(glob.glob('benchmarks-*/benchmark_results.json')):
-              with open(path) as f:
-                  all_data.extend(json.load(f))
-
-          # Write merged results for archival
-          with open('benchmark_results.json', 'w') as f:
-              json.dump(all_data, f, ensure_ascii=False, indent=2)
-
-          # Build github-action-benchmark entries
-          # Name format: <name>/<properties>/<gpu>/<grid_size>
-          data = []
-          compile_data = []
-          for d in all_data:
-              base_name = d['name'].split('_')[0]
-              advection = d['advection']
-              # Closure is unused for the time being because it's always the
-              # same everywhere in the current setup.
-              closure = d['closure']
-              dynamics = d['dynamics']
-              ft = d['float_type']
-              microphysics = d['microphysics']
-              backend = d.get('backend', 'vanilla')
-              mode = d.get('mode', 'forward')
-              checkpointing = d.get('checkpointing', '')
-
-              gpu = d['metadata']['gpu_name']
-
-              versions = d['metadata'].get('package_versions', {})
-              extra = ', '.join(
-                  f"{p} v{versions.get(p, 'unknown')}"
-                  for p in ('Oceananigans', 'CUDA', 'GPUCompiler', 'Reactant', 'Reactant_jll')
-              )
-
-              grid = d['grid_size']
-              grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
-
-              # AD (forward+backward via Enzyme) entries get their own chart,
-              # one line per checkpointing strategy. Skip the forward-only
-              # clauses below so an AD point doesn't also land on a forward
-              # chart that happens to match its config.
-              if mode == 'ad':
-                  level_1 = f'{base_name}; AD; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
-                  level_2 = f'Advection: {advection}'
-                  level_3 = f'{gpu}'
-                  level_4 = f'{grid_str} {checkpointing}'.strip()
-
-                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
-
-                  # The forward+backward compile, one panel per checkpointing strategy and one line per
-                  # stage, next to the tendency compile times
-                  if d.get('compile_tracing_time_seconds', 0) > 0:
-                      level_1 = f'Reactant compile time; AD; Advection: {advection}; Grid: {grid_str}'
-                      level_2 = f'{base_name} {checkpointing}'.strip()
-                      level_3 = f'{gpu}'
-                      for stage in ('tracing', 'mlir', 'xla'):
-                          name = f"{level_1}/{level_2}/{level_3}/{stage}"
-                          compile_data.append({'name': name, 'unit': 's', 'value': d[f'compile_{stage}_time_seconds'], 'extra': extra})
-                  continue
-
-              # Scalar-tendency kernel sweep (no model): compare WENO orders on
-              # a fixed grid. Reuses BenchmarkResult with mode == 'tendency';
-              # closure/dynamics/microphysics are 'none', so skip the forward
-              # clauses below via continue.
-              if mode in ('scalar_tendency', 'model_tendency'):
-                  # One figure per case (ScalarTendency / ModelTendency), one
-                  # side-by-side panel per WENO order, and one line per
-                  # float-type × backend config. Scalar gets 4 lines (Float32 /
-                  # BFloat16 × vanilla / reactant); model gets 2 (Float32 only,
-                  # since it has no BFloat16 rows).
-                  ft_short = {'Float32': 'F32', 'BFloat16': 'BF16', 'Float64': 'F64'}.get(ft, ft)
-                  level_1 = f'{base_name}; Grid: {grid_str}'
-                  level_2 = f'Advection: {advection}'
-                  level_3 = f'{gpu}'
-                  level_4 = f'{ft_short} {backend}'
-
-                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
-
-                  if advection == 'WENO5' and d.get('compile_tracing_time_seconds', 0) > 0:
-                      level_1 = f'Reactant compile time; Advection: {advection}; Grid: {grid_str}'
-                      level_2 = f'{base_name} {ft_short} {backend}'
-                      level_3 = f'{gpu}'
-                      for stage in ('tracing', 'mlir', 'xla'):
-                          name = f"{level_1}/{level_2}/{level_3}/{stage}"
-                          compile_data.append({'name': name, 'unit': 's', 'value': d[f'compile_{stage}_time_seconds'], 'extra': extra})
-                  continue
-
-              # We want to group benchmarks in different ways. NOTE:
-              # the same benchmark may appear in multiple groups
-              if dynamics == 'anelastic' and grid_str == '512x512x256' and advection == 'WENO5':
-                  level_1 = f'{base_name}; Dynamics: {dynamics}; Grid: {grid_str} [{ft}]'
-                  level_2 = f'Advection: {advection}'
-                  level_3 = f'{gpu}'
-                  level_4 = f'{microphysics}'
-
-                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
-                  pass
-
-              if dynamics == 'anelastic' and microphysics == 'nothing':
-                  level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
-                  level_2 = f'Compare advections'
-                  level_3 = f'{gpu}'
-                  level_4 = f'{advection} {grid}'
-
-                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
-                  pass
-
-              # The Reactant vs vanilla sweep is the only forward case on a
-              # LatitudeLongitudeGrid, which the result name marks with _LatLon.
-              latlon = '_LatLon' in d['name']
-
-              # Without the latlon check the vanilla and Reactant points of the
-              # sweep would share a name here.
-              if microphysics == 'nothing' and not latlon:
-                  level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
-                  level_2 = f'Advection: {advection}'
-                  level_3 = f'{gpu}'
-                  level_4 = f'{grid_str}'
-
-                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
-
-              # Reactant vs vanilla sweep: compare backends across grid sizes
-              # on the AD job's physics (LatitudeLongitudeGrid, split-explicit
-              # dynamics, WENO5, no microphysics).
-              if latlon and advection == 'WENO5':
-                  level_1 = f'{base_name}; LatitudeLongitudeGrid; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
-                  level_2 = f'Compare backends'
-                  level_3 = f'{gpu}'
-                  level_4 = f'{backend} {grid_str}'
-
-                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second'], 'extra': extra})
-
-          with open('github-action-benchmark.json', 'w') as f:
-              json.dump(data, f)
-
-          if compile_data:
-              with open('github-action-benchmark-compile.json', 'w') as f:
-                  json.dump(compile_data, f)
-
-          # Per-kernel GPU times from run_benchmarks.jl --profile_kernels: one figure per
-          # configuration, one panel per grid, one line per kernel, in ms per time step
-          kernel_data = []
-          for path in sorted(glob.glob('benchmarks-*/kernel_profile.json')):
-              with open(path) as f:
-                  for d in json.load(f):
-                      base_name = d['name'].split('_')[0]
-                      grid = d['grid_size']
-                      grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
-                      gpu = d['metadata']['gpu_name']
-                      level_1 = f"Kernel time; {base_name}; Dynamics: {d['dynamics']}; Microphysics: {d['microphysics']} [{d['float_type']}]"
-                      level_2 = f'Grid: {grid_str}'
-                      level_3 = f'{gpu}'
-                      for k in d['top_kernels']:
-                          kernel = k['name'].replace('/', '_')
-                          level_4 = kernel if len(kernel) <= 60 else kernel[:57] + '...'
-                          name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-                          kernel_data.append({'name': name, 'unit': 'ms/step', 'value': 1e3 * k['total_time_seconds'] / d['time_steps']})
-
-          if kernel_data:
-              with open('github-action-benchmark-kernels.json', 'w') as f:
-                  json.dump(kernel_data, f)
-      - name: "Generate token"
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        if: ${{ ! github.event.pull_request.head.repo.fork }}
-        id: generate_token
-        with:
-          client-id: "${{ secrets.NUMTERRA_BOT_ID }}"
-          private-key: "${{ secrets.NUMTERRA_BOT_PRIVATE_KEY }}"
-          owner: NumericalEarth
-          repositories: |
-            Breeze.jl
-            BreezeBenchmarks
-      - name: Push results to BreezeBenchmarks repo
-        if: ${{ github.event_name == 'push' }}
-        run: |
-          # Clone BreezeBenchmarks
-          git clone https://numterra-bot:${{ steps.generate_token.outputs.token }}@github.com/NumericalEarth/BreezeBenchmarks.git
-          cd BreezeBenchmarks
-          DIRNAME="benchmarks/by_branch/${{ github.head_ref || github.ref_name }}/${{ github.sha }}"
-          mkdir -vp "${DIRNAME}"
-          # Copy over file
-          cp -v ../benchmark_results.json "${DIRNAME}/."
-          # Push
-          git config --global user.name "numterra-bot[bot]"
-          git config --global user.email "242463128+numterra-bot[bot]@users.noreply.github.com"
-          git add .
-          git commit -m'Save benchmark results for commit ${{ github.sha }}'
-          git push -u origin main
-      - name: "Publish benchmark results"
-        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
-        with:
-          name: Breeze.jl Benchmarks
-          tool: "customBiggerIsBetter"
-          output-file-path: "github-action-benchmark.json"
-          # benchmark-data-dir-path: ${{ github.event_name == 'push' && '.' || format('previews/PR{0}', github.event.number) }}
-          benchmark-data-dir-path: "."
-          gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
-          github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
-          comment-always: ${{ github.event_name == 'pull_request' }}
-          summary-always: true
-          alert-threshold: "110%"
-          fail-on-alert: false
-          # auto-push: true
-          auto-push: ${{ github.event_name == 'push' }}
-          max-items-in-chart: 1000
-          comment-on-alert: true
-      - name: "Clean up benchmark data clone"
-        if: ${{ hashFiles('github-action-benchmark-compile.json') != '' }}
-        run: rm -rf benchmark-data-repository
-      - name: "Publish compile times"
-        if: ${{ hashFiles('github-action-benchmark-compile.json') != '' }}
-        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
-        with:
-          name: Breeze.jl Compile Times
-          tool: "customSmallerIsBetter"
-          output-file-path: "github-action-benchmark-compile.json"
-          benchmark-data-dir-path: "."
-          gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
-          github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
-          comment-always: false
-          summary-always: true
-          # Compile times are noisier than run times
-          alert-threshold: "150%"
-          fail-on-alert: false
-          auto-push: ${{ github.event_name == 'push' }}
-          max-items-in-chart: 1000
-          comment-on-alert: false
-      - name: "Clean up benchmark data clone before kernel times"
-        if: ${{ hashFiles('github-action-benchmark-kernels.json') != '' }}
-        run: rm -rf benchmark-data-repository
-      - name: "Publish kernel times"
-        if: ${{ hashFiles('github-action-benchmark-kernels.json') != '' }}
-        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
-        with:
-          name: Breeze.jl Kernel Times
-          tool: "customSmallerIsBetter"
-          output-file-path: "github-action-benchmark-kernels.json"
-          benchmark-data-dir-path: "."
-          gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
-          github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
-          comment-always: false
-          summary-always: true
-          alert-threshold: "150%"
-          fail-on-alert: false
-          auto-push: ${{ github.event_name == 'push' }}
-          max-items-in-chart: 1000
-          comment-on-alert: false
