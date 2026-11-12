@@ -2560,7 +2560,7 @@ end
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
-        ∇ʰ_θM = V⁻¹ * (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu) + δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv))
+        ∇ʰ_θM = V⁻¹ * (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu) + δyTᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv))
         C[i, j, k] = - ∇ʰ_θM - ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu, ρv, ρw)
     end
 end
