@@ -278,6 +278,10 @@ end
 ##### Terrain-specialized acoustic substep helpers
 #####
 
+# The terrain metric terms read vertical and diagonal neighbors of the horizontal momenta and
+# vertical neighbors of (ρθ)′, which the topology-aware operators do not provide, so the loop fills halos.
+fill_substep_halos!(fields, ::TerrainCompressibleModel) = fill_halo_regions!(fields)
+
 function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
