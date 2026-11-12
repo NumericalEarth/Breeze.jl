@@ -85,6 +85,7 @@ using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
 
 include("cloud_microphysics_translations.jl")
+include("sink_budgets.jl")
 include("one_moment_microphysics.jl")
 include("one_moment_helpers.jl")
 include("two_moment_microphysics.jl")
