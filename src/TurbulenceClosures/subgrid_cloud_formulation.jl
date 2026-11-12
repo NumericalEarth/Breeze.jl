@@ -142,14 +142,16 @@ Adapt.@adapt_structure SubgridDistribution
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`SubgridDistribution`](@ref). The defaults are the components of the fixed smooth SHOC
-configuration with published coefficients.
+configuration with published coefficients, except the largest skewness of the third-moment
+limiter, 0.85 in place of SHOC's 1.2 √2 (hand-tuned against excess cumulus cover on the
+master-comparison cases).
 """
 function SubgridDistribution(FT::DataType = Oceananigans.defaults.FloatType;
                              time_scale = StratificationLimitedMomentTimeScale(FT),
                              second_moments = DowngradientSecondMoments(FT),
                              third_moment = AlgebraicThirdMoment(FT),
                              stratification_number_bound = RationalSaturatedStratificationNumber(FT),
-                             skewness = PolynomialSaturatedSkewness(FT),
+                             skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = 0.85),
                              assumed_pdf = DoubleGaussianPDF(FT),
                              saturation = FixedConstantsLiquidSaturation(),
                              clipping = HardClipping(),
@@ -200,7 +202,7 @@ struct CloudBuoyancyFlux
     stability :: Bool
 end
 
-CloudBuoyancyFlux(; stability = false) = CloudBuoyancyFlux(stability)
+CloudBuoyancyFlux(; stability = true) = CloudBuoyancyFlux(stability)
 Base.summary(b::CloudBuoyancyFlux) = string("CloudBuoyancyFlux(stability = ", b.stability, ")")
 
 #####
@@ -252,6 +254,15 @@ Adapt.@adapt_structure SubgridCloudFormulation
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`SubgridCloudFormulation`](@ref), all three parts on by default.
+
+The configuration that scored best on the 15 master-comparison cases (hand-tuned, not calibrated)
+is this default with the closure keywords `static_stability = DryStaticStability()` and
+`minimum_tke = 4e-4`:
+
+```julia
+TKEBasedTurbulenceClosure(; static_stability = DryStaticStability(), minimum_tke = 4e-4,
+                          subgrid_cloud_formulation = SubgridCloudFormulation())
+```
 """
 function SubgridCloudFormulation(FT::DataType = Oceananigans.defaults.FloatType;
                                  distribution = SubgridDistribution(FT),

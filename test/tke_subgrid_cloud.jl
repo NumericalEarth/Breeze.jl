@@ -56,6 +56,8 @@ with_cloud_ownership() = SubgridCloudFormulation(; buoyancy_flux = nothing)
     @test f.distribution isa SubgridDistribution
     @test f.buoyancy_flux isa CloudBuoyancyFlux
     @test f.cloud isa ClosureOwnedCloud
+    @test f.buoyancy_flux.stability
+    @test f.distribution.skewness.maximum_skewness == 0.85
     @test_throws ArgumentError SubgridCloudFormulation(; distribution = nothing)
     @test_throws ArgumentError SubgridCloudFormulation(; distribution = nothing, cloud = nothing)
     @test SubgridCloudFormulation(; distribution = nothing, buoyancy_flux = nothing, cloud = nothing).distribution === nothing
