@@ -253,24 +253,42 @@ $(TYPEDEF)
 
 Another time scale component (`time_scale`, by default [`ColumnStabilityDamping`](@ref)) with
 its return-to-isotropy time scale `τ₀` limited in stable stratification by the buoyancy
-frequency, so that the stratification number `αᴺ = τ² N²` of the moments stays below `(ℂᴺ)²`:
+frequency, so that the stratification number `αᴺ = τ² N²` of the moments stays below `(ℂᴺ)²`.
+The rate `1 / τ` is the `p`-norm of the rate `1 / τ₀` of the component and the buoyancy rate
+`N⁺ / ℂᴺ`,
 
-    1 / τ = 1 / τ₀ + N⁺ / ℂᴺ,    N⁺ = √(max(N², 0) + N²ₘᵢₙ) - Nₘᵢₙ
+    1 / τ = ((1 / τ₀)ᵖ + (N⁺ / ℂᴺ)ᵖ)^(1/p),    N⁺ = √(max(N², 0) + N²ₘᵢₙ) - Nₘᵢₙ
 
-that is `τ = τ₀ / (1 + τ₀ N⁺ / ℂᴺ)`, the harmonic combination of `τ₀` and the buoyancy time
-scale `ℂᴺ / N⁺`. Then `τ N⁺ < ℂᴺ` for every `τ₀`, `τ → τ₀` where `τ₀ N⁺ ≪ ℂᴺ`, and
-`τ → ℂᴺ / N⁺` where the turbulence outlives the buoyancy period. It is the limit that the minimum
-dissipation of Oceananigans' `TKEDissipationVerticalDiffusivity` sets on its time scale `e / ε` (`ε ≥ 𝕊u₀³ e^{3/2} / ℓ` with the length `ℓ = Cᴺ √(e / N²)`, so
-`e / ε ≤ Cᴺ / (𝕊u₀³ N)`), here in the smooth form of a sum of rates.
+that is `τ = τ₀ / (1 + xᵖ)^(1/p)` with `x = τ₀ N⁺ / ℂᴺ`: a smooth minimum of `τ₀` and the
+buoyancy time scale `ℂᴺ / N⁺`. Then `τ N⁺ = ℂᴺ x / (1 + xᵖ)^(1/p) < ℂᴺ` for every `τ₀` and every
+`p ≥ 1`, `τ → τ₀` where `x ≪ 1`, and `τ → ℂᴺ / N⁺` where the turbulence outlives the buoyancy
+period. The integer exponent `p` sets how sharp the minimum is: `p = 1` is the harmonic sum
+`1 / τ = 1 / τ₀ + N⁺ / ℂᴺ`, which shortens `τ` by the factor `1 / (1 + x)` (a half at `x = 1`, a
+tenth already at `x = 0.1`); `p = 2` shortens it by `1 / √(1 + x²)` (`0.5 %` at `x = 0.1`, `29 %`
+at `x = 1`), and `p = 4` by `1 / (1 + x⁴)^(1/4)` (`16 %` at `x = 1`). The exponent is a type
+parameter: `p = 1, 2, 4` cost a division, a square root, two square roots; other integers a
+power. It is not a trainable coefficient. With `p ≥ 2` the factor has zero slope in `x` at
+`x = 0`, so the limit is smooth at `N² = 0` for every `p`.
 
-The limit applies to the time scale of the moments only: the second moments
+It is the limit that the minimum dissipation of Oceananigans' `TKEDissipationVerticalDiffusivity`
+sets on its time scale `e / ε` (`ε ≥ 𝕊u₀³ e^{3/2} / ℓ` with the length `ℓ = Cᴺ √(e / N²)`, so
+`e / ε ≤ Cᴺ / (𝕊u₀³ N)`), here in the smooth form of a norm of rates.
+
+By default the limit applies to the time scale of the moments only: the second moments
 (`τ Kᶜ` in the variances of [`DowngradientSecondMoments`](@ref)) and the diagnosis of the third
 moment ([`AlgebraicThirdMoment`](@ref), whose denominator vanishes at `αᴺ ≈ 24.3` with the
-coefficients of `shoc.F90`). The eddy diffusivities and the dissipation of `time_scale` are
-unchanged. The moments live at the interfaces, so the limit is applied there, once, to `τ₀` and
+coefficients of `shoc.F90`). The moments live at the interfaces, so the limit is applied there, once, to `τ₀` and
 `N²` interpolated to the interface; the bound then holds exactly where the moments use it (a
 limit at the levels would not survive the interpolation of `τ` and `N²` separately, and applied
-at both it would compound, to `τ N < ℂᴺ / 2`). The diagnostic `isotropy` of the levels is `τ₀`.
+at both it would compound). The diagnostic `isotropy` of the levels is `τ₀`.
+
+With `limit_diffusivities = true` the eddy diffusivities of the levels are limited as well, as
+the time scale of a k-ε closure limits its diffusivities: they are multiplied by the factor
+`τ / τ₀ = 1 / (1 + xᵖ)^(1/p)` of the level (`τ₀` and `N²` of the level), which for
+[`ColumnStabilityDamping`](@ref) is `Kᶜ = ℂᶜ τ e` and `Kᵘ = ℂᵘ τ e` with the limited `τ`. The
+diffusivities of the cold-surface fallback are not limited. For
+[`RichardsonStabilityFunctions`](@ref), whose diffusivities are not proportional to its `τ₀`,
+the same factor multiplies them. The dissipation of the turbulent kinetic energy is unchanged.
 
 The frequency `Nₘᵢₙ` regularizes the square root, whose slope is otherwise infinite at
 `N² = 0`: the slope of `N⁺` in `N²` is `1 / (2 Nₘᵢₙ)` at `N² = 0⁺` and zero below. It makes
@@ -281,60 +299,109 @@ The frequency `Nₘᵢₙ` regularizes the square root, whose slope is otherwise
 |:------------|:--------|:--------|
 | `ℂᴺ` | 3.5 | largest `τ N`; `αᴺ < (ℂᴺ)² = 12.25`, half the first zero 24.3 of the denominator of the third moment |
 
-Where `N² ≤ 0`, and everywhere with `ℂᴺ = Inf`, the time scale is exactly that of
-`time_scale`; the original configuration is `time_scale` itself, the default of
+Where `N² ≤ 0`, and everywhere with `ℂᴺ = Inf`, the time scale (and the diffusivities) are
+exactly those of `time_scale`; the original configuration is `time_scale` itself, the default of
 [`SimplifiedHigherOrderClosure`](@ref).
 
 $(TYPEDFIELDS)
 """
-struct StratificationLimitedTimeScale{TS, FT} <: AbstractSHOCComponent
+struct StratificationLimitedTimeScale{P, D, TS, FT} <: AbstractSHOCComponent
     "The time scale component whose return-to-isotropy time scale is limited"
     time_scale :: TS
     "Largest product of the time scale and the buoyancy frequency"
     ℂᴺ :: FT
     "Frequency `Nₘᵢₙ` that regularizes the square root of `N²` at `N² = 0`, s⁻¹"
     minimum_buoyancy_frequency :: FT
+
+    function StratificationLimitedTimeScale{P, D}(time_scale::TS, ℂᴺ::FT, minimum_buoyancy_frequency::FT) where {P, D, TS, FT}
+        (P isa Int && P ≥ 1) || throw(ArgumentError("The exponent of StratificationLimitedTimeScale must be an integer p ≥ 1, got $P."))
+        D isa Bool || throw(ArgumentError("limit_diffusivities must be true or false, got $D."))
+        return new{P, D, TS, FT}(time_scale, ℂᴺ, minimum_buoyancy_frequency)
+    end
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `StratificationLimitedTimeScale` of the component `time_scale`, by default
-`ColumnStabilityDamping` with the values of `shoc.F90`, with scalars of type `FT`.
+`ColumnStabilityDamping` with the values of `shoc.F90`, with scalars of type `FT`, the integer
+`exponent` `p ≥ 1` of the norm of the rates, and whether the eddy diffusivities are limited too
+(`limit_diffusivities`).
 """
 StratificationLimitedTimeScale(FT::DataType = Oceananigans.defaults.FloatType;
-                               time_scale = ColumnStabilityDamping(FT), ℂᴺ = 3.5, minimum_buoyancy_frequency = 1e-4) =
-    StratificationLimitedTimeScale(convert_eltype(FT, time_scale), convert(FT, ℂᴺ), convert(FT, minimum_buoyancy_frequency))
+                               time_scale = ColumnStabilityDamping(FT), ℂᴺ = 3.5, exponent = 1,
+                               limit_diffusivities = false, minimum_buoyancy_frequency = 1e-4) =
+    StratificationLimitedTimeScale{exponent, limit_diffusivities}(convert_eltype(FT, time_scale), convert(FT, ℂᴺ),
+                                                                  convert(FT, minimum_buoyancy_frequency))
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `StratificationLimitedTimeScale` of `time_scale` given first, as in
-`StratificationLimitedTimeScale(ColumnStabilityDamping(); ℂᴺ = 3.5)`.
+`StratificationLimitedTimeScale(ColumnStabilityDamping(); ℂᴺ = 3.5, exponent = 2)`.
 """
 StratificationLimitedTimeScale(time_scale::AbstractSHOCComponent, FT::DataType = Oceananigans.defaults.FloatType; kw...) =
     StratificationLimitedTimeScale(FT; time_scale, kw...)
 
-Adapt.@adapt_structure StratificationLimitedTimeScale
+const SLTS = StratificationLimitedTimeScale
 
-Base.summary(ts::StratificationLimitedTimeScale) = string("StratificationLimitedTimeScale of ", summary(ts.time_scale))
+# The exponent and the switch are type parameters, which the generic rebuilds of a component would drop
+@inline map_scalars(f, ts::SLTS{P, D}) where {P, D} =
+    SLTS{P, D}(map_scalars(f, ts.time_scale), f(ts.ℂᴺ), f(ts.minimum_buoyancy_frequency))
 
-@inline function limit_time_scale(ts::StratificationLimitedTimeScale, τ, N²)
-    Nₘᵢₙ = ts.minimum_buoyancy_frequency
-    N²⁺ = max(N², zero(N²))
-    N⁺ = N²⁺ / (sqrt(N²⁺ + Nₘᵢₙ * Nₘᵢₙ) + Nₘᵢₙ) # √(N²⁺ + Nₘᵢₙ²) - Nₘᵢₙ, exactly zero where N² ≤ 0
-    return τ / (1 + τ * N⁺ / ts.ℂᴺ)
+@inline function rebuild_component(ts::SLTS{P, D}, scalars, n) where {P, D}
+    time_scale, n = rebuild_component(ts.time_scale, scalars, n)
+    ℂᴺ, n = rebuild_component(ts.ℂᴺ, scalars, n)
+    minimum_buoyancy_frequency, n = rebuild_component(ts.minimum_buoyancy_frequency, scalars, n)
+    return SLTS{P, D}(time_scale, ℂᴺ, minimum_buoyancy_frequency), n
 end
 
-@inline time_scale_column(ts::StratificationLimitedTimeScale, cp, c, brunt_int) = time_scale_column(ts.time_scale, cp, c, brunt_int)
+Adapt.adapt_structure(to, ts::SLTS{P, D}) where {P, D} =
+    SLTS{P, D}(Adapt.adapt(to, ts.time_scale), Adapt.adapt(to, ts.ℂᴺ), Adapt.adapt(to, ts.minimum_buoyancy_frequency))
 
-@inline dissipation_coefficient(ts::StratificationLimitedTimeScale, column, brunt_k, shear_term, tke_update) =
+function Base.summary(ts::SLTS{P, D}) where {P, D}
+    options = string(P == 1 ? "" : " (exponent $P)", D ? " with limited diffusivities" : "")
+    return string("StratificationLimitedTimeScale", options, " of ", summary(ts.time_scale))
+end
+
+# (1 + xᵖ)^(1/p), the factor τ₀ / τ of the limit, for x = τ₀ N⁺ / ℂᴺ ≥ 0
+@inline rate_norm_factor(::Val{1}, x) = 1 + x
+@inline rate_norm_factor(::Val{2}, x) = sqrt(1 + x * x)
+@inline function rate_norm_factor(::Val{4}, x)
+    x² = x * x
+    return sqrt(sqrt(1 + x² * x²))
+end
+@inline rate_norm_factor(::Val{P}, x) where P = (1 + x^P)^inv(convert(typeof(x), P))
+
+# N⁺ = √(N²⁺ + Nₘᵢₙ²) - Nₘᵢₙ, exactly zero where N² ≤ 0
+@inline function regularized_buoyancy_frequency(ts::SLTS, N²)
+    Nₘᵢₙ = ts.minimum_buoyancy_frequency
+    N²⁺ = max(N², zero(N²))
+    return N²⁺ / (sqrt(N²⁺ + Nₘᵢₙ * Nₘᵢₙ) + Nₘᵢₙ)
+end
+
+@inline function limit_time_scale(ts::SLTS{P}, τ, N²) where P
+    N⁺ = regularized_buoyancy_frequency(ts, N²)
+    return τ / rate_norm_factor(Val(P), τ * N⁺ / ts.ℂᴺ)
+end
+
+@inline time_scale_column(ts::SLTS, cp, c, brunt_int) = time_scale_column(ts.time_scale, cp, c, brunt_int)
+
+@inline dissipation_coefficient(ts::SLTS, column, brunt_k, shear_term, tke_update) =
     dissipation_coefficient(ts.time_scale, column, brunt_k, shear_term, tke_update)
 
-@inline cold_surface_fallback(ts::StratificationLimitedTimeScale, tabs_sfc, zt_k, pblh) =
+@inline cold_surface_fallback(ts::SLTS, tabs_sfc, zt_k, pblh) =
     cold_surface_fallback(ts.time_scale, tabs_sfc, zt_k, pblh)
 
-# The levels carry the time scale of the wrapped component; the limit acts at the interfaces (limit_time_scale)
-@inline time_scale_and_diffusivities(ts::StratificationLimitedTimeScale, cp, c, column, tke_k, a_diss, mix,
-                                     brunt_k, shear_term, tke_update, runaway) =
-    time_scale_and_diffusivities(ts.time_scale, cp, c, column, tke_k, a_diss, mix, brunt_k, shear_term, tke_update, runaway)
+# The levels carry the time scale of the wrapped component; the limit of the moments acts at the
+# interfaces (limit_time_scale). With limit_diffusivities the diffusivities of the level take the
+# factor τ / τ₀ of the level, except those of the cold-surface fallback.
+@inline function time_scale_and_diffusivities(ts::SLTS{P, D}, cp, c, column, tke_k, a_diss, mix,
+                                              brunt_k, shear_term, tke_update, runaway) where {P, D}
+    iso, tkh_k, tk_k = time_scale_and_diffusivities(ts.time_scale, cp, c, column, tke_k, a_diss, mix,
+                                                    brunt_k, shear_term, tke_update, runaway)
+    D || return iso, tkh_k, tk_k
+    N⁺ = regularized_buoyancy_frequency(ts, brunt_k)
+    factor = rate_norm_factor(Val(P), iso * N⁺ / ts.ℂᴺ)
+    return iso, ifelse(runaway, tkh_k, tkh_k / factor), ifelse(runaway, tk_k, tk_k / factor)
+end

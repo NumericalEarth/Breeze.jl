@@ -825,6 +825,145 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         end
     end
 
+    @testset "StratificationLimitedTimeScale: exponent and limited diffusivities" begin
+        hard = HardClipping()
+        constants = SHOCConstants(FT)
+        damping = ColumnStabilityDamping(FT)
+        harmonic = StratificationLimitedTimeScale(FT)
+        Nₘᵢₙ = harmonic.minimum_buoyancy_frequency
+        regularized(N²) = max(N², 0) / (sqrt(max(N², 0) + Nₘᵢₙ^2) + Nₘᵢₙ)
+
+        @test_throws ArgumentError StratificationLimitedTimeScale(FT; exponent = 0)
+        @test_throws ArgumentError StratificationLimitedTimeScale(FT; exponent = 2.0)
+        @test_throws ArgumentError StratificationLimitedTimeScale(FT; limit_diffusivities = 1)
+        @test StratificationLimitedTimeScale(FT; exponent = 1, limit_diffusivities = false) === harmonic
+        @test summary(StratificationLimitedTimeScale(FT; exponent = 4, limit_diffusivities = true)) ==
+              "StratificationLimitedTimeScale (exponent 4) with limited diffusivities of ColumnStabilityDamping{$FT}"
+
+        for p in (1, 2, 3, 4), D in (false, true)
+            limited = StratificationLimitedTimeScale(FT; exponent = p, limit_diffusivities = D, ℂᴺ = 5)
+            @test isbits(limited)
+            # The exponent and the switch survive the conversion, the parameters and the rebuild with new coefficients
+            @test convert_eltype(Float32, limited) isa StratificationLimitedTimeScale{p, D, ColumnStabilityDamping{Float32}, Float32}
+            closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = limited, surface_forcing...)
+            @test keys(closure_parameters(closure)) == keys(closure_parameters(SimplifiedHigherOrderClosure(FT; turbulence_time_scale = harmonic)))
+            changed = with_parameters(closure; ℂᴺ = FT(3))
+            @test changed.turbulence_time_scale isa StratificationLimitedTimeScale{p, D}
+            @test changed.turbulence_time_scale.ℂᴺ == FT(3)
+            @test typeof(changed) === typeof(closure)
+
+            # The bound τ N⁺ < ℂᴺ, τ ≤ τ₀, the norm of the rates, and the identity where N² ≤ 0 and with ℂᴺ = Inf
+            unlimited = StratificationLimitedTimeScale(FT; exponent = p, limit_diffusivities = D, ℂᴺ = Inf)
+            for τ₀ in FT[1, 30, 400, 2e4], N² in FT[-1e-3, 0, 1e-8, 1e-6, 1e-4, 1e-2, 1]
+                τ = limit_time_scale(limited, τ₀, N²)
+                N⁺ = regularized(N²)
+                @test τ ≤ τ₀
+                @test τ * N⁺ ≤ limited.ℂᴺ * (1 + 4eps(FT))
+                @test isapprox(1 / τ, ((1 / τ₀)^p + (N⁺ / limited.ℂᴺ)^p)^(1 / p); rtol = 16eps(FT))
+                N² ≤ 0 && @test same_bits(τ, τ₀)
+                @test same_bits(limit_time_scale(unlimited, τ₀, N²), τ₀)
+            end
+            # The larger the exponent, the closer the limited time scale is to the minimum of τ₀ and ℂᴺ / N⁺
+            if p > 1
+                lower = StratificationLimitedTimeScale(FT; exponent = p - 1, ℂᴺ = 5)
+                for τ₀ in FT[30, 400, 2e4], N² in FT[1e-6, 1e-4, 1e-2]
+                    @test limit_time_scale(limited, τ₀, N²) ≥ limit_time_scale(lower, τ₀, N²) * (1 - 4eps(FT))
+                end
+            end
+
+            # The diffusivities: those of the wrapped component unless limit_diffusivities, then ℂ τ e with the
+            # limited τ of the level (ColumnStabilityDamping); the level time scale is τ₀ either way; the cold-surface
+            # fallback is not limited
+            column = time_scale_column(damping, hard, constants, FT(0.05))
+            for e in FT[1e-3, 0.1, 1], mix in FT[10, 300], N² in FT[-1e-4, 0, 1e-6, 1e-4, 1e-2], runaway in (false, true)
+                a_diss = column.Cee * e^(FT(3) / 2) / mix
+                τ₀, Kᶜ₀, Kᵘ₀ = time_scale_and_diffusivities(damping, hard, constants, column, e, a_diss, mix, N², FT(1e-5), ForwardEulerTKE(FT), runaway)
+                τ, Kᶜ, Kᵘ = time_scale_and_diffusivities(limited, hard, constants, column, e, a_diss, mix, N², FT(1e-5), ForwardEulerTKE(FT), runaway)
+                @test same_bits(τ, τ₀)
+                if !D || runaway || N² ≤ 0
+                    @test same_bits(Kᶜ, Kᶜ₀) && same_bits(Kᵘ, Kᵘ₀)
+                else
+                    τᴺ = limit_time_scale(limited, τ₀, N²)
+                    @test isapprox(Kᶜ, damping.ℂᶜ * τᴺ * e; rtol = 16eps(FT))
+                    @test isapprox(Kᵘ, damping.ℂᵘ * τᴺ * e; rtol = 16eps(FT))
+                    @test Kᶜ ≤ Kᶜ₀ && Kᵘ ≤ Kᵘ₀
+                end
+                level = time_scale_and_diffusivities(unlimited, hard, constants, column, e, a_diss, mix, N², FT(1e-5), ForwardEulerTKE(FT), runaway)
+                @test all(map(same_bits, level, (τ₀, Kᶜ₀, Kᵘ₀)))
+            end
+        end
+
+        if FT == Float64
+            # The harmonic case is the previous formula, bit for bit
+            for τ₀ in (1.0, 400.0, 2e4), N² in (-1e-4, 0.0, 1e-8, 1e-4, 1.0)
+                N⁺ = regularized(N²)
+                @test same_bits(limit_time_scale(harmonic, τ₀, N²), τ₀ / (1 + τ₀ * N⁺ / harmonic.ℂᴺ))
+            end
+
+            # Enzyme against central differences and the exact slopes: in ℂᴺ, in τ₀ and in N² (including N² = 0,
+            # where the slope is finite, and zero for p ≥ 2)
+            τ₀ = 400.0
+            h = 1e-6
+            for p in (2, 4)
+                ts = StratificationLimitedTimeScale(Float64; exponent = p)
+                by_ℂᴺ(ℂᴺ, τ₀, N²) = limit_time_scale(StratificationLimitedTimeScale(Float64; exponent = p, ℂᴺ), τ₀, N²)
+                by_N²(N², τ₀) = limit_time_scale(ts, τ₀, N²)
+                by_τ₀(τ₀, N²) = limit_time_scale(ts, τ₀, N²)
+                for N² in (-1e-4, 0.0, 1e-8, 1e-6, 1e-4, 1e-2)
+                    N⁺ = regularized(N²)
+                    dN⁺ = N² > 0 ? 1 / (2 * sqrt(N² + Nₘᵢₙ^2)) : (N² == 0 ? 1 / (2Nₘᵢₙ) : 0.0)
+                    x = τ₀ * N⁺ / 3.5
+                    τ = τ₀ / (1 + x^p)^(1 / p)
+                    # dτ/dx = -τ₀ x^(p-1) (1 + xᵖ)^(-1/p-1)
+                    dτdx = -τ₀ * x^(p - 1) * (1 + x^p)^(-1 / p - 1)
+                    exact_ℂᴺ = dτdx * (-x / 3.5)
+                    exact_N² = dτdx * τ₀ / 3.5 * dN⁺
+                    exact_τ₀ = τ / τ₀ + dτdx * N⁺ / 3.5
+                    @test isapprox(derivative(by_ℂᴺ, 3.5, τ₀, N²), exact_ℂᴺ; rtol = 1e-10, atol = 1e-14)
+                    @test isapprox((by_ℂᴺ(3.5 + h, τ₀, N²) - by_ℂᴺ(3.5 - h, τ₀, N²)) / 2h, exact_ℂᴺ; rtol = 1e-4, atol = 1e-7) # central differences: round-off of order τ eps / h
+                    @test isapprox(derivative(by_τ₀, τ₀, N²), exact_τ₀; rtol = 1e-10, atol = 1e-14)
+                    @test isapprox(derivative(by_N², N², τ₀), exact_N²; rtol = 1e-10, atol = 1e-12)
+                    if N² ≠ 0
+                        step = h * abs(N²)
+                        @test isapprox((by_N²(N² + step, τ₀) - by_N²(N² - step, τ₀)) / 2step, exact_N²; rtol = 1e-2, atol = 1e-6) # truncation where N⁺ curves near Nₘᵢₙ
+                    end
+                    N² ≤ 0 && @test derivative(by_N², N², τ₀) == 0 # smooth at N² = 0 for p ≥ 2
+                end
+            end
+
+            # The limited diffusivities: Enzyme against central differences in ℂᴺ
+            column = time_scale_column(damping, hard, constants, 0.05)
+            e, mix = 0.1, 100.0
+            a_diss = column.Cee * e^1.5 / mix
+            Kᶜ_by_ℂᴺ(ℂᴺ, N²) = time_scale_and_diffusivities(StratificationLimitedTimeScale(Float64; exponent = 2, ℂᴺ, limit_diffusivities = true),
+                                                            hard, constants, column, e, a_diss, mix, N², 1e-5, ForwardEulerTKE(), false)[2]
+            for N² in (0.0, 1e-6, 1e-4, 1e-2)
+                gradient = derivative(Kᶜ_by_ℂᴺ, 3.5, N²)
+                difference = (Kᶜ_by_ℂᴺ(3.5 + h, N²) - Kᶜ_by_ℂᴺ(3.5 - h, N²)) / 2h
+                @test isfinite(gradient)
+                @test isapprox(gradient, difference; rtol = 1e-5, atol = 1e-12)
+            end
+        end
+
+        # Steps in a column: every exponent with and without the limited diffusivities is finite, the bound holds at
+        # the interfaces, and limited diffusivities are never larger than those of the component
+        for p in (2, 4), D in (false, true)
+            limited = StratificationLimitedTimeScale(FT; exponent = p, limit_diffusivities = D)
+            closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = limited, surface_forcing...)
+            run = run_shoc_column(closure)
+            @test all_finite(run)
+            @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
+            @test isapprox(run.θ, original.θ; rtol = D ? 2e-3 : 1e-4)
+            infinite = run_shoc_column(SimplifiedHigherOrderClosure(FT; turbulence_time_scale = StratificationLimitedTimeScale(FT; exponent = p, limit_diffusivities = D, ℂᴺ = Inf),
+                                                                    surface_forcing...))
+            if default_arch isa CPU
+                @test all(name -> isequal(infinite[name], original[name]), keys(original))
+            else
+                @test all(name -> isapprox(infinite[name], original[name]; rtol = sqrt(eps(FT))), keys(original))
+            end
+        end
+    end
+
     @testset "GradientLimitedMixingLength" begin
         hard = HardClipping()
         constants = SHOCConstants(FT)
