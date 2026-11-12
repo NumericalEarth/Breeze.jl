@@ -11,7 +11,7 @@
 ##### so the interpolation node must carry r, obtained by inverting z(x, y, ·).
 #####
 ##### That inversion is injected through `flattened_node`, the hook Oceananigans
-##### already uses to build the particle interpolation node (see `advect_particle`
+##### already uses to build the particle interpolation node (see `particle_coordinate_velocity`
 ##### and `update_property!`, its only callers). Overriding this one function makes
 ##### both velocity interpolation and `tracked_fields` sampling terrain-aware
 ##### while leaving the generic `Fields.interpolate` contract untouched — its
@@ -33,7 +33,7 @@ const TerrainFollowingGridTopology{TX, TY} =
     AbstractUnderlyingGrid{<:Any, TX, TY, <:Oceananigans.Grids.Bounded, <:TFVD}
 
 # Immersed boundaries wrap the underlying grid, so neither the `flattened_node`
-# override nor `advect_particle` below dispatches on them: particle tracking would
+# override nor `enforce_particle_boundary_conditions` below dispatches on them: particle tracking would
 # silently fall back to the generic (flat-grid) implementation and interpret the
 # stored physical altitude as r. Reject the combination instead of failing quietly.
 const ImmersedTerrainFollowingGrid = ImmersedBoundaryGrid{<:Any, <:Any, <:Any, <:Any, <:TerrainFollowingGrid}
@@ -172,7 +172,7 @@ position `(x, y, z)`, clamped to the grid's bounding r faces.
 # One method per horizontal-topology combination, mirroring Oceananigans'
 # `flattened_node`, so that every particle interpolation on a terrain-following
 # grid is performed at the reference coordinate. `terrain_reference_coordinate` is
-# evaluated exactly once per call; `advect_particle` below reuses the result for
+# evaluated exactly once per call; Oceananigans' `particle_coordinate_velocity` reuses the result for
 # all three velocity components.
 @inline LagrangianParticleTracking.flattened_node((x, y, z), grid::TerrainFollowingGridTopology) =
     (x, y, terrain_reference_coordinate(x, y, z, grid))
@@ -187,51 +187,22 @@ position `(x, y, z)`, clamped to the grid's bounding r faces.
     tuple(terrain_reference_coordinate(x, y, z, grid))
 
 #####
-##### Advection
+##### Boundary conditions
 #####
 
-# TODO (upstream Oceananigans): this mirrors `LagrangianParticleTracking.advect_particle`
-# and differs from it in exactly one respect — the vertical walls. Stock uses
-# `rnode(i, j, 1, …)` and `rnode(i, j, kᴿ, …)`, which are reference coordinates,
-# whereas particle positions are physical altitudes. If those bounds came from a grid
-# hook (say `particle_vertical_bounds(x, y, grid)`, defaulting to those two `rnode`s)
-# this method could be deleted and the `flattened_node` override above would be the
-# only extension needed. Until then, upstream changes to `advect_particle` — new
-# features as well as bug fixes — have to be mirrored here.
+# TODO (upstream Oceananigans): this differs from
+# `LagrangianParticleTracking.enforce_particle_boundary_conditions` only in the vertical
+# walls. Upstream uses `rnode(i, j, 1, …)` and `rnode(i, j, kᴿ, …)`, which are reference
+# coordinates, whereas particle positions are physical altitudes. If those bounds came
+# from a grid hook (say `particle_vertical_bounds(x, y, grid)`, defaulting to the two
+# `rnode`s), this method could be deleted and the `flattened_node` override above would
+# be the only extension needed.
 #
-# Returns the new position and whether the particle was absorbed at an
-# `AbsorbingBoundary`, as the stock method does. There is no immersed-boundary branch:
-# `validate_particles` rejects immersed terrain-following grids, so `bcs.immersed`
-# never applies here.
-@inline function LagrangianParticleTracking.advect_particle((x, y, z), particles, p, bcs,
-                                                            grid::TerrainFollowingGrid, Δt, velocities)
-    # Inverts z(x, y, r) for r once; the fractional indices formed below reuse it,
-    # so the two-level Newton solve runs exactly once per particle per step.
-    X = LagrangianParticleTracking.flattened_node((x, y, z), grid)
-
-    # Current particle indices, from the cell interfaces.
-    face_indices = FractionalIndices(X, grid, Face(), Face(), Face())
-    i, _, _ = interpolator(face_indices.i)
-    j, _, _ = interpolator(face_indices.j)
-    k, _, _ = interpolator(face_indices.k)
-
-    ℓu = (Face(), Center(), Center())
-    ℓv = (Center(), Face(), Center())
-    ℓw = (Center(), Center(), Face())
-
-    u = interpolate(FractionalIndices(X, grid, ℓu...), velocities.u, ℓu, grid)
-    v = interpolate(FractionalIndices(X, grid, ℓv...), velocities.v, ℓv, grid)
-    w = interpolate(FractionalIndices(X, grid, ℓw...), velocities.w, ℓw, grid)
-
-    u = LagrangianParticleTracking.particle_u_velocity(particles, p, u)
-    v = LagrangianParticleTracking.particle_v_velocity(particles, p, v)
-    w = LagrangianParticleTracking.particle_w_velocity(particles, p, w)
-
-    # Positions are physical, so no vertical metric factor appears; the horizontal
-    # metrics convert to degrees on a LatitudeLongitudeGrid and are unity otherwise.
-    x = x + LagrangianParticleTracking.x_metric(i, j, grid) * u * Δt
-    y = y + LagrangianParticleTracking.y_metric(i, j, grid) * v * Δt
-    z = z + w * Δt
+# There is no immersed-boundary branch: `validate_particles` rejects immersed
+# terrain-following grids, so `bcs.immersed` never applies here.
+@inline function LagrangianParticleTracking.enforce_particle_boundary_conditions((x, y, z), previous_particle_indices,
+                                                                                 bcs, grid::TerrainFollowingGrid)
+    i, j, k = previous_particle_indices
 
     tx, ty, tz = map(instantiate, topology(grid))
     Nx, Ny, _ = size(grid)
