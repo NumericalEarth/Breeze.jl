@@ -95,7 +95,7 @@ function P3ProcessRate(model, p3, names)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `KernelFunctionOperation` for the P3 process rate `name`, which may be any field of
 `P3ProcessRates`. The most commonly visualized are
@@ -122,7 +122,7 @@ rime splintering is the one stored by the most recent tendency evaluation.
 AM.MicrophysicalProcessRate(model, p3::P3, ::Val{name}) where name = P3ProcessRate(model, p3, (name,))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `Field` of the P3 liquid precipitation production rate, autoconversion plus
 accretion (kg kg⁻¹ s⁻¹), consistently with the one- and two-moment schemes. This is the
