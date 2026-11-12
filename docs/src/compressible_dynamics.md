@@ -100,8 +100,11 @@ dynamics about the **RK stage-entry state** ``U^L``. The cached background field
 refreshed before every RK stage:
 
 ```math
-ρ^L, \quad (ρθ)^L, \quad p^L, \quad θ^L = (ρθ)^L/ρ^L, \quad C^L .
+ρ^L, \quad (ρθ)^L, \quad p^L, \quad θ^L = (ρθ)^L/ρ^L, \quad C^L , \quad Λ_a .
 ```
+
+``Λ_a`` are the moisture sensitivities of the pressure, described in
+[The pressure the loop integrates](@ref "The pressure the loop integrates").
 
 ``C^L`` is the slope ``∂p/∂(ρθ)`` of the compressible core's equation of state at ``U^L``, at
 fixed dry density and composition. With ``p = ρ R^m T`` and the temperature inverted from
@@ -147,8 +150,90 @@ condensate latent energy:
 ```
 
 at the converged root. Without condensate this vanishes for every inversion, so
-``p' = C^L (ρθ)'`` is the complete linearization. In cloud the loop omits it; for 5 g/kg of cloud
-liquid it is about 5% of ``C^L θ^L``.
+``p' = C^L (ρθ)'`` is the complete linearization at fixed composition. In cloud the loop omits it;
+for 5 g/kg of cloud liquid it is about 5% of ``C^L θ^L``.
+
+### The pressure the loop integrates
+
+The thermodynamic density changes whenever the moisture changes, also where the pressure does
+not: a parcel that loses condensate at fixed temperature and pressure gains ``θ^{li}``, and one
+that takes up vapor at fixed ``ρθ`` and dry density gains pressure, because vapor is a gas. A
+loop that read ``C^L (ρθ)'`` as the pressure perturbation would see 10 hPa for every g m⁻³ of
+condensate that sediments, mixes or is advected out of a cell, and would see the vapor one stage
+late, the defect that [Xiao et al. (2015)](@cite Xiao2015) removed from WRF by substepping the
+moist potential temperature.
+
+The loop therefore integrates the pressure. Its thermodynamic unknown is the pressure
+perturbation about ``p^L`` in units of the thermodynamic density, ``ϖ = p' / C^L``. The equation
+of state ``p = (ρ^d R^d + ρ^v R^v) T``, linearized in the thermodynamic density, the dry density
+and the partial densities of vapor, liquid and ice, is
+
+```math
+p' = C^L \left[ (ρθ)' + Λ^d (ρ^d)' - Λ^v (ρ^v)' - Λ^l (ρ^l)' - Λ^i (ρ^i)' \right] , \qquad
+Λ^x = \frac{ρ^d}{ρ} \left( χ^x - δ^{xv} \, θ \, \frac{c^p_m T}{c^p_m T - H^c} \frac{R^v}{R^m} \right) ,
+```
+
+where ``χ^x`` is the derivative of ``θ^{li}`` at fixed temperature and pressure along the change
+of the mass fractions when a unit of phase ``x`` is added to a unit of mass. ``Λ^x`` is the
+thermodynamic density that a unit of phase ``x`` holds at fixed pressure: about
+``-ℒ / (\hat{c}^p Π)`` for condensate, whose latent heat ``θ^{li}`` credits, and about
+``-θ R^v / R^d`` for vapor, which adds pressure like ``R^v / R^d`` of its mass in dry air. Each
+prognostic moisture density ``ρq_a`` of the model, the moisture density and the condensate
+masses of the microphysics, is one phase or a fixed mix of them and has the sensitivity ``Λ_a``
+of that mix. The dry density has
+
+```math
+Λ^d = \frac{θ H^c}{c^p_m T - H^c} + \sum_a Λ_a r_a , \qquad r_a = \frac{ρq_a}{ρ^d} ,
+```
+
+the dependence at fixed composition given above plus the dilution of the moisture, so that dry
+air which carries its moisture along at fixed mixing ratios ``r_a`` changes the pressure, besides
+through ``ρθ``, only through the first term. In all,
+
+```math
+ϖ = (ρθ)' + W , \qquad W = - \sum_a Λ_a (ρq_a)' + Λ^d (ρ^d)' .
+```
+
+``W`` is the content that the pressure reads from the densities other than ``ρθ``. The loop
+transports no water, so the moisture's part of it is known rather than solved for: over a stage
+the moisture goes from the state ``U^0`` that the loop starts from along its slow tendencies, and
+the dry density's part is taken along the same slow path. With ``U^L`` the base of the
+perturbations,
+
+```math
+W(τ) = - \sum_a Λ_a \left( ρq_a^0 - ρq_a^L \right) + Λ^d \left( ρ^{d,0} - ρ^{d,L} \right)
+       - τ \left( \sum_a Λ_a G^s_{ρq_a} - Λ^d G^s_ρ \right) .
+```
+
+The loop starts from ``ϖ(0) = (ρθ)^0 - (ρθ)^L + W(0)``, the pressure of ``U^0`` to first order, and
+forces ``ϖ`` with ``G^s_{ρθ} + \mathrm{d}W/\mathrm{d}τ``. Both are the projection
+``\sum_a (∂p/∂U_a)(\cdot)_a / C^L`` of a state difference or of the slow tendencies onto the
+pressure, over every prognostic density ``U_a``, so a tendency that moves no pressure projects to
+zero whichever process it comes from: condensate sedimenting, mixing or being advected at one
+temperature and pressure, or a phase change at fixed pressure. After the loop
+``ρθ = (ρθ)^L + ϖ - W``: the thermodynamic density has taken its own tendency and the flux
+divergence that the loop applied, as a moisture density takes its tendency and its own flux
+divergence. For vapor the projection is the moist potential temperature,
+``ϖ ≈ (ρ^d θ^m)'`` with ``θ^m = θ (1 + r^v R^v / R^d)``.
+
+``Λ_a`` and ``Λ^d`` are cached with ``θ^L`` and ``C^L``, and the projection is linear in the state
+difference and in the tendencies. An outer scheme that starts a stage from a combination of
+earlier stages, forces it with a combination of their tendencies, and freezes the linearization
+over a step, as a multirate infinitesimal step does, projects those combinations with the same
+coefficients. Without moisture ``W = 0`` exactly and ``ϖ = (ρθ)'``.
+
+The loop's pressure has three limits, each of which the next stage's base pressure ``p^L`` makes
+up for. It does not read the dry density perturbation that the loop's own mass flux builds,
+``-∇·(ρ\boldsymbol{u})'``, whose weight ``Λ^d`` is about ``-r^v R^v / R^d`` of ``θ^L``, 3% for
+20 g/kg of vapor. A scheme that diagnoses condensate
+from its moisture density (saturation adjustment) is projected with the partition of the
+linearization state held at its temperature: a change of the equilibrium moisture is vapor in
+unsaturated air and cloud condensate in saturated air, without the evaporation that warming
+causes, which matters most where a cell crosses saturation within a stage. And the
+vertically-implicit solves that follow the loop move moisture that the stage's own loop has not
+seen. A condensate mass enters the projection with the phase its scheme declares for it
+(`condensate_liquid_fraction`), which every prognostic condensate mass of a scheme used with the
+split-explicit core must therefore declare.
 
 The momentum is the dry-mass momentum ``ρ^d \boldsymbol{u}``, and the compressible core applies
 the full pressure gradient and gravity ``-∇p - g ρ \hat{\boldsymbol{z}}`` to it. Its acoustic
@@ -228,21 +313,25 @@ available as an alternative that collapses stage 1 to a single substep of size `
 
 ### Linearized perturbation equations
 
-Let primes denote perturbations about ``U^L``: ``ρ' = ρ - ρ^L``, ``(ρθ)' = ρθ - (ρθ)^L``, and
-``(ρu)' = ρu - (ρu)^L`` (likewise for ``v, w``). The linearized perturbation system advanced
-inside the substep loop is
+Let primes denote perturbations about ``U^L``: ``ρ' = ρ - ρ^L``,
+``(ρu)' = ρu - (ρu)^L`` (likewise for ``v, w``), and ``ϖ = p' / C^L = (ρθ)' + W`` the pressure
+perturbation in units of the thermodynamic density
+(see [The pressure the loop integrates](@ref "The pressure the loop integrates")). The linearized
+perturbation system advanced inside the substep loop is
 
 ```math
 \begin{aligned}
 ∂_τ ρ'    &+ ∇·(ρ\boldsymbol{u})' = G^s_ρ , \\
-∂_τ (ρθ)' &+ ∇·\!\left(θ^L (ρ\boldsymbol{u})'\right) = G^s_{ρθ} , \\
-∂_τ (ρu)' &+ ∂_x p^L + ∂_x \left(C^L (ρθ)'\right) = G^s_{ρu} , \\
-∂_τ (ρv)' &+ ∂_y p^L + ∂_y \left(C^L (ρθ)'\right) = G^s_{ρv} , \\
-∂_τ (ρw)' &+             ∂_z \left(C^L (ρθ)'\right) + g\, ρ' = G^s_{ρw} .
+∂_τ ϖ     &+ ∇·\!\left(θ^L (ρ\boldsymbol{u})'\right) = G^s_{ρθ} - \sum_a Λ_a G^s_{ρq_a} + Λ^d G^s_ρ , \\
+∂_τ (ρu)' &+ ∂_x p^L + ∂_x \left(C^L ϖ\right) = G^s_{ρu} , \\
+∂_τ (ρv)' &+ ∂_y p^L + ∂_y \left(C^L ϖ\right) = G^s_{ρv} , \\
+∂_τ (ρw)' &+             ∂_z \left(C^L ϖ\right) + g\, ρ' = G^s_{ρw} .
 \end{aligned}
 ```
 
-Each ``G^s`` is the slow tendency for that variable, held constant across the ``N_τ``
+In dry air ``ϖ = (ρθ)'`` and its forcing is ``G^s_{ρθ}``; the time discretization below is
+written for that case, and with moisture ``ϖ`` and its forcing take the place of ``(ρθ)'`` and
+``G^s_{ρθ}`` throughout. Each ``G^s`` is the slow tendency for that variable, held constant across the ``N_τ``
 substeps of a given RK stage. For vertical momentum, ``G^s_{ρw}`` is assembled by adding the
 stage-entry vertical pressure-gradient and buoyancy imbalance,
 ``-∂_z(p^L - p_r) - g(ρ^L - ρ_r)``, to the slow non-pressure tendency. The linearized pressure
@@ -475,11 +564,12 @@ The default ``ω = 0.65`` adds modest dissipation; the dimensionless parameter `
 After ``N_τ`` substeps, the full prognostic state is recovered by addition:
 
 ```math
-ρ = ρ^L + ρ' , \qquad ρθ = (ρθ)^L + (ρθ)' , \qquad ρ\boldsymbol{u} = (ρ\boldsymbol{u})^L + (ρ\boldsymbol{u})' .
+ρ = ρ^L + ρ' , \qquad ρθ = (ρθ)^L + ϖ - W , \qquad ρ\boldsymbol{u} = (ρ\boldsymbol{u})^L + (ρ\boldsymbol{u})' ,
 ```
 
-There is no Exner-to-``ρθ`` conversion and no convex blend, because the perturbation system
-already advances the same prognostic variables as the outer scheme. The slow tendencies
+with ``W`` the content of the pressure at the end of the stage, which is zero in dry air. There is no Exner-to-``ρθ`` conversion and no convex blend, because the perturbation system
+advances the same prognostic variables as the outer scheme, the thermodynamic one shifted by a
+known field. The slow tendencies
 ``G^s`` are applied through the substep loop, so the WS-RK3 stage update
 ``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})`` falls out of the same loop.
 

@@ -849,11 +849,14 @@ behind. The fraction is the enthalpy the mass carries, not what it falls with: P
 ice `ρqʷⁱ` falls at the ice speed yet is liquid, because no fusion enthalpy has been released
 for it and [`moisture_fractions`](@ref) counts it in the liquid mass fraction.
 
-The default `nothing` covers three cases, none needing a method: condensate that does not
-sediment (saturation-adjusted cloud), a sedimenting tracer that is not a condensate mass (a
-number moment such as `ρnᶜˡ`, or a non-additive property such as P3's `ρqᶠ` and `ρbᶠ`), and a
-scheme that precipitates by its own means. Only a sedimenting condensate mass with no liquid
-fraction is an error.
+The default `nothing` covers two cases, neither needing a method: condensate that is not a
+prognostic mass (saturation-adjusted cloud), and a tracer that is not a condensate mass (a
+number moment such as `ρnᶜˡ`, or a non-additive property such as P3's `ρqᶠ` and `ρbᶠ`). A
+sedimenting condensate mass with no liquid fraction is an error.
+
+The acoustic substep loop of the compressible core projects the tendency of every name in
+[`condensate_field_names`](@ref) onto its pressure with the sensitivity of the mass's phase, so
+there every such name must declare its fraction, whether or not it sediments.
 
 A mixed-phase particle is normally two condensate masses sharing a fall speed, as P3 carries ice
 `ρqⁱ` and the liquid on it `ρqʷⁱ`. One mass of mixed composition may instead return its liquid
@@ -861,6 +864,23 @@ fraction, which `liquid_fraction_content` resolves exactly, the content being li
 composition.
 """
 @inline condensate_liquid_fraction(microphysics, ::Val) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the fractions `(vapor, liquid, ice)` of a change of the prognostic moisture density
+([`moisture_prognostic_name`](@ref)) that each phase takes at fixed temperature, in a cell whose
+moisture mass fractions are `q`.
+
+The default is all vapor: a scheme with prognostic condensate carries the vapor as its moisture
+density. A scheme whose moisture density includes condensate that it diagnoses (saturation
+adjustment) extends this with the partition its equilibrium gives a change.
+
+The acoustic substep loop of the compressible core projects the moisture tendency onto its
+pressure with the sensitivities of these phases.
+"""
+@inline prognostic_moisture_phase_fractions(i, j, k, grid, microphysics, microphysical_fields, q) =
+    (one(q.vapor), zero(q.vapor), zero(q.vapor))
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
