@@ -32,8 +32,9 @@ using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.Grids: ZDirection, rnode, znode, node
-using Oceananigans.Solvers: BatchedTridiagonalSolver
-using Oceananigans.TurbulenceClosures: vertically_implicit_closures
+using Oceananigans.Solvers: BatchedTridiagonalSolver, compute_factorization!, solve!
+using Oceananigans.TurbulenceClosures: vertically_implicit_closures, VerticallyImplicitDiffusionLowerDiagonal,
+                                      VerticallyImplicitDiffusionDiagonal, VerticallyImplicitDiffusionUpperDiagonal
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
@@ -87,9 +88,8 @@ Fields:
 - `slow_vertical_momentum_tendency` (Gˢρw, z-faces): advection+Coriolis+closure+forcing (PGF/buoyancy
   excluded — those are in the fast operator).
 - `vertical_solver_source_term` (z-faces): explicit RHS of the (ρw)′ tridiagonal system.
-- `vertical_solver`: `BatchedTridiagonalSolver` holding the coefficients of the implicit (ρw)′ update.
-- `vertical_solver_factors`: its Thomas factors, computed once per stage (`factor_vertical_solver!`),
-  with which each substep solves by substitution.
+- `vertical_solver`: factorized `BatchedTridiagonalSolver` of the implicit (ρw)′ update, factored once
+  per stage (`factor_vertical_solver!`) so that each substep solves by substitution.
 - `vertical_velocity_cache`, `density_cache`: the stage-entry predictor velocity and the dry
   density that weights it, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
   adaptive-implicit advection.
@@ -97,7 +97,7 @@ Fields:
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
   tendency's condensate sedimentation term (see `cache_transport_velocity!`).
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, VF, WC, DC, TWC, IF}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC, IS}
     substeps :: N
     acoustic_cfl :: FT
     minimum_horizontal_spacing :: FT
@@ -133,12 +133,11 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, VF, WC, DC, TWC
     slow_vertical_momentum_tendency :: GT
     vertical_solver_source_term :: GT
     vertical_solver :: TS
-    vertical_solver_factors :: VF
 
     vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
     density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
     time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w the moisture and tracer tendencies were built with
-    implicit_advection_factors :: IF              # per-stage Thomas factors of the (ρθ)′ implicit-advection system; `nothing` without AIVA
+    implicit_advection_solver :: IS               # factorized solver of the (ρθ)′ implicit-advection system, factored per stage; `nothing` without AIVA
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -166,11 +165,10 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.slow_vertical_momentum_tendency),
                        adapt(to, a.vertical_solver_source_term),
                        adapt(to, a.vertical_solver),
-                       adapt(to, a.vertical_solver_factors),
                        adapt(to, a.vertical_velocity_cache),
                        adapt(to, a.density_cache),
                        adapt(to, a.time_averaged_vertical_velocity_cache),
-                       adapt(to, a.implicit_advection_factors))
+                       adapt(to, a.implicit_advection_solver))
 
 #####
 ##### Halo points written by the substep kernels
@@ -317,20 +315,19 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     slow_vertical_momentum_tendency = ZFaceField(grid)
     vertical_solver_source_term = ZFaceField(grid) # RHS stays FT, like the (ρw)′ solve target
 
-    # The solver's scratch is the `t` array of its stored factors: both hold the same quantity,
-    # and the substeps solve by substitution with the factors.
-    vertical_solver_factors = StoredTridiagonalFactors(grid)
+    # Factored once per stage; the substeps solve by substitution
     vertical_solver = BatchedTridiagonalSolver(grid;
                                                lower_diagonal = AcousticTridiagLower(),
                                                diagonal       = AcousticTridiagDiagonal(),
                                                upper_diagonal = AcousticTridiagUpper(),
-                                               scratch = vertical_solver_factors.t,
-                                               tridiagonal_direction = ZDirection())
+                                               tridiagonal_direction = ZDirection(),
+                                               factorized = true)
 
     vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
     density_cache = cache_advecting_state ? CenterField(grid) : nothing
     time_averaged_vertical_velocity_cache = ZFaceField(grid)
-    implicit_advection_factors = cache_advecting_state ? StoredTridiagonalFactors(grid) : nothing
+    # The coefficients of the model's implicit solver (`implicit_diffusion_solver`), in a factorized solver of its own
+    implicit_advection_solver = cache_advecting_state ? factorized_implicit_solver(grid) : nothing
 
     return AcousticSubstepper(Ns, acoustic_cfl, Δx_min, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -350,11 +347,10 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               slow_vertical_momentum_tendency,
                               vertical_solver_source_term,
                               vertical_solver,
-                              vertical_solver_factors,
                               vertical_velocity_cache,
                               density_cache,
                               time_averaged_vertical_velocity_cache,
-                              implicit_advection_factors)
+                              implicit_advection_solver)
 end
 
 #####
@@ -1732,8 +1728,8 @@ frozen stage-entry state; the base-state part rides `Gˢρθ`
 implicit_advection_substep!(model, substepper, advection, Δτ) = nothing
 
 function implicit_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
-    substitute_tridiagonal!(substepper.density_potential_temperature_predictor,
-                            substepper.implicit_advection_factors, model.grid)
+    ρθ′ = substepper.density_potential_temperature_predictor
+    solve!(ρθ′, substepper.implicit_advection_solver, ρθ′)
     return nothing
 end
 
@@ -1747,15 +1743,22 @@ function factor_implicit_advection!(model, substepper, advection::AdaptiveImplic
     field = substepper.density_potential_temperature_predictor
     args = implicit_step_solver_arguments(field, nothing, nothing, nothing, model.clock, fields(model),
                                           Δτ, advection, substepper.vertical_velocity_cache, substepper.density_cache)
-    factor_tridiagonal!(substepper.implicit_advection_factors, model.timestepper.implicit_solver, args)
+    compute_factorization!(substepper.implicit_advection_solver, args...)
     return nothing
 end
+
+# A factorized solver with the coefficients of the model's implicit solver (`implicit_diffusion_solver`)
+factorized_implicit_solver(grid) =
+    BatchedTridiagonalSolver(grid;
+                             lower_diagonal = VerticallyImplicitDiffusionLowerDiagonal(),
+                             diagonal       = VerticallyImplicitDiffusionDiagonal(),
+                             upper_diagonal = VerticallyImplicitDiffusionUpperDiagonal(),
+                             factorized = true)
 
 # The coefficient arguments `Oceananigans.TimeSteppers.implicit_step!` passes to `solve!`: the vertically
 # implicit closures (`nothing` for the substep's solve, which integrates advection alone), the advection
 # scheme with its velocity and density, and the boundary conditions of `field`.
-# TODO: this mirrors `implicit_step!`; an Oceananigans `factor!`/`substitute!` split of `BatchedTridiagonalSolver`
-# would let Breeze reuse a per-stage factorization without duplicating the argument assembly.
+# TODO: this mirrors `implicit_step!`; an Oceananigans helper returning these arguments would remove the duplication.
 function implicit_step_solver_arguments(field, closure, closure_fields, tracer_index, clock, model_fields, Δt,
                                         advection, w, density)
     implicit_closure, implicit_closure_fields = implicit_step_closures(closure, closure_fields)
@@ -1814,7 +1817,8 @@ function implicit_steps_in_place!(requests, implicit_solver::BatchedTridiagonalS
         columns = Tuple(implicit_step_column(request...) for request in batch)
         if one_by_one
             args = implicit_step_arguments(shared, first(columns), first(fields))
-            solve_tridiagonal_in_place!(first(fields), implicit_solver, args)
+            ϕ = first(fields)
+            solve!(ϕ, implicit_solver, ϕ, args...)
         else
             solve_tridiagonal_columns_in_place!(fields, implicit_solver, scratch, implicit_step_arguments,
                                                 shared, columns)
@@ -1849,12 +1853,12 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Scratch arrays for the column sweeps of the implicit steps that follow a stage's acoustic loop: the
-implicit solver's own, and the stored factors of the loop's ``(ρw)′`` system, which are free once the
-loop has run and are rebuilt before the next one (`factor_vertical_solver!`).
+implicit solver's own, and the stored factorization of the loop's ``(ρw)′`` solver, which is free once
+the loop has run and is recomputed before the next one (`factor_vertical_solver!`).
 """
 function implicit_step_scratch(substepper, implicit_solver)
-    factors = substepper.vertical_solver_factors
-    return (implicit_solver.t, factors.β, factors.t, factors.a)
+    solver = substepper.vertical_solver
+    return (implicit_solver.t, solver.factors.β, solver.t, solver.factors.a)
 end
 
 """
@@ -1872,7 +1876,7 @@ function factor_vertical_solver!(substepper, grid, thermodynamic_constants, δτ
     args = (substepper.linearization_potential_temperature,
             substepper.linearization_pressure_coefficient, g, δτᵐ⁺, dᵐ⁺,
             substepper.sponge)
-    factor_tridiagonal!(substepper.vertical_solver_factors, substepper.vertical_solver, args)
+    compute_factorization!(substepper.vertical_solver, args...)
     return nothing
 end
 
@@ -1958,8 +1962,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # `sponge` may add an implicit Rayleigh contribution on the
     # diagonal in a layer below the lid. The system is the same on every substep
     # of the stage, so it was factored once (`factor_vertical_solver!`).
-    substitute_tridiagonal!(substepper.momentum_perturbation.w, substepper.vertical_solver_factors, grid,
-                            substepper.vertical_solver_source_term)
+    solve!(substepper.momentum_perturbation.w, substepper.vertical_solver, substepper.vertical_solver_source_term)
 
     # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
     launch!(arch, grid, :xyz, _post_solve_recovery!,

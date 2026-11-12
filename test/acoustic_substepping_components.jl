@@ -29,8 +29,8 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
                                     implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
-                                    factor_vertical_solver!, StoredTridiagonalFactors, factor_tridiagonal!,
-                                    substitute_tridiagonal!, solve_tridiagonal_in_place!, substep_halo_mirror,
+                                    factor_vertical_solver!,
+                                    substep_halo_mirror,
                                     PeriodicHaloMirror, solve_tridiagonal_columns_in_place!
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
@@ -481,19 +481,8 @@ for arch in arches
         reference = Array(reference)
 
         in_place = copy(rhs)
-        solve_tridiagonal_in_place!(in_place, solver, ())
+        solve!(in_place, solver, in_place)
         @test Array(in_place) == reference
-
-        factors = StoredTridiagonalFactors(grid)
-        factor_tridiagonal!(factors, solver, ())
-
-        substituted = similar(rhs)
-        substitute_tridiagonal!(substituted, factors, grid, rhs)
-        @test Array(substituted) == reference
-
-        substituted_in_place = copy(rhs)
-        substitute_tridiagonal!(substituted_in_place, factors, grid)
-        @test Array(substituted_in_place) == reference
 
         # Several right-hand sides per column thread
         other_rhs = (wave(2, 2, 1), wave(1, 1, 4))
