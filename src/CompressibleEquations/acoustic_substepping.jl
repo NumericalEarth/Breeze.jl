@@ -46,7 +46,7 @@ using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.Grids: ZDirection, rnode, znode, node
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
-using Oceananigans.Solvers: BatchedTridiagonalSolver, compute_factorization!, solve!
+using Oceananigans.Solvers: BatchedTridiagonalSolver, compute_factorization!, masked_multiply, solve!
 using Oceananigans.TurbulenceClosures: vertically_implicit_closures, VerticallyImplicitDiffusionLowerDiagonal,
                                       VerticallyImplicitDiffusionDiagonal, VerticallyImplicitDiffusionUpperDiagonal
 using Oceananigans.Operators:
@@ -690,6 +690,7 @@ function project_moisture_onto_pressure!(substepper::AcousticSubstepper, model, 
 
     launch!(architecture(grid), grid, :xyz, _project_moisture_onto_pressure!,
             substepper.density_potential_temperature_perturbation,
+            substepper.previous_density_potential_temperature_perturbation,
             projection.tendency,
             projection.content,
             Gⁿ[ρᵡ_name],
@@ -709,7 +710,7 @@ function project_moisture_onto_pressure!(substepper::AcousticSubstepper, model, 
     return nothing
 end
 
-@kernel function _project_moisture_onto_pressure!(ϖ, Gϖ, W, Gˢρᵡ, Λᵐ, Λˡ, Λⁱ, Λᵈ, liquid_fractions, ramp_interval,
+@kernel function _project_moisture_onto_pressure!(ϖ, ϖˢ⁻, Gϖ, W, Gˢρᵡ, Λᵐ, Λˡ, Λⁱ, Λᵈ, liquid_fractions, ramp_interval,
                                                   ρᵈ⁰, ρᵈᴸ, Gˢρᵈ,
                                                   ρqᵐ⁰, ρqᵐᴸ, Gˢρqᵐ, ρqᶜ⁰, ρqᶜᴸ, Gˢρqᶜ)
     i, j, k = @index(Global, NTuple)
@@ -730,7 +731,12 @@ end
         Gᵂ = - λᵐ * Gˢρqᵐ[i, j, k] - condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, liquid_fractions, Gˢρqᶜ) +
                λᵈ * Gˢρᵈ[i, j, k]
 
-        ϖ[i, j, k] += W⁰
+        ϖ⁰ = ϖ[i, j, k] + W⁰
+        ϖ[i, j, k] = ϖ⁰
+        # The divergence damping measures the change of ϖ over a substep from the stash ϖˢ⁻, which
+        # stage initialization sets equal to the perturbation: the content added here is not such a
+        # change, so the stash takes it too and the first substep's damping stays zero.
+        ϖˢ⁻[i, j, k] = ϖ⁰
         Gϖ[i, j, k] = Gˢρᵡ[i, j, k] + Gᵂ
         W[i, j, k] = W⁰ + ramp_interval * Gᵂ
     end
@@ -2030,14 +2036,52 @@ function implicit_advection_substep!(model, substepper, advection::AdaptiveImpli
     projection = substepper.pressure_projection
     Gˢρᵡ = model.timestepper.Gⁿ[thermodynamic_density_name(model.formulation)]
 
-    launch!(arch, grid, :xyz, _remove_moisture_content!,
+    solver = substepper.implicit_advection_solver
+    Nz = size(grid, 3)
+
+    launch!(arch, grid, :xy, _solve_implicit_advection_without_moisture_content!,
             predictor, projection.content, projection.tendency, Gˢρᵡ,
-            Δτ * substepper.thermodynamic_tendency_factor)
+            Δτ * substepper.thermodynamic_tendency_factor,
+            solver.factors.β, solver.factors.a, solver.t, Nz)
 
-    solve!(predictor, substepper.implicit_advection_solver, predictor)
-
-    launch!(arch, grid, :xyz, _restore_moisture_content!, predictor, projection.content)
     return nothing
+end
+
+# The implicit-advection solve of one column, with the moisture content `W` taken off the predictor
+# `ϖ★` as the right-hand side is read and put back as the solution is written: the removal
+# (`_remove_moisture_content!`), the factored substitution (`solve!` with the stored factorization of
+# `factor_implicit_advection!`) and the restoration (`_restore_moisture_content!`) in one pass over
+# the column, with the same arithmetic as the three separate passes. `β`, `a` and `t` are the
+# stored pivots, lower diagonal and elimination ratios of the factorization.
+@kernel function _solve_implicit_advection_without_moisture_content!(ϖ★, W, Gϖ, Gˢρᵡ, Δτ, β, a, t, Nz)
+    i, j = @index(Global, NTuple)
+    FT = eltype(ϖ★)
+
+    @inbounds begin
+        Wᵏ = W[i, j, 1] + Δτ * (Gϖ[i, j, 1] - Gˢρᵡ[i, j, 1])
+        W[i, j, 1] = Wᵏ
+        f = convert(FT, ϖ★[i, j, 1] - Wᵏ)
+        ϕ⁻ = convert(FT, f / β[i, j, 1])
+        ϖ★[i, j, 1] = ϕ⁻
+
+        for k = 2:Nz
+            Wᵏ = W[i, j, k] + Δτ * (Gϖ[i, j, k] - Gˢρᵡ[i, j, k])
+            W[i, j, k] = Wᵏ
+            f = convert(FT, ϖ★[i, j, k] - Wᵏ)
+            βᵏ = β[i, j, k]
+            definitely_diagonally_dominant = abs(βᵏ) > 10 * eps(FT)
+            ϕ★ = (f - masked_multiply(a[i, j, k-1], ϕ⁻)) / βᵏ
+            ϕ⁻ = convert(FT, ifelse(definitely_diagonally_dominant, ϕ★, f))
+            ϖ★[i, j, k] = ϕ⁻
+        end
+
+        ϕ⁺ = ϕ⁻
+        ϖ★[i, j, Nz] = convert(FT, ϕ⁺ + W[i, j, Nz])
+        for k = Nz-1:-1:1
+            ϕ⁺ = convert(FT, ϖ★[i, j, k] - masked_multiply(t[i, j, k+1], ϕ⁺))
+            ϖ★[i, j, k] = convert(FT, ϕ⁺ + W[i, j, k])
+        end
+    end
 end
 
 # The (ρθ)′ implicit-advection system is the same on every substep of a stage — its coefficients depend only on
