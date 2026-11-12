@@ -480,7 +480,40 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
     foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
 
+    # Fluxes across the facets of an immersed boundary
+    state = merge(fields(model), dynamics_thermodynamic_fields(model.dynamics))
+    foreach(q -> compute_immersed_flux_tendency!(Gⁿ[q], prognostic_model_fields[q], model.grid,
+                                                 model.clock, state), field_indices)
+
     return nothing
+end
+
+#####
+##### Immersed boundary fluxes
+#####
+##### Breeze's closure divergences already zero the fluxes through immersed faces, so here we add
+##### only explicit facet fluxes (e.g. `ImmersedWallDrag`) from an `ImmersedBoundaryCondition`.
+##### TODO: an Oceananigans entry point for the immersed flux tendency alone would let
+##### NonhydrostaticModel and AtmosphereModel share this.
+#####
+
+compute_immersed_flux_tendency!(G, field, grid, clock, model_fields) = nothing
+
+compute_immersed_flux_tendency!(G, field, grid::ImmersedBoundaryGrid, clock, model_fields) =
+    compute_immersed_flux_tendency!(G, field, field.boundary_conditions.immersed, grid, clock, model_fields)
+
+compute_immersed_flux_tendency!(G, field, bc, grid, clock, model_fields) = nothing
+
+function compute_immersed_flux_tendency!(G, field, bc::ImmersedBoundaryCondition, grid, clock, model_fields)
+    loc = instantiated_location(field)
+    launch!(grid.architecture, grid, :xyz, _immersed_flux_tendency!, G, grid, bc, loc, field, clock, model_fields)
+    return nothing
+end
+
+@kernel function _immersed_flux_tendency!(G, grid, bc, loc, c, clock, model_fields)
+    i, j, k = @index(Global, NTuple)
+    @inbounds G[i, j, k] -= immersed_flux_divergence(i, j, k, grid, bc, loc, c, nothing, nothing, nothing,
+                                                     clock, model_fields)
 end
 
 #####

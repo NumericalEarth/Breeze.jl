@@ -15,6 +15,7 @@ module AnelasticEquations
 
 export
     AnelasticDynamics,
+    AnelasticConjugateGradientSolver,
     AnelasticModel,
     solve_for_anelastic_pressure!
 
@@ -22,14 +23,16 @@ using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
-using Oceananigans.Architectures: architecture
+using Oceananigans.Architectures: Architectures, architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: set!
-using Oceananigans.Grids: AbstractGrid, ZDirection, inactive_cell, with_number_type
+using Oceananigans.Grids: AbstractGrid, ZDirection, Center, Face, inactive_cell, peripheral_node, with_number_type
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
-using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
-using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
+using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
+                              Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ, Vᶜᶜᶜ, V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ
+using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation,
+                            ConjugateGradientSolver, ZeroMeanGaugeCondition, VolumeInverseNorm
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, fixed_pressure_state_density,
@@ -41,6 +44,7 @@ using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")
+include("anelastic_conjugate_gradient_solver.jl")
 include("anelastic_buoyancy.jl")
 
 # Define type alias after AnelasticDynamics is defined

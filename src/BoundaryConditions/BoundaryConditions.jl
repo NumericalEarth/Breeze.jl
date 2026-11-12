@@ -55,7 +55,8 @@ using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        FieldBoundaryConditions,
                                        Bottom, Top, West, East, South, North
 using Oceananigans.Fields: Field
-using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, node, znode
+using Oceananigans.ImmersedBoundaries: ImmersedBoundaryCondition
+using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, node, znode, peripheral_node
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑyzᵃᶠᶜ, ℑyzᵃᶜᶠ, ℑxzᶠᵃᶜ, ℑxzᶜᵃᶠ,
                               ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
 using Oceananigans.TurbulenceClosures: closure_required_tracers
@@ -303,13 +304,33 @@ function materialize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, gr
     north    = materialize_atmosphere_boundary_condition(fbcs.north,    North(),  args...)
     bottom   = materialize_atmosphere_boundary_condition(fbcs.bottom,   Bottom(), args...)
     top      = materialize_atmosphere_boundary_condition(fbcs.top,      Top(),    args...)
-    immersed = materialize_atmosphere_boundary_condition(fbcs.immersed, nothing,  args...)
+    immersed = materialize_immersed_boundary_condition(fbcs.immersed, args...)
 
     return FieldBoundaryConditions(; west, east, south, north, bottom, top, immersed)
 end
 
 # Default: pass through unchanged
 materialize_atmosphere_boundary_condition(bc, side, loc, grid, dynamics, microphysics, constants, closure) = bc
+
+materialize_immersed_boundary_condition(bc, args...) = materialize_atmosphere_boundary_condition(bc, nothing, args...)
+
+const BulkFluxBoundaryCondition = Union{BulkDragBoundaryCondition, BulkSensibleHeatFluxBoundaryCondition,
+                                       BulkVaporFluxBoundaryCondition}
+
+# A bulk flux on an immersed boundary is the same bulk flux on each of the six facets of a fluid cell
+function materialize_immersed_boundary_condition(bc::BulkFluxBoundaryCondition, args...)
+    isnothing(bc.condition.filtered_velocities) ||
+        throw(ArgumentError("Temporally filtered surface state is not supported on immersed boundaries."))
+    facet(side) = immersed_facet_condition(bc, side, args...)
+    return ImmersedBoundaryCondition(west=facet(West()), east=facet(East()), south=facet(South()),
+                                     north=facet(North()), bottom=facet(Bottom()), top=facet(Top()))
+end
+
+immersed_facet_condition(bc, side, args...) = materialize_atmosphere_boundary_condition(bc, side, args...)
+
+# Drag acts only on the facets tangential to the momentum component
+immersed_facet_condition(bc::BulkDragBoundaryCondition, side, loc, args...) =
+    facet_normal_location(side, loc) isa Face ? nothing : materialize_atmosphere_boundary_condition(bc, side, loc, args...)
 
 #####
 ##### Materialize coefficient: fill in VPT/pressure/constants for PolynomialCoefficient
@@ -360,10 +381,6 @@ end
 ##### Materialize BulkDrag: convert surface field and materialize coefficient
 #####
 
-# Bulk fluxes are evaluated on the six walls of the domain, not on immersed boundaries
-validate_wall(side) = nothing
-validate_wall(::Nothing) = throw(ArgumentError("Bulk flux boundary conditions are not supported on immersed boundaries"))
-
 # Drag acts on the momentum components tangential to the wall
 function validate_drag_direction(side, direction)
     if direction isa typeof(wall_normal_direction(side))
@@ -373,7 +390,6 @@ function validate_drag_direction(side, direction)
 end
 
 function materialize_bulk_drag(df, side, grid, dynamics, microphysics, constants, closure)
-    validate_wall(side)
     validate_drag_direction(side, df.direction)
     validate_wall_filtering(side, df.filtered_velocities)
 
@@ -425,7 +441,6 @@ function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBound
                                                    side, loc, grid, dynamics, microphysics, constants, closure)
 
     bf = bc.condition
-    validate_wall(side)
     validate_wall_filtering(side, bf.filtered_velocities)
     Tˢ = materialize_surface_field(bf.surface_temperature, grid, side)
     pˢᵗ = standard_pressure(dynamics)
@@ -449,7 +464,6 @@ function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCond
                                                    side, loc, grid, dynamics, microphysics, constants, closure)
 
     bf = bc.condition
-    validate_wall(side)
     validate_wall_filtering(side, bf.filtered_velocities)
     Tˢ = materialize_surface_field(bf.surface_temperature, grid, side)
     ℋˢ = materialize_surface_field(bf.surface_relative_humidity, grid, side)

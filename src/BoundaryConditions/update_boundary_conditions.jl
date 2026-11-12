@@ -48,7 +48,8 @@ end
 @inline function sensible_heat_difference(i, j, k, grid, bf, clock, fields)
     Tˢ = wall_value(i, j, grid, Bottom(), bf.surface_temperature, clock)
     pˢ = wall_air_pressure(i, j, 1, grid, Bottom(), nothing, fields, bf.thermodynamic_constants)
-    return bulk_sensible_heat_difference(i, j, k, grid, Bottom(), bf.formulation, bf, Tˢ, fields, pˢ, nothing)
+    zˢ = wall_height(i, j, 1, grid, Bottom())
+    return bulk_sensible_heat_difference(i, j, k, grid, Bottom(), bf.formulation, bf, Tˢ, fields, pˢ, zˢ, nothing)
 end
 
 function vapor_source_field(bf, model)
@@ -59,7 +60,7 @@ end
 @inline function vapor_difference(i, j, k, grid, bf, clock, fields)
     Tˢ = wall_value(i, j, grid, Bottom(), bf.surface_temperature, clock)
     pˢ = wall_air_pressure(i, j, 1, grid, Bottom(), nothing, fields, bf.thermodynamic_constants)
-    qᵛˢ = wall_specific_humidity(i, j, grid, Bottom(), bf, Tˢ, clock, pˢ)
+    qᵛˢ = wall_specific_humidity((i, j), grid, Bottom(), bf, Tˢ, clock, pˢ)
     return bulk_vapor_difference(i, j, k, fields, nothing, qᵛˢ)
 end
 

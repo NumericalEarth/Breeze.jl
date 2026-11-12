@@ -33,6 +33,8 @@ The drag may be placed on any of the six boundaries of a bounded domain, on eith
 two momentum components tangential to that wall: `ρu` and `ρv` on the bottom and top,
 `ρv` and `ρw` on the west and east, `ρu` and `ρw` on the south and north. The sign above
 is for the bottom; on every wall the drag removes tangential momentum from the domain.
+As the `immersed` condition on an `ImmersedBoundaryGrid`, it acts on every facet tangential
+to the momentum component.
 
 When a [`FilteredSurfaceVelocities`](@ref) is supplied via `filtered_velocities`,
 *every* field entering the formula — the wind speed `|U|`, the velocity `u`, and the
@@ -125,9 +127,19 @@ end
 @inline function OceananigansBC.getbc(df::BulkDragFunction, ℓ::Integer, m::Integer,
                                       grid::AbstractGrid, clock, model_fields, dynamics_fields)
     fields = surface_layer_state(model_fields, dynamics_fields)
+    i, j, k = near_wall_indices(ℓ, m, grid, df.side)
+    return outward_flux_sign(df.side) * bulk_drag_magnitude(df, (ℓ, m), i, j, k, grid, clock, fields)
+end
+
+# On an immersed facet, with the fields already merged with the dynamics fields
+@inline function OceananigansBC.getbc(df::BulkDragFunction, i::Integer, j::Integer, k::Integer,
+                                      grid::AbstractGrid, clock, fields)
+    return - bulk_drag_magnitude(df, (i, j, k), i, j, k, grid, clock, fields)
+end
+
+@inline function bulk_drag_magnitude(df, wall_point, i, j, k, grid, clock, fields)
     side = df.side
-    i, j, k = near_wall_indices(ℓ, m, grid, side)
-    Tˢ = wall_value(ℓ, m, grid, side, df.surface_temperature, clock)
+    Tˢ = wall_value(wall_point, grid, side, df.surface_temperature, clock)
     u  = near_wall_velocity(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     U² = wall_wind_speed²(i, j, k, grid, side, df.direction, fields, df.filtered_velocities)
     Uᵍ² = gustiness_squared(i, j, k, grid, df.gustiness, fields)
@@ -136,7 +148,7 @@ end
     pˢ = wall_air_pressure(i, j, k, grid, side, df.direction, fields, constants)
     ρˢ = surface_density(pˢ, Tˢ, constants)
     Cᴰ = bulk_coefficient(i, j, k, grid, side, df.coefficient, fields, Tˢ, df.filtered_velocities, pˢ, Uᵍ²)
-    return outward_flux_sign(side) * ρˢ * Cᴰ * Ũ * u
+    return ρˢ * Cᴰ * Ũ * u
 end
 
 const BulkDragBoundaryCondition = BoundaryCondition{<:Flux, <:BulkDragFunction}

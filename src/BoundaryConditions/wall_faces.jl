@@ -1,7 +1,8 @@
 #####
 ##### Wall faces
 #####
-##### The bulk fluxes may be placed on any of the six boundaries of a bounded domain.
+##### The bulk fluxes may be placed on any of the six boundaries of a bounded domain,
+##### or on the six facets of the fluid cells next to an immersed boundary.
 ##### Oceananigans evaluates a boundary condition with the two indices tangential to its
 ##### face: (i, j) on the bottom and top, (j, k) on the west and east, and (i, k) on the
 ##### south and north. Everything that distinguishes the faces — the near-wall cell, the
@@ -24,9 +25,15 @@ const RightWall = Union{East, North, Top}
 @inline near_wall_indices(ℓ, m, grid, ::South) = (ℓ, 1, m)
 @inline near_wall_indices(ℓ, m, grid, ::North) = (ℓ, grid.Ny, m)
 
+# Location of a field in the direction normal to a wall
+facet_normal_location(::XNormalWall, loc) = loc[1]
+facet_normal_location(::YNormalWall, loc) = loc[2]
+facet_normal_location(::HorizontalWall, loc) = loc[3]
+
 # Fluxes point along the positive coordinate direction, so a positive flux enters the
 # domain through a left wall and leaves it through a right wall. A flux of magnitude F
 # directed out of the domain is therefore -F on a left wall and +F on a right wall.
+# An immersed facet flux is instead positive into the fluid on every facet.
 @inline outward_flux_sign(::LeftWall) = -1
 @inline outward_flux_sign(::RightWall) = 1
 
@@ -49,6 +56,21 @@ wall_normal_direction(::HorizontalWall) = ZDirection()
 @inline wall_value(ℓ, m, grid, ::HorizontalWall, f::Function, clock) = f(node(ℓ, m, 1, grid, Center(), Center(), nothing)..., clock.time)
 @inline wall_value(ℓ, m, grid, ::XNormalWall,    f::Function, clock) = f(node(1, ℓ, m, grid, nothing, Center(), Center())..., clock.time)
 @inline wall_value(ℓ, m, grid, ::YNormalWall,    f::Function, clock) = f(node(ℓ, 1, m, grid, Center(), nothing, Center())..., clock.time)
+
+# On an immersed facet the wall state is located by the near-wall cell (i, j, k). As for
+# Oceananigans' `ContinuousBoundaryFunction` on immersed facets, a function takes all three
+# coordinates of the facet center followed by the time, and a field lives at cell centers.
+@inline wall_value((ℓ, m)::NTuple{2}, grid, side, x, clock) = wall_value(ℓ, m, grid, side, x, clock)
+@inline wall_value((i, j, k)::NTuple{3}, grid, side, x::Number, clock) = x
+@inline wall_value((i, j, k)::NTuple{3}, grid, side, field::AbstractArray, clock) = @inbounds field[i, j, k]
+@inline wall_value((i, j, k)::NTuple{3}, grid, side, f::Function, clock) = f(facet_node(i, j, k, grid, side)..., clock.time)
+
+@inline facet_node(i, j, k, grid, ::West)   = node(i,     j, k, grid, Face(), Center(), Center())
+@inline facet_node(i, j, k, grid, ::East)   = node(i + 1, j, k, grid, Face(), Center(), Center())
+@inline facet_node(i, j, k, grid, ::South)  = node(i, j,     k, grid, Center(), Face(), Center())
+@inline facet_node(i, j, k, grid, ::North)  = node(i, j + 1, k, grid, Center(), Face(), Center())
+@inline facet_node(i, j, k, grid, ::Bottom) = node(i, j, k,     grid, Center(), Center(), Face())
+@inline facet_node(i, j, k, grid, ::Top)    = node(i, j, k + 1, grid, Center(), Center(), Face())
 
 # Wall-normal distance from the wall to the near-wall cell center
 @inline wall_distance(i, j, k, grid, ::HorizontalWall) = Δzᶜᶜᶜ(i, j, k, grid) / 2
@@ -113,35 +135,49 @@ wall_normal_direction(::HorizontalWall) = ZDirection()
 @inline near_wall_velocity(i, j, k, grid, ::YDirection, fields) = @inbounds fields.v[i, j, k]
 @inline near_wall_velocity(i, j, k, grid, ::ZDirection, fields) = @inbounds fields.w[i, j, k]
 
+# Squared velocity averaged over the active neighboring faces only: faces on or inside an
+# immersed boundary (or on a domain wall) hold no tangential wind and are left out.
+const uᶠᶜᶜ = (Face(), Center(), Center())
+const vᶜᶠᶜ = (Center(), Face(), Center())
+const wᶜᶜᶠ = (Center(), Center(), Face())
+
+@inline active_ϕ²(i, j, k, grid, ϕ, loc) = ifelse(peripheral_node(i, j, k, grid, loc...), zero(grid), ϕ²(i, j, k, grid, ϕ))
+@inline active_face(i, j, k, grid, loc) = !peripheral_node(i, j, k, grid, loc...)
+
+@inline function active_mean_ϕ²(ℑ, i, j, k, grid, ϕ, loc)
+    n = ℑ(i, j, k, grid, active_face, loc)
+    return ifelse(n > 0, ℑ(i, j, k, grid, active_ϕ², ϕ, loc) / n, zero(grid))
+end
+
 # Horizontal walls: the tangential wind is (u, v)
 @inline tangential_speed²(i, j, k, grid, ::HorizontalWall, ::Nothing, fields) =
-    ℑxᶜᵃᵃ(i, j, k, grid, ϕ², fields.u) + ℑyᵃᶜᵃ(i, j, k, grid, ϕ², fields.v)
+    active_mean_ϕ²(ℑxᶜᵃᵃ, i, j, k, grid, fields.u, uᶠᶜᶜ) + active_mean_ϕ²(ℑyᵃᶜᵃ, i, j, k, grid, fields.v, vᶜᶠᶜ)
 
 @inline tangential_speed²(i, j, k, grid, ::HorizontalWall, ::XDirection, fields) =
-    ϕ²(i, j, k, grid, fields.u) + ℑxyᶠᶜᵃ(i, j, k, grid, ϕ², fields.v)
+    ϕ²(i, j, k, grid, fields.u) + active_mean_ϕ²(ℑxyᶠᶜᵃ, i, j, k, grid, fields.v, vᶜᶠᶜ)
 
 @inline tangential_speed²(i, j, k, grid, ::HorizontalWall, ::YDirection, fields) =
-    ℑxyᶜᶠᵃ(i, j, k, grid, ϕ², fields.u) + ϕ²(i, j, k, grid, fields.v)
+    active_mean_ϕ²(ℑxyᶜᶠᵃ, i, j, k, grid, fields.u, uᶠᶜᶜ) + ϕ²(i, j, k, grid, fields.v)
 
 # Walls normal to x: the tangential wind is (v, w)
 @inline tangential_speed²(i, j, k, grid, ::XNormalWall, ::Nothing, fields) =
-    ℑyᵃᶜᵃ(i, j, k, grid, ϕ², fields.v) + ℑzᵃᵃᶜ(i, j, k, grid, ϕ², fields.w)
+    active_mean_ϕ²(ℑyᵃᶜᵃ, i, j, k, grid, fields.v, vᶜᶠᶜ) + active_mean_ϕ²(ℑzᵃᵃᶜ, i, j, k, grid, fields.w, wᶜᶜᶠ)
 
 @inline tangential_speed²(i, j, k, grid, ::XNormalWall, ::YDirection, fields) =
-    ϕ²(i, j, k, grid, fields.v) + ℑyzᵃᶠᶜ(i, j, k, grid, ϕ², fields.w)
+    ϕ²(i, j, k, grid, fields.v) + active_mean_ϕ²(ℑyzᵃᶠᶜ, i, j, k, grid, fields.w, wᶜᶜᶠ)
 
 @inline tangential_speed²(i, j, k, grid, ::XNormalWall, ::ZDirection, fields) =
-    ℑyzᵃᶜᶠ(i, j, k, grid, ϕ², fields.v) + ϕ²(i, j, k, grid, fields.w)
+    active_mean_ϕ²(ℑyzᵃᶜᶠ, i, j, k, grid, fields.v, vᶜᶠᶜ) + ϕ²(i, j, k, grid, fields.w)
 
 # Walls normal to y: the tangential wind is (u, w)
 @inline tangential_speed²(i, j, k, grid, ::YNormalWall, ::Nothing, fields) =
-    ℑxᶜᵃᵃ(i, j, k, grid, ϕ², fields.u) + ℑzᵃᵃᶜ(i, j, k, grid, ϕ², fields.w)
+    active_mean_ϕ²(ℑxᶜᵃᵃ, i, j, k, grid, fields.u, uᶠᶜᶜ) + active_mean_ϕ²(ℑzᵃᵃᶜ, i, j, k, grid, fields.w, wᶜᶜᶠ)
 
 @inline tangential_speed²(i, j, k, grid, ::YNormalWall, ::XDirection, fields) =
-    ϕ²(i, j, k, grid, fields.u) + ℑxzᶠᵃᶜ(i, j, k, grid, ϕ², fields.w)
+    ϕ²(i, j, k, grid, fields.u) + active_mean_ϕ²(ℑxzᶠᵃᶜ, i, j, k, grid, fields.w, wᶜᶜᶠ)
 
 @inline tangential_speed²(i, j, k, grid, ::YNormalWall, ::ZDirection, fields) =
-    ℑxzᶜᵃᶠ(i, j, k, grid, ϕ², fields.u) + ϕ²(i, j, k, grid, fields.w)
+    active_mean_ϕ²(ℑxzᶜᵃᶠ, i, j, k, grid, fields.u, uᶠᶜᶜ) + ϕ²(i, j, k, grid, fields.w)
 
 #####
 ##### Near-wall wind, with or without the temporally filtered surface state

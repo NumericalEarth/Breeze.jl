@@ -2,10 +2,11 @@
 ##### AnelasticDynamics definition
 #####
 
-struct AnelasticDynamics{R, P, FT}
+struct AnelasticDynamics{R, P, FT, S}
     reference_state :: R
     pressure_anomaly :: P
     pressure_solver_float_type :: FT
+    pressure_solver :: S
 end
 
 """
@@ -21,15 +22,19 @@ Keyword arguments
   horizontal waves under a tall, strongly stratified column, and can be unstable in `Float32` on
   large domains. When it differs from the grid's type, the solver is built on a copy of the grid in
   this type, and the pressure is returned in the model's precision.
+- `pressure_solver`: `nothing` (default) chooses for the grid: the Fourier–tridiagonal solve, which is
+  exact without an immersed boundary, or `AnelasticConjugateGradientSolver()` on an
+  `ImmersedBoundaryGrid`. Pass `AnelasticConjugateGradientSolver(; reltol, abstol, maxiter)` to set
+  its tolerances, on any grid.
 """
-AnelasticDynamics(reference_state; pressure_solver_float_type=Float64) =
-    AnelasticDynamics(reference_state, nothing, pressure_solver_float_type)
+AnelasticDynamics(reference_state; pressure_solver_float_type=Float64, pressure_solver=nothing) =
+    AnelasticDynamics(reference_state, nothing, pressure_solver_float_type, pressure_solver)
 
-# Kernels never need the solver's float type, and a `DataType` is not a valid GPU kernel argument.
+# Kernels never need the solver's float type or method, and a `DataType` is not a valid GPU kernel argument.
 Adapt.adapt_structure(to, dynamics::AnelasticDynamics) =
     AnelasticDynamics(adapt(to, dynamics.reference_state),
                       adapt(to, dynamics.pressure_anomaly),
-                      nothing)
+                      nothing, nothing)
 
 #####
 ##### Default dynamics and materialization
@@ -53,7 +58,8 @@ Materialize a stub `AnelasticDynamics` into a full dynamics object with the pres
 """
 function AtmosphereModels.materialize_dynamics(dynamics::AnelasticDynamics, grid, boundary_conditions, thermodynamic_constants)
     pressure_anomaly = CenterField(grid)
-    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly, dynamics.pressure_solver_float_type)
+    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly, dynamics.pressure_solver_float_type,
+                             dynamics.pressure_solver)
 end
 
 #####
