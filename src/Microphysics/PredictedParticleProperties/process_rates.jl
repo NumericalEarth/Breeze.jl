@@ -560,11 +560,21 @@ end
 # Everything from here down is `@inline`. A `@noinline` device function would receive `p3`
 # (several KB of table handles), `ℳ`, `𝒰`, and `constants` as local-memory copies, and
 # ptxas allocates registers over the whole call graph anyway.
+@inline compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                                  surface_temperature, temperature_tendency, pressure_tendency) =
+    compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                             surface_temperature, temperature_tendency, pressure_tendency,
+                             nothing, DiracStatistics())
+
+# Two independent subgrid inputs: `subgrid_statistics` feed the subgrid supersaturation model
+# `p3.subgrid_supersaturation` (`nothing` without one), and `𝒮` are the closure's subgrid
+# statistics of the cell for `p3.subgrid` (`DiracStatistics()` without a subgrid choice).
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
                                           pressure_tendency,
-                                          subgrid_statistics = nothing)
+                                          subgrid_statistics,
+                                          𝒮 = DiracStatistics())
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -619,8 +629,8 @@ end
     ρᵗʰ = density(𝒰, constants)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
 
-    vapor_excess_adjustment = prognostic_vapor_excess_adjustment(
-        p3, qᶜˡ, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
+    vapor_excess_adjustment = subgrid_vapor_excess_adjustment(
+        𝒮, p3, qᶜˡ, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
     saturation_alignment_rate = vapor_excess_adjustment.rate
     qᶜˡ = vapor_excess_adjustment.qᶜˡ
     qᵛ = vapor_excess_adjustment.qᵛ
@@ -653,12 +663,15 @@ end
                                                            lookups)
 
     # === PHASE 1 & 2 RATES ===
-    # Subgrid supersaturation correlation of cloud condensation; `nothing` without a subgrid model
-    Γ = subgrid_supersaturation(p3.subgrid_supersaturation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
-                                ℳ_adjusted.qᶜˡ, T, P, ρ, constants)
+    # Subgrid supersaturation correlation of cloud condensation; `nothing` without a subgrid model.
+    # Where the closure owns the cloud (`ClosureCloud`) P3 does not condense, and Γ is dropped.
+    Γ = closure_owned_supersaturation(𝒮, subgrid_supersaturation(p3.subgrid_supersaturation, subgrid_statistics,
+                                                                 qᵛ, qᵛ⁺ˡ, ℳ_adjusted.qᶜˡ, T, P, ρ, constants))
 
-    phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
-                             temperature_tendency, pressure_tendency, Γ)
+    phase1_grid_mean = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
+                                       temperature_tendency, pressure_tendency, Γ)
+    # Subgrid information from the turbulence closure; the identity for `DiracStatistics`.
+    phase1 = p3_subgrid_phase1_rates(𝒮, phase1_grid_mean, p3, ρ, ℳ_adjusted, constants, state)
     phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===

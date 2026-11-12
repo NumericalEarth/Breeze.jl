@@ -61,7 +61,8 @@ function read_lookup_tables(directory::AbstractString;
                             rain = nothing,
                             process_rates = nothing,
                             warm_rain_scheme = KhairoutdinovKogan2000(),
-                            subgrid_supersaturation = nothing)
+                            subgrid_supersaturation = nothing,
+                            subgrid = NoSubgridCorrelation())
 
     table1_file = joinpath(directory, "p3_lookupTable_1.dat-v6.9-2momI")
     isfile(table1_file) || error("2momI table not found: $table1_file")
@@ -103,7 +104,8 @@ function read_lookup_tables(directory::AbstractString;
         negative_moisture_correction,
         aerosol,
         warm_rain_scheme,
-        subgrid_supersaturation
+        subgrid_supersaturation,
+        subgrid
     )
 end
 

@@ -171,6 +171,15 @@ column(field) = Array(interior(field, 1, 1, :))
         lengths = column(Field(KernelFunctionOperation{Center, Center, Center}(
             Breeze.TurbulenceClosures.mixing_lengthᶜᶜᶜ, grid, closure, e, model.closure_fields)))
         @test lengths ≈ Cs .* Array(znodes(grid, Center())) rtol=1e-5
+
+        # The mixing length functions take any object with `mixing_length` and `minimum_tke` as
+        # the closure and any named tuple with `ℓˢ` and `N²` as the closure fields: other closures
+        # reuse them (SimplifiedHigherOrderClosure with a GradientLimitedMixingLength).
+        context = (mixing_length = closure.mixing_length, minimum_tke = closure.minimum_tke)
+        fields = (ℓˢ = model.closure_fields.ℓˢ, N² = model.closure_fields.N²)
+        other_lengths = column(Field(KernelFunctionOperation{Center, Center, Center}(
+            Breeze.TurbulenceClosures.mixing_lengthᶜᶜᶜ, grid, context, e, fields)))
+        @test other_lengths == lengths
     end
 end
 

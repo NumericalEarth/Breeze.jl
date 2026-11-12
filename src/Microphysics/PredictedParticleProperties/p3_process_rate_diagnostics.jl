@@ -16,7 +16,7 @@ $(TYPEDEF)
 Kernel function for the sum of the P3 process rates `names` (a tuple of fields of
 `P3ProcessRates`), evaluated at the current model state. See [`MicrophysicalProcessRate`](@ref Breeze.AtmosphereModels.MicrophysicalProcessRate).
 """
-struct P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U, S}
+struct P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U, S, K}
     microphysics :: P
     microphysical_fields :: M
     formulation :: F
@@ -24,19 +24,24 @@ struct P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U, S}
     thermodynamic_constants :: C
     density :: R
     velocities :: U
+    # The fields of the subgrid supersaturation model, or nothing
     subgrid_fields :: S
+    # The turbulence closure and its fields, when the subgrid choice of the scheme reads them
+    subgrid_closure :: K
 end
 
 function P3ProcessRateKernelFunction{names}(microphysics, microphysical_fields, formulation, dynamics,
                                            thermodynamic_constants, density, velocities,
-                                           subgrid_fields) where names
+                                           subgrid_fields, subgrid_closure) where names
     P, M, F = typeof(microphysics), typeof(microphysical_fields), typeof(formulation)
     D, C = typeof(dynamics), typeof(thermodynamic_constants)
-    R, U, S = typeof(density), typeof(velocities), typeof(subgrid_fields)
-    return P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U, S}(microphysics, microphysical_fields,
-                                                                     formulation, dynamics,
-                                                                     thermodynamic_constants,
-                                                                     density, velocities, subgrid_fields)
+    R, U = typeof(density), typeof(velocities)
+    S, K = typeof(subgrid_fields), typeof(subgrid_closure)
+    return P3ProcessRateKernelFunction{names, P, M, F, D, C, R, U, S, K}(microphysics, microphysical_fields,
+                                                                        formulation, dynamics,
+                                                                        thermodynamic_constants,
+                                                                        density, velocities,
+                                                                        subgrid_fields, subgrid_closure)
 end
 
 Utils.prettysummary(::P3ProcessRateKernelFunction{names}) where names =
@@ -50,14 +55,15 @@ Adapt.adapt_structure(to, k::P3ProcessRateKernelFunction{names}) where names =
                                       Adapt.adapt(to, k.thermodynamic_constants),
                                       Adapt.adapt(to, k.density),
                                       Adapt.adapt(to, k.velocities),
-                                      Adapt.adapt(to, k.subgrid_fields))
+                                      Adapt.adapt(to, k.subgrid_fields),
+                                      Adapt.adapt(to, k.subgrid_closure))
 
 @inline function (kernel::P3ProcessRateKernelFunction{names})(i, j, k, grid) where names
     p3 = kernel.microphysics
     constants = kernel.thermodynamic_constants
     inputs = p3_grid_process_inputs(i, j, k, grid, p3, kernel.microphysical_fields,
                                     kernel.formulation, kernel.dynamics, constants,
-                                    kernel.density, kernel.velocities)
+                                    kernel.density, kernel.velocities, kernel.subgrid_closure...)
 
     # The statistics of the subgrid supersaturation model, as in `_p3_add_tendencies_kernel!`
     statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.subgrid_supersaturation,
@@ -66,7 +72,7 @@ Adapt.adapt_structure(to, k::P3ProcessRateKernelFunction{names}) where names =
     rates = compute_p3_process_rates(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants,
                                      inputs.properties, inputs.surface_temperature,
                                      inputs.temperature_tendency, inputs.pressure_tendency,
-                                     statistics)
+                                     statistics, inputs.𝒮)
 
     return sum_process_rates(rates, names)
 end
@@ -98,7 +104,8 @@ function P3ProcessRate(model, p3, names)
                                                 model.thermodynamic_constants,
                                                 AM.total_density(model.dynamics),
                                                 (; w = model.velocities.w),
-                                                subgrid_supersaturation_fields(p3.subgrid_supersaturation, model))
+                                                subgrid_supersaturation_fields(p3.subgrid_supersaturation, model),
+                                                p3_subgrid_closure(p3.subgrid, model))
 
     return KernelFunctionOperation{Center, Center, Center}(kernel, model.grid)
 end

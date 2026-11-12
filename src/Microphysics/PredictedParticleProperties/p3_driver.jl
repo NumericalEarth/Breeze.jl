@@ -90,7 +90,7 @@ end
 # tendency kernel assembles it, so that the process-rate diagnostics
 # (`MicrophysicalProcessRate`) evaluate the very rates that drive the model.
 @inline function p3_grid_process_inputs(i, j, k, grid, p3, μ, formulation, dynamics,
-                                        constants, ρ_field, velocities)
+                                        constants, ρ_field, velocities, closure, closure_fields)
     @inbounds begin
         ρ = ρ_field[i, j, k]
         qᵛᵉ = μ.qᵛ[i, j, k]
@@ -110,22 +110,25 @@ end
 
     properties = p3_process_properties(p3, ρ, ℳ)
 
-    return (; ρ, ℳ, 𝒰, properties, surface_temperature, temperature_tendency, pressure_tendency)
+    # Subgrid statistics from the closure; `DiracStatistics` without a subgrid choice.
+    𝒮 = AM.subgrid_statisticsᶜᶜᶜ(i, j, k, grid, p3.subgrid, closure, closure_fields)
+
+    return (; ρ, ℳ, 𝒰, properties, surface_temperature, temperature_tendency, pressure_tendency, 𝒮)
 end
 
 @kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities,
-                                            subgrid_fields)
+                                            subgrid_fields, closure, closure_fields)
     i, j, k = @index(Global, NTuple)
 
     inputs = p3_grid_process_inputs(i, j, k, grid, p3, μ, formulation, dynamics,
-                                    constants, ρ_field, velocities)
+                                    constants, ρ_field, velocities, closure, closure_fields)
 
     # Statistics for the subgrid supersaturation model; `nothing` without one
     statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.subgrid_supersaturation, subgrid_fields)
 
     result = p3_tendency_compute(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants, inputs.properties,
                                  inputs.surface_temperature, inputs.temperature_tendency,
-                                 inputs.pressure_tendency, statistics)
+                                 inputs.pressure_tendency, statistics, inputs.𝒮)
 
     add_p3_tendencies!(G, i, j, k, grid, p3, result)
 end
@@ -169,10 +172,17 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
             μ, model.formulation, model.dynamics, grid,
             model.thermodynamic_constants, p3, ρ_field,
             model.velocities,
-            subgrid_supersaturation_fields(p3.subgrid_supersaturation, model))
+            subgrid_supersaturation_fields(p3.subgrid_supersaturation, model),
+            p3_subgrid_closure(p3.subgrid, model)...)
 
     return nothing
 end
+
+AM.subgrid_correlation(p3::P3) = p3.subgrid
+
+# The closure and its fields reach the P3 kernels only when the subgrid choice reads them.
+p3_subgrid_closure(::NoSubgridCorrelation, model) = (nothing, nothing)
+p3_subgrid_closure(subgrid, model) = (model.closure, model.closure_fields)
 
 #####
 ##### Number concentration diagnostic

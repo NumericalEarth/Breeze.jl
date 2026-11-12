@@ -8,7 +8,24 @@ export TKEBasedTurbulenceClosure,
        ConstantStabilityFunctions,
        RationalStabilityFunction,
        DryStaticStability,
-       MoistStaticStability
+       MoistStaticStability,
+       SimplifiedHigherOrderClosure, SHOC,
+       smooth_shoc_components,
+       BlendedMixingLength,
+       ColumnStabilityDamping, RichardsonStabilityFunctions, StratificationLimitedTimeScale,
+       ForwardEulerTKE, ImplicitSinkTKE,
+       PDFBuoyancyFlux, DowngradientBuoyancyFlux,
+       DowngradientSecondMoments,
+       AlgebraicThirdMoment,
+       UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
+       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness,
+       DoubleGaussianPDF, SmoothDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
+       HardClipping, SmoothClipping,
+       BulkRichardsonBoundaryLayerDepth,
+       SHOCConstants,
+       closure_parameters, with_parameters,
+       SubgridCloudFormulation, SubgridDistribution, CloudBuoyancyFlux, ClosureOwnedCloud,
+       StratificationLimitedMomentTimeScale
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
@@ -172,5 +189,24 @@ end
 include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
 include("richardson_number_stability_functions.jl")
+
+include("SHOC/SimplifiedHigherOrderClosures.jl")
+using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedHigherOrderClosure, SHOC,
+                                      smooth_shoc_components,
+                                      BlendedMixingLength,
+                                      ColumnStabilityDamping, RichardsonStabilityFunctions, StratificationLimitedTimeScale,
+                                      ForwardEulerTKE, ImplicitSinkTKE,
+                                      PDFBuoyancyFlux, DowngradientBuoyancyFlux,
+                                      DowngradientSecondMoments,
+                                      AlgebraicThirdMoment,
+                                      UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
+                                      ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness,
+                                      DoubleGaussianPDF, SmoothDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
+                                      HardClipping, SmoothClipping,
+                                      BulkRichardsonBoundaryLayerDepth,
+                                      SHOCConstants,
+                                      closure_parameters, with_parameters
+
+include("subgrid_cloud_formulation.jl")
 
 end # module TurbulenceClosures
