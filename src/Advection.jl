@@ -306,7 +306,7 @@ A scalar advection scheme that reconstructs with the stencils and optimal weight
 scheme, but with the nonlinear smoothness weights computed from the tracer at the start of the
 outer time step rather than from the stage state being reconstructed. The fluxes stay live: only
 the weights are frozen, so the stage reconstruction is linear in the stage tracer and the
-[`MultirateInfinitesimalStep`](@ref) stage recombination sees one consistent advection operator
+[`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep) stage recombination sees one consistent advection operator
 for the whole step, as it does with `UpwindBiased`. Under any other time stepper the frozen
 tracer is refreshed before every tendency evaluation, and the scheme reduces to its `WENO`.
 
@@ -396,7 +396,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Refresh the step-start copy of `tracer` that `scheme` computes its smoothness weights from, when the
 tendencies about to be built feed the first stage of an outer step; between the stages of a
-[`MultirateInfinitesimalStep`](@ref) the copy is left as it is. The halos are copied with the
+[`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep) the copy is left as it is. The halos are copied with the
 interior, so no halo fill follows.
 """
 function OceananigansAdvection.update_advection!(scheme::FrozenWeightsWENO, model, tracer)
