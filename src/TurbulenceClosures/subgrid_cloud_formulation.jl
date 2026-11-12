@@ -115,7 +115,7 @@ energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref
 
 $(TYPEDFIELDS)
 """
-struct SubgridDistribution{TS, SM, TM, SB, SK, PDF, PS, CP, C}
+struct SubgridDistribution{TS, SM, TM, SB, SK, PDF, PS, CP, C, R}
     "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
@@ -134,6 +134,8 @@ struct SubgridDistribution{TS, SM, TM, SB, SK, PDF, PS, CP, C}
     clipping :: CP
     "SHOC's constants the components read (`ggr`, `basetemp`, `mintke`, …)"
     constants :: C
+    "Largest correlation of w with θˡ and with qᵗ at the faces, |w′a′| / √(w′² a′²), or `nothing` for no bound"
+    maximum_flux_correlation :: R
 end
 
 Adapt.@adapt_structure SubgridDistribution
@@ -155,18 +157,21 @@ function SubgridDistribution(FT::DataType = Oceananigans.defaults.FloatType;
                              assumed_pdf = DoubleGaussianPDF(FT),
                              saturation = FixedConstantsLiquidSaturation(),
                              clipping = HardClipping(),
-                             constants = SHOCConstants(FT))
+                             constants = SHOCConstants(FT),
+                             maximum_flux_correlation = sqrt(convert(FT, 0.15)))
+    ρᵐᵃˣ = isnothing(maximum_flux_correlation) ? nothing : convert(FT, maximum_flux_correlation)
     return SubgridDistribution(time_scale, second_moments, third_moment, stratification_number_bound,
-                               skewness, assumed_pdf, saturation, clipping, constants)
+                               skewness, assumed_pdf, saturation, clipping, constants, ρᵐᵃˣ)
 end
 
 convert_eltype(::Type{FT}, d::SubgridDistribution) where FT =
     SubgridDistribution(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
-                         d.assumed_pdf, d.saturation, d.clipping, d.constants))...)
+                         d.assumed_pdf, d.saturation, d.clipping, d.constants, d.maximum_flux_correlation))...)
 
 convert_component(FT, ::Nothing) = nothing
 convert_component(FT, c) = convert_eltype(FT, c)
+convert_component(FT, c::Number) = convert(FT, c)
 
 Base.summary(d::SubgridDistribution) = string("SubgridDistribution(", nameof(typeof(d.assumed_pdf)), ", ",
                                               nameof(typeof(d.saturation)), ", third moment: ",
@@ -380,6 +385,26 @@ end
 @inline cloud_buoyancy_parameter(::ModelThermodynamicsSaturation, c, thermodynamics, θ) =
     thermodynamics.constants.gravitational_acceleration / θ
 
+# Raise θˡ′² and qᵗ′² to (w′a′)² / (ρᵐᵃˣ² w′²) where the down-gradient variances are too small for
+# the down-gradient fluxes (|correlation with w| > ρᵐᵃˣ), and scale θˡ′qᵗ′ with them so that the
+# θˡ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
+# correlation) is often above 1 - ℂᵍ₁ = 0.6, where the plumes of the double-Gaussian PDF have no
+# width and its cloud fraction is all or nothing in each plume (0, a, 1 - a or 1). SHOC's own
+# diffusivity, 0.1 τ e, gives 0.15; the default bound is that, √0.15.
+@inline bound_flux_correlation(::Nothing, w′², θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′) = (θˡ′², qᵗ′², θˡ′qᵗ′)
+
+@inline function bound_flux_correlation(ρᵐᵃˣ, w′², θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
+    FT = typeof(θˡ′²)
+    d = ρᵐᵃˣ * ρᵐᵃˣ * w′²
+    resolved = d > floatmin(FT)
+    dₛ = ifelse(resolved, d, one(FT))
+    θ² = max(θˡ′², ifelse(resolved, w′θˡ′ * w′θˡ′ / dₛ, zero(FT)))
+    q² = max(qᵗ′², ifelse(resolved, w′qᵗ′ * w′qᵗ′ / dₛ, zero(FT)))
+    fθ = ifelse(θˡ′² > 0, θ² / ifelse(θˡ′² > 0, θˡ′², one(FT)), one(FT))
+    fq = ifelse(qᵗ′² > 0, q² / ifelse(qᵗ′² > 0, qᵗ′², one(FT)), one(FT))
+    return θ², q², θˡ′qᵗ′ * sqrt(fθ * fq)
+end
+
 @inline function subgrid_distribution_column!(m, cl, i, j, grid, d, closure, closure_fields, θ, qᵗ, e, w, p, thermodynamics)
     Nz = size(grid, 3)
     FT = eltype(grid)
@@ -404,6 +429,11 @@ end
             θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′, _, _, _ =
                 interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / Δz, θ[i, j, k] - θ[i, j, k-1], qᵗ[i, j, k] - qᵗ[i, j, k-1],
                                          zero(FT), zero(FT), zero(FT))
+
+            # The variances no smaller than the fluxes allow at the largest correlation with w
+            w′²ᶠ = (vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ)) +
+                    vertical_velocity_variance(sm, max(e[i, j, k-1], eᵐⁱⁿ))) / 2
+            θˡ′², qᵗ′², θˡ′qᵗ′ = bound_flux_correlation(d.maximum_flux_correlation, w′²ᶠ, θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
 
             m.τ[i, j, k] = τ
             m.θˡ′²[i, j, k] = θˡ′²
