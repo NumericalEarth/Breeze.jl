@@ -50,7 +50,7 @@ struct HeldSuarezForcing{V, P, A, R, D, C}
     parameters :: P
     pressure :: A                 # p
     total_density :: R            # ρ
-    coupling_density :: D         # ρᵈ
+    continuity_density :: D         # ρᵈ
     thermodynamic_constants :: C
 end
 
@@ -61,7 +61,7 @@ Adapt.adapt_structure(to, forcing::HeldSuarezForcing) =
                       forcing.parameters,
                       Adapt.adapt(to, forcing.pressure),
                       Adapt.adapt(to, forcing.total_density),
-                      Adapt.adapt(to, forcing.coupling_density),
+                      Adapt.adapt(to, forcing.continuity_density),
                       forcing.thermodynamic_constants)
 
 @regional HeldSuarezForcing
@@ -71,7 +71,7 @@ const YMomentumHeldSuarezForcing = HeldSuarezForcing{Val{:ρv}}
 const EnergyHeldSuarezForcing = HeldSuarezForcing{Val{:ρE}}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `(; ρu, ρv, ρE)`, the Rayleigh friction and the Newtonian temperature relaxation of
 [Held and Suarez (1994)](@cite HeldSuarez1994), to pass as `forcing` to
@@ -194,7 +194,7 @@ end
 
     @inbounds begin
         p = forcing.pressure[i, j, k]
-        ρᵈ = forcing.coupling_density[i, j, k]
+        ρᵈ = forcing.continuity_density[i, j, k]
         T = fields.T[i, j, k]
     end
 
@@ -222,7 +222,7 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::HeldSuar
                              HeldSuarezParameters{FT}(forcing.parameters),
                              context.pressure,
                              context.total_density,
-                             context.coupling_density,
+                             context.continuity_density,
                              context.thermodynamic_constants)
 end
 

@@ -18,7 +18,6 @@ export
     AnelasticModel,
     solve_for_anelastic_pressure!
 
-using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -34,13 +33,12 @@ using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜ�
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
 using Oceananigans.Utils: prettysummary, launch!
 
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, fixed_pressure_state_density,
+                               pressure_anomaly,
+                               kernel_time_step, grid_moisture_fractions
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant,
-                             surface_temperature_value, density
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_pressure, pressure_anomaly,
-                                kernel_time_step
-
-# Import microphysics interface for buoyancy computation
-using Breeze.AtmosphereModels: grid_moisture_fractions
+                             surface_temperature_value
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")

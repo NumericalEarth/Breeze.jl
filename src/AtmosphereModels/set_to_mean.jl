@@ -15,7 +15,7 @@ using GPUArraysCore: @allowscalar
 using Statistics: mean!
 
 """
-    rescale_density_weighted_fields!(model, ρ⁻)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rescale all density-weighted prognostic fields so that specific quantities
 (velocity, potential temperature, moisture, etc.) are preserved after a change
@@ -28,7 +28,7 @@ All other prognostic fields are cell-centered and rescaled with broadcasting.
 function rescale_density_weighted_fields!(model, ρ⁻)
     grid = model.grid
     arch = grid.architecture
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
 
     # Momentum: kernel with interpolation to face locations
     launch!(arch, grid, :xyz, _rescale_momentum!, grid, model.momentum, ρ, ρ⁻)
@@ -57,7 +57,7 @@ end
 function rescale_dry_density_weighted_fields!(model, ρᵈ⁻)
     grid = model.grid
     arch = grid.architecture
-    ρᵈ = dynamics_density(model.dynamics)
+    ρᵈ = continuity_density(model.dynamics)
 
     launch!(arch, grid, :xyz, _rescale_momentum!, grid, model.momentum, ρᵈ, ρᵈ⁻)
 
@@ -109,7 +109,7 @@ end
 end
 
 """
-    set_to_mean!(reference_state, model; rescale_densities=false)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the reference pressure and density profiles from horizontally-averaged
 temperature and moisture mass fractions of the current model state.
@@ -123,8 +123,8 @@ function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
     constants = model.thermodynamic_constants
 
     if rescale_densities
-        ρᵣ_old = similar(dynamics_density(model.dynamics))
-        copy_parent!(ρᵣ_old, dynamics_density(model.dynamics))
+        ρᵣ_old = similar(continuity_density(model.dynamics))
+        copy_parent!(ρᵣ_old, continuity_density(model.dynamics))
     end
 
     # Update reference temperature and moisture from horizontal means
@@ -158,7 +158,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rewrite the bottom-face pressure and density of an `ExnerReferenceState` from the horizontal-mean
 near-surface state `(θˢ, qᵛˢ)`, in place.
@@ -170,16 +170,16 @@ level, so a horizontally uniform reduction is exact; terrain-following resets go
 `reset_reference_state!`, which reduces the datum per column along the terrain.
 """
 function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, constants, κ̂)
-    FT  = eltype(ref)
     Rᵈ  = dry_air_gas_constant(constants)
     Rᵛ  = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
 
-    θˢ, qᵛˢ = @allowscalar (θ[1, 1, 1], qᵛ[1, 1, 1])
+    # The bottom of each column profile, read from its data: a profile allocated inside a compiled
+    # function has a traced element type, for which the reduced-Field `getindex` is ambiguous.
+    θˢ, qᵛˢ = @allowscalar (θ.data[1, 1, 1], qᵛ.data[1, 1, 1])
     zˢ = bottom_face_height(grid)
-    pˢ = convert(FT, moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
-                                                ref.standard_pressure, constants, κ̂))
+    pˢ = moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ, ref.standard_pressure, constants, κ̂)
 
     set_surface_state!(ref.surface_pressure, pˢ)
     update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, κ̂)
@@ -191,12 +191,12 @@ function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛ
     # nothing to keep in sync.
     isnothing(ref.surface_density) && return nothing
     ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, κ̂)
-    set_surface_state!(ref.surface_density, convert(eltype(ref), ρˢ))
+    set_surface_state!(ref.surface_density, ρˢ)
     return nothing
 end
 
 """
-    set_to_mean!(ref::ExnerReferenceState, model)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Exner analogue of the `ReferenceState` method, for split-explicit `CompressibleDynamics`. Recompute
 the base `exner_function`/`pressure`/`density` by re-running the same discrete Exner column
@@ -255,7 +255,7 @@ function set_to_mean!(ref::ExnerReferenceState, model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the reference state of `model`'s dynamics from the temperature `T̄` and the vapor, liquid and
 ice mass fractions `q̄ᵛ`, `q̄ˡ`, `q̄ⁱ` (`Number`s, `Function(z)`s, or `Field`s), and update the pressure
@@ -269,7 +269,7 @@ function Thermodynamics.compute_reference_state!(model::AtmosphereModel, T̄, q�
 end
 
 """
-    reset_reference_state!(model)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the dynamics' reference state from the horizontal means of the model's current state via
 [`set_to_mean!`](@ref) — works for both the anelastic `ReferenceState` and the split-explicit
@@ -394,7 +394,7 @@ function has_condensate(model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the prognostic density of a `CompressibleDynamics` model into discrete hydrostatic balance with
 the current `θˡⁱ`/`qᵛ`, per [`HydrostaticallyBalancedDensity`](@ref). Runs the same per-column
@@ -431,7 +431,7 @@ function set_potential_temperature_hydrostatically_balanced_density!(
     cᵖᵛ = constants.vapor.heat_capacity
     g   = constants.gravitational_acceleration
 
-    ρᵈ = dynamics_density(dynamics)
+    ρᵈ = continuity_density(dynamics)
 
     # Reuse diagnostic fields as column-solver scratch. `update_state!` below rebuilds all of them.
     # Aliasing `π` with `qᵛ` is safe because each column is serial in `k`: the kernel reads qᵛ[k]

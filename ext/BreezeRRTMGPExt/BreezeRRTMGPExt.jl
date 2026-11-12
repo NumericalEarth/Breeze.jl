@@ -1,7 +1,6 @@
 module BreezeRRTMGPExt
 
 using Breeze
-
 using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property,
                                dynamics_pressure, total_density, resolve_column_batch_rows,
                                column_index, column_longitude, column_latitude, compute_radiation_flux_divergence!,
@@ -9,12 +8,9 @@ using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, Constan
                                assert_bound_surface_temperature, maybe_infer_solar_position,
                                initialize_cos_zenith!, update_cos_zenith!, fill_columns!
 using Breeze.Thermodynamics: ThermodynamicConstants
-using RRTMGP: RRTMGP
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
-using DocStringExtensions: TYPEDSIGNATURES
-
-# Oceananigans imports
-using Oceananigans.Architectures: architecture, CPU, GPU
+using Oceananigans.Architectures: architecture, CPU, GPU, ReactantState
 using Oceananigans.DistributedComputations: Distributed, child_architecture
 using Oceananigans.Fields: ZFaceField, CenterField
 
@@ -24,7 +20,7 @@ using Oceananigans.Fields: ZFaceField, CenterField
 #   FluxLW, FluxSW: flux storage (flux_up, flux_dn, flux_net, flux_dn_dir)
 #   RRTMGPParameters: physical constants for RRTMGP
 
-using RRTMGP: RRTMGPGridParams
+using RRTMGP: RRTMGP, RRTMGPGridParams
 using RRTMGP.Parameters: Parameters, RRTMGPParameters
 using RRTMGP.RTE: NoScatLWRTE, NoScatSWRTE
 using RRTMGP.RTESolver: solve_lw!, solve_sw!
@@ -32,7 +28,7 @@ using RRTMGP.RTESolver: solve_lw!, solve_sw!
 using ClimaComms: ClimaComms
 
 """
-    RRTMGPParameters(constants::ThermodynamicConstants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `RRTMGPParameters` from Breeze's `ThermodynamicConstants`.
 """
@@ -54,7 +50,7 @@ function Parameters.RRTMGPParameters(constants::ThermodynamicConstants{FT};
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create an RRTMGP-compatible ClimaComms context from an Oceananigans architecture.
 """
@@ -69,6 +65,11 @@ end
 
 # Radiation is column-local: each rank solves its own columns on its child architecture
 rrtmgp_context(arch::Distributed) = rrtmgp_context(child_architecture(arch))
+
+# RRTMGP allocates its lookup tables and workspace through ClimaComms, which has no device for Reactant's arrays
+rrtmgp_context(::ReactantState) =
+    throw(ArgumentError("RRTMGP radiation does not support ReactantState yet: RRTMGP allocates its lookup tables " *
+                        "and workspace through ClimaComms, which has no device for Reactant's arrays."))
 
 using Oceananigans.Utils: IterationInterval
 

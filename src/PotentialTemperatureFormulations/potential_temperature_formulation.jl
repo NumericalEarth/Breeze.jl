@@ -58,7 +58,7 @@ struct LiquidIcePotentialTemperatureFormulation{F, T, S, E}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `LiquidIcePotentialTemperatureFormulation` with the given `temperature_solver` and
 Exner exponent `exner_exponent`, either `VaporEquivalentExponent()` (the default) or `DryExponent()`.
@@ -168,7 +168,7 @@ materialize_temperature_solver(temperature_solver, dynamics, grid) =
 #####
 
 function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation::LiquidIcePotentialTemperatureFormulation, dynamics, i, j, k, grid)
-    ρ = dynamics_density(dynamics)
+    ρ = continuity_density(dynamics)
     @inbounds begin
         ρᵢ = ρ[i, j, k]
         ρθ = formulation.potential_temperature_density[i, j, k]
@@ -182,7 +182,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a `LiquidIcePotentialTemperatureState` at grid point `(i, j, k)` from the
 given `formulation`, `dynamics`, and pre-computed moisture mass fractions `q`.

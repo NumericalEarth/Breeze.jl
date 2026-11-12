@@ -15,17 +15,30 @@ export sum_properties,
        @regional
 
 using Adapt: Adapt
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: DocStringExtensions
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Utils: getregion, _getregion
+
+#####
+##### Docstring signatures
+#####
+
+# `DocStringExtensions.TYPEDSIGNATURES` with the default values of positional and keyword
+# arguments shown, as in `f(x, n::Int64=3; Δt=0.001)`. Breeze docstrings use it in place of
+# `TYPEDSIGNATURES`.
+const TYPEDSIGNATURES_WITH_DEFAULTS = DocStringExtensions.TypedMethodSignatures(defaults = true)
+
+# `TYPEDSIGNATURES_WITH_DEFAULTS` without the inferred return type, for methods whose return
+# type is too long to be worth printing, such as a `Union` of deeply parametrized types.
+const TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN = DocStringExtensions.TypedMethodSignatures(defaults = true, returns = false)
 
 #####
 ##### Sums of selected properties
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the sum of the properties of `object` selected by the nonempty tuple `names`.
 Properties may be scalars, fields, or other values supporting `+`.
@@ -53,7 +66,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `a / b`, or `default` where `b` is exactly zero. Branch-free, so it is
 safe inside GPU kernels.
@@ -73,7 +86,7 @@ safe_divide(1.0, 0.0, -1.0)
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute Chebyshev–Gauss quadrature nodes and weights for `n` points.
 
@@ -118,7 +131,7 @@ chebyshev_gauss_nodes_weights(n::Int) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Map a Chebyshev–Gauss node `x ∈ [-1, 1]` to a particle diameter `D ∈ [0, ∞)`
 using `D = (scale/λ) (1+x)/(1-x+ε)`. The default `scale = 10` covers more than
@@ -130,7 +143,7 @@ using `D = (scale/λ) (1+x)/(1-x+ε)`. The default `scale = 10` covers more than
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Jacobian `dD/dx` of the diameter transform used by [`transform_to_diameter`](@ref).
 """

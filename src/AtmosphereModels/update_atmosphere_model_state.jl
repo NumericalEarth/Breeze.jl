@@ -4,7 +4,6 @@ using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Fields: flattened_unique_values
 using Oceananigans.Grids: topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
@@ -24,7 +23,6 @@ function Oceananigans.Models.update_model_field_time_series!(model::AtmosphereMo
     time = Time(clock.time)
     possible_fts = (fields(model), model.forcing)
     time_series_tuple = extract_field_time_series(possible_fts)
-    time_series_tuple = flattened_unique_values(time_series_tuple)
     for fts in time_series_tuple
         update_field_time_series!(fts, time)
     end
@@ -71,7 +69,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute forcing-specific quantities needed before tendency calculation.
 For example, [`SubsidenceForcing`](@ref Breeze.Forcings.SubsidenceForcing)
@@ -85,12 +83,12 @@ function compute_forcings!(model)
 end
 
 # Tracer↔specific conversion uses the TOTAL air density (mass fractions qˣ = ρˣ/ρ), keeping the
-# thermodynamics in mass fractions. For anelastic, `total_density === dynamics_density`.
+# thermodynamics in mass fractions. For anelastic, `total_density === continuity_density`.
 tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, total_density(model.dynamics))
 tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, total_density(model.dynamics))
 
 # Diagnose the total air density ρ = ρᵈ + Σρˣ. No-op unless the dynamics carries a distinct
-# total-density field (CompressibleDynamics overrides this); anelastic aliases dynamics_density.
+# total-density field (CompressibleDynamics overrides this); anelastic aliases continuity_density.
 compute_total_density!(model) = nothing
 
 # Breeze's advection container is keyed by prognostic name rather than Oceananigans'
@@ -147,7 +145,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute velocities from momentum: `u = ρu / ρ` for each velocity component.
 """
@@ -160,7 +158,7 @@ function compute_velocities!(model::AtmosphereModel)
     # cannot evaluate the time argument. Note: velocities are still stale here
     # (recomputed just below), so momentum BCs with velocity `field_dependencies`
     # would see last-stage values.
-    density = dynamics_density(model.dynamics)
+    density = continuity_density(model.dynamics)
     fill_halo_regions!(density, boundary_condition_args(model)...)
     fill_horizontal_velocity_halos!(model.momentum, boundary_condition_args(model)...)
 
@@ -199,7 +197,7 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
     Gρw = model.timestepper.Gⁿ.ρw
 
     momentum_args = (
-        dynamics_density(model.dynamics),
+        continuity_density(model.dynamics),
         model.advection.momentum,
         model.velocities,
         model.closure,
@@ -240,7 +238,7 @@ function compute_vertical_momentum_tendency!(model::AtmosphereModel, Gρw, w_arg
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute auxiliary model variables:
 
@@ -301,7 +299,7 @@ end
 
 @kernel function _compute_velocities!(u, v, w, ρu, ρv, ρw, grid, dynamics)
     i, j, k = @index(Global, NTuple)
-    ρ = dynamics_density(dynamics)
+    ρ = continuity_density(dynamics)
     @inbounds u[i, j, k] = ρu[i, j, k] / ℑxᶠᵃᵃ(i, j, k, grid, ρ)
     @inbounds v[i, j, k] = ρv[i, j, k] / ℑyᵃᶠᵃ(i, j, k, grid, ρ)
     @inbounds w[i, j, k] = ρw[i, j, k] / ℑzᵃᵃᶠ(i, j, k, grid, ρ)
@@ -482,7 +480,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
@@ -511,7 +509,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Add a turbulence closure's own tendencies — the local sources of a prognostic the closure carries,
 such as the shear and buoyancy production of turbulent kinetic energy — to the model's tendencies

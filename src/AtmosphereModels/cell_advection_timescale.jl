@@ -34,7 +34,7 @@ using Oceananigans.Grids: Center, Face
 using Oceananigans.TurbulenceClosures: HorizontalFormulation, ThreeDimensionalFormulation
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 A callable that returns the advective timescale of a `model` restricted to the directions of
 `formulation`: `HorizontalFormulation()` counts only the horizontal advective CFL (dropping the

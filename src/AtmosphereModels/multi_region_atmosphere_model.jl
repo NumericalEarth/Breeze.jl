@@ -74,7 +74,7 @@ Base.summary(fixer::ConservationFixer) = string("ConservationFixer of ", join(ke
 Base.show(io::IO, fixer::ConservationFixer) = print(io, summary(fixer))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The callback that conserves the dry mass and the content of every other density of `model` on a
 `YinYangGrid`, which `add_conservation_fixer!` adds to a simulation at the `TracerTendencyCallsite`.
@@ -103,7 +103,7 @@ ConservationFixer of ρᵈ, ρθ, ρqᵛ and c
 function ConservationFixer(model::AtmosphereModel)
     grid = model.grid
     names = (:ρᵈ, closure_scalar_names(model)...)
-    densities = NamedTuple{names}(map(name -> density(model, name), names))
+    densities = NamedTuple{names}(map(name -> scalar_density(model, name), names))
     seam_budgets = NamedTuple{names}(map(name -> owned_integral(flux_divergence(model, name)), names))
     positive_parts = map(ρc -> KernelFunctionOperation{Center, Center, Center}(positive_part, grid, ρc), densities)
     positive_contents = map(owned_integral, positive_parts)
@@ -117,7 +117,7 @@ acoustic_seam_budgets(divergences) = map(fluxes -> map(owned_integral, fluxes), 
 @inline positive_part(i, j, k, grid, ρc) = @inbounds max(0, ρc[i, j, k])
 
 # At the `TracerTendencyCallsite` the tracers are mass fractions, between the two conversions of `update_state!`
-function density(model, name)
+function scalar_density(model, name)
     ρc = prognostic_fields(model)[name]
     return name ∈ keys(model.tracers) ? total_density(model.dynamics) * ρc : ρc
 end
@@ -135,7 +135,7 @@ function flux_divergence(model, name)
     name === :ρᵈ && return KernelFunctionOperation{Center, Center, Center}(div_xyᶜᶜᶜ, grid, model.momentum.ρu, model.momentum.ρv)
 
     if name === thermodynamic_density_name(model.formulation)
-        ρ = dynamics_density(model.dynamics)
+        ρ = continuity_density(model.dynamics)
         U = thermodynamic_transport_velocities(model)
     else
         ρ = total_density(model.dynamics)
