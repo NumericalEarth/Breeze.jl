@@ -23,7 +23,9 @@ export TKEBasedTurbulenceClosure,
        HardClipping, SmoothClipping,
        BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
-       closure_parameters, with_parameters
+       closure_parameters, with_parameters,
+       SubgridCloudFormulation, SubgridDistribution, CloudBuoyancyFlux, ClosureOwnedCloud,
+       StratificationLimitedMomentTimeScale
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
@@ -204,5 +206,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
                                       BulkRichardsonBoundaryLayerDepth,
                                       SHOCConstants,
                                       closure_parameters, with_parameters
+
+include("subgrid_cloud_formulation.jl")
 
 end # module TurbulenceClosures
