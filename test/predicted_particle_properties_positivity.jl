@@ -3,7 +3,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Test
 
 using Breeze
-using Breeze.AtmosphereModels: StageStart
+using Breeze.AtmosphereModels: StageStart, patankar_fraction, patankar_sink_fraction,
+                                stage_interval_is_known, stage_remainder
 using Breeze.Thermodynamics: ThermodynamicConstants, MoistureMassFractions,
                              LiquidIcePotentialTemperatureState, PlanarLiquidSurface,
                              saturation_specific_humidity, density, temperature, with_temperature
@@ -134,20 +135,27 @@ end
     stage = StageStart(fields, fields, false, Δt)
 
     # c̃ = 2 - 10 × 0.1 = 1; a loss of 0.3 over 10 s asks for three times that.
-    φ = PPP.patankar_sink_fraction(1, 1, 1, G, stage, Val(:c), FT(0.3))
+    @test stage_interval_is_known(stage)
+    @test stage_remainder(1, 1, 1, G, stage, Val(:c)) ≈ 1
+    @test patankar_fraction(FT(1), Δt, FT(0.3)) ≈ FT(1 / 4)
+    @test patankar_fraction(FT(-1), Δt, FT(0.3)) == 0
+    @test patankar_fraction(FT(1), Δt, FT(-0.3)) == 1
+    φ = patankar_sink_fraction(1, 1, 1, G, stage, Val(:c), FT(0.3))
     @test φ ≈ FT(1 / 4)
     @test 1 - Δt * φ * FT(0.3) ≈ FT(1 / 4)   # c⁺ = c̃ / (1 + Δt L / c̃)
 
     # No loss, no limit; nothing left, no sink.
-    @test PPP.patankar_sink_fraction(1, 1, 1, G, stage, Val(:c), zero(FT)) == 1
-    @test PPP.patankar_sink_fraction(1, 1, 1, fill(FT(-1), 1, 1, 1), stage, Val(:c), FT(0.3)) == 0
+    @test patankar_sink_fraction(1, 1, 1, G, stage, Val(:c), zero(FT)) == 1
+    @test patankar_sink_fraction(1, 1, 1, fill(FT(-1), 1, 1, 1), stage, Val(:c), FT(0.3)) == 0
 
     # The stage interval is not known before the first time step.
     unknown = StageStart(fields, fields, false, FT(Inf))
-    @test PPP.patankar_sink_fraction(1, 1, 1, G, unknown, Val(:c), FT(0.3)) == 1
+    @test !stage_interval_is_known(unknown)
+    @test patankar_sink_fraction(1, 1, 1, G, unknown, Val(:c), FT(0.3)) == 1
 
     # A stage that starts from the step-start state budgets against that state.
     initial = (; c = fill(FT(4), 1, 1, 1))
     from_initial = StageStart(initial, fields, true, Δt)
-    @test PPP.patankar_sink_fraction(1, 1, 1, G, from_initial, Val(:c), FT(0.3)) ≈ FT(1 / 2)
+    @test stage_remainder(1, 1, 1, G, from_initial, Val(:c)) ≈ 3
+    @test patankar_sink_fraction(1, 1, 1, G, from_initial, Val(:c), FT(0.3)) ≈ FT(1 / 2)
 end
