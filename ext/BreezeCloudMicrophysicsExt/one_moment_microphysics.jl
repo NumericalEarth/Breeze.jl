@@ -100,9 +100,13 @@ Return one-moment categories backed by CloudMicrophysics' unified
   so the two containers cannot diverge.
 - `freezing_temperature`: Temperature used to route melting and freezing
   processes. Defaults to CloudMicrophysics' standard value, 273.15 K.
-- `τⁿᵘᵐ`: Timescale [s] for limiting sinks and relaxing negative values: a donor
-  reservoir loses at most its content over `τⁿᵘᵐ`. Must satisfy `τⁿᵘᵐ ≥ Δt` to
-  prevent reservoir overdraw within one time step. Default: 10 seconds.
+- `τⁿᵘᵐ`: Numerical timescale [s]. In an `AtmosphereModel`, sinks are budgeted against
+  the state and interval of each time-stepper stage, which keeps every reservoir
+  non-negative for any time step, and `τⁿᵘᵐ` is the timescale over which a value that
+  transport left negative relaxes back to zero. For the gridless tendencies used by parcel
+  models it is also the timescale for limiting sinks: a donor reservoir loses at most its
+  content over `τⁿᵘᵐ`, which prevents overdraw within a step no longer than `τⁿᵘᵐ`.
+  Default: 10 seconds.
 """
 function one_moment_cloud_microphysics_categories(
     FT::DataType = Oceananigans.defaults.FloatType;
@@ -873,19 +877,9 @@ end
 # The non-equilibrium and mixed-phase schemes evaluate these processes in their tendency bundles below.
 #####
 
-# Sinks and negative-value relaxation are limited over the numerical timescale
-# `categories.τⁿᵘᵐ` (default 10 s; see `one_moment_cloud_microphysics_categories`).
-
-# Fraction of a donor's process rates that can be honoured without draining more than
-# its content `q` over τⁿᵘᵐ: 1 when the summed sink rate `ΣS` fits, `q⁺ / (τⁿᵘᵐ ΣS)` otherwise.
-@inline function donor_limiter(q, ΣS, τⁿᵘᵐ)
-    q⁺ = max(0, q)
-    # Disabled processes return integer zeros; retain the moisture precision for zero demand.
-    demand = oftype(q, τⁿᵘᵐ) * ΣS
-    # Protect the eagerly evaluated quotient at zero demand without flooring positive demand.
-    denominator = ifelse(iszero(demand), one(demand), demand)
-    return ifelse(demand > q⁺, q⁺ / denominator, one(demand))
-end
+# Sinks are budgeted per donor reservoir, and negative values relaxed, by the `budget` each
+# bundle takes (see sink_budgets.jl): against the coming stage on the grid, and over the
+# numerical timescale `categories.τⁿᵘᵐ` (default 10 s) for the gridless tendencies of parcel models.
 
 #####
 ##### The two densities of the one-moment tendencies
@@ -900,10 +894,11 @@ end
 # coincide. On the anelastic core ρᵣ is a dry profile about 1% heavier than moist air at qᵛ = 16 g/kg,
 # so saturating on ρ places qᵛ⁺ about 1% too low and condenses water in subsaturated air.
 
-# State-based rain tendency for WP1M
-@inline function AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+# Saturation adjustment partitions ρqᵉ = ρ(qᵛ + qᶜˡ) diagnostically, so the precipitation
+# sources are drawn from ρqᵉ: ρqᵉ = −ρqʳ.
+@inline function wp1m_tendencies(bμp::WP1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants,
+                                 budget = TimescaleSinkBudget(bμp.categories.τⁿᵘᵐ))
     categories = bμp.categories
-    τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
     processes = parameters.processes
     process_params = parameters.process_params
@@ -945,21 +940,33 @@ end
     )
 
     # Limit evaporation to available rain
-    Sᵉᵛᵃᵖ_min = -max(0, qʳ) / τⁿᵘᵐ
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -sink_rate_cap(budget, qʳ))
+    Sᵉᵛᵃᵖ⁺, Sᵉᵛᵃᵖ⁻ = max(Sᵉᵛᵃᵖ, 0), min(Sᵉᵛᵃᵖ, 0)
 
-    # Total tendency for ρqʳ
-    ΣρS = ρ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+    # Donor-limited process rates: cloud liquid and vapor are parts of ρqᵉ, rain is prognostic.
+    Sᶜᵒˡˡ = Sᵃᶜⁿᵛ + Sᵃᶜᶜ
+    fᶜˡ = diagnostic_sink_fraction(budget, ρ, qᶜˡ, Sᶜᵒˡˡ)
+    fᵛ  = diagnostic_sink_fraction(budget, ρ, q.vapor, Sᵉᵛᵃᵖ⁺)
+    fᵉ  = equilibrium_moisture_sink_fraction(budget, ρ, fᶜˡ * Sᶜᵒˡˡ + fᵛ * Sᵉᵛᵃᵖ⁺)
+    fʳ  = sink_fraction(budget, Val(:ρqʳ), ρ, qʳ, -Sᵉᵛᵃᵖ⁻)
 
-    # Numerical relaxation for negative values
-    ρSⁿᵘᵐ = -ρ * qʳ / τⁿᵘᵐ
+    ρqʳ_phys = ρ * (fᵉ * fᶜˡ * Sᶜᵒˡˡ + fᵉ * fᵛ * Sᵉᵛᵃᵖ⁺ + fʳ * Sᵉᵛᵃᵖ⁻)
 
-    return ifelse(qʳ ≥ 0, ΣρS, ρSⁿᵘᵐ)
+    # Negative rain (from transport) relaxes back toward zero, drawing on ρqᵉ.
+    δʳ = negative_value_relaxation(budget, Val(:ρqʳ), ρ, qʳ, ρqʳ_phys)
+    gᵉ = relaxation_donor_fraction(budget, Val(:ρqᵉ), -ρqʳ_phys, δʳ)
+
+    ρqʳ = ρqʳ_phys + gᵉ * δʳ
+    ρqᵉ = -ρqʳ
+
+    return (; ρqᵉ, ρqʳ)
 end
 
-# Saturation adjustment partitions ρqᵉ diagnostically, so precipitation sources are drawn from ρqᵉ.
-@inline AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants) =
-    - AM.microphysical_tendency(bμp, Val(:ρqʳ), ρ, ℳ, 𝒰, constants)
+@inline AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants) =
+    wp1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+
+@inline AM.microphysical_tendency(bμp::WP1M, ::Val{:ρqᵉ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants) =
+    wp1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵉ
 
 #####
 ##### Microphysical tendencies for warm-phase non-equilibrium 1M (WPNE1M)
@@ -976,9 +983,9 @@ end
 #   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ  (autoconversion/accretion sources; evaporation sink)
 #####
 
-@inline function wpne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+@inline function wpne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants,
+                                   budget = TimescaleSinkBudget(bμp.categories.τⁿᵘᵐ))
     categories = bμp.categories
-    τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
     processes = parameters.processes
     process_params = parameters.process_params
@@ -1012,7 +1019,7 @@ end
         T,
         constants,
     )
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -sink_rate_cap(budget, qʳ))
 
     # Collection: cloud liquid → rain (does not involve vapor)
     Sᵃᶜⁿᵛ = liquid_autoconversion(parameters, qᶜˡ, ℳ.w)
@@ -1026,21 +1033,40 @@ end
         ρ,
     )
 
+    # Positivity: every process draws from exactly one donor reservoir. Scale each donor's
+    # processes together to what the donor can give. Scaling a process scales its source and
+    # its sink alike, so conservation is untouched.
+    Sᶜᵒⁿᵈ⁺, Sᶜᵒⁿᵈ⁻ = max(Sᶜᵒⁿᵈ, 0), min(Sᶜᵒⁿᵈ, 0)
+    Sᵉᵛᵃᵖ⁺, Sᵉᵛᵃᵖ⁻ = max(Sᵉᵛᵃᵖ, 0), min(Sᵉᵛᵃᵖ, 0)
+
+    fᵛ  = sink_fraction(budget, Val(:ρqᵛ),  ρ, qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵉᵛᵃᵖ⁺)
+    fᶜˡ = sink_fraction(budget, Val(:ρqᶜˡ), ρ, qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ)
+    fʳ  = sink_fraction(budget, Val(:ρqʳ),  ρ, qʳ,  -Sᵉᵛᵃᵖ⁻)
+
+    Sᶜᵒⁿᵈ = fᵛ * Sᶜᵒⁿᵈ⁺ + fᶜˡ * Sᶜᵒⁿᵈ⁻
+    Sᵉᵛᵃᵖ = fᵛ * Sᵉᵛᵃᵖ⁺ + fʳ  * Sᵉᵛᵃᵖ⁻
+    Sᵃᶜⁿᵛ, Sᵃᶜᶜ = fᶜˡ * Sᵃᶜⁿᵛ, fᶜˡ * Sᵃᶜᶜ
+
     # Physics tendencies — conserved by construction: ρqᵛ_phys + ρqᶜˡ_phys + ρqʳ_phys = 0
     ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ)
     ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
     ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
 
-    # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
-    # When q < 0, replace with -ρq/τⁿᵘᵐ and route the delta: v→cl, cl→r, r→v.
+    # Numerical relaxation guards — conserved by taking each correction from the reservoir's
+    # exchange partner: negative vapor relaxes by drawing on cloud liquid, negative cloud
+    # liquid on rain, and negative rain on vapor (see `negative_value_relaxation`).
     # This preserves ρqᵛ + ρqᶜˡ + ρqʳ = 0 regardless of which guards fire.
-    δᵛ  = ifelse(qᵛ  ≥ 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ      - ρqᵛ_phys)
-    δᶜˡ = ifelse(qᶜˡ ≥ 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ      - ρqᶜˡ_phys)
-    δʳ  = ifelse(qʳ  ≥ 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ      - ρqʳ_phys)
+    δᵛ  = negative_value_relaxation(budget, Val(:ρqᵛ),  ρ, qᵛ,  ρqᵛ_phys)
+    δᶜˡ = negative_value_relaxation(budget, Val(:ρqᶜˡ), ρ, qᶜˡ, ρqᶜˡ_phys)
+    δʳ  = negative_value_relaxation(budget, Val(:ρqʳ),  ρ, qʳ,  ρqʳ_phys)
 
-    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δʳ
-    ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
-    ρqʳ  = ρqʳ_phys  + δʳ  - δᶜˡ
+    gᵛ  = relaxation_donor_fraction(budget, Val(:ρqᵛ),  ρqᵛ_phys,  δʳ)
+    gᶜˡ = relaxation_donor_fraction(budget, Val(:ρqᶜˡ), ρqᶜˡ_phys, δᵛ)
+    gʳ  = relaxation_donor_fraction(budget, Val(:ρqʳ),  ρqʳ_phys,  δᶜˡ)
+
+    ρqᵛ  = ρqᵛ_phys  + gᶜˡ * δᵛ  - gᵛ  * δʳ
+    ρqᶜˡ = ρqᶜˡ_phys + gʳ  * δᶜˡ - gᶜˡ * δᵛ
+    ρqʳ  = ρqʳ_phys  + gᵛ  * δʳ  - gʳ  * δᶜˡ
 
     return (; ρqᵛ, ρqᶜˡ, ρqʳ)
 end
@@ -1143,9 +1169,9 @@ end
 #   ρqˢⁿ: +Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ − Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢⁿ, Sʳˢⁿ, Sˢⁿʳ, α)
 #####
 
-@inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+@inline function mpne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants,
+                                   budget = TimescaleSinkBudget(bμp.categories.τⁿᵘᵐ))
     categories = bμp.categories
-    τⁿᵘᵐ = categories.τⁿᵘᵐ
     parameters = categories.parameters
     processes = parameters.processes
     cloud_ice = parameters.cloud.ice
@@ -1178,13 +1204,13 @@ end
     (; Sᵉᵛᵃᵖ, Sˢᵘᵇˡ, Sᵐᵉˡᵗ, Sᵃᶜⁿᵛ, Sᵃᶜᶜ, Sᵃᶜⁿᵛⁱˢⁿ, Sᵃᶜᶜˡˢⁿ, Sᵃᶜᶜⁱˢⁿ, Sᵃᶜᶜⁱʳ, Sᵃᶜᶜʳⁱ, Sʳˢⁿ, Sˢⁿʳ) =
         mixed_phase_precipitation_rates(bμp, ρ, ρᵗʰ, ℳ, q, T, Tᶠ, constants)
 
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
-    Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -max(0, qˢⁿ) / τⁿᵘᵐ)
-    Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, max(0, qˢⁿ) / τⁿᵘᵐ)
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -sink_rate_cap(budget, qʳ))
+    Sˢᵘᵇˡ = max(Sˢᵘᵇˡ, -sink_rate_cap(budget, qˢⁿ))
+    Sᵐᵉˡᵗ = min(Sᵐᵉˡᵗ, sink_rate_cap(budget, qˢⁿ))
 
     # Cloud ice melting: cloud ice → cloud liquid
     Sᵐᵉˡᵗᶜⁱ = cloud_ice_melt_rate(processes.cloud_ice_melt, cloud_ice, air, qᶜⁱ, ρ, T, Tᶠ, constants)
-    Sᵐᵉˡᵗᶜⁱ = min(Sᵐᵉˡᵗᶜⁱ, max(0, qᶜⁱ) / τⁿᵘᵐ)
+    Sᵐᵉˡᵗᶜⁱ = min(Sᵐᵉˡᵗᶜⁱ, sink_rate_cap(budget, qᶜⁱ))
 
     # Thermal melt factor for warm accretion
     α = warm_accretion_melt_factor(T, Tᶠ, constants)
@@ -1193,7 +1219,7 @@ end
     is_warm = T ≥ Tᶠ
 
     # Positivity: every process draws from exactly one donor reservoir. Scale each donor's
-    # processes together so that the donor cannot lose more than its content over τⁿᵘᵐ.
+    # processes together to what the donor can give (see `sink_fraction`).
     # Scaling a process scales its source and its sink alike, so conservation is untouched.
     Sᶜᵒⁿᵈ⁺, Sᶜᵒⁿᵈ⁻ = max(Sᶜᵒⁿᵈ, 0), min(Sᶜᵒⁿᵈ, 0)
     Sᵈᵉᵖ⁺, Sᵈᵉᵖ⁻ = max(Sᵈᵉᵖ, 0), min(Sᵈᵉᵖ, 0)
@@ -1201,16 +1227,16 @@ end
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)                       # cold: rain → snow
 
-    fᵛ  = donor_limiter(qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺, τⁿᵘᵐ)
-    fᶜˡ = donor_limiter(qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ, τⁿᵘᵐ)
-    fᶜⁱ = donor_limiter(qᶜⁱ, -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ, τⁿᵘᵐ)
-    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ, τⁿᵘᵐ)
+    fᵛ  = sink_fraction(budget, Val(:ρqᵛ),  ρ, qᵛ,  Sᶜᵒⁿᵈ⁺ + Sᵈᵉᵖ⁺ + Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺)
+    fᶜˡ = sink_fraction(budget, Val(:ρqᶜˡ), ρ, qᶜˡ, -Sᶜᵒⁿᵈ⁻ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ)
+    fᶜⁱ = sink_fraction(budget, Val(:ρqᶜⁱ), ρ, qᶜⁱ, -Sᵈᵉᵖ⁻ + Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵐᵉˡᵗᶜⁱ)
+    fʳ  = sink_fraction(budget, Val(:ρqʳ),  ρ, qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
 
     # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
     # computing this melt demand, then cap all snow sinks against the available snow.
     Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
-    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ, τⁿᵘᵐ)
+    fˢⁿ = sink_fraction(budget, Val(:ρqˢⁿ), ρ, qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
 
     Sᶜᵒⁿᵈ = fᵛ * Sᶜᵒⁿᵈ⁺ + fᶜˡ * Sᶜᵒⁿᵈ⁻
     Sᵈᵉᵖ  = fᵛ * Sᵈᵉᵖ⁺  + fᶜⁱ * Sᵈᵉᵖ⁻
@@ -1237,21 +1263,25 @@ end
                      + ifelse(is_warm, zero(T), Sᵃᶜᶜˡˢⁿ + Sʳˢⁿ)
                      - ifelse(is_warm, αSᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T)))
 
-    # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
-    # When q < 0, replace with -ρq/τⁿᵘᵐ and route the delta to the coupled tracer:
-    # Exchange partners are v↔cl, cl↔r, ci↔v, r↔v, and s↔v.
+    # Numerical relaxation guards — conserved by taking each correction from the reservoir's
+    # exchange partner: negative vapor relaxes by drawing on cloud liquid, negative cloud
+    # liquid on rain, and negative cloud ice, rain and snow on vapor (see `negative_value_relaxation`).
     # This preserves ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ + ρqˢⁿ = 0 regardless of which guards fire.
-    δᵛ  = ifelse(qᵛ  ≥ 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
-    δᶜˡ = ifelse(qᶜˡ ≥ 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ - ρqᶜˡ_phys)
-    δᶜⁱ = ifelse(qᶜⁱ ≥ 0, zero(ρqᶜⁱ_phys), -ρ * qᶜⁱ / τⁿᵘᵐ - ρqᶜⁱ_phys)
-    δʳ  = ifelse(qʳ  ≥ 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
-    δˢⁿ = ifelse(qˢⁿ ≥ 0, zero(ρqˢⁿ_phys), -ρ * qˢⁿ / τⁿᵘᵐ - ρqˢⁿ_phys)
+    δᵛ  = negative_value_relaxation(budget, Val(:ρqᵛ),  ρ, qᵛ,  ρqᵛ_phys)
+    δᶜˡ = negative_value_relaxation(budget, Val(:ρqᶜˡ), ρ, qᶜˡ, ρqᶜˡ_phys)
+    δᶜⁱ = negative_value_relaxation(budget, Val(:ρqᶜⁱ), ρ, qᶜⁱ, ρqᶜⁱ_phys)
+    δʳ  = negative_value_relaxation(budget, Val(:ρqʳ),  ρ, qʳ,  ρqʳ_phys)
+    δˢⁿ = negative_value_relaxation(budget, Val(:ρqˢⁿ), ρ, qˢⁿ, ρqˢⁿ_phys)
 
-    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δᶜⁱ - δʳ - δˢⁿ
-    ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
-    ρqᶜⁱ = ρqᶜⁱ_phys + δᶜⁱ
-    ρqʳ  = ρqʳ_phys  + δʳ  - δᶜˡ
-    ρqˢⁿ = ρqˢⁿ_phys + δˢⁿ
+    gᵛ  = relaxation_donor_fraction(budget, Val(:ρqᵛ),  ρqᵛ_phys,  δᶜⁱ + δʳ + δˢⁿ)
+    gᶜˡ = relaxation_donor_fraction(budget, Val(:ρqᶜˡ), ρqᶜˡ_phys, δᵛ)
+    gʳ  = relaxation_donor_fraction(budget, Val(:ρqʳ),  ρqʳ_phys,  δᶜˡ)
+
+    ρqᵛ  = ρqᵛ_phys  + gᶜˡ * δᵛ  - gᵛ * δᶜⁱ - gᵛ * δʳ - gᵛ * δˢⁿ
+    ρqᶜˡ = ρqᶜˡ_phys + gʳ  * δᶜˡ - gᶜˡ * δᵛ
+    ρqᶜⁱ = ρqᶜⁱ_phys + gᵛ  * δᶜⁱ
+    ρqʳ  = ρqʳ_phys  + gᵛ  * δʳ  - gʳ * δᶜˡ
+    ρqˢⁿ = ρqˢⁿ_phys + gᵛ  * δˢⁿ
 
     return (; ρqᵛ, ρqᶜˡ, ρqᶜⁱ, ρqʳ, ρqˢⁿ)
 end
@@ -1278,60 +1308,6 @@ end
 end
 
 #####
-##### Fused microphysics tendency for MPNE1M
-#####
-#
-# `mpne1m_tendencies` bundles all 5 prognostic tendencies in one call. We override
-# `compute_microphysical_tendencies!` to compute the bundle once per cell and
-# write to all 5 G fields in a single kernel.
-
-@kernel function _compute_mpne1m_tendencies!(Gρqᵛ, Gρqᶜˡ, Gρqᶜⁱ, Gρqʳ, Gρqˢⁿ,
-                                             grid, microphysics, dynamics, formulation,
-                                             constants, specific_prognostic_moisture,
-                                             microphysical_fields, velocities)
-    i, j, k = @index(Global, NTuple)
-
-    ρ_field = AM.total_density(dynamics)
-    @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵛ = specific_prognostic_moisture[i, j, k]
-
-    # Reconstruct moisture fractions and thermodynamic state at this cell.
-    q = AM.grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
-    𝒰 = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
-
-    # Build the microphysical state directly to avoid interpolating the horizontal velocities
-    # in `grid_microphysical_state`: only the vertical velocity is used (by the rain autoconversion).
-    @inbounds qᶜˡ = microphysical_fields.ρqᶜˡ[i, j, k] / ρ
-    @inbounds qᶜⁱ = microphysical_fields.ρqᶜⁱ[i, j, k] / ρ
-    @inbounds qʳ  = microphysical_fields.ρqʳ[i, j, k]  / ρ
-    @inbounds qˢⁿ = microphysical_fields.ρqˢⁿ[i, j, k] / ρ
-    w = ℑzᵃᵃᶜ(i, j, k, grid, velocities.w)
-    ℳ = MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢⁿ, w)
-
-    G = mpne1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
-
-    @inbounds Gρqᵛ[i, j, k]  += G.ρqᵛ
-    @inbounds Gρqᶜˡ[i, j, k] += G.ρqᶜˡ
-    @inbounds Gρqᶜⁱ[i, j, k] += G.ρqᶜⁱ
-    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
-    @inbounds Gρqˢⁿ[i, j, k]  += G.ρqˢⁿ
-end
-
-function AM.compute_microphysical_tendencies!(microphysics::MPNE1M, model)
-    grid = model.grid
-    arch = grid.architecture
-    G = model.timestepper.Gⁿ
-
-    launch!(arch, grid, :xyz, _compute_mpne1m_tendencies!,
-            G.ρqᵛ, G.ρqᶜˡ, G.ρqᶜⁱ, G.ρqʳ, G.ρqˢⁿ,
-            grid, microphysics, model.dynamics, model.formulation,
-            model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
-            model.microphysical_fields, model.velocities)
-
-    return nothing
-end
-
-#####
 ##### Microphysical tendencies for mixed-phase saturation-adjustment 1M (MP1M)
 #####
 #
@@ -1343,13 +1319,15 @@ end
 #   ρqˢⁿ: +Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ + Sᵃᶜᶜʳⁱ + Sˢᵘᵇˡ − Sᵐᵉˡᵗ + T-routed(Sᵃᶜᶜˡˢⁿ, Sʳˢⁿ, Sˢⁿʳ, α)
 #   ρqᵉ:  −(ρqʳ + ρqˢⁿ)
 #
-# Sinks are limited per donor reservoir (vapor, cloud liquid, cloud ice, rain, snow) with
-# `donor_limiter`, which keeps every reservoir non-negative without breaking conservation.
+# Sinks are limited per donor reservoir (vapor, cloud liquid, cloud ice, rain, snow), which
+# keeps every reservoir non-negative without breaking conservation. Vapor, cloud liquid and
+# cloud ice are diagnostic parts of ρqᵉ: each is budgeted against its content, and what they
+# give together against ρqᵉ.
 #####
 
-@inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+@inline function mp1m_tendencies(bμp::MP1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants,
+                                 budget = TimescaleSinkBudget(bμp.categories.τⁿᵘᵐ))
     categories = bμp.categories
-    τⁿᵘᵐ = categories.τⁿᵘᵐ
     qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
     qʳ = ℳ.qʳ
@@ -1367,21 +1345,26 @@ end
     α = warm_accretion_melt_factor(T, Tᶠ, constants)
     is_warm = T ≥ Tᶠ
 
-    # Donor-limited process rates (see `donor_limiter`)
+    # Donor-limited process rates (see `sink_fraction`)
     Sᵉᵛᵃᵖ⁺, Sᵉᵛᵃᵖ⁻ = max(Sᵉᵛᵃᵖ, 0), min(Sᵉᵛᵃᵖ, 0)
     Sˢᵘᵇˡ⁺, Sˢᵘᵇˡ⁻ = max(Sˢᵘᵇˡ, 0), min(Sˢᵘᵇˡ, 0)
     Sʳˢⁿᶜ = ifelse(is_warm, zero(Sʳˢⁿ), Sʳˢⁿ)
 
-    fᵛ  = donor_limiter(qᵛ,  Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺, τⁿᵘᵐ)
-    fᶜˡ = donor_limiter(qᶜˡ, Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ, τⁿᵘᵐ)
-    fᶜⁱ = donor_limiter(qᶜⁱ, Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ, τⁿᵘᵐ)
-    fʳ  = donor_limiter(qʳ,  -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ, τⁿᵘᵐ)
+    Sᵛ  = Sᵉᵛᵃᵖ⁺ + Sˢᵘᵇˡ⁺
+    Sᶜˡ = Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᶜˡˢⁿ
+    Sᶜⁱ = Sᵃᶜⁿᵛⁱˢⁿ + Sᵃᶜᶜⁱˢⁿ + Sᵃᶜᶜⁱʳ
+    fᵛ  = diagnostic_sink_fraction(budget, ρ, qᵛ,  Sᵛ)
+    fᶜˡ = diagnostic_sink_fraction(budget, ρ, qᶜˡ, Sᶜˡ)
+    fᶜⁱ = diagnostic_sink_fraction(budget, ρ, qᶜⁱ, Sᶜⁱ)
+    fᵉ  = equilibrium_moisture_sink_fraction(budget, ρ, fᵛ * Sᵛ + fᶜˡ * Sᶜˡ + fᶜⁱ * Sᶜⁱ)
+    fᵛ, fᶜˡ, fᶜⁱ = fᵉ * fᵛ, fᵉ * fᶜˡ, fᵉ * fᶜⁱ
+    fʳ  = sink_fraction(budget, Val(:ρqʳ), ρ, qʳ, -Sᵉᵛᵃᵖ⁻ + Sᵃᶜᶜʳⁱ + Sʳˢⁿᶜ)
 
     # Collected liquid supplies heat for the melt rate α Sᵃᶜᶜˡˢⁿ. Limit collection before
     # computing this melt demand, then cap all snow sinks against the available snow.
     Sᵃᶜᶜˡˢⁿ = fᶜˡ * Sᵃᶜᶜˡˢⁿ
     Sˢⁿʷ = ifelse(is_warm, α * Sᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T))
-    fˢⁿ = donor_limiter(qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ, τⁿᵘᵐ)
+    fˢⁿ = sink_fraction(budget, Val(:ρqˢⁿ), ρ, qˢⁿ, -Sˢᵘᵇˡ⁻ + Sᵐᵉˡᵗ + Sˢⁿʷ)
 
     Sᵉᵛᵃᵖ = fᵛ * Sᵉᵛᵃᵖ⁺ + fʳ * Sᵉᵛᵃᵖ⁻
     Sˢᵘᵇˡ = fᵛ * Sˢᵘᵇˡ⁺ + fˢⁿ * Sˢᵘᵇˡ⁻
@@ -1401,8 +1384,12 @@ end
                      - ifelse(is_warm, αSᵃᶜᶜˡˢⁿ + Sˢⁿʳ + α * Sʳˢⁿ, zero(T)))
 
     # Negative precipitation (from transport) relaxes back toward zero, drawing on ρqᵉ.
-    ρqʳ  = ifelse(qʳ  ≥ 0, ρqʳ_phys,  -ρ * qʳ  / τⁿᵘᵐ)
-    ρqˢⁿ = ifelse(qˢⁿ ≥ 0, ρqˢⁿ_phys, -ρ * qˢⁿ / τⁿᵘᵐ)
+    δʳ  = negative_value_relaxation(budget, Val(:ρqʳ),  ρ, qʳ,  ρqʳ_phys)
+    δˢⁿ = negative_value_relaxation(budget, Val(:ρqˢⁿ), ρ, qˢⁿ, ρqˢⁿ_phys)
+    gᵉ  = relaxation_donor_fraction(budget, Val(:ρqᵉ), -ρqʳ_phys - ρqˢⁿ_phys, δʳ + δˢⁿ)
+
+    ρqʳ  = ρqʳ_phys  + gᵉ * δʳ
+    ρqˢⁿ = ρqˢⁿ_phys + gᵉ * δˢⁿ
     ρqᵉ  = -ρqʳ - ρqˢⁿ
 
     return (; ρqᵉ, ρqʳ, ρqˢⁿ)
@@ -1423,35 +1410,25 @@ end
     return map(name -> getproperty(G, name), names)
 end
 
-# Fused kernel: evaluate the MP1M bundle once per cell and write all three tendencies.
-@kernel function _compute_mp1m_tendencies!(Gρqᵉ, Gρqʳ, Gρqˢⁿ, grid, microphysics, dynamics, formulation,
-                                           constants, specific_prognostic_moisture, microphysical_fields, velocities)
-    i, j, k = @index(Global, NTuple)
+#####
+##### Fused microphysics tendencies on the grid
+#####
+#
+# Every one-moment scheme computes its tendencies together, budgeted against the coming
+# stage, in one kernel (see sink_budgets.jl).
 
-    ρ_field = AM.total_density(dynamics)
-    @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵉ = specific_prognostic_moisture[i, j, k]
+@inline fused_tendencies(bμp::WP1M, ρ, ℳ, 𝒰, constants, budget) = wp1m_tendencies(bμp, ρ, ℳ, 𝒰, constants, budget)
+@inline fused_tendencies(bμp::WPNE1M, ρ, ℳ, 𝒰, constants, budget) = wpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants, budget)
+@inline fused_tendencies(bμp::MP1M, ρ, ℳ, 𝒰, constants, budget) = mp1m_tendencies(bμp, ρ, ℳ, 𝒰, constants, budget)
+@inline fused_tendencies(bμp::MPNE1M, ρ, ℳ, 𝒰, constants, budget) = mpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants, budget)
 
-    q = AM.grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵉ, microphysical_fields)
-    𝒰 = AM.diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
-    U = (; w = ℑzᵃᵃᶜ(i, j, k, grid, velocities.w))  # only the vertical velocity is used (by the rain autoconversion)
-    ℳ = AM.microphysical_state(microphysics, ρ, microphysical_fields_at(microphysical_fields, i, j, k), 𝒰, U)
-
-    G = mp1m_tendencies(microphysics, ρ, ℳ, 𝒰, constants)
-
-    @inbounds Gρqᵉ[i, j, k]  += G.ρqᵉ
-    @inbounds Gρqʳ[i, j, k]  += G.ρqʳ
-    @inbounds Gρqˢⁿ[i, j, k] += G.ρqˢⁿ
+# Only the vertical velocity is used (by the rain autoconversion), so the horizontal
+# velocities are not interpolated as `grid_microphysical_state` would.
+@inline function fused_microphysical_state(i, j, k, grid, bμp::OneMomentLiquidRain, μ, ρ, 𝒰, velocities)
+    prognostics = AM.extract_microphysical_prognostics(i, j, k, bμp, μ)
+    U = (; w = ℑzᵃᵃᶜ(i, j, k, grid, velocities.w))
+    return AM.microphysical_state(bμp, ρ, prognostics, 𝒰, U)
 end
 
-@inline microphysical_fields_at(μ, i, j, k) = @inbounds (; ρqʳ = μ.ρqʳ[i, j, k], ρqˢⁿ = μ.ρqˢⁿ[i, j, k])
-
-function AM.compute_microphysical_tendencies!(microphysics::MP1M, model)
-    grid = model.grid
-    G = model.timestepper.Gⁿ
-    launch!(grid.architecture, grid, :xyz, _compute_mp1m_tendencies!,
-            G.ρqᵉ, G.ρqʳ, G.ρqˢⁿ, grid, microphysics, model.dynamics, model.formulation,
-            model.thermodynamic_constants, AM.specific_prognostic_moisture(model),
-            model.microphysical_fields, model.velocities)
-    return nothing
-end
+AM.compute_microphysical_tendencies!(microphysics::OneMomentLiquidRain, model) =
+    compute_fused_bulk_tendencies!(microphysics, model)

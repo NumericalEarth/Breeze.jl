@@ -5,7 +5,7 @@ using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Utils: Utils, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
-using Breeze.AtmosphereModels: AbstractMicrophysicalState
+using Breeze.AtmosphereModels: AbstractMicrophysicalState, patankar_sink_fraction
 
 using Breeze: Microphysics
 
@@ -147,22 +147,9 @@ end
 #
 # The process rates budget each sink against the state they are evaluated at, over
 # `sink_limiting_timescale`. The time stepper applies them to the state the coming stage
-# starts from, over the stage interval `Δt`, alongside transport. Neither the state nor the
-# interval need match, so the rates alone cannot keep a species non-negative.
-#
-# On the grid every sink is therefore advanced in Patankar form. With `c̃ = c⁰ + Δt Gᵒ` what
-# the stage start `c⁰` and every other tendency `Gᵒ` leave of a species, and `L` its total
-# microphysical loss rate, the loss is weighted by the ratio of the updated to the available
-# content, `L c⁺ / c̃`, so that
-#
-#     c⁺ = c̃ / (1 + Δt L / c̃)
-#
-# is non-negative for any `Δt`. That is the explicit loss scaled by `φ = c̃ / (c̃ + Δt L)`.
-# Each process is one transfer between species, so scaling a transfer by the `φ` of the
-# species it draws on (the smallest, where it draws on several) scales the recipient's gain
-# by the same factor and conserves the exchange exactly. Gains are left out of `c̃`, which
-# makes each `φ` a function of the explicit rates alone and avoids a coupled solve; the
-# cost is that a species cannot spend, within a stage, what it gains in that stage.
+# starts from, over the stage interval `Δt`, alongside transport. On the grid every sink is
+# therefore advanced in Patankar form: each transfer is scaled by the
+# `AtmosphereModels.patankar_sink_fraction` of the species it draws on.
 
 struct P3SinkFractions{FT}
     vapor :: FT
@@ -172,25 +159,6 @@ struct P3SinkFractions{FT}
     ice :: FT
     ice_number :: FT
     coating :: FT
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The Patankar weight `φ = c̃ / (c̃ + Δt L)` on the sinks of a species with loss rate `L`
-(a density tendency), where `c̃ = c⁰ + Δt Gᵒ` is what the state the coming stage starts
-from and every other tendency leave of it. `φ = 0` where nothing is left, and `φ = 1`
-before the first time step, when the stage interval is not known.
-"""
-@inline function patankar_sink_fraction(i, j, k, G, stage, name, L)
-    Δt = stage.Δt
-    c⁰ = AM.stage_start_value(i, j, k, stage, name)
-    @inbounds Gᵒ = G[i, j, k]
-    c̃ = max(0, c⁰ + Δt * Gᵒ)
-    demand = Δt * max(0, L)
-    φ = ifelse(c̃ + demand > 0, c̃ / (c̃ + demand), one(c̃))
-    known_interval = isfinite(Δt) & (Δt > 0)
-    return ifelse(known_interval, φ, one(φ))
 end
 
 @inline function p3_sink_fractions(i, j, k, G, stage, p3::P3, ρ, rates::P3ProcessRates)
