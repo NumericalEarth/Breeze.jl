@@ -1589,6 +1589,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # perturbation, applied to the predictor between Step B and Step C so the pressure
     # solve and recovery substitution see a transport-consistent ρθ′★ (issue #897).
     implicit_advection_substep!(model, substepper, advection, Δτ)
+    fill_halo_regions!(substepper.density_potential_temperature_predictor)
 
     launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
             _build_vertical_rhs!,

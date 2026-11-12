@@ -43,7 +43,7 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
-    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)...)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
@@ -210,7 +210,12 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
                    model.microphysical_fields,
                    model.thermodynamic_constants)
 
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
+    # A rank with a neighbour to the east does not own face Nx + 1, but the terrain slow
+    # vertical-momentum tendency averages Gρu onto cell centres and reads it there.
+    Nx, Ny, Nz = size(grid)
+    east_connected = topology(grid, 1) <: Oceananigans.Grids.TwoSided{<:Any, Oceananigans.Grids.Connected}
+    x_momentum_parameters = KernelParameters(1:(Nx + east_connected), 1:Ny, 1:Nz)
+    launch!(arch, grid, x_momentum_parameters, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     compute_vertical_momentum_tendency!(model, Gρw, w_args)
 
@@ -254,7 +259,7 @@ function compute_auxiliary_variables!(model)
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
     if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
         compute_closure_fields!(model.closure_fields, model.closure, model)
-        fill_halo_regions!(model.closure_fields; only_local_halos=true)
+        fill_halo_regions!(model.closure_fields)
     end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
