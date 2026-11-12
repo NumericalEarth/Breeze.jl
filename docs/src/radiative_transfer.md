@@ -484,6 +484,22 @@ tendency, with the vapor-equivalent heat capacity ``\hat{c}ᵖ`` and Exner funct
 (see [Liquid-ice potential temperature](@ref liquid-ice-potential-temperature)). Omitting the upwelling shortwave would bias either tendency wherever
 shortwave radiation scatters or reflects.
 
+### Update schedule
+
+The `schedule` keyword (default `IterationInterval(1)`) sets how often the fluxes are
+recomputed. They are computed from the initial state at iteration 0 (at model
+construction, `set!` and the preparation of the first step) and then once at the end of
+every time step after which `schedule` actuates: after the last Runge-Kutta stage and after
+any operator-split microphysics update such as
+`DCMIP2016KesslerMicrophysics`.
+The fluxes therefore describe the end-of-step state that the next step starts from, and the
+tendencies of the next step's first stage are rebuilt with them. Between updates the heating
+`radiation.flux_divergence` is held fixed. With `schedule = IterationInterval(80)` and
+`Δt = 7.5` s, the fluxes are recomputed every 600 s, from the states at iterations 80, 160, ….
+
+Under Reactant the clock is traced, so only a stateless `IterationInterval` schedule is
+accepted on `ReactantState`; the end-of-step update is then a traced conditional.
+
 ## Architecture Support
 
 The radiative transfer implementation supports both CPU and GPU architectures. The column-based RRTMGP solver is called from Oceananigans' field data arrays with appropriate data layout conversions. The ecCKD backend runs on the grid's architecture without leaving the device. It can solve the columns in batches of whole grid rows (`column_batches`, as for RRTMGP; one solve of the whole grid by default): per batch, a layer pass reads the model's fields directly and stores each layer's gas-optics stencil, gas amounts, cloud water paths and interface temperatures, one work item per layer, and a column kernel streams the g points through them and accumulates the fluxes directly into the radiation model's flux fields. Only one batch of per-column storage is allocated, so setting `column_batches` caps the radiation's memory on large grids, at some cost in speed on a GPU.

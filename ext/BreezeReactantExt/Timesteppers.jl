@@ -11,7 +11,7 @@ const ReactantSSPRungeKutta3Model = AtmosphereModel{<:Any, <:Any, <:ReactantStat
 
 # The eager preparation of `maybe_prepare_first_time_step!`, which Reactant skips because its guard
 # branches on the traced iteration. The traced `update_state!` cannot tell that it runs at
-# initialization either (see `radiation_update_due`), so the initial radiative fluxes are computed
+# initialization either (see `radiation_initialization_due`), so the initial radiative fluxes are computed
 # here explicitly, and the tendencies refreshed with them.
 function TimeSteppers.prepare_first_time_step!(model::ReactantSSPRungeKutta3Model, Δt)
     model.clock.last_Δt = Δt
@@ -52,19 +52,16 @@ OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcous
 ##### Radiation schedules (see `update_radiation!`)
 #####
 
-# The clock's time and iteration are traced but its stage is not, so only the first-stage
-# `update_state!` of a step carries a traced conditional. Initialization (iteration 0, between
-# steps) is not traced: `prepare_first_time_step!` computes the initial fluxes explicitly.
+# The clock's time and iteration are traced. Initialization (iteration 0, between steps) is not
+# traced: `prepare_first_time_step!` computes the initial fluxes explicitly. The scheduled update
+# at the end of each step is a traced conditional on the stateless `IterationInterval`.
 const TracedClock = Clock{<:TracedRNumber}
 
-function AtmosphereModels.radiation_update_due(schedule::IterationInterval, clock::TracedClock, model)
-    clock.stage == 2 || return false
-    return (clock.iteration > 0) & schedule(model)
-end
+AtmosphereModels.radiation_initialization_due(::TracedClock) = false
 
-function AtmosphereModels.conditionally_update_radiation!(due::TracedRNumber{Bool}, rtm, model)
+function AtmosphereModels.conditionally_update_radiation_and_tendencies!(due::TracedRNumber{Bool}, rtm, model, callbacks)
     @trace track_numbers=false if due
-        AtmosphereModels._update_radiation!(rtm, model)
+        AtmosphereModels.update_radiation_and_tendencies!(rtm, model, callbacks)
     end
     return nothing
 end
