@@ -9,6 +9,9 @@ using Logging: global_logger, ConsoleLogger
 # Force extended logging messages
 global_logger(ConsoleLogger(; show_limited=false))
 
+# Another test on this worker may have left a Float32 default behind
+Oceananigans.defaults.FloatType = Float64
+
 DocMeta.setdocmeta!(Main.Breeze, :DocTestSetup, :(using Breeze); recursive = true)
 
 doctest(Main.Breeze; manual = false)

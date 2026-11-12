@@ -68,7 +68,7 @@ probes = (((3, 6, 6), ((West(),   v,          (0, v)),)),
     model = immersed_box_model(formulation)
     G = model.timestepper.Gⁿ
     G₀ = immersed_box_model(formulation; bulk_fluxes=false).timestepper.Gⁿ
-    ΔG(name) = interior(getproperty(G, name)) .- interior(getproperty(G₀, name))
+    ΔG(name) = Array(interior(getproperty(G, name))) .- Array(interior(getproperty(G₀, name)))
 
     grid = model.grid
     constants = model.thermodynamic_constants
