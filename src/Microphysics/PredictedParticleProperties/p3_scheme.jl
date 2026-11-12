@@ -4,7 +4,6 @@
 ##### Main type combining ice, rain, and cloud properties.
 #####
 
-using Breeze.AtmosphereModels: SpeciesBorrowing
 
 using Artifacts: @artifact_str
 using LazyArtifacts: LazyArtifacts
@@ -110,14 +109,16 @@ Optional fields are allocated and advected only when enabled.
   `nothing` (default) is an open surface: the diagnosed fall speed is retained at the
   bottom face, so all sedimenting species leave the domain. `ImpenetrableBoundaryCondition()`
   zeroes the fall speed there instead, so precipitation accumulates in the lowest cell.
-- `negative_moisture_correction`: Repair of negative densities left by the advection
-  operator, applied at the top of `update_state!`. Defaults to `SpeciesBorrowing()`,
-  which borrows along the chain ``ρqʷⁱ ← ρqⁱ ← ρqʳ ← ρqᶜˡ ← ρqᵛ``, zeroes number and
-  rime fields orphaned by a vanishing ice mass, and clamps negative number and rime
-  densities. Pass `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())`
-  to additionally redistribute leftover vapor deficits within each column, or `nothing`
-  to disable the repair (P3's process rates then see zero-clamped values while the
-  prognostic fields keep their negative mass).
+- `negative_moisture_correction`: Repair of negative densities, applied at the top of
+  `update_state!`. Defaults to `nothing`: P3's process tendencies are sign-preserving over
+  each time-stepper stage, so with non-negative transport no repair is needed, and a repair
+  that overwrites the prognostics between stages breaks multistage time integration.
+  Pass `SpeciesBorrowing()` to borrow along the chain ``ρqʷⁱ ← ρqⁱ ← ρqʳ ← ρqᶜˡ ← ρqᵛ``,
+  zero number and rime fields orphaned by a vanishing ice mass, and clamp negative number
+  and rime densities; `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())`
+  additionally redistributes leftover vapor deficits within each column. Without a repair,
+  P3's process rates see zero-clamped values while the prognostic fields keep any negative
+  mass that transport leaves.
 
 # Cloud Droplet Activation
 
@@ -168,7 +169,7 @@ PredictedParticlePropertiesMicrophysics
 ├── rain: RainDrops
 ├── cloud: CloudDroplets
 ├── process_rates: ProcessRate
-├── negative_moisture_correction: SpeciesBorrowing(vertical_borrowing = nothing)
+├── negative_moisture_correction: nothing (no repair)
 ├── aerosol: nothing (prescribed droplet number)
 └── warm_rain_scheme: KhairoutdinovKogan2000
 ```
@@ -190,7 +191,7 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  minimum_mass_mixing_ratio = 1e-14,
                                                  minimum_number_mixing_ratio = 1e-16,
                                                  precipitation_boundary_condition = nothing,
-                                                 negative_moisture_correction = SpeciesBorrowing(),
+                                                 negative_moisture_correction = nothing,
                                                  aerosol = nothing,
                                                  cloud = nothing,
                                                  rain = nothing,

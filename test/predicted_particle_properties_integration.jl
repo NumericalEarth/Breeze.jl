@@ -268,36 +268,41 @@ end
         @test all(≈(droplet_number), Array(interior(μₐ.nᶜˡ)))
         @test number_concentration(aerosol_model, :cloud_liquid) === μₐ.ρnᶜˡ
 
-        # Rime mass with no rime volume is not a representable P3 state: ρᶠ = qᶠ/bᶠ is
-        # undefined, so `consistent_rime_state` zeroes both. The repair has to reach the
-        # prognostics, otherwise the hidden rime sits still while the ice carrying it is
-        # transported away, and reappears once bᶠ grows back.
+        # Rime mass with no rime volume, or exceeding the dry ice mass, is not a
+        # representable P3 state. The process rates see a consistent rime state, but it is
+        # never written back: the prognostics keep what transport and the tendencies gave
+        # them, and the advected specific fields are their raw ratios, so transport stays
+        # consistent with the prognostics.
         set!(model; qⁱ = FT(0.002), qᶠ = FT(0.0005), enforce_mass_conservation = false)
+        ρqᶠ_before = cpu(μ.ρqᶠ)
         update_state!(model)
 
         ρ = density()
-        @test all(==(0), cpu(μ.ρqᶠ))
-        @test all(==(0), cpu(μ.ρbᶠ))
+        @test cpu(μ.ρqᶠ) == ρqᶠ_before
+        @test all(>(0), cpu(μ.ρqᶠ))
         @test cpu(μ.qᶠ) ≈ cpu(μ.ρqᶠ) ./ ρ
         @test cpu(μ.bᶠ) ≈ cpu(μ.ρbᶠ) ./ ρ
 
-        # Rime mass exceeding the dry ice mass is capped at that mass, at fixed rime
-        # density. Rime is a component of the ice mass rather than an independent
-        # reservoir, so capping it must leave the total density untouched.
         rime_density = FT(400)
         dry_ice = FT(1e-4)
         excess_rime = FT(1e-3)
         set!(model; qⁱ = dry_ice, qᶠ = excess_rime, bᶠ = excess_rime / rime_density,
              enforce_mass_conservation = false)
-        density_before_repair = density()
+        density_before = density()
+        ρqᶠ_before = cpu(μ.ρqᶠ)
         update_state!(model)
 
         ρ = density()
-        @test ρ ≈ density_before_repair
-        @test all(≈(dry_ice), cpu(μ.ρqᶠ) ./ ρ)
-        @test all(≈(dry_ice / rime_density), cpu(μ.ρbᶠ) ./ ρ)
+        @test ρ ≈ density_before
+        @test cpu(μ.ρqᶠ) == ρqᶠ_before
         @test cpu(μ.qᶠ) ≈ cpu(μ.ρqᶠ) ./ ρ
         @test cpu(μ.bᶠ) ≈ cpu(μ.ρbᶠ) ./ ρ
+
+        # What the rates see is the consistent state: rime capped at the dry ice mass.
+        ℳ = @allowscalar AtmosphereModels.grid_microphysical_state(1, 1, 1, model.grid, model.microphysics,
+                                                                   μ, ρ[1, 1, 1], nothing,
+                                                                   model.velocities)
+        @test ℳ.qᶠ ≈ dry_ice
     end
 
     @testset "P3 parcel substeps write back a consistent rime state" begin
@@ -421,13 +426,16 @@ end
                                          base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        # The repair is opt-in: P3's process tendencies are sign-preserving over each stage,
+        # and a repair that overwrites the prognostics between stages breaks multistage
+        # time integration.
+        @test isnothing(AtmosphereModels.negative_moisture_correction(PredictedParticlePropertiesMicrophysics(FT)))
+
+        p3 = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = AtmosphereModels.SpeciesBorrowing())
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
                                 microphysics = p3)
         μ = model.microphysical_fields
 
-        # The repair is opt-out, not opt-in: P3 carries eight prognostic densities in the
-        # default configuration, through a non-positive-definite advection operator.
         @test AtmosphereModels.negative_moisture_correction(p3) isa AtmosphereModels.SpeciesBorrowing
         @test AtmosphereModels.correction_moisture_fields(p3, μ) ===
               (μ.ρqʷⁱ, μ.ρqⁱ, μ.ρqʳ, μ.ρqᶜˡ)
@@ -529,9 +537,8 @@ end
         qⁱ = FT(0.002)
         qʷⁱ = FT(0.001)
         qᶠ = FT(0.0005)
-        # Rime mass needs a rime volume to go with it: `consistent_rime_state` zeroes both
-        # when `bᶠ` vanishes, and `clamp_rime_state!` writes that repair back. Pick a rime
-        # density inside [minimum_rime_density, maximum_rime_density] so the state survives.
+        # Rime mass needs a rime volume to go with it, at a rime density inside
+        # [minimum_rime_density, maximum_rime_density], to be a representable state.
         rime_density = FT(400)
         bᶠ = qᶠ / rime_density
         nⁱ = FT(1e4)
