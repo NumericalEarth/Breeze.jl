@@ -63,7 +63,7 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Grids: rnode, znode
+using Oceananigans.Grids: rnode, znode, halo_size
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                               ∂zᶜᶜᶜ, ∂zᶜᶜᶠ, divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!, KernelParameters

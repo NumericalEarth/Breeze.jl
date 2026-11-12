@@ -713,6 +713,8 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
     fill_halo_regions!(dynamics.dry_density)
     fill_halo_regions!(prognostic_fields(model.formulation))
 
+    compute_dry_mass_fraction!(model)
+
     # Compute temperature and pressure (same as non-terrain CompressibleModel)
     launch!(arch, grid, :xyz,
             _compute_temperature_and_pressure!,
