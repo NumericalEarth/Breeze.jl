@@ -260,18 +260,26 @@ would be off by about ``ℒ Δq / cᵖ`` and the sensible part would turn that f
 into heating, even in an isothermal column. Rain-out thus leaves latent warming aloft and
 pre-cools the layer that later evaporates the arriving rain, the mechanism that builds cold pools.
 
-The acoustic stepper, `AcousticRungeKutta3`, forms the same content, explicit and implicit, but
-splits it in two, because its substep loop forms the pressure perturbation from the thermodynamic
-perturbation alone. The sensible heat the arriving mass brings is a real heating, so it joins the
-slow tendency the loop integrates. The composition content changes ``ρθˡⁱ`` at fixed temperature
-and so leaves the pressure alone; fed to the loop it would read as a spurious pressure
-perturbation. Each stage therefore collects it separately and adds it to the variable after the
-loop, before the variable's post-loop implicit solve, which the content then takes too in a solve
-of its own; the next stage takes the solved increment back out of its stage-entry state, after
-refreshing the loop's linearization from the full state. The loop's open-boundary relaxation
-targets the wall value of the full variable, content included, where a value boundary condition
-prescribes one. The stepper's section comment on the bypass has the details, and the two
-first-order splitting differences it leaves under an adaptive implicit scheme on the variable.
+The acoustic stepper, `AcousticRungeKutta3`, forms the same content, explicit and implicit. Its
+substep loop forms the pressure perturbation from the thermodynamic perturbation alone, with the
+moisture frozen, so it would read the composition content, which changes ``ρθˡⁱ`` at fixed
+temperature and leaves the pressure alone, as a spurious pressure perturbation. That holds for
+whatever moves moisture: sedimentation, advection by the resolved flow, closure diffusion. The
+stepper therefore measures the content from the equation of state rather than process by process:
+the content of a moisture difference is the part of ``ρθˡⁱ`` that offsets its pressure change at
+fixed dry density, the differences of the partial densities of vapor, liquid and ice weighted by
+the same content per unit mass that `sedimentation_tendency` moves (`composition_content_coefficients`).
+Each stage takes the content of the outer-step-start moisture out of the rewind its loop
+starts from, takes the ramp to the content of the moisture its explicit tendencies give out of the
+slow tendency the loop integrates, and adds that content to the variable after the loop, before
+the variable's post-loop implicit solve. The explicit sedimentation tendency joins the slow
+tendency whole, and the ramp leaves its sensible heat, a real heating. The implicit remainder's
+content is split: its sensible heat joins the slow tendency, its composition content is added
+after the loop with the rest. The loop's open-boundary relaxation targets the wall value of the
+full variable, content included, where a value boundary condition prescribes one; elsewhere it
+holds the pressure-changing part of the boundary cell alone, and the content passes through
+without accumulating across stages. The stepper's section comment on the bypass has the details
+and what the bypass leaves.
 
 ### Bottom Precipitation Flux
 

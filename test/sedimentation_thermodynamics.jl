@@ -7,6 +7,7 @@ using Oceananigans.TimeSteppers: update_state!, time_step!, implicit_step!
 const AM = Breeze.AtmosphereModels
 const TH = Breeze.Thermodynamics
 const TS = Breeze.TimeSteppers
+const CE = Breeze.CompressibleEquations
 
 # A test-only scheme: one condensate, prescribed velocity, no phase changes/sources.
 struct SedimentationOnly{P, FT}
@@ -78,9 +79,9 @@ sedimentation_column_values(f) = Float64.(vec(Array(interior(f))))
 # First-order upwind with the adaptive implicit split engaging above a fall Courant number of 0.5.
 adaptive_upwind(FT) = UpwindBiased(FT; order=1, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
 
-# The fields of the acoustic stepper's sedimentation content bypass.
-sedimentation_content(model) = TS.sedimentation_bypass(model).content
-frozen_thermodynamic_density(model) = TS.sedimentation_bypass(model).frozen_thermodynamic_density
+# The fields of the acoustic stepper's composition content bypass.
+composition_content(model) = TS.composition_bypass(model).content
+rewind_content(model) = TS.composition_bypass(model).rewind_content
 
 # Independent host Float64 differences of the executable state definition, not of the
 # callback's closed-form coefficient. The tendencies themselves use the selected FT/device.
@@ -161,20 +162,23 @@ end
                                      time_discretization=SplitExplicitTimeDiscretization(), advection=adaptive_upwind(FT))
         Oceananigans.TimeSteppers.maybe_prepare_first_time_step!(model, Δt, [])
         TS.store_initial_state!(model)
-        TS.remove_sedimentation_content!(model, 1)
         TS.cache_advecting_state!(model)
         reference = sedimentation_temperature_rates(model, phase, true)
         Δt_stage = model.timestepper.β₁ * Δt
         predicted_mass = column(model.timestepper.U⁰.ρqʳ) .+ Δt_stage .* column(model.timestepper.Gⁿ.ρqʳ)
 
-        TS.add_explicit_sedimentation_content!(model, Δt_stage)
-        sensible_before = column(model.timestepper.Gⁿ.ρθ)
-        composition_before = column(sedimentation_content(model))
+        TS.add_explicit_sedimentation_tendency!(model)
         TS.scalar_rk3_substep!(model, Δt_stage)
+
+        # The stage has moved the implicit remainder's content once; moving it once more isolates
+        # its two parts from the explicit tendency and the content's ramp.
+        sensible_before = column(model.timestepper.Gⁿ.ρθ)
+        composition_before = column(composition_content(model))
+        TS.add_implicit_sedimentation_content!(model, TS.tendency_transport_velocities(model), Δt_stage)
 
         implicit_mass_rate = (column(model.microphysical_fields.ρqʳ) .- predicted_mass) ./ Δt_stage
         sensible = column(model.timestepper.Gⁿ.ρθ) .- sensible_before
-        composition = (column(sedimentation_content(model)) .- composition_before) ./ Δt_stage
+        composition = (column(composition_content(model)) .- composition_before) ./ Δt_stage
         expected_composition, expected_sensible = expected_implicit_parts(reference, donor_temperature, implicit_mass_rate)
         tolerance = FT === Float32 ? 3e-5 : 3e-8
 
@@ -338,10 +342,9 @@ end
 end
 
 # The same column under gravity, in the discrete hydrostatic balance of its full state, rain
-# included. The bypass removes the content from the base the loop measures its perturbations
-# from, while the loop's pressure gradient and buoyancy difference the full state's pressure and
-# density against the reference: the balance must survive the removal, to roundoff, while nothing
-# falls. The falling rain unloads the column, a real change of the pressure and a real, small,
+# included. The bypass takes the content out of the perturbation the loop integrates, while the
+# loop's pressure gradient and buoyancy difference the full state's pressure and density against
+# the reference: the balance must survive, to roundoff, while nothing falls. The falling rain unloads the column, a real change of the pressure and a real, small,
 # motion, so the adaptive split at a large time step is held to the explicit run at a small one,
 # within the splitting difference the column shows without gravity (8 mK at Δt = 5).
 @testset "Sedimentation keeps a hydrostatic isothermal column at rest on the acoustic stepper [$FT]" for FT in test_float_types()
@@ -404,68 +407,10 @@ function postloop_model(fixture; temperature = 290, kwargs...)
 end
 
 # Oceananigans' solve of the thermodynamic variable with its post-loop operator, reading the live
-# model fields, over Δt: the post-loop solve when no condensate sediments.
+# model fields, over Δt.
 function oceananigans_postloop_solve!(model, Δt)
     TS.thermodynamic_implicit_step!(model, model.timestepper.implicit_solver, Δt)
     return sedimentation_column_values(AM.thermodynamic_density(model.formulation))
-end
-
-# The composition content takes the thermodynamic variable's post-loop solve on its own, so it
-# must take the variable's operator in full. A content proportional to the variable, s ρθ, then
-# adds s A⁻¹ρθ, where A⁻¹ρθ is what the variable's own solve gives, so the increment δ and the
-# result ρθ¹ = A⁻¹ρθ + δ satisfy δ = s (ρθ¹ − δ).
-@testset "The sedimentation content takes the thermodynamic variable's post-loop operator [$FT]" for FT in test_float_types()
-    fixture = postloop_operator_fixture(FT)
-    s = FT(0.3)
-
-    for closure in fixture.closures
-        model = postloop_model(fixture; closure, fixture.boundary_conditions)
-        ρθ = AM.thermodynamic_density(model.formulation)
-        content = sedimentation_content(model)
-        interior(content) .= s .* interior(ρθ)
-        TS.apply_sedimentation_content!(model)
-        TS.implicit_substep!(model, FT(1))
-
-        δ = sedimentation_column_values(content)
-        ρθ¹ = sedimentation_column_values(ρθ)
-        @test δ ≈ s .* (ρθ¹ .- δ) rtol=100eps(FT)
-    end
-end
-
-# With a bypass, the variable and the content take one call that mirrors Oceananigans'
-# `implicit_step!` call for call, with the variable's boundary conditions and boundary value in
-# place of the solved field's and the frozen variable as the fields the coefficients read. The
-# variable, and a content equal to it, must then solve to what Oceananigans' own solve of the
-# variable gives, for a closure whose coefficients do not read the variable. The thermodynamic
-# scheme is adaptive implicit, so every solve leaves the advective half to the loop. A coefficient
-# that reads the variable is the reason for the frozen copy: Oceananigans' solve reads it live,
-# below the row its sweep has already overwritten, and gives something else.
-@testset "The post-loop solves are Oceananigans' implicit_step! of the thermodynamic variable [$FT]" for FT in test_float_types()
-    fixture = postloop_operator_fixture(FT)
-    constant = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ=1)
-
-    for closure in (nothing, constant, fixture.closures[2])
-        model = postloop_model(fixture; closure, fixture.boundary_conditions, temperature = z -> 290 - z,
-                               scalar_advection = (; ρθ = adaptive_upwind(FT), ρqʳ = adaptive_upwind(FT)))
-        ρθ = AM.thermodynamic_density(model.formulation)
-        content = sedimentation_content(model)
-        ρθ⁰ = sedimentation_column_values(ρθ)
-        ρθ⁰_with_halos = copy(parent(ρθ))
-        interior(content) .= interior(ρθ)
-        TS.implicit_substep!(model, FT(1))
-        ρθ¹ = sedimentation_column_values(ρθ)
-        content¹ = sedimentation_column_values(content)
-        @test maximum(abs, ρθ¹ .- ρθ⁰) > 0
-        @test content¹ == ρθ¹
-
-        parent(ρθ) .= ρθ⁰_with_halos
-        oceananigans = oceananigans_postloop_solve!(model, FT(1))
-        if closure === fixture.closures[2]
-            @test ρθ¹ != oceananigans
-        else
-            @test ρθ¹ == oceananigans
-        end
-    end
 end
 
 # The operator's coefficients read the state the solves advance: the variable with the stage's
@@ -473,16 +418,16 @@ end
 # λ = −J/ρθ₁ on the bottom cell's diagonal, with ρθ₁ the full bottom value, so the solve leaves
 # ρθ₁² / (ρθ₁ + J Δt/Δz) there. Oceananigans' solve of the full variable reads ρθ₁ live, before
 # its sweep overwrites it, and must agree.
-@testset "The post-loop operator reads the thermodynamic variable with the sedimentation content in it [$FT]" for FT in test_float_types()
+@testset "The post-loop operator reads the thermodynamic variable with the composition content in it [$FT]" for FT in test_float_types()
     fixture = postloop_operator_fixture(FT)
     J = FT(30)
     model = postloop_model(fixture; closure=nothing,
                            boundary_conditions = (; ρθ=FieldBoundaryConditions(bottom=IMEXFluxBoundaryCondition(-J))))
 
     ρθ = AM.thermodynamic_density(model.formulation)
-    content = sedimentation_content(model)
+    content = composition_content(model)
     interior(content) .= -FT(0.1) .* interior(ρθ)
-    TS.apply_sedimentation_content!(model)
+    TS.apply_composition_content!(model)
     full = sedimentation_column_values(ρθ)
     full_with_halos = copy(parent(ρθ))
     TS.implicit_substep!(model, FT(1))
@@ -496,38 +441,37 @@ end
     @test oceananigans_postloop_solve!(model, FT(1)) ≈ ρθ¹ rtol=10eps(FT)
 end
 
-# Opening a stage keeps the full variable, halos included, and takes the content out of the halos
-# too, so that the reduced variable's halos are the full variable's less the content: the vertical
-# operators the stage applies to the reduced variable see no step at the boundaries, and a wall
-# value of the full variable is not held against the reduced interior.
-@testset "Removing the sedimentation content takes it out of the halos too [$FT]" for FT in test_float_types()
+# Updating the scalars and collecting the contents leave the live thermodynamic variable the full
+# stage-entry variable, halos included, so everything that reads it before the loop recovers the
+# full state (the adaptive implicit split's base flux, the coefficients of the moisture and tracer
+# solves, the open-boundary relaxation) reads the full variable. The content of the
+# outer-step-start moisture comes out of the rewind the loop starts from instead.
+@testset "The composition content comes out of the rewind, not out of the thermodynamic variable [$FT]" for FT in test_float_types()
     grid = RectilinearGrid(default_arch, FT; size=(4, 4), x=(0, 4), z=(0, 4), topology=(Bounded, Flat, Bounded))
     model = rain_model(FT, grid; fall_speed = 1,
                        boundary_conditions = (; ρθ=FieldBoundaryConditions(west=ValueBoundaryCondition(FT(360)))))
-    set!(model; ρᵈ=1.2, T=290, qᵛ=0.005, qʳ=0.001)
-    update_state!(model)
+    set!(model; ρᵈ=1.2, T=290, qᵛ=0.005, qʳ=(x, z) -> ifelse(z > 2, 0.002, 0.001))
+    Oceananigans.TimeSteppers.maybe_prepare_first_time_step!(model, FT(1), [])
+    TS.store_initial_state!(model)
 
     ρθ = AM.thermodynamic_density(model.formulation)
-    content = sedimentation_content(model)
     full_with_halos = Array(parent(ρθ))
+    TS.scalar_rk3_substep!(model, FT(1); first_stage = false)
+    @test Array(parent(ρθ)) == full_with_halos
+
+    substepper = model.timestepper.substepper
     c = FT(3)
-    interior(content) .= c
-    @allowscalar begin
-        ρθ_cell⁰ = ρθ[1, 1, 1]
-        step⁰ = ρθ[0, 1, 1] - ρθ[1, 1, 1]
-        @test step⁰ / 2 == 360 - ρθ_cell⁰
-        TS.remove_sedimentation_content!(model, 2)
-        @test ρθ[1, 1, 1] == ρθ_cell⁰ - c
-        @test ρθ[0, 1, 1] - ρθ[1, 1, 1] ≈ step⁰ rtol=10eps(FT)
-    end
-    @test all(iszero, Array(parent(content)))
-    @test Array(parent(frozen_thermodynamic_density(model))) == full_with_halos
+    interior(rewind_content(model)) .= c
+    interior(model.timestepper.U⁰.ρθ) .+= 1
+    CE.initialize_stage_perturbations!(substepper, model, model.timestepper.U⁰)
+    ρθ′ = Array(interior(substepper.density_potential_temperature_perturbation))
+    @test ρθ′ ≈ fill(1 - c, size(ρθ′)) rtol=100eps(FT)
 end
 
 # The content is kept out of the substep loop and added after it, so the loop's open-boundary
 # relaxation must target the wall value for the full variable: the stage-entry variable's wall
 # value less the content the stage adds. Targeting the base it reads would end each stage at
-# the wall value plus this stage's content less the previous stage's.
+# the wall value plus the content.
 @testset "The open-boundary relaxation lands the full thermodynamic variable on the wall value [$FT]" for FT in test_float_types()
     grid = RectilinearGrid(default_arch, FT; size=(4, 2), x=(0, 4000), z=(0, 200), topology=(Bounded, Flat, Bounded))
     v = FT(360)
@@ -538,7 +482,7 @@ end
     set!(model; ρᵈ=1.2, T=290, qᵛ=0.005, qʳ=(x, z) -> ifelse(z > 100, FT(0.01), FT(0.001)))
     time_step!(model, 1)
     ρθ = AM.thermodynamic_density(model.formulation)
-    @test all(!iszero, Array(interior(sedimentation_content(model), 1, 1, :)))
+    @test all(!iszero, Array(interior(composition_content(model), 1, 1, :)))
     @test Array(interior(ρθ, 1, 1, :)) ≈ fill(v, 2) rtol=100eps(FT)
 end
 
@@ -580,47 +524,18 @@ end
     end
 end
 
-# The moisture and tracer solves run while the previous stage's content is out of the live
-# thermodynamic variable. Their coefficients read the variable from its stage-entry copy, so a
-# diffusivity that depends on it diffuses the rain as with the content in the variable, not as
-# from the reduced variable.
-@testset "The tracer solves' coefficients read the full thermodynamic variable [$FT]" for FT in test_float_types()
-    fixture = postloop_operator_fixture(FT)
-    c = FT(30)
-
-    # The rain the solves leave with the content removed from the variable or not, and with the
-    # stage-entry copy overwritten by the reduced variable or not.
-    function solved_rain(; remove, stale)
-        model = postloop_model(fixture; closure=fixture.closures[2], temperature = z -> 290 - z)
-        TS.store_initial_state!(model)
-        foreach(G -> fill!(G, 0), model.timestepper.Gⁿ)
-        interior(sedimentation_content(model)) .= c
-        TS.remove_sedimentation_content!(model, remove ? 2 : 1)
-        stale && (parent(frozen_thermodynamic_density(model)) .= parent(AM.thermodynamic_density(model.formulation)))
-        TS.scalar_rk3_substep!(model, FT(1))
-        return sedimentation_column_values(model.microphysical_fields.ρqʳ)
-    end
-
-    full = solved_rain(; remove = false, stale = false)
-    @test solved_rain(; remove = true, stale = false) == full
-    @test solved_rain(; remove = true, stale = true) != full
-end
-
-# The post-loop solves of the variable and the content run only when something about the
-# variable is vertically implicit: closure diffusion or an implicit-explicit boundary flux, not a
-# solver the moisture and tracers alone call for; without it the variable stays as the loop left
-# it. When they run, the copy they read their coefficients from is taken after the content's
-# addition refilled the variable's halos, so a coefficient reading a neighboring cell sees the
-# full variable there too.
-@testset "The post-loop solves run only with something implicit about the variable, and read it with fresh halos [$FT]" for FT in test_float_types()
+# The post-loop solve of the variable runs only when something about it is vertically implicit:
+# closure diffusion or an implicit-explicit boundary flux, not a solver the moisture and tracers
+# alone call for; without it the variable stays as the loop left it. When it runs, the variable
+# enters it with the stage's content added and its halos refilled.
+@testset "The post-loop solve runs only with something implicit about the variable, and reads it with fresh halos [$FT]" for FT in test_float_types()
     fixture = postloop_operator_fixture(FT)
     explicit = ScalarDiffusivity(; κ=1)
     implicit = ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); κ=1)
 
     tracers_only = postloop_model(fixture; closure=explicit, temperature = z -> 290 - z)
     @test !isnothing(tracers_only.timestepper.implicit_solver)
-    @test !isnothing(TS.sedimentation_bypass(tracers_only))
-    @test !TS.thermodynamic_variable_implicit(tracers_only)
+    @test !isnothing(TS.composition_bypass(tracers_only))
     ρθ = AM.thermodynamic_density(tracers_only.formulation)
     ρθ⁰ = sedimentation_column_values(ρθ)
     TS.implicit_substep!(tracers_only, FT(1))
@@ -628,15 +543,12 @@ end
 
     for kwargs in ((; closure=implicit), (; closure=explicit, fixture.boundary_conditions))
         model = postloop_model(fixture; kwargs...)
-        @test TS.thermodynamic_variable_implicit(model)
         ρθ = AM.thermodynamic_density(model.formulation)
-        interior(sedimentation_content(model)) .= FT(3)
-        TS.apply_sedimentation_content!(model)
+        interior(composition_content(model)) .= FT(3)
+        TS.apply_composition_content!(model)
         @allowscalar @test ρθ[1, 1, 0] == ρθ[1, 1, 1]
-        full_with_halos = Array(parent(ρθ))
         full = sedimentation_column_values(ρθ)
         TS.implicit_substep!(model, FT(1))
-        @test Array(parent(frozen_thermodynamic_density(model))) == full_with_halos
         @test sedimentation_column_values(ρθ) != full
     end
 end
@@ -655,5 +567,200 @@ end
     for Δt in (2, 5)
         column = acoustic_sedimentation_column(FT, adaptive_upwind(FT); Δt, temperature = cooling_with_height)
         @test maximum(abs, column.temperature .- reference.temperature) < signal / 10
+    end
+end
+
+#####
+##### The composition content bypass beyond sedimentation
+#####
+##### The bypass measures the content from the equation of state, so it holds for whatever moves
+##### moisture. The fixtures below move a condensate that does not fall through air at one
+##### temperature and one pressure, without gravity or phase change: the exact solution keeps the
+##### temperature and the pressure uniform and the air's motion what it was.
+#####
+
+# The pressure-balanced state of those fixtures: dry air at density ρᵈ, vapor a fixed fraction ε
+# of it by density, and condensate adding mass only, so the gas pressure (ρᵈ Rᵈ + ρᵛ Rᵛ) T is p₀
+# at T₀ whatever the condensate fraction `qʳ`.
+function suspended_condensate_state(FT, constants, qʳ; p₀ = 1e5, T₀ = 290, ε = 0.005)
+    Rᵈ, Rᵛ = TH.dry_air_gas_constant(constants), TH.vapor_gas_constant(constants)
+    ρᵈ = FT(p₀ / ((Rᵈ + ε * Rᵛ) * T₀))
+    qᵛ(x...) = FT(ε * (1 - qʳ(x...)) / (1 + ε))
+    return (; ρᵈ, T = FT(T₀), qᵛ, qʳ, p₀ = FT(p₀))
+end
+
+function suspended_condensate_model(FT, grid; kwargs...)
+    Oceananigans.defaults.FloatType = FT
+    constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=290)
+    model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants,
+                            microphysics=SedimentationOnly(Val(:liquid), FT(0), false), kwargs...)
+    return model, constants
+end
+
+# The largest departures of the pressure (relative) and of the velocity components from `U` and
+# zero over `steps` steps of `Δt`.
+function largest_departures!(model, Δt, steps, p₀, U)
+    wind = vertical_velocity = pressure = zero(Float64)
+    for _ in 1:steps
+        time_step!(model, Δt)
+        wind = max(wind, maximum(abs, Float64.(Array(interior(model.velocities.u))) .- U))
+        vertical_velocity = max(vertical_velocity, maximum(abs, Float64.(Array(interior(model.velocities.w)))))
+        pressure = max(pressure, maximum(abs, Float64.(Array(interior(model.dynamics.pressure))) .- p₀) / p₀)
+    end
+    return (; wind, vertical_velocity, pressure)
+end
+
+# The pressure of the compressible core's equation of state in host Float64, from the dry density,
+# ρθ and the partial densities of vapor, liquid and ice: the reference the content is held to.
+function host_pressure(model, ρᵈ, ρθ, ρᵛ, ρˡ, ρⁱ)
+    constants = ThermodynamicConstants(Float64; gravitational_acceleration=0)
+    ρ = ρᵈ + ρᵛ + ρˡ + ρⁱ
+    q = TH.MoistureMassFractions(ρᵛ / ρ, ρˡ / ρ, ρⁱ / ρ)
+    state = TH.LiquidIceDensityState(ρθ / ρᵈ, q, Float64(AM.standard_pressure(model.dynamics)), ρ)
+    return TH.air_pressure(state, constants)
+end
+
+# The content coefficients are the derivatives of the equation of state: with the dry density and
+# ρθ fixed, the pressure changes by −Cᴸ Λˣ per unit partial density of phase x. Compare each with
+# a centered difference of the host Float64 state definition, in clear and in cloudy air, and
+# both with the slope Cᴸ the substep loop uses.
+@testset "The composition content coefficients are the pressure derivatives of the equation of state [$FT]" for FT in test_float_types()
+    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 4), topology=(Flat, Flat, Bounded))
+    column = sedimentation_column_values
+
+    for (phase, condensate) in ((:liquid, 0), (:liquid, 0.004), (:ice, 0.004))
+        Oceananigans.defaults.FloatType = FT
+        constants = ThermodynamicConstants(FT; gravitational_acceleration=0)
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=290)
+        model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants,
+                                microphysics=SedimentationOnly(Val(phase), FT(0), false))
+        set!(model; ρᵈ=1.1, T=285, qᵛ=0.008, qʳ=condensate)
+        update_state!(model)
+        CE.prepare_acoustic_cache!(model.timestepper.substepper, model)
+
+        Λ = @allowscalar CE.composition_content_coefficients(1, 1, 2, grid, model.formulation, model.dynamics,
+                                                             model.thermodynamic_constants, model.microphysics,
+                                                             model.microphysical_fields,
+                                                             AM.specific_prognostic_moisture(model), model.temperature)
+        Cᴸ = column(model.timestepper.substepper.linearization_pressure_coefficient)[2]
+        ρᵈ, ρθ = column(model.dynamics.dry_density)[2], column(AM.thermodynamic_density(model.formulation))[2]
+        ρᵛ, ρᶜ = column(model.moisture_density)[2], column(model.microphysical_fields.ρqʳ)[2]
+        ρˡ, ρⁱ = phase === :liquid ? (ρᶜ, 0.0) : (0.0, ρᶜ)
+
+        P(ρθ, ρᵛ, ρˡ, ρⁱ) = host_pressure(model, ρᵈ, ρθ, ρᵛ, ρˡ, ρⁱ)
+        δ = 1e-6
+        slope = (P(ρθ + δ, ρᵛ, ρˡ, ρⁱ) - P(ρθ - δ, ρᵛ, ρˡ, ρⁱ)) / 2δ
+        expected = (-(P(ρθ, ρᵛ + δ, ρˡ, ρⁱ) - P(ρθ, ρᵛ - δ, ρˡ, ρⁱ)) / 2δ / slope,
+                    -(P(ρθ, ρᵛ, ρˡ + δ, ρⁱ) - P(ρθ, ρᵛ, max(ρˡ - δ, 0), ρⁱ)) / (ρˡ + δ - max(ρˡ - δ, 0)) / slope,
+                    -(P(ρθ, ρᵛ, ρˡ, ρⁱ + δ) - P(ρθ, ρᵛ, ρˡ, max(ρⁱ - δ, 0))) / (ρⁱ + δ - max(ρⁱ - δ, 0)) / slope)
+
+        tolerance = FT === Float32 ? 1e-4 : 1e-5
+        @test Cᴸ ≈ slope rtol=tolerance
+        @test Λ[1] ≈ expected[1] rtol=tolerance
+        @test Λ[2] ≈ expected[2] rtol=tolerance
+        @test Λ[3] ≈ expected[3] rtol=tolerance
+        @test Λ[2] < -1000 # condensate at one temperature and pressure: a smaller θˡⁱ, by about ℒ / (cᵖ Π)
+        @test Λ[3] < Λ[2]
+    end
+end
+
+# A content is the coefficients times the differences of the partial densities, exactly zero in
+# the first stage and without moisture differences, and the stage's ramp takes out of the slow
+# tendency exactly what the content field gains over the rewind content.
+@testset "The composition content follows the partial densities [$FT]" for FT in test_float_types()
+    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 4), topology=(Flat, Flat, Bounded))
+    model = rain_model(FT, grid; fall_speed = 0)
+    set!(model; ρᵈ=1.2, T=290, qᵛ=0.005, qʳ=0.001)
+    Oceananigans.TimeSteppers.maybe_prepare_first_time_step!(model, FT(1), [])
+    TS.store_initial_state!(model)
+    bypass = TS.composition_bypass(model)
+    substepper = model.timestepper.substepper
+    U⁰, Gⁿ = model.timestepper.U⁰, model.timestepper.Gⁿ
+    column = sedimentation_column_values
+    Δt = FT(2)
+
+    # The first stage, with nothing moving: the outer-step-start partial densities, no content.
+    foreach(G -> fill!(G, 0), Gⁿ)
+    CE.collect_composition_content!(substepper, model, U⁰, Gⁿ, Δt, true, 1)
+    @test all(iszero, column(bypass.rewind_content))
+    @test all(iszero, column(bypass.rewind_remainder))
+    @test maximum(abs, column(bypass.content)) < 100eps(FT)
+    @test maximum(abs, column(Gⁿ.ρθ)) < 100eps(FT)
+    @test column(bypass.outer_phase_densities.liquid) ≈ column(model.microphysical_fields.ρqʳ) rtol=10eps(FT)
+    @test column(bypass.outer_phase_densities.vapor) ≈ column(model.moisture_density) rtol=10eps(FT)
+    @test all(iszero, column(bypass.outer_phase_densities.ice))
+
+    # A later stage: more rain in its stage-entry state than at the outer step start, at one ρθ
+    # and ρᵈ, and a rain tendency alone.
+    Δρʳ = FT(1e-3)
+    interior(model.microphysical_fields.ρqʳ) .+= Δρʳ
+    update_state!(model)
+    Λˡ = @allowscalar CE.composition_content_coefficients(1, 1, 2, grid, model.formulation, model.dynamics,
+                                                          model.thermodynamic_constants, model.microphysics,
+                                                          model.microphysical_fields,
+                                                          AM.specific_prognostic_moisture(model), model.temperature)[2]
+    foreach(G -> fill!(G, 0), Gⁿ)
+    Gρqʳ = FT(2e-4)
+    fill!(Gⁿ.ρqʳ, Gρqʳ)
+    interior(model.microphysical_fields.ρqʳ) .= interior(U⁰.ρqʳ) .+ Δt * Gρqʳ
+    # The contents the previous stage left in the bypass: it added 5 − 2 to the variable.
+    interior(bypass.content) .= 5
+    interior(bypass.rewind_content) .= 2
+    CE.collect_composition_content!(substepper, model, U⁰, Gⁿ, Δt, false, 2)
+
+    # What the rewind content does not take back of the content the previous stage added.
+    @test column(bypass.rewind_remainder) ≈ 3 .+ column(bypass.rewind_content) rtol=10eps(FT)
+    @test column(bypass.rewind_content) ≈ fill(-Λˡ * Δρʳ, 4) rtol=1e-4
+    @test all(>(1), column(bypass.rewind_content)) # less condensate at the outer step start: a larger θˡⁱ
+    ramp = column(bypass.content) .- column(bypass.rewind_content)
+    @test ramp ≈ fill(Λˡ * Δt * Gρqʳ, 4) rtol=1e-3
+    @test column(Gⁿ.ρθ) ≈ -ramp ./ Δt rtol=1e-4
+end
+
+# Without a microphysics scheme the model has no condensate, and the stepper no bypass.
+@testset "The composition bypass is allocated for a model with microphysics [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size=4, z=(0, 4), topology=(Flat, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=290)
+    @test isnothing(TS.composition_bypass(AtmosphereModel(grid; dynamics)))
+    @test TS.composition_bypass(rain_model(FT, grid; fall_speed = 0)) isa CE.CompositionBypass
+end
+
+# A slab of condensate carried through a periodic channel by a uniform wind. Read as pressure,
+# the content the advection moves drove the wind 0.5 m/s off and the pressure 4e-3 off at
+# Δt = 10; the bypass leaves the second-order remainder.
+@testset "Condensate carried by a uniform wind leaves the wind uniform on the acoustic stepper [$FT]" for FT in test_float_types()
+    grid = RectilinearGrid(default_arch, FT; size=(32, 4), halo=(3, 3), x=(0, 32e3), z=(0, 400),
+                           topology=(Periodic, Flat, Bounded))
+    U = 10
+    for advection in (WENO(FT), UpwindBiased(FT; order=1))
+        model, constants = suspended_condensate_model(FT, grid; advection)
+        slab(x, z) = ifelse(12e3 < x < 20e3, 0.01, 0.0)
+        state = suspended_condensate_state(FT, constants, slab)
+        set!(model; state.ρᵈ, state.T, state.qᵛ, state.qʳ, u = U)
+        departures = largest_departures!(model, FT(10), 30, state.p₀, U)
+        @test departures.wind < 0.05
+        @test departures.pressure < 5e-4
+    end
+end
+
+# A layer of condensate mixed through a column at rest by closure diffusion. The explicit
+# closure's content reaches the loop through the slow tendency; the vertically-implicit closure's
+# reaches the thermodynamic variable after the loop, and read as pressure through the next
+# stage's rewind it moved the column at 0.06 m/s and the pressure 1.5e-2 off at Δt = 10.
+@testset "Closure diffusion of condensate leaves an isothermal column at rest on the acoustic stepper [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size=20, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    κ = FT(50)
+    closures = (ScalarDiffusivity(; ν=κ, κ), ScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=κ, κ))
+    for closure in closures
+        model, constants = suspended_condensate_model(FT, grid; closure)
+        layer(z) = ifelse(400 < z < 600, 0.01, 0.0)
+        state = suspended_condensate_state(FT, constants, layer)
+        set!(model; state.ρᵈ, state.T, state.qᵛ, state.qʳ)
+        departures = largest_departures!(model, FT(10), 30, state.p₀, 0)
+        @test departures.vertical_velocity < 5e-3
+        @test departures.pressure < 5e-4
     end
 end

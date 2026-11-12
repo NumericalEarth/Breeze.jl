@@ -272,10 +272,10 @@ end
 ##### rest of φ. The SSP stepper therefore orders a stage: the tracers' solves, this step, the
 ##### thermodynamic variable's solve.
 #####
-##### The acoustic stepper splits the content its sedimentation moves, explicit and implicit, into
-##### its sensible and composition parts (`add_sedimentation_tendency_parts!`) and routes them
-##### differently; see `AcousticRungeKutta3`. The mass the content follows is still the mass the
-##### tracers' solves moved.
+##### The acoustic stepper splits the content this remainder moves into its sensible and
+##### composition parts (`add_sedimentation_tendency_parts!`) and routes them differently; see
+##### `AcousticRungeKutta3`. The mass the content follows is still the mass the tracers' solves
+##### moved.
 #####
 
 @inline function implicit_sedimentation_mass_fluxes(i, j, k, grid, advection::AIVA, wᵗ, wˢ, ρq, ρ)
@@ -346,8 +346,8 @@ tendency `G`, with `tracer_transport_velocity` the vertical velocity the moistur
 tendencies advect with. The term runs in a kernel of its own rather than inside the thermodynamic
 tendency kernel: fused, its per-constituent flux reconstructions and condensate contents raise that
 kernel's register use and cut its occupancy for every cell, whether or not anything sediments
-there. Dispatches on the model's time stepper: `AcousticRungeKutta3` moves the content on its own
-and adds nothing here. A no-op when no condensate sediments.
+there. Dispatches on the model's time stepper: `AcousticRungeKutta3` forms the tendency itself at
+the start of each stage and adds nothing here. A no-op when no condensate sediments.
 """
 add_sedimentation_tendency!(G, model, tracer_transport_velocity) =
     add_sedimentation_tendency!(model.timestepper, G, model, tracer_transport_velocity)
@@ -366,7 +366,8 @@ condensate's mass fluxes that `mass_fluxes` selects (`explicit_condensate_mass_f
 the tracer tendencies apply with the vertical velocity `wᵗ`, `implicit_condensate_mass_fluxes` for
 the remainder the adaptive implicit solves applied), with the [`condensate_content`](@ref) methods
 of `formulation`, which read the model's temperature field and the `microphysical_fields`.
-`AcousticRungeKutta3` integrates `G` in its substep loop and moves `C` outside it.
+`AcousticRungeKutta3` integrates `G` in its substep loop and, for the implicit remainder, moves
+`C` outside it.
 `microphysical_fields` selects the state the content coefficients are read from; the mass fluxes
 read the densities held by `model.sedimentation` independently. A no-op when no condensate
 sediments.

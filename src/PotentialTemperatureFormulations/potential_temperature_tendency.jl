@@ -213,6 +213,48 @@ end
     return (; χ = (χˡ, χⁱ), h, ∂φ∂h = ∂θ∂h)
 end
 
+# The composition content of ρθ = ρᵈ θˡⁱ per unit partial density of each phase, for the
+# compressible core's pressure p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T. At fixed ρᵈ,
+#
+#   d(ρθ) = ρᵈ (∂θ/∂T dT + ∂θ/∂p dp) + Σₓ (ρᵈ / ρ) χˣ dρˣ ,   dp = ρ Rᵐ dT + Rᵛ T dρᵛ ,
+#
+# with χˣ the derivative of θˡⁱ along q̂ˣ − q at fixed T and p, the content of
+# `potential_temperature_condensate_content` extended to vapor. Eliminating dT, and with Cᴸ the
+# slope dp / d(ρθ) at fixed composition,
+#
+#   dp = Cᴸ [d(ρθ) − Σₓ Λˣ dρˣ] ,   Λˣ = (ρᵈ / ρ) χˣ − δˣᵛ ρᵈ (∂θ/∂T) Rᵛ T / (ρ Rᵐ) ,
+#
+# and ∂θ/∂T = cᵖᵐ / (ĉᵖ Π) = θ cᵖᵐ / H at fixed p and composition. The divisors vanish only in
+# a state that was never set, where they are replaced by one.
+@inline function AtmosphereModels.composition_content_coefficients(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
+                                                                   dynamics, constants, microphysics, microphysical_fields,
+                                                                   specific_prognostic_moisture, temperature_field)
+    @inbounds ρ = total_density(dynamics)[i, j, k]
+    @inbounds ρᵈ = continuity_density(dynamics)[i, j, k]
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
+    @inbounds θ = formulation.potential_temperature[i, j, k]
+    @inbounds T = temperature_field[i, j, k]
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+
+    κ̂ = formulation.exner_exponent
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    H = liquid_ice_enthalpy(T, q, constants)
+    Ĥ = ifelse(H == 0, one(H), H)
+    θ̂ = ifelse(θ == 0, one(θ), θ)
+    ρ̂ = ifelse(ρ == 0, one(ρ), ρ)
+    Π = Ĥ / (ĉᵖ * θ̂)
+
+    χᵛ = potential_temperature_content(sedimentation_composition_increment(dynamics, q, Val(:vapor)), κ̂, q, constants, T, θ, ĉᵖ, Π)
+    χˡ = potential_temperature_content(sedimentation_composition_increment(dynamics, q, Val(:liquid)), κ̂, q, constants, T, θ, ĉᵖ, Π)
+    χⁱ = potential_temperature_content(sedimentation_composition_increment(dynamics, q, Val(:ice)), κ̂, q, constants, T, θ, ĉᵖ, Π)
+
+    density_ratio = ρᵈ / ρ̂
+    gas_pressure_content = density_ratio * θ * (cᵖᵐ * T / Ĥ) * vapor_gas_constant(constants) / Rᵐ
+    return (density_ratio * χᵛ - gas_pressure_content, density_ratio * χˡ, density_ratio * χⁱ)
+end
+
 # The derivative of θˡⁱ = H / (ĉᵖ Π) along one composition increment at fixed T and p
 @inline function potential_temperature_content(Δq, κ̂, q, constants, T, θ, ĉᵖ, Π)
     ΔH = enthalpy_increment(Δq, constants, T)

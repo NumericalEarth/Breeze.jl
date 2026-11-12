@@ -546,9 +546,9 @@ end
     @test all(isfinite, interior(ρθ))
     @test all(isfinite, interior(ρqʳ))
 
-    # ... and on the compressible acoustic path. There the stage collects the content as a
-    # tendency and adds it after the acoustic substep loop, whose linearized pressure would read it
-    # as a pressure change (see `remove_sedimentation_content!`), so it takes only the post-loop
+    # ... and on the compressible acoustic path. There the stage adds the composition content
+    # after the acoustic substep loop, whose linearized pressure would read it as a pressure
+    # change (see `apply_composition_content!`), so it takes only the post-loop
     # diffusion solve, not the implicit vertical transport the loop applies to the rest of the
     # thermodynamic variable: a change of the finite-step splitting (first order in Δt), while the
     # mass the content follows and the water budget are unchanged; no energy-conservation
@@ -694,10 +694,9 @@ end
 
     # `update_state!`'s `compute_tendencies!` builds ρθ's slow tendency, advected by the predictor
     # velocity, and ρqʳ's, advected by the transport velocity. On this stepper that tendency carries
-    # no sedimentation content: the stage forms the content at stage start from the tracers' frozen
-    # transport velocity and splits it, adding the sensible heat to the slow tendency and collecting
-    # the composition content, which the substep loop would read as a pressure change, in its own
-    # field to add after the loop (see `remove_sedimentation_content!`).
+    # no sedimentation content: the stage forms it at stage start from the tracers' frozen
+    # transport velocity (`add_explicit_sedimentation_tendency!`), in two parts, the sensible heat
+    # and the composition content, which `add_sedimentation_tendency_parts!` can route apart.
     function slow_ρθ_tendency()
         Breeze.AtmosphereModels.compute_tendencies!(model)
         return column(Gρθ)
@@ -708,12 +707,13 @@ end
         return column(Gρqʳ)
     end
 
-    stage_content_field = Breeze.TimeSteppers.sedimentation_bypass(model).content
+    stage_content_field = Breeze.TimeSteppers.composition_bypass(model).content
     function stage_content_parts()
         Breeze.AtmosphereModels.compute_tendencies!(model)
         slow = column(Gρθ)
         fill!(stage_content_field, 0)
-        Breeze.TimeSteppers.add_explicit_sedimentation_content!(model, 1) # over a unit interval: the tendency
+        Breeze.AtmosphereModels.add_sedimentation_tendency_parts!(Gρθ, stage_content_field, model,
+                                                                  Breeze.TimeSteppers.tendency_transport_velocities(model).w)
         return column(stage_content_field), column(Gρθ) .- slow
     end
     composition_content() = stage_content_parts()[1]

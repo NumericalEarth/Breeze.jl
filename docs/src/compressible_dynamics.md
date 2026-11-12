@@ -139,6 +139,36 @@ compressibility. For the oscillation itself the re-diagnosed state is closer to 
 densities, against which ``C^L`` is stiffer by ``ρ^v R^v / (ρ^d R^d)`` in ``c^2``, about 3% for
 20 g/kg of vapor.
 
+Holding the water fixed would also leave it out of the pressure perturbation, and the moisture a
+stage works with differs from the stage-entry moisture ``m^L`` twice: the rewind starts every
+stage from the outer-step-start moisture, and the stage's own moisture tendencies move it on. For
+condensate the pressure responds strongly through ``θ^{li}``. Condensate that arrives in a cell
+at the cell's temperature lowers ``ρθ^{li}`` by about ``ℒ Δρ^c / (c^p_m Π)`` and leaves the gas
+pressure alone, whatever moved it: sedimentation, advection by the resolved flow, closure
+diffusion. Read through ``C^L (ρθ)'`` alone, that composition content is a pressure perturbation
+of about ``(γ - 1) ℒ ≈ 10^6`` Pa per kg m⁻³ of condensate. In a model with a microphysics
+scheme, and with it condensate, the loop therefore integrates the thermodynamic perturbation less
+the content
+
+```math
+χ = Λ^v (ρ^v)' + Λ^l (ρ^l)' + Λ^i (ρ^i)' , \qquad
+Λ^x = \frac{ρ^d}{ρ} \left. \frac{∂θ^{li}}{∂q^x} \right|_{T, p}
+      - δ^{xv} \frac{ρ^d}{ρ} \frac{c^p_m T}{H} \frac{R^v}{R^m} θ^{li} ,
+```
+
+where ``(ρ^x)'`` are the differences of the partial densities of vapor, liquid and ice from the
+stage-entry state, ``H = c^p_m T - H^c``, and the derivative is taken along the composition
+change of adding mass of phase ``x``. The first term is the content the sedimentation tendency
+moves with falling condensate; the second is the gas pressure vapor adds at fixed temperature.
+``C^L \left( (ρθ)' - χ \right)`` is the first-order pressure perturbation of the state with both
+differences at fixed dry density. Each stage evaluates ``χ`` at the outer-step-start moisture,
+which comes out of the rewind, and at the moisture its explicit tendencies give, whose ramp over
+the stage comes out of the slow thermodynamic tendency; the stage adds the latter back to ``ρθ``
+after the loop. With a saturation-adjustment scheme the partial densities follow its diagnosed
+partition, and what the adjustment has moved between vapor and cloud by stage entry is
+extrapolated to the stage's end. The same terms carry, for a scheme that advances condensate by
+tendencies, the heating of a phase change. Without moisture ``χ`` is exactly zero.
+
 At fixed composition and ``ρθ``, the pressure depends on the dry density only through the
 condensate latent energy:
 

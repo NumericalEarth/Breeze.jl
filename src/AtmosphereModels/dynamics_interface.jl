@@ -215,6 +215,7 @@ keeps its temperature.
 @inline sedimentation_composition_increment(dynamics, q, phase) = unit_composition(phase, q)
 
 # The composition with all mass in one phase, q̂ˣ, typed like `q`
+@inline unit_composition(::Val{:vapor}, q) = MoistureMassFractions(one(q.vapor), zero(q.vapor), zero(q.vapor))
 @inline unit_composition(::Val{:liquid}, q) = MoistureMassFractions(zero(q.vapor), one(q.vapor), zero(q.vapor))
 @inline unit_composition(::Val{:ice}, q) = MoistureMassFractions(zero(q.vapor), zero(q.vapor), one(q.vapor))
 

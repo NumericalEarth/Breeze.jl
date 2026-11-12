@@ -315,6 +315,12 @@ AtmosphereModels.liquid_mass_fraction(::DCMIP2016KM, model) = model.microphysica
 end
 AtmosphereModels.ice_mass_fraction(::DCMIP2016KM, model) = nothing
 
+# The same fractions from the prognostic densities rather than the diagnosed mass fractions.
+@inline function AtmosphereModels.prognostic_moisture_fractions(i, j, k, grid, ::DCMIP2016KM, ρ, qᵛ, μ)
+    qˡ = @inbounds (μ.ρqᶜˡ[i, j, k] + μ.ρqʳ[i, j, k]) / ρ
+    return MoistureMassFractions(qᵛ, qˡ)
+end
+
 # Rain sedimentation is applied by the scheme's own column kernel, so no tracer
 # advertises a sedimentation velocity and the generic fallback (`nothing`) stands.
 

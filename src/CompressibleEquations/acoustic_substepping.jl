@@ -93,12 +93,11 @@ Fields:
 - `time_averaged_vertical_velocity_cache`: the acoustic-mean transport velocity the moisture and
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
   tendency's condensate sedimentation term (see `cache_transport_velocity!`).
-- `sedimentation_bypass`: the `SedimentationBypass` holding the condensate sedimentation
-  content of the thermodynamic variable that `AcousticRungeKutta3` keeps out of the loop, and the
-  copy of the full variable the loop's open-boundary relaxation reads; `nothing` when no
-  condensate sediments.
+- `composition_bypass`: the `CompositionBypass` holding the composition content of the
+  thermodynamic variable that `AcousticRungeKutta3` keeps out of the loop's pressure; `nothing`
+  switches the bypass off.
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC, SB}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC, CB}
     substeps :: N
     acoustic_cfl :: FT
     minimum_horizontal_spacing :: FT
@@ -138,7 +137,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC, SB
     vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
     density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
     time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w the moisture and tracer tendencies were built with
-    sedimentation_bypass :: SB                    # `SedimentationBypass`; `nothing` without sedimenting condensate
+    composition_bypass :: CB                      # `CompositionBypass`; `nothing` switches the bypass off
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -169,28 +168,44 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.vertical_velocity_cache),
                        adapt(to, a.density_cache),
                        adapt(to, a.time_averaged_vertical_velocity_cache),
-                       adapt(to, a.sedimentation_bypass))
+                       adapt(to, a.composition_bypass))
 
 """
 $(TYPEDEF)
 
-The condensate sedimentation composition content of the thermodynamic variable that
-`AcousticRungeKutta3` keeps out of the substep loop, and the copy of the full variable that stands
-in for the live field while the content is out of it. `content` holds the increment the stage
-collects and adds after the loop; `frozen_thermodynamic_density` holds the stage-entry variable,
-read by the moisture and tracer solves' coefficients and by the loop's open-boundary relaxation,
-and then the variable with the content added, read by the post-loop solves (see
-`Breeze.TimeSteppers.remove_sedimentation_content!`).
+The composition content of the thermodynamic variable that `AcousticRungeKutta3` keeps out of the
+substep loop's pressure (see the section comment on the bypass in `acoustic_runge_kutta_3.jl`).
+A change of moisture at fixed dry density changes `ρθ` without the pressure change the loop's
+`p′ = Cᴸ (ρθ)′` would read from it; the content of a moisture difference is the part of `ρθ` that
+offsets the pressure the equation of state gives it, `Σ Λˣ Δρˣ` over the partial densities of
+vapor, liquid and ice (see `composition_content_coefficients`).
+
+- `outer_phase_densities`: the partial densities `(vapor, liquid, ice)` of the outer-step-start
+  state, which every stage of the step measures its contents from.
+- `rewind_content`: the content of the outer-step-start moisture relative to the stage-entry
+  moisture, which comes out of the rewind.
+- `content`: the content of the moisture the stage ends with, which the stage adds to the
+  thermodynamic variable after the loop.
+- `rewind_remainder`: the content the previous stage added to the variable plus the rewind
+  content, which takes it back to first order only: what is left is in the stage-entry variable
+  and out of the rewind. The open-boundary relaxation holds it where no thermodynamic wall value
+  is prescribed (see `apply_open_boundary_relaxation!`).
 """
-struct SedimentationBypass{C, F}
+struct CompositionBypass{P, R, C, M}
+    outer_phase_densities :: P
+    rewind_content :: R
     content :: C
-    frozen_thermodynamic_density :: F
+    rewind_remainder :: M
 end
 
-SedimentationBypass(grid) = SedimentationBypass(CenterField(grid), CenterField(grid))
+function CompositionBypass(grid)
+    outer_phase_densities = (vapor = CenterField(grid), liquid = CenterField(grid), ice = CenterField(grid))
+    return CompositionBypass(outer_phase_densities, CenterField(grid), CenterField(grid), CenterField(grid))
+end
 
-Adapt.adapt_structure(to, b::SedimentationBypass) =
-    SedimentationBypass(adapt(to, b.content), adapt(to, b.frozen_thermodynamic_density))
+Adapt.adapt_structure(to, b::CompositionBypass) =
+    CompositionBypass(adapt(to, b.outer_phase_densities), adapt(to, b.rewind_content),
+                      adapt(to, b.content), adapt(to, b.rewind_remainder))
 
 #####
 ##### Section 2 — Constructor
@@ -205,12 +220,12 @@ prognostic momentum's BCs: inheriting them would imprint the full-state wall tar
 halo for a nonzero `NormalFlowBoundaryCondition` (issue \\#716) and apply momentum BCs to velocity fields.
 The wall target re-enters via the prognostic momentum's own BC after each substep's momentum update.
 The `prognostic_momentum` kwarg is retained for backwards compatibility but no longer consulted.
-`sedimentation_bypass = true` allocates the `SedimentationBypass` for a model in which condensate
-sediments.
+`composition_bypass = true` allocates the `CompositionBypass` through which the composition
+content of the thermodynamic variable skips the loop's pressure, for a model with condensate.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
                             prognostic_momentum = nothing, substep_floattype = eltype(grid),
-                            cache_advecting_state = false, sedimentation_bypass = false)
+                            cache_advecting_state = false, composition_bypass = false)
     Ns = split_explicit.substeps
     FT = eltype(grid)
     ω = convert(FT, split_explicit.forward_weight)
@@ -271,7 +286,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
     density_cache = cache_advecting_state ? CenterField(grid) : nothing
     time_averaged_vertical_velocity_cache = ZFaceField(grid)
-    bypass = sedimentation_bypass ? SedimentationBypass(grid) : nothing
+    bypass = composition_bypass ? CompositionBypass(grid) : nothing
 
     return AcousticSubstepper(Ns, acoustic_cfl, Δx_min, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -429,6 +444,155 @@ the WS-RK3 invariant by setting ``(ρ)′_\\mathrm{init} = Uᴸ_\\mathrm{outer} 
 """
 prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
     refresh_linearization_basic_state!(substepper, model)
+
+#####
+##### Section 3b — Composition content of the thermodynamic variable
+#####
+##### The loop reads its pressure perturbation off the thermodynamic perturbation alone,
+##### p′ = Cᴸ (ρθ)′, with the moisture frozen at the stage-entry state. The pressure also depends
+##### on the moisture, and the moisture a stage works with differs from the stage-entry one twice:
+##### the rewind starts every stage from the outer-step-start moisture, and the stage's own
+##### moisture tendencies ramp it to the moisture the stage ends with. To first order, at fixed dry
+##### density,
+#####
+#####   p′ = Cᴸ [(ρθ)′ − χ] ,   χ = Λᵛ (ρᵛ)′ + Λˡ (ρˡ)′ + Λⁱ (ρⁱ)′ ,
+#####
+##### with (ρˣ)′ the differences of the partial densities of vapor, liquid and ice and Λˣ the
+##### composition content of ρθ per unit partial density at the stage-entry state
+##### (`composition_content_coefficients`). `AcousticRungeKutta3` has the loop integrate (ρθ)′ − χ;
+##### see the section comment on the bypass in `acoustic_runge_kutta_3.jl`. The partial densities
+##### are those of the model's own moisture partition, diagnosed condensate included, so one code
+##### path serves prognostic condensate and saturation adjustment (`collect_composition_content!`).
+#####
+##### Without moisture every partial density is exactly zero, so is every content, and the run is
+##### bitwise what it is without the bypass.
+#####
+
+# The partial densities (vapor, liquid, ice) of the moisture mass fractions `q` in air of total
+# density `ρ`.
+@inline phase_densities(ρ, q) = (ρ * q.vapor, ρ * q.liquid, ρ * q.ice)
+
+# Σ Λˣ (ρˣ₁ − ρˣ₀) over vapor, liquid and ice
+@inline composition_content(Λ, ρ₁, ρ₀) =
+    Λ[1] * (ρ₁[1] - ρ₀[1]) + Λ[2] * (ρ₁[2] - ρ₀[2]) + Λ[3] * (ρ₁[3] - ρ₀[3])
+
+# The partial densities of the moisture that `moisture_density` and the prognostic densities of
+# `microphysical_fields` hold, in air of dry density `dry_density`, with whatever part of the
+# partition the scheme diagnoses held at the mass fractions `update_state!` last diagnosed
+# (`prognostic_moisture_fractions`).
+@inline function held_partition_phase_densities(i, j, k, grid, microphysics, dry_density, moisture_density, microphysical_fields)
+    ρ = AtmosphereModels.total_density(i, j, k, dry_density, microphysics, moisture_density, microphysical_fields)
+    ρ̂ = ifelse(ρ == 0, one(ρ), ρ)
+    qᵛᵉ = @inbounds moisture_density[i, j, k] / ρ̂
+    q = prognostic_moisture_fractions(i, j, k, grid, microphysics, ρ̂, qᵛᵉ, microphysical_fields)
+    return phase_densities(ρ, q)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Collect the composition contents of a stage, once the stage has updated the moisture with its
+explicit tendencies and before the moisture's vertically-implicit solves:
+
+- the content of the outer-step-start moisture relative to the stage-entry moisture, stored in the
+  bypass's `rewind_content`, which `initialize_stage_perturbations!` takes out of the rewind;
+- the content of the moisture the stage ends with, stored in the bypass's `content`, which the
+  stage adds to the thermodynamic variable after the loop;
+- the ramp between the two over the stage interval `Δt`, taken out of the slow tendency `Gⁿ` of
+  the thermodynamic variable, which the loop integrates;
+- the content the previous stage added to the variable, the difference of the two contents that
+  stage left in the bypass, plus the rewind content, stored in the bypass's `rewind_remainder`:
+  the rewind content takes the previous stage's content back to first order, with the
+  coefficients of the stage-entry state, and this is what it leaves.
+
+In the `first_stage` the stage-entry state is the outer-step-start state: its partial densities of
+vapor, liquid and ice are stored for the step, and the rewind content and its remainder are zero.
+
+The partial densities at the outer step start and at stage entry are those of the partition
+`update_state!` diagnosed; the stage-entry composition is rebuilt from the diagnosed specific
+fields (`diagnosed_microphysical_fields`), the prognostic densities having moved on, and the
+content coefficients are those of that state. The partial densities the stage ends with are the
+outer-step-start ones plus two changes. The first is the change of the prognostic densities over
+the stage, `Uᴸ_outer` to the live fields, at a held diagnosed partition: exact for prognostic
+condensate, whose content the slow tendency carries with the same coefficients. The second is the
+drift of the diagnosed partition, what a saturation adjustment has moved between vapor and cloud
+since the outer step start beyond that change: known at stage entry, it is extrapolated to the
+stage's end with the ratio `extrapolation` of the stage's interval to the one the stage-entry
+state was advanced over. It is zero for a scheme that diagnoses no condensate, and in the first
+stage, which has no drift to extrapolate. A no-op without a bypass.
+"""
+collect_composition_content!(substepper::AcousticSubstepper, model, Uᴸ_outer, Gⁿ, Δt, first_stage, extrapolation) =
+    collect_composition_content!(substepper.composition_bypass, model, Uᴸ_outer, Gⁿ, Δt, first_stage, extrapolation)
+
+collect_composition_content!(::Nothing, model, Uᴸ_outer, Gⁿ, Δt, first_stage, extrapolation) = nothing
+
+function collect_composition_content!(bypass, model, Uᴸ_outer, Gⁿ, Δt, first_stage, extrapolation)
+    grid = model.grid
+    microphysics = model.microphysics
+    ρᵡ_name = thermodynamic_density_name(model.formulation)
+    ρ⁰ = bypass.outer_phase_densities
+
+    # The outer-step-start moisture: its prognostic densities from `Uᴸ_outer`, in place of the live ones.
+    outer_microphysical_fields = merge(model.microphysical_fields, Uᴸ_outer[prognostic_field_names(microphysics)])
+    outer_moisture_density = Uᴸ_outer[moisture_prognostic_name(microphysics)]
+
+    launch!(architecture(grid), grid, :xyz, _collect_composition_content!,
+            bypass.content, bypass.rewind_content, bypass.rewind_remainder,
+            Gⁿ[ρᵡ_name], ρ⁰.vapor, ρ⁰.liquid, ρ⁰.ice,
+            Δt, first_stage, convert(eltype(grid), extrapolation),
+            grid, model.formulation, model.dynamics, model.thermodynamic_constants, microphysics,
+            diagnosed_microphysical_fields(model), specific_prognostic_moisture(model), model.temperature,
+            Uᴸ_outer.ρᵈ, model.moisture_density, model.microphysical_fields,
+            outer_moisture_density, outer_microphysical_fields)
+    return nothing
+end
+
+@kernel function _collect_composition_content!(χ, χ⁰, χʳ, Gˢρᵡ, ρᵛ⁰, ρˡ⁰, ρⁱ⁰, Δt, first_stage, extrapolation,
+                                               grid, formulation, dynamics, constants, microphysics,
+                                               diagnosed_fields, specific_prognostic_moisture, temperature,
+                                               ρᵈ_outer, moisture_density, microphysical_fields,
+                                               outer_moisture_density, outer_microphysical_fields)
+    i, j, k = @index(Global, NTuple)
+
+    # The stage-entry state: its partial densities and content coefficients.
+    @inbounds ρ = dynamics.total_density[i, j, k]
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
+    qᴸ = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, diagnosed_fields)
+    ρᴸ = phase_densities(ρ, qᴸ)
+    Λ = composition_content_coefficients(i, j, k, grid, formulation, dynamics, constants, microphysics,
+                                         diagnosed_fields, specific_prognostic_moisture, temperature)
+
+    # The outer-step-start partial densities: the stage-entry ones in the first stage.
+    @inbounds begin
+        ρ⁰ = (ifelse(first_stage, ρᴸ[1], ρᵛ⁰[i, j, k]),
+              ifelse(first_stage, ρᴸ[2], ρˡ⁰[i, j, k]),
+              ifelse(first_stage, ρᴸ[3], ρⁱ⁰[i, j, k]))
+        ρᵛ⁰[i, j, k] = ρ⁰[1]
+        ρˡ⁰[i, j, k] = ρ⁰[2]
+        ρⁱ⁰[i, j, k] = ρ⁰[3]
+    end
+
+    # The prognostic densities at the outer step start and after the stage's explicit update, both
+    # with the diagnosed part of the partition held at the stage-entry mass fractions. Their
+    # difference is the change the tendencies make; the difference of the first from the
+    # outer-step-start partial densities is the drift of the diagnosed partition.
+    ρ̃⁰ = held_partition_phase_densities(i, j, k, grid, microphysics, ρᵈ_outer, outer_moisture_density, outer_microphysical_fields)
+    ρ̃¹ = held_partition_phase_densities(i, j, k, grid, microphysics, ρᵈ_outer, moisture_density, microphysical_fields)
+
+    @inbounds begin
+        χ⁰ᵢ = composition_content(Λ, ρ⁰, ρᴸ)
+        Δχ = composition_content(Λ, ρ̃¹, ρ̃⁰) + extrapolation * composition_content(Λ, ρ̃⁰, ρ⁰)
+
+        # The content the previous stage added to the variable, from the contents it left in the
+        # bypass, and what the rewind content does not take back of it.
+        Δχ⁻ = ifelse(first_stage, zero(χ⁰ᵢ), χ[i, j, k] - χ⁰[i, j, k])
+        χʳ[i, j, k] = Δχ⁻ + χ⁰ᵢ
+
+        χ⁰[i, j, k] = χ⁰ᵢ
+        χ[i, j, k] = χ⁰ᵢ + Δχ
+        Gˢρᵡ[i, j, k] -= Δχ / Δt
+    end
+end
 
 #####
 ##### Section 4 — Adaptive substep computation (acoustic CFL)
@@ -907,6 +1071,10 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     # ρw is dispatched: terrain models initialize the contravariant ρw̃ instead.
     initialize_vertical_momentum_perturbation!(substepper, model, Uᴸ_outer)
 
+    # The rewind of the thermodynamic variable less the content of the outer-step-start moisture,
+    # so that the loop starts from the pressure of the outer-step-start state.
+    remove_rewind_content!(substepper.composition_bypass, substepper, grid, arch)
+
     fill_halo_regions!(substepper.density_perturbation)
     fill_halo_regions!(substepper.density_potential_temperature_perturbation)
     map(fill_halo_regions!, substepper.momentum_perturbation)
@@ -938,6 +1106,19 @@ end
         ρu′[i, j, k] = ρu_outer[i, j, k] - ρu_stage[i, j, k]
         ρv′[i, j, k] = ρv_outer[i, j, k] - ρv_stage[i, j, k]
     end
+end
+
+remove_rewind_content!(::Nothing, substepper, grid, arch) = nothing
+
+function remove_rewind_content!(bypass, substepper, grid, arch)
+    launch!(arch, grid, :xyz, _remove_rewind_content!,
+            substepper.density_potential_temperature_perturbation, bypass.rewind_content)
+    return nothing
+end
+
+@kernel function _remove_rewind_content!(ρθ′, χ⁰)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρθ′[i, j, k] -= χ⁰[i, j, k]
 end
 
 @kernel function _initialize_perturbation_with_rewind!(perturbation, Uᴸ_outer, Uᴸ_stage)
@@ -1438,16 +1619,18 @@ end
 # prognostic `ValueBoundaryCondition` to the base at stage entry, so
 # `ρᴸ[halo] = 2v − ρᴸ[cell]` and the target perturbation is
 # `v − ρᴸ[cell] = (ρᴸ[halo] − ρᴸ[cell]) / 2`, read straight from the base field.
-# With a `SedimentationBypass` the thermodynamic base is the stage-entry variable
-# less the previous stage's condensate sedimentation content, halos included, and the
-# stage adds its own content `C` after the loop. Where a `ValueBoundaryCondition`
-# prescribes the full variable at the wall, the wall value is read from the bypass's
-# copy of the stage-entry variable `ρθⁿ`, and `C` comes off the target,
-# `(ρθⁿ[halo] + ρθⁿ[cell]) / 2 − ρθᴸ[cell] − C[cell]`, so that the full variable lands
-# on the wall value. Any other condition prescribes no thermodynamic wall value: its
-# halo extrapolates the interior, the target is the base's own extrapolation as
-# without sedimentation, only the pressure-changing part of the variable is held, and
-# the content reaches the boundary cell as it does the interior.
+# With a `CompositionBypass` the loop integrates the thermodynamic perturbation less the
+# composition content, and the stage adds the content `C` of the moisture it ends with after
+# the loop. Where a `ValueBoundaryCondition` prescribes the full variable at the wall, `C`
+# comes off the target, `v − ρθᴸ[cell] − C[cell]`, so that the full variable lands on the wall
+# value. Any other condition prescribes no thermodynamic wall value: its halo extrapolates the
+# interior, the target is the base's own extrapolation as without the bypass, only the
+# pressure-changing part of the variable is held, and the content reaches the boundary cell
+# as it does the interior. The base is the stage-entry variable, which holds the content the
+# previous stage added, and the content the stage adds after the loop is measured from the
+# stage-entry moisture: the two differ from the content the stage moves by the bypass's
+# `rewind_remainder`, which comes off the target, so that the content passes through without
+# accumulating across stages.
 # Relaxation factor `α ∈ (0, 1]` (default 0.5, via
 # `SplitExplicitTimeDiscretization(; open_boundary_relaxation = α)`). No-op on any
 # side without an active `NormalFlowBoundaryCondition` (periodic/walls/`nothing`
@@ -1456,19 +1639,19 @@ end
 @inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:NormalFlow}) && !(bc.condition isa Nothing)
 
 # The target perturbation at the outermost open-boundary cell `Iᴮ`, with `Iᴴ` the adjacent halo
-# cell: v − cᴸ[Iᴮ] = (cᴸ[Iᴴ] − cᴸ[Iᴮ]) / 2 off the base `cᴸ` itself, or, for a base that is the
-# stage-entry variable `cⁿ` less the sedimentation content `C` the stage adds after the loop,
-# v − cᴸ[Iᴮ] − C[Iᴮ] with v = (cⁿ[Iᴴ] + cⁿ[Iᴮ]) / 2.
+# cell: v − cᴸ[Iᴮ] = (cᴸ[Iᴴ] − cᴸ[Iᴮ]) / 2 off the base `cᴸ` itself, less the composition content
+# `C` where one is passed.
 @inline relaxation_target(cᴸ, Iᴴ, Iᴮ) = @inbounds (cᴸ[Iᴴ...] - cᴸ[Iᴮ...]) / 2
-@inline relaxation_target(cᴸ, ::Nothing, ::Nothing, Iᴴ, Iᴮ) = relaxation_target(cᴸ, Iᴴ, Iᴮ)
-@inline relaxation_target(cᴸ, cⁿ, C, Iᴴ, Iᴮ) = @inbounds (cⁿ[Iᴴ...] + cⁿ[Iᴮ...]) / 2 - cᴸ[Iᴮ...] - C[Iᴮ...]
+@inline relaxation_target(cᴸ, ::Nothing, Iᴴ, Iᴮ) = relaxation_target(cᴸ, Iᴴ, Iᴮ)
+@inline relaxation_target(cᴸ, C, Iᴴ, Iᴮ) = @inbounds relaxation_target(cᴸ, Iᴴ, Iᴮ) - C[Iᴮ...]
 
-# The stage-entry variable and sedimentation content the thermodynamic target reads on one side:
-# both where a value condition prescribes the full variable at the wall and a bypass holds them,
-# neither otherwise, so that the target is the base's own extrapolation.
-wall_thermodynamic_state(bc, bypass) = (nothing, nothing)
-wall_thermodynamic_state(::BoundaryCondition{<:Value}, bypass::SedimentationBypass) =
-    (bypass.frozen_thermodynamic_density, bypass.content)
+# The composition content that comes off the thermodynamic target on one side: with a bypass, the
+# content the stage adds after the loop where a value condition prescribes the full variable at
+# the wall, and otherwise the remainder of the rewind content, so that the target is the base's
+# own extrapolation less the previous stage's content; none without a bypass.
+wall_content(bc, ::Nothing) = nothing
+wall_content(bc, bypass::CompositionBypass) = bypass.rewind_remainder
+wall_content(::BoundaryCondition{<:Value}, bypass::CompositionBypass) = bypass.content
 
 # The cell with index `c` along `direction`, at the kernel's (m, n) across it.
 @inline boundary_cell(::XDirection, c, m, n) = (c, m, n)
@@ -1477,13 +1660,13 @@ wall_thermodynamic_state(::BoundaryCondition{<:Value}, bypass::SedimentationBypa
 # Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the wall value in a single
 # kernel. `cᴮ` is the outermost interior cell index along `direction`, `cᴴ` the adjacent halo
 # cell index.
-@kernel function _relax_open_boundary!(ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, direction, cᴮ, cᴴ, α)
+@kernel function _relax_open_boundary!(ρ′, ρθ′, ρᴸ, ρθᴸ, C, direction, cᴮ, cᴴ, α)
     m, n = @index(Global, NTuple)
     Iᴮ = boundary_cell(direction, cᴮ, m, n)
     Iᴴ = boundary_cell(direction, cᴴ, m, n)
     @inbounds begin
         ρ′[Iᴮ...]  += α * (relaxation_target(ρᴸ, Iᴴ, Iᴮ) - ρ′[Iᴮ...])
-        ρθ′[Iᴮ...] += α * (relaxation_target(ρθᴸ, ρθⁿ, C, Iᴴ, Iᴮ) - ρθ′[Iᴮ...])
+        ρθ′[Iᴮ...] += α * (relaxation_target(ρθᴸ, C, Iᴴ, Iᴮ) - ρθ′[Iᴮ...])
     end
 end
 
@@ -1497,22 +1680,22 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch)
     ρᴸ  = model.dynamics.dry_density
     ρθᴸ = thermodynamic_density(model.formulation)
     bcs_θ = ρθᴸ.boundary_conditions
-    bypass = substepper.sedimentation_bypass
+    bypass = substepper.composition_bypass
     if is_active_open_bc(bcs_u.west)
         launch!(arch, grid, :yz, _relax_open_boundary!, ρ′, ρθ′, ρᴸ, ρθᴸ,
-                wall_thermodynamic_state(bcs_θ.west, bypass)..., XDirection(), 1, 0, α)
+                wall_content(bcs_θ.west, bypass), XDirection(), 1, 0, α)
     end
     if is_active_open_bc(bcs_u.east)
         launch!(arch, grid, :yz, _relax_open_boundary!, ρ′, ρθ′, ρᴸ, ρθᴸ,
-                wall_thermodynamic_state(bcs_θ.east, bypass)..., XDirection(), Nx, Nx + 1, α)
+                wall_content(bcs_θ.east, bypass), XDirection(), Nx, Nx + 1, α)
     end
     if is_active_open_bc(bcs_v.south)
         launch!(arch, grid, :xz, _relax_open_boundary!, ρ′, ρθ′, ρᴸ, ρθᴸ,
-                wall_thermodynamic_state(bcs_θ.south, bypass)..., YDirection(), 1, 0, α)
+                wall_content(bcs_θ.south, bypass), YDirection(), 1, 0, α)
     end
     if is_active_open_bc(bcs_v.north)
         launch!(arch, grid, :xz, _relax_open_boundary!, ρ′, ρθ′, ρᴸ, ρθᴸ,
-                wall_thermodynamic_state(bcs_θ.north, bypass)..., YDirection(), Ny, Ny + 1, α)
+                wall_content(bcs_θ.north, bypass), YDirection(), Ny, Ny + 1, α)
     end
     return nothing
 end
@@ -1704,9 +1887,11 @@ Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
 `substepper.substep_distribution`. The recovery of the full state from the stage-entry state and
 the accumulated perturbations is rounded with the round-off treatment `rounding`. With a
-`sedimentation_bypass` on the substepper, the thermodynamic base is the stage-entry variable less
-the condensate sedimentation content the caller adds after the loop, and the open-boundary
-relaxation targets the wall value of the full variable (see `apply_open_boundary_relaxation!`).
+`composition_bypass` on the substepper, the thermodynamic perturbation is integrated less the
+composition content: the rewind starts without the content of the outer-step-start moisture, the
+caller has taken the content's ramp out of the slow tendency and adds the content of the moisture
+the stage ends with after the loop, and the open-boundary relaxation targets the wall value of the
+full variable (see `apply_open_boundary_relaxation!`).
 """
 function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing;
                                     rounding = RoundToNearest())

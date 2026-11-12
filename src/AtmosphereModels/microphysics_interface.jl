@@ -765,6 +765,21 @@ end
 # Fallback for Nothing microphysics (no fields to index)
 @inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵛ, μ) = MoistureMassFractions(qᵛ)
 
+"""
+$(TYPEDSIGNATURES)
+
+Like [`grid_moisture_fractions`](@ref), for a moisture state that `μ_fields` holds in its prognostic
+densities only: the fractions of every prognostic species come from its density over `ρ`, never
+from a diagnosed specific field, which belongs to the state `update_state!` last diagnosed. The
+condensate a saturation-adjustment scheme diagnoses has no prognostic density and is still read
+from its diagnostic fields. The acoustic substepper measures the moisture a stage's tendencies
+move with it, at a moisture other than the diagnosed one. Defaults to `grid_moisture_fractions`;
+a scheme whose method reads diagnosed specific fields of its prognostic species extends this
+function.
+"""
+@inline prognostic_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, μ_fields) =
+    grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, μ_fields)
+
 #####
 ##### Total condensate and total air density (diagnosed from dry density)
 #####
@@ -1057,8 +1072,9 @@ end
 # own, from the fluxes the solves actually applied, and then takes the thermodynamic variable's
 # implicit transport and diffusion. An estimate of that remainder at the pre-solve state would
 # overstate a one-cell loss by the factor 1 + C at implicit Courant number C, precisely in the
-# regime the solve exists for. That is the SSP path; the acoustic stepper splits both parts into
-# their sensible and composition contents and moves them itself (see `AcousticRungeKutta3`).
+# regime the solve exists for. That is the SSP path; the acoustic stepper forms both parts
+# itself and keeps their composition content out of its substep loop's pressure (see
+# `AcousticRungeKutta3`).
 
 """
 $(TYPEDSIGNATURES)
@@ -1077,6 +1093,22 @@ formulation extends this function for its `formulation` type. The remaining argu
 consumes the content.
 """
 function condensate_content end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the composition content of the continuity-density-weighted thermodynamic variable of
+`formulation` at cell `(i, j, k)` per unit partial density of vapor, liquid and ice, as
+`(Λᵛ, Λˡ, Λⁱ)`: with the continuity density and the variable held fixed, the pressure of the
+equation of state changes by `−Cᴸ Σ Λˣ dρˣ`, `Cᴸ` being its slope against the variable at fixed
+composition. For condensate, `Λˣ` is the [`condensate_content`](@ref) `χˣ` times the
+continuity-to-total density ratio, the change of the variable at fixed temperature and pressure
+that [`sedimentation_tendency`](@ref) moves with the falling mass. Vapor adds to the gas pressure
+at fixed temperature as well, so its `Λᵛ` has a second term. `AcousticRungeKutta3` keeps
+`Σ Λˣ dρˣ` out of its substep loop's pressure. The arguments are those of `condensate_content`.
+Each thermodynamic formulation that the compressible core supports extends this function.
+"""
+function composition_content_coefficients end
 
 """
 $(TYPEDSIGNATURES)
@@ -1121,8 +1153,8 @@ core) turns it into the change of the continuity-density-weighted prognostic.
 The tendency has two parts, from `cᵢ = χᵢ + (∂φ/∂h) (hᵢ − h)`: the composition part, `χ` times the
 mass the cell gains, changes the composition at fixed temperature and so, on the compressible
 core, at fixed pressure; the sensible part, `∂φ/∂h` times the excess enthalpy the arriving mass
-brings, heats or cools the cell. `AcousticRungeKutta3` keeps them apart
-([`add_sedimentation_tendency_parts!`](@ref)).
+brings, heats or cools the cell. `AcousticRungeKutta3` keeps the parts of the implicit remainder
+apart ([`add_sedimentation_tendency_parts!`](@ref)).
 """
 @inline sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature) =
