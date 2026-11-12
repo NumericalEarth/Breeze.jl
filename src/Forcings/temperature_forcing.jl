@@ -73,9 +73,9 @@ Base.show(io::IO, forcing::TemperatureForcing) = print(io, summary(forcing))
 ##### Kernel: the specific energy tendency cᵖᵐ ∂ₜT (the ρ-multiply happens in SpecificForcing)
 #####
 
-# The moisture mass fractions are those of `grid_thermodynamic_state` in the tendency kernels:
-# total density, prognostic moisture and microphysical fields at (i, j, k). The cᵖᵐ here and the
-# kernel's division by cᵖᵐ Π therefore cancel to rounding.
+# The moisture mass fractions are the ones the tendency kernels form with `grid_moisture_fractions`:
+# from the total density, the prognostic moisture and the microphysical fields at (i, j, k). The
+# cᵖᵐ here and the kernel's division by cᵖᵐ Π therefore cancel to rounding.
 @inline function (forcing::TemperatureForcing)(i, j, k, grid, clock, fields)
     ∂ₜT = forcing.temperature_tendency(i, j, k, grid, clock, fields)
     @inbounds ρ = forcing.density[i, j, k]

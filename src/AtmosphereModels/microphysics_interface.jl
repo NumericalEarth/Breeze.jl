@@ -1126,18 +1126,15 @@ brings, heats or cools the cell. `AcousticRungeKutta3` keeps them apart
 """
 @inline sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature) =
-    sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, explicit_condensate_mass_fluxes,
-                                   formulation, dynamics, constants, microphysics, microphysical_fields,
-                                   specific_prognostic_moisture, temperature)
+    sum(sedimentation_content_tendency_parts(i, j, k, grid, condensates, wᵗ, explicit_condensate_mass_fluxes,
+                                             formulation, dynamics, constants, microphysics, microphysical_fields,
+                                             specific_prognostic_moisture, temperature))
 
-# The tendency from the part of each condensate's mass fluxes that `mass_fluxes` selects:
-# `explicit_condensate_mass_fluxes` for the part the tracer tendency applies,
-# `implicit_condensate_mass_fluxes` for the remainder the adaptive implicit solve applied.
-@inline sedimentation_content_tendency(i, j, k, grid, condensates, args...) =
-    sum(sedimentation_content_tendency_parts(i, j, k, grid, condensates, args...))
-
-# The same tendency as `(composition, sensible)`: the content χ the mass fluxes carry, and the
-# conversion ∂φ/∂h of the excess enthalpy the arriving mass brings (see `sedimentation_tendency`).
+# The tendency as `(composition, sensible)`, the content χ the mass fluxes carry and the conversion
+# ∂φ/∂h of the excess enthalpy the arriving mass brings (see `sedimentation_tendency`), from the
+# part of each condensate's mass fluxes that `mass_fluxes` selects: `explicit_condensate_mass_fluxes`
+# for the part the tracer tendency applies, `implicit_condensate_mass_fluxes` for the remainder the
+# adaptive implicit solve applied.
 @inline sedimentation_content_tendency_parts(i, j, k, grid, ::Tuple{}, args...) = (zero(grid), zero(grid))
 
 @inline function sedimentation_content_tendency_parts(i, j, k, grid, condensates, wᵗ, mass_fluxes, formulation, dynamics,

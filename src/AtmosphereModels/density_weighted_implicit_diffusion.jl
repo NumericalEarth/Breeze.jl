@@ -331,13 +331,11 @@ thermal-energy reconstruction. Matching the implicit mass flux alone does not re
 finite-step error.
 """
 function implicit_sedimentation_step!(model, Δt, velocities, formulation = model.formulation)
-    implicit_sedimentation(values(model.sedimentation)) || return nothing
     grid = model.grid
     φ = thermodynamic_density(model.formulation)
-    return add_sedimentation_tendency_parts!(φ, φ, model, velocities.w;
-                                             mass_fluxes = implicit_condensate_mass_fluxes, formulation,
-                                             microphysical_fields = diagnosed_microphysical_fields(model),
-                                             factor = kernel_time_step(grid.architecture, grid, Δt))
+    kernel_Δt = kernel_time_step(grid.architecture, grid, Δt)
+    return add_implicit_sedimentation_tendency_parts!(φ, φ, model, velocities; formulation,
+                                                      sensible_factor = kernel_Δt, composition_factor = kernel_Δt)
 end
 
 """
@@ -360,49 +358,50 @@ add_sedimentation_tendency!(timestepper, G, model, tracer_transport_velocity) =
 """
 $(TYPEDSIGNATURES)
 
-Add `factor` times the condensate sedimentation tendency of the thermodynamic variable in its two
-parts (see [`sedimentation_tendency`](@ref)): the sensible heat the arriving mass brings to `G`,
-and the composition content, the change at fixed temperature, to `C`, which may be `G` itself.
-The tendency is formed from the part of each condensate's mass fluxes that `mass_fluxes` selects
-(`explicit_condensate_mass_fluxes` for the part the tracer tendencies apply with the vertical
-velocity `wᵗ`, `implicit_condensate_mass_fluxes` for the remainder the adaptive implicit solves
-applied), with the [`condensate_content`](@ref) methods of `formulation`, which read the
-`temperature` field and the `microphysical_fields`. `AcousticRungeKutta3` integrates `G` in
-its substep loop and moves `C` outside it. `microphysical_fields` selects the state the content
-coefficients are read from; the mass fluxes read the densities held by `model.sedimentation`
-independently. A no-op when no condensate sediments.
+Add the condensate sedimentation tendency of the thermodynamic variable in its two parts (see
+[`sedimentation_tendency`](@ref)): `sensible_factor` times the sensible heat the arriving mass
+brings to `G`, and `composition_factor` times the composition content, the change at fixed
+temperature, to `C`, which may be `G` itself. The tendency is formed from the part of each
+condensate's mass fluxes that `mass_fluxes` selects (`explicit_condensate_mass_fluxes` for the part
+the tracer tendencies apply with the vertical velocity `wᵗ`, `implicit_condensate_mass_fluxes` for
+the remainder the adaptive implicit solves applied), with the [`condensate_content`](@ref) methods
+of `formulation`, which read the model's temperature field and the `microphysical_fields`.
+`AcousticRungeKutta3` integrates `G` in its substep loop and moves `C` outside it.
+`microphysical_fields` selects the state the content coefficients are read from; the mass fluxes
+read the densities held by `model.sedimentation` independently. A no-op when no condensate
+sediments.
 """
 function add_sedimentation_tendency_parts!(G, C, model, wᵗ;
                                            mass_fluxes = explicit_condensate_mass_fluxes,
                                            formulation = model.formulation,
                                            microphysical_fields = model.microphysical_fields,
-                                           temperature = model.temperature,
-                                           factor = 1)
+                                           sensible_factor = 1,
+                                           composition_factor = 1)
     condensates = values(model.sedimentation)
     isempty(condensates) && return nothing
     grid = model.grid
     launch!(grid.architecture, grid, :xyz, _add_sedimentation_tendency_parts!,
-            G, C, factor, grid, condensates, wᵗ, mass_fluxes, formulation, model.dynamics,
-            model.thermodynamic_constants, model.microphysics, microphysical_fields,
-            specific_prognostic_moisture(model), temperature)
+            G, C, sensible_factor, composition_factor, grid, condensates, wᵗ, mass_fluxes, formulation,
+            model.dynamics, model.thermodynamic_constants, model.microphysics, microphysical_fields,
+            specific_prognostic_moisture(model), model.temperature)
     return nothing
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Like [`add_sedimentation_tendency_parts!`](@ref), for the first-order remainder that the adaptive
-implicit vertical solves have just applied to the tracers, as [`implicit_sedimentation_step!`](@ref)
-forms it: the mass fluxes from the solved densities, the content per unit mass from the
-stage-entry state ([`diagnosed_microphysical_fields`](@ref)). `velocities` are the transport
-velocities whose vertical component the solves split. A no-op when no condensate is advected
-adaptively implicitly.
+Like [`add_sedimentation_tendency_parts!`](@ref), whose keyword arguments it forwards, for the
+first-order remainder that the adaptive implicit vertical solves have just applied to the tracers:
+the mass fluxes from the solved densities, the content per unit mass from the stage-entry state
+([`diagnosed_microphysical_fields`](@ref)). `velocities` are the transport velocities whose
+vertical component the solves split. A no-op when no condensate is advected adaptively implicitly.
 """
-function add_implicit_sedimentation_tendency_parts!(G, C, model, velocities)
+function add_implicit_sedimentation_tendency_parts!(G, C, model, velocities; kwargs...)
     implicit_sedimentation(values(model.sedimentation)) || return nothing
     return add_sedimentation_tendency_parts!(G, C, model, velocities.w;
                                              mass_fluxes = implicit_condensate_mass_fluxes,
-                                             microphysical_fields = diagnosed_microphysical_fields(model))
+                                             microphysical_fields = diagnosed_microphysical_fields(model),
+                                             kwargs...)
 end
 
 """
@@ -418,6 +417,9 @@ density over the total density, as every scheme with framework sedimentation doe
 Kessler, which rewrites them as mixing ratios, sediments its rain itself). The sedimentation mass
 fluxes still read the solved densities held by `model.sedimentation`.
 """
+# TODO: a `grid_moisture_fractions` entry point reading the specific fields directly would make
+# this adapter unnecessary; it needs a method per scheme, whose `microphysical_state` is built
+# from the densities.
 function diagnosed_microphysical_fields(model)
     μ = model.microphysical_fields
     ρ = total_density(model.dynamics)
@@ -426,14 +428,14 @@ function diagnosed_microphysical_fields(model)
     return merge(μ, NamedTuple{names}(densities))
 end
 
-@kernel function _add_sedimentation_tendency_parts!(G, C, factor, grid, condensates, wᵗ, mass_fluxes, formulation,
-                                                    dynamics, constants, microphysics, microphysical_fields,
-                                                    specific_prognostic_moisture, temperature)
+@kernel function _add_sedimentation_tendency_parts!(G, C, sensible_factor, composition_factor, grid, condensates, wᵗ,
+                                                    mass_fluxes, formulation, dynamics, constants, microphysics,
+                                                    microphysical_fields, specific_prognostic_moisture, temperature)
     i, j, k = @index(Global, NTuple)
     composition, sensible = sedimentation_content_tendency_parts(i, j, k, grid, condensates, wᵗ, mass_fluxes,
                                                                  formulation, dynamics, constants, microphysics,
                                                                  microphysical_fields, specific_prognostic_moisture,
                                                                  temperature)
-    @inbounds G[i, j, k] += factor * sensible
-    @inbounds C[i, j, k] += factor * composition
+    @inbounds G[i, j, k] += sensible_factor * sensible
+    @inbounds C[i, j, k] += composition_factor * composition
 end

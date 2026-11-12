@@ -708,12 +708,12 @@ end
         return column(Gρqʳ)
     end
 
-    stage_content_field = model.timestepper.sedimentation_content
+    stage_content_field = Breeze.TimeSteppers.sedimentation_bypass(model).content
     function stage_content_parts()
         Breeze.AtmosphereModels.compute_tendencies!(model)
         slow = column(Gρθ)
         fill!(stage_content_field, 0)
-        Breeze.TimeSteppers.add_explicit_sedimentation_content!(model)
+        Breeze.TimeSteppers.add_explicit_sedimentation_content!(model, 1) # over a unit interval: the tendency
         return column(stage_content_field), column(Gρθ) .- slow
     end
     composition_content() = stage_content_parts()[1]

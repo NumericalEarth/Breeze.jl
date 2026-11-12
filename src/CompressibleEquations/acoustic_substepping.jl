@@ -32,7 +32,7 @@ using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: implicit_step!
-using Oceananigans.Grids: ZDirection, rnode, znode, node
+using Oceananigans.Grids: XDirection, YDirection, ZDirection, rnode, znode, node
 using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
@@ -93,8 +93,12 @@ Fields:
 - `time_averaged_vertical_velocity_cache`: the acoustic-mean transport velocity the moisture and
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
   tendency's condensate sedimentation term (see `cache_transport_velocity!`).
+- `sedimentation_bypass`: the `SedimentationBypass` holding the condensate sedimentation
+  content of the thermodynamic variable that `AcousticRungeKutta3` keeps out of the loop, and the
+  copy of the full variable the loop's open-boundary relaxation reads; `nothing` when no
+  condensate sediments.
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC, SB}
     substeps :: N
     acoustic_cfl :: FT
     minimum_horizontal_spacing :: FT
@@ -134,6 +138,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
     density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
     time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w the moisture and tracer tendencies were built with
+    sedimentation_bypass :: SB                    # `SedimentationBypass`; `nothing` without sedimenting condensate
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -163,7 +168,29 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.vertical_solver),
                        adapt(to, a.vertical_velocity_cache),
                        adapt(to, a.density_cache),
-                       adapt(to, a.time_averaged_vertical_velocity_cache))
+                       adapt(to, a.time_averaged_vertical_velocity_cache),
+                       adapt(to, a.sedimentation_bypass))
+
+"""
+$(TYPEDEF)
+
+The condensate sedimentation composition content of the thermodynamic variable that
+`AcousticRungeKutta3` keeps out of the substep loop, and the copy of the full variable that stands
+in for the live field while the content is out of it. `content` holds the increment the stage
+collects and adds after the loop; `frozen_thermodynamic_density` holds the stage-entry variable,
+read by the moisture and tracer solves' coefficients and by the loop's open-boundary relaxation,
+and then the variable with the content added, read by the post-loop solves (see
+`Breeze.TimeSteppers.remove_sedimentation_content!`).
+"""
+struct SedimentationBypass{C, F}
+    content :: C
+    frozen_thermodynamic_density :: F
+end
+
+SedimentationBypass(grid) = SedimentationBypass(CenterField(grid), CenterField(grid))
+
+Adapt.adapt_structure(to, b::SedimentationBypass) =
+    SedimentationBypass(adapt(to, b.content), adapt(to, b.frozen_thermodynamic_density))
 
 #####
 ##### Section 2 — Constructor
@@ -178,10 +205,12 @@ prognostic momentum's BCs: inheriting them would imprint the full-state wall tar
 halo for a nonzero `NormalFlowBoundaryCondition` (issue \\#716) and apply momentum BCs to velocity fields.
 The wall target re-enters via the prognostic momentum's own BC after each substep's momentum update.
 The `prognostic_momentum` kwarg is retained for backwards compatibility but no longer consulted.
+`sedimentation_bypass = true` allocates the `SedimentationBypass` for a model in which condensate
+sediments.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
                             prognostic_momentum = nothing, substep_floattype = eltype(grid),
-                            cache_advecting_state = false)
+                            cache_advecting_state = false, sedimentation_bypass = false)
     Ns = split_explicit.substeps
     FT = eltype(grid)
     ω = convert(FT, split_explicit.forward_weight)
@@ -242,6 +271,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
     density_cache = cache_advecting_state ? CenterField(grid) : nothing
     time_averaged_vertical_velocity_cache = ZFaceField(grid)
+    bypass = sedimentation_bypass ? SedimentationBypass(grid) : nothing
 
     return AcousticSubstepper(Ns, acoustic_cfl, Δx_min, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -263,7 +293,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               vertical_solver,
                               vertical_velocity_cache,
                               density_cache,
-                              time_averaged_vertical_velocity_cache)
+                              time_averaged_vertical_velocity_cache,
+                              bypass)
 end
 
 #####
@@ -1407,22 +1438,16 @@ end
 # prognostic `ValueBoundaryCondition` to the base at stage entry, so
 # `ρᴸ[halo] = 2v − ρᴸ[cell]` and the target perturbation is
 # `v − ρᴸ[cell] = (ρᴸ[halo] − ρᴸ[cell]) / 2`, read straight from the base field.
-# The thermodynamic base may be the stage-entry variable less the condensate
-# sedimentation content the stage adds back after the loop (`AcousticRungeKutta3`).
-# The wall value then comes from the stage-entry variable `ρθⁿ` as `update_state!`
-# left it. A `ValueBoundaryCondition` on the thermodynamic variable prescribes the
-# full variable at the wall, so the content `C` the stage will add comes off the
-# target, `(ρθⁿ[halo] + ρθⁿ[cell]) / 2 − ρθᴸ[cell] − C[cell]`, and the full variable,
-# content included, lands on the wall value. Any other condition (the default flux
-# or a gradient condition) prescribes no thermodynamic wall value: its halo
-# extrapolates the interior, and the target is the base's own extrapolation,
-# `(ρθᴸ[halo] − ρθᴸ[cell]) / 2`, as without sedimentation. The base is the
-# stage-entry variable less the previous stage's content, halos included, so it holds
-# back only the pressure-changing part of the variable and the content added after
-# the loop reaches the boundary cell as it does the interior. The stage-entry
-# variable would not do: it carries the previous stage's content, and every stage
-# rewinds to the outer-step start, so holding it would accumulate each stage's
-# content on top of the last.
+# With a `SedimentationBypass` the thermodynamic base is the stage-entry variable
+# less the previous stage's condensate sedimentation content, halos included, and the
+# stage adds its own content `C` after the loop. Where a `ValueBoundaryCondition`
+# prescribes the full variable at the wall, the wall value is read from the bypass's
+# copy of the stage-entry variable `ρθⁿ`, and `C` comes off the target,
+# `(ρθⁿ[halo] + ρθⁿ[cell]) / 2 − ρθᴸ[cell] − C[cell]`, so that the full variable lands
+# on the wall value. Any other condition prescribes no thermodynamic wall value: its
+# halo extrapolates the interior, the target is the base's own extrapolation as
+# without sedimentation, only the pressure-changing part of the variable is held, and
+# the content reaches the boundary cell as it does the interior.
 # Relaxation factor `α ∈ (0, 1]` (default 0.5, via
 # `SplitExplicitTimeDiscretization(; open_boundary_relaxation = α)`). No-op on any
 # side without an active `NormalFlowBoundaryCondition` (periodic/walls/`nothing`
@@ -1434,40 +1459,35 @@ end
 # cell: v − cᴸ[Iᴮ] = (cᴸ[Iᴴ] − cᴸ[Iᴮ]) / 2 off the base `cᴸ` itself, or, for a base that is the
 # stage-entry variable `cⁿ` less the sedimentation content `C` the stage adds after the loop,
 # v − cᴸ[Iᴮ] − C[Iᴮ] with v = (cⁿ[Iᴴ] + cⁿ[Iᴮ]) / 2.
-@inline relaxation_target(cᴸ, ::Nothing, ::Nothing, Iᴴ, Iᴮ) = @inbounds (cᴸ[Iᴴ...] - cᴸ[Iᴮ...]) / 2
+@inline relaxation_target(cᴸ, Iᴴ, Iᴮ) = @inbounds (cᴸ[Iᴴ...] - cᴸ[Iᴮ...]) / 2
+@inline relaxation_target(cᴸ, ::Nothing, ::Nothing, Iᴴ, Iᴮ) = relaxation_target(cᴸ, Iᴴ, Iᴮ)
 @inline relaxation_target(cᴸ, cⁿ, C, Iᴴ, Iᴮ) = @inbounds (cⁿ[Iᴴ...] + cⁿ[Iᴮ...]) / 2 - cᴸ[Iᴮ...] - C[Iᴮ...]
 
 # The stage-entry variable and sedimentation content the thermodynamic target reads on one side:
-# both where a value condition prescribes the full variable at the wall, neither otherwise, so
-# that the target is the base's own extrapolation.
-wall_thermodynamic_state(::BoundaryCondition{<:Value}, ρθⁿ, C) = (ρθⁿ, C)
-wall_thermodynamic_state(bc, ρθⁿ, C) = (nothing, nothing)
+# both where a value condition prescribes the full variable at the wall and a bypass holds them,
+# neither otherwise, so that the target is the base's own extrapolation.
+wall_thermodynamic_state(bc, bypass) = (nothing, nothing)
+wall_thermodynamic_state(::BoundaryCondition{<:Value}, bypass::SedimentationBypass) =
+    (bypass.frozen_thermodynamic_density, bypass.content)
+
+# The cell with index `c` along `direction`, at the kernel's (m, n) across it.
+@inline boundary_cell(::XDirection, c, m, n) = (c, m, n)
+@inline boundary_cell(::YDirection, c, m, n) = (m, c, n)
 
 # Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the wall value in a single
-# kernel. `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
-@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, iᴮ, iᴴ, α)
-    j, k = @index(Global, NTuple)
-    Iᴮ = (iᴮ, j, k)
-    Iᴴ = (iᴴ, j, k)
+# kernel. `cᴮ` is the outermost interior cell index along `direction`, `cᴴ` the adjacent halo
+# cell index.
+@kernel function _relax_open_boundary!(ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, direction, cᴮ, cᴴ, α)
+    m, n = @index(Global, NTuple)
+    Iᴮ = boundary_cell(direction, cᴮ, m, n)
+    Iᴴ = boundary_cell(direction, cᴴ, m, n)
     @inbounds begin
-        ρ′[iᴮ, j, k]  += α * (relaxation_target(ρᴸ, nothing, nothing, Iᴴ, Iᴮ) - ρ′[iᴮ, j, k])
-        ρθ′[iᴮ, j, k] += α * (relaxation_target(ρθᴸ, ρθⁿ, C, Iᴴ, Iᴮ) - ρθ′[iᴮ, j, k])
+        ρ′[Iᴮ...]  += α * (relaxation_target(ρᴸ, Iᴴ, Iᴮ) - ρ′[Iᴮ...])
+        ρθ′[Iᴮ...] += α * (relaxation_target(ρθᴸ, ρθⁿ, C, Iᴴ, Iᴮ) - ρθ′[Iᴮ...])
     end
 end
 
-@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, ρθⁿ, C, jᴮ, jᴴ, α)
-    i, k = @index(Global, NTuple)
-    Iᴮ = (i, jᴮ, k)
-    Iᴴ = (i, jᴴ, k)
-    @inbounds begin
-        ρ′[i, jᴮ, k]  += α * (relaxation_target(ρᴸ, nothing, nothing, Iᴴ, Iᴮ) - ρ′[i, jᴮ, k])
-        ρθ′[i, jᴮ, k] += α * (relaxation_target(ρθᴸ, ρθⁿ, C, Iᴴ, Iᴮ) - ρθ′[i, jᴮ, k])
-    end
-end
-
-# `ρθⁿ` and `C` are the stage-entry thermodynamic variable and the stage's sedimentation content
-# increment when the base is the variable without that content, `nothing` otherwise.
-function apply_open_boundary_relaxation!(substepper, model, grid, arch, ρθⁿ, C)
+function apply_open_boundary_relaxation!(substepper, model, grid, arch)
     bcs_u = model.momentum.ρu.boundary_conditions
     bcs_v = model.momentum.ρv.boundary_conditions
     Nx, Ny, _ = size(grid)
@@ -1477,21 +1497,22 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch, ρθⁿ,
     ρᴸ  = model.dynamics.dry_density
     ρθᴸ = thermodynamic_density(model.formulation)
     bcs_θ = ρθᴸ.boundary_conditions
+    bypass = substepper.sedimentation_bypass
     if is_active_open_bc(bcs_u.west)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ,
-                wall_thermodynamic_state(bcs_θ.west, ρθⁿ, C)..., 1, 0, α)
+        launch!(arch, grid, :yz, _relax_open_boundary!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.west, bypass)..., XDirection(), 1, 0, α)
     end
     if is_active_open_bc(bcs_u.east)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ,
-                wall_thermodynamic_state(bcs_θ.east, ρθⁿ, C)..., Nx, Nx + 1, α)
+        launch!(arch, grid, :yz, _relax_open_boundary!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.east, bypass)..., XDirection(), Nx, Nx + 1, α)
     end
     if is_active_open_bc(bcs_v.south)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ,
-                wall_thermodynamic_state(bcs_θ.south, ρθⁿ, C)..., 1, 0, α)
+        launch!(arch, grid, :xz, _relax_open_boundary!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.south, bypass)..., YDirection(), 1, 0, α)
     end
     if is_active_open_bc(bcs_v.north)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ,
-                wall_thermodynamic_state(bcs_θ.north, ρθⁿ, C)..., Ny, Ny + 1, α)
+        launch!(arch, grid, :xz, _relax_open_boundary!, ρ′, ρθ′, ρᴸ, ρθᴸ,
+                wall_thermodynamic_state(bcs_θ.north, bypass)..., YDirection(), Ny, Ny + 1, α)
     end
     return nothing
 end
@@ -1567,7 +1588,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     g = convert(FT, constants.gravitational_acceleration)
     ω = FT(substepper.forward_weight)
     Gⁿ = model.timestepper.Gⁿ
-    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, entry_thermodynamic_density, sedimentation_content) = stage
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
 
     # Step A: explicit horizontal forward of (ρu)′, (ρv)′.
     launch!(arch, grid, :xyz, _explicit_horizontal_step!,
@@ -1656,8 +1677,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # Per-substep open-boundary enforcement (issue #738): relax the outermost
     # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
     # the halo fill, so the boundary cell tracks the prescribed inflow state.
-    apply_open_boundary_relaxation!(substepper, model, grid, arch,
-                                    entry_thermodynamic_density, sedimentation_content)
+    apply_open_boundary_relaxation!(substepper, model, grid, arch)
 
     fill_halo_regions!(substepper.density_perturbation)
     fill_halo_regions!(substepper.density_potential_temperature_perturbation)
@@ -1683,16 +1703,13 @@ $(TYPEDSIGNATURES)
 Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
 `substepper.substep_distribution`. The recovery of the full state from the stage-entry state and
-the accumulated perturbations is rounded with the round-off treatment `rounding`.
-
-When the thermodynamic base is the stage-entry variable less a condensate `sedimentation_content`
-increment that the caller adds after the loop (`AcousticRungeKutta3`), the open-boundary
-relaxation reads the wall value from `entry_thermodynamic_density`, the stage-entry variable, and
-takes the increment off its target (see `apply_open_boundary_relaxation!`).
+the accumulated perturbations is rounded with the round-off treatment `rounding`. With a
+`sedimentation_bypass` on the substepper, the thermodynamic base is the stage-entry variable less
+the condensate sedimentation content the caller adds after the loop, and the open-boundary
+relaxation targets the wall value of the full variable (see `apply_open_boundary_relaxation!`).
 """
 function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing;
-                                    rounding = RoundToNearest(),
-                                    entry_thermodynamic_density = nothing, sedimentation_content = nothing)
+                                    rounding = RoundToNearest())
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -1729,7 +1746,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
-    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, entry_thermodynamic_density, sedimentation_content)
+    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
     acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a

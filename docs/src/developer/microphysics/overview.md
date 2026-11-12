@@ -257,24 +257,21 @@ solved state: the content each unit of mass carries comes from the stage-entry s
 the explicit fraction's content was formed from. The solves have moved the condensate while the
 thermodynamic variable has not yet received its content, so a temperature diagnosed from the two
 would be off by about ``ℒ Δq / cᵖ`` and the sensible part would turn that fictitious contrast
-into heating, even in an isothermal column. The acoustic stepper splits the content, explicit and
-implicit, in two, formed the same way. Its substep loop forms the pressure perturbation from the
-thermodynamic perturbation alone. The sensible heat the arriving mass brings is a real heating, so it joins the
+into heating, even in an isothermal column. Rain-out thus leaves latent warming aloft and
+pre-cools the layer that later evaporates the arriving rain, the mechanism that builds cold pools.
+
+The acoustic stepper, `AcousticRungeKutta3`, forms the same content, explicit and implicit, but
+splits it in two, because its substep loop forms the pressure perturbation from the thermodynamic
+perturbation alone. The sensible heat the arriving mass brings is a real heating, so it joins the
 slow tendency the loop integrates. The composition content changes ``ρθˡⁱ`` at fixed temperature
 and so leaves the pressure alone; fed to the loop it would read as a spurious pressure
 perturbation. Each stage therefore collects it separately and adds it to the variable after the
-loop, before the variable's post-loop implicit solve, which the content then takes too, in a solve
-of its own, both solves reading their coefficients from the variable frozen between the addition
-and the solves; the next stage takes exactly the solved increment back out of its stage-entry
-state. The loop's implicit thermodynamic transport, applied inside the loop, never sees the
-content: a first-order splitting difference. At an open lateral boundary the substep loop relaxes
-the outermost cell toward its wall value. A value boundary condition on the thermodynamic variable
-prescribes the full variable there, content included, so the relaxation takes the stage's content
-off its target and the boundary cell keeps the prescribed value as rain falls through it. Any
-other condition prescribes no thermodynamic wall value; the relaxation then holds back only the
-pressure-changing part of the variable, and the content reaches the boundary cell as it does the
-interior. Rain-out thus leaves latent warming aloft and pre-cools the layer that later evaporates
-the arriving rain, the mechanism that builds cold pools.
+loop, before the variable's post-loop implicit solve, which the content then takes too in a solve
+of its own; the next stage takes the solved increment back out of its stage-entry state, after
+refreshing the loop's linearization from the full state. The loop's open-boundary relaxation
+targets the wall value of the full variable, content included, where a value boundary condition
+prescribes one. The stepper's section comment on the bypass has the details, and the two
+first-order splitting differences it leaves under an adaptive implicit scheme on the variable.
 
 ### Bottom Precipitation Flux
 

@@ -3,7 +3,6 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: TendencyCallsite
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Models: boundary_condition_args
-using Oceananigans.Fields: CenterField
 using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -48,10 +47,10 @@ acoustic substepping for fully compressible dynamics. Stage fractions
      rewind term so every stage still advances from the outer-step-start
      prognostic state.
   4. Adds the composition content that the sedimenting condensate moved,
-     which the substep loop never sees (see `remove_sedimentation_content!`),
-     then solves the vertically-implicit pieces of momentum and the
-     thermodynamic variable, the content taking the variable's solve in a
-     solve of its own.
+     which the substep loop never sees (see the section comment on the
+     sedimentation content bypass), then solves the vertically-implicit
+     pieces of momentum and the thermodynamic variable, the content taking
+     the variable's solve in a solve of its own.
 
 The acoustic substep loop is in
 [`acoustic_rk3_substep_loop!`](@ref); see
@@ -67,16 +66,8 @@ Fields
 - `implicit_solver`: Optional solver for the vertically-implicit pieces — closure diffusion
   and the adaptive-implicit vertical-advection remainder.
 - `substepper`: [`AcousticSubstepper`](@ref) for the linearized acoustic
-  substep loop.
-- `sedimentation_content`: The composition content of the thermodynamic variable that
-  condensate sedimentation moves in the current stage, kept out of the substep loop; `nothing`
-  when no condensate sediments.
-- `frozen_thermodynamic_density`: A copy of the thermodynamic variable, taken at stage entry for
-  the moisture and tracer solves' coefficients and the substep loop's open-boundary relaxation to
-  read the full variable from while the content is out of the live field, and again after the
-  stage's content is added, for the post-loop solves of the variable and the content to read
-  their coefficients from (see `freeze_thermodynamic_density!`); `nothing` when no condensate
-  sediments.
+  substep loop; it also holds the `SedimentationBypass` through which the
+  condensate sedimentation content of the thermodynamic variable skips the loop.
 - `rounding`: Round-off treatment of the final stage's update, [`RoundToNearest`](@ref)
   or [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding).
 
@@ -86,7 +77,7 @@ References
 Wicker, L. J. & Skamarock, W. C. (2002). *Time-splitting methods for
 elastic models using forward time schemes.* MWR 130, 2088–2097.
 """
-struct AcousticRungeKutta3{FT, U0, TG, TI, AS, SC, FD, R} <: AbstractTimeStepper
+struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R} <: AbstractTimeStepper
     β₁ :: FT
     β₂ :: FT
     β₃ :: FT
@@ -94,8 +85,6 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS, SC, FD, R} <: AbstractTimeStepper
     Gⁿ :: TG
     implicit_solver :: TI
     substepper :: AS
-    sedimentation_content :: SC
-    frozen_thermodynamic_density :: FD
     rounding :: R
 end
 
@@ -105,10 +94,8 @@ $(TYPEDSIGNATURES)
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
 
 `sedimentation` holds the model's sedimenting condensates (see `materialize_sedimentation`);
-when there are any, the stepper allocates a field for the content they move each stage and one
-for the copy of the thermodynamic variable that stands in for it while the content is out of
-the live field, and that the post-loop solves read their coefficients from
-(see `freeze_thermodynamic_density!`).
+when there are any, the substepper allocates the `SedimentationBypass` through which the content
+they move each stage skips the substep loop (see the section comment on the bypass).
 `Gⁿ` and `U⁰` may be supplied to alias another stepper's tendency storage instead of
 allocating fresh fields (used by the native-stepper adiabatic-balance twin).
 
@@ -144,22 +131,13 @@ function AcousticRungeKutta3(grid, prognostic_fields;
 
     substepper = AcousticSubstepper(grid, dynamics.time_discretization;
                                     cache_advecting_state,
+                                    sedimentation_bypass = !isempty(sedimentation),
                                     prognostic_momentum = (ρu = prognostic_fields.ρu,
                                                            ρv = prognostic_fields.ρv,
                                                            ρw = prognostic_fields.ρw))
     AS = typeof(substepper)
 
-    sedimentation_content = isempty(sedimentation) ? nothing : CenterField(grid)
-    SC = typeof(sedimentation_content)
-
-    frozen_thermodynamic_density = isempty(sedimentation) ? nothing : CenterField(grid)
-    FD = typeof(frozen_thermodynamic_density)
-
-    return AcousticRungeKutta3{FT, U0, TG, TI, AS, SC, FD, R}(β₁, β₂, β₃, U⁰, Gⁿ,
-                                                               implicit_solver, substepper,
-                                                               sedimentation_content,
-                                                               frozen_thermodynamic_density,
-                                                               rounding)
+    return AcousticRungeKutta3{FT, U0, TG, TI, AS, R}(β₁, β₂, β₃, U⁰, Gⁿ, implicit_solver, substepper, rounding)
 end
 
 #####
@@ -210,74 +188,58 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, stage, rounding 
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = ts.U⁰
+    Δt_stage = β * Δt
 
     # `update_state!` built the slow tendencies (advection + Coriolis + diffusion; PGF and
     # buoyancy are excluded — those are handled inside the substep loop in linearized form
-    # about the RK stage-entry state). Add the boundary flux and closure tendencies to them,
-    # before the content removal below: a boundary condition or a closure may read the
-    # thermodynamic variable itself, and must see the full stage-entry state.
+    # about the RK stage-entry state). Add the boundary flux and closure tendencies, which may
+    # read the thermodynamic variable and must see the full stage-entry state, before the
+    # content removal below.
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
 
-    # Keep the full stage-entry thermodynamic variable, halos included, for what must read it
-    # while the content is out of the live field below: the coefficients of the moisture and
-    # tracer solves, and the wall value the substep loop's open-boundary relaxation targets.
-    freeze_thermodynamic_density!(model)
-
-    # Take the previous stage's sedimentation composition content back out of the thermodynamic
-    # variable, so that neither the linearization nor the rewind below reads it as a pressure
-    # change (see `remove_sedimentation_content!`). Nothing is pending in stage 1.
-    remove_sedimentation_content!(model, stage)
-
-    # Per-stage cache prep. The linearization coefficients are refreshed
-    # to the current RK stage-entry state; the substep perturbations are
-    # initialized with a rewind term inside the substep loop so the
-    # WS-RK3 invariant still starts from Uⁿ.
+    # Per-stage cache prep, from the full stage-entry state `update_state!` diagnosed and before
+    # the content removal below: the temperature the linearization's slope is differentiated at
+    # must match the moisture the variable carries (see the section comment on the sedimentation
+    # content bypass). The substep perturbations are initialized with a rewind term inside the
+    # substep loop so the WS-RK3 invariant still starts from Uⁿ.
     prepare_acoustic_cache!(substepper, model)
     cache_advecting_state!(model)
 
-    # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
-    # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
-    # substep inside the loop, dispatched on the scheme type.
+    # Keep the full stage-entry thermodynamic variable and take the previous stage's sedimentation
+    # composition content out of the live field, so that the rewind below does not read it as a
+    # pressure change. Nothing is pending in stage 1.
+    remove_sedimentation_content!(model, stage)
+
+    # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless the
+    # thermodynamic scheme is adaptive-implicit); the perturbation part is solved per substep
+    # inside the loop. It reads the live variable, now without the previous stage's content.
     add_implicit_advection_tendency!(model)
 
-    # This stage's sedimentation content, sensible heat into the slow tendency and composition
-    # content into the stage's own field: the explicit part now, from the tracers' frozen
-    # transport velocity, and the implicit remainder's in `scalar_rk3_substep!`.
-    add_explicit_sedimentation_content!(model)
+    # This stage's sedimentation content: the explicit part now, from the tracers' frozen
+    # transport velocity; the implicit remainder's in `scalar_rk3_substep!`, after the tracer solves.
+    add_explicit_sedimentation_content!(model, Δt_stage)
 
     # Update remaining scalars (tracers) using WS-RK3, their implicit solves included. Their
     # tendencies and the transport velocity their solves split were frozen before this stage, so
     # they need nothing from the substep loop, and they run before it so that the content of the
-    # mass their solves sediment reaches the loop's slow tendency and the stage's own field in time.
-    # They follow the removal and the cache prep because the linearization's mixture coefficients
-    # read the stage-entry moisture, which they change; their solves' coefficients read the
-    # thermodynamic variable from its stage-entry copy (`frozen_thermodynamic_fields`).
-    scalar_rk3_substep!(model, β * Δt, rounding)
-
-    # The content is complete: scale it to the stage's increment, which the loop's open-boundary
-    # relaxation takes off its target where a value condition prescribes the wall value, and
-    # `apply_sedimentation_content!` adds after the loop.
-    scale_sedimentation_content!(model, β * Δt)
+    # mass their solves sediment reaches the loop's slow tendency in time. They follow the cache
+    # prep because the linearization's mixture coefficients read the stage-entry moisture.
+    scalar_rk3_substep!(model, Δt_stage, rounding)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
-    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection; rounding,
-                               entry_thermodynamic_density = ts.frozen_thermodynamic_density,
-                               sedimentation_content = ts.sedimentation_content)
+    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection; rounding)
 
     # Add the stage's sedimentation composition content, so that the solves below see the full
-    # state, halos included. The variable's implicit vertical transport was applied inside the
-    # substep loop, without it.
-    apply_sedimentation_content!(model)
+    # state, halos included.
+    apply_sedimentation_content!(model, rounding)
 
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
-    # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
-    # vertical advection combined with vertically-implicit closure diffusion. The stage's
-    # sedimentation composition content takes the thermodynamic variable's solve too, in a solve
-    # of its own, so that the next stage takes out exactly what the variable received
-    # (`thermodynamic_implicit_substep!`). A no-op when the timestepper has no implicit solver.
-    implicit_substep!(model, β * Δt)
+    # variable) over the stage interval: the implicit remainder of adaptive implicit vertical
+    # advection combined with vertically-implicit closure diffusion, the content taking the
+    # variable's solve in a solve of its own. A no-op when the timestepper has no implicit solver.
+    implicit_substep!(model, Δt_stage)
 
     return nothing
 end
@@ -329,24 +291,38 @@ end
 ##### pressure where the split engages drove motion and adiabatic heating and cooling of several
 ##### kelvin, concentrated where the fall Courant number crosses the split's CFL target.
 #####
-##### So the composition content bypasses the loop. Each stage:
-#####   - keeps a copy of the full stage-entry variable, then takes out the composition content the
-#####     previous stage added, halos included, so the rewind and the linearization base θᴸ measure
-#####     only pressure-changing differences from Uⁿ. The base is thus a hybrid: pᴸ and the total
-#####     density are those of the full state `update_state!` diagnosed, while θᴸ is the
-#####     pressure-relevant ρθ over ρᵈ and the slope Cᴸ is evaluated there. The content is O(Δt), so
-#####     the Θ-flux the loop forms from θᴸ and the slope Cᴸ differ by second-order terms. What must see the full variable meanwhile reads the copy:
-#####     the coefficients of the moisture and tracer solves, and the loop's open-boundary
-#####     relaxation where a value condition prescribes the full variable at the wall, which
-#####     targets the copy's wall value less the increment below;
-#####   - collects its own, explicit and implicit, as a tendency, and scales it to the stage's
-#####     increment once complete;
-#####   - after the loop, adds the increment to the variable, refills the variable's halos, and
-#####     takes the increment through the variable's post-loop solve in a solve of its own, with
-#####     the variable's boundary conditions, both solves reading their coefficients from a copy of
-#####     the full variable frozen between the addition and the solves, so both see one operator;
-#####     the field keeps the solved increment for the next stage to take out exactly.
+##### So the composition content bypasses the loop, through the substepper's
+##### `SedimentationBypass`: a content field and a copy of the thermodynamic variable. Each stage:
+#####   - refreshes the loop's linearization, θᴸ and the slope Cᴸ, from the full stage-entry state
+#####     `update_state!` diagnosed, whose temperature matches its moisture
+#####     (`prepare_acoustic_cache!`). Differentiated at the variable less a stage's content, with
+#####     the full moisture, the slope would sit at a temperature off by about ℒ Δq / cᵖ, tens of
+#####     kelvin in a cell a rain front crossed during the previous stage at a large time step, and
+#####     the loop's sound speed off by several percent there;
+#####   - copies the full stage-entry variable, then takes out the composition content the
+#####     previous stage added, halos included, so that the rewind, and the base the loop recovers
+#####     the full state from, measure only pressure-changing differences from Uⁿ
+#####     (`remove_sedimentation_content!`). What must see the full variable meanwhile reads the
+#####     copy: the coefficients of the moisture and tracer solves (`frozen_thermodynamic_fields`),
+#####     and the loop's open-boundary relaxation where a value condition prescribes the full
+#####     variable at the wall (`apply_open_boundary_relaxation!`);
+#####   - collects its own content, explicit and implicit, scaled to the stage's increment
+#####     (`add_explicit_sedimentation_content!`, `add_implicit_sedimentation_content!`);
+#####   - after the loop, adds the increment to the variable, rounded like the loop's recovery of
+#####     the full state (`apply_sedimentation_content!`), and takes it through the variable's
+#####     post-loop solve in a solve of its own, both solves reading their coefficients from the
+#####     copy refreshed between the addition and the solves, so that the content field keeps
+#####     exactly what the variable received, for the next stage to take out
+#####     (`thermodynamic_implicit_substep!`).
 ##### Uⁿ includes the content of every completed step, so stage 1 has none to take out.
+#####
+##### Two first-order splitting differences remain in the variable's own vertical transport
+##### under an adaptive implicit scheme. The content never takes the implicit transport the loop
+##### applies to the rest of the variable, only the post-loop solve. And the base flux of the
+##### implicit half (`add_implicit_advection_tendency!`) is formed from the live variable after the
+##### removal, so it carries the variable less the previous stage's content, while the explicit
+##### half in the slow tendency was formed from the full variable. Both differences are the
+##### content, O(Δt), transported over a stage.
 #####
 ##### The bypass covers sedimentation only. Condensate that the resolved flow advects moves its
 ##### content with it, so that part of the thermodynamic advection tendency changes ρθˡⁱ at nearly
@@ -354,108 +330,112 @@ end
 ##### in the rewind alike. Nothing here corrects that.
 #####
 
+# The substepper's `SedimentationBypass`, `nothing` when no condensate sediments, and its content.
+sedimentation_bypass(model) = model.timestepper.substepper.sedimentation_bypass
+sedimentation_content(::Nothing) = nothing
+sedimentation_content(bypass) = bypass.content
+
 """
 $(TYPEDSIGNATURES)
 
-Take the sedimentation composition content that the previous stage added out of the
-thermodynamic variable, and clear the stepper's `sedimentation_content` for this stage to collect
-its own. The substep loop's linearization and rewind then read only the differences from the
-outer-step-start state that change the pressure: the composition content moved with sedimenting
-condensate changes `ρθˡⁱ` at fixed temperature, and so at fixed pressure. A no-op when no
-condensate sediments. In `stage` 1 there is nothing to take out, the entry state `Uⁿ` including
-the content of every completed step, and the field is only cleared.
+Open a stage of the sedimentation content bypass (see the section comment above): copy the full
+thermodynamic variable, halos included, into the bypass's `frozen_thermodynamic_density`, take the
+composition content the previous stage added out of the live variable, halos included, and clear
+the content field for this stage to collect its own. In `stage` 1 there is nothing to take out,
+the entry state `Uⁿ` including the content of every completed step. A no-op when no condensate
+sediments.
 
 The content comes out of the halos too, extended into them with no gradient at a wall and
 periodically, so that the reduced variable's halos are the full variable's less the content and
 the vertical operators the stage applies to the reduced variable see no step at the boundaries.
-The variable's own boundary conditions hold for the full variable, which the stage keeps a copy
-of (`freeze_thermodynamic_density!`): where a value condition prescribes the wall value, the
-substep loop's open-boundary relaxation reads it from that copy (see
-`apply_open_boundary_relaxation!`).
+The variable's own boundary conditions hold for the full variable, which the copy keeps.
 """
-remove_sedimentation_content!(model, stage) =
-    remove_sedimentation_content!(model.timestepper.sedimentation_content, model, stage)
+remove_sedimentation_content!(model, stage) = remove_sedimentation_content!(sedimentation_bypass(model), model, stage)
 
 remove_sedimentation_content!(::Nothing, model, stage) = nothing
 
-function remove_sedimentation_content!(content, model, stage)
-    if stage > 1
-        ρᵡ = thermodynamic_density(model.formulation)
-        fill_halo_regions!(content)
-        parent(ρᵡ) .-= parent(content)
-    end
-    fill!(content, 0)
-    return nothing
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Add the explicit condensate sedimentation tendency of the thermodynamic variable in its two parts:
-the sensible heat to the slow tendency the substep loop integrates, and the composition content
-to the stepper's `sedimentation_content`. Both are formed from the state `update_state!` diagnosed
-and the frozen transport velocity the moisture and tracer tendencies were built with, so their
-fluxes pair with the mass fluxes those tendencies apply (see `add_sedimentation_tendency_parts!`).
-"""
-function add_explicit_sedimentation_content!(model)
-    ts = model.timestepper
-    G = getproperty(ts.Gⁿ, thermodynamic_density_name(model.formulation))
-    return add_sedimentation_tendency_parts!(G, ts.sedimentation_content, model, tendency_transport_velocities(model).w)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-The implicit counterpart of [`add_explicit_sedimentation_content!`](@ref): the content of the mass
-that the tracers' adaptive implicit solves have just sedimented, from the solved mass fluxes and
-the `velocities` they split. The same two parts use thermal coefficients from the consistent
-stage-entry state (see [`add_implicit_sedimentation_tendency_parts!`](@ref)).
-"""
-function add_implicit_sedimentation_content!(model, velocities)
-    ts = model.timestepper
-    G = getproperty(ts.Gⁿ, thermodynamic_density_name(model.formulation))
-    return add_implicit_sedimentation_tendency_parts!(G, ts.sedimentation_content, model, velocities)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Turn the sedimentation composition content tendency the stage collected into its increment over
-the stage interval `Δt_stage`, once its explicit and implicit parts are both in. The substep
-loop's open-boundary relaxation takes the increment off its target where a value condition
-prescribes the thermodynamic wall value (see `apply_open_boundary_relaxation!`), and
-[`apply_sedimentation_content!`](@ref) adds it to the thermodynamic variable after the loop.
-"""
-scale_sedimentation_content!(model::AtmosphereModel, Δt_stage) =
-    scale_sedimentation_content!(model.timestepper.sedimentation_content, Δt_stage)
-
-scale_sedimentation_content!(::Nothing, Δt_stage) = nothing
-
-function scale_sedimentation_content!(content, Δt_stage)
-    parent(content) .*= Δt_stage
-    return nothing
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Add the stage's sedimentation composition content increment to the thermodynamic variable, ahead
-of the variable's post-loop implicit solve, and refill the variable's halos with its boundary
-conditions, which hold for the full variable: a coefficient of the solves may read the variable
-in a neighboring cell. `implicit_substep!` then takes the increment through that solve too, with
-the variable's own boundary conditions, both solves reading their coefficients from a copy of the
-full variable frozen between this addition and the solves. The solve is linear in the field it
-solves for, so the stepper's `sedimentation_content` keeps exactly the increment the variable
-received, which the next stage takes back out (see [`remove_sedimentation_content!`](@ref)).
-"""
-apply_sedimentation_content!(model) =
-    apply_sedimentation_content!(model.timestepper.sedimentation_content, model)
-
-apply_sedimentation_content!(::Nothing, model) = nothing
-
-function apply_sedimentation_content!(content, model)
+function remove_sedimentation_content!(bypass, model, stage)
+    grid = model.grid
     ρᵡ = thermodynamic_density(model.formulation)
-    parent(ρᵡ) .+= parent(content)
+    content = bypass.content
+    stage > 1 && fill_halo_regions!(content)
+    params = KernelParameters(size(parent(ρᵡ)), (0, 0, 0))
+    launch!(grid.architecture, grid, params, _remove_sedimentation_content!,
+            parent(bypass.frozen_thermodynamic_density), parent(ρᵡ), parent(content), stage > 1)
+    return nothing
+end
+
+# One pass over the parent arrays: the copy, the removal (a no-op in stage 1), and the clearing.
+@kernel function _remove_sedimentation_content!(frozen, ρᵡ, content, remove)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        frozen[i, j, k] = ρᵡ[i, j, k]
+        ρᵡ[i, j, k] -= remove * content[i, j, k]
+        content[i, j, k] = 0
+    end
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Collect the explicit condensate sedimentation content of the thermodynamic variable in its two
+parts: the sensible heat into the slow tendency the substep loop integrates, and the composition
+content, scaled by the stage interval `Δt_stage`, into the bypass's content field. Both are formed
+from the state `update_state!` diagnosed and the frozen transport velocity the moisture and tracer
+tendencies were built with, so their fluxes pair with the mass fluxes those tendencies apply
+(see `add_sedimentation_tendency_parts!`). A no-op when no condensate sediments.
+"""
+function add_explicit_sedimentation_content!(model, Δt_stage)
+    grid = model.grid
+    G, C = sedimentation_parts_destinations(model)
+    return add_sedimentation_tendency_parts!(G, C, model, tendency_transport_velocities(model).w;
+                                             composition_factor = kernel_time_step(grid.architecture, grid, Δt_stage))
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+The implicit counterpart of `add_explicit_sedimentation_content!`: the content of the mass that
+the tracers' adaptive implicit solves have just sedimented, from the solved mass fluxes and the
+`velocities` they split, with the content per unit mass of the stage-entry state
+(see `add_implicit_sedimentation_tendency_parts!`). `kernel_Δt` is the stage interval as the
+kernels take it.
+"""
+function add_implicit_sedimentation_content!(model, velocities, kernel_Δt)
+    G, C = sedimentation_parts_destinations(model)
+    return add_implicit_sedimentation_tendency_parts!(G, C, model, velocities; composition_factor = kernel_Δt)
+end
+
+# Where the stage puts the two parts: the slow tendency of the thermodynamic variable, and the
+# bypass's content field (`nothing` when no condensate sediments, and nothing is added).
+sedimentation_parts_destinations(model) =
+    (model.timestepper.Gⁿ[thermodynamic_density_name(model.formulation)],
+     sedimentation_content(sedimentation_bypass(model)))
+
+"""
+$(TYPEDSIGNATURES)
+
+Add the stage's sedimentation composition content increment to the thermodynamic variable after
+the substep loop, rounded with the round-off treatment `rounding` like the loop's recovery of the
+full state, with a key of its own, and refill the variable's halos with its boundary conditions,
+which hold for the full variable. `implicit_substep!` then takes the increment through the
+variable's post-loop solve too (see `thermodynamic_implicit_substep!`). A no-op when no condensate
+sediments.
+"""
+apply_sedimentation_content!(model, rounding = RoundToNearest()) =
+    apply_sedimentation_content!(sedimentation_bypass(model), model, rounding)
+
+apply_sedimentation_content!(::Nothing, model, rounding) = nothing
+
+function apply_sedimentation_content!(bypass, model, rounding)
+    grid = model.grid
+    ρᵡ = thermodynamic_density(model.formulation)
+    # A field number past those of the prognostic fields, which key the scalar updates, and the
+    # zero that keys the loop's recovery of the full state.
+    field_number = length(prognostic_fields(model)) + 1
+    key = rounding_key(rounding, model.clock.iteration, model.clock.stage, field_number)
+    # The stage update u = u⁰ + Δt G, with the variable as u⁰, the increment as G and Δt = 1.
+    launch_rk3_substep!(rounding, grid.architecture, grid, ρᵡ, ρᵡ, bypass.content, one(eltype(grid)), key)
     fill_halo_regions!(ρᵡ, boundary_condition_args(model)...)
     return nothing
 end

@@ -307,8 +307,7 @@ function AtmosphereModel(grid;
                                                         prognostic_microphysical_fields,
                                                         tracers)
 
-    closure_solver = implicit_diffusion_solver(time_discretization(closure), grid)
-    implicit_solver = closure_solver
+    implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
 
     # Build a vertical tridiagonal solver for adaptive implicit vertical advection even when the
     # closure is explicit. When both are present, the diffusion and advection diagonals are summed
