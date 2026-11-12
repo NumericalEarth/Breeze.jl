@@ -59,8 +59,8 @@ jobs:
             extra_flags: ''
           # Reactant vs vanilla on the AD job's physics: a LatitudeLongitudeGrid
           # with SphericalCoriolis, split-explicit compressible dynamics (12
-          # acoustic substeps), WENO5 and no microphysics, on a PBB grid, at the
-          # AD job's size and a larger one. Uses --simplified to drop the
+          # acoustic substeps), WENO5, the TKE closure and no microphysics, on a
+          # PBB grid, at the AD job's size and a larger one. Uses --simplified to drop the
           # geostrophic forcing and field-dependent surface drag BCs (which do
           # not currently materialize on ReactantState).
           - dynamics: 'compressible_splitexplicit'
@@ -69,11 +69,11 @@ jobs:
             advection: 'WENO5'
             backend: 'vanilla, reactant'
             topology: 'PBB'
-            # Two Reactant compiles of the split-explicit step
-            timeout: 60
+            # Two Reactant compiles of the split-explicit step, with the TKE closure
+            timeout: 90
             # Profile the vanilla cases' kernels once every case is timed (--profile_kernels)
             profile_kernels: true
-            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude'
+            extra_flags: '--simplified --float_type=Float32 --grid_type latitude_longitude --closure TKEBasedTurbulenceClosure'
           # AD: forward+backward via Enzyme reverse-mode through the same
           # @trace checkpointed loop. Reactant-only by construction. No
           # microphysics in v1 (Enzyme correctness through the 1M scheme is
@@ -84,7 +84,8 @@ jobs:
           # (each value is a separate compile + run, recorded as its own
           # result). The model is the regional-forecast configuration: a
           # LatitudeLongitudeGrid with SphericalCoriolis (the AD default) and
-          # split-explicit compressible dynamics (12 acoustic substeps). To reproduce locally
+          # split-explicit compressible dynamics (12 acoustic substeps), with the
+          # TKE closure and its vertically implicit diffusion. To reproduce locally
           # on CPU see benchmarking/README.md ("AD benchmark").
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
@@ -94,7 +95,7 @@ jobs:
             topology: 'PBB'
             # The gradient compile needs more than the default 30-minute job
             timeout: 60
-            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial'
+            extra_flags: '--ad --simplified --float_type=Float32 --warmup_steps 1 --time_steps 64 --checkpoints 2,8 --checkpointing_mode binomial --closure TKEBasedTurbulenceClosure'
           # Scalar-tendency kernel sweep (no model): time the bare WENO
           # advective tendency Gc = -∇·(𝐮 c) on one grid across orders, for both
           # the Reactant-compiled XLA program and the eager vanilla launch.
@@ -248,8 +249,8 @@ jobs:
           for d in all_data:
               base_name = d['name'].split('_')[0]
               advection = d['advection']
-              # Closure is unused for the time being because it's always the
-              # same everywhere in the current setup.
+              # Closure names only the Reactant vs vanilla sweep's series, the one
+              # forward case with a closure.
               closure = d['closure']
               dynamics = d['dynamics']
               ft = d['float_type']
@@ -360,9 +361,9 @@ jobs:
 
               # Reactant vs vanilla sweep: compare backends across grid sizes
               # on the AD job's physics (LatitudeLongitudeGrid, split-explicit
-              # dynamics, WENO5, no microphysics).
+              # dynamics, WENO5, the TKE closure, no microphysics).
               if latlon and advection == 'WENO5':
-                  level_1 = f'{base_name}; LatitudeLongitudeGrid; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+                  level_1 = f'{base_name}; LatitudeLongitudeGrid; Dynamics: {dynamics}; Closure: {closure}; Microphysics: {microphysics} [{ft}]'
                   level_2 = f'Compare backends'
                   level_3 = f'{gpu}'
                   level_4 = f'{backend} {grid_str}'
