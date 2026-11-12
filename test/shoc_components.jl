@@ -10,7 +10,7 @@ using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: clip_max, clip_mi
                                       bound_stratification_number,
                                       vd_shoc_decomp!, vd_shoc_solve!, tke_step, buoyancy_production,
                                       assumed_pdf, plume_saturation, plume_variance, smooth_scalar_plumes,
-                                      time_scale_column, dissipation_coefficient, time_scale_and_diffusivities,
+                                      time_scale_column, dissipation_coefficient, time_scale_and_diffusivities, limit_time_scale, cold_surface_fallback,
                                       mixing_length_column!, mixing_length
 using Enzyme: Enzyme
 using Test
@@ -656,6 +656,175 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         end
     end
 
+    @testset "StratificationLimitedTimeScale" begin
+        hard = HardClipping()
+        constants = SHOCConstants(FT)
+        damping = ColumnStabilityDamping(FT)
+        limited = StratificationLimitedTimeScale(FT)
+        @test limited.time_scale === damping
+        @test limited.ℂᴺ == FT(3.5)
+        @test isbits(limited)
+        @test summary(limited) == "StratificationLimitedTimeScale of ColumnStabilityDamping{$FT}"
+        @test StratificationLimitedTimeScale(ColumnStabilityDamping(), FT; ℂᴺ = 2) === StratificationLimitedTimeScale(FT; ℂᴺ = 2)
+        @test StratificationLimitedTimeScale(RichardsonStabilityFunctions(), FT).time_scale === RichardsonStabilityFunctions(FT)
+
+        # The default is the original configuration, whose time scale is not limited
+        @test SimplifiedHigherOrderClosure(FT).turbulence_time_scale === damping
+        for τ in FT[1, 100, 2e4], N² in FT[-1e-3, 0, 1e-4, 1]
+            @test same_bits(limit_time_scale(damping, τ, N²), τ)
+            @test same_bits(limit_time_scale(RichardsonStabilityFunctions(FT), τ, N²), τ)
+        end
+
+        # ℂᴺ is a trainable coefficient of the closure, after those of the component it wraps
+        closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = limited, surface_forcing...)
+        @test isbits(closure)
+        ℂ = closure_parameters(closure)
+        original_keys = keys(closure_parameters(SimplifiedHigherOrderClosure(FT)))
+        @test keys(ℂ) == (original_keys[1:findfirst(==(:ℂᴰ₅), original_keys)]..., :ℂᴺ,
+                          original_keys[findfirst(==(:ℂᴰ₅), original_keys)+1:end]...)
+        @test :ℂᴺ ∈ trainable_parameter_names(closure)
+        changed = with_parameters(closure; ℂᴺ = FT(5), ℂᶜ = FT(0.2))
+        @test changed.turbulence_time_scale.ℂᴺ == FT(5)
+        @test changed.turbulence_time_scale.time_scale.ℂᶜ == FT(0.2)
+        @test typeof(changed) === typeof(closure)
+
+        # The column quantities, dissipation, fallback and diffusivities are those of the wrapped component
+        column = time_scale_column(damping, hard, constants, FT(0.05))
+        @test time_scale_column(limited, hard, constants, FT(0.05)) === column
+        @test dissipation_coefficient(limited, column, FT(1e-4), FT(1e-5), ForwardEulerTKE(FT)) ===
+              dissipation_coefficient(damping, column, FT(1e-4), FT(1e-5), ForwardEulerTKE(FT))
+        @test cold_surface_fallback(limited, FT(170), FT(10), FT(100)) && !cold_surface_fallback(limited, FT(290), FT(10), FT(100))
+
+        # The limit: 1/τ = 1/τ₀ + N⁺/ℂᴺ, so τ ≤ τ₀ and τ N⁺ < ℂᴺ for every τ₀ and N²; the identity where N² ≤ 0
+        Nₘᵢₙ = limited.minimum_buoyancy_frequency
+        fraction(n, m) = FT(mod(n * 0.6180339887498949 + m * 0.7548776662466927, 1))
+        for n in 1:500
+            e = FT(10)^(-3 + 3 * fraction(n, 1))
+            mix = FT(10)^(3 * fraction(n, 2))
+            N² = (fraction(n, 3) - FT(0.3)) * FT(10)^(-8 + 7 * fraction(n, 4))
+            runaway = false
+            a_diss = column.Cee * e^(FT(3) / 2) / mix
+            τ₀, Kᶜ₀, Kᵘ₀ = time_scale_and_diffusivities(damping, hard, constants, column, e, a_diss, mix, N², FT(1e-5), ForwardEulerTKE(FT), runaway)
+            # The levels carry the time scale and diffusivities of the wrapped component; the limit acts at the interfaces
+            level = time_scale_and_diffusivities(limited, hard, constants, column, e, a_diss, mix, N², FT(1e-5), ForwardEulerTKE(FT), runaway)
+            @test all(map(same_bits, level, (τ₀, Kᶜ₀, Kᵘ₀)))
+            τ = limit_time_scale(limited, τ₀, N²)
+            @test τ ≤ τ₀
+            if N² ≤ 0
+                @test same_bits(τ, τ₀)
+            else
+                N = sqrt(N²)
+                N⁺ = N² / (sqrt(N² + Nₘᵢₙ^2) + Nₘᵢₙ)
+                @test isapprox(τ, τ₀ / (1 + τ₀ * N⁺ / limited.ℂᴺ); rtol = 8eps(FT))
+                @test τ * N⁺ ≤ limited.ℂᴺ * (1 + 4eps(FT))
+                # αᴺ = τ² N² < (ℂᴺ)² where N ≫ Nₘᵢₙ, and below (ℂᴺ N / (N - Nₘᵢₙ))² everywhere
+                @test τ^2 * N² < limited.ℂᴺ^2 * (N > Nₘᵢₙ ? (N / (N - Nₘᵢₙ))^2 : FT(Inf)) * (1 + 8eps(FT))
+                N > 100Nₘᵢₙ && @test τ^2 * N² < limited.ℂᴺ^2 * (1 + FT(0.0203))
+            end
+        end
+        # αᴺ < (ℂᴺ)² once N ≥ 0.01: at τ₀ = maxiso and the strongest stratification
+        for N² in FT[1e-4, 4e-4, 1e-2, 1]
+            τ = limit_time_scale(limited, FT(2e4), N²)
+            @test τ^2 * N² < limited.ℂᴺ^2
+        end
+        # With ℂᴺ = Inf it is the identity
+        unlimited = StratificationLimitedTimeScale(FT; ℂᴺ = Inf)
+        for τ in FT[1, 100, 2e4], N² in FT[-1e-3, 0, 1e-8, 1e-4, 1]
+            @test same_bits(limit_time_scale(unlimited, τ, N²), τ)
+        end
+
+        if FT == Float64
+            # Slopes against the exact ones and central differences: in N² (continuous value at N² = 0,
+            # slope -τ₀² / (2 ℂᴺ Nₘᵢₙ) from above and 0 from below), in ℂᴺ and in τ₀
+            τ₀ = 400.0
+            limited_by_N²(N², ts, τ₀) = limit_time_scale(ts, τ₀, N²)
+            limited_by_ℂᴺ(ℂᴺ, τ₀, N²) = limit_time_scale(StratificationLimitedTimeScale(Float64; ℂᴺ), τ₀, N²)
+            limited_by_τ₀(τ₀, ts, N²) = limit_time_scale(ts, τ₀, N²)
+            ℂᴺ = limited.ℂᴺ
+            h = 1e-6
+            for N² in (-1e-4, 0.0, 1e-8, 1e-6, 1e-4, 1e-2)
+                N²⁺ = max(N², 0.0)
+                N⁺ = sqrt(N²⁺ + Nₘᵢₙ^2) - Nₘᵢₙ
+                dN⁺ = N² > 0 ? 1 / (2 * sqrt(N²⁺ + Nₘᵢₙ^2)) : (N² == 0 ? 1 / (2Nₘᵢₙ) : 0.0)
+                τ = τ₀ / (1 + τ₀ * N⁺ / ℂᴺ)
+                exact_N² = -τ^2 / ℂᴺ * dN⁺
+                N² == 0 || @test isapprox(derivative(limited_by_N², N², limited, τ₀), exact_N²; rtol = 1e-10)
+                N² == 0 && @test any(slope -> isapprox(derivative(limited_by_N², N², limited, τ₀), slope; rtol = 1e-10), (0.0, exact_N²)) # a one-sided slope
+                exact_ℂᴺ = τ^2 * N⁺ / ℂᴺ^2
+                @test isapprox(derivative(limited_by_ℂᴺ, ℂᴺ, τ₀, N²), exact_ℂᴺ; rtol = 1e-10, atol = 1e-14)
+                @test isapprox((limited_by_ℂᴺ(ℂᴺ + h, τ₀, N²) - limited_by_ℂᴺ(ℂᴺ - h, τ₀, N²)) / 2h, exact_ℂᴺ; rtol = 1e-6, atol = 1e-9)
+                exact_τ₀ = (τ / τ₀)^2
+                @test isapprox(derivative(limited_by_τ₀, τ₀, limited, N²), exact_τ₀; rtol = 1e-10)
+                if N² ≠ 0
+                    step = h * abs(N²)
+                    difference = (limited_by_N²(N² + step, limited, τ₀) - limited_by_N²(N² - step, limited, τ₀)) / 2step
+                    @test isapprox(difference, exact_N²; rtol = 1e-5, atol = 1e-6)
+                end
+                @test all(isfinite, (exact_N², exact_ℂᴺ, exact_τ₀))
+            end
+            # The value is continuous at N² = 0 and the slope is bounded there
+            @test limited_by_N²(1e-14, limited, τ₀) ≈ τ₀ rtol = 1e-6
+            @test abs(derivative(limited_by_N², 1e-14, limited, τ₀)) < τ₀^2 / (2 * ℂᴺ * Nₘᵢₙ) * (1 + 1e-6)
+
+            # The diagnosed third moment through the limited time scale, in ℂᴺ and in N²: Enzyme against central
+            # differences, from weak stratification to beyond the singularity of the unlimited diagnosis
+            diagnosis = AlgebraicThirdMoment(Float64)
+            rest = (0.4, 300.0, 1 / 40, 1 / 80, 0.02, -0.004, 0.1, 0.15, 0.03)
+            moment_by_ℂᴺ(ℂᴺ, τ₀, N², rest) = third_moment(diagnosis, UnboundedStratificationNumber(), constants,
+                                                          limit_time_scale(StratificationLimitedTimeScale(Float64; ℂᴺ), τ₀, N²), N², rest...)
+            moment_by_N²(N², ℂᴺ, τ₀, rest) = moment_by_ℂᴺ(ℂᴺ, τ₀, N², rest)
+            for αᴺ₀ in (-5.0, 0.5, 5.0, 24.26, 60.0, 250.0)
+                N² = αᴺ₀ / τ₀^2
+                for (func, x, parameters) in ((moment_by_ℂᴺ, 3.5, (τ₀, N², rest)), (moment_by_ℂᴺ, 2.5, (τ₀, N², rest)),
+                                              (moment_by_N², N², (3.5, τ₀, rest)))
+                    step = h * abs(x)
+                    difference = (func(x + step, parameters...) - func(x - step, parameters...)) / 2step
+                    gradient = derivative(func, x, parameters...)
+                    @test isfinite(gradient)
+                    @test isapprox(gradient, difference; rtol = 1e-5, atol = 1e-12)
+                end
+                # Beyond the singularity of the unlimited diagnosis the limited one is finite and moderate
+                τ = limit_time_scale(limited, τ₀, N²)
+                @test τ^2 * N² < ℂᴺ^2
+            end
+        end
+
+        # Steps in a column, of both wrapped components; with ℂᴺ = Inf the same bits as the component itself
+        for (wrapped, tke_update, rtol) in ((ColumnStabilityDamping(), ForwardEulerTKE(), 1e-4),
+                                            (RichardsonStabilityFunctions(), ForwardEulerTKE(ℂᴾ = 1), 2e-3))
+            closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = StratificationLimitedTimeScale(wrapped), tke_update,
+                                                   surface_forcing...)
+            run = run_shoc_column(closure)
+            @test all_finite(run)
+            @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
+            @test isapprox(run.θ, original.θ; rtol)
+
+            model = shoc_column_model(closure)
+            for _ in 1:20
+                time_step!(model, 60)
+            end
+            # At the interfaces, where the moments use it, the limited time scale keeps τ N⁺ < ℂᴺ, however
+            # large the stratification number of the interpolated τ₀ and N² would be without it
+            τ₀ = Array(interior(model.closure_fields.diagnostics.isotropy))[1, 1, :]
+            N² = Array(interior(model.closure_fields.diagnostics.brunt))[1, 1, :]
+            τ₀ᶠ, N²ᶠ = (τ₀[1:end-1] .+ τ₀[2:end]) ./ 2, (N²[1:end-1] .+ N²[2:end]) ./ 2
+            τᶠ = limit_time_scale.(Ref(closure.turbulence_time_scale), τ₀ᶠ, N²ᶠ)
+            N⁺ = @. max(N²ᶠ, 0) / (sqrt(max(N²ᶠ, 0) + Nₘᵢₙ^2) + Nₘᵢₙ)
+            @test all(τᶠ .* N⁺ .≤ closure.turbulence_time_scale.ℂᴺ * (1 + 4eps(FT)))
+            @test all(τᶠ .≤ τ₀ᶠ)
+
+            itself = run_shoc_column(SimplifiedHigherOrderClosure(FT; turbulence_time_scale = wrapped, tke_update, surface_forcing...))
+            infinite = run_shoc_column(SimplifiedHigherOrderClosure(FT; turbulence_time_scale = StratificationLimitedTimeScale(wrapped; ℂᴺ = Inf),
+                                                                    tke_update, surface_forcing...))
+            # the same bits on the CPU; on the GPU the two kernels may contract floating-point operations differently
+            if default_arch isa CPU
+                @test all(name -> isequal(infinite[name], itself[name]), keys(itself))
+            else
+                @test all(name -> isapprox(infinite[name], itself[name]; rtol = sqrt(eps(FT))), keys(itself))
+            end
+        end
+    end
+
     @testset "GradientLimitedMixingLength" begin
         hard = HardClipping()
         constants = SHOCConstants(FT)
@@ -815,7 +984,8 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
 
     @testset "Every combination of components" begin
         choices = (mixing_length = (BlendedMixingLength(), GradientLimitedMixingLength()),
-                   turbulence_time_scale = (ColumnStabilityDamping(), RichardsonStabilityFunctions(RationalStabilityFunction())),
+                   turbulence_time_scale = (ColumnStabilityDamping(), RichardsonStabilityFunctions(RationalStabilityFunction()),
+                                            StratificationLimitedTimeScale()),
                    tke_update = (ForwardEulerTKE(), ImplicitSinkTKE()),
                    buoyancy_source = (PDFBuoyancyFlux(), DowngradientBuoyancyFlux()),
                    stratification_number_bound = (UnboundedStratificationNumber(), RationalSaturatedStratificationNumber()),
@@ -824,7 +994,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
                    clipping = (HardClipping(), SmoothClipping()))
 
         combinations = vec([NamedTuple{keys(choices)}(combination) for combination in Iterators.product(values(choices)...)])
-        @test length(combinations) == 384
+        @test length(combinations) == 576
 
         # Every combination constructs, and its coefficients are collected and replaced
         constructed = map(combinations) do components

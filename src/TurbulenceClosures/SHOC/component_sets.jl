@@ -5,7 +5,7 @@
 # The components of each slot. The constructor checks against it, so that a component in a slot
 # it does not belong to fails there and not inside a kernel.
 const SLOT_COMPONENTS = (mixing_length = (BlendedMixingLength, GradientLimitedMixingLength),
-                         turbulence_time_scale = (ColumnStabilityDamping, RichardsonStabilityFunctions),
+                         turbulence_time_scale = (ColumnStabilityDamping, RichardsonStabilityFunctions, StratificationLimitedTimeScale),
                          tke_update = (ForwardEulerTKE, ImplicitSinkTKE),
                          buoyancy_source = (PDFBuoyancyFlux, DowngradientBuoyancyFlux),
                          second_moments = (DowngradientSecondMoments,),

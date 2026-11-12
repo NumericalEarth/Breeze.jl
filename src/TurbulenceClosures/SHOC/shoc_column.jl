@@ -193,6 +193,7 @@ end
     third_moment_component = closure.third_moment
     stratification_number_bound = closure.stratification_number_bound
     skewness = closure.skewness
+    time_scale = closure.turbulence_time_scale
 
     FT = eltype(tke)
     g = c.ggr
@@ -264,6 +265,7 @@ end
     @inbounds begin
         zt_l = zt[i, j, 1]
         iso_l = isotropy[i, j, 1]
+        brunt_l = brunt[i, j, 1]
         tkh_l = tkh[i, j, 1]
         tk_l = tk[i, j, 1]
         thetal_l = thetal[i, j, 1]
@@ -277,6 +279,7 @@ end
     @inbounds for k in 2:Nz
         zt_u = zt[i, j, k]
         iso_u = isotropy[i, j, k]
+        brunt_u = brunt[i, j, k]
         tkh_u = tkh[i, j, k]
         tk_u = tk[i, j, k]
         thetal_u = thetal[i, j, k]
@@ -289,6 +292,8 @@ end
         w_sec[i, j, k] = vertical_velocity_variance(second_moments, tke_u)
 
         isotropy_zi = hard_floor(linear_interp(zt_u, zt_l, iso_u, iso_l, zi_k), zero(FT))
+        brunt_zi = hard_floor(linear_interp(zt_u, zt_l, brunt_u, brunt_l, zi_k), convert(FT, -99999999.99))
+        isotropy_zi = limit_time_scale(time_scale, isotropy_zi, brunt_zi)
         tkh_zi = hard_floor(linear_interp(zt_u, zt_l, tkh_u, tkh_l, zi_k), zero(FT))
         tk_zi = hard_floor(linear_interp(zt_u, zt_l, tk_u, tk_l, zi_k), zero(FT))
 
@@ -299,7 +304,7 @@ end
             interface_second_moments(second_moments, isotropy_zi, tkh_zi, tk_zi, grid_dz,
                                      thetal_u - thetal_l, qw_u - qw_l, tke_u - tke_l, u_u - u_l, v_u - v_l)
 
-        zt_l, iso_l, tkh_l, tk_l = zt_u, iso_u, tkh_u, tk_u
+        zt_l, iso_l, brunt_l, tkh_l, tk_l = zt_u, iso_u, brunt_u, tkh_u, tk_u
         thetal_l, qw_l, tke_l, u_l, v_l = thetal_u, qw_u, tke_u, u_u, v_u
     end
 
@@ -351,6 +356,7 @@ end
 
         isotropy_zi = hard_floor(linear_interp(zt_u, zt_l, iso_u, iso_l, zi_k), zero(FT))
         brunt_zi = hard_floor(linear_interp(zt_u, zt_l, brunt_u, brunt_l, zi_k), largeneg)
+        isotropy_zi = limit_time_scale(time_scale, isotropy_zi, brunt_zi)
         w_sec_zi = clip_below(cp, linear_interp(zt_u, zt_l, w_sec_u, w_sec_l, zi_k), w_sec_min, c.mintke)
         thetal_zi = hard_floor(linear_interp(zt_u, zt_l, thetal_u, thetal_l, zi_k), zero(FT))
 

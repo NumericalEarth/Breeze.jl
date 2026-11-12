@@ -133,7 +133,9 @@ Each of the keyword arguments up to `constants` takes a component; the first one
   [`GradientLimitedMixingLength`](@ref).
 - `turbulence_time_scale`: the return-to-isotropy time scale, the eddy diffusivities and the
   dissipation coefficient; [`ColumnStabilityDamping`](@ref), or
-  [`RichardsonStabilityFunctions`](@ref) of a [`RationalStabilityFunction`](@ref).
+  [`RichardsonStabilityFunctions`](@ref) of a [`RationalStabilityFunction`](@ref), or either of
+  them wrapped in [`StratificationLimitedTimeScale`](@ref), which limits the time scale of the
+  moments to `ℂᴺ / N` in stable stratification.
 - `tke_update`: the update of turbulent kinetic energy; [`ForwardEulerTKE`](@ref), or
   [`ImplicitSinkTKE`](@ref).
 - `buoyancy_source`: the buoyancy source of turbulent kinetic energy; [`PDFBuoyancyFlux`](@ref),

@@ -13,7 +13,7 @@ module SimplifiedHigherOrderClosures
 export SimplifiedHigherOrderClosure, SHOC,
        smooth_shoc_components,
        BlendedMixingLength,
-       ColumnStabilityDamping, RichardsonStabilityFunctions,
+       ColumnStabilityDamping, RichardsonStabilityFunctions, StratificationLimitedTimeScale,
        ForwardEulerTKE, ImplicitSinkTKE,
        PDFBuoyancyFlux, DowngradientBuoyancyFlux,
        DowngradientSecondMoments,
