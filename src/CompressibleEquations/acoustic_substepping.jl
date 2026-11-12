@@ -47,7 +47,7 @@ using Oceananigans.Operators:
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
 
-using Oceananigans.Grids: Flat, Bounded, Center, Face, peripheral_node,
+using Oceananigans.Grids: Flat, Bounded, Center, Face, peripheral_node, immersed_peripheral_node,
                           topology,
                           minimum_xspacing, minimum_yspacing, minimum_zspacing
 
@@ -689,7 +689,8 @@ end
     damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
 
     # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
-    return pgf_term + buoy_term + damp_term
+    # Faces touching an immersed body are decoupled, like `ivd_lower_diagonal` in Oceananigans.
+    return (pgf_term + buoy_term + damp_term) * !immersed_peripheral_node(i, j, kᶠ, grid, Center(), Center(), Face())
 end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagDiagonal, p, ::ZDirection,
@@ -711,7 +712,7 @@ end
     damp_diag  = dᵐ⁺ * (Δz⁻¹ᵏ⁺ + Δz⁻¹ᵏ⁻) * Δz⁻¹ᶠ
     spnge_diag = sponge_term_diag(i, j, k, grid, sponge, δτᵐ⁺)
 
-    return 1 + (pgf_diag + buoy_diag + damp_diag + spnge_diag) * (k > 1)
+    return 1 + (pgf_diag + buoy_diag + damp_diag + spnge_diag) * active_acoustic_face(i, j, k, grid)
 end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagUpper, p, ::ZDirection,
@@ -728,8 +729,11 @@ end
     damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
 
     # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
-    return (pgf_term + buoy_term + damp_term) * (k > 1)
+    return (pgf_term + buoy_term + damp_term) * active_acoustic_face(i, j, k, grid)
 end
+
+# Rows solved for (ρw)′: not the bottom face, and not a face touching an immersed body.
+@inline active_acoustic_face(i, j, k, grid) = (k > 1) & !immersed_peripheral_node(i, j, k, grid, Center(), Center(), Face())
 
 #####
 ##### Section 7 — Slow vertical-momentum tendency assembly
@@ -949,10 +953,17 @@ end
         ∂x_p = ∂x_pᴸ + ∂x_p′
         ∂y_p = ∂y_pᴸ + ∂y_p′
 
-        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p)
-        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+        ρu′[i, j, k] = conditionalᶠᶜᶜ(i, j, k, grid, ρu′[i, j, k] + Δτ * (Gⁿρu[i, j, k] - ∂x_p))
+        ρv′[i, j, k] = conditionalᶜᶠᶜ(i, j, k, grid, ρv′[i, j, k] + Δτ * (Gⁿρv[i, j, k] - ∂y_p))
     end
 end
+
+# Momentum on faces touching an immersed body is zero, so no mass or (ρθ) flux crosses the body
+# and the state stored inside it never reaches the fluid.
+# TODO: upstream to Oceananigans next to `conditional_uᶠᶜᶜ` in `ImmersedBoundaries/conditional_differences.jl`.
+@inline conditionalᶠᶜᶜ(i, j, k, grid, ρu) = ifelse(immersed_peripheral_node(i, j, k, grid, Face(), Center(), Center()), zero(ρu), ρu)
+@inline conditionalᶜᶠᶜ(i, j, k, grid, ρv) = ifelse(immersed_peripheral_node(i, j, k, grid, Center(), Face(), Center()), zero(ρv), ρv)
+@inline conditionalᶜᶜᶠ(i, j, k, grid, ρw) = ifelse(immersed_peripheral_node(i, j, k, grid, Center(), Center(), Face()), zero(ρw), ρw)
 
 @inline δpᴸ(i, j, k, grid, ρθ′, Cᴸ) = @inbounds Cᴸ[i, j, k] * ρθ′[i, j, k]
 
@@ -1036,7 +1047,7 @@ end
         # (tridiag b[1] = 1 ⇒ (ρw)′[1] = 0; impenetrability w(top) = 0). Branchless (launched over
         # 1:Nz+1, no warp divergence); the boundary stencils read unfilled k=0/Nz+1 halos but the
         # result is discarded.
-        ρw′_rhs[i, j, k] = ifelse((k != 1) & (k != Nz + 1), rhs, zero(rhs))
+        ρw′_rhs[i, j, k] = ifelse(active_acoustic_face(i, j, k, grid) & (k != Nz + 1), rhs, zero(rhs))
     end
 end
 
@@ -1217,12 +1228,12 @@ end
         ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
         γˣ = κˣ(i, j, k, grid, x_damping_scale, Δτ)
-        ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ
+        ρu′[i, j, k] = conditionalᶠᶜᶜ(i, j, k, grid, ρu′[i, j, k] - γˣ * ∂x_div / θᴸᶠᶜᶜ)
 
         ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
         θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
         γʸ = κʸ(i, j, k, grid, y_damping_scale, Δτ)
-        ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ
+        ρv′[i, j, k] = conditionalᶜᶠᶜ(i, j, k, grid, ρv′[i, j, k] - γʸ * ∂y_div / θᴸᶜᶠᶜ)
     end
 end
 
@@ -1265,8 +1276,10 @@ end
 @kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+        Δρu′ = α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+        Δρv′ = α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+        ρu′[i, j, k] = conditionalᶠᶜᶜ(i, j, k, grid, ρu′[i, j, k] + Δρu′)
+        ρv′[i, j, k] = conditionalᶜᶠᶜ(i, j, k, grid, ρv′[i, j, k] + Δρv′)
     end
 end
 
@@ -1386,9 +1399,9 @@ end
         ρ[i, j, k]  = ρᵐ⁺
         ρθ[i, j, k] = ρθᵐ⁺
 
-        m.ρu[i, j, k] = ρuᵐ⁺
-        m.ρv[i, j, k] = ρvᵐ⁺
-        m.ρw[i, j, k] = ρwᵐ⁺
+        m.ρu[i, j, k] = conditionalᶠᶜᶜ(i, j, k, grid, ρuᵐ⁺)
+        m.ρv[i, j, k] = conditionalᶜᶠᶜ(i, j, k, grid, ρvᵐ⁺)
+        m.ρw[i, j, k] = conditionalᶜᶜᶠ(i, j, k, grid, ρwᵐ⁺)
     end
 end
 
