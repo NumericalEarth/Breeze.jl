@@ -58,3 +58,6 @@ julia = "1.11.9"
 
 [workspace]
 projects = ["docs", "examples", "test"]
+
+[sources]
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "dkz/reactant-static-stop-iteration"}
