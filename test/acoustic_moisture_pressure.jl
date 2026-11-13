@@ -1,5 +1,9 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
+using Breeze
+using Oceananigans
+using Test
+
 #####
 ##### The moisture's part of the pressure that the acoustic substep loop integrates.
 #####
