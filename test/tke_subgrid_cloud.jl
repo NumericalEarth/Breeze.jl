@@ -315,3 +315,41 @@ end
         @test all(tke_buoyancy_productionᶜᶜᶜ(1, 1, k, model.grid, cf) == B[k] for k in 1:size(model.grid, 3))
     end
 end
+
+@testset "Secant and bisection solves of the cloud buoyancy stability" begin
+    @test CloudBuoyancyFlux().stability_solver isa FixedPointIteration
+    @test BisectionIteration().final_interpolation
+    @test occursin("SecantIteration", summary(CloudBuoyancyFlux(; stability_solver = SecantIteration())))
+    solved(solver, n) = SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability_iterations = n, stability_solver = solver))
+    build(f) = tke_p3_column(f; subgrid = ClosureCloud(), static_stability = DryStaticStability())
+    for solver in (SecantIteration(), BisectionIteration(), BisectionIteration(; final_interpolation = false))
+        model = build(solved(solver, 4))
+        @test model.closure_fields.subgrid_cloud.solver_state.x₋ isa Field
+        for _ in 1:3
+            time_step!(model, 30)
+        end
+        cf = model.closure_fields
+        @test all(isfinite, column(cf.Kᶜ))
+        @test all(isfinite, column(cf.N²))
+        @test all(isfinite, column(model.tracers.ρe))
+        @test all(0 .≤ column(cf.subgrid_cloud.cloud.C) .≤ 1)
+        # N² stays in the bracket of the conserved and the saturated stratification
+        L, U = column(cf.subgrid_cloud.solver_state.lower), column(cf.subgrid_cloud.solver_state.upper)
+        N² = column(cf.N²)
+        @test all(L[k] - 1e-12 ≤ N²[k] ≤ U[k] + 1e-12 for k in 2:length(N²) - 1)
+    end
+    @test build(solved(FixedPointIteration(), 2)).closure_fields.subgrid_cloud.solver_state === nothing
+end
+
+@testset "Lagged stability" begin
+    f = SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability_solver = LaggedStability()))
+    model = tke_p3_column(f; subgrid = ClosureCloud(), static_stability = DryStaticStability())
+    N²₋ = model.closure_fields.subgrid_cloud.solver_state.N²₋
+    update_state!(model)
+    @test column(N²₋) == column(model.closure_fields.N²)
+    for _ in 1:3
+        time_step!(model, 30)
+    end
+    @test all(isfinite, column(model.closure_fields.Kᶜ))
+    @test all(isfinite, column(model.tracers.ρe))
+end

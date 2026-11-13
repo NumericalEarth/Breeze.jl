@@ -36,6 +36,7 @@ using Oceananigans.Operators: Δzᶜᶜᶠ
 
 using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
                                       third_moment, limit_third_moment, assumed_pdf, buoyancy_flux_coefficients,
+                                      plume_liquid_water_temperature, plume_saturation,
                                       clip_below, shoc_saturation_thermodynamics,
                                       rate_norm_factor
 
@@ -222,34 +223,103 @@ the mixing length and the diffusivities are formed from it. The first pass (from
 static stability to `N²ᵇ`) is never relaxed. `ω = 1` is the plain fixed-point iteration; `ω < 1`
 damps the pass-to-pass oscillation between the stable and unstable branches.
 
+`stability_solver` chooses how the extra passes update `N²` at each interior face, treating the
+coupling as the scalar root `r(N²) = N²ᵇ(N²) - N² = 0` of the face (the coupling to the
+neighbouring faces through the mixing length and the interpolated moments is lagged):
+
+- [`FixedPointIteration`](@ref) (default): `N² ← (1 - ω) N² + ω N²ᵇ`, as above.
+- [`SecantIteration`](@ref): a secant step from the last two passes, falling back to the relaxed
+  step where the secant denominator is tiny, and kept inside the bracket below.
+- [`BisectionIteration`](@ref): halves the bracket each pass by the sign of `r`; with
+  `final_interpolation = true` the last update is the secant step of the last two passes, kept in
+  the bracket, so that the result varies continuously with the parameters.
+
+The bracket of the secant and the bisection is `[min(N²ᶜ, N²ˢ), max(N²ᶜ, N²ˢ)]` with
+`N²ᶜ = (g / θ)(∂z θˡ + A_q ∂z qᵗ)`, the stratification of the conserved variables, and
+`N²ˢ = N²ᶜ + (g / θ) A_c ∂z s̄`, the saturated one (`s = c_q qᵗ - c_θ θˡ`, SHOC's linearized
+saturation excess at the level): where `w′qˡ′ ≈ C w′s′` and `w′s′ = -Kᶜ ∂z s̄`,
+`N²ᵇ ≈ (1 - C) N²ᶜ + C N²ˢ` lies in it for any `0 ≤ C ≤ 1`. The first pass (from the closure's
+static stability) is the same for all three; the secant and the bisection then start from it and
+from the closure's static stability.
+
 After the last pass the stored moments, cloud fields and buoyancy production `B` are those of the
 last distribution; `N²` is the relaxed blend of the stored `N²` and the `N²ᵇ` of that
-distribution's liquid flux (exactly that `N²ᵇ` when `ω = 1`), and `ℓᵐ`, `Kᶜ`, `Kᵘ`, `Kᵉ` are
+distribution's liquid flux (exactly that `N²ᵇ` when `ω = 1`; for the secant and the bisection,
+the update of the solver from that `N²ᵇ`), and `ℓᵐ`, `Kᶜ`, `Kᵘ`, `Kᵉ` are
 formed from that `N²`. The last distribution was itself computed with the diffusivities of the
 pass before (one pass behind, as with `n = 0`, where they are the dry ones).
 
 $(TYPEDFIELDS)
 """
-struct CloudBuoyancyFlux{N, W}
+struct CloudBuoyancyFlux{N, W, S}
     "Whether the stability of the diffusivities and the mixing length is that of the cloud buoyancy flux"
     stability :: Bool
     "The weight `ω` of the new `N²ᵇ` in the extra passes, `0 < ω ≤ 1`"
     stability_relaxation :: W
-    CloudBuoyancyFlux{N}(stability::Bool, ω::W = 1) where {N, W} = new{N, W}(stability, ω)
+    "The update of `N²` in the extra passes"
+    stability_solver :: S
+    CloudBuoyancyFlux{N}(stability::Bool, ω::W = 1, solver::S = FixedPointIteration()) where {N, W, S} =
+        new{N, W, S}(stability, ω, solver)
 end
+
+"""
+    FixedPointIteration()
+
+The extra passes of [`CloudBuoyancyFlux`](@ref) set `N² ← (1 - ω) N² + ω N²ᵇ`.
+"""
+struct FixedPointIteration end
+
+"""
+    SecantIteration()
+
+The extra passes of [`CloudBuoyancyFlux`](@ref) take a secant step on `r(N²) = N²ᵇ - N²` per face,
+from the last two passes, kept in the bracket of `N²ᶜ` and `N²ˢ`; where the secant denominator is
+tiny they take the relaxed step `N² + ω r`.
+"""
+struct SecantIteration end
+
+"""
+    BisectionIteration(; final_interpolation = true)
+
+The extra passes of [`CloudBuoyancyFlux`](@ref) halve the bracket of `N²ᶜ` and `N²ˢ` per face by
+the sign of `r(N²) = N²ᵇ - N²` (positive below the root). With `final_interpolation` the last pass
+instead takes the secant step of the last two passes, kept in the bracket.
+"""
+struct BisectionIteration
+    final_interpolation :: Bool
+end
+
+BisectionIteration(; final_interpolation = true) = BisectionIteration(final_interpolation)
+
+"""
+    LaggedStability()
+
+The first distribution of [`CloudBuoyancyFlux`](@ref) is formed with the `N²` of the previous
+evaluation of the closure fields (the previous stage, or the previous step) at the interior faces,
+instead of the closure's static stability; the closure's static stability on the first
+evaluation. The extra passes are then those of [`FixedPointIteration`](@ref). With
+`stability_iterations = 0` this lags `N²ᵇ` by one evaluation, as SHOC lags `wthv_sec`.
+"""
+struct LaggedStability end
+
+Base.summary(::LaggedStability) = "LaggedStability"
+Base.summary(::FixedPointIteration) = "FixedPointIteration"
+Base.summary(::SecantIteration) = "SecantIteration"
+Base.summary(b::BisectionIteration) = string("BisectionIteration(final_interpolation = ", b.final_interpolation, ")")
 
 CloudBuoyancyFlux(stability::Bool) = CloudBuoyancyFlux{0}(stability)
 
-function CloudBuoyancyFlux(; stability = true, stability_iterations = 0, stability_relaxation = 1)
+function CloudBuoyancyFlux(; stability = true, stability_iterations = 0, stability_relaxation = 1,
+                           stability_solver = FixedPointIteration())
     n = Int(stability_iterations)
     n >= 0 || throw(ArgumentError("stability_iterations must be ≥ 0, got $n."))
     (n == 0 || stability) || throw(ArgumentError("stability_iterations > 0 needs stability = true."))
     0 < stability_relaxation <= 1 || throw(ArgumentError("stability_relaxation must be in (0, 1], got $stability_relaxation."))
-    return CloudBuoyancyFlux{n}(stability, stability_relaxation)
+    return CloudBuoyancyFlux{n}(stability, stability_relaxation, stability_solver)
 end
 
 convert_eltype(::Type{FT}, b::CloudBuoyancyFlux{N}) where {FT, N} =
-    CloudBuoyancyFlux{N}(b.stability, convert(FT, b.stability_relaxation))
+    CloudBuoyancyFlux{N}(b.stability, convert(FT, b.stability_relaxation), b.stability_solver)
 
 """
     stability_iterations(buoyancy_flux::CloudBuoyancyFlux)
@@ -260,7 +330,8 @@ stability_iterations(::CloudBuoyancyFlux{N}) where N = N
 
 Base.summary(b::CloudBuoyancyFlux) = string("CloudBuoyancyFlux(stability = ", b.stability,
                                             ", stability_iterations = ", stability_iterations(b),
-                                            ", stability_relaxation = ", b.stability_relaxation, ")")
+                                            ", stability_relaxation = ", b.stability_relaxation,
+                                            ", stability_solver = ", summary(b.stability_solver), ")")
 
 #####
 ##### Part 3: cloud owned by the closure
@@ -351,15 +422,18 @@ The fields of a [`SubgridCloudFormulation`](@ref) in the closure fields of
 variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, the buoyancy production `B` and its part
 `Bˡ = (g / θ₀) A_c w′qˡ′` carried by the liquid flux).
 """
-struct SubgridCloudFields{BF, CO, M, C}
+struct SubgridCloudFields{BF, CO, M, C, S}
     buoyancy_flux :: BF
     cloud_ownership :: CO
     moments :: M
     cloud :: C
+    solver_state :: S
 end
 
+SubgridCloudFields(bf, co, m, c) = SubgridCloudFields(bf, co, m, c, nothing)
+
 Adapt.adapt_structure(to, f::SubgridCloudFields) =
-    SubgridCloudFields(f.buoyancy_flux, f.cloud_ownership, adapt(to, f.moments), adapt(to, f.cloud))
+    SubgridCloudFields(f.buoyancy_flux, f.cloud_ownership, adapt(to, f.moments), adapt(to, f.cloud), adapt(to, f.solver_state))
 
 build_subgrid_cloud_fields(grid, ::SubgridCloudFormulation{Nothing}) = nothing
 
@@ -369,8 +443,20 @@ function build_subgrid_cloud_fields(grid, f::SubgridCloudFormulation)
     cloud = (w′² = CenterField(grid), C = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), B = CenterField(grid), Bˡ = CenterField(grid),
              gθ = CenterField(grid), gA = CenterField(grid))
-    return SubgridCloudFields(f.buoyancy_flux, f.cloud, moments, cloud)
+    return SubgridCloudFields(f.buoyancy_flux, f.cloud, moments, cloud, build_solver_state(grid, f.buoyancy_flux))
 end
+
+# The last pass (N², r) and the bracket of the secant and the bisection, at the faces
+build_solver_state(grid, buoyancy_flux) = nothing
+build_solver_state(grid, ::CloudBuoyancyFlux{N, W, <:FixedPointIteration}) where {N, W} = nothing
+
+function build_solver_state(grid, ::CloudBuoyancyFlux{N, W, <:LaggedStability}) where {N, W}
+    N²₋ = ZFaceField(grid)
+    fill!(parent(N²₋), NaN) # not yet evaluated
+    return (; N²₋)
+end
+build_solver_state(grid, ::CloudBuoyancyFlux{N, W, <:Union{SecantIteration, BisectionIteration}}) where {N, W} =
+    (x₋ = ZFaceField(grid), r₋ = ZFaceField(grid), lower = ZFaceField(grid), upper = ZFaceField(grid))
 
 #####
 ##### Specific values from densities, for the kernels
@@ -597,6 +683,30 @@ end
 ##### Coupling to the closure
 #####
 
+# With the lagged stability: the stability of the previous evaluation, the mixing length and the
+# diffusivities from it, then the distribution and the passes; the final N² is kept for the next one
+@kernel function _set_lagged_stability!(N², N²₋)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        previous = N²₋[i, j, k]
+        N²[i, j, k] = ifelse((k > 1) & !isnan(previous), previous, N²[i, j, k])
+    end
+end
+
+function compute_subgrid_cloud!(fields::SubgridCloudFields{<:CloudBuoyancyFlux{N, W, <:LaggedStability}},
+                                closure_fields, closure, model, tracers, parameters) where {N, W}
+    grid = model.grid
+    arch = grid.architecture
+    N²₋ = fields.solver_state.N²₋
+    launch!(arch, grid, parameters, _set_lagged_stability!, closure_fields.N², N²₋)
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
+    launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
+    compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
+    cloud_buoyancy_stability!(fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
+    parent(N²₋) .= parent(closure_fields.N²)
+    return nothing
+end
+
 # Within `update_state!`, after the diffusivities and before the implicit coefficient
 function compute_subgrid_cloud!(fields::SubgridCloudFields, closure_fields, closure, model, tracers, parameters)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
@@ -627,6 +737,117 @@ cloud_buoyancy_stability!(buoyancy_flux, args...) = nothing
         resolved = Kᶜᵢ > sqrt(floatmin(FT))
         N²ᵇ = gθᶠ * ∂zθ + gAᶠ * ∂zq - ifelse(resolved, Bᶠ / ifelse(resolved, Kᶜᵢ, one(FT)), zero(FT))
         N²[i, j, k] = ifelse(interior_face, relax_stability(N²[i, j, k], N²ᵇ, ω), N²[i, j, k])
+    end
+end
+
+function cloud_buoyancy_stability!(buoyancy_flux::CloudBuoyancyFlux{N, W, <:Union{SecantIteration, BisectionIteration}},
+                                   fields, closure_fields, closure, model, tracers, parameters) where {N, W}
+    buoyancy_flux.stability || return nothing
+    solver = buoyancy_flux.stability_solver
+    ω = buoyancy_flux.stability_relaxation
+    solve_stability_pass!(solver, Val(0), Val(N), ω, fields, closure_fields, closure, model, tracers, parameters)
+    for p in 1:N
+        compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
+        solve_stability_pass!(solver, Val(p), Val(N), ω, fields, closure_fields, closure, model, tracers, parameters)
+    end
+    return nothing
+end
+
+function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_fields, closure, model, tracers, parameters) where {P, N}
+    grid = model.grid
+    arch = grid.architecture
+    s = distribution_state(model, nothing)
+    cl = fields.cloud
+    d = closure.subgrid_cloud_formulation.distribution
+    launch!(arch, grid, parameters, _solve_cloud_buoyancy_stability!, closure_fields.N², fields.solver_state, solver,
+            P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, d.saturation, d.constants,
+            cl.gθ, cl.gA, cl.Bˡ, closure_fields.Kᶜ)
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
+    launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
+    return nothing
+end
+
+# SHOC's linearization of the saturation excess at a level, s′ = c_q qᵗ′ - c_θ θˡ′, and A_c
+@inline function saturation_excess_coefficients(sat, thermodynamics, c, θ, qᵗ, p)
+    Tˡ = plume_liquid_water_temperature(sat, thermodynamics, c, θ, qᵗ, p)
+    qˢ, β, cp_over_L, Π = plume_saturation(sat, thermodynamics, c, Tˡ, qᵗ, p)
+    opbq = 1 + β * qˢ
+    c_θ = ((1 + β * qᵗ) / (opbq * opbq)) * cp_over_L * β * qˢ * Π
+    c_q = 1 / opbq
+    _, A_c = buoyancy_flux_coefficients(sat, thermodynamics, c, p, θ, qᵗ, zero(θ))
+    return c_q, c_θ, A_c
+end
+
+@inline secant_root(x, r, x₋, r₋, fallback) =
+    (Δr = r - r₋; ok = abs(Δr) > sqrt(floatmin(typeof(x))) * (abs(r) + abs(r₋)) + floatmin(typeof(x));
+     ifelse(ok, x - r * (x - x₋) / ifelse(ok, Δr, one(Δr)), fallback))
+
+# The first pass: r at the closure's stability; the next point is N²ᵇ (secant) or the bracket's middle (bisection)
+@inline function first_stability_update(::SecantIteration, x, r, G, L, U)
+    return clamp(G, L, U), L, U
+end
+
+@inline function first_stability_update(::BisectionIteration, x, r, G, L, U)
+    inside = (L < x) & (x < U)
+    L′ = ifelse(inside & (r > 0), x, L)
+    U′ = ifelse(inside & (r <= 0), x, U)
+    return (L′ + U′) / 2, L′, U′
+end
+
+@inline function stability_update(::SecantIteration, last, ω, x, r, x₋, r₋, L, U)
+    return clamp(secant_root(x, r, x₋, r₋, x + ω * r), L, U), L, U
+end
+
+@inline function stability_update(b::BisectionIteration, last, ω, x, r, x₋, r₋, L, U)
+    L′ = ifelse(r > 0, max(L, x), L)
+    U′ = ifelse(r > 0, U, min(U, x))
+    middle = (L′ + U′) / 2
+    interpolate = last & b.final_interpolation
+    x′ = ifelse(interpolate, clamp(secant_root(x, r, x₋, r₋, middle), L′, U′), middle)
+    return x′, L′, U′
+end
+
+@kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, sat, c,
+                                                  gθ, gA, Bˡ, Kᶜ)
+    i, j, k = @index(Global, NTuple)
+    FT = eltype(grid)
+    @inbounds begin
+        interior_face = k > 1
+        km = max(k - 1, 1)
+        Δz = Δzᶜᶜᶠ(i, j, k, grid)
+        ∂zθ = (θ[i, j, k] - θ[i, j, km]) / Δz
+        ∂zq = (qᵗ[i, j, k] - qᵗ[i, j, km]) / Δz
+        gθᶠ = (gθ[i, j, k] + gθ[i, j, km]) / 2
+        gAᶠ = (gA[i, j, k] + gA[i, j, km]) / 2
+        Bᶠ = (Bˡ[i, j, k] + Bˡ[i, j, km]) / 2
+        Kᶜᵢ = Kᶜ[i, j, k]
+        resolved = Kᶜᵢ > sqrt(floatmin(FT))
+        N²ᶜ = gθᶠ * ∂zθ + gAᶠ * ∂zq
+        G = N²ᶜ - ifelse(resolved, Bᶠ / ifelse(resolved, Kᶜᵢ, one(FT)), zero(FT))
+
+        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(sat, thermodynamics, c, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
+        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(sat, thermodynamics, c, θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
+        ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
+        N²ˢ = N²ᶜ + gθᶠ * (A⁺ + A⁻) / 2 * ∂zs
+        L = min(N²ᶜ, N²ˢ)
+        U = max(N²ᶜ, N²ˢ)
+
+        x = N²[i, j, k]
+        r = G - x
+        x₋ = state.x₋[i, j, k]
+        r₋ = state.r₋[i, j, k]
+        L₋ = ifelse(first, L, state.lower[i, j, k])
+        U₋ = ifelse(first, U, state.upper[i, j, k])
+
+        x₀, L₀, U₀ = first_stability_update(solver, x, r, G, L, U)
+        xₙ, Lₙ, Uₙ = stability_update(solver, last, ω, x, r, x₋, r₋, L₋, U₋)
+        x′ = ifelse(first, x₀, xₙ)
+
+        state.x₋[i, j, k] = x
+        state.r₋[i, j, k] = r
+        state.lower[i, j, k] = ifelse(first, L₀, Lₙ)
+        state.upper[i, j, k] = ifelse(first, U₀, Uₙ)
+        N²[i, j, k] = ifelse(interior_face, x′, N²[i, j, k])
     end
 end
 
