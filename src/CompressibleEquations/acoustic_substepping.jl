@@ -1197,6 +1197,12 @@ end
 ##### Section 9 — Damping
 #####
 
+# Terrain grids specialize these gradients to retain the constant-height chain rule.
+@inline x_damping_gradient(i, j, k, grid, args...) =
+    topology_aware_δxᶠᵃᵃ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+@inline y_damping_gradient(i, j, k, grid, args...) =
+    topology_aware_δyᵃᶠᵃ(i, j, k, grid, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+
 # No-op default
 @inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
 
@@ -1370,14 +1376,14 @@ end
 
 # The corrections γˣ ∂x D / θᴸ and γʸ ∂y D / θᴸ that the damping subtracts from (ρu)′ and (ρv)′.
 @inline function x_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, x_damping_scale)
-    ∂x_div = topology_aware_δxᶠᵃᵃ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    ∂x_div = x_damping_gradient(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
     θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
     γˣ = κˣ(i, j, k, grid, x_damping_scale, Δτ)
     return γˣ * ∂x_div / θᴸᶠᶜᶜ
 end
 
 @inline function y_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, y_damping_scale)
-    ∂y_div = topology_aware_δyᵃᶠᵃ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    ∂y_div = y_damping_gradient(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
     θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
     γʸ = κʸ(i, j, k, grid, y_damping_scale, Δτ)
     return γʸ * ∂y_div / θᴸᶜᶠᶜ
@@ -1422,8 +1428,8 @@ end
 @kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * topology_aware_δxᶠᵃᵃ(i, j, k, grid, δ) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * topology_aware_δyᵃᶠᵃ(i, j, k, grid, δ) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * x_damping_gradient(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * y_damping_gradient(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
     end
 end
 

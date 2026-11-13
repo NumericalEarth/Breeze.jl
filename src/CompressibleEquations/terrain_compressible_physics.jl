@@ -282,6 +282,14 @@ end
 # vertical neighbors of (ρθ)′, which the topology-aware operators do not provide, so the loop fills halos.
 fill_substep_halos!(fields, ::TerrainCompressibleModel) = fill_halo_regions!(fields)
 
+# Direct damping fills its divergence scratch using the grid, without a model argument.
+fill_substep_halos!(fields, ::TerrainFollowingGrid) = fill_halo_regions!(fields)
+
+# Divergence damping differentiates at constant physical height. The terrain chain rule
+# reads vertical and diagonal halos, which the substep halo fills above provide.
+@inline x_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂xᶠᶜᶜ(i, j, k, grid, args...)
+@inline y_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂yᶜᶠᶜ(i, j, k, grid, args...)
+
 function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
