@@ -251,3 +251,90 @@ end
     @test all(isfinite, a)
     @test maximum(abs, a .- b) > 0
 end
+
+#####
+##### Order of accuracy with moisture
+#####
+##### The acoustic loop applies the stage-entry pressure gradient and buoyancy at weight one. The
+##### part its linear operator does not carry — here the dependence of pressure on vapor — is slow
+##### and has to be recombined across stages (`StageEntryForceRemainder`); left at weight one it is
+##### integrated at first order by every non-diagonal tableau.
+#####
+
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+
+# A small vapor anomaly carried by a sheared wind over a resting, exactly balanced neutral
+# atmosphere: linear, so the reference of any consistent scheme is the same, and the only thing
+# that moves the air is the pressure the vapor adds. The substep size is the same for every Δt,
+# no damping and a centered vertical solve, so the acoustic loop's own error does not scale with Δt.
+function vapor_anomaly_density(; timestepper, coefficients = nothing, Δt, stop_time = 8, substep = 1/1024, N = 16)
+    L = 200N
+    grid = RectilinearGrid(default_arch, Float64; size = (N, N), halo = (5, 5), x = (0, L), z = (0, L),
+                           topology = (Periodic, Flat, Bounded))
+    time_discretization = SplitExplicitTimeDiscretization(; substeps = round(Int, Δt / substep),
+                                                          forward_weight = 0.5, damping = NoDivergenceDamping())
+    dynamics = CompressibleDynamics(time_discretization; base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    timestepper_kwargs = isnothing(coefficients) ? NamedTuple() : (; coefficients)
+    model = AtmosphereModel(grid; dynamics, advection = UpwindBiased(order = 5), timestepper, timestepper_kwargs)
+
+    # The discrete reference state, exactly, as in the resting-atmosphere test.
+    reference = model.dynamics.reference_state
+    Rᵈ = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
+    ρ = model.dynamics.dry_density
+    ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
+    parent(ρ) .= parent(reference.density)
+    parent(ρθ) .= parent(reference.pressure) ./ (Rᵈ .* parent(reference.exner_function))
+
+    qᵛ = CenterField(grid)
+    u = XFaceField(grid)
+    set!(qᵛ, (x, z) -> 1e-5 * cos(π * min(1, sqrt((x - L / 2)^2 + (z - L / 2)^2) / (3L / 16)) / 2)^2)
+    set!(u, (x, z) -> 10 + 10 * (z - L / 2) / L)
+    ρqᵛ = prognostic_fields(model).ρqᵛ
+    interior(ρqᵛ) .= interior(ρ) .* interior(qᵛ)
+    interior(model.momentum.ρu) .= interior(ρ) .* interior(u)
+    fill_halo_regions!((ρqᵛ, model.momentum.ρu))
+    update_state!(model)
+
+    for _ in 1:round(Int, stop_time / Δt)
+        time_step!(model, Δt)
+    end
+
+    return Array(interior(ρ))
+end
+
+@testset "MIS order of accuracy with moisture [$coefficients]" for (coefficients, Δts, order) in
+        ((:TVDMISB, (1/16, 1/32, 1/64), 1.8), (:SSPMIS43, (1/8, 1/16, 1/32), 1.8), (:MIS4a, (1/2, 1/4, 1/8), 2.7))
+    reference = vapor_anomaly_density(; timestepper = :AcousticRungeKutta3, Δt = 1/256)
+    errors = map(Δts) do Δt
+        ρ = vapor_anomaly_density(; timestepper = :MultirateInfinitesimalStep, coefficients, Δt)
+        maximum(abs, ρ .- reference)
+    end
+    @test all(isfinite, errors)
+    @test log2(errors[1] / errors[3]) / log2(Δts[1] / Δts[3]) ≥ order
+end
+
+@testset "MIS falls back where the stage-entry force remainder cannot be recombined" begin
+    # A diagonal tableau has nothing to recombine and holds no step-start state.
+    diagonal = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :WickerSkamarock3)
+    @test isnothing(diagonal.timestepper.step_start)
+    recombined = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :TVDMISB)
+    @test !isnothing(recombined.timestepper.step_start)
+
+    # Re-linearizing per stage leaves no single fast operator to define the remainder against.
+    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
+                           topology = (Bounded, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    timestepper_kwargs = (; coefficients = :TVDMISB, relinearize_stages = true)
+    relinearized = @test_logs (:warn, r"first-order accurate") match_mode=:any AtmosphereModel(grid; dynamics,
+        timestepper = :MultirateInfinitesimalStep, timestepper_kwargs)
+    @test isnothing(relinearized.timestepper.step_start)
+end
+
+@testset "The default MIS coefficients" begin
+    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
+                           topology = (Bounded, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep)
+    @test model.timestepper.tableau.β == multirate_infinitesimal_step_tableau(:MIS4a, eltype(grid)).β
+end
