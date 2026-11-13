@@ -1,7 +1,7 @@
 using Oceananigans: ReactantState, initialize!
 using Oceananigans.TimeSteppers: Clock
 using Oceananigans.Utils: IterationInterval
-using Reactant: TracedRNumber, @trace
+using Reactant: TracedRNumber, unwrapped_eltype, @trace
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!, reconcile_state!
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics: Microphysics, DCMIP2016KesslerMicrophysics
@@ -36,9 +36,8 @@ function OceananigansTimeSteppers.first_time_step!(model::ReactantSSPRungeKutta3
     return nothing
 end
 
-# Reactant tracing breaks if Δt is materialized via `convert` outside the kernel;
-# pass it through unchanged and let in-kernel arithmetic see the traced value.
-@inline AtmosphereModels.kernel_time_step(::ReactantState, grid, Δt) = Δt
+@inline AtmosphereModels.kernel_time_step(arch, grid, Δt::TracedRNumber) =
+    convert(TracedRNumber{unwrapped_eltype(eltype(grid))}, Δt)
 
 # A traced Δt is a time step: traced stepping sets `last_Δt` before the first step, and the
 # eager guard cannot branch on a traced value.

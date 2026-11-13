@@ -65,7 +65,8 @@ using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture
+                               thermodynamic_density_name, specific_prognostic_moisture,
+                               kernel_time_step
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Solvers: NewtonSolver
 using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key

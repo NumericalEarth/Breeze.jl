@@ -429,7 +429,7 @@ function compute_acoustic_substeps(Δx_min::Number, Δt, thermodynamic_constants
     γᵈ   = cᵖᵈ / (cᵖᵈ - Rᵈ)
     cᵃᶜ  = sqrt(γᵈ * Rᵈ * FT(300))
 
-    return max(1, ceil(Int, abs(FT(Δt)) * cᵃᶜ / (acoustic_cfl * Δx_min)))
+    return max(1, ceil(Int, abs(Δt) * cᵃᶜ / (acoustic_cfl * Δx_min)))
 end
 
 compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_cfl) =
@@ -766,7 +766,7 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
     FT   = eltype(grid)
     g    = convert(FT, model.thermodynamic_constants.gravitational_acceleration)
     Gⁿρw = model.timestepper.Gⁿ.ρw
-    direction = convert(FT, sign(Δτ))
+    direction = sign(kernel_time_step(arch, grid, Δτ))
 
     ref = model.dynamics.reference_state
 
@@ -1140,7 +1140,7 @@ function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper
             substepper.density_potential_temperature_perturbation,
             substepper.previous_density_potential_temperature_perturbation,
             substepper.linearization_potential_temperature,
-            grid, convert(FT, Δτ), x_damping_scale, y_damping_scale)
+            grid, kernel_time_step(arch, grid, Δτ), x_damping_scale, y_damping_scale)
 
     return nothing
 end
@@ -1301,7 +1301,7 @@ function finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
     FT   = eltype(grid)
-    inv_Nτ = one(FT) / FT(Nτ)
+    inv_Nτ = one(FT) / Nτ
     ωˢ⁻ = 1 - substepper.forward_weight
 
     # `model.dynamics.dry_density` and `model.momentum.*` are still the
@@ -1668,7 +1668,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Substep count Nτ and size Δτ for this stage (WS-RK3 weights β = (1/3, 1/2, 1)).
     # The distribution decides how to split: ProportionalSubsteps fits ⌈β·N⌉ substeps to
     # each stage's β·Δt interval; ConstantSubstepSize/MonolithicFirstStage share one Δτ = Δt/N.
-    Δt_FT = FT(Δt)
+    Δt_FT = kernel_time_step(arch, grid, Δt)
     Nτ, Δτ = stage_substep_count_and_size(substepper.substep_distribution, β_stage, Δt_FT,
                                           substepper.minimum_horizontal_spacing, constants,
                                           substepper.acoustic_cfl, substepper.substeps)

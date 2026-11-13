@@ -496,7 +496,7 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
     g = convert(FT, model.thermodynamic_constants.gravitational_acceleration)
     Gⁿ = model.timestepper.Gⁿ
     dynamics = model.dynamics
-    direction = convert(FT, sign(Δτ))
+    direction = sign(kernel_time_step(arch, grid, Δτ))
     vertical_pressure_tendency_factor =
         β_stage == 1 ? substepper.final_stage_vertical_pressure_tendency_factor :
         substepper.vertical_pressure_tendency_factor
