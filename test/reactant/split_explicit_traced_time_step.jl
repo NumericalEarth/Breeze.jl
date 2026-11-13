@@ -32,7 +32,9 @@ function split_explicit_model(substeps)
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(; substeps);
                                     reference_potential_temperature=300)
     model = AtmosphereModel(grid; dynamics)
-    set!(model; ρ=model.dynamics.reference_state.density, u=1, θ=(x, y, z) -> 300 + 0.1 * sin(2π * x / 1e3))
+    set_initial_state!(model) = set!(model; ρ=model.dynamics.reference_state.density, u=1,
+                                     θ=(x, y, z) -> 300 + 0.1 * sin(2π * x / 1e3))
+    Reactant.@jit set_initial_state!(model)
     return model
 end
 
