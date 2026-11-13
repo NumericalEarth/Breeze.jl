@@ -14,8 +14,10 @@
 #####   2. `buoyancy_flux` (`CloudBuoyancyFlux`): the TKE equation takes its buoyancy production
 #####      from (g / θ₀) w′θᵥ′ instead of -Kᶜ N². The positive part is an explicit source and the
 #####      negative part joins the implicit linear coefficient, as the buoyancy sink does without
-#####      the formulation. Optionally (`stability = true`) the stability that the mixing length
-#####      and the stability functions see becomes N²ᵇ = -(g / θ₀) w′θᵥ′ / Kᶜ at the faces.
+#####      the formulation. Its `stability_solver` and passes solve the coupling of the
+#####      distribution with the static stability when the closure's `static_stability` is
+#####      `SubgridCloudStaticStability(LiquidFluxFraction(...))`, whose weight is
+#####      ℵ = w′qˡ′ / w′s′ (`stability = true` is a shortcut for that static stability).
 #####   3. `cloud` (`ClosureOwnedCloud`): with a microphysics whose subgrid choice is `ClosureCloud`,
 #####      the closure supplies the cloud fraction and cloud liquid (`ClosureCloudStatistics`) and
 #####      sets the cloud liquid of the model once per time step, after the last stage, to the
@@ -200,15 +202,17 @@ for TS in (:DissipationTimeScale, :EddyTurnoverTimeScale)
     end
 end
 
-# The time scale of the second moments at face k, from the closure's ℓ, √e (u), N² and Ri there
-@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts, closure, velocities, N², ℓ, u) =
+# The time scale of the second moments at face k, from the closure's ℓ, √e (u), N² and Ri there.
+# `e` and `ℓᵐ` (the specific TKE and the stored mixing length) are those the closure's shear reads,
+# so that `Sᴰ` sees the same Richardson number as the diffusivities (`TurbulenceAugmentedShear`).
+@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts, closure, velocities, N², e, ℓᵐ, ℓ, u) =
     moment_time_scale(ts, ℓ, u, @inbounds N²[i, j, k])
 
-@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::EddyTurnoverTimeScale, closure, velocities, N², ℓ, u) =
+@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::EddyTurnoverTimeScale, closure, velocities, N², e, ℓᵐ, ℓ, u) =
     2 * ℓ / (ts.ℂᵠ * u)
 
-@inline function moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::DissipationTimeScale, closure, velocities, N², ℓ, u)
-    Sᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
+@inline function moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::DissipationTimeScale, closure, velocities, N², e, ℓᵐ, ℓ, u)
+    Sᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, N², e, ℓᵐ)
     return 2 * ℓ / (ts.ℂᵠ * Sᴰ * u)
 end
 
@@ -318,15 +322,20 @@ positive part enters the stage tendency; the negative part enters the implicit l
 `θ₀` is SHOC's `basetemp` with [`FixedConstantsLiquidSaturation`](@ref) and the level's θˡⁱ with
 [`ModelThermodynamicsSaturation`](@ref).
 
-With `stability = true` the static stability seen by the mixing length and by the stability
-functions becomes, at the interior faces,
+`stability = true` is a shortcut: [`TKEBasedTurbulenceClosure`](@ref) then replaces its
+`static_stability` by `SubgridCloudStaticStability(LiquidFluxFraction(static_stability))`. The
+static stability slot stays the only owner of `N²`; its cloud model [`LiquidFluxFraction`](@ref)
+gives, at the interior faces,
 
     N²ᵇ = (g / θ) (∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ,    Bˡ = (g / θ) A_c w′qˡ′,
 
 the stratification of the conserved variables less the part carried by the subgrid liquid flux,
 so that `-Kᶜ N²ᵇ` is the buoyancy flux of the distribution (with `g / θ` of the level in place of
 `g / θ₀`); `Bˡ / Kᶜ` is left out where `Kᶜ` vanishes. In clear air it is the stratification of
-θᵥ. The mixing length and the diffusivities are then formed again from it.
+θᵥ. This is `N²ᵇ = (1 - ℵ) N²ᶜ + ℵ N²ˢ` with the effective saturated fraction `ℵ = w′qˡ′ / w′s′`
+(see [`LiquidFluxFraction`](@ref)). The mixing length and the diffusivities are then formed again
+from it. The passes, the relaxation and the solver below are those of the closure update that
+solves this coupling; they are held here, not by the static stability.
 
 The distribution is first computed with the static stability of the closure (`N²`; with
 `DryStaticStability` the dry one) and the mixing length and diffusivities formed from it, while
@@ -372,7 +381,7 @@ pass before (one pass behind, as with `n = 0`, where they are the dry ones).
 $(TYPEDFIELDS)
 """
 struct CloudBuoyancyFlux{N, W, S}
-    "Whether the stability of the diffusivities and the mixing length is that of the cloud buoyancy flux"
+    "Whether the closure's static stability is made `SubgridCloudStaticStability(LiquidFluxFraction(...))` (a constructor shortcut)"
     stability :: Bool
     "The weight `ω` of the new `N²ᵇ` in the extra passes, `0 < ω ≤ 1`"
     stability_relaxation :: W
@@ -454,6 +463,50 @@ Base.summary(b::CloudBuoyancyFlux) = string("CloudBuoyancyFlux(stability = ", b.
                                             ", stability_solver = ", summary(b.stability_solver), ")")
 
 #####
+##### The cloud model of the static stability slot: the liquid flux fraction of the distribution
+#####
+
+"""
+$(TYPEDEF)
+
+The cloud model of [`SubgridCloudStaticStability`](@ref) given by the closure's own
+[`SubgridDistribution`](@ref): the effective saturated fraction is the ratio of the subgrid liquid
+flux to the flux of the saturation excess `s = c_q qᵗ - c_θ θˡ` (SHOC's linearization at the level),
+
+    ℵ = w′qˡ′ / w′s′,    w′s′ = -Kᶜ ∂z s̄,
+
+so that the static stability `N² = (1 - ℵ) N²ᶜ + ℵ N²ˢ`, with `N²ᶜ = (g / θ)(∂z θˡ + A_q ∂z qᵗ)` the
+stratification of the conserved variables and `N²ˢ = N²ᶜ + (g / θ) A_c ∂z s̄` the saturated one, is
+`N²ᶜ - Bˡ / Kᶜ`, `Bˡ = (g / θ) A_c w′qˡ′`: minus the buoyancy flux of the distribution divided by
+`Kᶜ`. It is evaluated in that form (see [`CloudBuoyancyFlux`](@ref)). For the double-Gaussian
+distribution `ℵ` lies in `[0, 1]` up to the interpolation of the fluxes to the faces.
+
+`ℵ` depends on the distribution, which depends on `Kᶜ`, `ℓ` and the moment time scale, which
+depend on `N²`: a fixed point. The closure update solves it after the diffusivities, with the
+passes and the solver of the formulation's [`CloudBuoyancyFlux`](@ref). Before the distribution of
+the update exists, the slot evaluates `initial_stability` (for example `DryStaticStability()`).
+
+`CloudBuoyancyFlux(stability = true)` in the closure's [`SubgridCloudFormulation`](@ref) is a
+shortcut for `static_stability = SubgridCloudStaticStability(LiquidFluxFraction(static_stability))`.
+
+$(TYPEDFIELDS)
+"""
+struct LiquidFluxFraction{S}
+    "Static stability of the first evaluation of an update, before the distribution exists"
+    initial_stability :: S
+end
+
+LiquidFluxFraction() = LiquidFluxFraction(DryStaticStability())
+
+Base.show(io::IO, f::LiquidFluxFraction) = print(io, "LiquidFluxFraction(", summary(f.initial_stability), ")")
+
+const LiquidFluxFractionStability = SubgridCloudStaticStability{<:LiquidFluxFraction}
+
+# Before the distribution of the update exists: the initial stability
+@inline static_stabilityᶜᶜᶠ(i, j, k, grid, ss::LiquidFluxFractionStability, buoyancy, tracers, closure_fields) =
+    static_stabilityᶜᶜᶠ(i, j, k, grid, ss.cloud_model.initial_stability, buoyancy, tracers, closure_fields)
+
+#####
 ##### Part 3: cloud owned by the closure
 #####
 
@@ -528,6 +581,25 @@ convert_eltype(::Type{FT}, f::SubgridCloudFormulation) where FT =
 
 Base.summary(f::SubgridCloudFormulation) =
     string("SubgridCloudFormulation(", summary(f.distribution), ", ", summary(f.buoyancy_flux), ", ", summary(f.cloud), ")")
+
+# The static stability of a closure with a subgrid cloud formulation: `CloudBuoyancyFlux(stability = true)`
+# makes it the liquid flux fraction of the distribution
+liquid_flux_fraction_stability(static_stability, formulation) = static_stability
+
+function liquid_flux_fraction_stability(static_stability, formulation::SubgridCloudFormulation)
+    bf = formulation.buoyancy_flux
+    shortcut = bf isa CloudBuoyancyFlux && bf.stability && !(static_stability isa LiquidFluxFractionStability)
+    return shortcut ? SubgridCloudStaticStability(LiquidFluxFraction(static_stability)) : static_stability
+end
+
+validate_static_stability(static_stability, formulation) = nothing
+
+function validate_static_stability(::LiquidFluxFractionStability, formulation)
+    formulation isa SubgridCloudFormulation && !isnothing(formulation.distribution) ||
+        throw(ArgumentError("SubgridCloudStaticStability(LiquidFluxFraction(...)) needs a SubgridCloudFormulation " *
+                            "with a distribution, whose liquid flux gives the weight."))
+    return nothing
+end
 
 #####
 ##### Fields
@@ -695,7 +767,7 @@ end
             Kᵘ = closure_fields.Kᵘ[i, j, k]
             ℓ = closure_fields.ℓᵐ[i, j, k]
             u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
-            τ = moment_time_scaleᶜᶜᶠ(i, j, k, grid, d.time_scale, closure, velocities, closure_fields.N², ℓ, u)
+            τ = moment_time_scaleᶜᶜᶠ(i, j, k, grid, d.time_scale, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ, ℓ, u)
             τ = ifelse(isfinite(τ), τ, zero(FT))
 
             θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′, _, _, _ =
@@ -826,7 +898,7 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:CloudBuoyancyFlux{N
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
     launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
-    cloud_buoyancy_stability!(fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
+    solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
     parent(N²₋) .= parent(closure_fields.N²)
     return nothing
 end
@@ -834,11 +906,18 @@ end
 # Within `update_state!`, after the diffusivities and before the implicit coefficient
 function compute_subgrid_cloud!(fields::SubgridCloudFields, closure_fields, closure, model, tracers, parameters)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
-    cloud_buoyancy_stability!(fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
+    solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
     return nothing
 end
 
-cloud_buoyancy_stability!(buoyancy_flux, args...) = nothing
+# The coupling of the static stability with the distribution is solved only when the static
+# stability slot reads the distribution, with the solver of the cloud buoyancy flux
+solve_static_stability!(static_stability, buoyancy_flux, args...) = nothing
+solve_static_stability!(::LiquidFluxFractionStability, buoyancy_flux, args...) = cloud_buoyancy_stability!(buoyancy_flux, args...)
+
+# Without a cloud buoyancy flux there is no solver: one evaluation of the slot from the distribution
+cloud_buoyancy_stability!(::Nothing, fields, closure_fields, closure, model, tracers, parameters) =
+    cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
 
 # N²ᵇ = (g / θ)(∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces, then the mixing length and the
 # diffusivities again from it
@@ -866,7 +945,6 @@ end
 
 function cloud_buoyancy_stability!(buoyancy_flux::CloudBuoyancyFlux{N, W, <:Union{SecantIteration, BisectionIteration}},
                                    fields, closure_fields, closure, model, tracers, parameters) where {N, W}
-    buoyancy_flux.stability || return nothing
     solver = buoyancy_flux.stability_solver
     ω = buoyancy_flux.stability_relaxation
     solve_stability_pass!(solver, Val(0), Val(N), ω, fields, closure_fields, closure, model, tracers, parameters)
@@ -976,7 +1054,6 @@ end
 end
 
 function cloud_buoyancy_stability!(buoyancy_flux::CloudBuoyancyFlux, fields, closure_fields, closure, model, tracers, parameters)
-    buoyancy_flux.stability || return nothing
     cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
     # The extra passes of the coupling; the count is a type parameter, so the loop is unrolled when traced
     for _ in 1:stability_iterations(buoyancy_flux)

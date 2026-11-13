@@ -29,7 +29,7 @@ export TKEBasedTurbulenceClosure,
        BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
        closure_parameters, with_parameters,
-       SubgridCloudFormulation, SubgridDistribution, CloudBuoyancyFlux, ClosureOwnedCloud, FixedPointIteration, SecantIteration, BisectionIteration, LaggedStability,
+       SubgridCloudFormulation, SubgridDistribution, CloudBuoyancyFlux, LiquidFluxFraction, ClosureOwnedCloud, FixedPointIteration, SecantIteration, BisectionIteration, LaggedStability,
        StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale
 
 using Adapt: Adapt, adapt

@@ -471,7 +471,9 @@ limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``; where ``S² ≫ S²ᵐⁱⁿ`` the
 ``S²ᵐⁱⁿ / S²``. The shear does not enter [`ConstantStabilityFunctions`](@ref).
 
 `subgrid_cloud_formulation` (default `nothing`) is a [`SubgridCloudFormulation`](@ref), or
-`nothing` for none.
+`nothing` for none. If its buoyancy flux is `CloudBuoyancyFlux(stability = true)`, the static
+stability becomes `SubgridCloudStaticStability(LiquidFluxFraction(static_stability))`, whose weight
+is the liquid flux fraction of the subgrid distribution.
 
 ```jldoctest
 using Breeze
@@ -505,6 +507,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
     stability_functions = convert_eltype(FT, stability_functions)
     static_stability = convert_eltype(FT, static_stability)
     subgrid_cloud_formulation = convert_eltype(FT, subgrid_cloud_formulation)
+    static_stability = liquid_flux_fraction_stability(static_stability, subgrid_cloud_formulation)
+    validate_static_stability(static_stability, subgrid_cloud_formulation)
 
     return TKEBasedTurbulenceClosure{TD}(mixing_length,
                                          stability_functions,

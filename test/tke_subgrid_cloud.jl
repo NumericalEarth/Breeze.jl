@@ -6,7 +6,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: ClosureCloud, ClosureCloudStatistics, NoSubgridCorrelation, subgrid_statisticsᶜᶜᶜ
-using Breeze.TurbulenceClosures: dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
+using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment,
                                                               FixedConstantsLiquidSaturation
 
@@ -25,14 +25,15 @@ column(field) = Array(interior(field))[1, 1, :]
 # Kernel arithmetic on the device can differ from the host by rounding (fused multiply-add): exact on the CPU, close on the GPU
 matches(a, b) = default_arch isa CPU ? a == b : isapprox(a, b; rtol=1e-10, atol=1e-15)
 
-function tke_p3_column(formulation; subgrid = NoSubgridCorrelation(), arch = default_arch, static_stability = MoistStaticStability())
+function tke_p3_column(formulation; subgrid = NoSubgridCorrelation(), arch = default_arch, static_stability = MoistStaticStability(),
+                       shear = GridMeanShear())
     grid = RectilinearGrid(arch; size=32, z=(0, 1600), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=290)
     microphysics = PredictedParticlePropertiesMicrophysics(; subgrid,
                                                            negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
-    closure = TKEBasedTurbulenceClosure(; static_stability, subgrid_cloud_formulation = formulation)
+    closure = TKEBasedTurbulenceClosure(; static_stability, shear, subgrid_cloud_formulation = formulation)
     model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics, closure,
                             scalar_advection=implicit_transport())
 
@@ -396,4 +397,61 @@ end
     end
     @test all(isfinite, column(model.closure_fields.Kᶜ))
     @test all(isfinite, column(model.tracers.ρe))
+end
+
+@testset "One N² path: the liquid flux fraction of the distribution is the cloud model of the static stability" begin
+    dry = DryStaticStability()
+    shortcut = TKEBasedTurbulenceClosure(; static_stability = dry, subgrid_cloud_formulation = SubgridCloudFormulation())
+    @test shortcut.static_stability isa SubgridCloudStaticStability{<:LiquidFluxFraction}
+    @test shortcut.static_stability.cloud_model.initial_stability isa DryStaticStability
+    @test sprint(show, shortcut.static_stability) == "SubgridCloudStaticStability(LiquidFluxFraction(DryStaticStability))"
+    explicit_stability = SubgridCloudStaticStability(LiquidFluxFraction(dry))
+    no_shortcut = SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability = false))
+    @test TKEBasedTurbulenceClosure(; static_stability = explicit_stability,
+                                    subgrid_cloud_formulation = no_shortcut).static_stability == shortcut.static_stability
+    # Without the shortcut the static stability is left alone
+    @test TKEBasedTurbulenceClosure(; subgrid_cloud_formulation = no_shortcut).static_stability isa MoistStaticStability
+    @test TKEBasedTurbulenceClosure(; static_stability = explicit_stability,
+                                    subgrid_cloud_formulation = SubgridCloudFormulation()).static_stability === explicit_stability
+    # The weight needs the distribution
+    @test_throws ArgumentError TKEBasedTurbulenceClosure(; static_stability = SubgridCloudStaticStability(LiquidFluxFraction()))
+
+    # The shortcut and the explicit cloud model are the same model
+    a = tke_p3_column(SubgridCloudFormulation(); subgrid = ClosureCloud(), static_stability = dry)
+    b = tke_p3_column(no_shortcut; subgrid = ClosureCloud(), static_stability = explicit_stability)
+    for _ in 1:3
+        time_step!(a, 30)
+        time_step!(b, 30)
+    end
+    @test all(map(matches, state_columns(a), state_columns(b)))
+    @test matches(column(a.closure_fields.N²), column(b.closure_fields.N²))
+
+    # Without a cloud buoyancy flux the slot is evaluated once from the distribution
+    c = tke_p3_column(SubgridCloudFormulation(; buoyancy_flux = nothing, cloud = nothing); static_stability = explicit_stability)
+    update_state!(c)
+    @test all(isfinite, column(c.closure_fields.N²))
+end
+
+@testset "DissipationTimeScale reads the Richardson number of the closure's shear" begin
+    time_scale = DissipationTimeScale(; ℂᵠ = 0.14)
+    formulation = SubgridCloudFormulation(; distribution = SubgridDistribution(; time_scale), buoyancy_flux = nothing, cloud = nothing)
+    τ = Dict()
+    for ℂˢᵗ in (0, 0.3)
+        model = tke_p3_column(formulation; shear = TurbulenceAugmentedShear(; turbulence_shear_coefficient = ℂˢᵗ))
+        update_state!(model)
+        grid = model.grid
+        cf = model.closure_fields
+        closure = model.closure
+        e = SpecificValue(model.tracers.ρe, model.dynamics.reference_state.density)
+        ρ = column(model.dynamics.reference_state.density)
+        eᶜ = column(model.tracers.ρe) ./ ρ
+        ℓ = column(cf.ℓᵐ)
+        τ[ℂˢᵗ] = column(cf.subgrid_cloud.moments.τ)
+        for k in 2:size(grid, 3)
+            u = (sqrt(max(eᶜ[k], closure.minimum_tke)) + sqrt(max(eᶜ[k-1], closure.minimum_tke))) / 2
+            Sᴰ = @allowscalar dissipation_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N², e, cf.ℓᵐ)
+            @test τ[ℂˢᵗ][k] ≈ 2 * ℓ[k] / (time_scale.ℂᵠ * Sᴰ * u) rtol=1e-10
+        end
+    end
+    @test τ[0] != τ[0.3]
 end

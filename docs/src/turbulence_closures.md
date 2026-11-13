@@ -105,12 +105,16 @@ condensate. ``N²_s`` nearly vanishes
 on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 
 [`SubgridCloudStaticStability`](@ref) replaces the switch at grid-mean saturation with a blend,
-``N² = (1 - w) N²_d + w N²_s``, the moist-buoyancy weighting of
-[Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993). The weight ``w`` comes from an
+``N² = (1 - ℵ) N²_d + ℵ N²_s``, the moist-buoyancy weighting of
+[Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993). The weight ``ℵ``, the effective
+saturated fraction, comes from an
 external subgrid cloud model, which extends `Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ`;
 Breeze holds no model of it. `SubgridCloudStaticStability()` uses the subgrid model that the
 microphysics holds, and `SubgridCloudStaticStability(cloud_model)` a model of its own. A weight that reads the mixing length reads the stored
 `closure_fields.ℓᵐ` of the previous update, because ``N²`` is diagnosed before ``ℓ``.
+The closure's own subgrid distribution is such a cloud model, [`LiquidFluxFraction`](@ref), with
+``ℵ = w′qˡ′ / w′s′`` (`CloudBuoyancyFlux(stability = true)` is a shortcut for it); because its
+weight depends on the diffusivities, the closure update solves the two together.
 
 ### Stability functions
 
