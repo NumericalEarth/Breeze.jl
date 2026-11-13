@@ -50,7 +50,8 @@ export
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
     freeze_linearization_state!,
-    acoustic_rk3_substep_loop!
+    acoustic_rk3_substep_loop!,
+    compute_transport_density_tendency!
 
 using DocStringExtensions: TYPEDEF
 using Adapt: Adapt, adapt
@@ -65,7 +66,9 @@ using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture
+                               thermodynamic_density_name, specific_prognostic_moisture,
+                               moisture_prognostic_name, condensate_field_names, condensate_liquid_fraction,
+                               prognostic_moisture_phase_fractions
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Solvers: NewtonSolver
 using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key
