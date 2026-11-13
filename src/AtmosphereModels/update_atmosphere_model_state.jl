@@ -4,7 +4,8 @@ using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Grids: topology
+using Oceananigans.Grids: topology, horizontally_extended_interior_kernel_parameters,
+                          Periodic, TwoSided, Connected
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.OutputReaders: update_field_time_series!, extract_field_time_series
@@ -210,16 +211,47 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
                    model.microphysical_fields,
                    model.thermodynamic_constants)
 
-    # A rank with a neighbour to the east does not own face Nx + 1, but the terrain slow
-    # vertical-momentum tendency averages Gρu onto cell centres and reads it there.
-    Nx, Ny, Nz = size(grid)
-    east_connected = topology(grid, 1) <: Oceananigans.Grids.TwoSided{<:Any, Oceananigans.Grids.Connected}
-    x_momentum_parameters = KernelParameters(1:(Nx + east_connected), 1:Ny, 1:Nz)
-    launch!(arch, grid, x_momentum_parameters, compute_x_momentum_tendency!, Gρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
+    u_parameters, v_parameters = horizontal_momentum_tendency_kernel_parameters(model)
+    launch!(arch, grid, u_parameters, compute_x_momentum_tendency!, Gρu, grid, u_args)
+    launch!(arch, grid, v_parameters, compute_y_momentum_tendency!, Gρv, grid, v_args)
     compute_vertical_momentum_tendency!(model, Gρw, w_args)
 
     return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Kernel parameters for the `Gρu` and `Gρv` launches. The default covers the interior. Dynamics whose
+kernels read `Gρu` and `Gρv` one face past the interior (the terrain-following compressible
+dynamics averages them onto cell centers) extend this to return `tendency_kernel_parameters`.
+"""
+horizontal_momentum_tendency_kernel_parameters(model) = (:xyz, :xyz)
+
+# Dynamics whose tendency kernels reach further than the advection scheme and closure check for
+# a large enough halo here, once the dynamics is materialized.
+validate_dynamics_halo(dynamics, grid, momentum_advection, closure) = nothing
+
+# Face-located tendencies are also computed at face N + 1 where the right side of a dimension
+# continues into a halo that nothing else fills: a neighboring rank (`Connected`) or the
+# periodic image. Elsewhere face N + 1 is either a boundary face or does not exist.
+tendency_range(::Face, ::Union{Periodic, TwoSided{<:Any, Connected}}, N) = 1:N+1
+tendency_range(ℓ, topo, N) = 1:N
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `KernelParameters` for a tendency located at `(ℓx, ℓy, Center())` that also cover face
+`N + 1` in each horizontal dimension whose right side is a seam between ranks or periodic, so that
+a kernel which reads the tendency at `i + 1` (or `j + 1`) finds a computed value there.
+Computing the tendency one face further out needs one more halo cell than the interior does.
+"""
+function tendency_kernel_parameters(grid, ℓx, ℓy)
+    Nx, Ny, Nz = size(grid)
+    TX, TY, _ = topology(grid)
+    return KernelParameters(tendency_range(ℓx, TX(), Nx),
+                            tendency_range(ℓy, TY(), Ny),
+                            1:Nz)
 end
 
 # Compute the vertical-momentum tendency `Gρw`. Extendable so that dynamics can omit vertical-velocity
@@ -258,8 +290,11 @@ function compute_auxiliary_variables!(model)
     # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
     if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
-        compute_closure_fields!(model.closure_fields, model.closure, model)
-        fill_halo_regions!(model.closure_fields)
+        # Closure fields are computed one cell past the interior in x and y, from inputs whose
+        # halos are already filled, so that across a seam between ranks only local halos need filling.
+        closure_parameters = horizontally_extended_interior_kernel_parameters(model.grid)
+        compute_closure_fields!(model.closure_fields, model.closure, model; parameters=closure_parameters)
+        fill_halo_regions!(model.closure_fields; only_local_halos=true)
     end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel

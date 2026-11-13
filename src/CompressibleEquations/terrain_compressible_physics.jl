@@ -27,6 +27,7 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.Fields: Field, ZeroField, interior, set!
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!, NormalFlowBoundaryCondition, FieldBoundaryConditions
+using Oceananigans.Grids: halo_size, inflate_halo_size
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
                                               SlopeInsideInterpolation,
@@ -35,6 +36,7 @@ using Breeze.Thermodynamics: evaluate_profile, integrate_exner_column!,
                              newton_hydrostatic_pressure, moist_reference_constants,
                              moist_hydrostatic_pressure, VaporEquivalentExponent
 using Breeze.Solvers: FixedIterations
+using Breeze.AtmosphereModels: tendency_kernel_parameters, tendency_range
 
 #####
 ##### Terrain-aware type alias
@@ -511,6 +513,32 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
             model.momentum.ρw,
             grid, dynamics, g, vertical_pressure_tendency_factor, substepper.sponge, direction)
 
+    return nothing
+end
+
+# `_assemble_terrain_slow_vertical_momentum_tendency!` averages Gρu and Gρv onto cell centers, so
+# it reads them at face i + 1 and j + 1. Where that face is a seam between ranks or a periodic
+# image, no interior launch computes it, so the momentum tendencies are computed there too.
+function AtmosphereModels.horizontal_momentum_tendency_kernel_parameters(model::TerrainCompressibleModel)
+    grid = model.grid
+    return (tendency_kernel_parameters(grid, Face(), Center()),
+            tendency_kernel_parameters(grid, Center(), Face()))
+end
+
+# Computing a momentum tendency at face N + 1 reaches one cell further than the advection
+# scheme and closure need for the interior.
+function AtmosphereModels.validate_dynamics_halo(::TerrainCompressibleDynamics, grid, momentum_advection, closure)
+    Hx, Hy, _ = halo_size(grid)
+    Rx, Ry, _ = inflate_halo_size(1, 1, 1, grid, momentum_advection, closure)
+    TX, TY, _ = topology(grid)
+    Ex = length(tendency_range(Face(), TX(), 1)) - 1
+    Ey = length(tendency_range(Face(), TY(), 1)) - 1
+    if Hx < Rx + Ex || Hy < Ry + Ey
+        throw(ArgumentError("A terrain-following CompressibleModel computes momentum tendencies one face " *
+                            "past the interior where a horizontal dimension is periodic or split between " *
+                            "ranks, so it needs a halo of at least $((Rx + Ex, Ry + Ey)) in (x, y); " *
+                            "the grid has $((Hx, Hy))."))
+    end
     return nothing
 end
 
