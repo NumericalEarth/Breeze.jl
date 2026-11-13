@@ -22,6 +22,9 @@ implicit_transport() = WENO(; order=5, time_discretization=AdaptiveVerticallyImp
 
 column(field) = Array(interior(field))[1, 1, :]
 
+# Kernel arithmetic on the device can differ from the host by rounding (fused multiply-add): exact on the CPU, close on the GPU
+matches(a, b) = default_arch isa CPU ? a == b : isapprox(a, b; rtol=1e-10, atol=1e-15)
+
 function tke_p3_column(formulation; subgrid = NoSubgridCorrelation(), arch = default_arch, static_stability = MoistStaticStability())
     grid = RectilinearGrid(arch; size=32, z=(0, 1600), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
@@ -74,8 +77,8 @@ end
     grid = model.grid
     cf = model.closure_fields
     for k in 1:size(grid, 3)
-        @test tke_buoyancy_productionᶜᶜᶜ(1, 1, k, grid, cf) ===
-              ℑbzᵃᵃᶜ(1, 1, k, grid, buoyancy_productionᶜᶜᶠ, cf.Kᶜ, cf.N²)
+        @test @allowscalar(tke_buoyancy_productionᶜᶜᶜ(1, 1, k, grid, cf)) ===
+              @allowscalar(ℑbzᵃᵃᶜ(1, 1, k, grid, buoyancy_productionᶜᶜᶠ, cf.Kᶜ, cf.N²))
     end
 end
 
@@ -148,8 +151,8 @@ end
         n = 0
         for k in 2:Nz
             u = (sqrt(max(e[k], eᵐⁱⁿ)) + sqrt(max(e[k-1], eᵐⁱⁿ))) / 2
-            Sᴰ = dissipation ? dissipation_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N²) : 1
-            Sᶜ = tracer_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N²)
+            Sᴰ = dissipation ? @allowscalar(dissipation_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N²)) : 1
+            Sᶜ = @allowscalar tracer_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N², nothing, nothing)
             @test column(m.τ)[k] ≈ 2 * ℓ[k] / (ℂᵠ * Sᴰ * u) rtol=1e-12
             θ² = column(m.θˡ′²)[k]
             if θ² > 0
@@ -189,11 +192,11 @@ end
             C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, FixedConstantsLiquidSaturation(), nothing, d.clipping, d.constants,
                                                    zf[k+1], zf[k], zc[k], p[k], θ[k], 0.0, qᵗ[k], column(cl.w′²)[k],
                                                    moments(k), moments(k+1))
-            @test column(cl.C)[k] == C
-            @test column(cl.qˡ)[k] == qˡ
-            @test column(cl.w′qˡ′)[k] == w′qˡ′
-            @test column(cl.w′θᵥ′)[k] == w′θᵥ′
-            @test column(cl.B)[k] ≈ d.constants.ggr / d.constants.basetemp * w′θᵥ′
+            @test matches(column(cl.C)[k], C)
+            @test matches(column(cl.qˡ)[k], qˡ)
+            @test matches(column(cl.w′qˡ′)[k], w′qˡ′)
+            @test matches(column(cl.w′θᵥ′)[k], w′θᵥ′)
+            @test isapprox(column(cl.B)[k], d.constants.ggr / d.constants.basetemp * w′θᵥ′; atol = default_arch isa CPU ? 0 : 1e-15)
         end
         @test maximum(column(cl.C)) > 0
         @test maximum(column(cl.qˡ)) > 0
@@ -207,7 +210,7 @@ end
     cf = model.closure_fields
     B = column(cf.subgrid_cloud.cloud.B)
     for k in 1:size(grid, 3)
-        @test tke_buoyancy_productionᶜᶜᶜ(1, 1, k, grid, cf) == B[k]
+        @test @allowscalar(tke_buoyancy_productionᶜᶜᶜ(1, 1, k, grid, cf)) == B[k]
     end
     reference = tke_p3_column(nothing)
     for _ in 1:4
@@ -257,7 +260,7 @@ end
     sc = model.closure_fields.subgrid_cloud
     @test maximum(column(sc.cloud.qˡ)) > 1e-6
     @test 0 < maximum(column(sc.cloud.C)) ≤ 1
-    stats = subgrid_statisticsᶜᶜᶜ(1, 1, 20, model.grid, ClosureCloud(), model.closure, model.closure_fields)
+    stats = @allowscalar subgrid_statisticsᶜᶜᶜ(1, 1, 20, model.grid, ClosureCloud(), model.closure, model.closure_fields)
     @test stats == ClosureCloudStatistics(column(sc.cloud.C)[20], column(sc.cloud.qˡ)[20])
 
     # Total water of a closed column with rain
@@ -353,7 +356,7 @@ end
         update_state!(model)
         cf = model.closure_fields
         B = column(cf.subgrid_cloud.cloud.B)
-        @test all(tke_buoyancy_productionᶜᶜᶜ(1, 1, k, model.grid, cf) == B[k] for k in 1:size(model.grid, 3))
+        @test all(@allowscalar(tke_buoyancy_productionᶜᶜᶜ(1, 1, k, model.grid, cf)) == B[k] for k in 1:size(model.grid, 3))
     end
 end
 
