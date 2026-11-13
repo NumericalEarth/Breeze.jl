@@ -46,7 +46,7 @@ JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"
 LazyArtifacts = "<0.0.1, 1"
 NumericalRadiation = "0.2"
-Oceananigans = "0.118"
+Oceananigans = "0.118.1"
 OffsetArrays = "1.4"
 Printf = "1"
 RRTMGP = "0.22, 0.23, 1"
@@ -58,6 +58,3 @@ julia = "1.11.9"
 
 [workspace]
 projects = ["docs", "examples", "test"]
-
-[sources]
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "b61f00dffa99beb2ce6841ebe7bd84b770b87cf0"}
