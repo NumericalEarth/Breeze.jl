@@ -48,7 +48,7 @@ end
         @test ℂˢ ≈ 1.316
         @test (sf.ℂᵘ, sf.ℂᶜ, sf.ℂᵉ, sf.ℂᴰ) == FT.((0.149, 0.201, 0.298, 0.388))
         @test closure.minimum_tke == FT(1e-6)
-        @test closure.minimum_shear_squared == FT(1e-10)
+        @test closure.shear.minimum_shear_squared == FT(1e-10)
         @test closure.negative_tke_damping_time_scale == FT(60)
         @test isinf(closure.maximum_viscosity)
         @test isinf(closure.maximum_tracer_diffusivity)
@@ -74,7 +74,7 @@ end
         @test closure.stability_functions.ℂᵉ === FT(1)
         @test closure.maximum_viscosity === FT(100)
         @test closure.minimum_tke === FT(1e-8)
-        @test closure.minimum_shear_squared === FT(1e-12)
+        @test closure.shear.minimum_shear_squared === FT(1e-12)
         @test closure.negative_tke_damping_time_scale === FT(600)
         @test_throws ArgumentError TKEBasedTurbulenceClosure(FT; minimum_shear_squared = 0)
         @test_throws ArgumentError TKEBasedTurbulenceClosure(FT; minimum_shear_squared = -1e-10)
@@ -887,7 +887,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
     @testset "the shear floor makes the Richardson number continuous" begin
         closure = TKEBasedTurbulenceClosure(FT)
         sf = closure.stability_functions
-        S²ᵐⁱⁿ = closure.minimum_shear_squared
+        S²ᵐⁱⁿ = closure.shear.minimum_shear_squared
         functions = (momentum_stability_function, tracer_stability_function,
                      tke_stability_function, dissipation_stability_function)
         endpoints = ((sf.ℂᵘ⁻, sf.ℂᵘ⁰, sf.ℂᵘ⁺), (sf.ℂᶜ⁻, sf.ℂᶜ⁰, sf.ℂᶜ⁺),

@@ -117,6 +117,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)`, `Supersaturation(model)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``            |
 | ``ξ``                               | `ξ`    | `psychrometric_correction`           | Psychrometric correction, ``ξ = 1 + ℒ² qᵛ⁺ / (cᵖ Rᵛ T²)``; ``ξˡ`` and ``ξⁱ`` name the liquid and ice phase |
 | ``δqˡ``, ``δqⁱ``                    | `δqˡ`, `δqⁱ` |                               | Saturation-adjustment increments, ``δq = (qᵛ - qᵛ⁺) / ξ`` for the liquid and ice phase |
+| ``Γ``                               | `Γ`    | `subgrid_supersaturation`            | Subgrid supersaturation correlation added to the vapor excess ``qᵛ - qᵛ⁺ˡ`` in P3 cloud condensation and evaporation (kg/kg) |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
 | ``c^{ac}``                          | `cᵃᶜ`  |                                     | Acoustic sound speed, ``cᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
 | ``\mathbb{C}_{X,i}``               | `ℂˣᵢ`  | descriptive parameter property      | The ``i``-th calibratable empirical coefficient in relation ``X``; source uses modifier letters because Unicode lacks general subscript letters; state, physical constants, case inputs, switches, and numerical safeguards do not receive ``\mathbb{C}`` |
@@ -199,6 +200,9 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
+| ``p`` | `p` | `exponent` | Exponent of the `HarmonicBlend` of the lengths that bound the mixing length, ``(ℓ₁^{-p} + ℓ₂^{-p})^{-1/p}`` (elsewhere ``p`` is pressure) |
+| ``ℂˢᵗ`` | `ℂˢᵗ` | `turbulence_shear_coefficient` | Coefficient of the squared eddy turnover rate ``e / ℓ²`` added to ``S²`` by `TurbulenceAugmentedShear` |
+| ``N²ᵈ, N²ˢ`` | `N²ᵈ`, `N²ˢ` | | Dry and saturated squared buoyancy frequencies, which `SubgridCloudStaticStability` blends with the weight ``w`` |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
 | ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
 | ``h^{bl}``                          | `hᵇˡ`  |                                     | Boundary-layer depth, m; a diagnostic (the height of the capping inversion in convective conditions) |

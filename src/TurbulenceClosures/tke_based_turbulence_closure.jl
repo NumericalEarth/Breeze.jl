@@ -135,6 +135,109 @@ abstract type AbstractMixingLength end
 """
 $(TYPEDEF)
 
+The rule by which a mixing length combines the lengths that bound it, as the smallest of them:
+``\\min(ℓ₁, ℓ₂)``. This is the default `blending` of [`LocalMinimumMixingLength`](@ref) and
+[`GradientLimitedMixingLength`](@ref). The minimum is continuous but its derivative jumps where
+the binding length changes.
+"""
+struct HardMinimum end
+
+"""
+$(TYPEDEF)
+
+The rule by which a mixing length combines the lengths that bound it, as their generalized
+harmonic blend with `exponent` ``p``,
+
+```math
+ℓ = (ℓ₁^{-p} + ℓ₂^{-p})^{-1/p},
+```
+
+a smooth and scale-free function of the lengths that is smaller than either, by the factor
+``2^{-1/p}`` at most (where they are equal), and tends to [`HardMinimum`](@ref) as ``p → ∞``.
+An infinite length — the buoyancy penetration depth where ``N² ≤ 0`` — contributes nothing, and a
+zero length gives zero.
+
+[`LocalMinimumMixingLength`](@ref) blends the wall length and the penetration depth.
+[`GradientLimitedMixingLength`](@ref) blends in both of its steps: the wall length with the
+stratification envelope, and, within each of the two sweeps that build the envelope, the
+penetration depth of a level with the envelope carried from its neighbor,
+
+```math
+ℓˢ_k ← \\left[ ℓˢ_k{}^{-p} + (ℓˢ_{k∓1} + ℂⁱ Δz)^{-p} \\right]^{-1/p}.
+```
+
+This recursion keeps the cost of two sweeps per column. It is not the ``p``-norm of all the bounds
+``ℓᵇ(z′) + ℂⁱ |z - z′|`` at once, which would cost a sum over the column at every level: the
+recursion blends a blend, so every level between an obstacle and the level of interest contributes
+its own bound again. The envelope is therefore smaller than the minimum by an amount that grows as
+the grid is refined — in uniformly stratified air it solves ``ℓ^{-p} = ℓᵇ{}^{-p} + (ℓ + ℂⁱ Δz)^{-p}`` in
+each sweep, which tends to ``ℓᵇ`` where ``ℂⁱ Δz ≫ ℓᵇ`` and to zero as ``Δz → 0`` — so the
+coefficients calibrated with a blend belong to the grid they were calibrated on.
+
+Fields
+======
+
+$(TYPEDFIELDS)
+"""
+struct HarmonicBlend{FT}
+    "exponent ``p ≥ 1`` of the blend; the hard minimum as ``p → ∞``"
+    exponent :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Construct a [`HarmonicBlend`](@ref) with the given `exponent`.
+
+```jldoctest
+using Breeze
+
+GradientLimitedMixingLength(blending = HarmonicBlend(exponent=8))
+
+# output
+GradientLimitedMixingLength{Float64} (ℂˢ = 1.316, ℂⁱ = 1.316, blending = HarmonicBlend(exponent = 8))
+```
+"""
+function HarmonicBlend(; exponent = 4)
+    exponent ≥ 1 || throw(ArgumentError("The exponent of HarmonicBlend must be at least 1, but it is $exponent"))
+    return HarmonicBlend(exponent)
+end
+
+# The exponent may be a traced scalar when a shared closure is differentiated.
+Adapt.@adapt_structure HarmonicBlend
+
+Base.summary(::HardMinimum) = "HardMinimum"
+Base.summary(::HarmonicBlend) = "HarmonicBlend"
+Base.show(io::IO, blending::HardMinimum) = print(io, summary(blending), "()")
+Base.show(io::IO, blending::HarmonicBlend) = print(io, summary(blending), "(exponent = ", prettysummary(blending.exponent), ")")
+
+@inline convert_eltype(::Type{FT}, blending::HardMinimum) where FT = blending
+@inline convert_eltype(::Type{FT}, blending::HarmonicBlend) where FT = HarmonicBlend{FT}(convert(FT, blending.exponent))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Combine the two lengths `ℓ₁` and `ℓ₂` that bound a mixing length by the rule `blending`.
+"""
+@inline blend(::HardMinimum, ℓ₁, ℓ₂) = min(ℓ₁, ℓ₂)
+
+# ℓ⁻ (1 + (ℓ⁻ / ℓ⁺)ᵖ)^(-1/p) with ℓ⁻ ≤ ℓ⁺: the ratio is in [0, 1], so nothing overflows for any p.
+# With an infinite ℓ⁺ or a zero ℓ⁻ the blend is ℓ⁻ itself; both branches of an `ifelse` are evaluated
+# and differentiated, so the unselected blend is formed from two lengths of one.
+@inline function blend(blending::HarmonicBlend, ℓ₁, ℓ₂)
+    p = blending.exponent
+    ℓ⁻ = min(ℓ₁, ℓ₂)
+    ℓ⁺ = max(ℓ₁, ℓ₂)
+    comparable = (ℓ⁻ > 0) & (ℓ⁺ < Inf)
+    ℓ⁻¹ = ifelse(comparable, ℓ⁻, one(ℓ⁻))
+    ℓ⁺¹ = ifelse(comparable, ℓ⁺, one(ℓ⁺))
+    ℓ = ℓ⁻¹ * (1 + (ℓ⁻¹ / ℓ⁺¹)^p)^(-1 / p)
+    return ifelse(comparable, ℓ, ℓ⁻)
+end
+
+"""
+$(TYPEDEF)
+
 The mixing length as the smaller of the wall length and the buoyancy penetration depth at the eddy's
 own level,
 
@@ -149,10 +252,18 @@ layer under [`MoistStaticStability`](@ref), a neutral layer — ``ℓᵇ`` is in
 ``ℓ`` but the distance to the ground, so ``ℓ = ℂˢ z`` reaches kilometers and the diffusivity
 ``ℂᵘ ℓ \\sqrt{e}`` jumps by orders of magnitude when such a layer forms, mixes it away within a time
 step and collapses. [`GradientLimitedMixingLength`](@ref), the default, adds the missing bound.
+
+`blending` is the rule that combines the two lengths: [`HardMinimum`](@ref), the default, or
+[`HarmonicBlend`](@ref).
 """
-Base.@kwdef struct LocalMinimumMixingLength{FT} <: AbstractMixingLength
-    ℂˢ :: FT = 1.316 # coefficient of the wall length ℓ = ℂˢ z
+struct LocalMinimumMixingLength{FT, B} <: AbstractMixingLength
+    ℂˢ :: FT       # coefficient of the wall length ℓ = ℂˢ z
+    blending :: B  # how the wall length and the penetration depth combine
 end
+
+LocalMinimumMixingLength(; ℂˢ = 1.316, blending = HardMinimum()) = LocalMinimumMixingLength(ℂˢ, blending)
+LocalMinimumMixingLength(ℂˢ::Number) = LocalMinimumMixingLength(ℂˢ, HardMinimum())
+LocalMinimumMixingLength{FT}(ℂˢ) where FT = LocalMinimumMixingLength(convert(FT, ℂˢ), HardMinimum())
 
 """
 $(TYPEDEF)
@@ -197,18 +308,35 @@ With equal slopes this recovers the original gradient-limited formulation
 The standalone constructor retains `ℂˢ = 1.316` and `ℂⁱ = ℂˢ` for compatibility:
 a single positional coefficient or a lone `ℂˢ` keyword still sets both slopes.
 [`TKEBasedTurbulenceClosure`](@ref) supplies the calibrated pair instead.
+
+`blending` is the rule that replaces every minimum above: [`HardMinimum`](@ref), the default, or
+[`HarmonicBlend`](@ref), which smooths both the combination of the wall length with the envelope
+and each step of the two sweeps that build the envelope.
 """
-Base.@kwdef struct GradientLimitedMixingLength{FT} <: AbstractMixingLength
-    ℂˢ :: FT = 1.316 # wall length coefficient
-    ℂⁱ :: FT = ℂˢ    # interior envelope slope; equal slopes recover the original formulation
+struct GradientLimitedMixingLength{FT, B} <: AbstractMixingLength
+    ℂˢ :: FT       # wall length coefficient
+    ℂⁱ :: FT       # interior envelope slope; equal slopes recover the original formulation
+    blending :: B  # how the bounds on the length combine
 end
 
-GradientLimitedMixingLength(ℂˢ) = GradientLimitedMixingLength(ℂˢ, ℂˢ)
+function GradientLimitedMixingLength(; ℂˢ = 1.316, ℂⁱ = ℂˢ, blending = HardMinimum())
+    ℂˢ, ℂⁱ = promote(ℂˢ, ℂⁱ)
+    return GradientLimitedMixingLength(ℂˢ, ℂⁱ, blending)
+end
+
+GradientLimitedMixingLength(ℂˢ::Number) = GradientLimitedMixingLength(ℂˢ, ℂˢ)
+GradientLimitedMixingLength(ℂˢ::Number, ℂⁱ::Number) = GradientLimitedMixingLength(promote(ℂˢ, ℂⁱ)..., HardMinimum())
 GradientLimitedMixingLength{FT}(ℂˢ) where FT = GradientLimitedMixingLength{FT}(ℂˢ, ℂˢ)
-GradientLimitedMixingLength(ℂˢ, ℂⁱ) = GradientLimitedMixingLength(promote(ℂˢ, ℂⁱ)...)
+GradientLimitedMixingLength{FT}(ℂˢ, ℂⁱ) where FT = GradientLimitedMixingLength(convert(FT, ℂˢ), convert(FT, ℂⁱ), HardMinimum())
 
 # Coefficients may be traced scalars when a shared closure is differentiated.
+Adapt.@adapt_structure LocalMinimumMixingLength
 Adapt.@adapt_structure GradientLimitedMixingLength
+
+# The rule by which a formulation combines its bounds; the parcel walks of the integral length have none
+@inline length_blending(ml::AbstractMixingLength) = HardMinimum()
+@inline length_blending(ml::LocalMinimumMixingLength) = ml.blending
+@inline length_blending(ml::GradientLimitedMixingLength) = ml.blending
 
 @inline interior_slope(ml::GradientLimitedMixingLength) = ml.ℂⁱ
 @inline interior_slope(ml::AbstractMixingLength) = ml.ℂˢ
@@ -216,14 +344,21 @@ Adapt.@adapt_structure GradientLimitedMixingLength
 Base.summary(ml::LocalMinimumMixingLength{FT}) where FT = "LocalMinimumMixingLength{$FT}"
 Base.summary(ml::IntegralMixingLength{FT}) where FT = "IntegralMixingLength{$FT}"
 Base.summary(ml::GradientLimitedMixingLength{FT}) where FT = "GradientLimitedMixingLength{$FT}"
-Base.show(io::IO, ml::AbstractMixingLength) = print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), ")")
-Base.show(io::IO, ml::GradientLimitedMixingLength) =
-    print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), ", ℂⁱ = ", prettysummary(ml.ℂⁱ), ")")
 
-@inline convert_eltype(::Type{FT}, ml::LocalMinimumMixingLength) where FT = LocalMinimumMixingLength{FT}(convert(FT, ml.ℂˢ))
+# The default blending, the hard minimum, is not shown
+blending_summary(::HardMinimum) = ""
+blending_summary(blending) = string(", blending = ", blending)
+
+Base.show(io::IO, ml::AbstractMixingLength) =
+    print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), blending_summary(length_blending(ml)), ")")
+Base.show(io::IO, ml::GradientLimitedMixingLength) =
+    print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), ", ℂⁱ = ", prettysummary(ml.ℂⁱ), blending_summary(ml.blending), ")")
+
+@inline convert_eltype(::Type{FT}, ml::LocalMinimumMixingLength) where FT =
+    LocalMinimumMixingLength(convert(FT, ml.ℂˢ), convert_eltype(FT, ml.blending))
 @inline convert_eltype(::Type{FT}, ml::IntegralMixingLength) where FT = IntegralMixingLength{FT}(convert(FT, ml.ℂˢ))
 @inline convert_eltype(::Type{FT}, ml::GradientLimitedMixingLength) where FT =
-    GradientLimitedMixingLength{FT}(convert(FT, ml.ℂˢ), convert(FT, ml.ℂⁱ))
+    GradientLimitedMixingLength(convert(FT, ml.ℂˢ), convert(FT, ml.ℂⁱ), convert_eltype(FT, ml.blending))
 
 #####
 ##### The closure
@@ -251,8 +386,8 @@ primary mixing length ([`AbstractMixingLength`](@ref): [`GradientLimitedMixingLe
 ([`ConstantStabilityFunctions`](@ref) or
 [`RationalStabilityFunction`](@ref)). ``N²`` is
 diagnosed once per time-step stage at the cell
-interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default, or
-[`DryStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
+interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default,
+[`DryStaticStability`](@ref) or [`SubgridCloudStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
 the tracer `ρe`, which the
 closure adds to the model; it is advected and vertically diffused like every other scalar, and the
 closure applies the local production, buoyancy flux and dissipation.
@@ -261,10 +396,12 @@ The square root of ``e`` is floored at `minimum_tke` wherever it enters a diffus
 scale, and negative ``e`` — which advection can produce — is damped on
 `negative_tke_damping_time_scale` rather than clipped. The three `maximum_*` diffusivities clip
 the diffusivities, `Inf` by default. The Richardson number of
-[`RationalStabilityFunction`](@ref) is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, with ``S²ᵐⁱⁿ`` the
-`minimum_shear_squared`, so that it is finite and continuous where the shear vanishes.
+[`RationalStabilityFunction`](@ref) is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, with the squared shear ``S²``
+and its floor ``S²ᵐⁱⁿ`` from the `shear` component: [`GridMeanShear`](@ref) by default, the shear of
+the resolved wind, or [`TurbulenceAugmentedShear`](@ref), which adds the turnover rate of the
+subgrid eddies. The floor keeps ``Ri`` finite and continuous where the shear vanishes.
 """
-struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
+struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
     mixing_length :: ML                   # the primary mixing length ℓ
     stability_functions :: SF             # Sᵘ, Sᶜ, Sᵉ, Sᴰ
     static_stability :: SS                # how N² is diagnosed
@@ -272,7 +409,7 @@ struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT} <: AbstractScalarDiffusivit
     maximum_tracer_diffusivity :: FT      # upper bound on Kᶜ, m² s⁻¹
     maximum_tke_diffusivity :: FT         # upper bound on Kᵉ, m² s⁻¹
     minimum_tke :: FT                     # floor on e inside √e, m² s⁻²
-    minimum_shear_squared :: FT           # shear floor S²ᵐⁱⁿ in Ri = N² / (S² + S²ᵐⁱⁿ), s⁻²
+    shear :: SH                           # the squared shear S² and its floor S²ᵐⁱⁿ in Ri = N² / (S² + S²ᵐⁱⁿ)
     negative_tke_damping_time_scale :: FT # time scale on which negative e is damped, s
 end
 
@@ -286,7 +423,7 @@ function Adapt.adapt_structure(to, closure::TKEBasedTurbulenceClosure{TD}) where
                                          adapt(to, closure.maximum_tracer_diffusivity),
                                          adapt(to, closure.maximum_tke_diffusivity),
                                          adapt(to, closure.minimum_tke),
-                                         adapt(to, closure.minimum_shear_squared),
+                                         adapt(to, closure.shear),
                                          adapt(to, closure.negative_tke_damping_time_scale))
 end
 
@@ -296,13 +433,13 @@ const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureAr
 function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::SF, static_stability::SS,
                                        maximum_viscosity::FT, maximum_tracer_diffusivity::FT,
                                        maximum_tke_diffusivity::FT, minimum_tke::FT,
-                                       minimum_shear_squared::FT,
-                                       negative_tke_damping_time_scale::FT) where {TD, ML, SF, SS, FT}
-    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT}(mixing_length, stability_functions, static_stability,
-                                                         maximum_viscosity, maximum_tracer_diffusivity,
-                                                         maximum_tke_diffusivity, minimum_tke,
-                                                         minimum_shear_squared,
-                                                         negative_tke_damping_time_scale)
+                                       shear::SH,
+                                       negative_tke_damping_time_scale::FT) where {TD, ML, SF, SS, FT, SH}
+    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH}(mixing_length, stability_functions, static_stability,
+                                                             maximum_viscosity, maximum_tracer_diffusivity,
+                                                             maximum_tke_diffusivity, minimum_tke,
+                                                             shear,
+                                                             negative_tke_damping_time_scale)
 end
 
 """
@@ -314,21 +451,23 @@ stability and numerical parameters. The defaults are calibrated to the Shen et a
 rational stability functions, wall coefficient 0.7877315198717979 and interior slope
 1.777871783491512.
 
-`minimum_shear_squared` (default `1e-10` s⁻²) is the floor ``S²ᵐⁱⁿ > 0`` added to the squared
-shear in the Richardson number of [`RationalStabilityFunction`](@ref),
-``Ri = N² / (S² + S²ᵐⁱⁿ)``. It makes the stability functions continuous where the shear vanishes,
+`shear` is the squared shear ``S²`` of the Richardson number of [`RationalStabilityFunction`](@ref),
+``Ri = N² / (S² + S²ᵐⁱⁿ)``: [`GridMeanShear`](@ref) (the default) or
+[`TurbulenceAugmentedShear`](@ref). It carries the floor ``S²ᵐⁱⁿ > 0`` (default `1e-10` s⁻²) as
+`shear.minimum_shear_squared`; the keyword `minimum_shear_squared`, if given, replaces the floor
+of `shear`. The floor makes the stability functions continuous where the shear vanishes,
 as in uniform or absent wind, where ``N² / S²`` would jump between the stable and unstable limits
 with the sign of a rounding-level ``N²``. There the stability functions pass from neutral to their
 limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``; where ``S² ≫ S²ᵐⁱⁿ`` they are unchanged to relative order
-``S²ᵐⁱⁿ / S²``. It does not enter [`ConstantStabilityFunctions`](@ref).
+``S²ᵐⁱⁿ / S²``. The shear does not enter [`ConstantStabilityFunctions`](@ref).
 
 ```jldoctest
 using Breeze
 
-TKEBasedTurbulenceClosure().minimum_shear_squared
+TKEBasedTurbulenceClosure(minimum_shear_squared=1e-12).shear
 
 # output
-1.0e-10
+GridMeanShear(minimum_shear_squared = 1.0e-12)
 ```
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
@@ -340,14 +479,14 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    maximum_tracer_diffusivity = Inf,
                                    maximum_tke_diffusivity = Inf,
                                    minimum_tke = 1e-6,
-                                   minimum_shear_squared = 1e-10,
+                                   shear = GridMeanShear(),
+                                   minimum_shear_squared = nothing,
                                    # CATKE's value; atmospheric turbulence evolves faster than the
                                    # ocean's, so a shorter time scale may be more appropriate here.
                                    negative_tke_damping_time_scale = 1minute) where TD
 
-    minimum_shear_squared > 0 ||
-        throw(ArgumentError("minimum_shear_squared must be positive, so that the Richardson number " *
-                            "N² / (S² + minimum_shear_squared) is finite, but it is $minimum_shear_squared"))
+    shear = with_minimum_shear_squared(shear, minimum_shear_squared)
+    validate_shear(shear)
 
     mixing_length = convert_eltype(FT, mixing_length)
     stability_functions = convert_eltype(FT, stability_functions)
@@ -360,7 +499,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                          convert(FT, maximum_tracer_diffusivity),
                                          convert(FT, maximum_tke_diffusivity),
                                          convert(FT, minimum_tke),
-                                         convert(FT, minimum_shear_squared),
+                                         convert_eltype(FT, shear),
                                          convert(FT, negative_tke_damping_time_scale))
 end
 
@@ -371,6 +510,7 @@ TKEBasedTurbulenceClosure(FT::DataType; kw...) =
     ConstantStabilityFunctions{FT}(convert(FT, sf.ℂᵘ), convert(FT, sf.ℂᶜ), convert(FT, sf.ℂᵉ), convert(FT, sf.ℂᴰ))
 @inline convert_eltype(::Type{FT}, ss::DryStaticStability) where FT = ss
 @inline convert_eltype(::Type{FT}, ss::MoistStaticStability) where FT = ss
+@inline convert_eltype(::Type{FT}, ss::SubgridCloudStaticStability) where FT = ss
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -508,8 +648,8 @@ end
 
 #####
 ##### Stability functions: dispatch on the stability-function type. The arguments beyond the
-##### closure — the velocities and the stored N² — are what a Richardson-number-dependent variant
-##### needs.
+##### closure — the velocities, the stored N², the specific TKE and the stored mixing length — are
+##### what a Richardson-number-dependent variant needs.
 #####
 
 const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ConstantStabilityFunctions}
@@ -546,7 +686,7 @@ end
 @inline function local_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
     ℓᵇ = buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
-    ℓ = min(d, ℓᵇ)
+    ℓ = blend(length_blending(closure.mixing_length), d, ℓᵇ)
     return ifelse(isnan(ℓ), d, ℓ)
 end
 
@@ -556,7 +696,7 @@ end
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
     N²⁺ = clip(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²))
     ℓᵇ = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
-    ℓ = min(d, ifelse(N²⁺ == 0, FT(Inf), ℓᵇ))
+    ℓ = blend(length_blending(closure.mixing_length), d, ifelse(N²⁺ == 0, FT(Inf), ℓᵇ))
     return ifelse(isnan(ℓ), d, ℓ)
 end
 
@@ -570,7 +710,9 @@ end
 end
 
 # Sweep the stratification envelope at ℂⁱ, then apply the wall bound ℂˢ z separately.
-# Neither the ground nor the domain top seeds the stratification envelope.
+# Neither the ground nor the domain top seeds the stratification envelope. Every combination of
+# two lengths goes through the blending of the mixing length: the minimum, or a `HarmonicBlend`,
+# which each sweep applies recursively (see its docstring for what that implies).
 @inline function fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml::GradientLimitedMixingLength, closure, e, N²)
     FT = eltype(grid)
     Nz = grid.Nz
@@ -581,14 +723,14 @@ end
             ℓˢ[i, j, k] = ifelse(isnan(ℓᵇ), FT(Inf), ℓᵇ)
         end
         for k in 2:Nz+1
-            ℓˢ[i, j, k] = min(ℓˢ[i, j, k], ℓˢ[i, j, k-1] + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k-1, grid))
+            ℓˢ[i, j, k] = blend(ml.blending, ℓˢ[i, j, k], ℓˢ[i, j, k-1] + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k-1, grid))
         end
         for k in Nz:-1:1
-            ℓˢ[i, j, k] = min(ℓˢ[i, j, k], ℓˢ[i, j, k+1] + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k, grid))
+            ℓˢ[i, j, k] = blend(ml.blending, ℓˢ[i, j, k], ℓˢ[i, j, k+1] + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k, grid))
         end
         ℓ[i, j, 1] = 0
         for k in 2:Nz+1
-            ℓ[i, j, k] = min(ℓˢ[i, j, k], ml.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid))
+            ℓ[i, j, k] = blend(ml.blending, ℓˢ[i, j, k], ml.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid))
         end
     end
     return nothing
@@ -690,8 +832,10 @@ The integral formulation carries its stored face length at slope ``ℂˢ``.
     # Carry the uncapped stratification envelope at the interior slope. Carrying the wall-capped
     # face value would incorrectly impose ℂⁱ on the surface layer when ℂⁱ < ℂˢ.
     ℓˢ = closure_fields.ℓˢ
+    # The smaller of the two face envelopes is carried, whatever the blending: they hold nearly the
+    # same bounds, which a blend would count twice.
     ℓᶠ = @inbounds min(ℓˢ[i, j, k], ℓˢ[i, j, k+1]) + interior_slope(ml) * Δzᶜᶜᶜ(i, j, k, grid) / 2
-    return min(ℓᶠ, local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²))
+    return blend(length_blending(ml), ℓᶠ, local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²))
 end
 
 #####
@@ -699,10 +843,10 @@ end
 #####
 
 # The static stability at the faces, diagnosed once per stage and read by everything downstream
-@kernel function _compute_tke_static_stability!(N², grid, closure, tracers, buoyancy)
+@kernel function _compute_tke_static_stability!(N², grid, closure, tracers, buoyancy, closure_fields)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
-    @inbounds N²[i, j, k] = static_stabilityᶜᶜᶠ(i, j, k, grid, closure_ij.static_stability, buoyancy, tracers)
+    @inbounds N²[i, j, k] = static_stabilityᶜᶜᶠ(i, j, k, grid, closure_ij.static_stability, buoyancy, tracers, closure_fields)
 end
 
 @kernel function _compute_tke_closure_fields!(closure_fields, grid, closure, velocities, tracers)
@@ -715,12 +859,13 @@ end
     # The one diffusivity the closure forms, ℓ √e — with the stored mixing length and √e floored
     # at the minimum TKE and reconstructed from the centers to the face — which the stability
     # functions scale into Kᵘ, Kᶜ and Kᵉ.
-    ℓ = @inbounds closure_fields.ℓᵐ[i, j, k]
+    ℓᵐ = closure_fields.ℓᵐ
+    ℓ = @inbounds ℓᵐ[i, j, k]
     K = ℓ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
 
-    Sᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N²)
-    Sᶜ = tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N²)
-    Sᵉ = tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N²)
+    Sᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
+    Sᶜ = tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
+    Sᵉ = tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
 
     Kᵘ = min(Sᵘ * K, closure_ij.maximum_viscosity)
     Kᶜ = min(Sᶜ * K, closure_ij.maximum_tracer_diffusivity)
@@ -760,7 +905,7 @@ closure's TKE budget with a large-eddy simulation's. Negative ``e`` dissipates n
 @inline function dissipationᶜᶜᶜ(i, j, k, grid, closure, e, velocities, closure_fields)
     eᵢ = max(0, @inbounds e[i, j, k])
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
-    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N²)
+    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
     return Sᴰ * eᵢ * sqrt(eᵢ) / ℓ
 end
 
@@ -779,7 +924,7 @@ stays positive for any time step.
     eᵐⁱⁿ = closure.minimum_tke
     eᵢ = @inbounds e[i, j, k]
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
-    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N²)
+    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
 
     # `minimum_tke` floors only the turbulent velocity of the mixing length above; the dissipation
     # rate follows √e all the way down, so that ε ∝ e^{3/2} below the floor too (as in CATKE).
@@ -825,7 +970,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
 
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
-            closure_fields.N², grid, closure, tracers, buoyancy)
+            closure_fields.N², grid, closure, tracers, buoyancy, closure_fields)
 
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
 
@@ -914,7 +1059,9 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
               "├── maximum_tracer_diffusivity: ", prettysummary(closure.maximum_tracer_diffusivity), '\n',
               "├── maximum_tke_diffusivity: ", prettysummary(closure.maximum_tke_diffusivity), '\n',
               "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
-              "├── minimum_shear_squared: ", prettysummary(closure.minimum_shear_squared), '\n',
+              "├── shear: ")
+    show(io, closure.shear)
+    print(io, '\n',
               "└── negative_tke_damping_time_scale: ", prettysummary(closure.negative_tke_damping_time_scale))
 end
 

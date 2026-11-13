@@ -2,27 +2,33 @@
 ##### Richardson-number-dependent rational stability functions
 #####
 
-# Ri = N² / (S² + S²ᵐⁱⁿ), with the closure's `minimum_shear_squared` S²ᵐⁱⁿ > 0 added to the
-# shear. The floor makes Ri a smooth function of N² and S² everywhere: zero at N² = 0 for any shear
-# (N² = S² = 0 is neutral rather than NaN), finite where the shear vanishes, and passing through
-# zero continuously as N² changes sign. Without it, Ri where S² = 0 jumps between the unstable
-# limit, neutral and the stable limit with the sign of a rounding-level N². Where S² ≫ S²ᵐⁱⁿ the
-# relative change from N² / S² is at most S²ᵐⁱⁿ / S².
+# Ri = N² / (S² + S²ᵐⁱⁿ), with the `minimum_shear_squared` S²ᵐⁱⁿ > 0 of the closure's shear added to
+# the squared shear S² (shear.jl). The floor makes Ri a smooth function of N² and S² everywhere: zero
+# at N² = 0 for any shear (N² = S² = 0 is neutral rather than NaN), finite where the shear vanishes,
+# and passing through zero continuously as N² changes sign. Without it, Ri where S² = 0 jumps between
+# the unstable limit, neutral and the stable limit with the sign of a rounding-level N². Where
+# S² ≫ S²ᵐⁱⁿ the relative change from N² / S² is at most S²ᵐⁱⁿ / S².
 @inline richardson_number(N², S², S²ᵐⁱⁿ) = N² / (S² + S²ᵐⁱⁿ)
 
-@inline function Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
-    S² = shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v)
+# `e` is the specific turbulent kinetic energy and `ℓ` the stored mixing length, which the shear of
+# the closure may read (`TurbulenceAugmentedShear`).
+@inline function Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N², e, ℓ)
+    S² = effective_shear_squaredᶜᶜᶠ(i, j, k, grid, closure, velocities, e, ℓ)
     N²ᵢ = @inbounds N²[i, j, k]
-    return richardson_number(N²ᵢ, S², closure.minimum_shear_squared)
+    return richardson_number(N²ᵢ, S², closure.shear.minimum_shear_squared)
 end
 
 # Reconstruct N² and S² separately rather than averaging the face Richardson numbers, so that the
 # center sees the stratification and shear of both faces even when Ri changes sign between them.
-@inline function Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N²)
-    S² = ℑbzᵃᵃᶜ(i, j, k, grid, shearᶜᶜᶠ, velocities.u, velocities.v)
+@inline function Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N², e, ℓ)
+    S² = ℑbzᵃᵃᶜ(i, j, k, grid, effective_shear_squaredᶜᶜᶠ, closure, velocities, e, ℓ)
     N²ᵢ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
-    return richardson_number(N²ᵢ, S², closure.minimum_shear_squared)
+    return richardson_number(N²ᵢ, S², closure.shear.minimum_shear_squared)
 end
+
+# Without `e` and `ℓ`: the Richardson number of a shear that reads neither (`GridMeanShear`)
+@inline Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²) = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N², nothing, nothing)
+@inline Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N²) = Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N², nothing, nothing)
 
 struct RationalStabilityFunction{FT}
     ℂᵘ⁻ :: FT # momentum, unstable limit (Ri → -∞)
@@ -127,22 +133,22 @@ end
 
 const RichardsonStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:RationalStabilityFunction}
 
-@inline function momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N²)
-    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
+@inline function momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N², e, ℓ)
+    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N², e, ℓ)
     return momentum_stability_function(closure.stability_functions, Ri)
 end
 
-@inline function tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N²)
-    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
+@inline function tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N², e, ℓ)
+    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N², e, ℓ)
     return tracer_stability_function(closure.stability_functions, Ri)
 end
 
-@inline function tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N²)
-    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
+@inline function tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N², e, ℓ)
+    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N², e, ℓ)
     return tke_stability_function(closure.stability_functions, Ri)
 end
 
-@inline function dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N²)
-    Ri = Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N²)
+@inline function dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N², e, ℓ)
+    Ri = Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N², e, ℓ)
     return dissipation_stability_function(closure.stability_functions, Ri)
 end

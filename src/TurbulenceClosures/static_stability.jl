@@ -5,7 +5,8 @@
 ##### loading included, latent heating excluded. `MoistStaticStability` switches, where the air
 ##### is saturated, to the buoyancy frequency of a saturated displacement (Durran & Klemp 1982),
 ##### in which the parcel condenses as it rises and its latent heating offsets part of the
-##### environmental stratification. Both are evaluated once per stage into `closure_fields.N²`.
+##### environmental stratification. `SubgridCloudStaticStability` blends the two with a weight that
+##### an external subgrid cloud model supplies. All are evaluated once per stage into `closure_fields.N²`.
 #####
 
 """
@@ -45,6 +46,115 @@ Base.show(io::IO, ss::MoistStaticStability) = print(io, summary(ss))
     saturated = saturatedᶜᶜᶠ(i, j, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
     return ifelse(saturated, N²ˢ, N²ᵈ)
 end
+
+"""
+$(TYPEDEF)
+
+Static stability as a blend of the dry buoyancy gradient ``N²ᵈ`` of [`DryStaticStability`](@ref)
+and the saturated buoyancy frequency ``N²ˢ`` of [Durran and Klemp (1982)](@cite DurranKlemp1982),
+
+```math
+N² = (1 - w) N²ᵈ + w N²ˢ,
+```
+
+with the weight ``w`` — the fraction of a displacement's change in saturation deficit that
+condenses — from a subgrid cloud model: ``w = 0`` is unsaturated air, ``w = 1`` saturated air, and
+a model whose ``w`` varies smoothly through saturation removes the jump that
+[`MoistStaticStability`](@ref) makes where the grid-mean air saturates. This is the
+moist-buoyancy weighting of [Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993).
+
+Breeze holds no model of ``w``. An external `cloud_model` supplies it by extending
+[`saturated_stability_weightᶜᶜᶠ`](@ref Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ);
+without a method for the model, computing ``N²`` throws a `MethodError`.
+`SubgridCloudStaticStability()`, without a model, takes the subgrid model of the microphysics
+([`MicrophysicsSubgridModel`](@ref Breeze.TurbulenceClosures.MicrophysicsSubgridModel)), so that
+the condensation and the turbulence see one subgrid cloud with one set of coefficients.
+``N²`` is stored in `closure_fields.N²`, which the mixing length, the Richardson number, the
+buoyancy flux and the implicit sinks of the TKE equation all read.
+
+```jldoctest
+using Breeze
+
+struct HalfSaturated end
+
+closure = TKEBasedTurbulenceClosure(static_stability = SubgridCloudStaticStability(HalfSaturated()))
+closure.static_stability
+
+# output
+SubgridCloudStaticStability(HalfSaturated())
+```
+
+Fields
+======
+
+$(TYPEDFIELDS)
+"""
+struct SubgridCloudStaticStability{M}
+    "the subgrid cloud model that supplies the weight ``w`` of the saturated static stability"
+    cloud_model :: M
+end
+
+"""
+$(TYPEDEF)
+
+The `cloud_model` of a [`SubgridCloudStaticStability`](@ref) constructed without one: the weight
+is that of the subgrid model the microphysics holds, found by
+[`microphysics_subgrid_model`](@ref Breeze.TurbulenceClosures.microphysics_subgrid_model).
+"""
+struct MicrophysicsSubgridModel end
+
+SubgridCloudStaticStability() = SubgridCloudStaticStability(MicrophysicsSubgridModel())
+
+Base.show(io::IO, ::MicrophysicsSubgridModel) = print(io, "MicrophysicsSubgridModel()")
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The subgrid model that `microphysics` holds, whose weight
+[`SubgridCloudStaticStability`](@ref)`()` uses: for P3, the model in its subgrid supersaturation
+hook. `nothing` for a microphysics scheme without one, for which there is no weight.
+"""
+@inline microphysics_subgrid_model(microphysics) = nothing
+@inline microphysics_subgrid_model(p3::PredictedParticlePropertiesMicrophysics) = p3.subgrid_supersaturation
+
+# The cloud model may hold traced coefficients when the closure is differentiated.
+Adapt.adapt_structure(to, ss::SubgridCloudStaticStability) = SubgridCloudStaticStability(adapt(to, ss.cloud_model))
+
+Base.summary(::SubgridCloudStaticStability) = "SubgridCloudStaticStability"
+Base.show(io::IO, ss::SubgridCloudStaticStability) = print(io, summary(ss), "(", ss.cloud_model, ")")
+
+"""
+The weight ``w`` of the saturated static stability in [`SubgridCloudStaticStability`](@ref) at the
+cell interface `(i, j, k)`, (Center, Center, Face). A subgrid cloud model extends this function for
+its own type, with the arguments `(i, j, k, grid, cloud_model, buoyancy, tracers, closure_fields)`.
+`buoyancy` is the
+`AtmosphereModelBuoyancy` of the model (its dynamics, formulation, thermodynamic constants,
+microphysics and microphysical fields), `tracers` holds the temperature `T`, the prognostic
+moisture `qᵛᵉ` and the specific prognostic tracers, and `closure_fields` are the
+[`TKEClosureFields`](@ref Breeze.TurbulenceClosures.TKEClosureFields).
+
+The static stability is the first field computed in an update, so `closure_fields.ℓᵐ` and the
+diffusivities hold the values of the previous update (zero before the first): a weight that reads
+the mixing length reads a lagged one. This is what keeps the dependence explicit, since the mixing
+length itself is computed from ``N²``.
+
+``w`` should lie in ``[0, 1]`` and must be finite; it is not clipped.
+"""
+function saturated_stability_weightᶜᶜᶠ end
+
+@inline saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ::MicrophysicsSubgridModel, buoyancy, tracers, closure_fields) =
+    saturated_stability_weightᶜᶜᶠ(i, j, k, grid, microphysics_subgrid_model(buoyancy.microphysics), buoyancy, tracers, closure_fields)
+
+@inline function static_stabilityᶜᶜᶠ(i, j, k, grid, ss::SubgridCloudStaticStability, buoyancy, tracers, closure_fields)
+    N²ᵈ = ∂z_b(i, j, k, grid, buoyancy, tracers)
+    N²ˢ = saturated_static_stabilityᶜᶜᶠ(i, j, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
+    w = saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ss.cloud_model, buoyancy, tracers, closure_fields)
+    return N²ᵈ + w * (N²ˢ - N²ᵈ)
+end
+
+# A static stability that reads nothing of the closure fields is defined without them
+@inline static_stabilityᶜᶜᶠ(i, j, k, grid, static_stability, buoyancy, tracers, closure_fields) =
+    static_stabilityᶜᶜᶠ(i, j, k, grid, static_stability, buoyancy, tracers)
 
 #####
 ##### Pointwise thermodynamics for the saturated branch
