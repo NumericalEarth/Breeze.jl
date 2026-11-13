@@ -202,7 +202,8 @@ scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_nam
 #####     rebuilt after the loop (`compute_scalar_tendencies!` with the live transport velocity);
 #####     `update_state!` skips them (`scalar_tendencies_in_update_state`). The stepper picks the
 #####     build (`post_loop_scalar_tendency_kernel`): the full tendency added to `Gⁿ`, or, for a
-#####     multirate infinitesimal step, the advection kept apart from the sources it treats as slow.
+#####     multirate infinitesimal step, the advection built apart from the sources and summed with
+#####     them in the stage assembly, which recombines both across stages.
 #####   - The flux boundary conditions and the closure's own scalar sources (TKE production) are
 #####     still evaluated before the loop, at the stage-entry state, onto zeroed scalar
 #####     tendencies, and the post-loop build adds to them. Evaluating the closure sources after
@@ -296,9 +297,9 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The `compute_scalar_tendencies!` kernel of the post-loop scalar tendency build: by default
-`add_scalar_tendency!`, the full tendency added to the stage-entry sources in `Gⁿ`. A stepper that
-treats a scalar's advection and its sources differently (`MultirateInfinitesimalStep`) builds the
-two apart instead.
+`add_scalar_tendency!`, the full tendency added to the stage-entry sources in `Gⁿ`.
+`MultirateInfinitesimalStep` builds a scalar's advection and its sources apart instead, and sums
+them in its stage assembly.
 """
 post_loop_scalar_tendency_kernel(timestepper) = add_scalar_tendency!
 

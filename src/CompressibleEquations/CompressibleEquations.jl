@@ -52,6 +52,10 @@ export
     GaussianRamp,
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
+    StageEntryForceRemainder,
+    stage_entry_force_remainder,
+    step_start_force_state,
+    store_step_start_force_state!,
     freeze_linearization_state!,
     acoustic_rk3_substep_loop!
 

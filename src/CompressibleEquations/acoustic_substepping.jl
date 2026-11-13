@@ -1217,6 +1217,121 @@ end
 @inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 
+#####
+##### The part of the stage-entry momentum force that the loop's linear operator does not carry
+#####
+
+"""
+$(TYPEDEF)
+
+The remainder ``R(U) = P(U) - 𝖫 U`` of the momentum force that the acoustic loop applies frozen
+from the stage-entry state ``U`` — the full pressure gradient and buoyancy ``P(U) = -∇p - g ρ`` —
+after subtracting the loop's linear operator applied to the same state,
+``𝖫 U = -∇(Cᴸ ρθ) - g ρᵈ``. It is what the loop does *not* integrate as fast: the curvature of
+the equation of state in ``ρθ``, the dependence of pressure on moisture and condensate at fixed
+``ρθ``, and the water loading ``-g (ρ - ρᵈ)``. A multirate stepper has to recombine it across
+stages like any other slow tendency; left at weight one from the stage-entry state it is
+integrated with the tableau ``(α, diag(d), γ)``, which is first-order accurate.
+
+The remainder is evaluated relative to the outer-step-start state ``Uⁿ``, ``R(U) - R(Uⁿ)``: a
+constant shift of the slow tendency leaves the stage forcing unchanged, since the weights it is
+recombined with sum to zero, and every term is then a difference of nearby states,
+
+    R(U) - R(Uⁿ) = ∇[Cᴸ (ρθ - ρθⁿ) - (p - pⁿ)] - g [(ρ - ρᵈ) - (ρ - ρᵈ)ⁿ],
+
+so the hydrostatic parts of ``∂z p`` and ``∂z(Cᴸ ρθ)``, five orders of magnitude larger, are
+subtracted exactly before any product or gradient is formed (which matters in `Float32`).
+
+`direction` is `Val(:x)`, `Val(:y)` or `Val(:z)`.
+"""
+struct StageEntryForceRemainder{D, G, P, PN, T, TN, C, R, RD, WN, FT}
+    direction :: D
+    grid :: G
+    pressure :: P                           # p
+    step_start_pressure :: PN               # pⁿ
+    thermodynamic_density :: T              # ρθ
+    step_start_thermodynamic_density :: TN  # ρθⁿ
+    pressure_coefficient :: C               # Cᴸ, frozen at Uⁿ
+    total_density :: R                      # ρ
+    dry_density :: RD                       # ρᵈ
+    step_start_water_density :: WN          # (ρ - ρᵈ)ⁿ
+    gravitational_acceleration :: FT
+end
+
+Adapt.adapt_structure(to, r::StageEntryForceRemainder) =
+    StageEntryForceRemainder(r.direction, adapt(to, r.grid),
+                             adapt(to, r.pressure), adapt(to, r.step_start_pressure),
+                             adapt(to, r.thermodynamic_density), adapt(to, r.step_start_thermodynamic_density),
+                             adapt(to, r.pressure_coefficient),
+                             adapt(to, r.total_density), adapt(to, r.dry_density),
+                             adapt(to, r.step_start_water_density),
+                             r.gravitational_acceleration)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The fields that hold the outer-step-start state a [`StageEntryForceRemainder`](@ref) is measured
+from: the pressure, the thermodynamic density and the water density ``ρ - ρᵈ``, halos included.
+"""
+step_start_force_state(grid) = (pressure = CenterField(grid),
+                                thermodynamic_density = CenterField(grid),
+                                water_density = CenterField(grid))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Copy the current pressure, thermodynamic density and water density of `model` into `step_start`
+(see `step_start_force_state`), halos included: the remainder differences them across cells.
+"""
+function store_step_start_force_state!(step_start, model)
+    parent(step_start.pressure) .= parent(model.dynamics.pressure)
+    parent(step_start.thermodynamic_density) .= parent(thermodynamic_density(model.formulation))
+    parent(step_start.water_density) .= parent(model.dynamics.total_density) .- parent(model.dynamics.dry_density)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The [`StageEntryForceRemainder`](@ref) of the momentum component along `direction`, read from the
+live (stage-entry) model state, the outer-step-start state `step_start` and the substepper's
+cached pressure coefficient, which must be the one frozen at the outer-step start.
+"""
+function StageEntryForceRemainder(direction, substepper::AcousticSubstepper, model, step_start)
+    FT = eltype(model.grid)
+    g = convert(FT, model.thermodynamic_constants.gravitational_acceleration)
+    return StageEntryForceRemainder(direction, model.grid,
+                                    model.dynamics.pressure, step_start.pressure,
+                                    thermodynamic_density(model.formulation), step_start.thermodynamic_density,
+                                    substepper.linearization_pressure_coefficient,
+                                    model.dynamics.total_density, model.dynamics.dry_density,
+                                    step_start.water_density, g)
+end
+
+# Cᴸ (ρθ − ρθⁿ) − (p − pⁿ): its gradient is the pressure-gradient remainder, relative to the step start.
+@inline linearized_pressure_remainder(i, j, k, grid, r) =
+    @inbounds r.pressure_coefficient[i, j, k] * (r.thermodynamic_density[i, j, k] - r.step_start_thermodynamic_density[i, j, k]) -
+              (r.pressure[i, j, k] - r.step_start_pressure[i, j, k])
+
+# (ρ − ρᵈ) − (ρ − ρᵈ)ⁿ: the change of the water loading since the step start.
+@inline water_density_change(i, j, k, grid, r) =
+    @inbounds (r.total_density[i, j, k] - r.dry_density[i, j, k]) - r.step_start_water_density[i, j, k]
+
+@inline stage_entry_force_remainder(i, j, k, r::StageEntryForceRemainder{Val{:x}}) =
+    ∂xᶠᶜᶜ(i, j, k, r.grid, linearized_pressure_remainder, r)
+
+@inline stage_entry_force_remainder(i, j, k, r::StageEntryForceRemainder{Val{:y}}) =
+    ∂yᶜᶠᶜ(i, j, k, r.grid, linearized_pressure_remainder, r)
+
+# The bottom and top faces carry no vertical momentum tendency (see `_build_vertical_rhs!`).
+@inline function stage_entry_force_remainder(i, j, k, r::StageEntryForceRemainder{Val{:z}})
+    grid = r.grid
+    ∂z_R = ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_remainder, r)
+    δρˣ = ℑzᵃᵃᶠ(i, j, k, grid, water_density_change, r)
+    interior_face = (k > 1) & (k < size(grid, 3) + 1)
+    return ifelse(interior_face, ∂z_R - r.gravitational_acceleration * δρˣ, zero(grid))
+end
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
