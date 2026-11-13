@@ -1,11 +1,13 @@
-using Oceananigans: ReactantState, initialize!
+using Oceananigans: Oceananigans, ReactantState, initialize!
 using Oceananigans.TimeSteppers: Clock
 using Oceananigans.Utils: IterationInterval
 using Reactant: TracedRNumber, @trace
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!, reconcile_state!
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics: Microphysics, DCMIP2016KesslerMicrophysics
-using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel
+using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel,
+                           stage_increment, cache_transport_velocity!
+using Breeze.CompressibleEquations: seed_time_averaged_velocities!
 
 const ReactantSSPRungeKutta3Model = AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}
 
@@ -44,9 +46,62 @@ end
 # eager guard cannot branch on a traced value.
 @inline AtmosphereModels.invalid_time_step(::TracedRNumber) = false
 
-# Reactant initializes through `first_time_step!`, and the eager guard branches on traced
-# clock fields; mirrors OceananigansReactantExt's no-ops for the upstream steppers.
-OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcousticModel{<:ReactantState}, Δt, callbacks) = nothing
+#####
+##### The acoustic stepper's first step
+#####
+
+const ReactantAcousticModel = CompressibleAcousticModel{<:ReactantState}
+
+# Eagerly, the acoustic stepper's `maybe_prepare_first_time_step!` runs at iteration 0, before
+# the first tendencies: it seeds the clock's last step sizes, reconciles the state, seeds the
+# substepper's time-averaged transport velocity with the initial velocities, recomputes the
+# tendencies with it and freezes the vertical component for the first stage's implicit remainder
+# and sedimentation. Its guard branches on the iteration, which is traced, so under Reactant the
+# work is split between the places a compiled program does reach:
+#
+# - `initialize!(model)`, which `initialize!(sim)` calls right before its `update_state!`, seeds
+#   the transport velocity and the frozen copy, so those tendencies are built with the initial
+#   velocities rather than the constructor's zeros (the frozen copy equals what the eager path
+#   freezes after its own `update_state!`, which does not touch the transport velocity);
+# - `maybe_prepare_first_time_step!`, at the top of every step, seeds the clock's last step sizes
+#   through a traced select at iteration 0, as `adaptive_advection_timestep` and the perturbation
+#   advection open boundaries read them on the first step;
+# - `prepare_first_time_step!`, which a traced loop of `time_step!` calls before the loop, does
+#   the whole eager sequence unconditionally, with the initial radiative fluxes as for SSP-RK3.
+function Oceananigans.initialize!(model::ReactantAcousticModel)
+    invoke(Oceananigans.initialize!, Tuple{AtmosphereModel}, model)
+    reconcile_state!(model)
+    seed_time_averaged_velocities!(model.timestepper.substepper, model)
+    cache_transport_velocity!(model)
+    return nothing
+end
+
+function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::ReactantAcousticModel, Δt, callbacks)
+    clock = model.clock
+    first_step = (clock.iteration == 0) | !isfinite(clock.last_stage_Δt)
+    clock.last_Δt = ifelse(first_step, Δt, clock.last_Δt)
+    clock.last_stage_Δt = ifelse(first_step, stage_increment(model.timestepper, 3) * Δt, clock.last_stage_Δt)
+    return nothing
+end
+
+function TimeSteppers.prepare_first_time_step!(model::ReactantAcousticModel, Δt)
+    clock = model.clock
+    clock.last_Δt = Δt
+    clock.last_stage_Δt = stage_increment(model.timestepper, 3) * Δt
+    reconcile_state!(model)
+    seed_time_averaged_velocities!(model.timestepper.substepper, model)
+    update_state!(model; compute_tendencies = isnothing(model.radiation))
+    initialize_radiation!(model.radiation, model)
+    cache_transport_velocity!(model)
+    return nothing
+end
+
+function OceananigansTimeSteppers.first_time_step!(model::ReactantAcousticModel, Δt)
+    initialize!(model)
+    TimeSteppers.prepare_first_time_step!(model, Δt)
+    time_step!(model, Δt)
+    return nothing
+end
 
 #####
 ##### Radiation schedules (see `update_radiation!`)
