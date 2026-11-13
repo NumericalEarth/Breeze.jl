@@ -533,6 +533,7 @@ struct PressureProjection{SF, CF}
     dry_density_sensitivity :: SF
     tendency :: CF
     content :: CF
+    transport_density_tendency :: CF # see `compute_transport_density_tendency!`
 end
 
 # The sensitivities are linearization fields, stored like θᴸ and Cᴸ. The tendency and the content
@@ -543,6 +544,7 @@ PressureProjection(grid, substep_floattype) =
                        CenterField(grid, substep_floattype),
                        CenterField(grid, substep_floattype),
                        CenterField(grid),
+                       CenterField(grid),
                        CenterField(grid))
 
 Adapt.adapt_structure(to, p::PressureProjection) =
@@ -551,7 +553,8 @@ Adapt.adapt_structure(to, p::PressureProjection) =
                        adapt(to, p.ice_sensitivity),
                        adapt(to, p.dry_density_sensitivity),
                        adapt(to, p.tendency),
-                       adapt(to, p.content))
+                       adapt(to, p.content),
+                       adapt(to, p.transport_density_tendency))
 
 # The moisture sensitivities (Λᵛ, Λˡ, Λⁱ) of the pressure p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T for the
 # thermodynamic density ρθ = ρᵈ θˡⁱ. At fixed ρᵈ, with θˡⁱ a function of T, p and the composition,
@@ -665,7 +668,7 @@ function project_moisture_onto_pressure!(substepper::AcousticSubstepper, model, 
             projection.ice_sensitivity,
             projection.dry_density_sensitivity,
             liquid_fractions, ramp_interval,
-            U⁰.ρᵈ, model.dynamics.dry_density, Gⁿ.ρᵈ,
+            U⁰.ρᵈ, model.dynamics.dry_density, projection.transport_density_tendency,
             U⁰[moisture_name], model.moisture_density, Gⁿ[moisture_name],
             values(U⁰[condensate_names]),
             values(model.microphysical_fields[condensate_names]),
@@ -702,6 +705,46 @@ end
         W[i, j, k] = W⁰ + ramp_interval * Gᵂ
     end
 end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Compute the dry density tendency that the pressure projection ramps the dry content `Λᵈ ρᵈ′` with:
+the dry air's share, `ρᵈ / ρ`, of the divergence of the mass flux `ρ 𝐮` that the moisture
+tendencies were built with, where `velocities` are their transport velocities.
+
+The dilution part of `Λᵈ`, `Σₐ Λₐ rₐ`, exists to cancel the compression `− qₐ ∇·(ρ 𝐮)` that
+every moisture tendency holds, so that air which carries its moisture along changes the
+pressure only through `ρθ`. The two cancel only if they are built from one mass flux. The
+moisture is advected with the transport velocity, the average over the preceding acoustic
+loop, while `Gⁿ.ρᵈ` is the divergence of the stage-entry momentum. Their difference is the
+fast part of that divergence, which the average filters: with `Gⁿ.ρᵈ` the projection forces
+the pressure with `Σₐ Λₐ ρqₐ (∇·𝐮̄ − ∇·𝐮ᴸ)`, an explicit acoustic term of the wrong sign and of
+relative size `−Σₐ Λₐ rₐ / θ` (0.1 in saturation-adjusted cloud), which is unstable. Call this
+whenever the moisture tendencies are built, with the velocities they were built with.
+"""
+function compute_transport_density_tendency!(substepper::AcousticSubstepper, model, velocities)
+    grid = model.grid
+    launch!(architecture(grid), grid, :xyz, _compute_transport_density_tendency!,
+            substepper.pressure_projection.transport_density_tendency, grid,
+            model.dynamics.dry_density, model.dynamics.total_density, velocities.u, velocities.v, velocities.w)
+    return nothing
+end
+
+@kernel function _compute_transport_density_tendency!(Gρᵈ, grid, ρᵈ, ρ, u, v, w)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρ̂ = ifelse(ρ[i, j, k] == 0, one(eltype(ρ)), ρ[i, j, k])
+        ∇_ρu = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, transport_mass_flux_x, ρ, u) +
+                                        δyᵃᶜᵃ(i, j, k, grid, transport_mass_flux_y, ρ, v)) +
+               ∂zᶜᶜᶜ(i, j, k, grid, transport_mass_flux_z, ρ, w)
+        Gρᵈ[i, j, k] = - ρᵈ[i, j, k] / ρ̂ * ∇_ρu
+    end
+end
+
+@inline transport_mass_flux_x(i, j, k, grid, ρ, u) = @inbounds Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, ρ) * u[i, j, k]
+@inline transport_mass_flux_y(i, j, k, grid, ρ, v) = @inbounds Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, ρ) * v[i, j, k]
+@inline transport_mass_flux_z(i, j, k, grid, ρ, w) = @inbounds ℑzᵃᵃᶠ(i, j, k, grid, ρ) * w[i, j, k]
 
 # Σ over the condensate masses of their sensitivity times the value of `fields` at (i, j, k). A
 # mass with liquid fraction f holds f Λˡ + (1 − f) Λⁱ.

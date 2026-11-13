@@ -50,7 +50,8 @@ export
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
     freeze_linearization_state!,
-    acoustic_rk3_substep_loop!
+    acoustic_rk3_substep_loop!,
+    compute_transport_density_tendency!
 
 using DocStringExtensions: TYPEDEF
 using Adapt: Adapt, adapt

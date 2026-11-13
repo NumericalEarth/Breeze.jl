@@ -22,7 +22,7 @@ using Breeze.AtmosphereModels:
     implicit_step_scheme,
     implicit_sedimentation_step!
 
-using Breeze.CompressibleEquations: CompressibleDynamics
+using Breeze.CompressibleEquations: CompressibleDynamics, compute_transport_density_tendency!
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 const TerrainCompressibleAcousticModel =
@@ -69,8 +69,14 @@ tendency is built in `update_state!` with the same live velocity.) Called after 
 computation the stepper issues, once per stage.
 """
 function cache_transport_velocity!(model)
-    w_cache = model.timestepper.substepper.time_averaged_vertical_velocity_cache
+    substepper = model.timestepper.substepper
+    w_cache = substepper.time_averaged_vertical_velocity_cache
     copyto!(parent(w_cache), parent(transport_velocities(model).w))
+
+    # The pressure projection pairs the moisture tendencies with the divergence of the mass flux
+    # they were built with, which the next acoustic loop likewise overwrites.
+    compute_transport_density_tendency!(substepper, model, transport_velocities(model))
+
     return nothing
 end
 
