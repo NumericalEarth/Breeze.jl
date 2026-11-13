@@ -522,6 +522,20 @@ const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:Const
 #####
 ##### Computing the mixing length, column by column, into `closure_fields.ℓᵐ`
 #####
+##### The functions of this section are also called by closures other than
+##### `TKEBasedTurbulenceClosure` (`SimplifiedHigherOrderClosure` with a
+##### `GradientLimitedMixingLength`), so they must keep to this contract and not annotate the types
+##### of `closure` or `closure_fields`:
+#####
+#####   * `closure` is read only for `closure.mixing_length` (and its coefficients) and for
+#####     `closure.minimum_tke`, the floor of `e` inside `turbulent_velocityᶜᶜᶜ`;
+#####   * `e` is an array of the specific turbulent kinetic energy at cell centers `1:Nz+1` (the
+#####     reconstruction at the top face reads the cell above the top);
+#####   * `N²` is an array at faces `1:Nz+1`;
+#####   * `fill_mixing_length!(ℓ, ℓˢ, i, j, grid, mixing_length, closure, e, N²)` writes the face
+#####     arrays `ℓ` and `ℓˢ` of column `(i, j)`, and `mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e,
+#####     closure_fields)` reads only `closure_fields.ℓˢ` and `closure_fields.N²`.
+#####
 
 # The stored face field as a kernel function, for the boundary-aware reconstruction `ℑbzᵃᵃᶜ`
 @inline face_valueᶜᶜᶠ(i, j, k, grid, field) = @inbounds field[i, j, k]
