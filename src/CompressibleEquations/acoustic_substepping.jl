@@ -711,19 +711,6 @@ end
     return W⁰, Gᵂ
 end
 
-# Stage start: the loop integrates the pressure, so its thermodynamic perturbation (and the copy
-# the divergence damping differences) gains the content of the start state and its slow forcing
-# the rate of the content.
-@kernel function _add_moisture_content!(ϖ, ϖˢ⁻, Gˢρᵡ, grid, state, densities)
-    i, j, k = @index(Global, NTuple)
-    W⁰, Gᵂ = moisture_content_and_tendency(i, j, k, grid, state, densities)
-    @inbounds begin
-        ϖ[i, j, k] += W⁰
-        ϖˢ⁻[i, j, k] += W⁰
-        Gˢρᵡ[i, j, k] += Gᵂ
-    end
-end
-
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -1270,23 +1257,22 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     # The stashed (ρθ)′ˢ⁻ starts equal to (ρθ)′: the divergence damping measures the change of
     # (ρθ)′ over a substep, and none has run. A damping applied at the start of the first
     # substep (see `deferred_divergence_damping`) then adds exactly zero.
+    # The loop integrates the pressure, so the thermodynamic perturbation (and the copy the divergence
+    # damping differences) also gains the moisture content of the start state, and the slow forcing the
+    # rate of that content (Section 3b). Both are added in the same launch as the rewind.
+    state, densities = moisture_content_arguments(substepper, model, Uᴸ_outer)
     launch!(arch, grid, :xyz, _initialize_stage_perturbations!,
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
             substepper.previous_density_potential_temperature_perturbation,
             substepper.momentum_perturbation.u,
             substepper.momentum_perturbation.v,
+            model.timestepper.Gⁿ[ρᵡ_name],
             Uᴸ_outer.ρᵈ, Uᴸ_outer[ρᵡ_name], Uᴸ_outer.ρu, Uᴸ_outer.ρv,
-            model.dynamics.dry_density, ρᵡ, model.momentum.ρu, model.momentum.ρv)
+            model.dynamics.dry_density, ρᵡ, model.momentum.ρu, model.momentum.ρv,
+            grid, state, densities)
     # ρw is dispatched: terrain models initialize the contravariant ρw̃ instead.
     initialize_vertical_momentum_perturbation!(substepper, model, Uᴸ_outer)
-
-    # The loop integrates the pressure: add the moisture's part of it (Section 3b).
-    state, densities = moisture_content_arguments(substepper, model, Uᴸ_outer)
-    launch!(arch, grid, :xyz, _add_moisture_content!,
-            substepper.density_potential_temperature_perturbation,
-            substepper.previous_density_potential_temperature_perturbation,
-            model.timestepper.Gⁿ[ρᵡ_name], grid, state, densities)
 
     # The only fill of the ρ′ halos in the stage: no substep kernel reads ρ′ off its own column, and the
     # k = 0, Nz+1 values that `_build_vertical_rhs!` reads only feed its discarded boundary rows. Filled
@@ -1311,17 +1297,22 @@ end
     end
 end
 
-# Rewind-initialize the four non-vertical perturbations (ρ′, ρθ′, ρu′, ρv′) in one launch.
-@kernel function _initialize_stage_perturbations!(ρ′, ρθ′, ρθ′ˢ⁻, ρu′, ρv′,
+# Rewind-initialize the four non-vertical perturbations (ρ′, ρθ′, ρu′, ρv′) in one launch, and add the
+# moisture content W⁰ of the start state to ρθ′ and its stash and its slow rate Gᵂ to the thermodynamic
+# tendency (see `moisture_content_and_tendency`). ρθ′ is the rewind plus W⁰, evaluated in that order.
+@kernel function _initialize_stage_perturbations!(ρ′, ρθ′, ρθ′ˢ⁻, ρu′, ρv′, Gˢρᵡ,
                                                   ρ_outer, ρθ_outer, ρu_outer, ρv_outer,
-                                                  ρ_stage, ρθ_stage, ρu_stage, ρv_stage)
+                                                  ρ_stage, ρθ_stage, ρu_stage, ρv_stage,
+                                                  grid, state, densities)
     i, j, k = @index(Global, NTuple)
+    W⁰, Gᵂ = moisture_content_and_tendency(i, j, k, grid, state, densities)
     @inbounds begin
         ρ′[i, j, k]  = ρ_outer[i, j, k]  - ρ_stage[i, j, k]
-        ρθ′[i, j, k] = ρθ_outer[i, j, k] - ρθ_stage[i, j, k]
-        ρθ′ˢ⁻[i, j, k] = ρθ_outer[i, j, k] - ρθ_stage[i, j, k]
+        ρθ′[i, j, k] = (ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + W⁰
+        ρθ′ˢ⁻[i, j, k] = (ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + W⁰
         ρu′[i, j, k] = ρu_outer[i, j, k] - ρu_stage[i, j, k]
         ρv′[i, j, k] = ρv_outer[i, j, k] - ρv_stage[i, j, k]
+        Gˢρᵡ[i, j, k] += Gᵂ
     end
 end
 
