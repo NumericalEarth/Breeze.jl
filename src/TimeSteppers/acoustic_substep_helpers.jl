@@ -20,7 +20,8 @@ using Breeze.AtmosphereModels:
     implicit_step_scheme,
     implicit_sedimentation_step!
 
-using Breeze.CompressibleEquations: CompressibleDynamics, implicit_steps_in_place!, implicit_step_scratch
+using Breeze.CompressibleEquations: CompressibleDynamics, implicit_steps_in_place!, implicit_step_scratch,
+                                     compute_transport_density_tendency!
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 const TerrainCompressibleAcousticModel =
@@ -67,8 +68,14 @@ tendency is built in `update_state!` with the same live velocity.) Called after 
 computation the stepper issues, once per stage.
 """
 function cache_transport_velocity!(model)
-    w_cache = model.timestepper.substepper.time_averaged_vertical_velocity_cache
+    substepper = model.timestepper.substepper
+    w_cache = substepper.time_averaged_vertical_velocity_cache
     copyto!(parent(w_cache), parent(transport_velocities(model).w))
+
+    # A loop that integrates ρθₘ pairs the moisture tendency with the divergence of the mass flux
+    # it was built with, which the next acoustic loop likewise overwrites (a no-op by default).
+    compute_transport_density_tendency!(substepper, model, transport_velocities(model))
+
     return nothing
 end
 
@@ -282,7 +289,35 @@ function add_implicit_advection_tendency!(model, advection::AdaptiveImplicitVert
     ρθ = prognostic_fields(model)[θ_name]
     launch!(architecture(grid), grid, :xyz, _implicit_advection_base_tendency!,
             model.timestepper.Gⁿ[θ_name], grid, scheme, td, w, ρθ, ρᵈ)
+
+    substepper = model.timestepper.substepper
+    add_moist_implicit_advection_tendency!(substepper.moist_potential_temperature, substepper, model, scheme, td, w, ρᵈ)
+
     return nothing
+end
+
+# A loop that integrates ρθₘ carries the base-state implicit flux of θₘᴸ itself in the tendency of
+# ρθₘ, which is converted from the explicit tendencies alone: the moisture tendency withholds the
+# implicit remainder of its vertical advection, and θₘᴸ holds the moisture that remainder moves.
+add_moist_implicit_advection_tendency!(::Nothing, substepper, model, scheme, td, w, ρᵈ) = nothing
+
+function add_moist_implicit_advection_tendency!(fields, substepper, model, scheme, td, w, ρᵈ)
+    grid = model.grid
+    launch!(architecture(grid), grid, :xyz, _moist_implicit_advection_base_tendency!,
+            fields.tendency, grid, scheme, td, w, substepper.linearization_potential_temperature, ρᵈ)
+    return nothing
+end
+
+@inline function moist_implicit_advective_base_flux(i, j, k, grid, scheme, td, W, θₘ, ρᵈ)
+    wⁱ = implicit_vertical_velocityᶜᶜᶠ(i, j, k, grid, scheme, td, W)
+    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρᵈ)
+    return @inbounds Azᶜᶜᶠ(i, j, k, grid) * ρᶠ * (max(wⁱ, 0) * θₘ[i, j, k-1] + min(wⁱ, 0) * θₘ[i, j, k])
+end
+
+@kernel function _moist_implicit_advection_base_tendency!(Gρθₘ, grid, scheme, td, W, θₘ, ρᵈ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρθₘ[i, j, k] -= V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+        δzᵃᵃᶜ(i, j, k, grid, moist_implicit_advective_base_flux, scheme, td, W, θₘ, ρᵈ)
 end
 
 # The implicit half of the IMEX thermodynamic split is applied inside the acoustic loop

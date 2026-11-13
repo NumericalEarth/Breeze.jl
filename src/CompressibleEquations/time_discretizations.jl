@@ -586,6 +586,46 @@ convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
     UpperSponge(convert(FT, sponge.damping_rate), convert(FT, sponge.depth),
                 sponge.ramp, sponge.mask, sponge.damping_profile)
 
+#####
+##### The thermodynamic variable the acoustic substep loop integrates
+#####
+
+"""
+$(TYPEDEF)
+
+Abstract supertype for the thermodynamic variable that the acoustic substep loop integrates and
+reads its pressure perturbation from.
+
+Concrete subtypes:
+
+  - [`PrognosticThermodynamicDensity`](@ref) — the formulation's prognostic thermodynamic
+    density, ``ρθ`` with ``θ = θˡⁱ``. This is the default.
+
+  - [`MoistPotentialTemperatureDensity`](@ref) — ``ρθₘ`` with ``θₘ = θ (1 + (Rᵛ/Rᵈ) rᵛ)``, as in
+    WRF and MPAS.
+"""
+abstract type AcousticThermodynamicVariable end
+
+"""
+$(TYPEDEF)
+
+The acoustic substep loop integrates the perturbation of the formulation's prognostic
+thermodynamic density. The moisture densities are frozen during the loop, so its pressure does
+not respond to moisture transport within a stage.
+"""
+struct PrognosticThermodynamicDensity <: AcousticThermodynamicVariable end
+
+"""
+$(TYPEDEF)
+
+The acoustic substep loop integrates the perturbation of the moist potential temperature density
+``ρθₘ = ρᵈ θ (1 + (Rᵛ/Rᵈ) rᵛ)``, ``rᵛ = ρᵛ/ρᵈ``, of
+[Xiao et al. (2015)](https://doi.org/10.1002/2015MS000532), converting from and back to the
+prognostic thermodynamic density at the boundaries of each stage. The slow tendency of ``ρθₘ``
+carries the transport of moisture, so the loop's pressure responds to it within the stage.
+"""
+struct MoistPotentialTemperatureDensity <: AcousticThermodynamicVariable end
+
 """
 $(TYPEDEF)
 
@@ -605,7 +645,7 @@ docstring for the A-stability argument, sign-handling of the adaptive
 substep count, and the irreversibility caveat for the optional
 [`UpperSponge`](@ref).
 """
-struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution}
+struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution, TV <: AcousticThermodynamicVariable}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
@@ -617,6 +657,7 @@ struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistri
     sponge :: US
     substep_distribution :: AD
     open_boundary_relaxation :: FT
+    thermodynamic_variable :: TV
 end
 
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
@@ -630,7 +671,8 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
                                          substep_distribution = ProportionalSubsteps(),
-                                         open_boundary_relaxation = FT(0.5))
+                                         open_boundary_relaxation = FT(0.5),
+                                         thermodynamic_variable = PrognosticThermodynamicDensity())
 
     damping isa AcousticDampingStrategy ||
         throw(ArgumentError("`damping` must be an `AcousticDampingStrategy`"))
@@ -656,6 +698,7 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
         convert_acoustic_parameter(FT, sponge),
         substep_distribution,
         convert(FT, open_boundary_relaxation),
+        thermodynamic_variable,
     )
 end
 

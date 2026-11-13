@@ -24,7 +24,8 @@ using Breeze.CompressibleEquations:
     acoustic_rk3_substep_loop!,
     prepare_acoustic_cache!,
     freeze_linearization_state!,
-    seed_time_averaged_velocities!
+    seed_time_averaged_velocities!,
+    compute_moist_potential_temperature_tendency!
 
 """
 $(TYPEDEF)
@@ -183,6 +184,10 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = Round
     # about the RK stage-entry state). Add the boundary flux and closure tendencies to them.
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
+
+    # A loop that integrates ρθₘ converts the explicit slow tendencies to that of ρθₘ; the
+    # base-state implicit advection below then adds to each its own (a no-op by default).
+    compute_moist_potential_temperature_tendency!(substepper, model)
 
     # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per

@@ -30,7 +30,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Field, CenterField, XFaceField, YFaceField, ZFaceField, architecture, location
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
-using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
+using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, vertical_scheme, implicit_vertical_velocityᶜᶜᶠ
 using Oceananigans.Grids: ZDirection, rnode, znode, node
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Solvers: BatchedTridiagonalSolver, compute_factorization!, solve!
@@ -39,7 +39,7 @@ using Oceananigans.TurbulenceClosures: vertically_implicit_closures, VerticallyI
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
-    δxTᶠᵃᵃ, δyTᵃᶠᵃ, δxTᶜᵃᵃ, δyTᵃᶜᵃ,
+    δxTᶠᵃᵃ, δyTᵃᶠᵃ, δxTᶜᵃᵃ, δyTᵃᶜᵃ, δxᶜᵃᵃ, δyᵃᶜᵃ,
     Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ,
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
     Δz⁻¹ᶜᶜᶜ, Δz⁻¹ᶜᶜᶠ,
@@ -81,6 +81,9 @@ Fields:
 - `linearization_potential_temperature` (θᴸ), `linearization_pressure_coefficient` (Cᴸ, the slope
   ∂p/∂(ρθ) of the equation of state at the stage-entry state): per-stage caches, see
   `refresh_linearization_basic_state!`.
+- `moist_potential_temperature`: `nothing` by default. With
+  [`MoistPotentialTemperatureDensity`](@ref), the slow `tendency` of ρθₘ and the
+  `transport_density_tendency`; θᴸ, Cᴸ and (ρθ)′ then hold θₘᴸ, Cₘᴸ and (ρθₘ)′ (Section 3b).
 - `density_perturbation` (ρ′), `density_potential_temperature_perturbation` ((ρθ)′),
   `momentum_perturbation` ((ρu/v/w)′ as `.u/.v/.w`): perturbation prognostics advanced in the loop.
 - `density_predictor`, `density_potential_temperature_predictor`: explicit predictors before the vertical solve.
@@ -99,7 +102,7 @@ Fields:
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
   tendency's condensate sedimentation term (see `cache_transport_velocity!`).
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC, IS}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, MT, MP, TAV, GT, TS, WC, DC, TWC, IS}
     substeps :: N
     acoustic_cfl :: FT
     minimum_horizontal_spacing :: FT
@@ -120,6 +123,10 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC, IS
     # stage-entry state throughout and serve as the recovery base in `_recover_full_state!`).
     linearization_potential_temperature :: CF
     linearization_pressure_coefficient :: CF
+
+    # `nothing`, or the two fields of the moist potential temperature loop (Section 3b): the slow
+    # tendency of ρθₘ and the dry air's share of the divergence of the moisture's transport mass flux.
+    moist_potential_temperature :: MT
 
     density_perturbation :: CF
     density_potential_temperature_perturbation :: CF
@@ -157,6 +164,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        a.open_boundary_relaxation,
                        adapt(to, a.linearization_potential_temperature),
                        adapt(to, a.linearization_pressure_coefficient),
+                       adapt(to, a.moist_potential_temperature),
                        adapt(to, a.density_perturbation),
                        adapt(to, a.density_potential_temperature_perturbation),
                        adapt(to, a.momentum_perturbation),
@@ -240,6 +248,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     # Linearization basic state — θᴸ and Cᴸ derived from live model fields once per stage.
     linearization_potential_temperature = CenterField(grid, substep_floattype)
     linearization_pressure_coefficient = CenterField(grid, substep_floattype)
+    moist_potential_temperature = moist_potential_temperature_fields(split_explicit.thermodynamic_variable, grid)
 
     density_perturbation = CenterField(grid, substep_floattype)
     density_potential_temperature_perturbation = CenterField(grid, substep_floattype)
@@ -282,6 +291,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               sponge, open_boundary_relaxation,
                               linearization_potential_temperature,
                               linearization_pressure_coefficient,
+                              moist_potential_temperature,
                               density_perturbation,
                               density_potential_temperature_perturbation,
                               momentum_perturbation,
@@ -367,6 +377,7 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
     launch!(arch, grid, :xyz, _compute_linearization_basic_state!,
             substepper.linearization_potential_temperature,
             substepper.linearization_pressure_coefficient,
+            substepper.moist_potential_temperature,
             grid,
             model.formulation,
             model.dynamics,
@@ -394,7 +405,7 @@ end
 # θᴸ and Cᴸ = ρ Rᵐ (θ ∂T/∂θ) / (ρᵈ θ) per cell, from the same moisture and state the core closes
 # the thermodynamics with (`_compute_temperature_and_pressure!`). The divisors are zero only before
 # `set!`; there they are replaced by one, and θ = 0 has zero sensitivity.
-@kernel function _compute_linearization_basic_state!(θᴸ, Cᴸ, grid, formulation, dynamics, dry_density,
+@kernel function _compute_linearization_basic_state!(θᴸ, Cᴸ, moist_potential_temperature, grid, formulation, dynamics, dry_density,
                                                      total_density, specific_prognostic_moisture,
                                                      microphysics, microphysical_fields, constants)
     i, j, k = @index(Global, NTuple)
@@ -412,9 +423,12 @@ end
     _, θ∂T∂θ = temperature_and_sensitivity(𝒰, constants)
     Rᵐ = mixture_gas_constant(q, constants)
 
+    # θₘ = φ θ, and the loop's pressure is p′ = Cₘᴸ (ρθₘ)′ with Cₘᴸ = Cᴸ / φ (Section 3b). φ = 1 by default.
+    φ = moist_potential_temperature_factor(moist_potential_temperature, q, ρ, ρ̂ᵈ, constants)
+
     @inbounds begin
-        θᴸ[i, j, k] = θ
-        Cᴸ[i, j, k] = ρ * Rᵐ * θ∂T∂θ / (ρ̂ᵈ * θ̂)
+        θᴸ[i, j, k] = φ * θ
+        Cᴸ[i, j, k] = ρ * Rᵐ * θ∂T∂θ / (ρ̂ᵈ * θ̂) / φ
     end
 end
 
@@ -431,6 +445,284 @@ the WS-RK3 invariant by setting ``(ρ)′_\\mathrm{init} = Uᴸ_\\mathrm{outer} 
 """
 prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
     refresh_linearization_basic_state!(substepper, model)
+
+#####
+##### Section 3b — The moist potential temperature loop (`MoistPotentialTemperatureDensity`)
+#####
+##### WRF and MPAS integrate, in the acoustic loop, the moist potential temperature density
+##### Θₘ = ρᵈ θₘ, θₘ = θ (1 + ε rᵛ), ε = Rᵛ / Rᵈ, rᵛ = ρᵛ / ρᵈ, because the equation of state
+##### p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T reads p = pˢᵗ (Rᵈ Θₘ / pˢᵗ)^γ in it: the pressure depends on Θₘ alone, and
+##### Θₘ is carried by the dry mass flux (Xiao et al. 2015, doi:10.1002/2015MS000532). Here
+#####
+#####   θₘ = φ θ ,    φ = 1 + ε rᵛ ,
+#####
+##### with θ = ρθ / ρᵈ the prognostic (liquid-ice) potential temperature and rᵛ the vapor of the
+##### stage-entry state. The loop kernels are those of the default loop; three of its fields change
+##### meaning: θᴸ holds θₘᴸ = φ θᴸ, Cᴸ holds Cₘᴸ = Cᴸ / φ, and (ρθ)′ holds Θₘ′, so that
+##### p′ = Cₘᴸ Θₘ′, the flux of Θₘ′ is θₘᴸ times the loop's mass flux, and the divergence damping
+##### differences Θₘ′ / θₘᴸ. With Θ = ρθ, Θₘ = Θ + ε θ ρᵛ, and to first order about the stage-entry state
+#####
+#####   dΘₘ = φ dΘ + ε θ (dρqᵐ − rᵐ dρᵈ) ,    rᵐ = ρqᵐ / ρᵈ ,                                  (⋆)
+#####
+##### with ρqᵐ the prognostic moisture density. The stage converts with (⋆) at its two ends:
+#####
+#####   - Start (`add_moisture_content!`): Θₘ′ = Θ′ + W⁰, where Θ′ = Θ⁰ − Θᴸ is the rewind and
+#####     W⁰ = (φ − 1) Θ′ + ε θ [(ρqᵐ⁰ − ρqᵐᴸ) − rᵐ (ρᵈ⁰ − ρᵈᴸ)] is (⋆) less Θ′.
+#####   - Slow tendency (`compute_moist_potential_temperature_tendency!`):
+#####     GΘₘ = φ GΘ + ε θ (Gρqᵐ − rᵐ Gᵗρᵈ). Gᵗρᵈ is the dry air's share of the divergence of the
+#####     mass flux that the moisture tendency was built with (`compute_transport_density_tendency!`),
+#####     so that for pure transport the bracket is the advective tendency − ρ 𝐮ᵗ·∇qᵐ: the moisture
+#####     is advected with the transport velocity, the average over the preceding loop, and the
+#####     dilution cancels only against the divergence of that same flux.
+#####   - End (`remove_moisture_content!`): Θ′ = Θₘ′ − W⁰ − τ (GΘₘ − GΘ) + Δτ ∇·((θₘᴸ − θᴸ) ΣM), with
+#####     τ the interval the slow tendency was applied over and ΣM the loop's mass flux summed
+#####     over its substeps. Θₘ′ is W⁰ + Θ′(0) + τ GΘₘ − Δτ ∇·(θₘᴸ ΣM), so what is left is
+#####     Θ′(0) + τ GΘ − Δτ ∇·(θᴸ ΣM): the prognostic density keeps its own slow tendency and the
+#####     divergence of its own flux, and its integral is conserved as in the default loop. The
+#####     moisture densities take their update `ρqᵐ⁰ + τ Gρqᵐ` after the loop, as before; that is the
+#####     moisture change the start content and GΘₘ of the stage were built from.
+#####
+##### The flux θₘᴸ M of the loop differs from φ θᴸ M by θᴸ M·∇φ: the loop's own mass flux advects the
+##### vapor part of θₘ, which the default loop cannot do with frozen moisture.
+#####
+##### Adaptive implicit vertical advection: the per-substep implicit solve acts on the Θₘ′ predictor
+##### unchanged, and GΘₘ is converted from the explicit tendencies and then gains the base-state
+##### implicit flux divergence of θₘᴸ itself (`add_implicit_advection_tendency!`), which carries the
+##### implicit remainder of the moisture's vertical advection that Gρqᵐ withholds. Gᵗρᵈ uses the
+##### explicit fraction of the vertical velocity, as Gρqᵐ does.
+#####
+##### Neglected in (⋆), all exactly zero without moisture:
+#####   - θ is the liquid-ice potential temperature, not the dry one. The two differ by the latent
+#####     content of the condensate and by the exponent of the Exner function (κᵐ against κᵈ), so the
+#####     pressure does not respond, within a stage, to a change of condensate (WRF likewise leaves
+#####     the condensate and the latent heating out of the loop's pressure). The stage-entry
+#####     coefficient Cₘᴸ = Cᴸ / φ is that of the full equation of state, so nothing accumulates.
+#####   - The prognostic moisture density is taken as vapor. Under saturation adjustment it holds
+#####     the cloud condensate too, a change of which in saturated air is condensate.
+#####   - The tendencies and the rewinds of the other condensate masses.
+#####
+
+moist_potential_temperature_fields(::PrognosticThermodynamicDensity, grid) = nothing
+
+moist_potential_temperature_fields(::MoistPotentialTemperatureDensity, grid) =
+    (tendency = CenterField(grid), transport_density_tendency = CenterField(grid))
+
+# φ = θₘ / θ
+@inline moist_potential_temperature_factor(::Nothing, q, ρ, ρᵈ, constants) = one(ρ)
+
+@inline moist_potential_temperature_factor(fields, q, ρ, ρᵈ, constants) =
+    1 + vapor_gas_constant(constants) / dry_air_gas_constant(constants) * ρ * q.vapor / ρᵈ
+
+@inline acoustic_thermodynamic_tendency(::Nothing, Gρᵡ) = Gρᵡ
+@inline acoustic_thermodynamic_tendency(fields, Gρᵡ) = fields.tendency
+
+# Everything the conversion kernels read: the stage-entry state the coefficients of (⋆) are
+# evaluated at, the outer-step-start state, and the slow tendencies.
+function moist_potential_temperature_arguments(fields, model, U⁰)
+    formulation = model.formulation
+    formulation isa LiquidIcePotentialTemperatureFormulation ||
+        throw(ArgumentError("MoistPotentialTemperatureDensity requires LiquidIcePotentialTemperatureFormulation"))
+
+    Gⁿ = model.timestepper.Gⁿ
+    ρθ_name = thermodynamic_density_name(formulation)
+    moisture_name = moisture_prognostic_name(model.microphysics)
+
+    return (; microphysics = model.microphysics, microphysical_fields = model.microphysical_fields,
+            constants = model.thermodynamic_constants, fields,
+            ρᵈ = model.dynamics.dry_density, ρ = model.dynamics.total_density,
+            qᵐ = specific_prognostic_moisture(model), ρqᵐ = model.moisture_density,
+            ρθ = thermodynamic_density(formulation),
+            ρᵈ⁰ = U⁰.ρᵈ, ρqᵐ⁰ = U⁰[moisture_name], ρθ⁰ = U⁰[ρθ_name],
+            Gρθ = Gⁿ[ρθ_name], Gρqᵐ = Gⁿ[moisture_name],
+            Gρθₘ = fields.tendency, Gᵗρᵈ = fields.transport_density_tendency)
+end
+
+# The coefficients of (⋆) at the stage-entry state: φ, ε θ and rᵐ.
+@inline function moist_potential_temperature_coefficients(i, j, k, grid, s)
+    @inbounds begin
+        ρᵈ = s.ρᵈ[i, j, k]
+        ρ = s.ρ[i, j, k]
+        qᵐ = s.qᵐ[i, j, k]
+        ρqᵐ = s.ρqᵐ[i, j, k]
+        ρθ = s.ρθ[i, j, k]
+    end
+
+    q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵐ, s.microphysical_fields)
+    ρ̂ᵈ = ifelse(ρᵈ == 0, one(ρᵈ), ρᵈ)
+    φ = moist_potential_temperature_factor(s.fields, q, ρ, ρ̂ᵈ, s.constants)
+    εθ = vapor_gas_constant(s.constants) / dry_air_gas_constant(s.constants) * ρθ / ρ̂ᵈ
+
+    return φ, εθ, ρqᵐ / ρ̂ᵈ
+end
+
+# W⁰ = Θₘ′ − Θ′ at the start of the stage
+@inline function start_moisture_content(i, j, k, grid, s)
+    φ, εθ, rᵐ = moist_potential_temperature_coefficients(i, j, k, grid, s)
+    @inbounds begin
+        Δρθ = s.ρθ⁰[i, j, k] - s.ρθ[i, j, k]
+        Δρqᵐ = s.ρqᵐ⁰[i, j, k] - s.ρqᵐ[i, j, k]
+        Δρᵈ = s.ρᵈ⁰[i, j, k] - s.ρᵈ[i, j, k]
+    end
+    return (φ - 1) * Δρθ + εθ * (Δρqᵐ - rᵐ * Δρᵈ)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Convert the slow tendencies of the prognostic thermodynamic density and of the moisture density to
+the slow tendency of ``ρθₘ`` that the loop of [`MoistPotentialTemperatureDensity`](@ref) integrates
+(Section 3b). Call it once the explicit slow tendencies are complete, and before the base-state
+part of the implicit vertical advection is added to them. A no-op for the default loop.
+"""
+compute_moist_potential_temperature_tendency!(substepper::AcousticSubstepper, model) =
+    compute_moist_potential_temperature_tendency!(substepper.moist_potential_temperature, model)
+
+compute_moist_potential_temperature_tendency!(::Nothing, model) = nothing
+
+function compute_moist_potential_temperature_tendency!(fields, model)
+    grid = model.grid
+    state = moist_potential_temperature_arguments(fields, model, model.timestepper.U⁰)
+    launch!(architecture(grid), grid, :xyz, _compute_moist_potential_temperature_tendency!, grid, state)
+    return nothing
+end
+
+@kernel function _compute_moist_potential_temperature_tendency!(grid, s)
+    i, j, k = @index(Global, NTuple)
+    φ, εθ, rᵐ = moist_potential_temperature_coefficients(i, j, k, grid, s)
+    @inbounds s.Gρθₘ[i, j, k] = φ * s.Gρθ[i, j, k] + εθ * (s.Gρqᵐ[i, j, k] - rᵐ * s.Gᵗρᵈ[i, j, k])
+end
+
+# Stage start: the perturbation of ρθₘ, and the copy the divergence damping differences.
+add_moisture_content!(::Nothing, substepper, model, U⁰) = nothing
+
+function add_moisture_content!(fields, substepper, model, U⁰)
+    grid = model.grid
+    state = moist_potential_temperature_arguments(fields, model, U⁰)
+    launch!(architecture(grid), grid, :xyz, _add_moisture_content!,
+            substepper.density_potential_temperature_perturbation,
+            substepper.previous_density_potential_temperature_perturbation, grid, state)
+    return nothing
+end
+
+@kernel function _add_moisture_content!(ρθ′, ρθ′ˢ⁻, grid, s)
+    i, j, k = @index(Global, NTuple)
+    W⁰ = start_moisture_content(i, j, k, grid, s)
+    @inbounds begin
+        ρθ′[i, j, k] += W⁰
+        ρθ′ˢ⁻[i, j, k] += W⁰
+    end
+end
+
+# Stage end: back to the perturbation of the prognostic thermodynamic density. `interval` is the
+# time the slow tendency was applied over. The mass flux sums are those the transport velocity is
+# averaged from, so this runs before `finalize_time_averaged_velocity!` normalizes them (Section 10).
+remove_moisture_content!(::Nothing, substepper, model, U⁰, interval, Δτ) = nothing
+
+function remove_moisture_content!(fields, substepper, model, U⁰, interval, Δτ)
+    grid = model.grid
+    state = moist_potential_temperature_arguments(fields, model, U⁰)
+    ΣM = substepper.time_averaged_velocities
+    launch!(architecture(grid), grid, :xyz, _remove_moisture_content!,
+            substepper.density_potential_temperature_perturbation, grid, state,
+            substepper.linearization_potential_temperature,
+            ΣM.u, ΣM.v, ΣM.w, substepper.momentum_perturbation.w, U⁰.ρw, model.momentum.ρw,
+            interval, Δτ, 1 - substepper.forward_weight)
+    return nothing
+end
+
+@kernel function _remove_moisture_content!(ρθ′, grid, s, θₘᴸ, Σρu′, Σρv′, Σρw′, ρw′, ρw⁰, ρwᴸ, interval, Δτ, ωˢ⁻)
+    i, j, k = @index(Global, NTuple)
+    W⁰ = start_moisture_content(i, j, k, grid, s)
+    @inbounds begin
+        ∇ʰ_ΔθM = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxTᶜᵃᵃ(i, j, k, grid, moisture_flux_x, θₘᴸ, s.ρθ, s.ρᵈ, Σρu′) +
+                                           δyTᵃᶜᵃ(i, j, k, grid, moisture_flux_y, θₘᴸ, s.ρθ, s.ρᵈ, Σρv′))
+        ∂z_ΔθM = ∂zᶜᶜᶜ(i, j, k, grid, moisture_flux_z, θₘᴸ, s.ρθ, s.ρᵈ, Σρw′, ρw′, ρw⁰, ρwᴸ, ωˢ⁻)
+        ρθ′[i, j, k] -= W⁰ + interval * (s.Gρθₘ[i, j, k] - s.Gρθ[i, j, k]) - Δτ * (∇ʰ_ΔθM + ∂z_ΔθM)
+    end
+end
+
+# θₘᴸ − θᴸ = (φ − 1) θᴸ, the part of θₘ that the vapor holds
+@inline function moisture_potential_temperature(i, j, k, grid, θₘᴸ, ρθ, ρᵈ)
+    ρ̂ᵈ = @inbounds ifelse(ρᵈ[i, j, k] == 0, one(eltype(ρᵈ)), ρᵈ[i, j, k])
+    return @inbounds θₘᴸ[i, j, k] - ρθ[i, j, k] / ρ̂ᵈ
+end
+
+@inline moisture_flux_x(i, j, k, grid, θₘᴸ, ρθ, ρᵈ, Σρu′) =
+    @inbounds Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, moisture_potential_temperature, θₘᴸ, ρθ, ρᵈ) * Σρu′[i, j, k]
+
+@inline moisture_flux_y(i, j, k, grid, θₘᴸ, ρθ, ρᵈ, Σρv′) =
+    @inbounds Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, moisture_potential_temperature, θₘᴸ, ρθ, ρᵈ) * Σρv′[i, j, k]
+
+# The vertical flux of the loop is off-centered, (1 − ω) (ρw)′(n−1) + ω (ρw)′(n); its sum telescopes
+# onto the raw sum as in `_finalize_time_averaged_velocity!`. The interpolation is that of `ℑbzᵃᵃᶠ`.
+@inline function moisture_flux_z(i, j, k, grid, θₘᴸ, ρθ, ρᵈ, Σρw′, ρw′, ρw⁰, ρwᴸ, ωˢ⁻)
+    Δθ⁺ = moisture_potential_temperature(i, j, k, grid, θₘᴸ, ρθ, ρᵈ)
+    Δθ⁻ = moisture_potential_temperature(i, j, k - 1, grid, θₘᴸ, ρθ, ρᵈ)
+
+    p⁺ = peripheral_node(i, j, k,     grid, Center(), Center(), Center())
+    p⁻ = peripheral_node(i, j, k - 1, grid, Center(), Center(), Center())
+
+    Δθ⁺ = ifelse(p⁺, Δθ⁻, Δθ⁺)
+    Δθ⁻ = ifelse(p⁻, Δθ⁺, Δθ⁻)
+
+    ΣM = @inbounds Σρw′[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - (ρw⁰[i, j, k] - ρwᴸ[i, j, k]))
+
+    return (Δθ⁺ + Δθ⁻) / 2 * ΣM
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Compute the dry air's share, `ρᵈ / ρ`, of the divergence of the mass flux `ρ 𝐮` that the moisture
+tendency was built with, where `velocities` are its transport velocities: the dry density tendency
+that pairs with the moisture tendency in the conversion to the tendency of ``ρθₘ`` (Section 3b).
+Call it whenever the moisture tendency is built, with the velocities it was built with. A no-op
+for the default loop.
+"""
+compute_transport_density_tendency!(substepper::AcousticSubstepper, model, velocities) =
+    compute_transport_density_tendency!(substepper.moist_potential_temperature, model, velocities)
+
+compute_transport_density_tendency!(::Nothing, model, velocities) = nothing
+
+function compute_transport_density_tendency!(fields, model, velocities)
+    grid = model.grid
+    advection = field_advection_scheme(model.advection, moisture_prognostic_name(model.microphysics))
+    scheme, td = explicit_fraction_arguments(advection)
+    launch!(architecture(grid), grid, :xyz, _compute_transport_density_tendency!,
+            fields.transport_density_tendency, grid, scheme, td,
+            model.dynamics.dry_density, model.dynamics.total_density, velocities.u, velocities.v, velocities.w)
+    return nothing
+end
+
+@kernel function _compute_transport_density_tendency!(Gᵗρᵈ, grid, scheme, td, ρᵈ, ρ, u, v, w)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρ̂ = ifelse(ρ[i, j, k] == 0, one(eltype(ρ)), ρ[i, j, k])
+        ∇_ρu = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, transport_mass_flux_x, ρ, u) +
+                                        δyᵃᶜᵃ(i, j, k, grid, transport_mass_flux_y, ρ, v)) +
+               ∂zᶜᶜᶜ(i, j, k, grid, transport_mass_flux_z, scheme, td, ρ, w)
+        Gᵗρᵈ[i, j, k] = - ρᵈ[i, j, k] / ρ̂ * ∇_ρu
+    end
+end
+
+@inline transport_mass_flux_x(i, j, k, grid, ρ, u) = @inbounds Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, ρ) * u[i, j, k]
+@inline transport_mass_flux_y(i, j, k, grid, ρ, v) = @inbounds Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, ρ) * v[i, j, k]
+@inline transport_mass_flux_z(i, j, k, grid, scheme, td, ρ, w) =
+    ℑzᵃᵃᶠ(i, j, k, grid, ρ) * explicit_vertical_velocity(i, j, k, grid, scheme, td, w)
+
+# The fraction of the vertical velocity that the explicit tendency of a scalar is advected with:
+# all of it, unless the scheme is adaptive-implicit.
+explicit_fraction_arguments(advection) = (nothing, nothing)
+
+function explicit_fraction_arguments(advection::AdaptiveImplicitVerticalAdvection)
+    scheme = vertical_scheme(advection)
+    return scheme, Oceananigans.TimeSteppers.time_discretization(scheme)
+end
+
+@inline explicit_vertical_velocity(i, j, k, grid, ::Nothing, ::Nothing, w) = @inbounds w[i, j, k]
+
+@inline explicit_vertical_velocity(i, j, k, grid, scheme, td, w) =
+    @inbounds w[i, j, k] - implicit_vertical_velocityᶜᶜᶠ(i, j, k, grid, scheme, td, w)
 
 #####
 ##### Section 4 — Adaptive substep computation (acoustic CFL)
@@ -911,6 +1203,9 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
             model.dynamics.dry_density, ρᵡ, model.momentum.ρu, model.momentum.ρv)
     # ρw is dispatched: terrain models initialize the contravariant ρw̃ instead.
     initialize_vertical_momentum_perturbation!(substepper, model, Uᴸ_outer)
+
+    # A loop that integrates ρθₘ starts from the perturbation of ρθₘ (Section 3b).
+    add_moisture_content!(substepper.moist_potential_temperature, substepper, model, Uᴸ_outer)
 
     # The only fill of the ρ′ halos in the stage: no substep kernel reads ρ′ off its own column, and the
     # k = 0, Nz+1 values that `_build_vertical_rhs!` reads only feed its discarded boundary rows. Filled
@@ -1982,7 +2277,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
     Gⁿ = model.timestepper.Gⁿ
     ρᵡ_name = thermodynamic_density_name(model.formulation)
-    Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
+    Gˢρᵡ = acoustic_thermodynamic_tendency(substepper.moist_potential_temperature, getproperty(Gⁿ, ρᵡ_name))
 
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
     factor_implicit_advection!(model, substepper, advection, Δτ)
@@ -1994,7 +2289,11 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # `transport_velocities(model)` for moisture/tracer tendencies.
     # Done BEFORE `_recover_full_state!` so we read the stage-entry
     # `model.momentum.*` (substep loop hasn't touched it) and stage-entry
-    # `model.dynamics.dry_density` as the Uᴸ_stage reference.
+    # `model.dynamics.dry_density` as the Uᴸ_stage reference. A loop that integrated ρθₘ first
+    # converts it back to the perturbation of the prognostic thermodynamic density, with the
+    # mass flux sums that the average is normalized from.
+    remove_moisture_content!(substepper.moist_potential_temperature, substepper, model, Uᴸ,
+                             Nτ * Δτ * substepper.thermodynamic_tendency_factor, Δτ)
     finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
