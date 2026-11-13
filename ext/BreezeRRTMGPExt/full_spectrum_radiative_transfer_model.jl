@@ -22,8 +22,11 @@ using RRTMGP: RRTMGPSolver, lookup_tables
 using RRTMGP.AtmosphericStates: AtmosphericState
 using RRTMGP.BCs: LwBCs, SwBCs
 
-# Dispatch on background_atmosphere = BackgroundAtmosphere for full-spectrum (clear-sky or all-sky) radiation
-const FullSpectrumRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere}
+# RRTMGP's state distinguishes its full-spectrum solvers from other spectral backends.
+const FullSpectrumRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:AtmosphericState}
+
+# The solve clamps the surface temperature into RRTMGP's Planck tables (`_update_rrtmgp_gas_state!`)
+AtmosphereModels.surface_temperature_bounds(::FullSpectrumRadiativeTransferModel) = rrtmgp_temperature_bounds
 
 # Shared by the clear-sky and all-sky `RadiativeTransferModel` docstrings.
 const full_spectrum_keywords_docstring = """
@@ -160,7 +163,9 @@ function full_spectrum_radiative_transfer_model(grid, radiation_method, constant
                                   liquid_effective_radius,
                                   ice_effective_radius,
                                   column_batches,
-                                  schedule)
+                                  schedule,
+                                  approximate_radiation_updates(grid, schedule, solar_position),
+                                  radiation_cache_validity(grid))
 end
 
 # Mapping from RRTMGP's internal gas names to BackgroundAtmosphere field names
@@ -251,16 +256,16 @@ end
 ##### Update radiation
 #####
 
+AtmosphereModels.solver_cos_zenith(rtm::FullSpectrumRadiativeTransferModel) = rtm.longwave_solver.sws.bcs.cos_zenith
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Update the full-spectrum radiative fluxes from the current model state, including the cloud
-state for all-sky radiation.
+Solve the full-spectrum radiative fluxes for the current model state, including the cloud
+state for all-sky radiation, at the solar zenith angle that `_update_radiation!` has set.
 """
-function AtmosphereModels._update_radiation!(rtm::FullSpectrumRadiativeTransferModel, model)
-    assert_bound_surface_temperature(rtm)
+function AtmosphereModels.solve_radiative_transfer!(rtm::FullSpectrumRadiativeTransferModel, model)
     grid = model.grid
-    clock = model.clock
     solver = rtm.longwave_solver
 
     # Surface emissivity and albedos, re-read in case they evolve
@@ -275,15 +280,9 @@ function AtmosphereModels._update_radiation!(rtm::FullSpectrumRadiativeTransferM
                                rtm.liquid_effective_radius,
                                rtm.ice_effective_radius)
 
-    # Update solar zenith angle from the solar_position specification
-    update_cos_zenith!(solver.sws.bcs.cos_zenith, rtm.solar_position, grid, clock)
-
     # Longwave and shortwave, one batch of columns at a time; night columns (`cos_zenith ≤ 0`)
     # get zero fluxes, which RRTMGP handles internally.
     solve_radiation_batches!(rtm, solver, grid)
-
-    # Compute radiation flux divergence
-    compute_radiation_flux_divergence!(rtm, grid)
 
     return nothing
 end

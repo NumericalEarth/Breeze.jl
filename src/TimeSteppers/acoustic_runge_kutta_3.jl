@@ -76,6 +76,8 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R} <: AbstractTimeStepper
     rounding :: R
 end
 
+AtmosphereModels.stage_abscissae(ts::AcousticRungeKutta3) = (ts.β₁, ts.β₂)
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 

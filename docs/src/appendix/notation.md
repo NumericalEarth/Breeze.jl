@@ -208,6 +208,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``F_{\mathscr{I}}``                 | `Fℐ`   |                                     | Radiative flux divergence (heating rate), K/s                                  |
 | ``τˡʷ``                             | `τˡʷ`  |                                     | Atmosphere optical thickness for longwave                                      |
 | ``τˢʷ``                             | `τˢʷ`  |                                     | Atmosphere optical thickness for shortwave                                     |
+| ``μ₀``                              | `μ₀`   | `cos_zenith`                        | Current cosine of the solar zenith angle, clamped to zero at night              |
+| ``\bar{μ}₀``                        | `μ̄₀`   | `solved_cos_zenith`                 | Solar cosine used by a solve, averaged over the sunlit part of its interval when known |
 | ``N_A``                             | `ℕᴬ`   |                                     | Avogadro's number, molecules per mole                                          |
 | ``\mathcal{U}``                     | `𝒰`    |                                     | Thermodynamic state struct (e.g., `StaticEnergyState`)                         |
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
