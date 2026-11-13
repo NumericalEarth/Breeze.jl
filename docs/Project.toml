@@ -25,7 +25,7 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [sources]
 Breeze = {path = ".."}
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "dkz/reactant-static-stop-iteration"}
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "b61f00dffa99beb2ce6841ebe7bd84b770b87cf0"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
