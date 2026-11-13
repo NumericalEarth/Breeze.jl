@@ -265,6 +265,13 @@ end
     @test Breeze.TurbulenceClosures.stability_iterations(CloudBuoyancyFlux(; stability_iterations = 3)) == 3
     @test_throws ArgumentError CloudBuoyancyFlux(; stability_iterations = -1)
     @test_throws ArgumentError CloudBuoyancyFlux(; stability = false, stability_iterations = 1)
+    @test CloudBuoyancyFlux().stability_relaxation == 1
+    @test CloudBuoyancyFlux(; stability_iterations = 3, stability_relaxation = 0.5).stability_relaxation == 0.5
+    @test_throws ArgumentError CloudBuoyancyFlux(; stability_relaxation = 0)
+    @test_throws ArgumentError CloudBuoyancyFlux(; stability_relaxation = 1.5)
+    relaxed = TKEBasedTurbulenceClosure(Float32; subgrid_cloud_formulation =
+        SubgridCloudFormulation(Float64; buoyancy_flux = CloudBuoyancyFlux(; stability_iterations = 2, stability_relaxation = 0.3)))
+    @test relaxed.subgrid_cloud_formulation.buoyancy_flux.stability_relaxation === 0.3f0
 
     iterated(n) = SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability_iterations = n))
     closure_columns(model) = (cf = model.closure_fields; sc = cf.subgrid_cloud;
@@ -277,6 +284,19 @@ end
         time_step!(m, 30)
     end
     @test closure_columns(default) == closure_columns(reference)
+
+    # ω = 1 is the unrelaxed iteration
+    unrelaxed = build(2)
+    explicit_one = tke_p3_column(SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability_iterations = 2, stability_relaxation = 1.0));
+                                 subgrid = ClosureCloud(), static_stability = DryStaticStability())
+    relaxed = tke_p3_column(SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability_iterations = 2, stability_relaxation = 0.5));
+                            subgrid = ClosureCloud(), static_stability = DryStaticStability())
+    for m in (unrelaxed, explicit_one, relaxed), _ in 1:3
+        time_step!(m, 30)
+    end
+    @test closure_columns(explicit_one) == closure_columns(unrelaxed)
+    @test closure_columns(relaxed) != closure_columns(unrelaxed)
+    @test all(isfinite, column(relaxed.closure_fields.Kᶜ))
 
     for n in (1, 2)
         model = build(n)

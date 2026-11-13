@@ -214,27 +214,42 @@ The distribution is first computed with the static stability of the closure (`N�
 the distribution again with the stored `N²`, mixing length and `Kᶜ` (those of `N²ᵇ` from the pass
 before, which also set the moment time scale), then `N²ᵇ` from its liquid flux, then the mixing
 length and the diffusivities from `N²ᵇ`. The number is a type parameter, so the passes are
-unrolled when the closure is compiled. After the last pass the stored moments, cloud fields and
-buoyancy production `B` are those of the last distribution, and `N²`, `ℓᵐ`, `Kᶜ`, `Kᵘ`, `Kᵉ` are
-formed from that distribution's liquid flux; that distribution was itself computed with the
-diffusivities of the pass before (one pass behind, as with `n = 0`, where they are the dry ones).
+unrolled when the closure is compiled.
+
+In the extra passes the new stability is blended into the stored one with
+`stability_relaxation = ω` (`0 < ω ≤ 1`): `N² ← (1 - ω) N² + ω N²ᵇ` at the interior faces, before
+the mixing length and the diffusivities are formed from it. The first pass (from the closure's
+static stability to `N²ᵇ`) is never relaxed. `ω = 1` is the plain fixed-point iteration; `ω < 1`
+damps the pass-to-pass oscillation between the stable and unstable branches.
+
+After the last pass the stored moments, cloud fields and buoyancy production `B` are those of the
+last distribution; `N²` is the relaxed blend of the stored `N²` and the `N²ᵇ` of that
+distribution's liquid flux (exactly that `N²ᵇ` when `ω = 1`), and `ℓᵐ`, `Kᶜ`, `Kᵘ`, `Kᵉ` are
+formed from that `N²`. The last distribution was itself computed with the diffusivities of the
+pass before (one pass behind, as with `n = 0`, where they are the dry ones).
 
 $(TYPEDFIELDS)
 """
-struct CloudBuoyancyFlux{N}
+struct CloudBuoyancyFlux{N, W}
     "Whether the stability of the diffusivities and the mixing length is that of the cloud buoyancy flux"
     stability :: Bool
-    CloudBuoyancyFlux{N}(stability::Bool) where N = new{N}(stability)
+    "The weight `ω` of the new `N²ᵇ` in the extra passes, `0 < ω ≤ 1`"
+    stability_relaxation :: W
+    CloudBuoyancyFlux{N}(stability::Bool, ω::W = 1) where {N, W} = new{N, W}(stability, ω)
 end
 
 CloudBuoyancyFlux(stability::Bool) = CloudBuoyancyFlux{0}(stability)
 
-function CloudBuoyancyFlux(; stability = true, stability_iterations = 0)
+function CloudBuoyancyFlux(; stability = true, stability_iterations = 0, stability_relaxation = 1)
     n = Int(stability_iterations)
     n >= 0 || throw(ArgumentError("stability_iterations must be ≥ 0, got $n."))
     (n == 0 || stability) || throw(ArgumentError("stability_iterations > 0 needs stability = true."))
-    return CloudBuoyancyFlux{n}(stability)
+    0 < stability_relaxation <= 1 || throw(ArgumentError("stability_relaxation must be in (0, 1], got $stability_relaxation."))
+    return CloudBuoyancyFlux{n}(stability, stability_relaxation)
 end
+
+convert_eltype(::Type{FT}, b::CloudBuoyancyFlux{N}) where {FT, N} =
+    CloudBuoyancyFlux{N}(b.stability, convert(FT, b.stability_relaxation))
 
 """
     stability_iterations(buoyancy_flux::CloudBuoyancyFlux)
@@ -244,7 +259,8 @@ The number of extra passes of the distribution and the cloud buoyancy stability 
 stability_iterations(::CloudBuoyancyFlux{N}) where N = N
 
 Base.summary(b::CloudBuoyancyFlux) = string("CloudBuoyancyFlux(stability = ", b.stability,
-                                            ", stability_iterations = ", stability_iterations(b), ")")
+                                            ", stability_iterations = ", stability_iterations(b),
+                                            ", stability_relaxation = ", b.stability_relaxation, ")")
 
 #####
 ##### Part 3: cloud owned by the closure
@@ -317,7 +333,7 @@ function SubgridCloudFormulation(FT::DataType = Oceananigans.defaults.FloatType;
 end
 
 convert_eltype(::Type{FT}, f::SubgridCloudFormulation) where FT =
-    SubgridCloudFormulation(convert_component(FT, f.distribution), f.buoyancy_flux, f.cloud)
+    SubgridCloudFormulation(convert_component(FT, f.distribution), convert_component(FT, f.buoyancy_flux), f.cloud)
 
 Base.summary(f::SubgridCloudFormulation) =
     string("SubgridCloudFormulation(", summary(f.distribution), ", ", summary(f.buoyancy_flux), ", ", summary(f.cloud), ")")
@@ -592,7 +608,10 @@ cloud_buoyancy_stability!(buoyancy_flux, args...) = nothing
 
 # N²ᵇ = (g / θ)(∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces, then the mixing length and the
 # diffusivities again from it
-@kernel function _cloud_buoyancy_stability!(N², grid, θ, qᵗ, gθ, gA, Bˡ, Kᶜ)
+@inline relax_stability(N², N²ᵇ, ::Nothing) = N²ᵇ
+@inline relax_stability(N², N²ᵇ, ω) = (1 - ω) * N² + ω * N²ᵇ
+
+@kernel function _cloud_buoyancy_stability!(N², grid, θ, qᵗ, gθ, gA, Bˡ, Kᶜ, ω)
     i, j, k = @index(Global, NTuple)
     FT = eltype(grid)
     @inbounds begin
@@ -607,7 +626,7 @@ cloud_buoyancy_stability!(buoyancy_flux, args...) = nothing
         Kᶜᵢ = Kᶜ[i, j, k]
         resolved = Kᶜᵢ > sqrt(floatmin(FT))
         N²ᵇ = gθᶠ * ∂zθ + gAᶠ * ∂zq - ifelse(resolved, Bᶠ / ifelse(resolved, Kᶜᵢ, one(FT)), zero(FT))
-        N²[i, j, k] = ifelse(interior_face, N²ᵇ, N²[i, j, k])
+        N²[i, j, k] = ifelse(interior_face, relax_stability(N²[i, j, k], N²ᵇ, ω), N²[i, j, k])
     end
 end
 
@@ -617,18 +636,20 @@ function cloud_buoyancy_stability!(buoyancy_flux::CloudBuoyancyFlux, fields, clo
     # The extra passes of the coupling; the count is a type parameter, so the loop is unrolled when traced
     for _ in 1:stability_iterations(buoyancy_flux)
         compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
-        cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
+        cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters,
+                                       buoyancy_flux.stability_relaxation)
     end
     return nothing
 end
 
-# N²ᵇ from the stored distribution, then the mixing length and the diffusivities from it
-function cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
+# N²ᵇ from the stored distribution (blended into the stored N² with weight ω, unless ω = nothing), then
+# the mixing length and the diffusivities from it
+function cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters, ω = nothing)
     grid = model.grid
     arch = grid.architecture
     s = distribution_state(model, nothing)
     cl = fields.cloud
-    launch!(arch, grid, parameters, _cloud_buoyancy_stability!, closure_fields.N², grid, s.θ, s.qᵗ, cl.gθ, cl.gA, cl.Bˡ, closure_fields.Kᶜ)
+    launch!(arch, grid, parameters, _cloud_buoyancy_stability!, closure_fields.N², grid, s.θ, s.qᵗ, cl.gθ, cl.gA, cl.Bˡ, closure_fields.Kᶜ, ω)
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
     launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
     return nothing
