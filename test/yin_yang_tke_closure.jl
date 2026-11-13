@@ -52,29 +52,12 @@ panel_minimum(field, r) = minimum(Array(parent(getregion(field, r))))
     end
 
     @testset "Sheared, heated state steps stably; edges match the interior and lat-lon" begin
-        # TEMPORARY (#1103 CI stack overflow): print the overflowing stack, then rethrow
-        stage = "construct Yin-Yang model"
-        model = twin = nothing
-        try
-            model = tke_model(grid)
-            stage = "construct lat-lon twin"
-            twin = tke_model(LatitudeLongitudeGrid(default_arch; size=(96, 48, 16), longitude=(0, 360),
-                                                   latitude=(-80, 80), z=(0, 3kilometers), halo=(3, 3, 3)))
-            for n in 1:10
-                stage = "Yin-Yang time step $n"
-                time_step!(model, 60)
-                stage = "lat-lon time step $n"
-                time_step!(twin, 60)
-            end
-        catch e
-            e isa StackOverflowError || rethrow()
-            bt = stacktrace(catch_backtrace())
-            println(stderr, "StackOverflowError during: ", stage, "; backtrace depth = ", length(bt))
-            println(stderr, "--- innermost frames ---")
-            foreach(f -> println(stderr, f), bt[1:min(end, 40)])
-            println(stderr, "--- outermost frames ---")
-            foreach(f -> println(stderr, f), bt[max(1, end - 39):end])
-            rethrow()
+        model = tke_model(grid)
+        twin = tke_model(LatitudeLongitudeGrid(default_arch; size=(96, 48, 16), longitude=(0, 360),
+                                               latitude=(-80, 80), z=(0, 3kilometers), halo=(3, 3, 3)))
+        for _ in 1:10
+            time_step!(model, 60)
+            time_step!(twin, 60)
         end
 
         ρe = model.tracers[TKE_NAME]
