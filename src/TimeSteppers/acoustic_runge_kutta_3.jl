@@ -182,19 +182,19 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = Round
     # to the current RK stage-entry state; the substep perturbations are
     # initialized with a rewind term inside the substep loop so the
     # WS-RK3 invariant still starts from Uⁿ.
-    prepare_acoustic_cache!(substepper, model)
-    cache_advecting_state!(model)
+    @noinline prepare_acoustic_cache!(substepper, model)
+    @noinline cache_advecting_state!(model)
 
     # `update_state!` built the slow tendencies (advection + Coriolis + diffusion; PGF and
     # buoyancy are excluded — those are handled inside the substep loop in linearized form
     # about the RK stage-entry state). Add the boundary flux and closure tendencies to them.
-    compute_flux_bc_tendencies!(model)
-    compute_closure_tendencies!(model)
+    @noinline compute_flux_bc_tendencies!(model)
+    @noinline compute_closure_tendencies!(model)
 
     # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
     # substep inside the loop, dispatched on the scheme type.
-    add_implicit_advection_tendency!(model)
+    @noinline add_implicit_advection_tendency!(model)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
@@ -205,13 +205,13 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = Round
     # the tracers' solves sedimented, which then takes the thermodynamic variable's post-loop
     # closure diffusion; that variable's implicit vertical transport was already applied inside
     # the substep loop (see `implicit_sedimentation_step!`).
-    scalar_rk3_substep!(model, β * Δt, rounding)
+    @noinline scalar_rk3_substep!(model, β * Δt, rounding)
 
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
     # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
     # vertical advection combined with vertically-implicit closure diffusion. A no-op when
     # the timestepper has no implicit solver.
-    implicit_substep!(model, β * Δt)
+    @noinline implicit_substep!(model, β * Δt)
 
     return nothing
 end

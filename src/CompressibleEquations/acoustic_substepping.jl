@@ -1556,7 +1556,7 @@ function implicit_advection_substep!(model, substepper, advection::AdaptiveImpli
     ρᵈ = substepper.density_cache
     implicit_step!(substepper.density_potential_temperature_predictor,
                    model.timestepper.implicit_solver, nothing, nothing, nothing,
-                   model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+                   model.clock, model.fields, Δτ, advection, (; w), ρᵈ)
     return nothing
 end
 
@@ -1572,6 +1572,7 @@ no captured state; see [`acoustic_substep_loop!`](@ref).
 function acoustic_substep!(model, substepper, stage, advection)
     grid = model.grid
     constants = model.thermodynamic_constants
+    model = regional_substep_view(model)
     ρu′ = substepper.momentum_perturbation.u
     ρv′ = substepper.momentum_perturbation.v
 
@@ -1602,6 +1603,15 @@ function acoustic_substep!(model, substepper, stage, advection)
     @apply_regionally enforce_wall_impenetrability!(substepper, model)
     return nothing
 end
+
+# The parts of `model` that the regional substep launches read. Passing these instead of the
+# model keeps `getregion` from rebuilding the whole model per region on every substep, which
+# needs several MB of stack on a `YinYangGrid`.
+regional_substep_view(model) =
+    (; grid = model.grid, dynamics = model.dynamics, formulation = model.formulation,
+       thermodynamic_constants = model.thermodynamic_constants, momentum = model.momentum,
+       clock = model.clock, fields = fields(model),
+       timestepper = (; Gⁿ = model.timestepper.Gⁿ, implicit_solver = model.timestepper.implicit_solver))
 
 # Step A: the explicit horizontal momentum forward.
 function launch_horizontal_momentum_step!(substepper, model, stage)
