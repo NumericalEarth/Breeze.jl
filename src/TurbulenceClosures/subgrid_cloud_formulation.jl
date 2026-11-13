@@ -134,8 +134,8 @@ struct SubgridDistribution{TS, SM, TM, SB, SK, PDF, PS, CP, C, R}
     clipping :: CP
     "SHOC's constants the components read (`ggr`, `basetemp`, `mintke`, …)"
     constants :: C
-    "Largest correlation of w with θˡ and with qᵗ at the faces, |w′a′| / √(w′² a′²), or `nothing` for no bound"
-    maximum_flux_correlation :: R
+    "Maximum flux correlation of w with θˡ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
+    ℂʳ :: R
 end
 
 Adapt.@adapt_structure SubgridDistribution
@@ -147,6 +147,13 @@ Return a [`SubgridDistribution`](@ref). The defaults are the components of the f
 configuration with published coefficients, except the largest skewness of the third-moment
 limiter, 0.85 in place of SHOC's 1.2 √2 (hand-tuned against excess cumulus cover on the
 master-comparison cases).
+
+`ℂʳ` is the maximum flux correlation: where the down-gradient variance ``a′²`` of ``a = θˡ`` or
+``qᵗ`` is too small for the down-gradient flux, ``(w′a′)² > (ℂʳ)² w′² a′²``, the variance is raised
+smoothly to ``(w′a′)² / ((ℂʳ)² w′²)`` (see `bound_flux_correlation`), and ``θˡ′qᵗ′`` is scaled with
+the variances. It must satisfy ``0 < (ℂʳ)² < 1 - ℂᵍ₁`` (≈ 0.6 with ``ℂᵍ₁ = 0.4`` of
+[`DoubleGaussianPDF`](@ref)); above that the plumes of the double-Gaussian PDF have no width. SHOC's
+own diffusivity, ``0.1 τ e``, corresponds to ``(ℂʳ)² = 0.15``. The default, `nothing`, imposes no bound.
 """
 function SubgridDistribution(FT::DataType = Oceananigans.defaults.FloatType;
                              time_scale = StratificationLimitedMomentTimeScale(FT),
@@ -158,16 +165,16 @@ function SubgridDistribution(FT::DataType = Oceananigans.defaults.FloatType;
                              saturation = FixedConstantsLiquidSaturation(),
                              clipping = HardClipping(),
                              constants = SHOCConstants(FT),
-                             maximum_flux_correlation = sqrt(convert(FT, 0.15)))
-    ρᵐᵃˣ = isnothing(maximum_flux_correlation) ? nothing : convert(FT, maximum_flux_correlation)
+                             ℂʳ = nothing)
+    ℂʳ = isnothing(ℂʳ) ? nothing : convert(FT, ℂʳ)
     return SubgridDistribution(time_scale, second_moments, third_moment, stratification_number_bound,
-                               skewness, assumed_pdf, saturation, clipping, constants, ρᵐᵃˣ)
+                               skewness, assumed_pdf, saturation, clipping, constants, ℂʳ)
 end
 
 convert_eltype(::Type{FT}, d::SubgridDistribution) where FT =
     SubgridDistribution(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
-                         d.assumed_pdf, d.saturation, d.clipping, d.constants, d.maximum_flux_correlation))...)
+                         d.assumed_pdf, d.saturation, d.clipping, d.constants, d.ℂʳ))...)
 
 convert_component(FT, ::Nothing) = nothing
 convert_component(FT, c) = convert_eltype(FT, c)
@@ -385,21 +392,34 @@ end
 @inline cloud_buoyancy_parameter(::ModelThermodynamicsSaturation, c, thermodynamics, θ) =
     thermodynamics.constants.gravitational_acceleration / θ
 
-# Raise θˡ′² and qᵗ′² to (w′a′)² / (ρᵐᵃˣ² w′²) where the down-gradient variances are too small for
-# the down-gradient fluxes (|correlation with w| > ρᵐᵃˣ), and scale θˡ′qᵗ′ with them so that the
-# θˡ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
+# Raise θˡ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
+# small for the down-gradient fluxes (|correlation with w| > ℂʳ), and scale θˡ′qᵗ′ with them so that
+# the θˡ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
 # correlation) is often above 1 - ℂᵍ₁ = 0.6, where the plumes of the double-Gaussian PDF have no
-# width and its cloud fraction is all or nothing in each plume (0, a, 1 - a or 1). SHOC's own
-# diffusivity, 0.1 τ e, gives 0.15; the default bound is that, √0.15.
+# width and its cloud fraction is all or nothing in each plume (0, a, 1 - a or 1); the bound needs
+# 0 < (ℂʳ)² < 1 - ℂᵍ₁. SHOC's own diffusivity, 0.1 τ e, gives (ℂʳ)² = 0.15.
+#
+# The floor is a smooth maximum with continuous derivative and no branch on the state,
+#
+#     smooth_max(a, b) = (a + b + √((a - b)² + (δ b)²)) / 2,   δ = 0.1,
+#
+# so smooth_max(a, 0) = a exactly, smooth_max ≥ max(a, b), and the excess, δ b / 2 at a = b,
+# decays as (δ b)² / (4 |a - b|) away from it. `floatmin` under the root keeps the derivative
+# finite where a = b = 0.
 @inline bound_flux_correlation(::Nothing, w′², θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′) = (θˡ′², qᵗ′², θˡ′qᵗ′)
 
-@inline function bound_flux_correlation(ρᵐᵃˣ, w′², θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
+@inline function variance_floor_smooth_max(a, b, FT)
+    δb = b / 10 # δ = 0.1
+    return (a + b + sqrt((a - b) * (a - b) + δb * δb + floatmin(FT))) / 2
+end
+
+@inline function bound_flux_correlation(ℂʳ, w′², θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
     FT = typeof(θˡ′²)
-    d = ρᵐᵃˣ * ρᵐᵃˣ * w′²
+    d = ℂʳ * ℂʳ * w′²
     resolved = d > floatmin(FT)
     dₛ = ifelse(resolved, d, one(FT))
-    θ² = max(θˡ′², ifelse(resolved, w′θˡ′ * w′θˡ′ / dₛ, zero(FT)))
-    q² = max(qᵗ′², ifelse(resolved, w′qᵗ′ * w′qᵗ′ / dₛ, zero(FT)))
+    θ² = variance_floor_smooth_max(θˡ′², ifelse(resolved, w′θˡ′ * w′θˡ′ / dₛ, zero(FT)), FT)
+    q² = variance_floor_smooth_max(qᵗ′², ifelse(resolved, w′qᵗ′ * w′qᵗ′ / dₛ, zero(FT)), FT)
     fθ = ifelse(θˡ′² > 0, θ² / ifelse(θˡ′² > 0, θˡ′², one(FT)), one(FT))
     fq = ifelse(qᵗ′² > 0, q² / ifelse(qᵗ′² > 0, qᵗ′², one(FT)), one(FT))
     return θ², q², θˡ′qᵗ′ * sqrt(fθ * fq)
@@ -433,7 +453,7 @@ end
             # The variances no smaller than the fluxes allow at the largest correlation with w
             w′²ᶠ = (vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ)) +
                     vertical_velocity_variance(sm, max(e[i, j, k-1], eᵐⁱⁿ))) / 2
-            θˡ′², qᵗ′², θˡ′qᵗ′ = bound_flux_correlation(d.maximum_flux_correlation, w′²ᶠ, θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
+            θˡ′², qᵗ′², θˡ′qᵗ′ = bound_flux_correlation(d.ℂʳ, w′²ᶠ, θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
 
             m.τ[i, j, k] = τ
             m.θˡ′²[i, j, k] = θˡ′²
