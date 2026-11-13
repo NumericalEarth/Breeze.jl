@@ -48,7 +48,7 @@ struct RainFallSpeed{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `RainFallSpeed`. The defaults reproduce the piecewise Gunn-Kinzer /
 Beard law used by P3, with the published centimetre-per-second velocity scales converted
@@ -140,7 +140,7 @@ struct RainVentilation{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `RainVentilation`.
 
@@ -203,7 +203,7 @@ struct RainDrops{FT, VN, VM, EV}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `RainDrops` with empirical parameters and quadrature-based integrals.
 

@@ -20,7 +20,7 @@ using KernelAbstractions: @kernel, @index
 const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, Nothing}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a gray atmosphere radiative transfer model for the given grid.
 
@@ -234,7 +234,7 @@ materialize_solar_constant(solar_constant::AbstractArray, FT) = solar_constant
 AtmosphereModels.solver_cos_zenith(rtm::GrayRadiativeTransferModel) = rtm.shortwave_solver.bcs.cos_zenith
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve the gray radiative fluxes for the current model state, at the solar zenith angle that
 `_update_radiation!` has set:
@@ -303,7 +303,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the RRTMGP `GrayAtmosphericState` arrays from model fields.
 
@@ -437,7 +437,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Copy RRTMGP flux arrays to Oceananigans ZFaceFields.
 

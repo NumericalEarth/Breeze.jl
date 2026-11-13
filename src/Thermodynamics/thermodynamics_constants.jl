@@ -69,7 +69,7 @@ Adapt.adapt_structure(to, pt::CondensedPhase) =
                    adapt(to, pt.density))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `CondensedPhase` with specified parameters converted to `FT`.
 
@@ -182,7 +182,7 @@ function Adapt.adapt_structure(to, constants::ThermodynamicConstants)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
 and vapor, as well as condensed liquid and ice phases.
@@ -232,7 +232,7 @@ const TC = ThermodynamicConstants
 @inline dry_air_gas_constant(constants::TC) = constants.molar_gas_constant / constants.dry_air.molar_mass
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the latent heat of vaporization (vapor → liquid) at temperature `T`.
 
@@ -254,7 +254,7 @@ where ``ℒˡᵣ`` is the reference latent heat at the energy reference temperat
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the latent heat of sublimation (vapor → ice) at temperature `T`.
 
@@ -334,7 +334,7 @@ end
 @inline dry_air_mass_fraction(q::MMF) = 1 - total_specific_moisture(q)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the gas constant of moist air mixture [in J/(kg K)] given the specific humidity
 `q` and thermodynamic parameters `constants`.
@@ -365,7 +365,7 @@ where:
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the heat capacity of a mixture of dry air, vapor, liquid, and ice, where
 the mass fractions of vapor, liquid, and ice are given by `q`.
@@ -432,7 +432,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the vapor pressure from the ideal gas law:
 
@@ -446,7 +446,7 @@ pᵛ = ρ qᵛ Rᵛ T
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the relative humidity as the ratio of vapor pressure to saturation vapor pressure:
 
@@ -509,7 +509,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convert `MoistureMassFractions` to `MoistureMixingRatio`.
 
@@ -526,7 +526,7 @@ where ``qᵗ`` is the total specific moisture and ``qᵈ = 1 - qᵗ`` is the dry
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convert `MoistureMixingRatio` to `MoistureMassFractions`.
 
@@ -543,7 +543,7 @@ where ``rᵗ`` is the total mixing ratio.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the gas constant of a moist air mixture given moisture mixing ratios.
 
@@ -554,7 +554,7 @@ Converts mixing ratios to mass fractions and calls `mixture_gas_constant(q::MMF,
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the heat capacity of a moist air mixture given moisture mixing ratios.
 

@@ -24,7 +24,7 @@ Adapt.adapt_structure(to, k::DewpointTemperatureKernelFunction) =
 const DewpointTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:DewpointTemperatureKernelFunction}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `KernelFunctionOperation` representing the dewpoint temperature ``T⁺``.
 
@@ -74,7 +74,7 @@ T⁺_field = Field(T⁺)
 │   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
-└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+└── data: 3×3×14 StaticStridesOffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=289.056, min=287.474, mean=288.266
 ```
 """

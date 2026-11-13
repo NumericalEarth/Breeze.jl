@@ -33,7 +33,7 @@ struct EquilibriumFlavor end
 struct TotalMoistureFlavor end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `KernelFunctionOperation` representing the specified flavor
 of *saturation specific humidity* ``qᵛ⁺``.
@@ -95,7 +95,7 @@ end
 @inline microphysics_phase_equilibrium(μ) = WarmPhaseEquilibrium()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the *saturation total specific moisture* under the assumption that all moisture is vapor at saturation,
 ``qᵗ = qᵛ⁺``. With this assumption, the equation of state for moist air can be solved in closed form, yielding an
@@ -141,7 +141,7 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
         qᵛᵉ = @inbounds d.specific_prognostic_moisture[i, j, k]
         q = grid_moisture_fractions(i, j, k, grid, d.microphysics, @inbounds(d.density[i, j, k]),
                                     qᵛᵉ, d.microphysical_fields)
-        ρ = gas_phase_density(i, j, k, d.dynamics, T, q, constants)
+        ρ = thermodynamic_state_density(i, j, k, d.dynamics, T, q, constants)
         return saturation_specific_humidity(T, ρ, constants, surface)
 
     elseif d.flavor isa EquilibriumFlavor

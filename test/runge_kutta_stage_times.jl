@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.AtmosphereModels: dynamics_density
+using Breeze.AtmosphereModels: continuity_density
 using Breeze.ParcelModels: ParcelDynamics
 using Oceananigans
 using Oceananigans: UpdateStateCallsite
@@ -27,7 +27,7 @@ step returns the Runge-Kutta quadrature of `F` over `[0, Δt]`, abscissae includ
 """
 function stepped_tracer_quadrature(grid, F, Δt)
     model = AtmosphereModel(grid; tracers = (:c,), forcing = (; c = F))
-    ρ = Array(interior(dynamics_density(model.dynamics)))
+    ρ = Array(interior(continuity_density(model.dynamics)))
     time_step!(model, Δt)
     ρc = Array(interior(model.tracers.c))
     return ρc[1, 1, 1] / ρ[1, 1, 1]

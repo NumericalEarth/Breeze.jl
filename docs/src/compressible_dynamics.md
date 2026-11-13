@@ -50,6 +50,11 @@ strategies:
   tendencies (advection, pressure gradient, buoyancy) computed together. The time step is
   bounded by the full 3-D acoustic CFL ``Δt < \min(Δx, Δy, Δz)/c_s``.
 
+Both time steppers accept a round-off treatment for their stage updates, for example
+`timestepper_kwargs = (; rounding = StochasticRounding())`, which removes the bias that
+round-to-nearest introduces for slow tendencies in `Float32`; see
+[Round-off in reduced precision](@ref round-off-section).
+
 ## Split-explicit time integration
 
 Subcycling fast pressure and gravity-wave dynamics inside an outer Runge–Kutta integration is
@@ -95,9 +100,84 @@ dynamics about the **RK stage-entry state** ``U^L``. The cached background field
 refreshed before every RK stage:
 
 ```math
-ρ^L, \quad (ρθ)^L, \quad p^L, \quad
-Π^L = (p^L / p^{st})^κ, \quad θ^L = (ρθ)^L/ρ^L, \quad γ^m R^m\big|_L .
+ρ^L, \quad (ρθ)^L, \quad p^L, \quad θ^L = (ρθ)^L/ρ^L, \quad C^L .
 ```
+
+``C^L`` is the slope ``∂p/∂(ρθ)`` of the compressible core's equation of state at ``U^L``, at
+fixed dry density and composition. With ``p = ρ R^m T`` and the temperature inverted from
+``c^p_m T = \hat{c}^p Π θ^{li} + H^c``, where ``Π = (p / p^{st})^{\hat κ}`` with the formulation's
+Exner exponent ``\hat κ``, ``\hat{c}^p`` is the vapor-equivalent heat capacity and
+``H^c = ℒ^l_0 q^l + ℒ^i_0 q^i`` the condensate latent energy, the slope is the dry-air
+``γ p / (ρθ)`` with an effective heat-capacity ratio ``γ^e``:
+
+```math
+C^L = \frac{γ^e p^L}{(ρθ)^L} , \qquad
+\frac{1}{γ^e} = 1 - \hat κ + \frac{H^c}{\hat{c}^p Π θ} ,
+```
+
+where ``\hat{c}^p Π θ = c^p_m T - H^c``. This is the slope at the root that an iterating
+`temperature_solver` converges to. With `temperature_solver = nothing`, the core closes with the
+non-iterated inversion ``T = \tilde{T} + \hat γ H^c / c^p_m`` instead, where ``\tilde{T}`` is the
+condensate-free root and ``\hat γ = 1 / (1 - \hat κ)``, so that the latent shift is the heating at
+fixed density. Its slope has ``γ^e = \hat γ (1 - \hat γ H^c / (c^p_m T))``.
+The implementation evaluates ``C^L = ρ R^m θ ∂T/∂θ / (ρθ)^L`` by propagating the temperature
+sensitivity through the selected inversion's actual iterations. Thus zero iterations agree with
+`nothing`, and a solve stopped before convergence uses the slope of its returned temperature.
+Without condensate all give ``γ^e = 1 / (1 - \hat κ)``, which is
+``γ^m = c^p_m / c^v_m`` with the vapor-equivalent exponent and ``γ^d`` with the dry one; condensate
+lowers it. In dry air ``C^L = γ^d R^d (p^L / p^{st})^{κ^d}``.
+
+The substep loop also moves the dry density and holds the water densities fixed. Scalar
+transport then advects the water with the preceding loop's mean velocity (the
+outer-step-start velocity in stage 1;
+[#1089](https://github.com/NumericalEarth/Breeze.jl/issues/1089)), so the water follows the
+loop-mean compression of the
+air, one stage late, but not the acoustic oscillation within a loop. The loop linearizes at
+fixed composition. This is exact for the slow, loop-mean compression, where it keeps the loop
+consistent with the re-diagnosed pressure in balanced flow, and it gives the moist adiabatic
+compressibility. For the oscillation itself the re-diagnosed state is closer to fixed water
+densities, against which ``C^L`` is stiffer by ``ρ^v R^v / (ρ^d R^d)`` in ``c^2``, about 3% for
+20 g/kg of vapor.
+
+At fixed composition and ``ρθ``, the pressure depends on the dry density only through the
+condensate latent energy:
+
+```math
+\frac{∂p}{∂ρ^d} = C^L θ^L \frac{H^c}{c^p_m T - H^c}
+```
+
+at the converged root. Without condensate this vanishes for every inversion, so
+``p' = C^L (ρθ)'`` is the complete linearization. In cloud the loop omits it; for 5 g/kg of cloud
+liquid it is about 5% of ``C^L θ^L``.
+
+The momentum is the dry-mass momentum ``ρ^d \boldsymbol{u}``, and the compressible core applies
+the full pressure gradient and gravity ``-∇p - g ρ \hat{\boldsymbol{z}}`` to it. Its acoustic
+inertia is therefore ``ρ^d`` rather than ``ρ``. Thus the sound speed is ``\sqrt{γ^e p / ρ^d}``. In
+unsaturated air ``γ^e = γ^m`` with the vapor-equivalent exponent, so the sound speed exceeds the
+mixture value ``\sqrt{γ^m R^m T}`` by the factor ``\sqrt{ρ / ρ^d}``, about 1% for 20 g/kg of
+vapor. With the dry exponent, ``γ^e = γ^d``; it exceeds ``γ^m`` by a further 0.2% at 20 g/kg
+because that formulation's adiabat uses ``κ^d``. In unsaturated air ``C^L`` gives the substep loop
+the same speed as the stage-entry pressure gradient and
+[`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping), which both use
+the exact equation of state. In cloud they differ: the loop omits ``∂p/∂ρ^d``, which lowers its
+``c^2`` by the fraction ``H^c / (c^p_m T - H^c)``, and holds the composition fixed, while
+saturation adjustment re-equilibrates the condensate at every stage. Weighting the pressure
+gradient and gravity by ``ρ^d / ρ``, as WRF-ARW does, would give ``c^2 = γ^e R^m T`` with the same
+``C^L``, which is ``γ^m R^m T`` in unsaturated air with the vapor-equivalent exponent
+([#1210](https://github.com/NumericalEarth/Breeze.jl/issues/1210)).
+
+Only the substep loop linearizes the equation of state:
+[`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping) diagnoses the full
+pressure from it every stage, and anelastic dynamics hold the thermodynamic pressure at the
+reference state.
+
+Saturation adjustment also evaluates its residual with the selected temperature inversion.
+This keeps the adjusted vapor and condensate in equilibrium at the temperature that the
+dynamics diagnose, including with non-iterated or stopped temperature solves. Any error of the
+inversion therefore moves into the condensate. The non-iterated inversion overshoots the root by
+about ``\hat κ (\hat γ H^c / c^p_m)^2 / (2 \tilde{T})``, a few tenths of a kelvin for 5 g/kg of cloud
+liquid, which leaves about 1% less condensate than the converged equilibrium. One Newton step
+removes nearly all of it.
 
 The outer-step-start state ``U^n`` is also stored. Stages 2 and 3 initialize perturbations
 with the rewind term ``U^n - U^L`` so that the full state at the beginning of every
@@ -165,10 +245,9 @@ inside the substep loop is
 Each ``G^s`` is the slow tendency for that variable, held constant across the ``N_τ``
 substeps of a given RK stage. For vertical momentum, ``G^s_{ρw}`` is assembled by adding the
 stage-entry vertical pressure-gradient and buoyancy imbalance,
-``-∂_z(p^L - p_r) - g(ρ^L - ρ_r)``, to the slow non-pressure tendency. The acoustic
-linearized pressure coefficient
-``C^L = γ^m R^m\big|_L Π^L`` and the temperature-flux factor ``θ^L`` are cached for the
-stage, which is what makes each stage's substep system linear.
+``-∂_z(p^L - p_r) - g(ρ^L - ρ_r)``, to the slow non-pressure tendency. The linearized pressure
+coefficient ``C^L`` and the temperature-flux factor ``θ^L`` are cached for the stage, which is
+what makes each stage's substep system linear.
 
 ### Terrain-following fast acoustic system
 
@@ -378,7 +457,7 @@ The horizontal divergence in the mass and ``ρθ`` equations is taken from the j
 horizontal momenta ``(ρu)'_{τ+Δτ}, (ρv)'_{τ+Δτ}`` (forward–backward coupling). Substituting
 the discrete updates of ``ρ'`` and ``(ρθ)'`` into the vertical-momentum equation yields a
 tridiagonal Schur system at z-faces, with diagonals proportional to
-``ω^2 Δτ^2`` and the local ``C^L = γ R^m Π^L`` and ``g`` coefficients. Importantly, the
+``ω^2 Δτ^2`` and the local ``C^L`` and ``g`` coefficients. Importantly, the
 pressure perturbation is ``p' = C^L (ρθ)'`` at cell centers, so the discrete pressure
 gradient is the gradient of this product, not ``C^L`` interpolated to a face times
 ``∂(ρθ)'``. After the tridiag is solved the perturbations of ``ρ'`` and ``(ρθ)'`` are

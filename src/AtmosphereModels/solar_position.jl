@@ -53,7 +53,7 @@ struct ApparentSolarPosition{C, E} <: AbstractSolarPosition
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an [`ApparentSolarPosition`](@ref) with optional `coordinate` and `epoch`.
 
@@ -163,7 +163,7 @@ struct DiurnalSolarPosition{FT} <: AbstractSolarPosition
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`DiurnalSolarPosition`](@ref) with sensible defaults: perpetual
 equinox (`declination = 0`), 24-hour day (`day_length = 86400` s), and noon
@@ -236,7 +236,7 @@ compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round
 compute_datetime(t::Number, epoch::Nothing) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fill `cos_zenith` once at construction from the solar-position specification.
 
@@ -264,7 +264,7 @@ function fill_columns!(column_array, values::AbstractArray)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the per-column cosine of the solar zenith angle in `cos_zenith`, dispatched on the
 solar-position specification:
@@ -300,7 +300,7 @@ function update_cos_zenith!(cos_zenith, sp::DiurnalSolarPosition, grid, clock)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Check that `solar_position` can read the model's `clock`, once, when the radiation joins a model:
 [`DiurnalSolarPosition`](@ref) needs a numeric clock, and [`ApparentSolarPosition`](@ref) a

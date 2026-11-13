@@ -17,7 +17,7 @@ export
     # Interface functions extended by Microphysics
     microphysics_phase_equilibrium
 
-using DocStringExtensions: TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using Breeze.Solvers: SecantSolver
 
@@ -37,7 +37,7 @@ using Breeze.Thermodynamics:
     WarmPhaseEquilibrium,
     equilibrated_surface
 
-using Breeze.AtmosphereModels: AtmosphereModel, dynamics_pressure, gas_phase_density, total_density,
+using Breeze.AtmosphereModels: AtmosphereModel, dynamics_pressure, thermodynamic_state_density, total_density,
                                grid_moisture_fractions, specific_prognostic_moisture, liquid_ice_exner_exponent
 
 using Adapt: Adapt, adapt
