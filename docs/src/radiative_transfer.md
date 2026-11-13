@@ -55,8 +55,8 @@ When a `DateTime` clock is used, the cosine of the solar zenith angle is compute
 
 The [`RadiativeTransferModel`](@ref) model computes:
 
-- **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
-- **Shortwave radiation**: Direct beam solar radiation
+- **Longwave radiation**: Upwelling and downwelling thermal radiation using RRTMGP's no-scattering solver. Every layer emits in both directions, and the surface emits upward and reflects `1 - ε` of the downwelling flux. Gray optics has no clouds.
+- **Shortwave radiation**: The direct solar beam, absorbed on its way down, and its reflection by the surface (see the note below)
 
 The gray atmosphere optical thickness for longwave follows the parameterization by [OGormanSchneider2008](@citet),
 
