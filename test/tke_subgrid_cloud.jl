@@ -6,7 +6,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: ClosureCloud, ClosureCloudStatistics, NoSubgridCorrelation, subgrid_statisticsᶜᶜᶜ
-using Breeze.TurbulenceClosures: SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
+using Breeze.TurbulenceClosures: dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment,
                                                               FixedConstantsLiquidSaturation
 
@@ -125,6 +125,47 @@ end
     w³ = column(m.w′³)
     @test all(abs.(w³[2:Nz]) .≤ d.skewness.maximum_skewness .* ((w²[1:Nz-1] .+ w²[2:Nz]) ./ 2) .^ 1.5 .* (1 + 1e-12))
     @test any(!=(0), w³)
+end
+
+@testset "Variance-budget time scales: ρ² = 3 ℂᵠ Sᶜ Sᴰ / (4 ℂʷ₁) and 3 ℂᵠ Sᶜ / (4 ℂʷ₁)" begin
+    for time_scale in (DissipationTimeScale(; ℂᵠ = 0.1), DissipationTimeScale(; ℂᵠ = 0.14), EddyTurnoverTimeScale(; ℂᵠ = 1))
+        formulation = SubgridCloudFormulation(; distribution = SubgridDistribution(; time_scale), buoyancy_flux = nothing, cloud = nothing)
+        model = tke_p3_column(formulation)
+        update_state!(model)
+        grid = model.grid
+        cf = model.closure_fields
+        m = cf.subgrid_cloud.moments
+        closure = model.closure
+        sf = closure.stability_functions
+        ℂᵠ = time_scale.ℂᵠ
+        dissipation = time_scale isa DissipationTimeScale
+        ρ = column(model.dynamics.reference_state.density)
+        e = column(model.tracers.ρe) ./ ρ
+        ℓ = column(cf.ℓᵐ)
+        Nz = size(grid, 3)
+        eᵐⁱⁿ = closure.minimum_tke
+        max_S = dissipation ? max(sf.ℂᶜ⁻ * sf.ℂᴰ⁻, sf.ℂᶜ⁰ * sf.ℂᴰ⁰, sf.ℂᶜ⁺ * sf.ℂᴰ⁺) : max(sf.ℂᶜ⁻, sf.ℂᶜ⁰, sf.ℂᶜ⁺)
+        n = 0
+        for k in 2:Nz
+            u = (sqrt(max(e[k], eᵐⁱⁿ)) + sqrt(max(e[k-1], eᵐⁱⁿ))) / 2
+            Sᴰ = dissipation ? dissipation_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N²) : 1
+            Sᶜ = tracer_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N²)
+            @test column(m.τ)[k] ≈ 2 * ℓ[k] / (ℂᵠ * Sᴰ * u) rtol=1e-12
+            θ² = column(m.θˡ′²)[k]
+            if θ² > 0
+                # With u² for e the squared correlation is a function of Ri alone, bounded by its largest value
+                ρ² = column(m.w′θˡ′)[k]^2 / (θ² * (2 / 3) * u^2)
+                @test ρ² ≈ 3 * ℂᵠ * Sᶜ * Sᴰ / 4 rtol=1e-8
+                @test ρ² ≤ 3 * ℂᵠ * max_S / 4 * (1 + 1e-12)
+                n += 1
+            end
+        end
+        @test n > 0
+        @test all(isfinite, column(m.w′³))
+        @test all(isfinite, column(cf.subgrid_cloud.cloud.C))
+    end
+    @test DissipationTimeScale(Float32).ℂᵠ isa Float32
+    @test EddyTurnoverTimeScale(Float32).ℂᵠ isa Float32
 end
 
 @testset "The cloud is SHOC's assumed PDF of the stored moments" begin

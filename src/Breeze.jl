@@ -256,7 +256,7 @@ export
     AlgebraicThirdMoment, UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
     ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness, DoubleGaussianPDF, SmoothDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation, HardClipping, SmoothClipping, BulkRichardsonBoundaryLayerDepth, SHOCConstants,
     closure_parameters, with_parameters,
-    SubgridCloudFormulation, SubgridDistribution, CloudBuoyancyFlux, ClosureOwnedCloud, StratificationLimitedMomentTimeScale, FixedPointIteration, SecantIteration, BisectionIteration, LaggedStability,
+    SubgridCloudFormulation, SubgridDistribution, CloudBuoyancyFlux, ClosureOwnedCloud, StratificationLimitedMomentTimeScale, FixedPointIteration, SecantIteration, BisectionIteration, LaggedStability, DissipationTimeScale, EddyTurnoverTimeScale,
     LagrangianParticles, ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,

@@ -148,7 +148,12 @@ end
     return tke_stability_function(closure.stability_functions, Ri)
 end
 
-@inline function dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N², e, ℓ)
+@inline function dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N², e=nothing, ℓ=nothing)
+    Ri = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N², e, ℓ)
+    return dissipation_stability_function(closure.stability_functions, Ri)
+end
+
+@inline function dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N², e=nothing, ℓ=nothing)
     Ri = Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N², e, ℓ)
     return dissipation_stability_function(closure.stability_functions, Ri)
 end

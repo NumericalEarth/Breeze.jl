@@ -103,6 +103,121 @@ Base.summary(ts::StratificationLimitedMomentTimeScale{P}) where P =
 end
 
 #####
+##### Time scales of the second moments from the scalar-variance budget
+#####
+
+"""
+$(TYPEDEF)
+
+The time scale `τ` of the second moments from the variance budget of a scalar `φ` (θˡ or qᵗ) in
+local equilibrium, production equal to dissipation, with a scalar-variance dissipation time
+tied to the dissipation time of the closure's TKE,
+
+    2 Kᶜ (∂z φ)² = φ′² / τᵠ,    τᵠ = e / (ℂᵠ ε) = ℓ / (ℂᵠ Sᴰ(Ri) √e),    ε = Sᴰ(Ri) e^{3/2} / ℓ,
+
+so that `φ′² = 2 τᵠ Kᶜ (∂z φ)²`. `ℓ`, `Ri` and the dissipation stability function `Sᴰ` are those
+of the closure (`Kᶜ = Sᶜ(Ri) ℓ √e`). The second moments are `ℂᵛ τ Kᶜ ∂z a ∂z b`, so this type
+returns `τ = 2 τᵠ` and the budget holds with `ℂᵛ = 1`. There is no stratification limit of its
+own: stability enters through `ℓ`, `Sᶜ` and `Sᴰ`. The squared correlation of `w` with `φ` is
+
+    ρ² = (w′φ′)² / (w′² φ′²) = Kᶜ / (ℂᵛ τ w′²) = 3 ℂᵠ Sᶜ(Ri) Sᴰ(Ri) / (4 ℂᵛ ℂʷ₁),
+
+with `w′² = ℂʷ₁ (2/3) e`, independent of the gradient and of `ℓ`. The plumes of the
+double-Gaussian PDF have width only for `ρ² < 1 - ℂᵍ₁`, so for every `Ri`
+
+    ℂᵠ < 4 ℂᵛ ℂʷ₁ (1 - ℂᵍ₁) / (3 max(Sᶜ Sᴰ)).
+
+For `RationalStabilityFunction`, `Sᶜ` and `Sᴰ` share the shape `s = 1 / (1 + Riᵇ / |Ri|)` on each
+branch, so `Sᶜ Sᴰ` is a quadratic in `s ∈ [0, 1)`; where both move the same way on a branch its
+maximum is at an end point, `max(ℂᶜ⁻ ℂᴰ⁻, ℂᶜ⁰ ℂᴰ⁰, ℂᶜ⁺ ℂᴰ⁺)`. With `ℂᵛ = ℂʷ₁ = 1` and `ℂᵍ₁ = 0.4`:
+
+| stability functions | `Sᶜ Sᴰ` at Ri → -∞ / 0 / +∞ | bound on `ℂᵠ` | `ρ²` at Ri → -∞ / 0 / +∞ with `ℂᵠ = 2` |
+|---|---|---|---|
+| `RationalStabilityFunction()` | 5.39 / 0.0107 / 0.0140 | 0.148 | 8.1 / 0.016 / 0.021 |
+| published SHOC-derived set (`ℂᶜ⁺ = 0.533`, `ℂᴰ⁺ = 0.802`) | 0.00044 / 0.0058 / 0.427 | 1.87 | 0.00066 / 0.0087 / 0.64 |
+
+The default `ℂᵠ = 2` is the measured ratio of the scalar to the mechanical time scale,
+`τᵠ ε / e ≈ 0.5` (Béguier et al. 1978; 0.5–0.7), not a fit. In a neutral surface layer
+(`e = c u★²`, `ε = u★³ / (κ z)`, `Kᶜ = κ u★ z / Pr`) the closure has `Sᶜ⁰ Sᴰ⁰ = 1 / (Pr c²)` for any
+`ℓ`, so `ρ² = 3 ℂᵠ / (4 ℂʷ₁ Pr c²)`: about 0.05–0.15 for `c = 3`–`6` and `Pr ≈ 0.7`–`1`, the
+observed range. A neutral `ρ²` far below that means `Sᶜ⁰ Sᴰ⁰` (or `c = (Sᵘ⁰ Sᴰ⁰)^{-1/2}`) of the
+stability functions is off, and is not compensated with `ℂᵠ`.
+
+The third-moment diagnosis keeps its own time scale, `third_moment_time_scale` (default:
+SHOC's [`StratificationLimitedMomentTimeScale`](@ref)).
+
+$(TYPEDFIELDS)
+"""
+struct DissipationTimeScale{FT, T3}
+    "Ratio of the TKE dissipation time `e / ε` to the scalar-variance dissipation time `τᵠ`"
+    ℂᵠ :: FT
+    "Time scale of the third-moment diagnosis"
+    third_moment_time_scale :: T3
+end
+
+"""
+$(TYPEDEF)
+
+As [`DissipationTimeScale`](@ref) without the stability function of the dissipation:
+`τᵠ = ℓ / (ℂᵠ √e)`, `τ = 2 τᵠ`, so that `ρ² = 3 ℂᵠ Sᶜ(Ri) / (4 ℂᵛ ℂʷ₁)` and
+`ℂᵠ < 4 ℂᵛ ℂʷ₁ (1 - ℂᵍ₁) / (3 max Sᶜ)`.
+
+$(TYPEDFIELDS)
+"""
+struct EddyTurnoverTimeScale{FT, T3}
+    "Eddy turnovers `ℓ / √e` per scalar-variance dissipation time, `τᵠ = ℓ / (ℂᵠ √e)`"
+    ℂᵠ :: FT
+    "Time scale of the third-moment diagnosis"
+    third_moment_time_scale :: T3
+end
+
+const VarianceBudgetTimeScale = Union{DissipationTimeScale, EddyTurnoverTimeScale}
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return a [`DissipationTimeScale`](@ref); the third moment keeps `StratificationLimitedMomentTimeScale(FT)`.
+"""
+DissipationTimeScale(FT::DataType = Oceananigans.defaults.FloatType; ℂᵠ = 2,
+                     third_moment_time_scale = StratificationLimitedMomentTimeScale(FT)) =
+    DissipationTimeScale(convert(FT, ℂᵠ), third_moment_time_scale)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return an [`EddyTurnoverTimeScale`](@ref); the third moment keeps `StratificationLimitedMomentTimeScale(FT)`.
+"""
+EddyTurnoverTimeScale(FT::DataType = Oceananigans.defaults.FloatType; ℂᵠ = 1,
+                      third_moment_time_scale = StratificationLimitedMomentTimeScale(FT)) =
+    EddyTurnoverTimeScale(convert(FT, ℂᵠ), third_moment_time_scale)
+
+for TS in (:DissipationTimeScale, :EddyTurnoverTimeScale)
+    @eval begin
+        Adapt.adapt_structure(to, ts::$TS) = $TS(adapt(to, ts.ℂᵠ), adapt(to, ts.third_moment_time_scale))
+        convert_eltype(::Type{FT}, ts::$TS) where FT = $TS(convert(FT, ts.ℂᵠ), convert_eltype(FT, ts.third_moment_time_scale))
+        Base.summary(ts::$TS) = string($(string(TS)), "(ℂᵠ = ", prettysummary(ts.ℂᵠ), ", third moment: ",
+                                       summary(ts.third_moment_time_scale), ")")
+    end
+end
+
+# The time scale of the second moments at face k, from the closure's ℓ, √e (u), N² and Ri there
+@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts, closure, velocities, N², ℓ, u) =
+    moment_time_scale(ts, ℓ, u, @inbounds N²[i, j, k])
+
+@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::EddyTurnoverTimeScale, closure, velocities, N², ℓ, u) =
+    2 * ℓ / (ts.ℂᵠ * u)
+
+@inline function moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::DissipationTimeScale, closure, velocities, N², ℓ, u)
+    Sᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, N²)
+    return 2 * ℓ / (ts.ℂᵠ * Sᴰ * u)
+end
+
+# The time scale of the third-moment diagnosis: the stored second-moment time scale, or its own
+@inline third_moment_time_scale(::StratificationLimitedMomentTimeScale, τ, ℓ, u, N²) = τ
+@inline third_moment_time_scale(ts::VarianceBudgetTimeScale, τ, ℓ, u, N²) =
+    moment_time_scale(ts.third_moment_time_scale, ℓ, u, N²)
+
+#####
 ##### Part 1: the subgrid distribution
 #####
 
@@ -117,7 +232,7 @@ energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref
 $(TYPEDFIELDS)
 """
 struct SubgridDistribution{TS, SM, TM, SB, SK, PDF, PS, CP, C, R}
-    "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref))"
+    "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
     second_moments :: SM
@@ -155,6 +270,11 @@ smoothly to ``(w′a′)² / ((ℂʳ)² w′²)`` (see `bound_flux_correlation`)
 the variances. It must satisfy ``0 < (ℂʳ)² < 1 - ℂᵍ₁`` (≈ 0.6 with ``ℂᵍ₁ = 0.4`` of
 [`DoubleGaussianPDF`](@ref)); above that the plumes of the double-Gaussian PDF have no width. SHOC's
 own diffusivity, ``0.1 τ e``, corresponds to ``(ℂʳ)² = 0.15``. The default, `nothing`, imposes no bound.
+
+`time_scale` is [`StratificationLimitedMomentTimeScale`](@ref) (the default, SHOC's),
+[`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref). The latter two derive `τ` from
+the scalar-variance budget with the same `ℓ`, `√e` and `Ri` as `Kᶜ`, so that the squared
+correlation of `w` with θˡ and qᵗ is a function of `Ri` alone, bounded by a bound on `ℂᵠ`.
 """
 function SubgridDistribution(FT::DataType = Oceananigans.defaults.FloatType;
                              time_scale = StratificationLimitedMomentTimeScale(FT),
@@ -556,7 +676,8 @@ end
     return θ², q², θˡ′qᵗ′ * sqrt(fθ * fq)
 end
 
-@inline function subgrid_distribution_column!(m, cl, i, j, grid, d, closure, closure_fields, θ, qᵗ, e, w, p, thermodynamics)
+@inline function subgrid_distribution_column!(m, cl, i, j, grid, d, closure, closure_fields, θ, qᵗ, e, velocities, p, thermodynamics)
+    w = velocities.w
     Nz = size(grid, 3)
     FT = eltype(grid)
     c = d.constants
@@ -574,7 +695,7 @@ end
             Kᵘ = closure_fields.Kᵘ[i, j, k]
             ℓ = closure_fields.ℓᵐ[i, j, k]
             u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
-            τ = moment_time_scale(d.time_scale, ℓ, u, closure_fields.N²[i, j, k])
+            τ = moment_time_scaleᶜᶜᶠ(i, j, k, grid, d.time_scale, closure, velocities, closure_fields.N², ℓ, u)
             τ = ifelse(isfinite(τ), τ, zero(FT))
 
             θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′, _, _, _ =
@@ -625,7 +746,10 @@ end
             θᶠ = (θ[i, j, k] + θ[i, j, k-1]) / 2
             thedz = 1 / Δzᶜᶜᶠ(i, j, k, grid)
             thedz2 = 1 / (Δzᶜᶜᶜ(i, j, k-1, grid) + Δzᶜᶜᶜ(i, j, k, grid))
-            w′³ = subgrid_third_moment(d.third_moment, d, c, m.τ[i, j, k], closure_fields.N²[i, j, k], w′²ᶠ, θᶠ, thedz, thedz2,
+            τ³ = third_moment_time_scale(d.time_scale, m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k],
+                                         ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e), closure_fields.N²[i, j, k])
+            τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
+            w′³ = subgrid_third_moment(d.third_moment, d, c, τ³, closure_fields.N²[i, j, k], w′²ᶠ, θᶠ, thedz, thedz2,
                                        m.θˡ′²[i, j, k+1] - m.θˡ′²[i, j, k-1],
                                        m.w′θˡ′[i, j, k+1] - m.w′θˡ′[i, j, k-1],
                                        cl.w′²[i, j, k] - cl.w′²[i, j, k-1],
@@ -664,18 +788,18 @@ end
     return nothing
 end
 
-@kernel function _compute_subgrid_distribution!(moments, cloud, grid, closure, closure_fields, θ, qᵗ, e, w, p, thermodynamics)
+@kernel function _compute_subgrid_distribution!(moments, cloud, grid, closure, closure_fields, θ, qᵗ, e, velocities, p, thermodynamics)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     d = closure_ij.subgrid_cloud_formulation.distribution
-    subgrid_distribution_column!(moments, cloud, i, j, grid, d, closure_ij, closure_fields, θ, qᵗ, e, w, p, thermodynamics)
+    subgrid_distribution_column!(moments, cloud, i, j, grid, d, closure_ij, closure_fields, θ, qᵗ, e, velocities, p, thermodynamics)
 end
 
 function compute_subgrid_distribution!(fields::SubgridCloudFields, closure_fields, closure, model, e_density)
     grid = model.grid
     s = distribution_state(model, e_density)
     launch!(grid.architecture, grid, :xy, _compute_subgrid_distribution!,
-            fields.moments, fields.cloud, grid, closure, closure_fields, s.θ, s.qᵗ, s.e, s.w, s.p, s.thermodynamics)
+            fields.moments, fields.cloud, grid, closure, closure_fields, s.θ, s.qᵗ, s.e, model.velocities, s.p, s.thermodynamics)
     return nothing
 end
 
