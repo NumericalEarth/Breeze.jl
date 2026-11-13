@@ -868,19 +868,16 @@ composition.
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the fractions `(vapor, liquid, ice)` of a change of the prognostic moisture density
-([`moisture_prognostic_name`](@ref)) that each phase takes at fixed temperature, in a cell whose
-moisture mass fractions are `q`.
+Return whether the scheme diagnoses the vapor of cell `(i, j, k)`, whose moisture mass fractions
+are `q`, from saturation: `false` (the default) for a scheme whose prognostic moisture density
+is the vapor, and `true` in saturated air for a scheme that diagnoses its cloud condensate from
+the moisture density (saturation adjustment).
 
-The default is all vapor: a scheme with prognostic condensate carries the vapor as its moisture
-density. A scheme whose moisture density includes condensate that it diagnoses (saturation
-adjustment) extends this with the partition its equilibrium gives a change.
-
-The acoustic substep loop of the compressible core projects the moisture tendency onto its
-pressure with the sensitivities of these phases.
+Where it does, the pressure the scheme re-diagnoses is that of the adjusted partition, whose
+response differs from the fixed-composition one of the acoustic substep loop of the compressible
+core. The loop projects no moisture onto its pressure there (see `PressureProjection`).
 """
-@inline prognostic_moisture_phase_fractions(i, j, k, grid, microphysics, microphysical_fields, q) =
-    (one(q.vapor), zero(q.vapor), zero(q.vapor))
+@inline diagnoses_vapor_from_saturation(i, j, k, grid, microphysics, microphysical_fields, q) = false
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

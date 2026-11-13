@@ -173,26 +173,33 @@ p' = C^L \left[ (ρθ)' + Λ^d (ρ^d)' - Λ^v (ρ^v)' - Λ^l (ρ^l)' - Λ^i (ρ^
 Λ^x = \frac{ρ^d}{ρ} \left( χ^x - δ^{xv} \, θ \, \frac{c^p_m T}{c^p_m T - H^c} \frac{R^v}{R^m} \right) ,
 ```
 
-where ``χ^x`` is the derivative of ``θ^{li}`` at fixed temperature and pressure along the change
-of the mass fractions when a unit of phase ``x`` is added to a unit of mass. ``Λ^x`` is the
+at the converged root of the temperature inversion, where ``χ^x`` is the derivative of
+``θ^{li}`` at fixed temperature and pressure along the change of the mass fractions when a unit
+of phase ``x`` is added to a unit of mass. Like ``C^L``, the implementation differentiates the
+selected inversion's actual iterations for every one of these coefficients, so that a
+non-iterated or stopped temperature solve uses the derivatives of the temperature it returns and
+``ϖ`` stays the tangent of the pressure the core diagnoses. ``Λ^x`` is the
 thermodynamic density that a unit of phase ``x`` holds at fixed pressure: about
 ``-ℒ / (\hat{c}^p Π)`` for condensate, whose latent heat ``θ^{li}`` credits, and about
 ``-θ R^v / R^d`` for vapor, which adds pressure like ``R^v / R^d`` of its mass in dry air. Each
-prognostic moisture density ``ρq_a`` of the model, the moisture density and the condensate
-masses of the microphysics, is one phase or a fixed mix of them and has the sensitivity ``Λ_a``
-of that mix. The dry density has
+prognostic moisture density ``ρq_a`` of the model is one phase or a fixed mix of them and has the
+sensitivity ``Λ_a`` of that mix: the moisture density is the vapor, and the condensate masses of
+the microphysics are liquid, ice, or a declared mix. The dry density has
 
 ```math
-Λ^d = \frac{θ H^c}{c^p_m T - H^c} + \sum_a Λ_a r_a , \qquad r_a = \frac{ρq_a}{ρ^d} ,
+Λ^d = \frac{θ H^c}{c^p_m T - H^c} + \sum_x Λ^x \frac{ρ^x}{ρ^d} ,
 ```
 
-the dependence at fixed composition given above plus the dilution of the moisture, so that dry
-air which carries its moisture along at fixed mixing ratios ``r_a`` changes the pressure, besides
-through ``ρθ``, only through the first term. In all,
+the dependence at fixed composition given above plus the dilution of the phases that the state
+holds: ``C^L Λ^d`` is ``∂p/∂ρ^d`` at fixed ``ρθ`` and fixed densities of vapor, liquid and ice.
+Dry air which carries its moisture along at fixed mixing ratios therefore changes the pressure,
+besides through ``ρθ``, only through the first term. In all,
 
 ```math
-ϖ = (ρθ)' + W , \qquad W = - \sum_a Λ_a (ρq_a)' + Λ^d (ρ^d)' .
+ϖ = (ρθ)' + W , \qquad W = - \sum_a Λ_a (ρq_a)' + Λ^d (ρ^d)' ,
 ```
+
+with the primes in ``W`` taken along the slow path of the stage.
 
 ``W`` is the content that the pressure reads from the densities other than ``ρθ``. The loop
 transports no water, so the moisture's part of it is known rather than solved for: over a stage
@@ -206,7 +213,13 @@ W(τ) = - \sum_a Λ_a \left( ρq_a^0 - ρq_a^L \right) + Λ^d \left( ρ^{d,0} - 
 ```
 
 The loop starts from ``ϖ(0) = (ρθ)^0 - (ρθ)^L + W(0)``, the pressure of ``U^0`` to first order, and
-forces ``ϖ`` with ``G^s_{ρθ} + \mathrm{d}W/\mathrm{d}τ``. Both are the projection
+forces ``ϖ`` with ``G^s_{ρθ} + \mathrm{d}W/\mathrm{d}τ``. One part of that forcing is taken
+differently. The moisture tendencies are built with the mean velocity ``\tilde{\boldsymbol{u}}``
+of the preceding loop and hold the compression of the moisture by it, so the dilution
+``\sum_a Λ_a r_a G^s_ρ`` that offsets that compression within ``Λ^d G^s_ρ`` is taken with
+``-∇·(ρ^d \tilde{\boldsymbol{u}})`` as well. Only the change of the mixing ratios then reaches the
+pressure; the difference of the two velocities, which is that of the fast modes, would otherwise
+feed the preceding loop's flow back into this loop's pressure. Both are the projection
 ``\sum_a (∂p/∂U_a)(\cdot)_a / C^L`` of a state difference or of the slow tendencies onto the
 pressure, over every prognostic density ``U_a``, so a tendency that moves no pressure projects to
 zero whichever process it comes from: condensate sedimenting, mixing or being advected at one
@@ -222,18 +235,34 @@ earlier stages, forces it with a combination of their tendencies, and freezes th
 over a step, as a multirate infinitesimal step does, projects those combinations with the same
 coefficients. Without moisture ``W = 0`` exactly and ``ϖ = (ρθ)'``.
 
-The loop's pressure has three limits, each of which the next stage's base pressure ``p^L`` makes
-up for. It does not read the dry density perturbation that the loop's own mass flux builds,
+A scheme that diagnoses its cloud condensate from saturation (saturation adjustment) is
+projected only where the air is unsaturated, where its moisture density is the vapor. In
+saturated air the pressure it re-diagnoses is that of the adjusted partition, in which warming
+evaporates condensate. With ``s = \mathrm{d}ρ^{v+}/\mathrm{d}T`` the slope of the saturation
+vapor density, ``ϖ_0`` the projection above with the moisture change taken as cloud condensate
+of sensitivity ``Λ^c``, and the temperature eliminated between the linearized equation of state
+and ``p' = ρ R^m T' + T (R^d (ρ^d)' + R^v s T')``, that pressure responds as
+
+```math
+p' = η \, C^L ϖ_0 + (1 - η) R^d T (ρ^d)' , \qquad
+η = \frac{ρ R^m + R^v T s}{ρ R^m + R^v T s + C^L (Λ^v - Λ^c) s} ,
+```
+
+with ``η`` about 0.4 at 290 K. A projection at a held partition (``η = 1``) over-corrects the
+start of a stage by ``1/η``, and the exact tangent responds less to the slow compression than the
+loop's fixed-composition ``C^L`` does to its own flux divergence. Either makes a saturated layer
+unstable without divergence damping, the first also at small time steps. The projection there has
+to come together with the equilibrium response in ``C^L`` itself
+([#1086](https://github.com/NumericalEarth/Breeze.jl/issues/1086)); until then saturated cells of
+such a scheme are not projected, and there ``ϖ = (ρθ)'``.
+
+The loop's pressure has two further limits, each of which the next stage's base pressure ``p^L``
+makes up for. It does not read the dry density perturbation that the loop's own mass flux builds,
 ``-∇·(ρ\boldsymbol{u})'``, whose weight ``Λ^d`` is about ``-r^v R^v / R^d`` of ``θ^L``, 3% for
-20 g/kg of vapor. A scheme that diagnoses condensate
-from its moisture density (saturation adjustment) is projected with the partition of the
-linearization state held at its temperature: a change of the equilibrium moisture is vapor in
-unsaturated air and cloud condensate in saturated air, without the evaporation that warming
-causes, which matters most where a cell crosses saturation within a stage. And the
-vertically-implicit solves that follow the loop move moisture that the stage's own loop has not
-seen. A condensate mass enters the projection with the phase its scheme declares for it
-(`condensate_liquid_fraction`), which every prognostic condensate mass of a scheme used with the
-split-explicit core must therefore declare.
+20 g/kg of vapor. And the vertically-implicit solves that follow the loop move moisture that the
+stage's own loop has not seen. A condensate mass enters the projection with the phase its scheme
+declares for it (`condensate_liquid_fraction`), which every prognostic condensate mass of a
+scheme used with the split-explicit core must therefore declare.
 
 The momentum is the dry-mass momentum ``ρ^d \boldsymbol{u}``, and the compressible core applies
 the full pressure gradient and gravity ``-∇p - g ρ \hat{\boldsymbol{z}}`` to it. Its acoustic

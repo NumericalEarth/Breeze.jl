@@ -120,6 +120,19 @@ exner_exponent(VaporEquivalentExponent(), q, constants), exner_exponent(DryExpon
 @inline exner_exponent(::DryExponent, q, constants) =
     dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
 
+# The change of `exner_exponent` along a change Δqᵗ of the total moisture mass fraction:
+# κ = R̂ / ĉᵖ changes by κ (ΔR̂ / R̂ − Δĉᵖ / ĉᵖ) with the vapor-equivalent exponent, and not at all
+# with the dry one.
+@inline exner_exponent_increment(::DryExponent, q, constants, Δqᵗ) = zero(Δqᵗ)
+
+@inline function exner_exponent_increment(::VaporEquivalentExponent, q, constants, Δqᵗ)
+    R̂ = vapor_equivalent_gas_constant(q, constants)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    ΔR̂ = (vapor_gas_constant(constants) - dry_air_gas_constant(constants)) * Δqᵗ
+    Δĉᵖ = (constants.vapor.heat_capacity - constants.dry_air.heat_capacity) * Δqᵗ
+    return (R̂ / ĉᵖ) * (ΔR̂ / R̂ - Δĉᵖ / ĉᵖ)
+end
+
 # `exner_exponent` for the vapor-only hydrostatic column solve, from the bare scalar constants the
 # column kernels receive, paired with the heat capacity ĉᵖ = Rᵐ / κ in the continuous hydrostatic
 # balance ∂Π/∂z = -g / (ĉᵖ θ). Without condensate the vapor-equivalent κ̂ is the moist κᵐ = Rᵐ / cᵖᵐ.
@@ -348,8 +361,58 @@ end
     temperature_solution(𝒰, constants, Val(true))
 
 # θ ∂T₁/∂θ = γ T̃: T̃ ∝ θ^γ, and γ L does not depend on θ.
-@inline initial_temperature_sensitivity(::Nothing, T̃, γ) = nothing
-@inline initial_temperature_sensitivity(::Val{true}, T̃, γ) = γ * T̃
+@inline initial_temperature_sensitivity(::Nothing, T̃, γ, X̃, L) = nothing
+@inline initial_temperature_sensitivity(::Val{true}, T̃, γ, X̃, L) = γ * T̃
+
+"""
+$(TYPEDEF)
+
+A tangent of the density-based inversion of ``θˡⁱ`` for the temperature: a perturbation of the
+inversion's inputs, and the tangent of the temperature that the inversion returns along it. The
+inversion solves ``T = (ρ Rᵐ T / pˢᵗ)^κ θ̃ + L`` with ``θ̃ = ĉᵖ θˡⁱ / cᵖᵐ`` and
+``L = (ℒˡ₀ qˡ + ℒⁱ₀ qⁱ) / cᵖᵐ``.
+
+The tangent is carried through the steps of the selected temperature solver, like the
+sensitivity of `temperature_and_sensitivity`, so that it is the derivative of the temperature
+the solver returns, whether or not that is the converged root.
+
+Fields:
+- `temperature`: the tangent of the temperature.
+- `log_potential_temperature`, `log_gas_density`, `exner_exponent`, `latent_shift`: the
+  perturbations of ``\\ln θ̃``, ``\\ln(ρ Rᵐ)``, ``κ`` and ``L``.
+"""
+struct TemperatureTangent{FT}
+    temperature :: FT
+    log_potential_temperature :: FT
+    log_gas_density :: FT
+    exner_exponent :: FT
+    latent_shift :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the temperature of the density-based state `𝒰` and its tangent along the perturbation
+`(δlnθ, δlnB, δκ, δL)` of ``\\ln θ̃``, ``\\ln(ρ Rᵐ)``, ``κ`` and ``L``, differentiated through
+the selected temperature solver (see [`TemperatureTangent`](@ref)).
+"""
+@inline function temperature_and_tangent(𝒰::LiquidIceDensityState, constants, δlnθ, δlnB, δκ, δL)
+    seed = TemperatureTangent(zero(δlnθ), δlnθ, δlnB, δκ, δL)
+    T, tangent = temperature_solution(𝒰, constants, seed)
+    return T, tangent.temperature
+end
+
+# The logarithm of a quantity that is positive in any state that has been set; zero otherwise,
+# so that the tangents of an unset state stay finite.
+@inline guarded_log(X) = log(ifelse(X > 0, X, one(X)))
+
+# The tangent of T₁ = T̃ + γ L with ln T̃ = ln θ̃ + (γ − 1) ln X̃, X̃ = θ̃ ρ Rᵐ / pˢᵗ and γ = 1 / (1 − κ).
+@inline function initial_temperature_sensitivity(t::TemperatureTangent, T̃, γ, X̃, L)
+    δγ = γ^2 * t.exner_exponent
+    δT̃ = T̃ * (δγ * guarded_log(X̃) + γ * t.log_potential_temperature + (γ - 1) * t.log_gas_density)
+    δT₁ = δT̃ + δγ * L + γ * t.latent_shift
+    return TemperatureTangent(δT₁, t.log_potential_temperature, t.log_gas_density, t.exner_exponent, t.latent_shift)
+end
 
 @inline function temperature_solution(𝒰, constants, sensitivity)
     θ   = 𝒰.potential_temperature
@@ -363,9 +426,10 @@ end
     θ̃   = θ * (vapor_equivalent_heat_capacity(q, constants) / cᵖᵐ)
     L   = condensate_latent_energy(q, constants) / cᵖᵐ
 
-    T̃  = θ̃ * (θ̃ * ρ * Rᵐ / pˢᵗ)^(γ - 1)       # condensate-free root θ̃^γ (ρ Rᵐ / pˢᵗ)^(γ − 1), one power
+    X̃  = θ̃ * ρ * Rᵐ / pˢᵗ
+    T̃  = θ̃ * X̃^(γ - 1)                        # condensate-free root θ̃^γ (ρ Rᵐ / pˢᵗ)^(γ − 1), one power
     T₁ = T̃ + γ * L                            # plus the latent shift at fixed density (the non-iterated closed form)
-    θ∂T∂θ = initial_temperature_sensitivity(sensitivity, T̃, γ)
+    θ∂T∂θ = initial_temperature_sensitivity(sensitivity, T̃, γ, X̃, L)
 
     return solve_temperature(𝒰.temperature_solver, T₁, θ∂T∂θ, θ̃, ρ, Rᵐ, pˢᵗ, κ, L)
 end
@@ -395,17 +459,33 @@ end
 end
 
 @inline function newton_temperature_step(T, θ∂T∂θ, θ, ρ, Rᵐ, pˢᵗ, κ, L)
-    Φ = (ρ * Rᵐ * T / pˢᵗ)^κ * θ             # = T − L at the root
+    X = ρ * Rᵐ * T / pˢᵗ
+    Φ = X^κ * θ                                # = T − L at the root
     T̂ = ifelse(T == 0, one(T), T)              # keep the θ = T = 0 initialization finite
     r′ = 1 - κ * Φ / T̂
     ΔT = -(T - Φ - L) / r′
-    θ∂T∂θ = newton_temperature_sensitivity(θ∂T∂θ, T̂, Φ, κ, r′, ΔT)
+    θ∂T∂θ = newton_temperature_sensitivity(θ∂T∂θ, T̂, Φ, κ, r′, ΔT, X)
     return T + ΔT, θ∂T∂θ, ΔT
 end
 
-@inline newton_temperature_sensitivity(::Nothing, T, Φ, κ, r′, ΔT) = nothing
+@inline newton_temperature_sensitivity(::Nothing, T, Φ, κ, r′, ΔT, X) = nothing
 
-@inline function newton_temperature_sensitivity(θ∂T∂θ, T, Φ, κ, r′, ΔT)
+# Differentiate T⁺ = T − r/r′ along a perturbation of all the inputs of the inversion, with
+# r = T − Φ − L, Φ = X^κ θ̃, X = ρ Rᵐ T / pˢᵗ and r′ = 1 − κ Φ / T:
+#
+#   δΦ = Φ (δκ ln X + κ (δlnB + δT / T) + δlnθ) ,        δr = δT − δΦ − δL ,
+#   δr′ = − (δκ Φ + κ δΦ − κ Φ δT / T) / T ,              δT⁺ = δT − (δr + ΔT δr′) / r′ .
+@inline function newton_temperature_sensitivity(t::TemperatureTangent, T, Φ, κ, r′, ΔT, X)
+    δT = t.temperature
+    δκ = t.exner_exponent
+    δΦ = Φ * (δκ * guarded_log(X) + κ * (t.log_gas_density + δT / T) + t.log_potential_temperature)
+    δr = δT - δΦ - t.latent_shift
+    δr′ = - (δκ * Φ + κ * δΦ - κ * Φ * δT / T) / T
+    δT⁺ = δT - (δr + ΔT * δr′) / r′
+    return TemperatureTangent(δT⁺, t.log_potential_temperature, t.log_gas_density, δκ, t.latent_shift)
+end
+
+@inline function newton_temperature_sensitivity(θ∂T∂θ, T, Φ, κ, r′, ΔT, X)
     # Differentiate T⁺ = T − r/r′ with respect to ln θ, including the dependence of r′ on T.
     # Since θ ∂Φ/∂θ = Φ (1 + κ θ∂T∂θ/T), r′ θ∂T∂θ − θ∂r∂θ = Φ.
     θ∂Φ∂θ = Φ * (1 + κ * θ∂T∂θ / T)

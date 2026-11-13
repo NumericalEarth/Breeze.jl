@@ -155,20 +155,9 @@ end
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
-# A change of the equilibrium moisture ρqᵉ at fixed temperature is vapor in unsaturated air. In
-# saturated air the vapor is held at saturation, which depends on the temperature alone, so the
-# change is cloud condensate, with the liquid fraction of the cloud the equilibrium diagnosed.
-@inline AtmosphereModels.prognostic_moisture_phase_fractions(i, j, k, grid, ::SA, μ, q) =
-    equilibrium_moisture_phase_fractions(q.liquid, q.ice)
-
-@inline function equilibrium_moisture_phase_fractions(qᶜˡ, qᶜⁱ)
-    qᶜ = qᶜˡ + qᶜⁱ
-    saturated = qᶜ > 0
-    λ = qᶜˡ / ifelse(saturated, qᶜ, one(qᶜ))
-    return (ifelse(saturated, zero(λ), one(λ)),
-            ifelse(saturated, λ, zero(λ)),
-            ifelse(saturated, 1 - λ, zero(λ)))
-end
+# In saturated air the adjustment diagnoses the vapor from saturation: the cloud condensate it
+# holds marks the cell.
+@inline AtmosphereModels.diagnoses_vapor_from_saturation(i, j, k, grid, ::SA, μ, q) = q.liquid + q.ice > 0
 
 # State-based moisture fractions for saturation adjustment (used by parcel models).
 # The moisture fractions come from the thermodynamic state after adjustment.

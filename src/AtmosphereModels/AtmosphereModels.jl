@@ -65,7 +65,7 @@ export
     initial_aerosol_number_density,
     sedimentation_velocity,
     condensate_liquid_fraction,
-    prognostic_moisture_phase_fractions,
+    diagnoses_vapor_from_saturation,
     sedimentation_velocity_field,
     write_sedimentation_velocity!,
     microphysical_velocities,

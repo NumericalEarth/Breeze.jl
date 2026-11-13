@@ -67,7 +67,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_
                                base_pressure, standard_pressure, thermodynamic_density,
                                thermodynamic_density_name, specific_prognostic_moisture,
                                moisture_prognostic_name, condensate_field_names, condensate_liquid_fraction,
-                               prognostic_moisture_phase_fractions
+                               diagnoses_vapor_from_saturation, dry_air_increment, heat_capacity_increment
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Solvers: NewtonSolver
 using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key
@@ -75,6 +75,7 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
                              vapor_equivalent_heat_capacity, condensate_latent_energy, exner_exponent,
                              reject_renamed_surface_pressure,
                              vapor_gas_constant, ExnerReferenceState, temperature, temperature_and_sensitivity,
+                             temperature_and_tangent, exner_exponent_increment,
                              LiquidIceDensityState
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
