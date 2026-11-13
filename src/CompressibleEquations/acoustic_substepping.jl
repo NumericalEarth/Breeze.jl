@@ -438,22 +438,23 @@ end
         # The loop's flux of its pressure carries θᴸ + Λᴴ per unit of its own mass flux (Section 3b).
         θᴸ[i, j, k] = θ + λᴴ
         Λᴴ[i, j, k] = λᴴ
-        Cᴸ[i, j, k] = acoustic_pressure_coefficient(pressure_coefficient, Cᶠ, 𝒰, T, qᵖ, ρ̂ᵈ, θ̂,
+        # The equilibrium slope is that of a compression, whose response the loop builds with θᴸ + Λᴴ.
+        Cᴸ[i, j, k] = acoustic_pressure_coefficient(pressure_coefficient, Cᶠ, 𝒰, T, qᵖ, ρ̂ᵈ, θ̂ + λᴴ,
                                                          microphysics, constants)
     end
 end
 
 # The cached coefficient: the frozen-composition slope Cᶠ, or in saturated cells (cloud condensate,
 # in excess of the precipitating fraction qᵖ, at the linearization state) the phase-equilibrium slope.
-@inline acoustic_pressure_coefficient(::FrozenCompositionPressureCoefficient, Cᶠ, 𝒰, T, qᵖ, ρ̂ᵈ, θ̂,
+@inline acoustic_pressure_coefficient(::FrozenCompositionPressureCoefficient, Cᶠ, 𝒰, T, qᵖ, ρ̂ᵈ, θᵉ,
                                            microphysics, constants) = Cᶠ
 
-@inline function acoustic_pressure_coefficient(::PhaseEquilibriumPressureCoefficient, Cᶠ, 𝒰, T, qᵖ, ρ̂ᵈ, θ̂,
+@inline function acoustic_pressure_coefficient(::PhaseEquilibriumPressureCoefficient, Cᶠ, 𝒰, T, qᵖ, ρ̂ᵈ, θᵉ,
                                                     microphysics, constants)
     q = 𝒰.moisture_mass_fractions
     saturated = q.liquid + q.ice - qᵖ > 0
     equilibrium = microphysics_phase_equilibrium(microphysics)
-    Cᵉ = equilibrium_pressure_coefficient(𝒰, T, ρ̂ᵈ, θ̂, equilibrium, constants)
+    Cᵉ = equilibrium_pressure_coefficient(𝒰, T, ρ̂ᵈ, θᵉ, equilibrium, constants)
     return ifelse(saturated, Cᵉ, Cᶠ)
 end
 
@@ -484,16 +485,19 @@ end
 #
 # and the pressure p = ρ Rᵐ T responds with
 #
-#   d ln p / ds = 1 + (1 / T) dT / ds − (Rᵛ / Rᵐ) dqᶜ / ds ,        Cᵉ = p (d ln p / ds) / (ρᵈ θ) .
+#   d ln p / ds = 1 + (1 / T) dT / ds − (Rᵛ / Rᵐ) dqᶜ / ds ,        Cᵉ = p (d ln p / ds) / (ρᵈ (θ + Λᴴ)) .
+#
+# The divisor is the loop's pressure variable along the compression: its flux carries θ + Λᴴ per unit
+# of mass flux (Section 3b), so ϖ = ρᵈ (θ + Λᴴ) ds, not (ρθ)′ = ρᵈ θ ds. Dividing by ρᵈ θ would count
+# the ∂p/∂ρᵈ part of the response, Cᴸ Λᴴ, twice: once in d ln p / ds, which is derived along the
+# compression and so includes it, and once in the flux of Λᴴ. `θᵉ` is θ + Λᴴ.
 #
 # Without vapor (qᵛ⁺ → 0, A → 0) this is the frozen compression slope, dT / ds = κ̂ H / D, which in dry
-# air is γᵈ p / (ρθ). The frozen slope that the loop otherwise uses in cloud is the part of that at
-# fixed ρᵈ, Cᶠ = γᵉ p / (ρθ), and the ∂p/∂ρᵈ remainder (see `refresh_linearization_basic_state!`) is
-# included here, since the saturated response is derived along the compression. Over the equilibrium
+# air is γᵈ p / (ρθ), and the coefficient is then the frozen one, Cᶠ = γᵉ p / (ρθ). Over the equilibrium
 # of a mixed-phase `MixedPhaseEquilibrium`, ℒ and pᵛ⁺ are those of the liquid fraction at T, and its
 # temperature dependence is neglected. T = 0 (before `set!`) is replaced by one; the cell is then not
 # saturated and the frozen slope is returned.
-@inline function equilibrium_pressure_coefficient(𝒰, T, ρ̂ᵈ, θ̂, equilibrium, constants)
+@inline function equilibrium_pressure_coefficient(𝒰, T, ρ̂ᵈ, θᵉ, equilibrium, constants)
     q   = 𝒰.moisture_mass_fractions
     ρ   = 𝒰.density
     T̂   = ifelse(T == 0, one(T), T)
@@ -516,7 +520,7 @@ end
     dlnp_ds = 1 + dT_ds / T̂ - Rᵛ / Rᵐ * dqᶜ_ds
 
     p = ρ * Rᵐ * T̂
-    return p * dlnp_ds / (ρ̂ᵈ * θ̂)
+    return p * dlnp_ds / (ρ̂ᵈ * θᵉ)
 end
 
 """

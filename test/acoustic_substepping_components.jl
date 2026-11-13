@@ -1041,7 +1041,7 @@ end
 # In saturated cells `PhaseEquilibriumPressureCoefficient` gives the slope of the pressure that saturation
 # adjustment re-diagnoses after a uniform compression (every density and ρθ scaled together, θ and total
 # water fixed); elsewhere it is the frozen-composition slope. Compressing the model itself and calling
-# `update_state!` recovers the linearized response δp = Cᴸ (ρθ)′ in every cell with it, where the
+# `update_state!` recovers the response of the loop, δp = Cᴸ ρᵈ (θ + Λᴴ) ε, in every cell with it, where the
 # frozen coefficient overestimates the response by about 10% in cloud (NumericalEarth/Breeze.jl#1086).
 @testset "Phase-equilibrium pressure coefficient is the slope of the adjusted equation of state [$FT, $(nameof(typeof(κ̂)))]" for FT in test_float_types(),
         κ̂ in (VaporEquivalentExponent(), DryExponent())
@@ -1071,6 +1071,8 @@ end
 
     Cᶠ = Array(interior(frozen.timestepper.substepper.linearization_pressure_coefficient))
     Cᵉ = Array(interior(equilibrium.timestepper.substepper.linearization_pressure_coefficient))
+    # What the loop's pressure carries per unit of dry mass flux: θ + Λᴴ, which is θ without condensate.
+    θᵉ = Array(interior(equilibrium.timestepper.substepper.linearization_potential_temperature))
     ρᵈ = Array(interior(equilibrium.dynamics.dry_density))
     ρ  = Array(interior(equilibrium.dynamics.total_density))
     ρθ = Array(interior(equilibrium.formulation.potential_temperature_density))
@@ -1094,14 +1096,14 @@ end
                 𝒰 = LiquidIceDensityState(θ, MoistureMassFractions(qᵛ[I] + qˡ[I]), pˢᵗ, s * ρ[I], solver, κ̂)
                 return air_pressure(adjust_thermodynamic_state(𝒰, microphysics, constants), constants)
             end
-            slope = (adjusted_pressure(1 + ε) - adjusted_pressure(1 - ε)) / (2ε * ρᵈ[I] * θ)
+            slope = (adjusted_pressure(1 + ε) - adjusted_pressure(1 - ε)) / (2ε * ρᵈ[I] * θᵉ[I])
             @test Cᵉ[I] ≈ slope rtol = rtol
             @test FT(1.05) < Cᶠ[I] / Cᵉ[I] < FT(1.2)
         end
     end
 
     # Compress the model itself, ρᵈ, ρθ and ρqᵉ together by 1 + ε, and re-diagnose the pressure. The
-    # ratio of the linearized response Cᴸ (ρθ)′ to the re-diagnosed δp is the issue's diagnostic.
+    # ratio of the loop's response Cᴸ ρᵈ (θ + Λᴴ) ε to the re-diagnosed δp is the issue's diagnostic.
     for (model, Cᴸ, (lower, upper)) in ((equilibrium, Cᵉ, (1 - 10ε, 1 + 10ε)),
                                         (frozen, Cᶠ, (FT(1.05), FT(1.2))))
         p₀ = Array(interior(model.dynamics.pressure))
@@ -1110,7 +1112,7 @@ end
         end
         update_state!(model)
         δp = Array(interior(model.dynamics.pressure)) .- p₀
-        ratio = Cᴸ .* ρθ .* ε ./ δp
+        ratio = Cᴸ .* ρᵈ .* θᵉ .* ε ./ δp
         for I in CartesianIndices(ρθ)
             if qˡ[I] == 0
                 @test ratio[I] ≈ 1 rtol = 10ε
