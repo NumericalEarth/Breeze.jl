@@ -2588,12 +2588,17 @@ end
 
 Oceananigans.prognostic_state(substepper::AcousticSubstepper) =
     (time_averaged_velocities = Oceananigans.prognostic_state(substepper.time_averaged_velocities),
-     time_averaged_vertical_velocity_cache = Oceananigans.prognostic_state(substepper.time_averaged_vertical_velocity_cache))
+     time_averaged_vertical_velocity_cache = Oceananigans.prognostic_state(substepper.time_averaged_vertical_velocity_cache),
+     transport_density_tendency = Oceananigans.prognostic_state(substepper.transport_density_tendency))
 
 function Oceananigans.restore_prognostic_state!(restored::AcousticSubstepper, from)
     Oceananigans.restore_prognostic_state!(restored.time_averaged_velocities, from.time_averaged_velocities)
     Oceananigans.restore_prognostic_state!(restored.time_averaged_vertical_velocity_cache,
                                            from.time_averaged_vertical_velocity_cache)
+    # The pressure projection pairs the first stage's moisture tendencies with this divergence,
+    # which `cache_transport_velocity!` only refreshes after a tendency build.
+    hasproperty(from, :transport_density_tendency) &&
+        Oceananigans.restore_prognostic_state!(restored.transport_density_tendency, from.transport_density_tendency)
     return restored
 end
 
