@@ -159,6 +159,9 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density, boundary_condition_args(model)...)
     fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
+    # The fill above rewrote the boundary faces, so rebalance before the velocities are diagnosed.
+    enforce_lateral_mass_balance!(model.dynamics, model.momentum)
+
     # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
     # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
     # the trailing `fill_halo_regions!(model.velocities)`), N for Flat.

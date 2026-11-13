@@ -179,6 +179,37 @@ volume), not per unit of the continuity density. On the anelastic core the two d
 function continuity_density end
 
 """
+    materialize_boundary_transport(dynamics, momentum)
+
+Return `dynamics` with whatever boundary bookkeeping it needs to rebalance its boundary data,
+built from the `momentum` fields and their boundary conditions.
+
+Called in the model constructor once the momentum has been materialized, which is after
+[`materialize_dynamics`](@ref): the bookkeeping is a property of the momentum boundary conditions, so
+it cannot be built when the rest of the dynamics is. A no-op for every formulation that rebalances
+nothing.
+"""
+materialize_boundary_transport(dynamics, momentum) = dynamics
+
+"""
+    enforce_lateral_mass_balance!(dynamics, momentum)
+
+Rebalance the boundary momentum so the dynamics' pressure problem stays solvable.
+
+A no-op for every formulation whose pressure is not obtained from an elliptic solve with homogeneous
+Neumann conditions; [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics) overrides
+it.
+
+**This must be called after EVERY `fill_halo_regions!(model.momentum, …)`, not once per stage.** The
+halo fill writes the prescribed boundary data, so it overwrites any earlier rebalancing: correcting only
+inside `compute_pressure_correction!` leaves the interior consistent with balanced walls while the walls
+themselves are unbalanced, which puts a permanent flux discontinuity on every boundary face — doubled at
+the corner cells, where two normal components are prescribed at once. The correction is a pure function
+of the freshly-filled boundary data, so reapplying it after each fill is idempotent, not cumulative.
+"""
+enforce_lateral_mass_balance!(dynamics, momentum) = nothing
+
+"""
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the model's total air density ρ = ρᵈ + Σρˣ: the density of the model's mass, which

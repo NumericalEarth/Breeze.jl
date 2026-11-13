@@ -29,7 +29,8 @@ using Oceananigans.DistributedComputations: Distributed, DistributedFourierTridi
                                             child_architecture, partition_coordinate, reconstruct_global_grid
 using Oceananigans.Grids: AbstractGrid, ZDirection, inactive_cell, topology, with_number_type
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, mask_immersed_field!
-using Oceananigans.Models: boundary_condition_args
+using Oceananigans.Models: boundary_condition_args, enforce_net_zero_transport!,
+                           initialize_boundary_transport
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation,
                             poisson_eigenvalues
@@ -39,12 +40,14 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_press
                                pressure_anomaly,
                                kernel_time_step, grid_moisture_fractions
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant,
-                             surface_temperature_value
+                             surface_temperature_value, density
+using Breeze.AtmosphereModels: enforce_lateral_mass_balance!
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")
 include("anelastic_buoyancy.jl")
+include("lateral_mass_balance.jl")
 
 # Define type alias after AnelasticDynamics is defined
 const AnelasticModel = AtmosphereModel{<:AnelasticDynamics}

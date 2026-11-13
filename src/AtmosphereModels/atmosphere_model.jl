@@ -265,6 +265,8 @@ function AtmosphereModel(grid;
         velocities = materialize_velocities(velocities, grid)
     end
 
+    dynamics = materialize_boundary_transport(dynamics, momentum)
+
     moisture_name = moisture_prognostic_name(microphysics)
 
     # The closure's scalars — thermodynamic density, moisture, microphysical prognostic fields, user
