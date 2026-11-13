@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.TurbulenceClosures: TKE_NAME, TKEClosureFields, absorb_stratification_coefficient, dissipationᶜᶜᶜ,
-                                 tke_sink_rate
+                                 tke_sink_rate, momentum_stability_function, tracer_stability_function, dissipation_stability_function
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, ExplicitTimeDiscretization,
@@ -1124,4 +1124,43 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         @test all(isfinite, column(model.tracers.ρe))
         @test all(isfinite, column(model.closure_fields.Kᶜ))
     end
+end
+
+@testset "Stability functions from neutral surface-layer similarity" begin
+    for (c, Pr⁰, ℂˢ) in ((3.75, 0.85, 1.316), (4.5, 1.0, 1.2))
+        κ = 0.4
+        n = ConstantStabilityFunctions(SurfaceLayerSimilarity(); e_u★² = c, Pr⁰, ℂˢ)
+        sf = RationalStabilityFunction(SurfaceLayerSimilarity(); e_u★² = c, Pr⁰, ℂˢ)
+        @test sf.ℂᵘ⁰ ≈ n.ℂᵘ && sf.ℂᶜ⁰ ≈ n.ℂᶜ && sf.ℂᴰ⁰ ≈ n.ℂᴰ
+        # Neutral identities: Kᵘ = κ u★ z, Kᶜ = κ u★ z / Pr⁰, ε = u★³ / (κ z) with ℓ = ℂˢ z, e = c u★²
+        u★, z = 0.3, 10.0
+        e = c * u★^2; ℓ = ℂˢ * z
+        @test n.ℂᵘ * ℓ * sqrt(e) ≈ κ * u★ * z
+        @test n.ℂᶜ * ℓ * sqrt(e) ≈ κ * u★ * z / Pr⁰
+        @test n.ℂᴰ * e^(3/2) / ℓ ≈ u★^3 / (κ * z)
+        # The closure's neutral TKE balance returns e / u★² = c
+        @test 1 / sqrt(n.ℂᵘ * n.ℂᴰ) ≈ c
+        # Steady state of stratified shear at the critical Ri, and decay above it
+        Ri_c = 0.25
+        S(f, Ri) = f(sf, Ri)
+        @test S(momentum_stability_function, Ri_c) / (S(tracer_stability_function, Ri_c) + S(dissipation_stability_function, Ri_c)) ≈ Ri_c
+        @test S(momentum_stability_function, 1.0) / (S(tracer_stability_function, 1.0) + S(dissipation_stability_function, 1.0)) < 1.0
+        # Pr rises on the stable branch to Pr⁺ and falls to Pr⁻ in convection; Sᴰ is neutral throughout
+        Ris = vcat(-exp10.(range(4, -4, 200)), 0, exp10.(range(-4, 4, 200)))
+        Pr = [S(momentum_stability_function, Ri) / S(tracer_stability_function, Ri) for Ri in Ris]
+        @test all(diff(Pr) .≥ -1e-12)
+        @test Pr[1] ≈ 0.7 rtol = 1e-3
+        @test Pr[end] ≈ 4 rtol = 1e-3
+        @test all(Ri -> S(dissipation_stability_function, Ri) ≈ n.ℂᴰ, Ris)
+        # ρ² of DissipationTimeScale(ℂᵠ = 2) below 1 - ℂᵍ₁ at every Ri
+        ρ² = [3 * 2 * S(tracer_stability_function, Ri) * S(dissipation_stability_function, Ri) / 4 for Ri in Ris]
+        @test maximum(ρ²) < 0.6
+        @test 3 * 2 / (4 * Pr⁰ * c^2) ≈ ρ²[201]
+    end
+    sf32 = RationalStabilityFunction(SurfaceLayerSimilarity(); e_u★² = 3.75f0, Pr⁰ = 0.85f0, κ = 0.4f0, ℂˢ = 1.316f0, σᵉ = 1f0,
+                                     Pr⁻ = 0.7f0, Pr⁺ = 4f0, Ri_critical = 0.25f0, Ri⁻ = 1f0)
+    @test sf32 isa RationalStabilityFunction{Float32}
+    @test ConstantStabilityFunctions(SurfaceLayerSimilarity(); e_u★² = 3.75f0, Pr⁰ = 0.85f0, κ = 0.4f0, ℂˢ = 1.316f0, σᵉ = 1f0) isa
+          ConstantStabilityFunctions{Float32}
+    @test_throws ArgumentError RationalStabilityFunction(SurfaceLayerSimilarity(); Ri_critical = 0.01)
 end

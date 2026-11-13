@@ -8,7 +8,7 @@ export TKEBasedTurbulenceClosure,
        HardMinimum,
        HarmonicBlend,
        ConstantStabilityFunctions,
-       RationalStabilityFunction,
+       RationalStabilityFunction, SurfaceLayerSimilarity,
        DryStaticStability,
        MoistStaticStability,
        SubgridCloudStaticStability,
@@ -196,6 +196,7 @@ include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
 include("shear.jl")
 include("richardson_number_stability_functions.jl")
+include("surface_layer_similarity.jl")
 
 include("SHOC/SimplifiedHigherOrderClosures.jl")
 using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedHigherOrderClosure, SHOC,
