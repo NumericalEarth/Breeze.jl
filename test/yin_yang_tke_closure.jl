@@ -74,6 +74,19 @@ panel_minimum(field, r) = minimum(Array(parent(getregion(field, r))))
             foreach(f -> println(stderr, f), bt[1:min(end, 40)])
             println(stderr, "--- outermost frames ---")
             foreach(f -> println(stderr, f), bt[max(1, end - 39):end])
+            # Which method is being compiled when the stack runs out: trace compilation in a fresh
+            # process, stepping in tasks with shrinking stacks
+            probe = joinpath(@__DIR__, "yin_yang_overflow_probe.jl")
+            for stack_size in (2^23, 2^22, 2^21)
+                log = IOBuffer()
+                cmd = `$(Base.julia_cmd()) --project=$(Base.active_project()) --trace-compile=stderr $probe $stack_size`
+                run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=log))
+                lines = split(String(take!(log)), '\n')
+                probe_lines = filter(l -> startswith(l, "PROBE"), lines)
+                println(stderr, "=== probe, stack ", stack_size, ": ", join(probe_lines, " | "))
+                compiled = filter(l -> startswith(l, "precompile("), lines)
+                foreach(l -> println(stderr, first(l, 400)), compiled[max(1, end - 14):end])
+            end
             rethrow()
         end
 

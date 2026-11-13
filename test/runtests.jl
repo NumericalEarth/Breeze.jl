@@ -13,6 +13,7 @@ const REACTANT_COMPAT = VERSION < v"1.14-" && Base.JLOptions().check_bounds != 1
 
 # These aren't test files, they are only used as setup for other tests.
 delete!(testsuite, "setup")
+delete!(testsuite, "yin_yang_overflow_probe") # TEMPORARY (#1103 CI diagnosis)
 delete!(testsuite, "reactant/weno_compilation_setup")
 delete!(testsuite, "reactant/microphysics_compilation_setup")
 
