@@ -368,6 +368,7 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
             projection.liquid_sensitivity,
             projection.ice_sensitivity,
             projection.dry_density_sensitivity,
+            projection.fixed_composition_sensitivity,
             grid,
             model.formulation,
             model.dynamics,
@@ -388,6 +389,7 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
     # for the slow tendency is handled by `assemble_slow_vertical_momentum_tendency!`.
 
     fill_halo_regions!(substepper.linearization_potential_temperature)
+    fill_halo_regions!(projection.fixed_composition_sensitivity)
     fill_halo_regions!(substepper.linearization_pressure_coefficient)
 
     return nothing
@@ -400,7 +402,7 @@ end
 # of it takes (`prognostic_moisture_phase_fractions`): the vapor, unless the scheme diagnoses
 # condensate from it. The sensitivity Λᵈ of the dry density, at fixed thermodynamic and moisture
 # densities, is Λᴴ + Σₐ Λₐ rₐ over the prognostic moisture densities, rₐ = ρqₐ / ρᵈ.
-@kernel function _compute_linearization_basic_state!(θᴸ, Cᴸ, Λᵐ, Λˡ, Λⁱ, Λᵈ, grid, formulation, dynamics, dry_density,
+@kernel function _compute_linearization_basic_state!(θᴸ, Cᴸ, Λᵐ, Λˡ, Λⁱ, Λᵈ, Λᴴ, grid, formulation, dynamics, dry_density,
                                                      total_density, specific_prognostic_moisture,
                                                      microphysics, microphysical_fields,
                                                      liquid_fractions, condensate_densities, constants)
@@ -425,7 +427,12 @@ end
     Σλρq = λᵐ * ρ * qᵛᵉ + condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, liquid_fractions, condensate_densities)
 
     @inbounds begin
-        θᴸ[i, j, k] = θ
+        # The loop's flux of the pressure ϖ carries θᴸ + Λᴴ per unit of its own mass flux: the
+        # thermodynamic density θᴸ, plus the dry content of the pressure with the moisture moving
+        # with the air, in which the dilution Σₐ Λₐ rₐ of Λᵈ cancels the compression of the
+        # moisture and leaves the dependence Λᴴ at fixed composition (see `add_fast_content!`).
+        θᴸ[i, j, k] = θ + λᴴ
+        Λᴴ[i, j, k] = λᴴ
         Cᴸ[i, j, k] = ρ * Rᵐ * θ∂T∂θ / (ρ̂ᵈ * θ̂)
         Λᵐ[i, j, k] = λᵐ
         Λˡ[i, j, k] = λˡ
@@ -534,6 +541,7 @@ struct PressureProjection{SF, CF}
     tendency :: CF
     content :: CF
     transport_density_tendency :: CF # see `compute_transport_density_tendency!`
+    fixed_composition_sensitivity :: SF # Λᴴ, the part of Λᵈ the loop's own mass flux carries (see `add_fast_content!`)
 end
 
 # The sensitivities are linearization fields, stored like θᴸ and Cᴸ. The tendency and the content
@@ -545,7 +553,8 @@ PressureProjection(grid, substep_floattype) =
                        CenterField(grid, substep_floattype),
                        CenterField(grid),
                        CenterField(grid),
-                       CenterField(grid))
+                       CenterField(grid),
+                       CenterField(grid, substep_floattype))
 
 Adapt.adapt_structure(to, p::PressureProjection) =
     PressureProjection(adapt(to, p.prognostic_moisture_sensitivity),
@@ -554,7 +563,8 @@ Adapt.adapt_structure(to, p::PressureProjection) =
                        adapt(to, p.dry_density_sensitivity),
                        adapt(to, p.tendency),
                        adapt(to, p.content),
-                       adapt(to, p.transport_density_tendency))
+                       adapt(to, p.transport_density_tendency),
+                       adapt(to, p.fixed_composition_sensitivity))
 
 # The moisture sensitivities (Λᵛ, Λˡ, Λⁱ) of the pressure p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T for the
 # thermodynamic density ρθ = ρᵈ θˡⁱ. At fixed ρᵈ, with θˡⁱ a function of T, p and the composition,
@@ -667,8 +677,9 @@ function project_moisture_onto_pressure!(substepper::AcousticSubstepper, model, 
             projection.liquid_sensitivity,
             projection.ice_sensitivity,
             projection.dry_density_sensitivity,
+            projection.fixed_composition_sensitivity,
             liquid_fractions, ramp_interval,
-            U⁰.ρᵈ, model.dynamics.dry_density, projection.transport_density_tendency,
+            U⁰.ρᵈ, model.dynamics.dry_density, projection.transport_density_tendency, Gⁿ.ρᵈ,
             U⁰[moisture_name], model.moisture_density, Gⁿ[moisture_name],
             values(U⁰[condensate_names]),
             values(model.microphysical_fields[condensate_names]),
@@ -679,8 +690,8 @@ function project_moisture_onto_pressure!(substepper::AcousticSubstepper, model, 
     return nothing
 end
 
-@kernel function _project_moisture_onto_pressure!(ϖ, Gϖ, W, Gˢρᵡ, Λᵐ, Λˡ, Λⁱ, Λᵈ, liquid_fractions, ramp_interval,
-                                                  ρᵈ⁰, ρᵈᴸ, Gˢρᵈ,
+@kernel function _project_moisture_onto_pressure!(ϖ, Gϖ, W, Gˢρᵡ, Λᵐ, Λˡ, Λⁱ, Λᵈ, Λᴴ, liquid_fractions, ramp_interval,
+                                                  ρᵈ⁰, ρᵈᴸ, Gᵗρᵈ, Gˢρᵈ,
                                                   ρqᵐ⁰, ρqᵐᴸ, Gˢρqᵐ, ρqᶜ⁰, ρqᶜᴸ, Gˢρqᶜ)
     i, j, k = @index(Global, NTuple)
 
@@ -689,16 +700,20 @@ end
         λˡ = Λˡ[i, j, k]
         λⁱ = Λⁱ[i, j, k]
         λᵈ = Λᵈ[i, j, k]
+        λᴴ = Λᴴ[i, j, k]
 
         # The content of the moisture and dry densities the loop starts from, relative to the
-        # stage-entry ones, and the rate at which their slow tendencies add to it.
+        # stage-entry ones, and the rate at which their slow tendencies add to it. The dilution
+        # part of the dry content ramps with the mass flux the moisture was advected with (Gᵗρᵈ),
+        # the fixed-composition part with the dry density's own slow tendency (Gˢρᵈ), to which
+        # the loop adds its fast part (`add_fast_content!`).
         W⁰ = - λᵐ * (ρqᵐ⁰[i, j, k] - ρqᵐᴸ[i, j, k]) -
                (condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, liquid_fractions, ρqᶜ⁰) -
                 condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, liquid_fractions, ρqᶜᴸ)) +
                λᵈ * (ρᵈ⁰[i, j, k] - ρᵈᴸ[i, j, k])
 
         Gᵂ = - λᵐ * Gˢρqᵐ[i, j, k] - condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, liquid_fractions, Gˢρqᶜ) +
-               λᵈ * Gˢρᵈ[i, j, k]
+               (λᵈ - λᴴ) * Gᵗρᵈ[i, j, k] + λᴴ * Gˢρᵈ[i, j, k]
 
         ϖ[i, j, k] += W⁰
         Gϖ[i, j, k] = Gˢρᵡ[i, j, k] + Gᵂ
@@ -745,6 +760,46 @@ end
 @inline transport_mass_flux_x(i, j, k, grid, ρ, u) = @inbounds Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, ρ) * u[i, j, k]
 @inline transport_mass_flux_y(i, j, k, grid, ρ, v) = @inbounds Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, ρ) * v[i, j, k]
 @inline transport_mass_flux_z(i, j, k, grid, ρ, w) = @inbounds ℑzᵃᵃᶠ(i, j, k, grid, ρ) * w[i, j, k]
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Add to the stage's content `W` the part that the loop's own mass flux built: `− ∇·(Λᴴ M)`, with
+`M` the perturbation mass flux integrated over the stage's `Nτ` substeps of size `Δτ`.
+
+The loop transports its pressure ϖ = (ρθ)′ + W with θᴸ + Λᴴ (see
+`_compute_linearization_basic_state!`), so that the pressure responds to the compression of
+cloudy air by the loop's own flux. Of that transport `− ∇·(θᴸ M)` is the thermodynamic
+density's and `− ∇·(Λᴴ M)` is content, which must come off with the rest of `W` for the
+recovery to leave the thermodynamic density with its own flux divergence. `M` is the sum the
+transport velocity is averaged from, before `finalize_time_averaged_velocity!` normalizes it:
+the horizontal momentum perturbations as the predictors read them, and the off-centered
+vertical ones (see Section 10).
+"""
+function add_fast_content!(substepper::AcousticSubstepper, model, Δτ, U⁰)
+    grid = model.grid
+    M = substepper.time_averaged_velocities
+    fill_halo_regions!(M.u)
+    fill_halo_regions!(M.v)
+    launch!(architecture(grid), grid, :xyz, _add_fast_content!,
+            substepper.pressure_projection.content, grid, model.dynamics,
+            substepper.pressure_projection.fixed_composition_sensitivity,
+            M.u, M.v, M.w, substepper.momentum_perturbation.w, U⁰.ρw, model.momentum.ρw,
+            Δτ, 1 - substepper.forward_weight)
+    return nothing
+end
+
+@kernel function _add_fast_content!(W, grid, dynamics, Λᴴ, Σρu′, Σρv′, Σρw′, ρw′, ρw⁰, ρwᴸ, Δτ, ωˢ⁻)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ∇ʰ_ΛM = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, θFˣ, Λᴴ, Σρu′) + δyᵃᶜᵃ(i, j, k, grid, θFʸ, Λᴴ, Σρv′))
+        ∂z_ΛM = ∂zᶜᶜᶜ(i, j, k, grid, fast_content_flux_z, Λᴴ, Σρw′, ρw′, ρw⁰, ρwᴸ, ωˢ⁻)
+        W[i, j, k] -= Δτ * (∇ʰ_ΛM + ∂z_ΛM)
+    end
+end
+
+@inline fast_content_flux_z(i, j, k, grid, Λᴴ, Σρw′, ρw′, ρw⁰, ρwᴸ, ωˢ⁻) =
+    @inbounds ℑbzᵃᵃᶠ(i, j, k, grid, Λᴴ) * (Σρw′[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - (ρw⁰[i, j, k] - ρwᴸ[i, j, k])))
 
 # Σ over the condensate masses of their sensitivity times the value of `fields` at (i, j, k). A
 # mass with liquid fraction f holds f Λˡ + (1 − f) Λⁱ.
@@ -2118,6 +2173,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Done BEFORE `_recover_full_state!` so we read the stage-entry
     # `model.momentum.*` (substep loop hasn't touched it) and stage-entry
     # `model.dynamics.dry_density` as the Uᴸ_stage reference.
+    add_fast_content!(substepper, model, Δτ, Uᴸ)
     finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
