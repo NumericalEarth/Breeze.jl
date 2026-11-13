@@ -15,7 +15,7 @@ A parameterization dense enough to exhaust the alphabet on its own does not belo
 in it: its notation is scoped to its own pages instead, where reusing a letter
 reserved here is a local decision rather than a conflict. The
 [P3 notation](@ref p3_notation) section does that for the Predicted Particle Properties
-scheme.
+scheme, and the [Held–Suarez forcing](@ref held_suarez_notation) section for the Held–Suarez forcing.
 
 A few notes about the following table:
 

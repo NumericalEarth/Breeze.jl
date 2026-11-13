@@ -61,11 +61,12 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: rnode, znode
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                               ∂zᶜᶜᶜ, ∂zᶜᶜᶠ, divᶜᶜᶜ
-using Oceananigans.Utils: prettysummary, launch!, KernelParameters
+using Oceananigans.Utils: prettysummary, launch!, KernelParameters, @apply_regionally, construct_regionally
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture
+                               thermodynamic_density_name, specific_prognostic_moisture,
+                               fill_horizontal_velocity_halos!, copy_parent!
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Solvers: NewtonSolver
 using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key
@@ -74,7 +75,7 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
                              reject_renamed_surface_pressure,
                              vapor_gas_constant, ExnerReferenceState, temperature, temperature_and_sensitivity,
                              LiquidIceDensityState
-using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using Breeze.Utils: @regional, TYPEDSIGNATURES_WITH_DEFAULTS
 
 using ReactantCore: @trace
 

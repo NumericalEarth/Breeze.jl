@@ -155,3 +155,12 @@ end
         @test model.clock.iteration == 1
     end
 end
+
+@testset "Split-explicit compressible dynamics require the acoustic time stepper" begin
+    grid = RectilinearGrid(default_arch, Float64; size=(4, 4, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
+    @test AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3).timestepper isa AcousticRungeKutta3
+    for timestepper in (:SSPRungeKutta3, :RungeKutta3, :QuasiAdamsBashforth2)
+        @test_throws ArgumentError AtmosphereModel(grid; dynamics, timestepper)
+    end
+end

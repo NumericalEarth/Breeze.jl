@@ -54,6 +54,8 @@ Adapt.adapt_structure(to, sf::SpecificForcing) =
                     Adapt.adapt(to, sf.density),
                     sf.target_location)
 
+@regional SpecificForcing
+
 #####
 ##### Density at the target prognostic location: dispatch on (LX, LY, LZ).
 ##### Only the four staggered locations that appear in the Breeze prognostic state are

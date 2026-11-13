@@ -21,6 +21,8 @@ Adapt.adapt_structure(to, k::DewpointTemperatureKernelFunction) =
                                       adapt(to, k.thermodynamic_constants),
                                       k.solver)
 
+@regional DewpointTemperatureKernelFunction
+
 const DewpointTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:DewpointTemperatureKernelFunction}
 
 """

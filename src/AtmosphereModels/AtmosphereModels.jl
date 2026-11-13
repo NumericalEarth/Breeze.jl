@@ -126,6 +126,11 @@ export
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
 
+    # Multi-region grids
+    fill_horizontal_velocity_halos!,
+    fill_prognostic_halo_regions!,
+    copy_parent!,
+
     # Architecture-dispatched helpers for safely converting Δt to a kernel arg,
     # and for skipping operator-split updates before the first step
     kernel_time_step,
@@ -146,7 +151,7 @@ using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Operators: Δzᶜᶜᶜ, ∂zᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
-using Oceananigans.Utils: prettysummary, launch!
+using Oceananigans.Utils: prettysummary, launch!, @apply_regionally
 
 # Convert Δt to the kernel-compatible time type for `grid`'s architecture.
 # Metal cannot load Float64 kernel arguments, so we must convert at the launch
@@ -185,6 +190,7 @@ include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("implicit_vertical_advection.jl")
 include("density_weighted_implicit_diffusion.jl")
+include("multi_region_atmosphere_model.jl")
 include("cell_advection_timescale.jl")
 include("negative_moisture_correction.jl")
 include("update_atmosphere_model_state.jl")

@@ -7,8 +7,7 @@
 # output fields and the radiation update) is built here once.
 
 using Oceananigans.Utils: launch!
-using Oceananigans.Grids: xnode
-using Oceananigans.Grids: AbstractGrid, Center, Flat
+using Oceananigans.Grids: AbstractGrid, Flat
 
 using Breeze.AtmosphereModels: AtmosphereModels,
                                BackgroundAtmosphere, materialize_background_atmosphere,
@@ -242,7 +241,7 @@ _set_longitude_from_grid!(rrtmgp_λ, ::AbstractGrid{<:Any, <:Flat}) = (fill!(rrt
 
 @kernel function _set_longitude_from_grid_kernel!(rrtmgp_λ, grid)
     i, j = @index(Global, NTuple)
-    λ = xnode(i, j, 1, grid, Center(), Center(), Center())
+    λ = column_longitude(i, j, grid)
     c = column_index(i, j, grid.Nx)
     @inbounds rrtmgp_λ[c] = λ
 end

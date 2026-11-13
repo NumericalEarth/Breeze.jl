@@ -1,5 +1,8 @@
 using KernelAbstractions: @kernel, @index
 
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Grids: Center
+using Oceananigans.Operators: div_xyᶜᶜᶜ
 using Oceananigans: TendencyCallsite
 using Oceananigans.Utils: time_difference_seconds
 
@@ -13,7 +16,8 @@ using Oceananigans.TimeSteppers:
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!,
-                                compute_closure_tendencies!, refreshes_state_after_update, invalid_time_step
+                                compute_closure_tendencies!, refreshes_state_after_update, invalid_time_step,
+                                continuity_density, thermodynamic_density
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
@@ -24,7 +28,8 @@ using Breeze.CompressibleEquations:
     acoustic_rk3_substep_loop!,
     prepare_acoustic_cache!,
     freeze_linearization_state!,
-    seed_time_averaged_velocities!
+    seed_time_averaged_velocities!,
+    horizontal_theta_flux_divergence
 
 """
 $(TYPEDEF)
@@ -124,6 +129,8 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                                                       implicit_solver, substepper, rounding)
 end
 
+@regional AcousticRungeKutta3
+
 #####
 ##### Adaptive-implicit vertical advection split time step
 #####
@@ -175,19 +182,19 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = Round
     # to the current RK stage-entry state; the substep perturbations are
     # initialized with a rewind term inside the substep loop so the
     # WS-RK3 invariant still starts from Uⁿ.
-    prepare_acoustic_cache!(substepper, model)
-    cache_advecting_state!(model)
+    @noinline prepare_acoustic_cache!(substepper, model)
+    @noinline cache_advecting_state!(model)
 
     # `update_state!` built the slow tendencies (advection + Coriolis + diffusion; PGF and
     # buoyancy are excluded — those are handled inside the substep loop in linearized form
     # about the RK stage-entry state). Add the boundary flux and closure tendencies to them.
-    compute_flux_bc_tendencies!(model)
-    compute_closure_tendencies!(model)
+    @noinline compute_flux_bc_tendencies!(model)
+    @noinline compute_closure_tendencies!(model)
 
     # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
     # substep inside the loop, dispatched on the scheme type.
-    add_implicit_advection_tendency!(model)
+    @noinline add_implicit_advection_tendency!(model)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
@@ -198,13 +205,13 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = Round
     # the tracers' solves sedimented, which then takes the thermodynamic variable's post-loop
     # closure diffusion; that variable's implicit vertical transport was already applied inside
     # the substep loop (see `implicit_sedimentation_step!`).
-    scalar_rk3_substep!(model, β * Δt, rounding)
+    @noinline scalar_rk3_substep!(model, β * Δt, rounding)
 
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
     # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
     # vertical advection combined with vertically-implicit closure diffusion. A no-op when
     # the timestepper has no implicit solver.
-    implicit_substep!(model, β * Δt)
+    @noinline implicit_substep!(model, β * Δt)
 
     return nothing
 end
@@ -216,7 +223,7 @@ end
 function scalar_rk3_substep!(model::AtmosphereModel, Δt_stage, rounding = RoundToNearest())
     grid = model.grid
     kernel_Δt = kernel_time_step(grid.architecture, grid, Δt_stage)
-    return scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
+    return @apply_regionally scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
 end
 
 # Round-to-nearest keeps the original kernel, so the default is bitwise unchanged.
@@ -404,6 +411,27 @@ end
 # the RK predictor velocity rather than the time-averaged transport velocity.
 AtmosphereModels.slow_dynamics(::AcousticRungeKutta3, dynamics) = SlowDynamics(dynamics)
 AtmosphereModels.thermodynamic_transport_velocities(model::CompressibleAcousticModel) = slow_thermodynamic_velocities(model)
+
+# The acoustic loop moves the dry density with the momentum perturbation (ρu)′ of its substeps and the
+# thermodynamic density with θᴸ (ρu)′, where θᴸ is θ at the entry of the stage. Its transport velocity
+# ⟨u⟩ = (ρuᴸ + ⟨(ρu)′⟩) / ℑ(ρᴸ) averages the perturbation over the stage, so the seam budget of the
+# loop's fluxes is that of the flux of the mean momentum ⟨u⟩ ℑ(ρᴸ), with ρᴸ = ρᵈ − ρ′ the density the
+# stage started from, less that of the flux of the momentum ρuᴸ at the entry of the stage.
+function AtmosphereModels.acoustic_divergences(model::CompressibleAcousticModel)
+    substepper = model.timestepper.substepper
+    ρᵈ = continuity_density(model.dynamics)
+    ρθ = thermodynamic_density(model.formulation)
+    ρᴸ = ρᵈ - substepper.density_perturbation
+    mean_ρu = substepper.time_averaged_velocities.u * ρᴸ
+    mean_ρv = substepper.time_averaged_velocities.v * ρᴸ
+    entry = acoustic_flux_divergences(model.grid, ρθ / ρᵈ, model.momentum.ρu, model.momentum.ρv)
+    mean = acoustic_flux_divergences(model.grid, substepper.linearization_potential_temperature, mean_ρu, mean_ρv)
+    return (; entry, mean)
+end
+
+acoustic_flux_divergences(grid, θ, ρu, ρv) =
+    (KernelFunctionOperation{Center, Center, Center}(div_xyᶜᶜᶜ, grid, ρu, ρv),
+     KernelFunctionOperation{Center, Center, Center}(horizontal_theta_flux_divergence, grid, θ, ρu, ρv))
 
 Oceananigans.prognostic_state(timestepper::AcousticRungeKutta3) =
     (substepper = Oceananigans.prognostic_state(timestepper.substepper),)
