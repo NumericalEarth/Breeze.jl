@@ -78,6 +78,8 @@ Fields:
   measures the acoustic Courant number against; computed once, when the substepper is built.
 - `forward_weight`: CN off-centering ω (0.5 = centered; default 0.65).
 - `damping`, `substep_distribution`: divergence-damping strategy; substep allocation across WS-RK3 stages.
+- `pressure_coefficient`: the `AcousticPressureCoefficient` selecting how Cᴸ is computed (the
+  frozen-composition slope, or the phase-equilibrium slope in saturated cells).
 - `linearization_potential_temperature` (θᴸ), `linearization_pressure_coefficient` (Cᴸ, the slope
   ∂p/∂(ρθ) of the equation of state at the stage-entry state): per-stage caches, see
   `refresh_linearization_basic_state!`.
@@ -99,7 +101,7 @@ Fields:
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
   tendency's condensate sedimentation term (see `cache_transport_velocity!`).
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, TD, MP, TAV, GT, TS, WC, DC, TWC, IS}
+struct AcousticSubstepper{N, FT, D, AD, US, PC, CF, TD, MP, TAV, GT, TS, WC, DC, TWC, IS}
     substeps :: N
     acoustic_cfl :: FT
     minimum_horizontal_spacing :: FT
@@ -113,6 +115,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, TD, MP, TAV, GT, TS, WC, DC, TWC
     sponge :: US
     # Open-boundary relaxation factor α for `ρ′,(ρθ)′` (issue #738).
     open_boundary_relaxation :: FT
+    pressure_coefficient :: PC
 
     # Linearization basic state θᴸ and Cᴸ, derived per stage from live model fields
     # (`model.dynamics.dry_density`, `model.dynamics.total_density`, the moisture and the
@@ -157,6 +160,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        a.substep_distribution,
                        adapt(to, a.sponge),
                        a.open_boundary_relaxation,
+                       a.pressure_coefficient,
                        adapt(to, a.linearization_potential_temperature),
                        adapt(to, a.linearization_pressure_coefficient),
                        adapt(to, a.fixed_composition_sensitivity),
@@ -233,6 +237,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     sponge = materialize_sponge(grid, split_explicit.sponge)
     substep_distribution = split_explicit.substep_distribution
     open_boundary_relaxation = convert(FT, split_explicit.open_boundary_relaxation)
+    pressure_coefficient = split_explicit.pressure_coefficient
 
     # `substep_floattype` (default `eltype(grid)`) is the storage type for the acoustic perturbation/predictor/
     # linearization working fields below. Pass a reduced-precision type (e.g. `BFloat16`, where the
@@ -286,6 +291,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               final_stage_vertical_pressure_tendency_factor,
                               damping, substep_distribution,
                               sponge, open_boundary_relaxation,
+                              pressure_coefficient,
                               linearization_potential_temperature,
                               linearization_pressure_coefficient,
                               fixed_composition_sensitivity,
@@ -377,6 +383,7 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
             substepper.linearization_pressure_coefficient,
             substepper.fixed_composition_sensitivity,
             grid,
+            substepper.pressure_coefficient,
             model.formulation,
             model.dynamics,
             model.dynamics.dry_density,
@@ -401,11 +408,13 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
     return nothing
 end
 
-# θᴸ and Cᴸ = ρ Rᵐ (θ ∂T/∂θ) / (ρᵈ θ) per cell, from the same moisture and state the core closes
-# the thermodynamics with (`_compute_temperature_and_pressure!`). The divisors are zero only before
-# `set!`; there they are replaced by one, and θ = 0 has zero sensitivity.
-@kernel function _compute_linearization_basic_state!(θᴸ, Cᴸ, Λᴴ, grid, formulation, dynamics, dry_density,
-                                                     total_density, specific_prognostic_moisture,
+# θᴸ and Cᴸ per cell, from the same moisture and state the core closes the thermodynamics with
+# (`_compute_temperature_and_pressure!`). The frozen-composition slope is Cᴸ = ρ Rᵐ (θ ∂T/∂θ) / (ρᵈ θ);
+# `acoustic_pressure_coefficient` replaces it in saturated cells when the phase-equilibrium
+# coefficient is selected. The divisors are zero only before `set!`; there they are replaced by one,
+# and θ = 0 has zero sensitivity.
+@kernel function _compute_linearization_basic_state!(θᴸ, Cᴸ, Λᴴ, grid, pressure_coefficient, formulation, dynamics,
+                                                     dry_density, total_density, specific_prognostic_moisture,
                                                      microphysics, microphysical_fields, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
@@ -422,13 +431,92 @@ end
     T, θ∂T∂θ = temperature_and_sensitivity(𝒰, constants)
     Rᵐ = mixture_gas_constant(q, constants)
     λᴴ = fixed_composition_sensitivity(formulation, 𝒰, T, constants)
+    Cᶠ = ρ * Rᵐ * θ∂T∂θ / (ρ̂ᵈ * θ̂)
+    qᵖ = precipitating_mass_fraction(i, j, k, microphysics, microphysical_fields)
 
     @inbounds begin
         # The loop's flux of its pressure carries θᴸ + Λᴴ per unit of its own mass flux (Section 3b).
         θᴸ[i, j, k] = θ + λᴴ
         Λᴴ[i, j, k] = λᴴ
-        Cᴸ[i, j, k] = ρ * Rᵐ * θ∂T∂θ / (ρ̂ᵈ * θ̂)
+        Cᴸ[i, j, k] = acoustic_pressure_coefficient(pressure_coefficient, Cᶠ, 𝒰, T, qᵖ, ρ̂ᵈ, θ̂,
+                                                         microphysics, constants)
     end
+end
+
+# The cached coefficient: the frozen-composition slope Cᶠ, or in saturated cells (cloud condensate,
+# in excess of the precipitating fraction qᵖ, at the linearization state) the phase-equilibrium slope.
+@inline acoustic_pressure_coefficient(::FrozenCompositionPressureCoefficient, Cᶠ, 𝒰, T, qᵖ, ρ̂ᵈ, θ̂,
+                                           microphysics, constants) = Cᶠ
+
+@inline function acoustic_pressure_coefficient(::PhaseEquilibriumPressureCoefficient, Cᶠ, 𝒰, T, qᵖ, ρ̂ᵈ, θ̂,
+                                                    microphysics, constants)
+    q = 𝒰.moisture_mass_fractions
+    saturated = q.liquid + q.ice - qᵖ > 0
+    equilibrium = microphysics_phase_equilibrium(microphysics)
+    Cᵉ = equilibrium_pressure_coefficient(𝒰, T, ρ̂ᵈ, θ̂, equilibrium, constants)
+    return ifelse(saturated, Cᵉ, Cᶠ)
+end
+
+# The slope Cᵉ = ∂p/∂(ρθ) of the saturation-adjusted pressure along a uniform compression of a
+# saturated cell, at the converged root of the θˡⁱ → T inversion.
+#
+# The acoustic loop compresses ρᵈ and ρθ together, and the water follows with the loop-mean velocity,
+# so the stage-end state that saturation adjustment re-diagnoses is a uniform compression: every
+# density scales by the same factor, θ and the total water qᵗ are unchanged, and (ρθ)′ = ρᵈ θ ds with
+# ds = d ln ρ. Along that path the cell stays saturated, with the vapor at qᵛ⁺(T, ρ) = pᵛ⁺(T) / (ρ Rᵛ T)
+# and the condensate qᶜ = qᵗ − qᵛ⁺ − qᵖ taking up the difference. Compression warms the air and raises
+# qᵛ⁺, so condensate evaporates and its latent heat is drawn from the air: the pressure rises less than
+# at frozen composition. Writing H = ĉᵖ Π θ = cᵖᵐ T − Hᶜ for the dry-coupled part of the energy, the
+# inversion cᵖᵐ T = H + Hᶜ is differentiated at fixed θ and qᵗ, with the phase change dqᶜ = −dqᵛ
+# entering through cᵖᵐ (dcᵖᵐ = −Δcᵖ dqᶜ), Rᵐ (dRᵐ = −Rᵛ dqᶜ) and Hᶜ (dHᶜ = ℒ₀ dqᶜ), while ĉᵖ and κ̂
+# depend on qᵗ alone:
+#
+#   (cᵖᵐ − κ̂ H / T) dT = κ̂ H ds + (ℒ − κ̂ H Rᵛ / Rᵐ) dqᶜ ,        ℒ = ℒ₀ + Δcᵖ T ,
+#
+# which is the phase-exchange response that `Microphysics.saturation_response` differentiates, plus
+# the compression term κ̂ H ds. Saturation closes it, by Clausius–Clapeyron d ln pᵛ⁺ / dT = ℒ / (Rᵛ T²):
+#
+#   dqᶜ = −dqᵛ⁺ = qᵛ⁺ ds − A dT ,        A = qᵛ⁺ (ℒ / (Rᵛ T²) − 1 / T) .
+#
+# With D = cᵖᵐ − κ̂ H / T and B = ℒ − κ̂ H Rᵛ / Rᵐ, the compression response is
+#
+#   dT / ds = (κ̂ H + B qᵛ⁺) / (D + A B) ,        dqᶜ / ds = qᵛ⁺ − A dT / ds ,
+#
+# and the pressure p = ρ Rᵐ T responds with
+#
+#   d ln p / ds = 1 + (1 / T) dT / ds − (Rᵛ / Rᵐ) dqᶜ / ds ,        Cᵉ = p (d ln p / ds) / (ρᵈ θ) .
+#
+# Without vapor (qᵛ⁺ → 0, A → 0) this is the frozen compression slope, dT / ds = κ̂ H / D, which in dry
+# air is γᵈ p / (ρθ). The frozen slope that the loop otherwise uses in cloud is the part of that at
+# fixed ρᵈ, Cᶠ = γᵉ p / (ρθ), and the ∂p/∂ρᵈ remainder (see `refresh_linearization_basic_state!`) is
+# included here, since the saturated response is derived along the compression. Over the equilibrium
+# of a mixed-phase `MixedPhaseEquilibrium`, ℒ and pᵛ⁺ are those of the liquid fraction at T, and its
+# temperature dependence is neglected. T = 0 (before `set!`) is replaced by one; the cell is then not
+# saturated and the frozen slope is returned.
+@inline function equilibrium_pressure_coefficient(𝒰, T, ρ̂ᵈ, θ̂, equilibrium, constants)
+    q   = 𝒰.moisture_mass_fractions
+    ρ   = 𝒰.density
+    T̂   = ifelse(T == 0, one(T), T)
+    Rᵛ  = vapor_gas_constant(constants)
+    Rᵐ  = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    κ̂   = exner_exponent(𝒰.exner_exponent, q, constants)
+
+    surface = equilibrated_surface(equilibrium, T̂)
+    ℒ   = absolute_zero_latent_heat(constants, surface) + specific_heat_difference(constants, surface) * T̂
+    qᵛ⁺ = saturation_specific_humidity(T̂, ρ, constants, surface)
+
+    H = cᵖᵐ * T̂ - condensate_latent_energy(q, constants)
+    D = cᵖᵐ - κ̂ * H / T̂
+    B = ℒ - κ̂ * H * Rᵛ / Rᵐ
+    A = qᵛ⁺ * (ℒ / (Rᵛ * T̂^2) - 1 / T̂)
+
+    dT_ds  = (κ̂ * H + B * qᵛ⁺) / (D + A * B)
+    dqᶜ_ds = qᵛ⁺ - A * dT_ds
+    dlnp_ds = 1 + dT_ds / T̂ - Rᵛ / Rᵐ * dqᶜ_ds
+
+    p = ρ * Rᵐ * T̂
+    return p * dlnp_ds / (ρ̂ᵈ * θ̂)
 end
 
 """
@@ -749,9 +837,17 @@ end
 
 # Substeps for a stage covering Δt_stage = β·Δt: ⌈β·N⌉ for a fixed full-step count N,
 # or the acoustic-CFL count for the stage interval when adaptive (substeps = nothing).
+#
+# When adaptive, a stage covering more than half of Δt takes at least two substeps. A single
+# acoustic substep over most of the outer step is unstable even below the acoustic CFL target:
+# SSPMIS43 (first stage 0.56 Δt) on a 5 km tropical-cyclone grid grew a near-surface mode and
+# failed for every Δt between 11 and 12.5 s, where its first stage got one substep of 6.2–7 s,
+# while Δt ≥ 13 s, with two substeps, ran 6 h. Short stages keep the CFL count.
+@inline minimum_stage_substeps(β) = ifelse(β > 1//2, 2, 1)
+
 @inline _stage_substeps(N::Integer, β, Δt_stage, Δx_min, constants, acoustic_cfl) = max(1, ceil(Int, β * N))
 @inline _stage_substeps(::Nothing, β, Δt_stage, Δx_min, constants, acoustic_cfl) =
-    compute_acoustic_substeps(Δx_min, Δt_stage, constants, acoustic_cfl)
+    max(minimum_stage_substeps(β), compute_acoustic_substeps(Δx_min, Δt_stage, constants, acoustic_cfl))
 
 # Uniform full-step count N rounded up to a multiple of 6 so β·N is integral (ConstantSubstepSize,
 # MonolithicFirstStage stages 2–3).
@@ -2289,6 +2385,38 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     AtmosphereModels.compute_velocities!(model)
 
     return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Compute into `C` the stage-entry thermodynamic flux divergence in the discretization of the
+substep loop, ``C = -∇·(θᴸ (ρu)ᴸ)`` with ``θᴸ`` the substepper's cached linearization potential
+temperature (so [`prepare_acoustic_cache!`](@ref) must have run for this stage). This is the
+part of the thermodynamic tendency that the acoustic loop integrates as fast: its perturbation
+about the stage-entry state is ``-∇·(θᴸ (ρu)′)``. Multirate steppers subtract it from the full
+tendency to isolate the slow remainder.
+"""
+function compute_linearized_thermodynamic_flux_divergence!(C, substepper::AcousticSubstepper, model)
+    grid = model.grid
+    launch!(architecture(grid), grid, :xyz, _linearized_thermodynamic_flux_divergence!,
+            C, grid, model.dynamics, substepper.linearization_potential_temperature,
+            substepper.fixed_composition_sensitivity,
+            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw)
+    return nothing
+end
+
+# The cached θᴸ field holds θᴸ + Λᴴ (Section 3b); the thermodynamic density's own flux carries θᴸ,
+# so the flux of Λᴴ, which is exactly zero without condensate, is taken off.
+@kernel function _linearized_thermodynamic_flux_divergence!(C, grid, dynamics, θᴸ, Λᴴ, ρu, ρv, ρw)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
+        ∇ʰ_θM = V⁻¹ * (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu) + δyTᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv))
+        ∇ʰ_ΛM = V⁻¹ * (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, Λᴴ, ρu) + δyTᵃᶜᵃ(i, j, k, grid, θFʸ, Λᴴ, ρv))
+        ∇_ΛM = ∇ʰ_ΛM + ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, Λᴴ, dynamics, ρu, ρv, ρw)
+        C[i, j, k] = - ∇ʰ_θM - ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu, ρv, ρw) + ∇_ΛM
+    end
 end
 
 Oceananigans.prognostic_state(substepper::AcousticSubstepper) =

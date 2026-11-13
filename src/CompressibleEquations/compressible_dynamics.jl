@@ -441,7 +441,8 @@ without_sponge(td::SplitExplicitTimeDiscretization) =
                                     td.damping,
                                     nothing,
                                     td.substep_distribution,
-                                    td.open_boundary_relaxation)
+                                    td.open_boundary_relaxation,
+                                    td.pressure_coefficient)
 
 # Adiabatic-balance twin dynamics (extends the solver-agnostic fallback in AtmosphereModels). The
 # sponge is always stripped — it is irreversible. The default builds the fully-explicit twin

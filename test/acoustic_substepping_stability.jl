@@ -362,4 +362,53 @@ for arch in arches
         Oceananigans.defaults.FloatType = old_FT
     end
 
+    #####
+    ##### Saturated air at large Δt: the pressure coefficient and the 2Δx mode
+    #####
+    ##### The reproducer of NumericalEarth/Breeze.jl#1086: a fully saturated, moist-stable
+    ##### x–z column with a seeded 2Δx θ perturbation, undamped, at Δt = 10 s. The frozen-composition
+    ##### coefficient overestimates the pressure response in cloud by about 10% and the 2Δx mode
+    ##### of w grows to O(1) m/s within an hour; the phase-equilibrium coefficient keeps it at
+    ##### its seeded amplitude. Float64 only (the amplitudes are calibrated in Float64), so it
+    ##### is skipped on Metal.
+    #####
+
+    arch isa GPU{MetalBackend} || @testset "Phase-equilibrium pressure coefficient removes the saturated 2Δx growth [$(arch)]" begin
+        old_FT = Oceananigans.defaults.FloatType
+        Oceananigans.defaults.FloatType = Float64
+
+        Nx, Nz, Δx = 32, 40, 3e3
+        θ̄(z) = 280 + 0.01z
+        θᵢ(x, z) = θ̄(z) * (1 + 1e-5 * cos(π * round(Int, x / Δx - 0.5)))
+
+        # rms over k = 2:16 of the (−1)ⁱ projection of w
+        function checkerboard_amplitude(model)
+            w = Array(interior(model.velocities.w))
+            return sqrt(sum(k -> (sum((-1)^i * w[i, 1, k] for i in 1:Nx) / Nx)^2, 2:16) / 15)
+        end
+
+        function saturated_column(pressure_coefficient)
+            grid = RectilinearGrid(arch; size = (Nx, Nz), halo = (5, 5), x = (0, Nx * Δx), z = (0, 10e3),
+                                   topology = (Periodic, Flat, Bounded))
+            td = SplitExplicitTimeDiscretization(; damping = NoDivergenceDamping(), pressure_coefficient)
+            dynamics = CompressibleDynamics(td; base_pressure = 1e5, reference_potential_temperature = θ̄)
+            microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+            model = AtmosphereModel(grid; dynamics, microphysics, advection = WENO(order = 5))
+            set!(model; θ = θᵢ, u = 15, ρ = Breeze.HydrostaticallyBalancedDensity())
+            set!(model; qᵗ = 0.02)
+            for _ in 1:360
+                time_step!(model, 10)
+            end
+            return model
+        end
+
+        frozen = saturated_column(FrozenCompositionPressureCoefficient())
+        equilibrium = saturated_column(PhaseEquilibriumPressureCoefficient())
+        @test @allowscalar minimum(interior(frozen.microphysical_fields.qˡ)) > 0  # saturated throughout
+
+        @test checkerboard_amplitude(frozen) > 1e-1
+        @test checkerboard_amplitude(equilibrium) < 1e-4
+        Oceananigans.defaults.FloatType = old_FT
+    end
+
 end

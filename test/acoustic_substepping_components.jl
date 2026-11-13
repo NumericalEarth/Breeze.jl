@@ -19,6 +19,7 @@ using Breeze
 using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps, minimum_horizontal_spacing,
+                                    stage_substep_count_and_size, ProportionalSubsteps,
                                     sponge_term_diag, sponge_rhs, sponge_slow_tendency,
                                     materialize_sponge,
                                     assemble_slow_vertical_momentum_tendency!,
@@ -31,6 +32,7 @@ using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_s
                                     implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
                                     factor_vertical_solver!,
                                     solve_tridiagonal_columns_in_place!
+using Breeze.Microphysics: adjust_thermodynamic_state
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, continuity_density, standard_pressure
@@ -43,6 +45,7 @@ using Oceananigans.Architectures: architecture, on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: BatchedTridiagonalSolver, get_coefficient, solve!
+using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Units
 using Oceananigans.Utils: KernelParameters, launch!
 using Test
@@ -330,6 +333,26 @@ for arch in arches
             @test minimum_horizontal_spacing(flat_grid) == 1000
         end
         Oceananigans.defaults.FloatType = old_FT
+    end
+
+    @testset "Long stages take at least two adaptive substeps [$(arch)]" begin
+        constants = ThermodynamicConstants()
+        Δx_min = 5016.0 # the 5 km tropical-cyclone grid where a single 6.3 s substep went unstable
+        Δt = 11.25
+        distribution = ProportionalSubsteps()
+
+        # SSPMIS43's first stage covers 0.56 Δt: the CFL count alone gives one substep.
+        @test compute_acoustic_substeps(Δx_min, 0.56 * Δt, constants, 0.5) == 1
+        Nτ, Δτ = stage_substep_count_and_size(distribution, 0.56, Δt, Δx_min, constants, 0.5, nothing)
+        @test Nτ == 2
+        @test Δτ ≈ 0.56 * Δt / 2
+
+        # Stages covering at most half of Δt keep the CFL count.
+        @test first(stage_substep_count_and_size(distribution, 1/2, Δt, Δx_min, constants, 0.5, nothing)) == 1
+        @test first(stage_substep_count_and_size(distribution, 0.139, Δt, Δx_min, constants, 0.5, nothing)) == 1
+
+        # A fixed substep count is the user's choice and is not raised.
+        @test first(stage_substep_count_and_size(distribution, 0.56, Δt, Δx_min, constants, 0.5, 1)) == 1
     end
 
     @testset "acoustic_cfl plumbed to AcousticSubstepper [$(arch), $(FT)]" for FT in as_test_float_types(arch)
@@ -1006,6 +1029,94 @@ end
 
         if qᵛ[I] == 0
             @test Cᴸ[I] ≈ cᵖᵈ * Rᵈ / (cᵖᵈ - Rᵈ) * (p[I] / pˢᵗ)^κᵈ rtol = 100eps(FT)
+        end
+    end
+    Oceananigans.defaults.FloatType = old_FT
+end
+
+#####
+##### The phase-equilibrium pressure coefficient is the slope of the saturation-adjusted equation of state
+#####
+
+# In saturated cells `PhaseEquilibriumPressureCoefficient` gives the slope of the pressure that saturation
+# adjustment re-diagnoses after a uniform compression (every density and ρθ scaled together, θ and total
+# water fixed); elsewhere it is the frozen-composition slope. Compressing the model itself and calling
+# `update_state!` recovers the linearized response δp = Cᴸ (ρθ)′ in every cell with it, where the
+# frozen coefficient overestimates the response by about 10% in cloud (NumericalEarth/Breeze.jl#1086).
+@testset "Phase-equilibrium pressure coefficient is the slope of the adjusted equation of state [$FT, $(nameof(typeof(κ̂)))]" for FT in test_float_types(),
+        κ̂ in (VaporEquivalentExponent(), DryExponent())
+    old_FT = Oceananigans.defaults.FloatType
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch, FT; size = (6, 6, 6), halo = (5, 5, 5),
+                           x = (0, 2e3), y = (0, 2e3), z = (0, 3e3),
+                           topology = (Periodic, Periodic, Bounded))
+    constants = ThermodynamicConstants(FT)
+    microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+    formulation = LiquidIcePotentialTemperatureFormulation(; exner_exponent = κ̂)
+    qᵗ(x, y, z) = ifelse(z < 1e3, 0.0, ifelse(z < 2e3, 0.005, 0.03))
+
+    function coefficient_model(pressure_coefficient)
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(; pressure_coefficient);
+                                        base_pressure = 1e5, standard_pressure = 1e5,
+                                        reference_potential_temperature = z -> 300)
+        model = AtmosphereModel(grid; dynamics, formulation, microphysics, thermodynamic_constants = constants)
+        set!(model; ρ = model.dynamics.reference_state.density, θ = 300, qᵗ)
+        prepare_acoustic_cache!(model.timestepper.substepper, model)
+        return model
+    end
+
+    frozen = coefficient_model(FrozenCompositionPressureCoefficient())
+    equilibrium = coefficient_model(PhaseEquilibriumPressureCoefficient())
+    @test equilibrium.timestepper.substepper.pressure_coefficient isa PhaseEquilibriumPressureCoefficient
+
+    Cᶠ = Array(interior(frozen.timestepper.substepper.linearization_pressure_coefficient))
+    Cᵉ = Array(interior(equilibrium.timestepper.substepper.linearization_pressure_coefficient))
+    ρᵈ = Array(interior(equilibrium.dynamics.dry_density))
+    ρ  = Array(interior(equilibrium.dynamics.total_density))
+    ρθ = Array(interior(equilibrium.formulation.potential_temperature_density))
+    qᵛ = Array(interior(equilibrium.microphysical_fields.qᵛ))
+    qˡ = Array(interior(equilibrium.microphysical_fields.qˡ))
+    @test maximum(qˡ) > 1e-4  # the top layer condensed
+    @test minimum(qˡ) == 0    # the lower layers did not
+
+    pˢᵗ = FT(standard_pressure(equilibrium.dynamics))
+    solver = equilibrium.formulation.temperature_solver
+    ε    = FT == Float64 ? FT(1e-3) : FT(1e-2)
+    rtol = FT == Float64 ? FT(1e-3) : FT(1e-2)
+
+    for I in CartesianIndices(ρθ)
+        θ = ρθ[I] / ρᵈ[I]
+        if qˡ[I] == 0
+            @test Cᵉ[I] == Cᶠ[I]
+        else
+            # The pressure that saturation adjustment re-diagnoses after compressing every density by s.
+            function adjusted_pressure(s)
+                𝒰 = LiquidIceDensityState(θ, MoistureMassFractions(qᵛ[I] + qˡ[I]), pˢᵗ, s * ρ[I], solver, κ̂)
+                return air_pressure(adjust_thermodynamic_state(𝒰, microphysics, constants), constants)
+            end
+            slope = (adjusted_pressure(1 + ε) - adjusted_pressure(1 - ε)) / (2ε * ρᵈ[I] * θ)
+            @test Cᵉ[I] ≈ slope rtol = rtol
+            @test FT(1.05) < Cᶠ[I] / Cᵉ[I] < FT(1.2)
+        end
+    end
+
+    # Compress the model itself, ρᵈ, ρθ and ρqᵉ together by 1 + ε, and re-diagnose the pressure. The
+    # ratio of the linearized response Cᴸ (ρθ)′ to the re-diagnosed δp is the issue's diagnostic.
+    for (model, Cᴸ, (lower, upper)) in ((equilibrium, Cᵉ, (1 - 10ε, 1 + 10ε)),
+                                        (frozen, Cᶠ, (FT(1.05), FT(1.2))))
+        p₀ = Array(interior(model.dynamics.pressure))
+        for field in (model.dynamics.dry_density, model.formulation.potential_temperature_density, model.moisture_density)
+            parent(field) .*= 1 + ε
+        end
+        update_state!(model)
+        δp = Array(interior(model.dynamics.pressure)) .- p₀
+        ratio = Cᴸ .* ρθ .* ε ./ δp
+        for I in CartesianIndices(ρθ)
+            if qˡ[I] == 0
+                @test ratio[I] ≈ 1 rtol = 10ε
+            else
+                @test lower < ratio[I] < upper
+            end
         end
     end
     Oceananigans.defaults.FloatType = old_FT
