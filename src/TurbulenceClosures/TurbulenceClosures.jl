@@ -29,7 +29,7 @@ export TKEBasedTurbulenceClosure,
        BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
        closure_parameters, with_parameters,
-       SubgridCloudFormulation, SubgridDistribution, CloudBuoyancyFlux, LiquidFluxFraction, ClosureOwnedCloud, FixedPointIteration, SecantIteration, BisectionIteration, LaggedStability,
+       SubgridCloudFormulation, SubgridDistribution, CloudBuoyancyFlux, LiquidFluxFraction, BracketedFractionSolve, ClosureOwnedCloud, FixedPointIteration, SecantIteration, BisectionIteration, LaggedStability,
        StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale
 
 using Adapt: Adapt, adapt
@@ -280,5 +280,6 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
                                       closure_parameters, with_parameters
 
 include("subgrid_cloud_formulation.jl")
+include("bracketed_fraction_solve.jl")
 
 end # module TurbulenceClosures

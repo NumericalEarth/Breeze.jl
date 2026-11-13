@@ -455,3 +455,30 @@ end
     end
     @test τ[0] != τ[0.3]
 end
+
+@testset "Bracketed solve of the effective saturated fraction ℵ" begin
+    @test summary(BracketedFractionSolve(2)) == "BracketedFractionSolve(2)"
+    @test_throws ArgumentError BracketedFractionSolve(-1)
+    for n in (0, 2)
+        f = SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability_solver = BracketedFractionSolve(n)))
+        model = tke_p3_column(f; subgrid = ClosureCloud(), static_stability = DryStaticStability())
+        @test model.closure.static_stability isa SubgridCloudStaticStability{<:LiquidFluxFraction}
+        state = model.closure_fields.subgrid_cloud.solver_state
+        @test length(state.residuals) == n + 1
+        for _ in 1:3
+            time_step!(model, 30)
+        end
+        Nz = size(model.grid, 3)
+        ℵ = column(state.ℵ)[2:Nz]
+        @test all(x -> 0 ≤ x ≤ 1, ℵ)
+        @test all(x -> 0 ≤ x ≤ 1, column(state.ℵ̃₀)[2:Nz]) && all(x -> 0 ≤ x ≤ 1, column(state.ℵ̃₁)[2:Nz])
+        classified = column(state.classified)[2:Nz]
+        @test all(x -> x ∈ (-1, 0, 1), classified)
+        @test all(ℵ[classified .== -1] .== 0) && all(ℵ[classified .== 1] .== 1)
+        @test all(r -> all(isfinite, column(r)) && all(≥(0), column(r)), state.residuals)
+        @test all(isfinite, column(state.ℵ̃ᶠ))
+        @test all(x -> 0 ≤ x ≤ 1, column(model.closure_fields.subgrid_cloud.cloud.C))
+        @test all(isfinite, column(model.closure_fields.Kᶜ))
+        @test all(isfinite, column(model.tracers.ρe))
+    end
+end
