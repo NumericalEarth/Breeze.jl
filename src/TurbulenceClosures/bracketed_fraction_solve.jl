@@ -50,19 +50,25 @@ solvers. `solver_state` holds `ℵ`, the residual `|R|` after each step, the cla
 `ℵ̃` of the two ends, and `ℵ̃` of the final distribution at the faces, whose difference from `ℵ` is
 the inconsistency left by the local mixing length and the explicit neighbours.
 
+With `lagged_envelope = true` the mixing length inside the solve is also bounded by the
+stratification envelope `ℓˢ` of the column stored before the solve (lagged), blended as the
+mixing length blends its lengths, instead of the local length alone.
+
 `stability_iterations` and `stability_relaxation` of the [`CloudBuoyancyFlux`](@ref) are not used.
 """
 struct BracketedFractionSolve{N, FT}
     classification_tolerance :: FT
-    BracketedFractionSolve{N}(tol::FT) where {N, FT} = new{N, FT}(tol)
+    lagged_envelope :: Bool
+    BracketedFractionSolve{N}(tol::FT, lagged_envelope::Bool = false) where {N, FT} = new{N, FT}(tol, lagged_envelope)
 end
 
-function BracketedFractionSolve(iterations::Integer = 3; classification_tolerance = 1e-8)
+function BracketedFractionSolve(iterations::Integer = 3; classification_tolerance = 1e-8, lagged_envelope = false)
     iterations >= 0 || throw(ArgumentError("iterations must be ≥ 0, got $iterations."))
-    return BracketedFractionSolve{Int(iterations)}(classification_tolerance)
+    return BracketedFractionSolve{Int(iterations)}(classification_tolerance, lagged_envelope)
 end
 
-Base.summary(::BracketedFractionSolve{N}) where N = string("BracketedFractionSolve(", N, ")")
+Base.summary(b::BracketedFractionSolve{N}) where N =
+    string("BracketedFractionSolve(", N, b.lagged_envelope ? ", lagged_envelope = true)" : ")")
 
 const BracketedCloudBuoyancyFlux = CloudBuoyancyFlux{<:Any, <:Any, <:BracketedFractionSolve}
 
@@ -134,7 +140,7 @@ end
 end
 
 # The liquid flux fraction ℵ̃ at face k of the distribution formed with N² = N²ᶜ + ℵ ΔN² there
-@inline function trial_liquid_flux_fraction(ℵ, i, j, k, grid, closure, d, m, cl, input, velocities, θ, qᵗ, e, p, thermodynamics, w)
+@inline function trial_liquid_flux_fraction(ℵ, i, j, k, grid, closure, d, m, cl, input, velocities, θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
     FT = eltype(grid)
     c = d.constants
     cp = d.clipping
@@ -150,6 +156,7 @@ end
     ℓᵇ = ifelse(N²⁺ == 0, FT(Inf), u / sqrt(N²⁺))
     ℓ = blend(length_blending(closure.mixing_length), ℓᵈ, ℓᵇ)
     ℓ = ifelse(isnan(ℓ), ℓᵈ, ℓ)
+    ℓ = blend(length_blending(closure.mixing_length), ℓ, ℓᵉ) # ℓᵉ = Inf without the lagged envelope
 
     # The stability functions and diffusivities of that N² and ℓ
     S² = local_shear_squaredᶜᶜᶠ(i, j, k, grid, closure.shear, closure, velocities, u, ℓ)
@@ -229,7 +236,7 @@ end
 end
 
 @kernel function _bracketed_fraction_solve!(N², state, solver::BracketedFractionSolve{N}, grid, closure, moments, cloud,
-                                            velocities, θ, qᵗ, e, p, thermodynamics) where N
+                                            velocities, θ, qᵗ, e, p, thermodynamics, ℓˢ) where N
     i, j, k = @index(Global, NTuple)
     FT = eltype(grid)
     Nz = size(grid, 3)
@@ -240,9 +247,10 @@ end
     d = closure_ij.subgrid_cloud_formulation.distribution
     w = velocities.w
     tol = convert(FT, solver.classification_tolerance)
+    ℓᵉ = ifelse(solver.lagged_envelope, @inbounds(ℓˢ[i, j, kₛ]), FT(Inf))
     input = fraction_face_inputs(i, j, kₛ, grid, closure_ij, d, moments, cloud, θ, qᵗ, e, p, thermodynamics)
     ℵ̃(x) = trial_liquid_flux_fraction(x, i, j, kₛ, grid, closure_ij, d, moments, cloud, input, velocities,
-                                      θ, qᵗ, e, p, thermodynamics, w)
+                                      θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
 
     # The two ends
     t₀ = ℵ̃(zero(FT))
@@ -341,7 +349,7 @@ function cloud_buoyancy_stability!(buoyancy_flux::BracketedCloudBuoyancyFlux, fi
     s = distribution_state(model, nothing)
     state = fields.solver_state
     launch!(arch, grid, parameters, _bracketed_fraction_solve!, closure_fields.N², state, buoyancy_flux.stability_solver,
-            grid, closure, fields.moments, fields.cloud, model.velocities, s.θ, s.qᵗ, s.e, s.p, s.thermodynamics)
+            grid, closure, fields.moments, fields.cloud, model.velocities, s.θ, s.qᵗ, s.e, s.p, s.thermodynamics, closure_fields.ℓˢ)
     # The column envelope of the mixing length, the diffusivities and the distribution, once
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
     launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)

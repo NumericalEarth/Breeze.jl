@@ -459,8 +459,9 @@ end
 @testset "Bracketed solve of the effective saturated fraction ℵ" begin
     @test summary(BracketedFractionSolve(2)) == "BracketedFractionSolve(2)"
     @test_throws ArgumentError BracketedFractionSolve(-1)
-    for n in (0, 2)
-        f = SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability_solver = BracketedFractionSolve(n)))
+    @test summary(BracketedFractionSolve(1; lagged_envelope = true)) == "BracketedFractionSolve(1, lagged_envelope = true)"
+    for (n, lagged_envelope) in ((0, false), (2, false), (2, true))
+        f = SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability_solver = BracketedFractionSolve(n; lagged_envelope)))
         model = tke_p3_column(f; subgrid = ClosureCloud(), static_stability = DryStaticStability())
         @test model.closure.static_stability isa SubgridCloudStaticStability{<:LiquidFluxFraction}
         state = model.closure_fields.subgrid_cloud.solver_state
