@@ -11,6 +11,9 @@ paths:
   values of positional and keyword arguments shown, and it stays in sync with the method.
 - Use `$(TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN)` (also from `Breeze.Utils`) when the inferred
   return type is too long to be worth printing, such as a `Union` of deeply parametrized types.
+- Never call `DocStringExtensions.TypedMethodSignatures(...)` or `MethodSignatures(...)` directly.
+  Their keyword constructors exist only in DocStringExtensions v0.10, and Breeze also supports v0.9,
+  where the two constants above fall back to plain `TYPEDSIGNATURES`.
 - Code examples in docstrings are `jldoctest` blocks, not `julia` blocks. Doctests run in the
   `doctests` test; plain `julia` blocks are never executed and go stale silently.
 - End a doctest with an expression whose `show` output is worth reading, and put that output after
