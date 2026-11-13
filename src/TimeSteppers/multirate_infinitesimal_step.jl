@@ -155,6 +155,25 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
+The interval over which microphysical sinks are budgeted so that they leave every species
+non-negative: ``Δt / C``, with ``C`` the strong-stability coefficient of the coefficient set
+(see [`strong_stability_coefficient`](@ref)). Every MIS stage of a slow variable is then a
+convex combination of forward-Euler steps no longer than this, each from the state its
+tendency was evaluated at, which is the state [`AtmosphereModels.StageStart`](@ref) budgets
+against by default.
+
+A coefficient set with ``C = 0`` has no such decomposition. The full step ``Δt`` is used,
+which bounds the drain of the final stage's own tendency but guarantees nothing.
+"""
+@inline function AtmosphereModels.stage_time_step(ts::MultirateInfinitesimalStep, clock)
+    Δt = ifelse(isfinite(ts.current_Δt[]), ts.current_Δt[], clock.last_Δt)
+    C = ts.tableau.strong_stability_coefficient
+    return ifelse(C > 0, Δt / C, Δt)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
 Whether the tendencies the next `update_state!` builds feed the first stage of an outer step, so that
 state an advection scheme freezes for the whole step (see `Breeze.Advection.FrozenWeightsWENO`) is
 to be refreshed from the current fields. `true` for every time stepper but MIS, which raises

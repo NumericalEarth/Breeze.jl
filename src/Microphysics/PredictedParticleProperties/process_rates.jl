@@ -214,6 +214,7 @@ struct P3ProcessRates{FT}
     cloud_homogeneous_number :: FT # Cloud number → ice [1/kg/s]
     rain_homogeneous_mass :: FT    # Rain → ice from homogeneous freezing [kg/kg/s]
     rain_homogeneous_number :: FT  # Rain number → ice [1/kg/s]
+    homogeneous_number_excess :: FT # Frozen number above the ice number cap, not handed to ice [1/kg/s]
 
     # Above-freezing collection (T > T₀). Cloud collection goes to qʷⁱ in
     # liquid-fraction mode and sheds to rain otherwise; rain mass transfers only to qʷⁱ.
@@ -966,6 +967,16 @@ end
 
     ni_correction = ifelse(whole_particle_clipping, zero(FT),
                            (nⁱ - nⁱ_global) / dt_safety)
+
+    # Immersion freezing removes whole drops, so it cannot freeze more drops than rain
+    # holds. The mass budget `f_rain` does not bound the number: the per-drop freezing
+    # rate is uncapped, and rain mass sources (shedding, melting) can keep `f_rain`
+    # near one while the frozen number exceeds the drops present. Limit the frozen
+    # number against the existing drops plus the drops that sources deliver.
+    rain_freezing_number_available = max(0, nʳ) / dt_safety +
+                                     autoconv / rain_seed_drop_mass(p3) + shed_n + wg_shed_n
+    rain_frz_n = min(rain_frz_n, rain_freezing_number_available)
+
     ice_number_source_total = nuc_n + cloud_frz_n + rain_frz_n + spl_n
     # Global and DSD corrections conceptually replace the raw population with
     # the bounded one before physical processes act. Give particle-removing
@@ -1004,9 +1015,9 @@ end
     clipping_rime_volume = clipping_rime_volume + post_clip_rime_volume
     post_process_clipping = ifelse(post_process_clipping_active, one(FT), zero(FT))
 
-    # Reserve the immersion-frozen drops first: their number companion must retain
-    # the same species-budget ratio as rain_freezing_mass.
-    # Project the remaining number-only sinks onto the population left afterward.
+    # Reserve the immersion-frozen drops first (their number was limited against the
+    # available drops above), then project the remaining number-only sinks onto the
+    # population left afterward.
     cloud_warm_rain_number = ifelse(
         tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q / parameters.shed_drop_mass)
 
@@ -1092,6 +1103,17 @@ end
     rain_hom_q = rain_hom_q * f_rain_hom
     rain_hom_n = rain_hom_n * f_rain_hom
 
+    # Homogeneous freezing hands ice the number of the liquid it freezes, which for cloud
+    # droplets is orders of magnitude above `maximum_ice_number_density`. Liquid loses every
+    # frozen drop, but ice keeps only the number that fits under that cap: the excess is
+    # never handed to ice, rather than created now and relaxed away later, when the source
+    # may have switched off. The frozen mass is unchanged, so the same mass freezes onto
+    # fewer, larger particles.
+    homogeneous_number = cloud_hom_n + rain_hom_n
+    ice_number_capacity = max(0, parameters.maximum_ice_number_density / ρ - ice_number_remaining)
+    f_hom_number = sink_limiting_factor(homogeneous_number, ice_number_capacity, dt_safety)
+    hom_n_excess = (1 - f_hom_number) * homogeneous_number
+
     # DSD number correction feedback
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
@@ -1132,7 +1154,7 @@ end
         shed, shed_n, refrz,
         nuc_q, nuc_n, cloud_frz_q, cloud_frz_n, rain_frz_q, rain_frz_n,
         spl_q, spl_n,
-        cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n,
+        cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n, hom_n_excess,
         cloud_warm_q, cloud_warm_n, rain_warm_q, rain_warm_n,
         wg_cloud, wg_rain,
         wg_shed, wg_shed_n,

@@ -380,8 +380,10 @@ end
 @inline AM.microphysical_state(::P3, ρ, ::Nothing, 𝒰, velocities) = AM.NothingMicrophysicalState(typeof(ρ))
 @inline AM.microphysical_state(::P3, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = AM.NothingMicrophysicalState(typeof(ρ))
 
-# Apply the same rime-state writeback to parcel prognostics that
-# `AM.update_microphysical_fields!` applies to grid fields.
+# Write the consistent rime state back to parcel prognostics after each parcel substep.
+# The grid path does not: there, the projection is applied only where the state is read
+# (see `AM.update_microphysical_fields!`), because writing it back would overwrite the
+# prognostics between the stages of a multistage time step.
 @inline function AM.postprocess_microphysical_prognostics(p3::P3, μ::NamedTuple, ρ)
     qⁱ = μ.ρqⁱ / ρ
     qᶠ = μ.ρqᶠ / ρ
@@ -470,24 +472,11 @@ end
                                  moments.nⁱ, ρ_mean)
 end
 
-# Write the consistent rime state back to the prognostic densities. `grid_microphysical_state`
-# already passes `ρqᶠ`/`ρbᶠ` through `consistent_rime_state`, so `ℳ.qᶠ`/`ℳ.bᶠ` are what every
-# process rate sees, and (through `μ.qᶠ`/`μ.bᶠ`) what the scalar transport operators advect:
-# the correction zeroes `qᶠ` when the rime volume vanishes, zeroes both below the rime-mass
-# floor, and caps `qᶠ` at the dry ice mass.
-#
-# Without this writeback the prognostic keeps the uncorrected mass while the advected specific
-# field reports the corrected one, so hidden rime receives no transport while the ice carrying
-# it moves away, then reappears once the correction stops firing.
-#
-# Rime mass is a *component* of the ice mass rather than an independent water reservoir
-# (`condensate_field_names` excludes `ρqᶠ`), so the clip moves the rime fraction Fᶠ and never
-# the total water or the total density.
-@inline function clamp_rime_state!(μ, i, j, k, ρ, ℳ::P3MicrophysicalState)
-    @inbounds μ.ρqᶠ[i, j, k] = ρ * ℳ.qᶠ
-    @inbounds μ.ρbᶠ[i, j, k] = ρ * ℳ.bᶠ
-    return nothing
-end
+# The rime state is made consistent where it is read (`consistent_rime_state`, inside
+# `grid_microphysical_state`), never written back to the prognostics. Writing it back would
+# overwrite the prognostic densities between the stages of a time step, which multistage
+# time steppers cannot account for, and would add grid-scale noise wherever it fires.
+# Transport stays consistent because the specific rime fields advect the raw prognostics.
 
 # GPU-compatible update_microphysical_fields! for P3.
 # Bypasses the generic extract_microphysical_prognostics which uses runtime Symbol
@@ -504,7 +493,6 @@ end
         # in the tendency kernel.
         velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
         ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
-        clamp_rime_state!(μ, i, j, k, ρ, ℳ)
         AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3, ℳ, ρ, 𝒰, constants)
     end
     return nothing
@@ -543,8 +531,10 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.nʳ[i, j, k]  = ℳ.nʳ
     @inbounds μ.qⁱ[i, j, k]  = ℳ.qⁱ
     @inbounds μ.nⁱ[i, j, k]  = ℳ.nⁱ
-    @inbounds μ.qᶠ[i, j, k]  = ℳ.qᶠ
-    @inbounds μ.bᶠ[i, j, k]  = ℳ.bᶠ
+    # The raw prognostic ratios, not the consistent rime state the rates see: these are what
+    # transport advects, and they must equal ρqᶠ / ρ and ρbᶠ / ρ.
+    @inbounds μ.qᶠ[i, j, k]  = μ.ρqᶠ[i, j, k] / ρ
+    @inbounds μ.bᶠ[i, j, k]  = μ.ρbᶠ[i, j, k] / ρ
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
     write_cloud_number_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
     write_aerosol_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
@@ -688,15 +678,21 @@ end
                                      constants, properties::P3ProcessProps,
                                      surface_temperature, temperature_tendency,
                                      pressure_tendency)
-    Fᶠ = properties.Fᶠ
-    ρᶠ = properties.ρᶠ
     # Passing `properties` lets compute_p3_process_rates skip the redundant
     # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                      surface_temperature, temperature_tendency,
                                      pressure_tendency)
 
-    # Tendency extraction
+    return p3_tendencies(p3, ρ, ℳ, properties, rates)
+end
+
+# The tendency of every P3 prognostic from one set of process rates.
+@inline function p3_tendencies(p3::P3, ρ, ℳ::P3MicrophysicalState, properties::P3ProcessProps,
+                               rates::P3ProcessRates)
+    Fᶠ = properties.Fᶠ
+    ρᶠ = properties.ρᶠ
+
     cloud_mass_tendency = tendency_ρqᶜˡ(rates, ρ)
     # Prescribed-Nᶜˡ path: nc is a scheme parameter (not advected); tendency = 0.
     cloud_number_tendency = isnothing(p3.aerosol) ? zero(typeof(ρ)) :

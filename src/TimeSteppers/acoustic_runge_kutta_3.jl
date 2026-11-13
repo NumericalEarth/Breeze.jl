@@ -181,6 +181,11 @@ the cost is confined to CFL targeting on one stage when ``Δt`` changes (see
     return ifelse(isfinite(Δt_stage), Δt_stage, Δt_last)
 end
 
+# Stages 2 and 3 update from U⁰. The tendencies of stage 1 are built at the end of the
+# previous step, when the current state is the coming Uⁿ.
+@inline AtmosphereModels.stage_starts_from_initial_state(::AcousticRungeKutta3, clock) = clock.stage > 1
+@inline AtmosphereModels.initial_state_fields(timestepper::AcousticRungeKutta3, model) = timestepper.U⁰
+
 #####
 ##### Per-stage substep wrapper
 #####

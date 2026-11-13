@@ -299,6 +299,86 @@ override this method directly to compute the bundle once per cell.
 compute_microphysical_tendencies!(model) =
     compute_microphysical_tendencies!(model.microphysics, model)
 
+#####
+##### The stage that the tendencies being built will be applied over
+#####
+#
+# A multi-stage time stepper applies the tendencies evaluated at one state to another:
+# Wicker–Skamarock RK3 evaluates them at the latest stage state and adds them to the
+# step-start state. A scheme that budgets its sinks against the state it is evaluated at
+# therefore guarantees nothing about the state it is applied to. `StageStart` hands a
+# microphysics kernel what it needs to budget against the right one.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether the coming stage of `timestepper` starts from the state at the start of the time
+step (`true`) or from the current state (`false`, as for forward Euler and SSP-RK3 stages).
+"""
+@inline stage_starts_from_initial_state(timestepper, clock) = false
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The prognostic fields at the start of the time step, for time steppers whose stages start
+from them (see [`stage_starts_from_initial_state`](@ref)); otherwise the current fields.
+"""
+@inline initial_state_fields(timestepper, model) = prognostic_fields(model)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The interval over which the coming stage applies the tendencies being built. It is not
+finite before the first time step.
+"""
+@inline stage_time_step(timestepper, clock) =
+    Oceananigans.Advection.adaptive_advection_timestep(timestepper, clock)
+
+"""
+$(TYPEDEF)
+
+The state that the coming stage starts from, and the interval `Δt` it advances over, for
+kernels that build tendencies. See [`stage_start_value`](@ref).
+"""
+struct StageStart{I, C, B, T}
+    initial :: I       # fields at the start of the time step
+    current :: C       # fields now
+    from_initial :: B  # whether the coming stage starts from `initial`
+    Δt :: T            # interval of the coming stage
+end
+
+# `from_initial` and `Δt` are adapted too: under Reactant both are traced numbers
+# that the kernel adaptor must convert.
+Adapt.adapt_structure(to, s::StageStart) =
+    StageStart(adapt(to, s.initial), adapt(to, s.current), adapt(to, s.from_initial), adapt(to, s.Δt))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The [`StageStart`](@ref) of `model` for the prognostic fields that `select` picks out of a
+`NamedTuple` of them.
+"""
+function StageStart(model, select)
+    timestepper = model.timestepper
+    grid = model.grid
+    Δt = kernel_time_step(grid.architecture, grid, stage_time_step(timestepper, model.clock))
+    return StageStart(select(initial_state_fields(timestepper, model)),
+                      select(prognostic_fields(model)),
+                      stage_starts_from_initial_state(timestepper, model.clock),
+                      Δt)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The value at `(i, j, k)` of the field `name` at the state the coming stage starts from.
+"""
+@inline function stage_start_value(i, j, k, s::StageStart, ::Val{name}) where name
+    @inbounds initial = getproperty(s.initial, name)[i, j, k]
+    @inbounds current = getproperty(s.current, name)[i, j, k]
+    return ifelse(s.from_initial, initial, current)
+end
+
 # No microphysics: nothing to add.
 compute_microphysical_tendencies!(::Nothing, model) = nothing
 

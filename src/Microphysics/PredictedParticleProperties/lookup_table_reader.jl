@@ -55,7 +55,7 @@ function read_lookup_tables(directory::AbstractString;
                             minimum_mass_mixing_ratio = 1e-14,
                             minimum_number_mixing_ratio = 1e-16,
                             precipitation_boundary_condition = nothing,
-                            negative_moisture_correction = SpeciesBorrowing(),
+                            negative_moisture_correction = nothing,
                             aerosol = nothing,
                             cloud = nothing,
                             rain = nothing,

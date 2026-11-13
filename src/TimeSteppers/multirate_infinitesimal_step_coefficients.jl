@@ -24,8 +24,9 @@ $(TYPEDEF)
 
 Coefficients of a multirate infinitesimal step (MIS) method in the convention of
 [Knoth and Wensch (2014)](@cite KnothWensch2014): lower-triangular `α`, `β` (with diagonal)
-and `γ`, the stage interval fractions `d` (row sums of `β`), and the stage abscissae `c`
-(stage ``i`` ends at ``tⁿ + cᵢ Δt``).
+and `γ`, the stage interval fractions `d` (row sums of `β`), the stage abscissae `c`
+(stage ``i`` ends at ``tⁿ + cᵢ Δt``), and the strong-stability coefficient of the slow
+method (see [`strong_stability_coefficient`](@ref)).
 """
 struct MultirateInfinitesimalStepTableau{FT}
     α :: Matrix{FT}
@@ -33,6 +34,7 @@ struct MultirateInfinitesimalStepTableau{FT}
     γ :: Matrix{FT}
     d :: Vector{FT}
     c :: Vector{FT}
+    strong_stability_coefficient :: FT
 end
 
 Base.summary(::MultirateInfinitesimalStepTableau{FT}) where FT = "MultirateInfinitesimalStepTableau{$FT}"
@@ -53,7 +55,64 @@ function MultirateInfinitesimalStepTableau(FT, α, β, γ)
         end
     end
 
-    return MultirateInfinitesimalStepTableau{FT}(α, β, γ, d, c)
+    return MultirateInfinitesimalStepTableau{FT}(α, β, γ, d, c, strong_stability_coefficient(α, β, γ))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The strong-stability (SSP) coefficient ``C`` of the slow method of an MIS coefficient set: the
+radius of absolute monotonicity ([Kraaijevanger (1991)](@cite Kraaijevanger1991)) of the
+Runge–Kutta method that the set reduces to for a variable with no fast tendency,
+
+```math
+Yᵢ = Uⁿ + Σⱼ (αᵢⱼ + γᵢⱼ) (Yⱼ - Uⁿ) + Δt Σⱼ βᵢⱼ S(Yⱼ₋₁) .
+```
+
+For ``C > 0`` every stage is a convex combination of forward-Euler steps of length at most
+``Δt / C``, each taken from the state its tendency was evaluated at. A tendency that keeps a
+variable non-negative over a forward-Euler step of length ``Δt / C`` therefore keeps it
+non-negative over the whole step. ``C = 0`` (Wicker–Skamarock RK3, for example) means there is
+no such decomposition, and no forward-Euler bound carries over.
+"""
+function strong_stability_coefficient(α, β, γ)
+    s = size(β, 1)
+
+    # ΔYᵢ = Δt Σⱼ K[i, j] S(Yⱼ₋₁)
+    K = zeros(s, s)
+    for i in 1:s
+        K[i, :] .= β[i, :]
+        for j in 1:i-1
+            K[i, :] .+= (α[i, j] + γ[i, j]) .* K[j, :]
+        end
+    end
+
+    # Rows are the states Y₀, …, Yₛ and columns the tendencies evaluated at them, so `M` is
+    # strictly lower triangular and `I + r M` is inverted by forward substitution.
+    n = s + 1
+    M = zeros(n, n)
+    M[2:n, 1:s] .= K
+
+    # Absolutely monotonic at r: M (I + r M)⁻¹ ≥ 0 and (I + r M)⁻¹ 𝟏 ≥ 0.
+    function absolutely_monotonic(r)
+        inverse = zeros(n, n)
+        for column in 1:n, row in 1:n
+            identity = row == column ? 1.0 : 0.0
+            inverse[row, column] = identity - r * sum(M[row, m] * inverse[m, column] for m in 1:row-1; init=0.0)
+        end
+        tolerance = 1e-12
+        return all(M * inverse .≥ -tolerance) && all(sum(inverse, dims=2) .≥ -tolerance)
+    end
+
+    absolutely_monotonic(1e-9) || return 0.0
+
+    lower, upper = 0.0, 16.0
+    for _ in 1:60
+        r = (lower + upper) / 2
+        absolutely_monotonic(r) ? (lower = r) : (upper = r)
+    end
+
+    return lower
 end
 
 number_of_stages(tableau::MultirateInfinitesimalStepTableau) = length(tableau.d)
