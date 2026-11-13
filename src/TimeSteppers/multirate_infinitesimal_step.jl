@@ -482,6 +482,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
     θ_name = thermodynamic_density_name(model.formulation)
     C = fast_tendency_scratch(ts, θ_name)
     compute_linearized_thermodynamic_flux_divergence!(C, ts.substepper, model)
+    assemble_scalar_start_states!(ts.scalar_tendencies, ts, model)
     compute_step_start_moisture_content!(ts.step_start, ts.substepper, model, ts.Uⁿ)
     assemble_transport_density_tendency!(ts, model, Δt)
     for name in pre_loop_assembly_names(ts.scalar_tendencies, model)
@@ -531,6 +532,44 @@ end
         Gᵗ[i, j, k] = stage_accumulation(Tᵢ, i, j, k) + wγᵢ * ΔY + wβᵢ * G
         start_accumulators!(i, j, k, Tᵢ, T, wγᵏ, ΔY, wβᵏ, G)
     end
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+With [`PostLoopScalarTendencies`](@ref), write the start states ``U⁰ = Uⁿ + Zᵢ`` of the moisture,
+the microphysical prognostics and the tracers before the acoustic loop of stages 2 to ``s``. Their
+stage forcing is assembled after the loop, but the loop's pressure reads the start state of the
+moisture and the condensate (`moisture_content_arguments`). Left to
+`assemble_post_loop_stage_forcing!`, which writes the same values again, the loop would read the
+start state of the stage before (in stage 2, of the last stage of the step before, which a
+checkpoint does not hold). The offsets are complete at stage entry, because the increments of
+these fields are stored when a stage completes (see `stage_increment_source`).
+"""
+assemble_scalar_start_states!(::PreLoopScalarTendencies, ts, model) = nothing
+
+function assemble_scalar_start_states!(::PostLoopScalarTendencies, ts::MultirateInfinitesimalStep, model)
+    i = ts.stage[]
+    i == 1 && return nothing # stage 1 starts from Uⁿ itself (see `stage_start_state`)
+
+    grid = model.grid
+    # `accumulators[1].offset` holds the raw ΔY₁ in stage 2, and Zᵢ is in `accumulators[i - 2]` after that.
+    αᵢ = i == 2 ? ts.tableau.α[2, 1] : one(eltype(ts.tableau.d))
+    offsets = ts.accumulators[max(i - 2, 1)].offset
+
+    for name in scalar_prognostic_names(model)
+        stage_increment_source(model, name) isa StoredIncrement || continue
+        U⁰ = ts.U⁰[name]
+        launch!(architecture(grid), grid, stage_assembly_parameters(model, U⁰), _assemble_start_state!,
+                U⁰, ts.Uⁿ[name], offsets[name], αᵢ)
+    end
+
+    return nothing
+end
+
+@kernel function _assemble_start_state!(U⁰, Uⁿ, Z, α)
+    i, j, k = @index(Global, NTuple)
+    @inbounds U⁰[i, j, k] = Uⁿ[i, j, k] + α * Z[i, j, k]
 end
 
 pre_loop_assembly_names(::PreLoopScalarTendencies, model) = keys(prognostic_fields(model))
