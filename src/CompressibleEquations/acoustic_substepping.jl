@@ -1369,19 +1369,19 @@ end
 # recovery and halo fill.
 #
 # Each sum is rounded with the round-off treatment `rounding` (see `RoundingTreatments`);
-# `key` seeds its random numbers, offset by one per prognostic.
+# `key` seeds its random numbers, offset by one per prognostic with `offset_rounding_key`.
 @kernel function _recover_full_state!(ρ, ρθ, m,
                                       ρ′, ρθ′, ρu′, ρv′, ρw′,
                                       ρᴸ, ρuᴸ, ρvᴸ, ρwᴸ, ρθᴸ,
                                       grid, dynamics, rounding, key)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρᵐ⁺  = rounded_add(rounding, ρᴸ[i, j, k],  ρ′[i, j, k],  i, j, k, key + 0x00000001)
-        ρθᵐ⁺ = rounded_add(rounding, ρθᴸ[i, j, k], ρθ′[i, j, k], i, j, k, key + 0x00000002)
-        ρuᵐ⁺ = rounded_add(rounding, ρuᴸ[i, j, k], ρu′[i, j, k], i, j, k, key + 0x00000003)
-        ρvᵐ⁺ = rounded_add(rounding, ρvᴸ[i, j, k], ρv′[i, j, k], i, j, k, key + 0x00000004)
+        ρᵐ⁺  = rounded_add(rounding, ρᴸ[i, j, k],  ρ′[i, j, k],  i, j, k, offset_rounding_key(key, 1))
+        ρθᵐ⁺ = rounded_add(rounding, ρθᴸ[i, j, k], ρθ′[i, j, k], i, j, k, offset_rounding_key(key, 2))
+        ρuᵐ⁺ = rounded_add(rounding, ρuᴸ[i, j, k], ρu′[i, j, k], i, j, k, offset_rounding_key(key, 3))
+        ρvᵐ⁺ = rounded_add(rounding, ρvᴸ[i, j, k], ρv′[i, j, k], i, j, k, offset_rounding_key(key, 4))
         ρwᵐ⁺ = rounded_recovered_vertical_momentum(rounding, i, j, k, grid, dynamics, ρwᴸ[i, j, k],
-                                                   ρu′, ρv′, ρw′, key + 0x00000005)
+                                                   ρu′, ρv′, ρw′, offset_rounding_key(key, 5))
 
         ρ[i, j, k]  = ρᵐ⁺
         ρθ[i, j, k] = ρθᵐ⁺
@@ -1713,9 +1713,9 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # recovery kernel reads them as Uᴸ AND writes the full state back to the
     # same fields; per-thread read-before-write makes this aliasing safe
     # because all reads are local to the same grid point. The sums are rounded with `rounding`;
-    # field number 0 keeps their keys apart from those of the scalar updates.
+    # field numbers from 0x8000 keep their keys apart from those of the scalar updates.
     ρᵡ = thermodynamic_density(model.formulation)
-    key = rounding_key(rounding, model.clock.iteration, model.clock.stage, 0)
+    key = rounding_key(rounding, model.clock.iteration, model.clock.stage, 0x8000)
     launch!(arch, grid, :xyz, _recover_full_state!,
             model.dynamics.dry_density, ρᵡ,
             model.momentum,
