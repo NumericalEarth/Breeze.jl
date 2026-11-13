@@ -66,7 +66,7 @@ end
             rates = @allowscalar begin
                 inputs = p3_grid_process_inputs(1, 1, k, grid, model.microphysics, μ,
                                                 model.formulation, model.dynamics, constants,
-                                                ρ, model.velocities)
+                                                ρ, model.velocities, nothing, nothing)
                 compute_p3_process_rates(model.microphysics, inputs.ρ, inputs.ℳ, inputs.𝒰, constants,
                                          inputs.properties, inputs.surface_temperature,
                                          inputs.temperature_tendency, inputs.pressure_tendency)
