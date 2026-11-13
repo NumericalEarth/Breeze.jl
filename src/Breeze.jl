@@ -247,7 +247,7 @@ export
     SphericalCoriolis, HydrostaticSphericalCoriolis,
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
     TKEBasedTurbulenceClosure, AbstractMixingLength, LocalMinimumMixingLength, IntegralMixingLength,
-    GradientLimitedMixingLength, ConstantStabilityFunctions,
+    GradientLimitedMixingLength, HardMinimum, HarmonicBlend, ConstantStabilityFunctions,
     RationalStabilityFunction,
     DryStaticStability, MoistStaticStability, SubgridCloudStaticStability,
     GridMeanShear, TurbulenceAugmentedShear,

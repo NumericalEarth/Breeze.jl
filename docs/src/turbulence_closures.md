@@ -75,6 +75,15 @@ The mixing length is stored in `closure_fields.ℓᵐ`. The standalone construct
 ``ℂˢ = 1.316`` (`GradientLimitedMixingLength(ℂˢ=c)` also sets ``ℂⁱ = c``); the default closure uses the
 calibrated ``ℂˢ ≈ 0.788`` and ``ℂⁱ ≈ 1.78``.
 
+Each minimum above is the `blending` of the mixing length. The default, [`HardMinimum`](@ref), is
+continuous with a derivative that jumps where the binding length changes.
+[`HarmonicBlend`](@ref) replaces it with ``(ℓ₁^{-p} + ℓ₂^{-p})^{-1/p}``, which is smooth, never
+exceeds the minimum and tends to it as ``p → ∞``. In the gradient-limited length the blend is applied
+where the wall length meets the envelope and, recursively, at every step of the two sweeps that
+build the envelope. The recursion is not the ``p``-norm of all the bounds at once: every level
+between an obstacle and the level of interest adds its own bound again, so the blended envelope
+lies below the hard one by an amount that depends on ``p`` and on the grid spacing.
+
 ### Static stability
 
 ``N²`` enters the stratification length, the buoyancy flux, and ``Ri``. It is diagnosed once per
