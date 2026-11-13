@@ -310,6 +310,10 @@ end
 @inline AtmosphereModels.prognostic_moisture_phase_fractions(i, j, k, grid, bμp::NPBM, μ, q) =
     AtmosphereModels.prognostic_moisture_phase_fractions(i, j, k, grid, bμp.cloud_formation, μ, q)
 
+# Forward saturation_adjusted_equilibrium to cloud_formation scheme
+@inline AtmosphereModels.saturation_adjusted_equilibrium(bμp::BulkMicrophysics) =
+    AtmosphereModels.saturation_adjusted_equilibrium(bμp.cloud_formation)
+
 # Forward state-based moisture_fractions to cloud_formation scheme
 @inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵛ)
     return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)

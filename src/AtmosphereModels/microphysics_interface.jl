@@ -885,6 +885,20 @@ pressure with the sensitivities of these phases.
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
+Return the phase equilibrium to which the scheme adjusts the partition of its prognostic moisture
+density ([`moisture_prognostic_name`](@ref)) in saturated air, or `nothing` if it adjusts none.
+
+The default is `nothing`: a scheme with prognostic condensate holds the partition it carries.
+Saturation adjustment returns its equilibrium. In a cell where such a scheme holds cloud
+condensate (where [`prognostic_moisture_phase_fractions`](@ref) gives the vapor no share), the
+pressure that the compressible core re-diagnoses is that of the adjusted partition, in which
+warming evaporates condensate, and the acoustic substep loop linearizes that pressure.
+"""
+@inline saturation_adjusted_equilibrium(microphysics) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
 Return the microphysical velocities associated with `microphysics`, `microphysical_fields`, and tracer `name`.
 
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
