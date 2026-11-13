@@ -66,6 +66,9 @@ moist-buoyancy weighting of [Cuijpers and Duynkerke (1993)](@cite CuijpersDuynke
 Breeze holds no model of ``w``. An external `cloud_model` supplies it by extending
 [`saturated_stability_weightᶜᶜᶠ`](@ref Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ);
 without a method for the model, computing ``N²`` throws a `MethodError`.
+`SubgridCloudStaticStability()`, without a model, takes the subgrid model of the microphysics
+([`MicrophysicsSubgridModel`](@ref Breeze.TurbulenceClosures.MicrophysicsSubgridModel)), so that
+the condensation and the turbulence see one subgrid cloud with one set of coefficients.
 ``N²`` is stored in `closure_fields.N²`, which the mixing length, the Richardson number, the
 buoyancy flux and the implicit sinks of the TKE equation all read.
 
@@ -91,6 +94,29 @@ struct SubgridCloudStaticStability{M}
     cloud_model :: M
 end
 
+"""
+$(TYPEDEF)
+
+The `cloud_model` of a [`SubgridCloudStaticStability`](@ref) constructed without one: the weight
+is that of the subgrid model the microphysics holds, found by
+[`microphysics_subgrid_model`](@ref Breeze.TurbulenceClosures.microphysics_subgrid_model).
+"""
+struct MicrophysicsSubgridModel end
+
+SubgridCloudStaticStability() = SubgridCloudStaticStability(MicrophysicsSubgridModel())
+
+Base.show(io::IO, ::MicrophysicsSubgridModel) = print(io, "MicrophysicsSubgridModel()")
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The subgrid model that `microphysics` holds, whose weight
+[`SubgridCloudStaticStability`](@ref)`()` uses: for P3, the model in its subgrid supersaturation
+hook. `nothing` for a microphysics scheme without one, for which there is no weight.
+"""
+@inline microphysics_subgrid_model(microphysics) = nothing
+@inline microphysics_subgrid_model(p3::PredictedParticlePropertiesMicrophysics) = p3.subgrid_supersaturation
+
 # The cloud model may hold traced coefficients when the closure is differentiated.
 Adapt.adapt_structure(to, ss::SubgridCloudStaticStability) = SubgridCloudStaticStability(adapt(to, ss.cloud_model))
 
@@ -115,6 +141,9 @@ length itself is computed from ``N²``.
 ``w`` should lie in ``[0, 1]`` and must be finite; it is not clipped.
 """
 function saturated_stability_weightᶜᶜᶠ end
+
+@inline saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ::MicrophysicsSubgridModel, buoyancy, tracers, closure_fields) =
+    saturated_stability_weightᶜᶜᶠ(i, j, k, grid, microphysics_subgrid_model(buoyancy.microphysics), buoyancy, tracers, closure_fields)
 
 @inline function static_stabilityᶜᶜᶠ(i, j, k, grid, ss::SubgridCloudStaticStability, buoyancy, tracers, closure_fields)
     N²ᵈ = ∂z_b(i, j, k, grid, buoyancy, tracers)

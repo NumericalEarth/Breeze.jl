@@ -114,8 +114,10 @@ Adapt.@adapt_structure TurbulenceAugmentedShear
 
 # The closure's `minimum_shear_squared` keyword replaces the floor of whichever shear it is given
 with_minimum_shear_squared(shear, ::Nothing) = shear
-with_minimum_shear_squared(::GridMeanShear, S²ᵐⁱⁿ) = GridMeanShear(S²ᵐⁱⁿ)
-with_minimum_shear_squared(shear::TurbulenceAugmentedShear, S²ᵐⁱⁿ) =
+with_minimum_shear_squared(shear, S²ᵐⁱⁿ::Number) = replace_minimum_shear_squared(shear, S²ᵐⁱⁿ)
+
+replace_minimum_shear_squared(::GridMeanShear, S²ᵐⁱⁿ) = GridMeanShear(S²ᵐⁱⁿ)
+replace_minimum_shear_squared(shear::TurbulenceAugmentedShear, S²ᵐⁱⁿ) =
     TurbulenceAugmentedShear(shear.turbulence_shear_coefficient, S²ᵐⁱⁿ)
 
 function validate_shear(shear)

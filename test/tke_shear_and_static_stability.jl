@@ -10,7 +10,7 @@ using Breeze.TurbulenceClosures: TurbulenceClosures, TKE_NAME, Riᶜᶜᶠ, Ri�
                                  static_stabilityᶜᶜᶠ, saturated_static_stabilityᶜᶜᶠ,
                                  turbulence_shear_squaredᶜᶜᶠ, effective_shear_squaredᶜᶜᶠ,
                                  tke_stability_functionᶜᶜᶠ, dissipation_stability_functionᶜᶜᶜ,
-                                 with_minimum_shear_squared
+                                 with_minimum_shear_squared, MicrophysicsSubgridModel, microphysics_subgrid_model
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.TurbulenceClosures: buoyancy_tracers, buoyancy_force
@@ -29,6 +29,12 @@ struct ConstantWeight{FT}
 end
 
 @inline TurbulenceClosures.saturated_stability_weightᶜᶜᶠ(i, j, k, grid, model::ConstantWeight, buoyancy, tracers, closure_fields) = model.w
+
+# In P3's subgrid supersaturation hook the constant weight is a model without a correlation
+const PPP = Breeze.Microphysics.PredictedParticleProperties
+PPP.subgrid_supersaturation_fields(::ConstantWeight, model) = nothing
+@inline PPP.subgrid_supersaturation_statistics(i, j, k, grid, ::ConstantWeight, fields) = nothing
+@inline PPP.subgrid_supersaturation(::ConstantWeight, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) = zero(qᵛ)
 
 struct MixingLengthWeight{FT}
     ℓ⁰ :: FT
@@ -229,7 +235,9 @@ end
     interior_faces = 2:Nz
 
     @test isbits(SubgridCloudStaticStability(ConstantWeight(FT(0.5))))
-    @test sprint(show, SubgridCloudStaticStability(ConstantWeight(0.5))) == "SubgridCloudStaticStability(ConstantWeight{Float64}(0.5))"
+    @test startswith(sprint(show, SubgridCloudStaticStability(ConstantWeight(0.5))), "SubgridCloudStaticStability(")
+    @test endswith(sprint(show, SubgridCloudStaticStability(ConstantWeight(0.5))), "ConstantWeight{Float64}(0.5))")
+    @test sprint(show, SubgridCloudStaticStability()) == "SubgridCloudStaticStability(MicrophysicsSubgridModel())"
     @test adapt(Array, SubgridCloudStaticStability(ConstantWeight(FT(0.5)))) === SubgridCloudStaticStability(ConstantWeight(FT(0.5)))
 
     with_weight(model; kw...) = TKEBasedTurbulenceClosure(; static_stability = SubgridCloudStaticStability(model), kw...)
@@ -244,6 +252,22 @@ end
     N²ˢ = face_field(dry, saturated_static_stabilityᶜᶜᶠ, buoyancy, tracers.T, tracers.qᵛᵉ)
     @test column(dry.closure_fields.N²) == N²ᵈ
     @test maximum(abs, N²ˢ[interior_faces] .- N²ᵈ[interior_faces]) > 1e-5
+
+    @testset "the subgrid model of the microphysics" begin
+        @test SubgridCloudStaticStability() === SubgridCloudStaticStability(MicrophysicsSubgridModel())
+        @test microphysics_subgrid_model(nothing) === nothing
+        @test microphysics_subgrid_model(warm_adjustment()) === nothing
+        # P3 hands over the model in its subgrid supersaturation hook: here a constant weight
+        w = FT(0.3)
+        p3_case = merge(case, (; microphysics = P3Microphysics(FT; subgrid_supersaturation = ConstantWeight(w))))
+        from_microphysics = column_model(TKEBasedTurbulenceClosure(static_stability = SubgridCloudStaticStability()), p3_case)
+        own = column_model(with_weight(ConstantWeight(w)), p3_case)
+        @test microphysics_subgrid_model(from_microphysics.microphysics) === ConstantWeight(w)
+        N² = column(from_microphysics.closure_fields.N²)
+        @test all(isfinite, N²)
+        @test N² == column(own.closure_fields.N²)
+        @test N² != column(column_model(TKEBasedTurbulenceClosure(static_stability = DryStaticStability()), p3_case).closure_fields.N²)
+    end
 
     @testset "the blend" begin
         for w in FT.((0, 0.3, 1))
@@ -350,9 +374,11 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
                 @test ad ≈ fd rtol=1e-6
             end
         end
-        # At a zero coefficient the derivative is finite, one-sided differences agree
+        # At a zero coefficient the derivative is finite: -N² (e / ℓ²) / (S² + S²ᵐⁱⁿ)²
         f = ℂˢᵗ -> Riᶜᶜᶠ(1, 1, k, grid, with_coefficient(ℂˢᵗ), velocities, fields.N², e, fields.ℓᵐ)
-        @test reverse_gradient(f, 0.0) ≈ (f(1e-7) - f(0.0)) / 1e-7 rtol=1e-4
+        S² = shearᶜᶜᶠ(1, 1, k, grid, velocities.u, velocities.v)
+        e_ℓ² = turbulence_shear_squaredᶜᶜᶠ(1, 1, k, grid, with_coefficient(1.0), e, fields.ℓᵐ)
+        @test reverse_gradient(f, 0.0) ≈ -fields.N²[1, 1, k] * e_ℓ² / (S² + 1e-10)^2 rtol=1e-10
 
         # The weight: ∂N²/∂w = N²ˢ - N²ᵈ, and through the parameter of a weight that reads ℓ
         N²ᵈ = ∂z_b(1, 1, k, grid, buoyancy, tracers)

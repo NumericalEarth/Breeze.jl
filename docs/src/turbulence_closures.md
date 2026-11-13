@@ -99,7 +99,8 @@ on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 ``N² = (1 - w) N²_d + w N²_s``, the moist-buoyancy weighting of
 [Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993). The weight ``w`` comes from an
 external subgrid cloud model, which extends `Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ`;
-Breeze holds no model of it. A weight that reads the mixing length reads the stored
+Breeze holds no model of it. `SubgridCloudStaticStability()` uses the subgrid model that the
+microphysics holds, and `SubgridCloudStaticStability(cloud_model)` a model of its own. A weight that reads the mixing length reads the stored
 `closure_fields.ℓᵐ` of the previous update, because ``N²`` is diagnosed before ``ℓ``.
 
 ### Stability functions
