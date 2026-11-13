@@ -1082,7 +1082,8 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
 
         # The closure holds its own copies of the coefficients of these components: they are
         # coefficients of the closure, all trainable, and are replaced like the others
-        reused = (fieldnames(GradientLimitedMixingLength)..., fieldnames(RationalStabilityFunction)...)
+        # The blending rule of the length is a structural choice, not a coefficient
+        reused = (filter(!=(:blending), fieldnames(GradientLimitedMixingLength))..., fieldnames(RationalStabilityFunction)...)
         @test length(reused) == 16
         @test all(name -> haskey(ℂ, name), reused)
         @test all(name -> name ∈ trainable_parameter_names(smooth_closure), reused)

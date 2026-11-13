@@ -64,6 +64,12 @@ end
     return component_constructor(T)(fields...), n
 end
 
+# The blending rule of a mixing length is structural, not an SHOC coefficient
+const MixingLengthBlending = Union{HardMinimum, HarmonicBlend}
+@inline component_scalars(::MixingLengthBlending) = ()
+component_scalar_names(::MixingLengthBlending, name) = ()
+@inline rebuild_component(blending::MixingLengthBlending, scalars, n) = blending, n
+
 TurbulenceClosures.convert_eltype(::Type{FT}, component::AbstractSHOCComponent) where FT =
     map_scalars(scalar -> convert(FT, scalar), component)
 

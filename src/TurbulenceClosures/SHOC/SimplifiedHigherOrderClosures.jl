@@ -47,7 +47,7 @@ using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using Breeze.AtmosphereModels: AtmosphereModels, ClosureCloud, ClosureCloudStatistics
 using Breeze.TurbulenceClosures: TurbulenceClosures, convert_eltype,
-                                 GradientLimitedMixingLength, fill_mixing_length!, mixing_lengthᶜᶜᶜ,
+                                 GradientLimitedMixingLength, HardMinimum, HarmonicBlend, fill_mixing_length!, mixing_lengthᶜᶜᶜ,
                                  RationalStabilityFunction, richardson_number, momentum_stability_function,
                                  tracer_stability_function, dissipation_stability_function
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS

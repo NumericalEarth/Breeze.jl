@@ -157,7 +157,7 @@ profiles_are_finite(run) = all(name -> all(isfinite, getproperty(run, name)), (:
 
         # Plain data, for kernels and for a closure rebuilt from traced scalars
         @test isbits(original) && isbits(swapped)
-        @test isbitstype(BlendedMixingLength{FT}) && isbitstype(GradientLimitedMixingLength{FT})
+        @test isbitstype(BlendedMixingLength{FT}) && isbitstype(typeof(GradientLimitedMixingLength(FT(0.8), FT(1.8))))
 
         # The coefficients of the length are those of the closure, by name
         @test closure_parameters(swapped).ℂˢ === gl.ℂˢ
