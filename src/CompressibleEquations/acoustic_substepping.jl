@@ -170,7 +170,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `AcousticSubstepper`. The perturbation face fields ``(ρu)′, (ρv)′, (ρw)′`` and the
 scalar-transport velocities use topology-derived BCs (periodic wrap / impenetrability), **not** the
@@ -271,7 +271,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the background quantities used by the substepper as the first
 linearization point of an outer step. Subsequent RK stages call
@@ -290,7 +290,7 @@ function freeze_linearization_state!(substepper::AcousticSubstepper, model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Seed the time-averaged transport velocity with the outer-step-start velocities: stage 1 has no
 prior acoustic loop in this outer step to average over. Called at outer-step start by
@@ -386,7 +386,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Stage-start cache preparation. Refreshes the cached linearization
 quantities (θᴸ, Cᴸ) to the **stage-entry state** ``Uᴸ_\\mathrm{stage}``
@@ -404,7 +404,7 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the number of acoustic substeps ``N`` from the horizontal
 acoustic CFL:
@@ -436,7 +436,7 @@ compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_cfl) =
     compute_acoustic_substeps(minimum_horizontal_spacing(grid), Δt, thermodynamic_constants, acoustic_cfl)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The smallest horizontal spacing of `grid`, in the grid's float type: the length the acoustic
 Courant number of [`compute_acoustic_substeps`](@ref) is measured against. A `Flat` direction
@@ -594,7 +594,7 @@ end
 materialize_sponge(grid, ::Nothing) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build the grid-dependent form of `sponge` by evaluating its ramp into a 1D profile of the damping
 rate ``γ(z) = \\text{rate} × \\text{ramp}(z)`` over z-faces. Called by the
@@ -961,7 +961,7 @@ end
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Run the `Nτ` acoustic substeps of one RK3 stage by calling [`acoustic_substep!`](@ref) for each.
 
@@ -1282,17 +1282,27 @@ end
 #####   ⟨ρu⟩ = ρuᴸ + (1/Nτ) ∑ₙ (ρu)′(n) = model.momentum.ρu + accum/Nτ
 #####   ⟨u⟩  ≈ ⟨ρu⟩ / ρᴸ_face
 #####
+##### ρ′ sees the off-centered vertical flux (1 − ω)(ρw)′(n−1) + ω(ρw)′(n), so ⟨ρw⟩ must too.
+##### `solve!` is the only writer of (ρw)′ inside the loop, so the sum of that flux over
+##### n = 1…Nτ telescopes onto the raw accumulation:
+#####
+#####   ∑ₙ [(1 − ω)(ρw)′(n−1) + ω(ρw)′(n)] = ∑ₙ (ρw)′(n) − (1 − ω)[(ρw)′(Nτ) − (ρw)′(0)]
+#####
+##### The rewind (ρw)′(0) is zero in stage 1 but not in stages 2–3, so it is recomputed
+##### from Uᴸ_outer.
+#####
 ##### `model.momentum.*` and `model.dynamics.dry_density` are still the stage-entry
 ##### (Uᴸ_stage) values here. Dividing by ρᴸ ignores ρ's variation over the
 ##### loop, small for acoustic perturbations.
 #####
 
 
-function finalize_time_averaged_velocity!(substepper, model, Nτ)
+function finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ_outer)
     grid = model.grid
     arch = architecture(grid)
     FT   = eltype(grid)
-    inv_Nτ = one(FT) / Nτ # Nτ is an integer, traced when the substep count is computed from a traced Δt
+    inv_Nτ = one(FT) / Nτ
+    ωˢ⁻ = 1 - substepper.forward_weight
 
     # `model.dynamics.dry_density` and `model.momentum.*` are still the
     # stage-entry (Uᴸ) values here — the substep loop only touched
@@ -1303,7 +1313,9 @@ function finalize_time_averaged_velocity!(substepper, model, Nτ)
             substepper.time_averaged_velocities.w,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
             model.dynamics.dry_density,
-            grid, model.dynamics, inv_Nτ)
+            substepper.momentum_perturbation.w,
+            Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
+            grid, model.dynamics, inv_Nτ, ωˢ⁻)
 
     map(fill_halo_regions!, substepper.time_averaged_velocities)
 
@@ -1312,15 +1324,16 @@ end
 
 @kernel function _finalize_time_averaged_velocity!(u_avg, v_avg, w_avg,
                                                    ρu_stage, ρv_stage, ρw_stage,
-                                                   ρᴸ, grid, dynamics, inv_Nτ)
+                                                   ρᴸ, ρw′, ρu_outer, ρv_outer, ρw_outer,
+                                                   grid, dynamics, inv_Nτ, ωˢ⁻)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
+        ρwᴸ = transport_ρw(i, j, k, grid, dynamics, ρu_stage, ρv_stage, ρw_stage)
+        ρw′⁰ = transport_ρw(i, j, k, grid, dynamics, ρu_outer, ρv_outer, ρw_outer) - ρwᴸ
         ρu_total = ρu_stage[i, j, k] + u_avg[i, j, k] * inv_Nτ
         ρv_total = ρv_stage[i, j, k] + v_avg[i, j, k] * inv_Nτ
-        ρw_total = transport_ρw(i, j, k, grid, dynamics,
-                                                              ρu_stage, ρv_stage, ρw_stage) +
-                   w_avg[i, j, k] * inv_Nτ
+        ρw_total = ρwᴸ + (w_avg[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - ρw′⁰)) * inv_Nτ
 
         ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρᴸ)
         ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρᴸ)
@@ -1492,7 +1505,7 @@ function enforce_wall_impenetrability!(substepper, model, grid, arch)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the implicit half of the IMEX split for the thermodynamic perturbation over one
 substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor between Step B and Step C so
@@ -1512,7 +1525,7 @@ function implicit_advection_substep!(model, substepper, advection::AdaptiveImpli
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the acoustic perturbation fields of `substepper` by one substep of size `stage.Δτ`.
 `stage` holds the loop-invariant quantities of the current RK3 stage: the substep size `Δτ`,
@@ -1638,7 +1651,7 @@ function acoustic_substep!(model, substepper, stage, advection)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
 substep loop. Number and size of substeps in this stage depend on
@@ -1692,7 +1705,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Done BEFORE `_recover_full_state!` so we read the stage-entry
     # `model.momentum.*` (substep loop hasn't touched it) and stage-entry
     # `model.dynamics.dry_density` as the Uᴸ_stage reference.
-    finalize_time_averaged_velocity!(substepper, model, Nτ)
+    finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
     # `ρᵡ`, and `model.momentum.*` are still the stage-entry Uᴸ values here

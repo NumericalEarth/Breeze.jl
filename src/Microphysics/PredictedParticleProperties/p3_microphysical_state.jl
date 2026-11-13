@@ -108,7 +108,7 @@ end
 @inline AM.aerosol_field_names(p3::P3) = aerosol_prognostic_names(p3.aerosol)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return prognostic field names for the P3 scheme.
 
@@ -190,7 +190,7 @@ AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
 @inline aerosol_correction_fields(::AerosolActivation{<:Any, true}, μ) = (μ.ρnᵃ,)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Effective cloud droplet number concentration [kg⁻¹] seen by P3's process rates.
 
@@ -211,7 +211,7 @@ per-mass number `μ.ρnᶜˡ / ρ` as usual.
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 P3 is a non-equilibrium scheme: vapor (`qᵛ`) is the prognostic moisture variable.
 """
@@ -222,7 +222,7 @@ AM.moisture_prognostic_name(::P3) = :ρqᵛ
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create prognostic and diagnostic fields for P3 microphysics.
 
@@ -347,7 +347,7 @@ end
 @inline interpolate_w_to_center(grid, i, j, k, w_field, FT) = FT(ℑzᵃᵃᶜ(i, j, k, grid, w_field))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a [`P3MicrophysicalState`](@ref) from density-weighted prognostic variables.
 
@@ -515,7 +515,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update diagnostic microphysical fields after state update.
 
@@ -815,7 +815,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute moisture mass fractions from P3 microphysical state.
 

@@ -39,7 +39,7 @@ struct CloudShape{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `CloudShape`.
 
@@ -116,7 +116,7 @@ struct CloudDroplets{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Diagnose the cloud droplet gamma PSD shape parameter μᶜˡ from the absolute number
 concentration `Nᶜˡ` [m⁻³] and the [`CloudShape`](@ref) `shape`:
@@ -161,7 +161,7 @@ round(liu_daum_shape_parameter(100e6, shape), digits=1)  # continental default
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convenience wrapper evaluating [`liu_daum_shape_parameter`](@ref) with the default
 [`CloudShape`](@ref).
@@ -172,7 +172,7 @@ those must read `p3.cloud.shape` so that a configured fit is actually used.
 @inline liu_daum_shape_parameter(Nᶜˡ) = liu_daum_shape_parameter(Nᶜˡ, CloudShape(typeof(float(Nᶜˡ))))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct `CloudDroplets` with prescribed parameters.
 
@@ -265,7 +265,7 @@ function CloudDroplets(FT = Oceananigans.defaults.FloatType;
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Slope parameter λᶜˡ [1/m] of the cloud gamma PSD carrying absolute mass
 `qᶜˡ_abs` [kg/m³] at number `Nᶜˡ` [1/m³] and shape `μᶜˡ`, before the
@@ -278,7 +278,7 @@ mean-diameter bounds of [`cloud_slope_bounds`](@ref) are applied.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Bounds `(minimum_slope, maximum_slope)` [1/m] on the cloud PSD slope,
 `λ_min = (μᶜˡ + 1) / ⟨D⟩_max` and `λ_max = (μᶜˡ + 1) / ⟨D⟩_min`, from the mean-diameter
@@ -307,7 +307,7 @@ defaults admit mean droplet diameters of 1–40 μm.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Bounded cloud PSD slope λᶜˡ [1/m]: [`unbounded_cloud_slope_parameter`](@ref) clamped to
 [`cloud_slope_bounds`](@ref).
@@ -319,7 +319,7 @@ Bounded cloud PSD slope λᶜˡ [1/m]: [`unbounded_cloud_slope_parameter`](@ref)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the cloud number concentration [1/m³] adjusted for the cloud slope bounds.
 
@@ -356,7 +356,7 @@ function Base.show(io::IO, c::CloudDroplets)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Diagnose the cloud PSD state from cloud liquid and cloud number.
 
