@@ -445,6 +445,11 @@ end
 ##### Main update function - launches GPU kernel
 #####
 
+# Phase change and precipitation happen in the operator-split update, outside the microphysical
+# tendencies and the model's sedimentation
+AtmosphereModels.tendency_phase_change(::DCMIP2016KM) = false
+AtmosphereModels.sediments_through_model(::DCMIP2016KM) = false
+
 # The grid-model update below rebuilds all tendencies after changing the state.
 AtmosphereModels.refreshes_state_after_update(::DCMIP2016KM) = true
 

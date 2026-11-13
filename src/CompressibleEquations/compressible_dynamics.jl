@@ -200,6 +200,11 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
 # closed-form and uses the generic `nothing` fallback.
 AtmosphereModels.default_temperature_solver(::CompressibleDynamics) = NewtonSolver()
 
+# Microphysics converts water at fixed density, and the thermodynamic pressure is diagnosed from
+# the density, so phase change at fixed θˡⁱ conserves the enthalpy at a pressure that does not
+# stay fixed: the fixed-volume phase-change source applies here (and only here).
+AtmosphereModels.materialize_phase_change_source(option, ::CompressibleDynamics) = option
+
 # Translate a stored reference spec — a bare θ₀, a (; reference_temperature, …)
 # NamedTuple, or a (; reference_potential_temperature, …) NamedTuple — into the
 # kwargs accepted by `ExnerReferenceState`. A `nothing` θ in the NamedTuple is
