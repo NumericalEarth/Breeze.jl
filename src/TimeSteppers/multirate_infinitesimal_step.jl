@@ -82,28 +82,28 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`MultirateInfinitesimalStep`](@ref) time stepper. `coefficients` is a `Symbol`
-naming a set in [`multirate_infinitesimal_step_tableau`](@ref) (default `:TVDMISB`) or a
+naming a set in [`multirate_infinitesimal_step_tableau`](@ref) (default `:SSPMIS43`) or a
 [`MultirateInfinitesimalStepTableau`](@ref).
 
 Select it with `AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep,
-timestepper_kwargs = (; coefficients = :TVDMISB))`.
+timestepper_kwargs = (; coefficients = :SSPMIS43))`.
 
-The default, `:TVDMISB` ([Knoth and Wensch (2014)](@cite KnothWensch2014)), is chosen for
-positivity: its slow method is strong-stability preserving with coefficient ``r = 0.75``, so the
-moisture and tracer stages are convex combinations of forward-Euler steps for an advective Courant
-number up to ``0.75`` times the forward-Euler bound of the advection operator. Of the other sets,
-`:SSPMIS43` (experimental) has ``r = 1.79``, `:MIS3C` ``r = 0.23``, and `:MIS4a`, `:MIS4`, `:MIS2`
-and `:WickerSkamarock3` have ``r = 0``: no such bound at any Courant number. The bound is on the
-time stepping alone. Positive moisture also needs an advection operator that is positive under
-forward Euler, which the clamp of bounded WENO reconstructions does not provide by itself; a flux
-limiter would (Oceananigans.jl#6475).
+The default, `:SSPMIS43`, is chosen for positivity: its slow method is strong-stability preserving
+with coefficient ``r = 1.79``, so the moisture and tracer stages are convex combinations of
+forward-Euler steps for an advective Courant number up to ``1.79`` times the forward-Euler bound of
+the advection operator. Of the other sets, `:TVDMISA` and `:TVDMISB` have ``r = 0.75``, `:MIS3C`
+``r = 0.23``, and `:MIS4a`, `:MIS4`, `:MIS2` and `:WickerSkamarock3` have ``r = 0``: no such bound
+at any Courant number. The bound is on the time stepping alone. Positive moisture also needs an
+advection operator that is positive under forward Euler, which the clamp of bounded WENO
+reconstructions does not provide by itself; a flux limiter would (Oceananigans.jl#6475).
 
-`:TVDMISB` is second-order accurate with the fast and slow parts coupled and, with fifth-order
-upwind advection and this stepper's acoustic loop, stable to the advective Courant number of
-Wicker–Skamarock RK3 (1.4) when sound is at least six times faster than the flow. `:MIS4a` is
-third order and stable to a larger Courant number, without the positivity bound. `:MIS2` relies
-on the dissipation of third-order upwinding and is unstable beyond a Courant number of about 0.2
-with fifth-order schemes.
+`:SSPMIS43` has four stages and is second-order accurate with the fast and slow parts coupled. Its
+first stage covers 0.56 of the step, which takes at least two acoustic substeps. It needs the
+moisture's pressure effect in the acoustic loop to stay robust in moist convection: with the
+stage-entry pressure remainder recombined across stages, the part of that remainder the loop does
+not carry is integrated explicitly. `:MIS4a` is third order and stable to a larger Courant number,
+without the positivity bound. `:MIS2` relies on the dissipation of third-order upwinding and is
+unstable beyond a Courant number of about 0.2 with fifth-order schemes.
 
 `post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
@@ -111,7 +111,7 @@ between stages with the preceding loop's (see [`PostLoopScalarTendencies`](@ref)
 """
 function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
-                                    coefficients = :TVDMISB,
+                                    coefficients = :SSPMIS43,
                                     implicit_solver = nothing,
                                     cache_advecting_state = false,
                                     relinearize_stages = false,

@@ -336,5 +336,5 @@ end
                            topology = (Bounded, Flat, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
     model = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep)
-    @test model.timestepper.tableau.β == multirate_infinitesimal_step_tableau(:TVDMISB, eltype(grid)).β
+    @test model.timestepper.tableau.β == multirate_infinitesimal_step_tableau(:SSPMIS43, eltype(grid)).β
 end
