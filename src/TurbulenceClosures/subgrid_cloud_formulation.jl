@@ -207,15 +207,44 @@ so that `-Kᶜ N²ᵇ` is the buoyancy flux of the distribution (with `g / θ` o
 `g / θ₀`); `Bˡ / Kᶜ` is left out where `Kᶜ` vanishes. In clear air it is the stratification of
 θᵥ. The mixing length and the diffusivities are then formed again from it.
 
+The distribution is first computed with the static stability of the closure (`N²`; with
+`DryStaticStability` the dry one) and the mixing length and diffusivities formed from it, while
+`N²ᵇ` reads the liquid flux of that distribution, so the two are coupled. With
+`stability_iterations = n > 0` the coupling is iterated `n` more times: each iteration computes
+the distribution again with the stored `N²`, mixing length and `Kᶜ` (those of `N²ᵇ` from the pass
+before, which also set the moment time scale), then `N²ᵇ` from its liquid flux, then the mixing
+length and the diffusivities from `N²ᵇ`. The number is a type parameter, so the passes are
+unrolled when the closure is compiled. After the last pass the stored moments, cloud fields and
+buoyancy production `B` are those of the last distribution, and `N²`, `ℓᵐ`, `Kᶜ`, `Kᵘ`, `Kᵉ` are
+formed from that distribution's liquid flux; that distribution was itself computed with the
+diffusivities of the pass before (one pass behind, as with `n = 0`, where they are the dry ones).
+
 $(TYPEDFIELDS)
 """
-struct CloudBuoyancyFlux
+struct CloudBuoyancyFlux{N}
     "Whether the stability of the diffusivities and the mixing length is that of the cloud buoyancy flux"
     stability :: Bool
+    CloudBuoyancyFlux{N}(stability::Bool) where N = new{N}(stability)
 end
 
-CloudBuoyancyFlux(; stability = true) = CloudBuoyancyFlux(stability)
-Base.summary(b::CloudBuoyancyFlux) = string("CloudBuoyancyFlux(stability = ", b.stability, ")")
+CloudBuoyancyFlux(stability::Bool) = CloudBuoyancyFlux{0}(stability)
+
+function CloudBuoyancyFlux(; stability = true, stability_iterations = 0)
+    n = Int(stability_iterations)
+    n >= 0 || throw(ArgumentError("stability_iterations must be ≥ 0, got $n."))
+    (n == 0 || stability) || throw(ArgumentError("stability_iterations > 0 needs stability = true."))
+    return CloudBuoyancyFlux{n}(stability)
+end
+
+"""
+    stability_iterations(buoyancy_flux::CloudBuoyancyFlux)
+
+The number of extra passes of the distribution and the cloud buoyancy stability (the type parameter).
+"""
+stability_iterations(::CloudBuoyancyFlux{N}) where N = N
+
+Base.summary(b::CloudBuoyancyFlux) = string("CloudBuoyancyFlux(stability = ", b.stability,
+                                            ", stability_iterations = ", stability_iterations(b), ")")
 
 #####
 ##### Part 3: cloud owned by the closure
@@ -584,6 +613,17 @@ end
 
 function cloud_buoyancy_stability!(buoyancy_flux::CloudBuoyancyFlux, fields, closure_fields, closure, model, tracers, parameters)
     buoyancy_flux.stability || return nothing
+    cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
+    # The extra passes of the coupling; the count is a type parameter, so the loop is unrolled when traced
+    for _ in 1:stability_iterations(buoyancy_flux)
+        compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
+        cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
+    end
+    return nothing
+end
+
+# N²ᵇ from the stored distribution, then the mixing length and the diffusivities from it
+function cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
     grid = model.grid
     arch = grid.architecture
     s = distribution_state(model, nothing)

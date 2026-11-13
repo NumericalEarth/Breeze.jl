@@ -258,3 +258,40 @@ end
         @test maximum(column(μ.ρqᶜˡ)) > 0
     end
 end
+
+@testset "Iterating the distribution and the cloud buoyancy stability" begin
+    @test CloudBuoyancyFlux() isa CloudBuoyancyFlux{0}
+    @test CloudBuoyancyFlux(true) isa CloudBuoyancyFlux{0}
+    @test Breeze.TurbulenceClosures.stability_iterations(CloudBuoyancyFlux(; stability_iterations = 3)) == 3
+    @test_throws ArgumentError CloudBuoyancyFlux(; stability_iterations = -1)
+    @test_throws ArgumentError CloudBuoyancyFlux(; stability = false, stability_iterations = 1)
+
+    iterated(n) = SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability_iterations = n))
+    closure_columns(model) = (cf = model.closure_fields; sc = cf.subgrid_cloud;
+                              map(column, (cf.N², cf.ℓᵐ, cf.Kᶜ, sc.moments..., sc.cloud...)))
+    build(n) = tke_p3_column(iterated(n); subgrid = ClosureCloud(), static_stability = DryStaticStability())
+
+    reference = build(0)
+    default = tke_p3_column(SubgridCloudFormulation(); subgrid = ClosureCloud(), static_stability = DryStaticStability())
+    for m in (reference, default), _ in 1:3
+        time_step!(m, 30)
+    end
+    @test closure_columns(default) == closure_columns(reference)
+
+    for n in (1, 2)
+        model = build(n)
+        for _ in 1:3
+            time_step!(model, 30)
+        end
+        @test closure_columns(model) != closure_columns(reference)
+        @test all(isfinite, column(model.closure_fields.Kᶜ))
+        @test all(isfinite, column(model.tracers.ρe))
+        @test all(0 .≤ column(model.closure_fields.subgrid_cloud.cloud.C) .≤ 1)
+
+        # The TKE buoyancy production is the stored B of the last distribution
+        update_state!(model)
+        cf = model.closure_fields
+        B = column(cf.subgrid_cloud.cloud.B)
+        @test all(tke_buoyancy_productionᶜᶜᶜ(1, 1, k, model.grid, cf) == B[k] for k in 1:size(model.grid, 3))
+    end
+end
