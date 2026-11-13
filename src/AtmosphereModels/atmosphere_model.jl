@@ -809,20 +809,22 @@ auxiliary_model_fields(temperature) = (; T=temperature)
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The pressure and density the model's own thermodynamics is evaluated with, which surface-flux
+The pressure and densities the model's own thermodynamics is evaluated with, which surface-flux
 boundary conditions read to diagnose the surface state below `(i, j)`. `boundary_condition_args`
 passes this tuple after the model field tuple, and Breeze's own boundary conditions merge the two;
 see [`auxiliary_model_fields`](@ref) for why it has to arrive separately.
 
-These are [`dynamics_pressure`](@ref) and [`total_density`](@ref), both of which are always
-actual `Field`s: prognostic under `CompressibleDynamics`, the hydrostatic reference profile under
-`AnelasticDynamics`. Deliberately *not* [`total_pressure`](@ref), which for anelastic dynamics is a
-lazy sum that would rebuild an `AbstractOperation` on every halo fill, and whose nonhydrostatic
-anomaly is a Lagrange multiplier defined only up to a constant, so no surface diagnostic should
-depend on it.
+These are [`dynamics_pressure`](@ref), [`total_density`](@ref) and the
+[`continuity_density`](@ref), which converts a flux on the mixture onto a
+continuity-density-weighted variable with `ρᵈ / ρ`. All are actual `Field`s: prognostic under
+`CompressibleDynamics`, the hydrostatic reference profile under `AnelasticDynamics` (where `ρᵈ`
+and `ρ` are the same field). Deliberately *not* [`total_pressure`](@ref), which for anelastic
+dynamics is a lazy sum that would rebuild an `AbstractOperation` on every halo fill, and whose
+nonhydrostatic anomaly is a Lagrange multiplier defined only up to a constant, so no surface
+diagnostic should depend on it.
 """
 dynamics_thermodynamic_fields(dynamics) =
-    (; p=dynamics_pressure(dynamics), ρ=total_density(dynamics))
+    (; p=dynamics_pressure(dynamics), ρ=total_density(dynamics), ρᵈ=continuity_density(dynamics))
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)

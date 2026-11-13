@@ -1,24 +1,63 @@
 # [Compressible dynamics](@id Compressible-section)
 
 [`CompressibleDynamics`](@ref) solves the fully compressible Euler equations with prognostic
-total density ``ρ`` (including dry air, vapor, and condensate). The formulation retains acoustic waves and is suitable for problems where full
-compressibility is important — global atmospheric flows, baroclinic-wave benchmarks, and
+dry-air density ``ρ^d``; the total density ``ρ = ρ^d + ρ^t`` adds the water partial densities
+``ρ^t`` (vapor plus condensate). The formulation retains acoustic waves and is suitable for problems
+where full compressibility is important — global atmospheric flows, baroclinic-wave benchmarks, and
 acoustic-mode validation.
 
 ## Prognostic equations
 
-The compressible formulation advances density ``ρ``, momentum ``ρ \boldsymbol{u}``, a
+The compressible formulation advances dry density ``ρ^d``, momentum ``ρ^d \boldsymbol{u}``, a
 thermodynamic variable ``χ`` (see [Governing equations](@ref Dycore-section)), total moisture
 ``ρ q^t``, and tracers in flux form:
 
 ```math
 \begin{aligned}
-&\text{Mass:} && ∂_t ρ + ∇·(ρ \boldsymbol{u}) = 0 ,\\
-&\text{Momentum:} && ∂_t(ρ \boldsymbol{u}) + ∇·(ρ \boldsymbol{u} \boldsymbol{u}) + ∇ p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + ∇·\boldsymbol{\mathcal{T}} ,\\
+&\text{Dry mass:} && ∂_t ρ^d + ∇·(ρ^d \boldsymbol{u}) = 0 ,\\
+&\text{Momentum:} && ∂_t(ρ^d \boldsymbol{u}) + ∇·(ρ^d \boldsymbol{u} \boldsymbol{u}) = - q^d ∇ p - ρ^d g \hat{\boldsymbol{z}} + ρ^d \boldsymbol{f} + ∇·\boldsymbol{\mathcal{T}} ,\\
 &\text{Thermodynamic:} && ∂_t ρᵡ + ∇·(ρᵡ \boldsymbol{u}) = ρᵈ \, \mathcal{E}_χ \frac{\mathrm{D} \ln p}{\mathrm{D} t} + S_χ ,\\
 &\text{Moisture:} && ∂_t(ρ q^t) + ∇·(ρ q^t \boldsymbol{u}) = S_q .
 \end{aligned}
 ```
+
+Dry air is the prognostic mass because its continuity equation has no sedimentation or phase-change
+source, and the momentum to match is the dry-air momentum ``ρ^d \boldsymbol{u}``, not the mixture
+momentum ``ρ \boldsymbol{u}``: ``\boldsymbol{u} = (ρ^d \boldsymbol{u})/ρ^d``. Since dry-air
+continuity carries no diffusive flux, ``\boldsymbol{u}`` is the velocity **of dry air**,
+rather than the barycentric velocity of the mixture. All species share this resolved advecting
+velocity. Sedimentation adds species-dependent transport velocities, and configured turbulence
+closures can contribute diffusive scalar fluxes; their contributions to the moisture equation are
+included in ``S_q``.
+
+Under this common-velocity approximation, the momentum balance is formulated as
+
+```math
+ρ \frac{D\boldsymbol{u}}{Dt} = -∇p - ρ g \hat{\boldsymbol{z}},
+```
+
+where ``ρ`` is the **total mixture density**. This formulation incorporates the full pressure
+gradient and the total gravitational force per unit volume, ``ρ g``. To express the balance in
+terms of the dry-air momentum, we multiply by ``ρ^d/ρ`` and use dry-air continuity. The resulting
+conservative form above therefore contains the pressure term ``-(ρ^d/ρ)∇p`` and the gravitational
+term ``-ρ^d g\hat{\boldsymbol{z}}``. The dry-air mass fraction is
+
+```math
+q^d = ρ^d / ρ = 1 - q^t .
+```
+
+The pressure and gravitational terms are the height-coordinate form of the ``μ^d α`` and
+``-g μ^d`` factors in the dry-mass-coordinate equations of
+[Skamarock & Klemp (2008)](@cite SkamarockKlemp2008); without them a parcel at ``q^t = 0.02`` falls
+2% too fast. Advection and Coriolis already carry ``ρ^d \boldsymbol{u}``, so they are exact without
+a weight. The stress is modeled with the dry-air density, ``\boldsymbol{\mathcal{T}} = ρ^d ν \boldsymbol{S}``,
+so its divergence acts on ``ρ^d \boldsymbol{u}`` directly; this is a closure choice shared with
+WRF-ARW rather than an identity, since the rescaled mixture stress ``q^d ∇·(ρ ν \boldsymbol{S})``
+differs from it by ``ρ ν \boldsymbol{S}·∇q^d``, a term proportional to the moisture gradient. The
+same weight converts the bulk surface drag and the energy fluxes at the walls, and the
+buoyancy-flux source of the static energy equation below. In the code the weight is
+`dynamics_mass_fractionᶠᶜᶜ` and its ``ᶜᶠᶜ``/``ᶜᶜᶠ`` counterparts, a ratio of face-interpolated
+densities so the discrete gravitational force is exactly ``-g \, ℑ^z(ρ^d)``.
 
 Pressure is closed by the moist ideal gas law
 
@@ -26,14 +65,18 @@ Pressure is closed by the moist ideal gas law
 p = ρ R^m T ,
 ```
 
-where ``R^m`` is the mixture gas constant. The thermodynamic prognostic ``ρᵡ = ρᵈ χ`` is weighted
-by the dry-air density, and ``\mathcal{E}_χ = (∂χ / ∂\ln p)_{η, q}`` is the expansion coefficient
-of the state function ``χ`` (see [Governing equations](@ref Dycore-section)). For the liquid-ice
-potential temperature, ``χ = θˡⁱ``, the expansion source is proportional to the condensate and
-the pressure tendency is approximated hydrostatically, ``\mathrm{D} \ln p / \mathrm{D} t ≈ - g ρ w / p``;
-the exact tendency, and why its adiabatic part alone would not be a better estimate, are discussed
-in [The expansion source on the two dynamical cores](@ref "The expansion source on the two dynamical cores").
-For static energy, ``χ = s``, the source encodes the pressure work.
+where ``R^m`` is the mixture gas constant and ``ρ`` is the total density. The thermodynamic
+prognostic ``ρᵡ = ρᵈ χ`` is weighted by the dry-air density, and
+``\mathcal{E}_χ = (∂χ / ∂\ln p)_{η, q}`` is the expansion coefficient of the state function ``χ``
+(see [Governing equations](@ref Dycore-section)). For the liquid-ice potential temperature,
+``χ = θˡⁱ``, the expansion source is proportional to the condensate and the pressure tendency is
+approximated hydrostatically, ``\mathrm{D} \ln p / \mathrm{D} t ≈ - g ρ w / p``; the exact
+tendency, and why its adiabatic part alone would not be a better estimate, are discussed in
+[The expansion source on the two dynamical cores](@ref "The expansion source on the two dynamical cores").
+For static energy, ``χ = s``, the source encodes the pressure work and the geopotential change,
+``ρ \, \mathrm{D}s/\mathrm{D}t ∋ \mathrm{D}p/\mathrm{D}t + ρ g w``, evaluated as the mixture buoyancy
+flux of the [anelastic core](@ref Anelastic-section) and applied to ``ρ^d s`` with the factor
+``q^d``, like the forces on the dry-air momentum.
 
 ## Time integration options
 
@@ -151,19 +194,19 @@ at the converged root. Without condensate this vanishes for every inversion, so
 liquid it is about 5% of ``C^L θ^L``.
 
 The momentum is the dry-mass momentum ``ρ^d \boldsymbol{u}``, and the compressible core applies
-the full pressure gradient and gravity ``-∇p - g ρ \hat{\boldsymbol{z}}`` to it. Its acoustic
-inertia is therefore ``ρ^d`` rather than ``ρ``. Thus the sound speed is ``\sqrt{γ^e p / ρ^d}``. In
-unsaturated air ``γ^e = γ^m`` with the vapor-equivalent exponent, so the sound speed exceeds the
-mixture value ``\sqrt{γ^m R^m T}`` by the factor ``\sqrt{ρ / ρ^d}``, about 1% for 20 g/kg of
-vapor. With the dry exponent, ``γ^e = γ^d``; it exceeds ``γ^m`` by a further 0.2% at 20 g/kg
-because that formulation's adiabat uses ``κ^d``. In unsaturated air ``C^L`` gives the substep loop
-the same speed as the stage-entry pressure gradient and
+the pressure gradient and gravity to it weighted by the dry-air mass fraction ``q^d = ρ^d / ρ``
+introduced above, as WRF-ARW does. Its acoustic inertia is therefore the total density ``ρ``, and
+the sound speed is ``\sqrt{γ^e p / ρ} = \sqrt{γ^e R^m T}``. In unsaturated air ``γ^e = γ^m`` with
+the vapor-equivalent exponent, which gives the mixture value ``\sqrt{γ^m R^m T}``. With the dry
+exponent, ``γ^e = γ^d``; it exceeds ``γ^m`` by 0.2% at 20 g/kg because that formulation's adiabat
+uses ``κ^d``. In unsaturated air ``C^L`` gives the substep loop the same speed as the stage-entry
+pressure gradient and
 [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping), which both use
 the exact equation of state. In cloud they differ: the loop omits ``∂p/∂ρ^d``, which lowers its
 ``c^2`` by the fraction ``H^c / (c^p_m T - H^c)``, and holds the composition fixed, while
-saturation adjustment re-equilibrates the condensate at every stage. Weighting the pressure
-gradient and gravity by ``ρ^d / ρ``, as WRF-ARW does, would give ``c^2 = γ^e R^m T`` with the same
-``C^L``, which is ``γ^m R^m T`` in unsaturated air with the vapor-equivalent exponent
+saturation adjustment re-equilibrates the condensate at every stage. Without the ``q^d`` weight
+the inertia would be ``ρ^d``, and the sound speed would exceed ``\sqrt{γ^e R^m T}`` by the factor
+``\sqrt{ρ / ρ^d}``, about 1% for 20 g/kg of vapor
 ([#1210](https://github.com/NumericalEarth/Breeze.jl/issues/1210)).
 
 Only the substep loop linearizes the equation of state:
@@ -236,18 +279,24 @@ inside the substep loop is
 \begin{aligned}
 ∂_τ ρ'    &+ ∇·(ρ\boldsymbol{u})' = G^s_ρ , \\
 ∂_τ (ρθ)' &+ ∇·\!\left(θ^L (ρ\boldsymbol{u})'\right) = G^s_{ρθ} , \\
-∂_τ (ρu)' &+ ∂_x p^L + ∂_x \left(C^L (ρθ)'\right) = G^s_{ρu} , \\
-∂_τ (ρv)' &+ ∂_y p^L + ∂_y \left(C^L (ρθ)'\right) = G^s_{ρv} , \\
-∂_τ (ρw)' &+             ∂_z \left(C^L (ρθ)'\right) + g\, ρ' = G^s_{ρw} .
+∂_τ (ρu)' &+ q^d \left[∂_x p^L + ∂_x \left(C^L (ρθ)'\right)\right] = G^s_{ρu} , \\
+∂_τ (ρv)' &+ q^d \left[∂_y p^L + ∂_y \left(C^L (ρθ)'\right)\right] = G^s_{ρv} , \\
+∂_τ (ρw)' &+ q^d \left[∂_z \left(C^L (ρθ)'\right) + g\, ρ'\right] = G^s_{ρw} .
 \end{aligned}
 ```
+
+The dry-air mass fraction ``q^d = ρ^d/ρ`` is frozen at ``U^L`` with the other linearization
+coefficients (water densities are fixed across the substeps, so ``ρ'`` is both the dry and the
+total density perturbation) and evaluated at the face of the momentum component it acts on. It
+also multiplies the corresponding entries of the vertically implicit tridiagonal matrix, keeping
+matrix and right-hand side consistent, and is identically 1 for dry runs.
 
 Each ``G^s`` is the slow tendency for that variable, held constant across the ``N_τ``
 substeps of a given RK stage. For vertical momentum, ``G^s_{ρw}`` is assembled by adding the
 stage-entry vertical pressure-gradient and buoyancy imbalance,
-``-∂_z(p^L - p_r) - g(ρ^L - ρ_r)``, to the slow non-pressure tendency. The linearized pressure
-coefficient ``C^L`` and the temperature-flux factor ``θ^L`` are cached for the stage, which is
-what makes each stage's substep system linear.
+``-q^d\left[∂_z(p^L - p_r) + g(ρ^L - ρ_r)\right]``, to the slow non-pressure tendency. The
+linearized pressure coefficient ``C^L`` and the temperature-flux factor ``θ^L`` are cached for the
+stage, which is what makes each stage's substep system linear.
 
 ### Terrain-following fast acoustic system
 
@@ -283,10 +332,14 @@ The vertical acoustic equation is projected onto the same contravariant
 momentum. With static terrain slopes, the pressure part of the fast force is
 
 ```math
-\partial_\zeta p'
-- \left(\frac{\partial z}{\partial x}\right)_\zeta \partial_x p'
-- \left(\frac{\partial z}{\partial y}\right)_\zeta \partial_y p' .
+q^d \, \partial_\zeta p'
+- \left(\frac{\partial z}{\partial x}\right)_\zeta q^d \, \partial_x p'
+- \left(\frac{\partial z}{\partial y}\right)_\zeta q^d \, \partial_y p' ,
 ```
+
+where each ``q^d`` sits at the face of the momentum component whose force it converts — the
+horizontal ones exactly as they enter the ``(ρu)'`` and ``(ρv)'`` updates, so the contravariant
+projection stays in step with them.
 
 The slow vertical tendency is projected consistently as the Cartesian
 vertical-momentum slow tendency minus the slope-weighted horizontal slow

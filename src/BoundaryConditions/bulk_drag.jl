@@ -19,7 +19,7 @@ Create a bulk drag function for computing wall momentum fluxes using bulk aerody
 formulas. The momentum flux is computed in the same form as the scalar bulk fluxes,
 
 ```math
-Jᵘ = - ρˢ Cᴰ |U| u
+Jᵘ = - qᵈ ρˢ Cᴰ |U| u
 ```
 
 where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + Uᵍ²)` is the wind speed
@@ -27,7 +27,9 @@ tangential to the wall together with the gustiness `Uᵍ`, `u` is the
 velocity component at the first cell face, and `ρˢ` is the surface density computed from
 the surface pressure and surface temperature. Monin–Obukhov similarity is a profile law
 for `u` (not `ρu`), so using `u` here keeps the formulation consistent with the similarity
-theory underlying `Cᴰ`.
+theory underlying `Cᴰ`. The stress acts on the air mixture while the flux lands on the
+continuity-density-weighted momentum, so it carries the near-wall `qᵈ = ρᵈ / ρ`, as the interior
+pressure gradient and gravity do; `qᵈ = 1` on the anelastic core.
 
 The drag may be placed on any of the six boundaries of a bounded domain, on either of the
 two momentum components tangential to that wall: `ρu` and `ρv` on the bottom and top,
@@ -117,7 +119,7 @@ end
 #####
 ##### getbc for BulkDragFunction
 #####
-##### Jᵘ = ∓ ρˢ Cᴰ Ũ u, mirroring the scalar bulk flux form, with the sign that removes
+##### Jᵘ = ∓ qᵈ ρˢ Cᴰ Ũ u, mirroring the scalar bulk flux form, with the sign that removes
 ##### tangential momentum through the wall (see `outward_flux_sign`). `u` is read from the
 ##### filtered field at the appropriate face location when filtering is enabled.
 #####
@@ -136,7 +138,8 @@ end
     pˢ = wall_air_pressure(i, j, k, grid, side, df.direction, fields, constants)
     ρˢ = surface_density(pˢ, Tˢ, constants)
     Cᴰ = bulk_coefficient(i, j, k, grid, side, df.coefficient, fields, Tˢ, df.filtered_velocities, pˢ, Uᵍ²)
-    return outward_flux_sign(side) * ρˢ * Cᴰ * Ũ * u
+    qᵈ = @inbounds fields.ρᵈ[i, j, k] / fields.ρ[i, j, k]
+    return outward_flux_sign(side) * qᵈ * ρˢ * Cᴰ * Ũ * u
 end
 
 const BulkDragBoundaryCondition = BoundaryCondition{<:Flux, <:BulkDragFunction}

@@ -325,9 +325,8 @@ outer_step_start_transport_velocities(model) = model.velocities
 # TODO: carry ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ), which the loop omits in cloud, as a ρ′ term of p′
 # (cached per stage next to Cᴸ, differentiated through the selected inversion). It enters the
 # horizontal pressure gradient and the vertical Schur complement next to Cᴸ θᴸ.
-# TODO: weight the pressure gradient and gravity on ρᵈu by ρᵈ / ρ throughout the compressible core
-# (as WRF-ARW does; v4 technical note, §2.2), NumericalEarth/Breeze.jl#1210. The acoustic inertia
-# is ρᵈ today, so the loop's sound speed is (Cᴸ θ)^½ = (γᵉ p / ρᵈ)^½ rather than (γᵉ Rᵐ T)^½.
+# The pressure gradient and gravity on ρᵈu carry qᵈ = ρᵈ / ρ (`dynamics_mass_fraction*`), so the
+# acoustic inertia is ρ and the loop's sound speed is (qᵈ Cᴸ θ)^½ = (γᵉ Rᵐ T)^½.
 function refresh_linearization_basic_state!(substepper::AcousticSubstepper, model)
     grid = model.grid
     arch = architecture(grid)
@@ -550,11 +549,13 @@ end
 #   ρ′ₙ(k)    = ρ′★(k)  − δτᵐ⁺((ρw)′ₙ(k+1) − (ρw)′ₙ(k))/Δz_c(k)
 #   (ρθ)′ₙ(k) = ρθ′★(k) − δτᵐ⁺(θᴸ_face(k+1)(ρw)′ₙ(k+1) − θᴸ_face(k)(ρw)′ₙ(k))/Δz_c(k)
 #
-# yields the tridiag coefficients (ω≡ωᵐ⁺):
+# yields the tridiag coefficients (ω≡ωᵐ⁺). Every PGF and buoyancy entry carries the face dry-mass
+# fraction qᵈ(k) (`dynamics_mass_fractionᶜᶜᶠ`), matching the explicit halves in
+# `_build_vertical_rhs!`. Damping and sponge act on (ρw)′ itself and take no factor:
 #
-#   A[k,k+1] = −(ωΔτ)² Cᴸ(k)  θᴸ_face(k+1) rdz_c(k)   /Δzᶠ(k) − (ωΔτ)² g rdz_c(k)/2
-#   A[k,k]   = 1 + (ωΔτ)² θᴸ_face(k)(Cᴸ(k)rdz_c(k)+Cᴸ(k−1)rdz_c(k−1))/Δzᶠ(k) + (ωΔτ)² g(rdz_c(k)−rdz_c(k−1))/2
-#   A[k,k−1] = −(ωΔτ)² Cᴸ(k−1)θᴸ_face(k−1)rdz_c(k−1)/Δzᶠ(k) + (ωΔτ)² g rdz_c(k−1)/2
+#   A[k,k+1] = qᵈ(k)[−(ωΔτ)² Cᴸ(k)  θᴸ_face(k+1) rdz_c(k)   /Δzᶠ(k) − (ωΔτ)² g rdz_c(k)/2]
+#   A[k,k]   = 1 + qᵈ(k)[(ωΔτ)² θᴸ_face(k)(Cᴸ(k)rdz_c(k)+Cᴸ(k−1)rdz_c(k−1))/Δzᶠ(k) + (ωΔτ)² g(rdz_c(k)−rdz_c(k−1))/2]
+#   A[k,k−1] = qᵈ(k)[−(ωΔτ)² Cᴸ(k−1)θᴸ_face(k−1)rdz_c(k−1)/Δzᶠ(k) + (ωΔτ)² g rdz_c(k−1)/2]
 #
 # Implicit vertical damping: for `ThermalDivergenceDamping(damp_vertical=true)`, the vertical divergence
 # damping folds into the same tridiag via a discrete vertical Laplacian on (ρw)′:
@@ -676,7 +677,7 @@ end
     @inbounds -direction * sponge_damping(i, j, k, grid, sponge) * ρwᴸ[i, j, k]
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagLower, p, ::ZDirection,
-                                 θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+                                 θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, dynamics)
     kᶠ     = k + 1
     Δz⁻¹ᶠ  = Δz⁻¹ᶜᶜᶠ(i, j, kᶠ, grid)
     Δz⁻¹ᵏ⁻ = Δz⁻¹ᶜᶜᶜ(i, j, kᶠ - 1, grid)
@@ -684,16 +685,19 @@ end
     @inbounds Cᵏ⁻ = Cᴸ[i, j, kᶠ - 1]
     θᵏ⁻ = ℑbzᵃᵃᶠ(i, j, kᶠ - 1, grid, θᴸ)
 
+    # Solver index k is the lower-diagonal entry of row (face) kᶠ = k + 1.
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, kᶠ, grid, dynamics)
+
     pgf_term  = - δτᵐ⁺^2 * Cᵏ⁻ * θᵏ⁻ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
     buoy_term = + δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁻ / 2
     damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁻ * Δz⁻¹ᶠ
 
     # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
-    return pgf_term + buoy_term + damp_term
+    return qᵈ * (pgf_term + buoy_term) + damp_term
 end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagDiagonal, p, ::ZDirection,
-                                 θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+                                 θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, dynamics)
 
     Δz⁻¹ᶠ  = Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
     Δz⁻¹ᵏ⁺ = Δz⁻¹ᶜᶜᶜ(i, j, k,     grid)
@@ -705,30 +709,32 @@ end
     end
 
     θᶜᶜᶠ = ℑbzᵃᵃᶠ(i, j, k, grid, θᴸ)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     pgf_diag   = δτᵐ⁺^2 * θᶜᶜᶠ * (Cᵏ⁺ * Δz⁻¹ᵏ⁺ + Cᵏ⁻ * Δz⁻¹ᵏ⁻) * Δz⁻¹ᶠ
     buoy_diag  = δτᵐ⁺^2 * g * (Δz⁻¹ᵏ⁺ - Δz⁻¹ᵏ⁻) / 2
     damp_diag  = dᵐ⁺ * (Δz⁻¹ᵏ⁺ + Δz⁻¹ᵏ⁻) * Δz⁻¹ᶠ
     spnge_diag = sponge_term_diag(i, j, k, grid, sponge, δτᵐ⁺)
 
-    return 1 + (pgf_diag + buoy_diag + damp_diag + spnge_diag) * (k > 1)
+    return 1 + (qᵈ * (pgf_diag + buoy_diag) + damp_diag + spnge_diag) * (k > 1)
 end
 
 @inline function get_coefficient(i, j, k, grid, ::AcousticTridiagUpper, p, ::ZDirection,
-                                 θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, sponge)
+                                 θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, sponge, dynamics)
 
     Δz⁻¹ᶠ  = Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
     Δz⁻¹ᵏ⁺ = Δz⁻¹ᶜᶜᶜ(i, j, k, grid)
 
     @inbounds Cᵏ⁺ = Cᴸ[i, j, k]
     θᵏ⁺ = ℑbzᵃᵃᶠ(i, j, k + 1, grid, θᴸ)
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     pgf_term  = - δτᵐ⁺^2 * Cᵏ⁺ * θᵏ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
     buoy_term = - δτᵐ⁺^2 * g * Δz⁻¹ᵏ⁺ / 2
     damp_term = - dᵐ⁺ * Δz⁻¹ᵏ⁺ * Δz⁻¹ᶠ
 
     # Upper sponge is local in z (Rayleigh-type), so no off-diagonal coupling.
-    return (pgf_term + buoy_term + damp_term) * (k > 1)
+    return (qᵈ * (pgf_term + buoy_term) + damp_term) * (k > 1)
 end
 
 #####
@@ -777,7 +783,7 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
                 model.dynamics.pressure,
                 model.dynamics.total_density,
                 model.momentum.ρw,
-                grid, g, substepper.sponge, direction)
+                grid, model.dynamics, g, substepper.sponge, direction)
     else
         launch!(arch, grid, :xyz, _assemble_slow_vertical_momentum_tendency!,
                 substepper.slow_vertical_momentum_tendency,
@@ -786,22 +792,27 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
                 model.dynamics.total_density,
                 ref.pressure, ref.density,
                 model.momentum.ρw,
-                grid, g, substepper.sponge, direction)
+                grid, model.dynamics, g, substepper.sponge, direction)
     end
 
     return nothing
 end
 
 # Slow-tendency assembly with reference state. Buoyancy uses the diagnosed TOTAL density
-# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): in conservation-form momentum
-# `∂t(ρw) = -∂z p - g ρ`, gravity acts on the total mass of all species. The prognostic mass
+# `ρ = ρᵈ + Σρˣ` as `ρᴸ` (no virtual-density factor): in the mixture momentum balance
+# `ρ Dw/Dt = -∂z p - g ρ`, gravity acts on the total mass of all species. The prognostic mass
 # variable is the dry density ρᵈ (its continuity has no sedimentation source); total ρ is
 # reconstructed each update. Across the acoustic substeps the water densities are frozen, so the
 # evolving density perturbation `ρ′ = ρᵈ′` is also the total-density perturbation, and the
 # moisture loading enters exactly once — here, through the stage-entry total `ρᴸ`.
+#
+# `qᵈ` converts the mixture force `-∂z p - g ρ` onto the dry-air momentum ρw (see
+# `dynamics_mass_fractionᶜᶜᶠ`); without a reference state its buoyancy part is exactly `-g ℑᶻ(ρᵈ)`.
 @kernel function _assemble_slow_vertical_momentum_tendency!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, pᵣ, ρᵣ, ρwᴸ,
-                                                            grid, g, sponge, direction)
+                                                            grid, dynamics, g, sponge, direction)
     i, j, k = @index(Global, NTuple)
+
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     @inbounds begin
         # Reference-subtracted PGF and buoyancy: at Uᴸ = reference state
@@ -810,7 +821,7 @@ end
         ρ′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, δϕ, ρᴸ, ρᵣ)
         Gˢρwˢᵖ = sponge_slow_tendency(i, j, k, grid, sponge, ρwᴸ, direction)
 
-        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - ∂z_p′ - g * ρ′ᶜᶜᶠ + Gˢρwˢᵖ) * (k > 1)
+        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - qᵈ * (∂z_p′ + g * ρ′ᶜᶜᶠ) + Gˢρwˢᵖ) * (k > 1)
     end
 end
 
@@ -818,14 +829,16 @@ end
 @inline δϕ(i, j, k, grid, ϕᴸ, ϕᵣ) = @inbounds ϕᴸ[i, j, k] - ϕᵣ[i, j, k]
 
 @kernel function _assemble_slow_vertical_momentum_tendency_no_ref!(Gˢρw, Gⁿρw, pᴸ, ρᴸ, ρwᴸ,
-                                                                   grid, g, sponge, direction)
+                                                                   grid, dynamics, g, sponge, direction)
     i, j, k = @index(Global, NTuple)
+
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
 
     @inbounds begin
         ∂z_pᴸ  = ∂zᶜᶜᶠ(i, j, k, grid, pᴸ)
         ρᴸᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρᴸ)
         Gˢρwˢᵖ = sponge_slow_tendency(i, j, k, grid, sponge, ρwᴸ, direction)
-        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - ∂z_pᴸ - g * ρᴸᶜᶜᶠ + Gˢρwˢᵖ) * (k > 1)
+        Gˢρw[i, j, k] = (Gⁿρw[i, j, k] - qᵈ * (∂z_pᴸ + g * ρᴸᶜᶜᶠ) + Gˢρwˢᵖ) * (k > 1)
     end
 end
 
@@ -932,13 +945,16 @@ end
 # perturbation force. `ExnerReferenceState` depends only on z, so ∂x pᵣ ≡ 0
 # and no horizontal pressure-perturbation field is needed.
 #
-#   (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′))
-#   (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ (Gⁿρv − ∂y pᴸ − ∂y(Cᴸ (ρθ)′))
+#   (ρu)′^{τ+Δτ} = (ρu)′^τ + Δτ (Gⁿρu − qᵈ [∂x pᴸ + ∂x(Cᴸ (ρθ)′)])
+#   (ρv)′^{τ+Δτ} = (ρv)′^τ + Δτ (Gⁿρv − qᵈ [∂y pᴸ + ∂y(Cᴸ (ρθ)′)])
 #
 # `Gⁿρu` (SlowDynamics) carries non-pressure slow terms with PGF zeroed;
 # we reinstate the frozen large-step PGF here (MPAS keeps it in `tend_u_euler`).
 @kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Cᴸ, Gⁿρu, Gⁿρv)
     i, j, k = @index(Global, NTuple)
+
+    qᵈˣ = AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics)
+    qᵈʸ = AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics)
 
     @inbounds begin
         ∂x_pᴸ  = AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
@@ -949,8 +965,8 @@ end
         ∂x_p = ∂x_pᴸ + ∂x_p′
         ∂y_p = ∂y_pᴸ + ∂y_p′
 
-        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p)
-        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - qᵈˣ * ∂x_p)
+        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - qᵈʸ * ∂y_p)
     end
 end
 
@@ -959,6 +975,15 @@ end
 @inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 @inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+
+# The perturbation pressure force that the (ρw)′ solve subtracts: `qᵈ ∂z p′` on the dry-air ρw.
+# On terrain-following grids it acts on ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv, so it also subtracts the
+# slope projection of the horizontal forces on ρu and ρv (zero on other grids).
+@inline vertical_pressure_force′(i, j, k, grid, dynamics, ρθ′, Cᴸ) =
+    AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) * ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) -
+    terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid, dynamics, ρθ′, Cᴸ)
+
+@inline terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid, dynamics, ρθ′, Cᴸ) = zero(grid)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -1017,13 +1042,14 @@ end
     Nz = size(grid, 3)
 
     @inbounds begin
-        ∂r_p′★  = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′★, Cᴸ)
-        ∂r_p′ˢ⁻ = ∇ᶻp′(i, j, k, grid, dynamics, ρθ′,  Cᴸ)
+        ∂r_p′★  = vertical_pressure_force′(i, j, k, grid, dynamics, ρθ′★, Cᴸ)
+        ∂r_p′ˢ⁻ = vertical_pressure_force′(i, j, k, grid, dynamics, ρθ′,  Cᴸ)
         Gρwᵖ = δτˢ⁻ * ∂r_p′ˢ⁻ + δτᵐ⁺ * ∂r_p′★ # pressure gradient
 
+        qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
         ρ′ᶜᶜᶠ★  = ℑzᵃᵃᶠ(i, j, k, grid, ρ′★)
         ρ′ᶜᶜᶠˢ⁻ = ℑzᵃᵃᶠ(i, j, k, grid, ρ′)
-        Gρwᵇ = g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★) # buoyancy
+        Gρwᵇ = qᵈ * g * (δτˢ⁻ * ρ′ᶜᶜᶠˢ⁻ + δτᵐ⁺ * ρ′ᶜᶜᶠ★) # buoyancy
 
         ∂z²_ρw′ˢ⁻ = ∂zᶜᶜᶠ(i, j, k, grid, ∂zᶜᶜᶜ, ρw′)
         Gρwᵈ = - dˢ⁻ * ∂z²_ρw′ˢ⁻ # damping
@@ -1612,7 +1638,7 @@ function acoustic_substep!(model, substepper, stage, advection)
            substepper.vertical_solver_source_term,
            substepper.linearization_potential_temperature,
            substepper.linearization_pressure_coefficient, g, δτᵐ⁺, dᵐ⁺,
-           substepper.sponge)
+           substepper.sponge, model.dynamics)
 
     # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
     launch!(arch, grid, :xyz, _post_solve_recovery!,

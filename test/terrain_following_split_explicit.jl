@@ -1,11 +1,11 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.AtmosphereModels: transport_velocities
+using Breeze.AtmosphereModels: dynamics_mass_fractionᶜᶜᶠ, transport_velocities
 
 using CUDA: @allowscalar
 
-using Breeze.CompressibleEquations: acoustic_recovered_vertical_momentum, assemble_slow_vertical_momentum_tendency!, compute_acoustic_substeps, compute_contravariant_velocity!, freeze_linearization_state!, δpᴸ, terrain_horizontal_linearized_pressure_gradient_correction, terrain_slope_x_ccf, terrain_slope_y_ccf, ∇ᶻp′
+using Breeze.CompressibleEquations: acoustic_recovered_vertical_momentum, assemble_slow_vertical_momentum_tendency!, compute_acoustic_substeps, compute_contravariant_velocity!, freeze_linearization_state!, δpᴸ, terrain_horizontal_linearized_pressure_gradient_correction, terrain_slope_x_ccf, terrain_slope_y_ccf, vertical_pressure_force′
 using Oceananigans
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: xnode, znode
@@ -498,7 +498,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
     @testset "Acoustic substep applies terrain ρw̃ slope correction [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
         # The contravariant vertical-momentum perturbation ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv
         # carries a horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) in its acoustic
-        # pressure-gradient force, so `∇ᶻp′` is the vertical ∂z(Cᴸ(ρθ)′) minus that correction.
+        # pressure-gradient force, so that force is qᵈ ∂z(Cᴸ(ρθ)′) minus that correction.
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
 
@@ -532,7 +532,9 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             ∂z_p′      = ∂zᶜᶜᶠ(i, 1, k, grid, δpᴸ, ρθ′, Cᴸ)
             correction = terrain_horizontal_linearized_pressure_gradient_correction(i, 1, k, grid, d, ρθ′, Cᴸ)
 
-            @test ∇ᶻp′(i, 1, k, grid, d, ρθ′, Cᴸ) == ∂z_p′ - correction
+            qᵈ         = dynamics_mass_fractionᶜᶜᶠ(i, 1, k, grid, d)
+
+            @test vertical_pressure_force′(i, 1, k, grid, d, ρθ′, Cᴸ) == qᵈ * ∂z_p′ - correction
 
             correction_seen = correction_seen || (abs(correction) > 1e-10)
         end

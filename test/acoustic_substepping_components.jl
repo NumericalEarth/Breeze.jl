@@ -125,34 +125,45 @@ end
 
     direction = ZDirection()
 
-    code_diag(k) = get_coefficient(2, 2, k, grid, AcousticTridiagDiagonal(), nothing, direction,
-                                   θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
-    code_upper(k) = get_coefficient(2, 2, k, grid, AcousticTridiagUpper(), nothing, direction,
-                                    θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+    # `nothing` in the dynamics slot takes the default unit mass fraction and checks the bare
+    # coefficient algebra. A uniformly moist compressible state then weights every PGF and
+    # buoyancy entry of a row by that row's face fraction qᵈ = ρᵈ/ρ = 1 − qᵗ, and leaves the
+    # damping entry alone — the matrix side of the weighting `_build_vertical_rhs!` applies.
+    qᵗ = FT(0.02)
+    moist_model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
+    set!(moist_model; θ=300, ρ=1.1, qᵗ=qᵗ)
+    weightings = ((nothing, one(FT)), (moist_model.dynamics, 1 - qᵗ))
+
+    code_diag(k, dynamics) = get_coefficient(2, 2, k, grid, AcousticTridiagDiagonal(), nothing, direction,
+                                             θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, nothing, dynamics)
+    code_upper(k, dynamics) = get_coefficient(2, 2, k, grid, AcousticTridiagUpper(), nothing, direction,
+                                              θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, nothing, dynamics)
     # Oceananigans' Press-indexed tridiagonal solver asks the lower
     # diagonal for row k as `a[k - 1]`.
-    code_lower_for_row(k) = get_coefficient(2, 2, k - 1, grid, AcousticTridiagLower(), nothing, direction,
-                                            θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, nothing)
+    code_lower_for_row(k, dynamics) = get_coefficient(2, 2, k - 1, grid, AcousticTridiagLower(), nothing, direction,
+                                                      θᴸ, Cᴸ, g, δτᵐ⁺, dᵐ⁺, nothing, dynamics)
 
-    expected_lower(k) = - δτᵐ⁺^2 * C(k - 1) * θ_face(k - 1) / Δz^2 +
-                         δτᵐ⁺^2 * g / (2Δz) -
-                         dᵐ⁺ / Δz^2
-    expected_diag(k) = 1 + δτᵐ⁺^2 * θ_face(k) * (C(k) + C(k - 1)) / Δz^2 +
-                           2dᵐ⁺ / Δz^2
-    expected_upper(k) = - δτᵐ⁺^2 * C(k) * θ_face(k + 1) / Δz^2 -
-                         δτᵐ⁺^2 * g / (2Δz) -
-                         dᵐ⁺ / Δz^2
+    expected_lower(k, qᵈ) = qᵈ * (- δτᵐ⁺^2 * C(k - 1) * θ_face(k - 1) / Δz^2 +
+                                   δτᵐ⁺^2 * g / (2Δz)) -
+                            dᵐ⁺ / Δz^2
+    expected_diag(k, qᵈ) = 1 + qᵈ * δτᵐ⁺^2 * θ_face(k) * (C(k) + C(k - 1)) / Δz^2 +
+                               2dᵐ⁺ / Δz^2
+    expected_upper(k, qᵈ) = qᵈ * (- δτᵐ⁺^2 * C(k) * θ_face(k + 1) / Δz^2 -
+                                   δτᵐ⁺^2 * g / (2Δz)) -
+                            dᵐ⁺ / Δz^2
 
-    @test code_diag(1) == 1
-    @test code_upper(1) == 0
+    for (dynamics, qᵈ) in weightings
+        @test code_diag(1, dynamics) == 1
+        @test code_upper(1, dynamics) == 0
 
-    for k in 2:Nz
-        @test code_lower_for_row(k) ≈ expected_lower(k)
-        @test code_diag(k) ≈ expected_diag(k)
-    end
+        for k in 2:Nz
+            @test code_lower_for_row(k, dynamics) ≈ expected_lower(k, qᵈ)
+            @test code_diag(k, dynamics) ≈ expected_diag(k, qᵈ)
+        end
 
-    for k in 2:Nz-1
-        @test code_upper(k) ≈ expected_upper(k)
+        for k in 2:Nz-1
+            @test code_upper(k, dynamics) ≈ expected_upper(k, qᵈ)
+        end
     end
 end
 

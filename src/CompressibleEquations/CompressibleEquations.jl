@@ -3,25 +3,30 @@
 
 Module implementing fully compressible dynamics for atmosphere models.
 
-The compressible formulation directly time-steps density as a prognostic variable
-and computes pressure from the ideal gas law. This formulation does not filter
+The compressible formulation directly time-steps the dry-air density as a prognostic
+variable and computes pressure from the ideal gas law. This formulation does not filter
 acoustic waves, so explicit time-stepping with small time steps (or acoustic
 substepping) is required.
 
-The fully compressible Euler equations in conservation form are:
+The fully compressible Euler equations in conservation form, with dry air as the mass
+and momentum carrier, are:
 
 ```math
 \\begin{aligned}
-&\\text{Mass:} && \\partial_t \\rho + \\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u}) = 0 \\\\
-&\\text{Momentum:} && \\partial_t (\\rho \\boldsymbol{u}) + \\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u} \\boldsymbol{u}) + \\boldsymbol{\\nabla} p = -\\rho g \\hat{\\boldsymbol{z}} + \\rho \\boldsymbol{f} + \\boldsymbol{\\nabla \\cdot \\mathcal{T}}
+&\\text{Dry mass:} && \\partial_t \\rho^d + \\boldsymbol{\\nabla \\cdot} (\\rho^d \\boldsymbol{u}) = 0 \\\\
+&\\text{Momentum:} && \\partial_t (\\rho^d \\boldsymbol{u}) + \\boldsymbol{\\nabla \\cdot} (\\rho^d \\boldsymbol{u} \\boldsymbol{u}) = - q^d \\boldsymbol{\\nabla} p - \\rho^d g \\hat{\\boldsymbol{z}} + \\rho^d \\boldsymbol{f} + \\boldsymbol{\\nabla \\cdot \\mathcal{T}}
 \\end{aligned}
 ```
+
+Here ``q^d = ρ^d / ρ = 1 - q^t`` is the dry-air mass fraction, which carries the mixture pressure
+gradient and gravity onto the dry-air momentum, and ``ρ = ρ^d + ρ^t`` is the total density. See
+[Compressible dynamics](@ref Compressible-section) for the derivation.
 
 Pressure is computed from the ideal gas law:
 ```math
 p = \\rho R^m T
 ```
-where ``R^m`` is the mixture gas constant.
+where ``R^m`` is the mixture gas constant and ``\\rho`` is the total density.
 """
 module CompressibleEquations
 
@@ -58,7 +63,7 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Grids: rnode, znode
+using Oceananigans.Grids: rnode, znode, halo_size
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ,
                               ∂zᶜᶜᶜ, ∂zᶜᶜᶠ, divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!, KernelParameters
@@ -68,6 +73,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_
                                thermodynamic_density_name, specific_prognostic_moisture
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Solvers: NewtonSolver
+using Breeze.Utils: safe_divide
 using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key
 using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, MoistureMassFractions,
                              vapor_equivalent_heat_capacity, condensate_latent_energy, exner_exponent,

@@ -369,34 +369,33 @@ terrain_ρw_boundary_conditions(::TerrainFollowingGrid, ρw_bcs) =
                               bottom = NormalFlowBoundaryCondition(terrain_kinematic_bottom_ρw; discrete_form = true),
                               top = ρw_bcs.top, immersed = ρw_bcs.immersed)
 
+# ρw̃ = ρw - slopeₓ·ρu - slopeᵧ·ρv, so the force on ρw̃ collects the horizontal pressure forces *as
+# they act on ρu and ρv*: each gradient is weighted by qᵈ at its own x/y face, then interpolated.
+# Weighting after the interpolation would put the contravariant projection out of step with the
+# ρu and ρv updates.
+@inline dry_mass_weightedᶠᶜᶜ(i, j, k, grid, dynamics, gradient, args...) =
+    AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) * gradient(i, j, k, grid, dynamics, args...)
+
+@inline dry_mass_weightedᶜᶠᶜ(i, j, k, grid, dynamics, gradient, args...) =
+    AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) * gradient(i, j, k, grid, dynamics, args...)
+
 @inline function terrain_horizontal_pressure_gradient_correction(i, j, k, grid, dynamics)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    ∂x_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, AtmosphereModels.x_pressure_gradient, dynamics)
-    ∂y_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, AtmosphereModels.y_pressure_gradient, dynamics)
+    ∂x_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, dry_mass_weightedᶠᶜᶜ, dynamics, AtmosphereModels.x_pressure_gradient)
+    ∂y_p_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, dry_mass_weightedᶜᶠᶜ, dynamics, AtmosphereModels.y_pressure_gradient)
     return slope_x * ∂x_p_ccf + slope_y * ∂y_p_ccf
 end
 
+# The same slope correction for the perturbation pressure, subtracted in `vertical_pressure_force′`.
 @inline function terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
-                                                                            dynamics, ρθ′, Cᴸ)
+                                                                            dynamics::TerrainCompressibleDynamics,
+                                                                            ρθ′, Cᴸ)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ∇ˣp′,
-                       dynamics, ρθ′, Cᴸ)
-    ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ∇ʸp′,
-                       dynamics, ρθ′, Cᴸ)
+    ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, dry_mass_weightedᶠᶜᶜ, dynamics, ∇ˣp′, ρθ′, Cᴸ)
+    ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, dry_mass_weightedᶜᶠᶜ, dynamics, ∇ʸp′, ρθ′, Cᴸ)
     return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
-end
-
-# The vertical gradient minus the horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) + slopeᵧ·∂ᵧ(Cᴸ(ρθ)′),
-# since ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv.
-@inline function ∇ᶻp′(i, j, k, grid,
-                      dynamics::TerrainCompressibleDynamics,
-                      ρθ′, Cᴸ)
-    ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
-    correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
-                                                                            dynamics, ρθ′, Cᴸ)
-    return ∂z_p′ - correction
 end
 
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
@@ -527,6 +526,7 @@ end
     Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, Gⁿρu)
     Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, Gⁿρv)
 
+    qᵈ = AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics)
     ∂z_p′ = terrain_vertical_pressure_gradient(i, j, k, grid, pᴸ, pᵣ)
     ρ′ᶜᶜᶠ = terrain_vertical_buoyancy_density(i, j, k, grid, ρᴸ, ρᵣ)
     horizontal_slow_tendency = slope_x * Gⁿρu_ccf + slope_y * Gⁿρv_ccf
@@ -543,9 +543,8 @@ end
 
     @inbounds Gˢρw̃[i, j, k] = (Gⁿρw[i, j, k] -
                                 horizontal_slow_tendency -
-                                vertical_pressure_tendency_factor * ∂z_p′ +
-                                horizontal_pressure_gradient -
-                                g * ρ′ᶜᶜᶠ +
+                                qᵈ * (vertical_pressure_tendency_factor * ∂z_p′ + g * ρ′ᶜᶜᶠ) +
+                                horizontal_pressure_gradient +
                                 sponge_tendency) * (k > 1)
 end
 
@@ -713,6 +712,8 @@ function compute_terrain_temperature_and_pressure!(model::TerrainCompressibleMod
     # Ensure halos are filled
     fill_halo_regions!(dynamics.dry_density)
     fill_halo_regions!(prognostic_fields(model.formulation))
+
+    compute_dry_mass_fraction!(model)
 
     # Compute temperature and pressure (same as non-terrain CompressibleModel)
     launch!(arch, grid, :xyz,
