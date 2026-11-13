@@ -1,7 +1,5 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
-using Random
-
 #####
 ##### The moisture's part of the pressure that the acoustic substep loop integrates.
 #####
@@ -33,8 +31,9 @@ end
                                     reference_vapor_mass_fraction = sounding_q)
     model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5))
 
-    Random.seed!(1)
-    set!(model; θ = (x, z) -> sounding_θ(z) + 0.1 * (z < 2e3) * (2rand() - 1), qᵛ = (x, z) -> sounding_q(z),
+    # Deterministic noise of amplitude 0.1 K below 2 km.
+    noise(x, z) = 2 * mod(43758.5453 * sin(0.129898x + 3.91165z), 1) - 1
+    set!(model; θ = (x, z) -> sounding_θ(z) + 0.1 * (z < 2e3) * noise(x, z), qᵛ = (x, z) -> sounding_q(z),
          u = 12, ρ = Breeze.HydrostaticallyBalancedDensity())
 
     for _ in 1:1200
