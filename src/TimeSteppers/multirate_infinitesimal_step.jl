@@ -82,18 +82,28 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`MultirateInfinitesimalStep`](@ref) time stepper. `coefficients` is a `Symbol`
-naming a set in [`multirate_infinitesimal_step_tableau`](@ref) (default `:MIS4a`) or a
+naming a set in [`multirate_infinitesimal_step_tableau`](@ref) (default `:TVDMISB`) or a
 [`MultirateInfinitesimalStepTableau`](@ref).
 
 Select it with `AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep,
-timestepper_kwargs = (; coefficients = :MIS4a))`.
+timestepper_kwargs = (; coefficients = :TVDMISB))`.
 
-The default, `:MIS4a` ([Knoth and Wensch (2014)](@cite KnothWensch2014)), is third-order accurate
-with the fast and slow parts coupled and, with fifth-order upwind advection and this stepper's
-acoustic loop, stable to a larger advective Courant number than Wicker–Skamarock RK3 at every
-ratio of sound to flow speed. `:MIS2` is not: its slow method relies on the dissipation of
-third-order upwinding and is unstable beyond a Courant number of about 0.2 with fifth-order
-schemes.
+The default, `:TVDMISB` ([Knoth and Wensch (2014)](@cite KnothWensch2014)), is chosen for
+positivity: its slow method is strong-stability preserving with coefficient ``r = 0.75``, so the
+moisture and tracer stages are convex combinations of forward-Euler steps for an advective Courant
+number up to ``0.75`` times the forward-Euler bound of the advection operator. Of the other sets,
+`:SSPMIS43` (experimental) has ``r = 1.79``, `:MIS3C` ``r = 0.23``, and `:MIS4a`, `:MIS4`, `:MIS2`
+and `:WickerSkamarock3` have ``r = 0``: no such bound at any Courant number. The bound is on the
+time stepping alone. Positive moisture also needs an advection operator that is positive under
+forward Euler, which the clamp of bounded WENO reconstructions does not provide by itself; a flux
+limiter would (Oceananigans.jl#6475).
+
+`:TVDMISB` is second-order accurate with the fast and slow parts coupled and, with fifth-order
+upwind advection and this stepper's acoustic loop, stable to the advective Courant number of
+Wicker–Skamarock RK3 (1.4) when sound is at least six times faster than the flow. `:MIS4a` is
+third order and stable to a larger Courant number, without the positivity bound. `:MIS2` relies
+on the dissipation of third-order upwinding and is unstable beyond a Courant number of about 0.2
+with fifth-order schemes.
 
 `post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
@@ -101,7 +111,7 @@ between stages with the preceding loop's (see [`PostLoopScalarTendencies`](@ref)
 """
 function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
-                                    coefficients = :MIS4a,
+                                    coefficients = :TVDMISB,
                                     implicit_solver = nothing,
                                     cache_advecting_state = false,
                                     relinearize_stages = false,
