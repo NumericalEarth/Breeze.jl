@@ -5,7 +5,7 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
 using Oceananigans.TimeSteppers: TimeSteppers, tick_stage!
-using Oceananigans.Utils: launch!, time_difference_seconds
+using Oceananigans.Utils: launch!, time_difference_in_seconds
 
 using KernelAbstractions: @kernel, @index
 
@@ -1192,7 +1192,7 @@ function TimeSteppers.time_step!(model::AtmosphereModel{<:ParcelDynamics, <:Any,
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α³)
 
     # Final clock update (adjust for floating point error)
-    corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
+    corrected_Δt = time_difference_in_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     # Apply microphysics model update AFTER all RK3 stages and clock update

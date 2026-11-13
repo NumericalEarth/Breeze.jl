@@ -25,11 +25,27 @@ using Oceananigans.Architectures: on_architecture
 # `DocStringExtensions.TYPEDSIGNATURES` with the default values of positional and keyword
 # arguments shown, as in `f(x, n::Int64=3; Δt=0.001)`. Breeze docstrings use it in place of
 # `TYPEDSIGNATURES`.
-const TYPEDSIGNATURES_WITH_DEFAULTS = DocStringExtensions.TypedMethodSignatures(defaults = true)
+#
+# Showing default values requires DocStringExtensions v0.10, where `TypedMethodSignatures` has
+# keyword arguments. In v0.9 it is an empty struct, so `hasmethod` tells the two versions apart
+# and v0.9 falls back to `TYPEDSIGNATURES` (as in SpeedyWeather/SpeedyWeather.jl#1398 and
+# CliMA/Oceananigans.jl#6490).
+const TYPEDSIGNATURES_WITH_DEFAULTS =
+    if hasmethod(DocStringExtensions.TypedMethodSignatures, Tuple{}, (:defaults,))
+        DocStringExtensions.TypedMethodSignatures(defaults = true)
+    else
+        DocStringExtensions.TYPEDSIGNATURES
+    end
 
 # `TYPEDSIGNATURES_WITH_DEFAULTS` without the inferred return type, for methods whose return
 # type is too long to be worth printing, such as a `Union` of deeply parametrized types.
-const TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN = DocStringExtensions.TypedMethodSignatures(defaults = true, returns = false)
+# DocStringExtensions v0.9 cannot omit the return type and falls back to `TYPEDSIGNATURES`.
+const TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN =
+    if hasmethod(DocStringExtensions.TypedMethodSignatures, Tuple{}, (:defaults, :returns))
+        DocStringExtensions.TypedMethodSignatures(defaults = true, returns = false)
+    else
+        DocStringExtensions.TYPEDSIGNATURES
+    end
 
 #####
 ##### Sums of selected properties
