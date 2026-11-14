@@ -759,31 +759,47 @@ end
     return nothing
 end
 
-# `G` is the reduced tuple from `p3_tendency_fields`. The `+=` lands on top of the
-# advection, diffusion and forcing the scalar kernels have already written.
-@inline function add_p3_tendencies!(G, i, j, k, grid, p3::P3, result::P3TendencyResult)
+# `G` is the reduced tuple from `p3_tendency_fields`. The sums land on top of the
+# advection, diffusion and forcing the scalar kernels have already written. `relaxations`
+# and `rime` are the number relaxations and rime limits (see `p3_driver.jl`), added after
+# the process tendency of the field they correct.
+#
+# Every sum is formed before any is stored. The compiler cannot tell that the tendency
+# fields do not alias, so a load that follows a store is issued again; loading first lets
+# it reuse the values that the sink fractions, relaxations and rime limits already read.
+@inline function add_p3_tendencies!(G, i, j, k, grid, p3::P3, result::P3TendencyResult, relaxations, rime)
     @inbounds begin
-        G.ρqᶜˡ[i, j, k] += result.tendency_ρqᶜˡ
-        G.ρqʳ[i, j, k]  += result.tendency_ρqʳ
-        G.ρnʳ[i, j, k]  += result.tendency_ρnʳ
-        G.ρqⁱ[i, j, k]  += result.tendency_ρqⁱ
-        G.ρnⁱ[i, j, k]  += result.tendency_ρnⁱ
-        G.ρqᶠ[i, j, k]  += result.tendency_ρqᶠ
-        G.ρbᶠ[i, j, k]  += result.tendency_ρbᶠ
-        G.ρqʷⁱ[i, j, k] += result.tendency_ρqʷⁱ
-        G.ρqᵛ[i, j, k]  += result.tendency_ρqᵛ
+        Gρqᶜˡ = G.ρqᶜˡ[i, j, k] + result.tendency_ρqᶜˡ
+        Gρqʳ  = G.ρqʳ[i, j, k]  + result.tendency_ρqʳ
+        Gρnʳ  = G.ρnʳ[i, j, k]  + result.tendency_ρnʳ + relaxations.rain
+        Gρqⁱ  = G.ρqⁱ[i, j, k]  + result.tendency_ρqⁱ
+        Gρnⁱ  = G.ρnⁱ[i, j, k]  + result.tendency_ρnⁱ + relaxations.ice
+        Gρqᶠ  = G.ρqᶠ[i, j, k]  + result.tendency_ρqᶠ + rime.mass
+        Gρbᶠ  = G.ρbᶠ[i, j, k]  + result.tendency_ρbᶠ + rime.volume
+        Gρqʷⁱ = G.ρqʷⁱ[i, j, k] + result.tendency_ρqʷⁱ
+        Gρqᵛ  = G.ρqᵛ[i, j, k]  + result.tendency_ρqᵛ
+
+        G.ρqᶜˡ[i, j, k] = Gρqᶜˡ
+        G.ρqʳ[i, j, k]  = Gρqʳ
+        G.ρnʳ[i, j, k]  = Gρnʳ
+        G.ρqⁱ[i, j, k]  = Gρqⁱ
+        G.ρnⁱ[i, j, k]  = Gρnⁱ
+        G.ρqᶠ[i, j, k]  = Gρqᶠ
+        G.ρbᶠ[i, j, k]  = Gρbᶠ
+        G.ρqʷⁱ[i, j, k] = Gρqʷⁱ
+        G.ρqᵛ[i, j, k]  = Gρqᵛ
     end
-    add_cloud_number_tendency!(G, i, j, k, grid, p3.aerosol, result)
+    add_cloud_number_tendency!(G, i, j, k, grid, p3.aerosol, result, relaxations)
     add_aerosol_tendency!(G, i, j, k, grid, p3.aerosol, result)
     add_vapor_excess_tendency!(G, i, j, k, grid, p3.process_rates, result)
     return nothing
 end
 
 # Match tendency writes to the allocated prognostic fields.
-@inline add_cloud_number_tendency!(G, i, j, k, grid, ::Nothing, result) = nothing
+@inline add_cloud_number_tendency!(G, i, j, k, grid, ::Nothing, result, relaxations) = nothing
 
-@inline function add_cloud_number_tendency!(G, i, j, k, grid, ::AerosolActivation, result)
-    @inbounds G.ρnᶜˡ[i, j, k] += result.tendency_ρnᶜˡ
+@inline function add_cloud_number_tendency!(G, i, j, k, grid, ::AerosolActivation, result, relaxations)
+    @inbounds G.ρnᶜˡ[i, j, k] = G.ρnᶜˡ[i, j, k] + result.tendency_ρnᶜˡ + relaxations.cloud
     return nothing
 end
 

@@ -140,9 +140,7 @@ end
 
     rime = p3_rime_limits(i, j, k, G, stage, result)
 
-    add_p3_tendencies!(G, i, j, k, grid, p3, result)
-    add_p3_number_relaxations!(G, i, j, k, p3, relaxations)
-    add_p3_rime_limits!(G, i, j, k, rime)
+    add_p3_tendencies!(G, i, j, k, grid, p3, result, relaxations, rime)
 end
 
 #####
@@ -358,14 +356,6 @@ end
     P3RimeLimits(nonnegative_tendency_limit(i, j, k, G.ρqᶠ, stage, Val(:ρqᶠ), result.tendency_ρqᶠ),
                  nonnegative_tendency_limit(i, j, k, G.ρbᶠ, stage, Val(:ρbᶠ), result.tendency_ρbᶠ))
 
-@inline function add_p3_rime_limits!(G, i, j, k, rime)
-    @inbounds begin
-        G.ρqᶠ[i, j, k] += rime.mass
-        G.ρbᶠ[i, j, k] += rime.volume
-    end
-    return nothing
-end
-
 #####
 ##### Semi-implicit number relaxations
 #####
@@ -446,22 +436,6 @@ end
     Gᵖ = tendency_ρnᶜˡ(rates, ρ, properties.Nᶜˡ, ℳ.qᶜˡ, p3)
     return semi_implicit_relaxation(i, j, k, G.ρnᶜˡ, stage, Val(:ρnᶜˡ), Gᵖ, explicit, target, τ,
                                     explicit != 0)
-end
-
-@inline function add_p3_number_relaxations!(G, i, j, k, p3::P3, relaxations)
-    @inbounds begin
-        G.ρnʳ[i, j, k] += relaxations.rain
-        G.ρnⁱ[i, j, k] += relaxations.ice
-    end
-    add_p3_cloud_number_relaxation!(G, i, j, k, p3.aerosol, relaxations)
-    return nothing
-end
-
-@inline add_p3_cloud_number_relaxation!(G, i, j, k, ::Nothing, relaxations) = nothing
-
-@inline function add_p3_cloud_number_relaxation!(G, i, j, k, ::AerosolActivation, relaxations)
-    @inbounds G.ρnᶜˡ[i, j, k] += relaxations.cloud
-    return nothing
 end
 
 #####
