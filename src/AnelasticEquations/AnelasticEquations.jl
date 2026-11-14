@@ -39,7 +39,7 @@ using Oceananigans.Solvers: Solvers, solve!, FFTBasedPoissonSolver, FourierTridi
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, BoussinesqReferenceState, ThermodynamicConstants,
-                             MoistureMassFractions, mixture_gas_constant, surface_temperature_value, density,
+                             MoistureMassFractions, mixture_gas_constant, surface_temperature_value,
                              MovingFrame, advance_frame!, synchronize_frame!, frame_summary, reference_value,
                              PlanarLiquidSurface, potential_temperature_from_temperature, supersaturation,
                              mixture_heat_capacity, liquid_latent_heat
