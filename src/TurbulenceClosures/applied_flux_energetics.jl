@@ -1,6 +1,6 @@
 #####
 ##### The energy conversions of the fluxes `TKEBasedTurbulenceClosure` applies, for the TKE
-##### equation of a closure with a `CloudBuoyancyFlux`
+##### equation of a closure with a `AppliedFluxEnergetics`
 #####
 ##### The closure diffuses every scalar `φ` (θˡⁱ, vapor, every condensate species, ...) with `Kᶜ`
 ##### and momentum with `Kᵘ`, density weighted, through the flux `ρᶠ K ∂z φ` at the interior
@@ -8,11 +8,11 @@
 ##### mean state, face by face:
 #####
 #####   shear:     Pᶠ = Kᵘ S²                                  (S² of the stored velocities)
-#####   buoyancy:  Bᶠ = Σₛ βₛᶠ Fₛ,   Fₛ = -Kᶜ (φₛ,ₖ - φₛ,ₖ₋₁) / Δzᶠ,   βₛ = ∂b/∂φₛ
+#####   buoyancy:  Bᶠ = Σ_χ b_χᶠ F_χ,   Fₛ = -Kᶜ (φₛ,ₖ - φₛ,ₖ₋₁) / Δzᶠ,   b_χ = ∂b/∂χ
 #####
 ##### where `b` is the buoyancy of the dynamics (for anelastic dynamics b = g (1 - Rᵐᵣ Tᵣ / (Rᵐ T)),
-##### condensate loading through Rᵐ) and `βₛ` its exact derivative with respect to each mixed
-##### specific variable at fixed pressure, at the centers, averaged to the face (`βₛᶠ`). The
+##### condensate loading through Rᵐ) and `b_χ` its exact derivative with respect to each mixed
+##### specific variable at fixed pressure, at the centers, averaged to the face (`b_χᶠ`). The
 ##### mixed variables that change `b` are θˡⁱ and the vapor, liquid and ice mass fractions of the
 ##### microphysics (`grid_moisture_fractions`, linear in its prognostic densities, so the flux of
 ##### all liquid is the sum of the liquid species' fluxes, and so on).
@@ -23,7 +23,7 @@
 #####   d/dt Σₖ ρₖ Δzₖ h‡ₖ (closure part) = -Σᶠ ρᶠ Δzᶠ Bᶠ + boundary terms,
 #####
 ##### with the dynamic enthalpy h‡ = -∫₀ᶻ b dz′ discretized by the trapezoid rule on the
-##### centers (∂h‡/∂φₛ at center k is -Zₛ,ₖ, Zₛ,ₖ - Zₛ,ₖ₋₁ = βₛᶠ Δzᶠ). The face conversions are
+##### centers (∂h‡/∂φₛ at center k is -Zₛ,ₖ, Zₛ,ₖ - Zₛ,ₖ₋₁ = b_χᶠ Δzᶠ). The face conversions are
 ##### moved to the centers, where the TKE lives, with the half-cell weights of the two faces of
 ##### each cell,
 #####
@@ -55,7 +55,7 @@ using Breeze.Thermodynamics: mixture_heat_capacity, mixture_gas_constant, exner_
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The derivatives `(βᶿ, βᵛ, βˡ, βⁱ)` of the buoyancy `b` of the dynamics with respect to the
+The derivatives `(b_θ, b_qᵛ, b_qˡ, b_qⁱ)` of the buoyancy `b` of the dynamics with respect to the
 liquid-ice potential temperature and the vapor, liquid and ice mass fractions, at fixed pressure,
 at cell center `(i, j, k)`. With ``X = Rᵐ T``, ``T = (ĉᵖ Π θˡⁱ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ) / cᵖᵐ`` and
 ``b = g (1 - Xᵣ / X)``, ``∂b/∂φ = (g - b) ∂ ln X / ∂φ``; `g - b` is taken from the buoyancy force
@@ -100,40 +100,40 @@ of the dynamics, so the derivatives hold for any dynamics whose buoyancy is a fu
                                           s.microphysics, s.microphysical_fields, constants) / ρ
     G = g - b
 
-    βᶿ = G * ĉᵖ * Π / H
-    βᵛ = G * ((Rᵛ - Rᵈ) / Rᵐ + ∂H∂qᵗ / H - (cᵖᵛ - cᵖᵈ) / cᵖᵐ)
-    βˡ = G * (-Rᵈ / Rᵐ + (∂H∂qᵗ + ℒˡ₀) / H - (cˡ - cᵖᵈ) / cᵖᵐ)
-    βⁱ = G * (-Rᵈ / Rᵐ + (∂H∂qᵗ + ℒⁱ₀) / H - (cⁱ - cᵖᵈ) / cᵖᵐ)
+    b_θ = G * ĉᵖ * Π / H
+    b_qᵛ = G * ((Rᵛ - Rᵈ) / Rᵐ + ∂H∂qᵗ / H - (cᵖᵛ - cᵖᵈ) / cᵖᵐ)
+    b_qˡ = G * (-Rᵈ / Rᵐ + (∂H∂qᵗ + ℒˡ₀) / H - (cˡ - cᵖᵈ) / cᵖᵐ)
+    b_qⁱ = G * (-Rᵈ / Rᵐ + (∂H∂qᵗ + ℒⁱ₀) / H - (cⁱ - cᵖᵈ) / cᵖᵐ)
 
-    return βᶿ, βᵛ, βˡ, βⁱ, θ, q
+    return b_θ, b_qᵛ, b_qˡ, b_qⁱ, θ, q
 end
 
 # The derivatives of the buoyancy and the enthalpy coefficient d(cᵖᵐ T)/dθˡⁱ = ĉᵖ Π at the centers,
 # stored once per update so that the conversions after the implicit solves use the same ones
 @kernel function _compute_buoyancy_derivatives!(cl, grid, s)
     i, j, k = @index(Global, NTuple)
-    βᶿ, βᵛ, βˡ, βⁱ, θ, q = buoyancy_derivativesᶜᶜᶜ(i, j, k, grid, s)
+    b_θ, b_qᵛ, b_qˡ, b_qⁱ, θ, q = buoyancy_derivativesᶜᶜᶜ(i, j, k, grid, s)
     constants = s.constants
     κ = exner_exponent(s.exner_exponent, q, constants)
     Π = (@inbounds(s.p[i, j, k]) / s.standard_pressure)^κ
     qᵗ = q.vapor + q.liquid + q.ice
     ĉᵖ = constants.dry_air.heat_capacity + qᵗ * (constants.vapor.heat_capacity - constants.dry_air.heat_capacity)
     @inbounds begin
-        cl.βᶿ[i, j, k] = βᶿ
-        cl.βᵛ[i, j, k] = βᵛ
-        cl.βˡ[i, j, k] = βˡ
-        cl.βⁱ[i, j, k] = βⁱ
+        cl.b_θ[i, j, k] = b_θ
+        cl.b_qᵛ[i, j, k] = b_qᵛ
+        cl.b_qˡ[i, j, k] = b_qˡ
+        cl.b_qⁱ[i, j, k] = b_qⁱ
         cl.ĉᵖΠ[i, j, k] = ĉᵖ * Π
     end
 end
 
 compute_buoyancy_derivatives!(fields, model) = nothing
 
-function compute_buoyancy_derivatives!(fields::SubgridCloudFields{<:CloudBuoyancyFlux}, model)
+function compute_buoyancy_derivatives!(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, model)
     grid = model.grid
     cl = fields.cloud
     launch!(grid.architecture, grid, :xyz, _compute_buoyancy_derivatives!, cl, grid, applied_flux_state(model))
-    fill_halo_regions!((cl.βᶿ, cl.βᵛ, cl.βˡ, cl.βⁱ))
+    fill_halo_regions!((cl.b_θ, cl.b_qᵛ, cl.b_qˡ, cl.b_qⁱ))
     return nothing
 end
 
@@ -151,10 +151,10 @@ end
         θ⁻ = s.ρθ[i, j, k-1] / ρ⁻
         q⁺ = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ⁺, s.ρqᵛᵉ[i, j, k] / ρ⁺, s.microphysical_fields)
         q⁻ = grid_moisture_fractions(i, j, k-1, grid, s.microphysics, ρ⁻, s.ρqᵛᵉ[i, j, k-1] / ρ⁻, s.microphysical_fields)
-        Δb = (cl.βᶿ[i, j, k] + cl.βᶿ[i, j, k-1]) / 2 * (θ⁺ - θ⁻) +
-             (cl.βᵛ[i, j, k] + cl.βᵛ[i, j, k-1]) / 2 * (q⁺.vapor - q⁻.vapor) +
-             (cl.βˡ[i, j, k] + cl.βˡ[i, j, k-1]) / 2 * (q⁺.liquid - q⁻.liquid) +
-             (cl.βⁱ[i, j, k] + cl.βⁱ[i, j, k-1]) / 2 * (q⁺.ice - q⁻.ice)
+        Δb = (cl.b_θ[i, j, k] + cl.b_θ[i, j, k-1]) / 2 * (θ⁺ - θ⁻) +
+             (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, k-1]) / 2 * (q⁺.vapor - q⁻.vapor) +
+             (cl.b_qˡ[i, j, k] + cl.b_qˡ[i, j, k-1]) / 2 * (q⁺.liquid - q⁻.liquid) +
+             (cl.b_qⁱ[i, j, k] + cl.b_qⁱ[i, j, k-1]) / 2 * (q⁺.ice - q⁻.ice)
         return Δb / Δzᶜᶜᶠ(i, j, k, grid)
     end
 end
@@ -186,7 +186,7 @@ end
 
 # The conversions of the surface fluxes within the bottom half-cell: the work of the surface
 # stress on the lowest level, -u₁ 𝒯ˣ - v₁ 𝒯ʸ (𝒯 the upward flux of ρu, ρv), and the dynamic
-# enthalpy the surface fluxes of θˡⁱ and vapor remove, (z₁ - z_surface) Σ βₛ,₁ Jₛ, per unit mass
+# enthalpy the surface fluxes of θˡⁱ and vapor remove, (z₁ - z_surface) Σ b_χ,₁ J_χ, per unit mass
 # of the lowest cell. Condensate has no surface flux here.
 @inline function surface_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, u, v, bottom_bcs, bc_args)
     FT = eltype(grid)
@@ -197,7 +197,7 @@ end
     h = znode(i, j, 1, grid, Center(), Center(), Center()) - znode(i, j, 1, grid, Center(), Center(), Face())
     @inbounds begin
         ρΔz = s.ρ[i, j, 1] * Δzᶜᶜᶜ(i, j, 1, grid)
-        Bˢ = h * (cl.βᶿ[i, j, 1] * Jᶿ + cl.βᵛ[i, j, 1] * Jᵛ) / ρΔz
+        Bˢ = h * (cl.b_θ[i, j, 1] * Jᶿ + cl.b_qᵛ[i, j, 1] * Jᵛ) / ρΔz
         Pˢ = -(u[i, j, 1] * 𝒯ˣ + v[i, j, 1] * 𝒯ʸ) / ρΔz
     end
     bottom = k == 1
@@ -250,7 +250,7 @@ end
 compute_applied_flux_conversions!(fields, closure_fields, closure, model, tracers) = nothing
 
 # Within `update_state!`, where the tracers hold their specific values
-function compute_applied_flux_conversions!(fields::SubgridCloudFields{<:CloudBuoyancyFlux}, closure_fields, closure, model, tracers)
+function compute_applied_flux_conversions!(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, closure, model, tracers)
     grid = model.grid
     arch = grid.architecture
     cl = fields.cloud
@@ -266,7 +266,7 @@ end
 @inline tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields, closure_fields, u, v) =
     shear_production(i, j, k, grid, closure_fields.Kᵘ, u, u, v, v)
 
-@inline tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields::SubgridCloudFields{<:CloudBuoyancyFlux}, closure_fields, u, v) =
+@inline tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, u, v) =
     @inbounds fields.cloud.P[i, j, k]
 
 #####
@@ -280,7 +280,7 @@ end
 # e = 0 (its benefit: the implicit sink cannot divide by zero, and e stays non-negative in the
 # implicit solve); the conversion is exact wherever e exceeds it.
 @inline buoyancy_sink_floor(fields, closure) = closure.minimum_tke
-@inline buoyancy_sink_floor(::SubgridCloudFields{<:CloudBuoyancyFlux}, closure) = buoyancy_sink_floor_value(closure)
+@inline buoyancy_sink_floor(::SubgridCloudFields{<:AppliedFluxEnergetics}, closure) = buoyancy_sink_floor_value(closure)
 @inline buoyancy_sink_floor_value(closure) = sqrt(floatmin(typeof(closure.minimum_tke)))
 
 #####
@@ -294,7 +294,7 @@ end
 #####
 #####   momentum:  Σ ρ Δz (|u|² - |u⁻|²)/2 = -Δt Σ ρᶠ Δzᶠ Kᵘ |δz u|² / Δzᶠ² - Σ ρ Δz |u - u⁻|² / 2
 #####              (the last term is the dissipation of backward Euler itself),
-#####   scalars:   Σ ρ Δz Δh‡ = -Δt Σ ρᶠ Δzᶠ Bᶠ(φ),  h‡ linearized with the stage's βₛ,
+#####   scalars:   Σ ρ Δz Δh‡ = -Δt Σ ρᶠ Δzᶠ Bᶠ(φ),  h‡ linearized with the stage's b_χ,
 #####
 ##### while the stage tendency gave the TKE the conversions of the stage state. After the solves the
 ##### closure adds the difference to ρe, so that over the stage the TKE gains exactly what the mean
@@ -302,7 +302,7 @@ end
 ##### removed from the solved e, ρ ĉᵖ Π Δθˡⁱ = Δt ρ ωᴰ e (ωᴰ = -Lᵉ - ωᴮ).
 #####
 
-const ImplicitCloudBuoyancyFields = SubgridCloudFields{<:CloudBuoyancyFlux}
+const ImplicitCloudBuoyancyFields = SubgridCloudFields{<:AppliedFluxEnergetics}
 
 implicit_stage(closure, model) =
     time_discretization(closure) isa VerticallyImplicitTimeDiscretization && !isnothing(model.timestepper.implicit_solver)
@@ -335,7 +335,6 @@ function AtmosphereModels.closure_before_thermodynamic_solve!(closure_fields::TK
                                                                closure::FlavorOfTKEClosure, model, Δt)
     implicit_stage(closure, model) || return nothing
     fields = closure_fields.subgrid_cloud
-    fields.buoyancy_flux.dissipative_heating || return nothing
     grid = model.grid
     ρθ = distribution_potential_temperature_density(model)
     launch!(grid.architecture, grid, :xyz, _heat_by_implicit_dissipation!, ρθ,
@@ -364,10 +363,10 @@ end
         cl.Bᵖ[i, j, k] = Bᵖ
         # the stage's values, kept for the energy budget after `update_state!` recomputes the others
         cl.given[i, j, k] = cl.P[i, j, k] + max(B, 0)
-        cl.stage_βᶿ[i, j, k] = cl.βᶿ[i, j, k]
-        cl.stage_βᵛ[i, j, k] = cl.βᵛ[i, j, k]
-        cl.stage_βˡ[i, j, k] = cl.βˡ[i, j, k]
-        cl.stage_βⁱ[i, j, k] = cl.βⁱ[i, j, k]
+        cl.stage_b_θ[i, j, k] = cl.b_θ[i, j, k]
+        cl.stage_b_qᵛ[i, j, k] = cl.b_qᵛ[i, j, k]
+        cl.stage_b_qˡ[i, j, k] = cl.b_qˡ[i, j, k]
+        cl.stage_b_qⁱ[i, j, k] = cl.b_qⁱ[i, j, k]
         cl.stage_surface[i, j, k] = cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k]
         # Where the TKE cannot pay what the solved fluxes converted (e ≈ 0 while the diffusivities,
         # floored at `minimum_tke`, still mix), the shortfall is taken from the internal energy
@@ -413,8 +412,7 @@ end
 
 add_dissipative_heating!(Gⁿ, fields, closure_fields, closure, model) = nothing
 
-function add_dissipative_heating!(Gⁿ, fields::SubgridCloudFields{<:CloudBuoyancyFlux}, closure_fields, closure, model)
-    fields.buoyancy_flux.dissipative_heating || return nothing
+function add_dissipative_heating!(Gⁿ, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, closure, model)
     implicit_stage(closure, model) && return nothing
     grid = model.grid
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
@@ -478,7 +476,7 @@ end
         c_θ = (c_θ⁺ + c_θ⁻) / 2
         ∂z_s = (c_q * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
-        bˡᵛ = (cl.βˡ[i, j, kₛ] + cl.βˡ[i, j, kₛ-1] - cl.βᵛ[i, j, kₛ] - cl.βᵛ[i, j, kₛ-1]) / 2
+        bˡᵛ = (cl.b_qˡ[i, j, kₛ] + cl.b_qˡ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
         N²ᵇ = applied_stratificationᶜᶜᶠ(i, j, kₛ, grid, s, cl)
         N²ˢ = N²ᵇ + bˡᵛ * (∂z_s - ∂z_qᶜ)
 
@@ -509,12 +507,12 @@ end
 
 # The pass of the stability coupling with the cloud buoyancy flux: the latent-corrected N², then the
 # mixing length and the diffusivities from it
-function cloud_buoyancy_stability_pass!(fields::SubgridCloudFields{<:CloudBuoyancyFlux}, closure_fields, closure, model, tracers,
+function cloud_buoyancy_stability_pass!(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, closure, model, tracers,
                                         parameters, ω = nothing)
     grid = model.grid
     arch = grid.architecture
     d = distribution_state(model, nothing)
-    dist = subgrid_cloud_formulation(closure).distribution
+    dist = subgrid_distribution(closure)
     launch!(arch, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments, grid, closure,
             closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, tracers[TKE_NAME], d.thermodynamics,
             dist.saturation, dist.constants, ω)
@@ -531,7 +529,7 @@ end
 
 draw_latent_conversion!(Gⁿ, fields, model) = nothing
 
-function draw_latent_conversion!(Gⁿ, fields::SubgridCloudFields{<:CloudBuoyancyFlux}, model)
+function draw_latent_conversion!(Gⁿ, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, model)
     grid = model.grid
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     launch!(grid.architecture, grid, :xyz, _draw_latent_conversion!, Gⁿ[name], grid, fields.cloud, total_density(model.dynamics))

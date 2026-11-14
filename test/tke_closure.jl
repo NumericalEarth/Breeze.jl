@@ -483,7 +483,7 @@ end
         @test model.closure_fields.tupled_implicit_linear_coefficients.ρe === model.closure_fields.Lᵉ
         @test model.closure_fields.tupled_implicit_linear_coefficients.ρθ isa Oceananigans.Fields.ZeroField
 
-        # Neutral air, no buoyancy flux: Lᵉ = - Sᴰ √e / ℓ with ℓ = ℂˢ z at the cell centers
+        # Neutral air, no buoyancy flux: Lᵉ = - 𝕊ᴰ √e / ℓ with ℓ = ℂˢ z at the cell centers
         Lᵉ = column(model.closure_fields.Lᵉ)
         zc = znodes(grid, Center())
         ℂᴰ = closure.stability_functions.ℂᴰ
@@ -1029,7 +1029,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         model = AtmosphereModel(grid; closure, advection = nothing)
 
         # Neutral shear: Ri = 0, so the neutral endpoints exactly, with no plateau needed to get
-        # them, and the dissipation ℂᴰ⁰ √e / (ℂˢ z) — Sᴰ multiplies ε, it does not divide it
+        # them, and the dissipation ℂᴰ⁰ √e / (ℂˢ z) — 𝕊ᴰ multiplies ε, it does not divide it
         set!(model; θ = 300, u = z -> 0.01 * z)
         set_tke!(model, e₀)
         Kᵘ = column(model.closure_fields.Kᵘ)
@@ -1145,7 +1145,7 @@ end
         S(f, Ri) = f(sf, Ri)
         @test S(momentum_stability_function, Ri_c) / (S(tracer_stability_function, Ri_c) + S(dissipation_stability_function, Ri_c)) ≈ Ri_c
         @test S(momentum_stability_function, 1.0) / (S(tracer_stability_function, 1.0) + S(dissipation_stability_function, 1.0)) < 1.0
-        # Pr rises on the stable branch to Pr⁺ and falls to Pr⁻ in convection; Sᴰ is neutral throughout
+        # Pr rises on the stable branch to Pr⁺ and falls to Pr⁻ in convection; 𝕊ᴰ is neutral throughout
         Ris = vcat(-exp10.(range(4, -4, 200)), 0, exp10.(range(-4, 4, 200)))
         Pr = [S(momentum_stability_function, Ri) / S(tracer_stability_function, Ri) for Ri in Ris]
         @test all(diff(Pr) .≥ -1e-12)

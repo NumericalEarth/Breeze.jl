@@ -2,7 +2,7 @@ include(joinpath(dirname(@__DIR__), "setup.jl"))
 
 #####
 ##### Reactant forward and gradient compilation of a column ensemble with `TKEBasedTurbulenceClosure`,
-##### its `TurbulenceAugmentedShear`, a `SubgridCloudStaticStability` whose weight (a dummy) reads the
+##### its `TurbulenceAugmentedShear`, a `SaturationWeightedStaticStability` whose weight (a dummy) reads the
 ##### stored mixing length, and a mixing length with a `HarmonicBlend`
 #####
 
@@ -56,7 +56,7 @@ end
     microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
     closure = TKEBasedTurbulenceClosure(mixing_length = GradientLimitedMixingLength(ℂˢ=0.79, ℂⁱ=1.78, blending=HarmonicBlend(exponent=4)),
                                         shear = TurbulenceAugmentedShear(turbulence_shear_coefficient=0.5),
-                                        static_stability = SubgridCloudStaticStability(MixingLengthWeight(100.0)))
+                                        static_stability = SaturationWeightedStaticStability(MixingLengthWeight(100.0)))
     initial_θ() = (θ = CenterField(grid); set!(θ, z -> 290 + 3e-3 * z); θ)
 
     @testset "Forward" begin

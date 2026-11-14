@@ -1,13 +1,13 @@
 #####
-##### A bracketed solve of the effective saturated fraction ℵ of `LiquidFluxFraction`, face by face
+##### A bracketed solve of the effective saturated fraction aᴺ of `CondensateFluxFraction`, face by face
 #####
-##### The static stability of `SubgridCloudStaticStability(LiquidFluxFraction(...))` is
-##### N² = N²ᶜ + ℵ ΔN², ΔN² = N²ˢ - N²ᶜ, with ℵ = w′qˡ′ / w′s′ of the distribution formed with that N².
-##### Written as a scalar root per face, R(ℵ) = ℵ - ℵ̃(ℵ) on ℵ ∈ [0, 1], where ℵ̃ is the liquid flux
-##### fraction of the distribution with the local mixing length and diffusivities of N²ᶜ + ℵ ΔN².
-##### ℵ̃ is clamped to [0, 1], so R(0) ≤ 0 ≤ R(1) and [0, 1] brackets a root.
+##### The static stability of `SaturationWeightedStaticStability(CondensateFluxFraction(...))` is
+##### N² = N²ᶜ + aᴺ ΔN², ΔN² = N²ˢ - N²ᶜ, with aᴺ = w′qˡ′ / w′s′ of the distribution formed with that N².
+##### Written as a scalar root per face, R(aᴺ) = aᴺ - ãᴺ(aᴺ) on aᴺ ∈ [0, 1], where ãᴺ is the liquid flux
+##### fraction of the distribution with the local mixing length and diffusivities of N²ᶜ + aᴺ ΔN².
+##### ãᴺ is clamped to [0, 1], so R(0) ≤ 0 ≤ R(1) and [0, 1] brackets a root.
 #####
-##### Locality. ℵ̃ at a face is made a function of that face's ℵ alone:
+##### Locality. ãᴺ at a face is made a function of that face's aᴺ alone:
 #####   * the mixing length inside the solve is the local one, the blend of ℂˢ z and √e / N of the
 #####     mixing length's blending; the column envelope of `GradientLimitedMixingLength` is applied once,
 #####     after the solve;
@@ -22,39 +22,38 @@
 using SpecialFunctions: erf
 
 """
-    BracketedFractionSolve(iterations = 3; classification_tolerance = 1e-8)
+    BracketedFractionSolve(iterations = 3; classification_tolerance = 1e-8, lagged_envelope = false)
 
-The `stability_solver` of [`CloudBuoyancyFlux`](@ref) that solves the static stability of
-[`LiquidFluxFraction`](@ref), `N² = N²ᶜ + ℵ ΔN²`, as a bracketed scalar root in the effective
-saturated fraction `ℵ ∈ [0, 1]` at each interior face:
+The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of the static stability of
+[`CondensateFluxFraction`](@ref), `N² = N²ᶜ + aᴺ ΔN²`, as a bracketed scalar root in the effective
+saturated fraction `aᴺ ∈ [0, 1]` at each interior face:
 
-    R(ℵ) = ℵ - ℵ̃(N²ᶜ + ℵ ΔN²),    ΔN² = N²ˢ - N²ᶜ,
+    R(aᴺ) = aᴺ - ãᴺ(N²ᶜ + aᴺ ΔN²),    ΔN² = N²ˢ - N²ᶜ,
 
-with `ℵ̃ = w′qˡ′ / w′s′` (clamped to `[0, 1]`) of the distribution formed at the face with the local
+with `ãᴺ = w′qˡ′ / w′s′` (clamped to `[0, 1]`) of the distribution formed at the face with the local
 mixing length (the blend of `ℂˢ z` and `√e / N`), the stability functions, `Kᶜ` and the moment time
 scale of that `N²`, the third moment at the face, and the assumed PDF at the two centers next to
 it. The moments of the other faces are held at those of the distribution before the solve.
 
-1. `ℵ̃` at both ends of the bracket: `R(0) ≤ 0 ≤ R(1)`. Where `ℵ̃ ≤ tol` at both ends the face is
-   classified unsaturated (`ℵ = 0`); where `ℵ̃ ≥ 1 - tol` at both, saturated (`ℵ = 1`), with
+1. `ãᴺ` at both ends of the bracket: `R(0) ≤ 0 ≤ R(1)`. Where `ãᴺ ≤ tol` at both ends the face is
+   classified unsaturated (`aᴺ = 0`); where `ãᴺ ≥ 1 - tol` at both, saturated (`aᴺ = 1`), with
    `tol = classification_tolerance`. These faces take no further step (their values are discarded).
 2. Two first guesses: the regula falsi point of the ends, and the single-Gaussian fraction
-   `Φ(s̄ / σₛ)`, with `σₛ² = τ Kᶜ (∂z s̄)²` at the regula falsi point (`σₛ² = (2 / ℂᵠ)(Sᶜ / Sᴰ) ℓ² (∂z s̄)²`
+   `Φ(s̄ / σₛ)`, with `σₛ² = τ Kᶜ (∂z s̄)²` at the regula falsi point (`σₛ² = (2 / ℂᵠ)(𝕊ᶜ / 𝕊ᴰ) ℓ² (∂z s̄)²`
    with [`DissipationTimeScale`](@ref)). Both narrow the bracket; the one with the smaller `|R|` is kept.
 3. `iterations` Illinois steps (regula falsi, halving the weight of an end kept twice), with
    bisection where a step would leave the bracket. Every iterate lies in `[0, 1]`.
 
-After the solve `N² = N²ᶜ + ℵ ΔN²`; then the mixing length of the closure (with its column
+After the solve `N² = N²ᶜ + aᴺ ΔN²`; then the mixing length of the closure (with its column
 envelope), the diffusivities and the distribution are formed once from it, as after the other
-solvers. `solver_state` holds `ℵ`, the residual `|R|` after each step, the classification, the
-`ℵ̃` of the two ends, and `ℵ̃` of the final distribution at the faces, whose difference from `ℵ` is
+solvers. `solver_state` holds `aᴺ`, the residual `|R|` after each step, the classification, the
+`ãᴺ` of the two ends, and `ãᴺ` of the final distribution at the faces, whose difference from `aᴺ` is
 the inconsistency left by the local mixing length and the explicit neighbours.
 
 With `lagged_envelope = true` the mixing length inside the solve is also bounded by the
 stratification envelope `ℓˢ` of the column stored before the solve (lagged), blended as the
 mixing length blends its lengths, instead of the local length alone.
 
-`stability_iterations` and `stability_relaxation` of the [`CloudBuoyancyFlux`](@ref) are not used.
 """
 struct BracketedFractionSolve{N, FT}
     classification_tolerance :: FT
@@ -70,13 +69,18 @@ end
 Base.summary(b::BracketedFractionSolve{N}) where N =
     string("BracketedFractionSolve(", N, b.lagged_envelope ? ", lagged_envelope = true)" : ")")
 
-const BracketedCloudBuoyancyFlux = CloudBuoyancyFlux{<:Any, <:Any, <:BracketedFractionSolve}
+coupling_iterations(::BracketedFractionSolve) = 0
+coupling_relaxation(::BracketedFractionSolve) = 1
+convert_eltype(::Type{FT}, s::BracketedFractionSolve) where FT = s
+Base.show(io::IO, s::BracketedFractionSolve) = print(io, summary(s))
 
-function build_solver_state(grid, ::CloudBuoyancyFlux{M, W, <:BracketedFractionSolve{N}}) where {M, W, N}
+const BracketedAppliedFluxEnergetics = AppliedFluxEnergetics{<:Any, <:Any, <:BracketedFractionSolve}
+
+function build_solver_state(grid, ::AppliedFluxEnergetics{M, W, <:BracketedFractionSolve{N}}) where {M, W, N}
     residuals = Tuple(ZFaceField(grid) for _ in 1:N+1)
-    return (ℵ = ZFaceField(grid), ℵ̃₀ = ZFaceField(grid), ℵ̃₁ = ZFaceField(grid), classified = ZFaceField(grid),
+    return (aᴺ = ZFaceField(grid), ãᴺ₀ = ZFaceField(grid), ãᴺ₁ = ZFaceField(grid), classified = ZFaceField(grid),
             initial_residuals = ZFaceField(grid), first_guess = ZFaceField(grid), slope = ZFaceField(grid),
-            ℵ̃ᶠ = ZFaceField(grid), residuals)
+            ãᴺᶠ = ZFaceField(grid), residuals)
 end
 
 #####
@@ -98,9 +102,9 @@ end
     return shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v) + ifelse(turbulent, S²ᵗ, zero(S²ᵗ))
 end
 
-@inline local_moment_time_scale(ts, ℓ, u, N², Sᴰ) = moment_time_scale(ts, ℓ, u, N²)
-@inline local_moment_time_scale(ts::EddyTurnoverTimeScale, ℓ, u, N², Sᴰ) = 2 * ℓ / (ts.ℂᵠ * u)
-@inline local_moment_time_scale(ts::DissipationTimeScale, ℓ, u, N², Sᴰ) = 2 * ℓ / (ts.ℂᵠ * Sᴰ * u)
+@inline local_moment_time_scale(ts, ℓ, u, N², 𝕊ᴰ) = moment_time_scale(ts, ℓ, u, N²)
+@inline local_moment_time_scale(ts::EddyTurnoverTimeScale, ℓ, u, N², 𝕊ᴰ) = 2 * ℓ / (ts.ℂᵠ * u)
+@inline local_moment_time_scale(ts::DissipationTimeScale, ℓ, u, N², 𝕊ᴰ) = 2 * ℓ / (ts.ℂᵠ * 𝕊ᴰ * u)
 
 # SHOC's saturation excess of the mean state at a level, s = qᵗ - qˢ (1 + β qᵗ) / (1 + β qˢ)
 @inline function mean_saturation_excess(sat, thermodynamics, c, θ, qᵗ, p)
@@ -139,15 +143,15 @@ end
     return (; Δz, Δθ, Δq, ∂zθ, ∂zq, N²ᶜ, ΔN², ∂zs, s̄, u, w′²ᶠ)
 end
 
-# The liquid flux fraction ℵ̃ at face k of the distribution formed with N² = N²ᶜ + ℵ ΔN² there
-@inline function trial_liquid_flux_fraction(ℵ, i, j, k, grid, closure, d, m, cl, input, velocities, θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
+# The liquid flux fraction ãᴺ at face k of the distribution formed with N² = N²ᶜ + aᴺ ΔN² there
+@inline function trial_condensate_flux_fraction(aᴺ, i, j, k, grid, closure, d, m, cl, input, velocities, θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
     FT = eltype(grid)
     c = d.constants
     cp = d.clipping
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
 
-    N² = input.N²ᶜ + ℵ * input.ΔN²
+    N² = input.N²ᶜ + aᴺ * input.ΔN²
     u = input.u
 
     # The local mixing length
@@ -161,11 +165,11 @@ end
     # The stability functions and diffusivities of that N² and ℓ
     S² = local_shear_squaredᶜᶜᶠ(i, j, k, grid, closure.shear, closure, velocities, u, ℓ)
     Ri = richardson_number(N², S², closure.shear.minimum_shear_squared)
-    Sᵘ, Sᶜ, Sᴰ = local_stability_functions(closure.stability_functions, Ri)
+    𝕊ᵘ, 𝕊ᶜ, 𝕊ᴰ = local_stability_functions(closure.stability_functions, Ri)
     K = ℓ * u
-    Kᵘ = min(Sᵘ * K, closure.maximum_viscosity)
-    Kᶜ = min(Sᶜ * K, closure.maximum_tracer_diffusivity)
-    τ = local_moment_time_scale(d.time_scale, ℓ, u, N², Sᴰ)
+    Kᵘ = min(𝕊ᵘ * K, closure.maximum_viscosity)
+    Kᶜ = min(𝕊ᶜ * K, closure.maximum_tracer_diffusivity)
+    τ = local_moment_time_scale(d.time_scale, ℓ, u, N², 𝕊ᴰ)
     τ = ifelse(isfinite(τ), τ, zero(FT))
 
     # The second moments at the face
@@ -201,8 +205,8 @@ end
 
     Bᶠ = (Bˡ⁻ + Bˡ⁺) / 2
     resolved = (Kᶜ > sqrt(floatmin(FT))) & (abs(input.ΔN²) > floatmin(FT))
-    ℵ̃ = ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜ * input.ΔN², one(FT)), zero(FT))
-    return (; ℵ̃ = clamp(ℵ̃, zero(FT), one(FT)), raw = ℵ̃, τ, Kᶜ, C = (C⁻ + C⁺) / 2)
+    ãᴺ = ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜ * input.ΔN², one(FT)), zero(FT))
+    return (; ãᴺ = clamp(ãᴺ, zero(FT), one(FT)), raw = ãᴺ, τ, Kᶜ, C = (C⁻ + C⁺) / 2)
 end
 
 @inline function center_liquid_buoyancy(i, j, k, grid, d, cp, c, cl, w, θ, qᵗ, p, thermodynamics, moments_l, moments_u)
@@ -244,30 +248,30 @@ end
     kₛ = clamp(k, 2, max(Nz, 2)) # a valid face for the boundary threads, whose result is discarded
 
     closure_ij = getclosure(i, j, closure)
-    d = closure_ij.subgrid_cloud_formulation.distribution
+    d = closure_ij.subgrid_distribution
     w = velocities.w
     tol = convert(FT, solver.classification_tolerance)
     ℓᵉ = ifelse(solver.lagged_envelope, @inbounds(ℓˢ[i, j, kₛ]), FT(Inf))
     input = fraction_face_inputs(i, j, kₛ, grid, closure_ij, d, moments, cloud, θ, qᵗ, e, p, thermodynamics)
-    ℵ̃(x) = trial_liquid_flux_fraction(x, i, j, kₛ, grid, closure_ij, d, moments, cloud, input, velocities,
+    ãᴺ(x) = trial_condensate_flux_fraction(x, i, j, kₛ, grid, closure_ij, d, moments, cloud, input, velocities,
                                       θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
 
     # The two ends
-    t₀ = ℵ̃(zero(FT))
-    t₁ = ℵ̃(one(FT))
-    a, Rₐ = zero(FT), -t₀.ℵ̃          # R(0) = -ℵ̃(0) ≤ 0
-    b, R_b = one(FT), one(FT) - t₁.ℵ̃ # R(1) = 1 - ℵ̃(1) ≥ 0
-    unsaturated = (t₀.ℵ̃ ≤ tol) & (t₁.ℵ̃ ≤ tol)
-    saturated = (t₀.ℵ̃ ≥ 1 - tol) & (t₁.ℵ̃ ≥ 1 - tol)
+    t₀ = ãᴺ(zero(FT))
+    t₁ = ãᴺ(one(FT))
+    a, Rₐ = zero(FT), -t₀.ãᴺ          # R(0) = -ãᴺ(0) ≤ 0
+    b, R_b = one(FT), one(FT) - t₁.ãᴺ # R(1) = 1 - ãᴺ(1) ≥ 0
+    unsaturated = (t₀.ãᴺ ≤ tol) & (t₁.ãᴺ ≤ tol)
+    saturated = (t₀.ãᴺ ≥ 1 - tol) & (t₁.ãᴺ ≥ 1 - tol)
 
     # Two first guesses: the regula falsi point of the ends, and the single-Gaussian fraction
     x_rf = bracketed_step(a, Rₐ, b, R_b)
-    t_rf = ℵ̃(x_rf)
-    R_rf = x_rf - t_rf.ℵ̃
+    t_rf = ãᴺ(x_rf)
+    R_rf = x_rf - t_rf.ãᴺ
     σₛ = sqrt(max(t_rf.τ * t_rf.Kᶜ, zero(FT))) * abs(input.∂zs)
     x_g = clamp(standard_normal_cdf(input.s̄ / max(σₛ, floatmin(FT))), zero(FT), one(FT))
-    t_g = ℵ̃(x_g)
-    R_g = x_g - t_g.ℵ̃
+    t_g = ãᴺ(x_g)
+    R_g = x_g - t_g.ãᴺ
 
     # Both narrow the bracket
     lower_rf = (R_rf ≤ 0) & (x_rf > a)
@@ -282,7 +286,7 @@ end
     gaussian_better = abs(R_g) < abs(R_rf)
     x = ifelse(gaussian_better, x_g, x_rf)
     R = ifelse(gaussian_better, R_g, R_rf)
-    x₋, ℵ̃₋ = ifelse(gaussian_better, x_rf, x_g), ifelse(gaussian_better, t_rf.ℵ̃, t_g.ℵ̃)
+    x₋, ãᴺ₋ = ifelse(gaussian_better, x_rf, x_g), ifelse(gaussian_better, t_rf.ãᴺ, t_g.ãᴺ)
 
     @inbounds state.residuals[1][i, j, k] = abs(R)
 
@@ -291,8 +295,8 @@ end
     side = zero(FT)
     for n in 1:N
         x′ = bracketed_step(a, Aₐ, b, A_b)
-        t = ℵ̃(x′)
-        R′ = x′ - t.ℵ̃
+        t = ãᴺ(x′)
+        R′ = x′ - t.ãᴺ
         below = R′ ≤ 0
         # halve the weight of the end that is kept a second time
         A_b = ifelse(below & (side > 0), A_b / 2, A_b)
@@ -300,19 +304,19 @@ end
         a, Aₐ = ifelse(below, x′, a), ifelse(below, R′, Aₐ)
         b, A_b = ifelse(below, b, x′), ifelse(below, A_b, R′)
         side = ifelse(below, one(FT), -one(FT))
-        x₋, ℵ̃₋ = x, x - R
+        x₋, ãᴺ₋ = x, x - R
         x, R = x′, R′
         @inbounds state.residuals[n+1][i, j, k] = abs(R)
     end
 
-    ℵ = ifelse(unsaturated, zero(FT), ifelse(saturated, one(FT), x))
-    slope = ifelse(abs(x - x₋) > sqrt(eps(FT)), ((x - R) - ℵ̃₋) / ifelse(abs(x - x₋) > sqrt(eps(FT)), x - x₋, one(FT)), zero(FT))
+    aᴺ = ifelse(unsaturated, zero(FT), ifelse(saturated, one(FT), x))
+    slope = ifelse(abs(x - x₋) > sqrt(eps(FT)), ((x - R) - ãᴺ₋) / ifelse(abs(x - x₋) > sqrt(eps(FT)), x - x₋, one(FT)), zero(FT))
 
     @inbounds begin
-        N²[i, j, k] = ifelse(interior_face, input.N²ᶜ + ℵ * input.ΔN², N²[i, j, k])
-        state.ℵ[i, j, k] = ℵ
-        state.ℵ̃₀[i, j, k] = t₀.ℵ̃
-        state.ℵ̃₁[i, j, k] = t₁.ℵ̃
+        N²[i, j, k] = ifelse(interior_face, input.N²ᶜ + aᴺ * input.ΔN², N²[i, j, k])
+        state.aᴺ[i, j, k] = aᴺ
+        state.ãᴺ₀[i, j, k] = t₀.ãᴺ
+        state.ãᴺ₁[i, j, k] = t₁.ãᴺ
         state.classified[i, j, k] = ifelse(unsaturated, -one(FT), ifelse(saturated, one(FT), zero(FT)))
         state.initial_residuals[i, j, k] = ifelse(gaussian_better, -abs(R_g), abs(R_rf)) # sign: which guess was kept
         state.first_guess[i, j, k] = ifelse(gaussian_better, x_g, x_rf)
@@ -320,13 +324,13 @@ end
     end
 end
 
-# ℵ̃ of the stored distribution at the faces, (N²ᵇ - N²ᶜ) / ΔN², after the solve
-@kernel function _final_liquid_flux_fraction!(ℵ̃ᶠ, grid, closure, cloud, Kᶜ, θ, qᵗ, p, thermodynamics)
+# ãᴺ of the stored distribution at the faces, (N²ᵇ - N²ᶜ) / ΔN², after the solve
+@kernel function _final_condensate_flux_fraction!(ãᴺᶠ, grid, closure, cloud, Kᶜ, θ, qᵗ, p, thermodynamics)
     i, j, k = @index(Global, NTuple)
     FT = eltype(grid)
     Nz = size(grid, 3)
     kₛ = clamp(k, 2, max(Nz, 2))
-    d = getclosure(i, j, closure).subgrid_cloud_formulation.distribution
+    d = getclosure(i, j, closure).subgrid_distribution
     @inbounds begin
         Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
         ∂zθ = (θ[i, j, kₛ] - θ[i, j, kₛ-1]) / Δz
@@ -338,12 +342,12 @@ end
         Bᶠ = (cloud.Bˡ[i, j, kₛ] + cloud.Bˡ[i, j, kₛ-1]) / 2
         Kᶜᵢ = Kᶜ[i, j, kₛ]
         resolved = (Kᶜᵢ > sqrt(floatmin(FT))) & (abs(ΔN²) > floatmin(FT))
-        ℵ̃ = ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜᵢ * ΔN², one(FT)), zero(FT))
-        ℵ̃ᶠ[i, j, k] = ifelse((k > 1) & (k ≤ Nz), ℵ̃, zero(FT))
+        ãᴺ = ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜᵢ * ΔN², one(FT)), zero(FT))
+        ãᴺᶠ[i, j, k] = ifelse((k > 1) & (k ≤ Nz), ãᴺ, zero(FT))
     end
 end
 
-function cloud_buoyancy_stability!(buoyancy_flux::BracketedCloudBuoyancyFlux, fields, closure_fields, closure, model, tracers, parameters)
+function cloud_buoyancy_stability!(buoyancy_flux::BracketedAppliedFluxEnergetics, fields, closure_fields, closure, model, tracers, parameters)
     grid = model.grid
     arch = grid.architecture
     s = distribution_state(model, nothing)
@@ -354,7 +358,7 @@ function cloud_buoyancy_stability!(buoyancy_flux::BracketedCloudBuoyancyFlux, fi
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
     launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
-    launch!(arch, grid, parameters, _final_liquid_flux_fraction!, state.ℵ̃ᶠ, grid, closure, fields.cloud, closure_fields.Kᶜ,
+    launch!(arch, grid, parameters, _final_condensate_flux_fraction!, state.ãᴺᶠ, grid, closure, fields.cloud, closure_fields.Kᶜ,
             s.θ, s.qᵗ, s.p, s.thermodynamics)
     return nothing
 end

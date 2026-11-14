@@ -5,7 +5,7 @@
 ##### loading included, latent heating excluded. `MoistStaticStability` switches, where the air
 ##### is saturated, to the buoyancy frequency of a saturated displacement (Durran & Klemp 1982),
 ##### in which the parcel condenses as it rises and its latent heating offsets part of the
-##### environmental stratification. `SubgridCloudStaticStability` blends the two with a weight that
+##### environmental stratification. `SaturationWeightedStaticStability` blends the two with a weight that
 ##### an external subgrid cloud model supplies. All are evaluated once per stage into `closure_fields.N²`.
 #####
 
@@ -54,23 +54,23 @@ Static stability as a blend of the dry buoyancy gradient ``N²ᵈ`` of [`DryStat
 and the saturated buoyancy frequency ``N²ˢ`` of [Durran and Klemp (1982)](@cite DurranKlemp1982),
 
 ```math
-N² = (1 - ℵ) N²ᵈ + ℵ N²ˢ,
+N² = (1 - aᴺ) N²ᵈ + aᴺ N²ˢ,
 ```
 
-with the weight ``ℵ``, the effective saturated fraction — the fraction of a displacement's change
-in saturation deficit that condenses — from a subgrid cloud model: ``ℵ = 0`` is unsaturated air,
-``ℵ = 1`` saturated air, and a model whose ``ℵ`` varies smoothly through saturation removes the jump
+with the weight ``aᴺ``, the effective saturated fraction — the fraction of a displacement's change
+in saturation deficit that condenses — from a subgrid cloud model: ``aᴺ = 0`` is unsaturated air,
+``aᴺ = 1`` saturated air, and a model whose ``aᴺ`` varies smoothly through saturation removes the jump
 that [`MoistStaticStability`](@ref) makes where the grid-mean air saturates. This is the
 moist-buoyancy weighting of [Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993).
 
 This slot is the only owner of ``N²``: every other component reads `closure_fields.N²`. An external
-`cloud_model` supplies ``ℵ`` by extending
+`fraction` supplies ``aᴺ`` by extending
 [`saturated_stability_weightᶜᶜᶠ`](@ref Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ);
 without a method for the model, computing ``N²`` throws a `MethodError`. The closure's own subgrid
-distribution is the cloud model [`LiquidFluxFraction`](@ref), ``ℵ = w′qˡ′ / w′s′``, which depends on
+distribution is the cloud model [`CondensateFluxFraction`](@ref), ``aᴺ = w′qˡ′ / w′s′``, which depends on
 the diffusivities and so is solved together with them in the closure update.
-`SubgridCloudStaticStability()`, without a model, takes the subgrid model of the microphysics
-([`MicrophysicsSubgridModel`](@ref Breeze.TurbulenceClosures.MicrophysicsSubgridModel)), so that
+`SaturationWeightedStaticStability()`, without a model, takes the subgrid model of the microphysics
+([`MicrophysicsSaturatedFraction`](@ref Breeze.TurbulenceClosures.MicrophysicsSaturatedFraction)), so that
 the condensation and the turbulence see one subgrid cloud with one set of coefficients.
 ``N²`` is stored in `closure_fields.N²`, which the mixing length, the Richardson number, the
 buoyancy flux and the implicit sinks of the TKE equation all read.
@@ -80,11 +80,11 @@ using Breeze
 
 struct HalfSaturated end
 
-closure = TKEBasedTurbulenceClosure(static_stability = SubgridCloudStaticStability(HalfSaturated()))
+closure = TKEBasedTurbulenceClosure(static_stability = SaturationWeightedStaticStability(HalfSaturated()))
 closure.static_stability
 
 # output
-SubgridCloudStaticStability(HalfSaturated())
+SaturationWeightedStaticStability(HalfSaturated())
 ```
 
 Fields
@@ -92,29 +92,29 @@ Fields
 
 $(TYPEDFIELDS)
 """
-struct SubgridCloudStaticStability{M}
-    "the subgrid cloud model that supplies the weight ``ℵ`` (effective saturated fraction) of the saturated static stability"
-    cloud_model :: M
+struct SaturationWeightedStaticStability{M}
+    "the subgrid cloud model that supplies the weight ``aᴺ`` (effective saturated fraction) of the saturated static stability"
+    fraction :: M
 end
 
 """
 $(TYPEDEF)
 
-The `cloud_model` of a [`SubgridCloudStaticStability`](@ref) constructed without one: the weight
+The `fraction` of a [`SaturationWeightedStaticStability`](@ref) constructed without one: the weight
 is that of the subgrid model the microphysics holds, found by
 [`microphysics_subgrid_model`](@ref Breeze.TurbulenceClosures.microphysics_subgrid_model).
 """
-struct MicrophysicsSubgridModel end
+struct MicrophysicsSaturatedFraction end
 
-SubgridCloudStaticStability() = SubgridCloudStaticStability(MicrophysicsSubgridModel())
+SaturationWeightedStaticStability() = SaturationWeightedStaticStability(MicrophysicsSaturatedFraction())
 
-Base.show(io::IO, ::MicrophysicsSubgridModel) = print(io, "MicrophysicsSubgridModel()")
+Base.show(io::IO, ::MicrophysicsSaturatedFraction) = print(io, "MicrophysicsSaturatedFraction()")
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The subgrid model that `microphysics` holds, whose weight
-[`SubgridCloudStaticStability`](@ref)`()` uses: for P3, the model in its `subgrid` slot (for
+[`SaturationWeightedStaticStability`](@ref)`()` uses: for P3, the model in its `subgrid` slot (for
 example an external subgrid supersaturation model). `nothing` for a microphysics scheme without
 one, for which there is no weight.
 """
@@ -122,15 +122,15 @@ one, for which there is no weight.
 @inline microphysics_subgrid_model(p3::PredictedParticlePropertiesMicrophysics) = p3.subgrid
 
 # The cloud model may hold traced coefficients when the closure is differentiated.
-Adapt.adapt_structure(to, ss::SubgridCloudStaticStability) = SubgridCloudStaticStability(adapt(to, ss.cloud_model))
+Adapt.adapt_structure(to, ss::SaturationWeightedStaticStability) = SaturationWeightedStaticStability(adapt(to, ss.fraction))
 
-Base.summary(::SubgridCloudStaticStability) = "SubgridCloudStaticStability"
-Base.show(io::IO, ss::SubgridCloudStaticStability) = print(io, summary(ss), "(", ss.cloud_model, ")")
+Base.summary(::SaturationWeightedStaticStability) = "SaturationWeightedStaticStability"
+Base.show(io::IO, ss::SaturationWeightedStaticStability) = print(io, summary(ss), "(", ss.fraction, ")")
 
 """
-The weight ``ℵ`` (the effective saturated fraction) of the saturated static stability in [`SubgridCloudStaticStability`](@ref) at the
+The weight ``aᴺ`` (the effective saturated fraction) of the saturated static stability in [`SaturationWeightedStaticStability`](@ref) at the
 cell interface `(i, j, k)`, (Center, Center, Face). A subgrid cloud model extends this function for
-its own type, with the arguments `(i, j, k, grid, cloud_model, buoyancy, tracers, closure_fields)`.
+its own type, with the arguments `(i, j, k, grid, fraction, buoyancy, tracers, closure_fields)`.
 `buoyancy` is the
 `AtmosphereModelBuoyancy` of the model (its dynamics, formulation, thermodynamic constants,
 microphysics and microphysical fields), `tracers` holds the temperature `T`, the prognostic
@@ -142,18 +142,18 @@ diffusivities hold the values of the previous update (zero before the first): a 
 the mixing length reads a lagged one. This is what keeps the dependence explicit, since the mixing
 length itself is computed from ``N²``.
 
-``ℵ`` should lie in ``[0, 1]`` and must be finite; it is not clipped.
+``aᴺ`` should lie in ``[0, 1]`` and must be finite; it is not clipped.
 """
 function saturated_stability_weightᶜᶜᶠ end
 
-@inline saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ::MicrophysicsSubgridModel, buoyancy, tracers, closure_fields) =
+@inline saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ::MicrophysicsSaturatedFraction, buoyancy, tracers, closure_fields) =
     saturated_stability_weightᶜᶜᶠ(i, j, k, grid, microphysics_subgrid_model(buoyancy.microphysics), buoyancy, tracers, closure_fields)
 
-@inline function static_stabilityᶜᶜᶠ(i, j, k, grid, ss::SubgridCloudStaticStability, buoyancy, tracers, closure_fields)
+@inline function static_stabilityᶜᶜᶠ(i, j, k, grid, ss::SaturationWeightedStaticStability, buoyancy, tracers, closure_fields)
     N²ᵈ = ∂z_b(i, j, k, grid, buoyancy, tracers)
     N²ˢ = saturated_static_stabilityᶜᶜᶠ(i, j, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
-    ℵ = saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ss.cloud_model, buoyancy, tracers, closure_fields)
-    return N²ᵈ + ℵ * (N²ˢ - N²ᵈ)
+    aᴺ = saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ss.fraction, buoyancy, tracers, closure_fields)
+    return N²ᵈ + aᴺ * (N²ˢ - N²ᵈ)
 end
 
 # A static stability that reads nothing of the closure fields is defined without them

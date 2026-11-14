@@ -474,18 +474,18 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         implicit_update = ImplicitSinkTKE(FT)
         euler = ForwardEulerTKE(FT)
         unfloored = SHOCConstants(FT; mintke = 0, maxtke = floatmax(FT))
-        ℓ, Sᴰ = FT(50), FT(2)
+        ℓ, 𝕊ᴰ = FT(50), FT(2)
         for Δt in FT[60, 300, 900, 3600], e in FT[1e-6, 4e-4, 0.1, 5], P in FT[0, 1e-4, 1e-2], B in FT[-1e-2, -1e-4, 0, 1e-3]
-            estimate, ε, ω, stored = tke_step(implicit_update, hard, constants, Δt, e, P, B, ℓ, Sᴰ)
+            estimate, ε, ω, stored = tke_step(implicit_update, hard, constants, Δt, e, P, B, ℓ, 𝕊ᴰ)
             @test estimate > 0 && stored > 0 && ω ≥ 0 && ε ≥ 0
             @test estimate ≤ stored
             # The same sources and sinks as forward Euler, to first order in the time step
             small = FT(1e-5)
-            estimate, _, _, _ = tke_step(implicit_update, hard, unfloored, small, e, P, B, ℓ, Sᴰ)
-            explicit, _, _, _ = tke_step(euler, hard, unfloored, small, e, P, B, ℓ, Sᴰ)
+            estimate, _, _, _ = tke_step(implicit_update, hard, unfloored, small, e, P, B, ℓ, 𝕊ᴰ)
+            explicit, _, _, _ = tke_step(euler, hard, unfloored, small, e, P, B, ℓ, 𝕊ᴰ)
             P + B ≥ 0 && e ≥ constants.mintke && @test isapprox(estimate, explicit; rtol = FT == Float64 ? 1e-4 : 1e-3)
         end
-        @test first(tke_step(euler, hard, unfloored, FT(900), FT(0.1), zero(FT), zero(FT), ℓ, Sᴰ)) == 0
+        @test first(tke_step(euler, hard, unfloored, FT(900), FT(0.1), zero(FT), zero(FT), ℓ, 𝕊ᴰ)) == 0
 
         implicit = run_shoc_column(closure)
         @test all_finite(implicit)

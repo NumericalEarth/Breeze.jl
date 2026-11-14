@@ -27,14 +27,14 @@ K^u = ℓ^u \sqrt{e}, \qquad K^c = ℓ^c \sqrt{e}, \qquad K^e = ℓ^e \sqrt{e},
 where each mixing length is a *stability function* times one primary length ``ℓ``,
 
 ```math
-ℓ^u = S^u ℓ, \qquad ℓ^c = S^c ℓ, \qquad ℓ^e = S^e ℓ,
+ℓ^u = \mathbb{S}^u ℓ, \qquad ℓ^c = \mathbb{S}^c ℓ, \qquad ℓ^e = \mathbb{S}^e ℓ,
 ```
 
 and the dissipation of turbulent kinetic energy follows the same pattern with a dissipation length
-``ℓ^D = ℓ / S^D``,
+``ℓ^D = ℓ / \mathbb{S}^D``,
 
 ```math
-ε = \frac{e^{3/2}}{ℓ^D} = S^D \frac{e^{3/2}}{ℓ}.
+ε = \frac{e^{3/2}}{ℓ^D} = \mathbb{S}^D \frac{e^{3/2}}{ℓ}.
 ```
 
 The turbulent kinetic energy obeys
@@ -104,17 +104,18 @@ using the local moist density and excludes precipitation, while the loading term
 condensate. ``N²_s`` nearly vanishes
 on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 
-[`SubgridCloudStaticStability`](@ref) replaces the switch at grid-mean saturation with a blend,
-``N² = (1 - ℵ) N²_d + ℵ N²_s``, the moist-buoyancy weighting of
-[Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993). The weight ``ℵ``, the effective
-saturated fraction, comes from an
-external subgrid cloud model, which extends `Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ`;
-Breeze holds no model of it. `SubgridCloudStaticStability()` uses the subgrid model that the
-microphysics holds, and `SubgridCloudStaticStability(cloud_model)` a model of its own. A weight that reads the mixing length reads the stored
-`closure_fields.ℓᵐ` of the previous update, because ``N²`` is diagnosed before ``ℓ``.
-The closure's own subgrid distribution is such a cloud model, [`LiquidFluxFraction`](@ref), with
-``ℵ = w′qˡ′ / w′s′`` (`CloudBuoyancyFlux(stability = true)` is a shortcut for it); because its
-weight depends on the diffusivities, the closure update solves the two together.
+[`SaturationWeightedStaticStability`](@ref) replaces the switch at grid-mean saturation with a blend,
+``N² = (1 - aᴺ) N²_d + aᴺ N²_s``, the moist-buoyancy weighting of
+[Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993). The weight ``aᴺ``, the effective
+saturated fraction, comes from the `fraction` argument, which extends
+`Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ`.
+`SaturationWeightedStaticStability()` is `SaturationWeightedStaticStability(MicrophysicsSaturatedFraction())`,
+the saturated fraction of the subgrid model that the microphysics holds. A fraction that reads the
+mixing length reads the stored `closure_fields.ℓᵐ` of the previous update, because ``N²`` is
+diagnosed before ``ℓ``. With a `subgrid_distribution` ([`DoubleGaussian`](@ref)) the fraction can be
+[`CondensateFluxFraction`](@ref), ``aᴺ = w′qᶜ′ / w′s′``; because it depends on the diffusivities,
+the closure's `solver` ([`SinglePass`](@ref), [`DampedFixedPoint`](@ref) or
+[`BracketedFractionSolve`](@ref)) solves the two together.
 
 ### Stability functions
 
@@ -156,7 +157,7 @@ number ``Ri^\dagger = ℂᵘ / (ℂᶜ + ℂᴰ)``. Their defaults, ``ℂᵘ = 0
 The diffusivities are computed at the cell interfaces where the fluxes live, from the stored mixing
 length and ``\sqrt{e}`` reconstructed from the cell centers and floored at `minimum_tke`.
 The numerics of the TKE equation follow CATKE. The sinks — dissipation and the negative part of the buoyancy flux, as the rate
-``-Lᵉ = Sᴰ \sqrt{e} / ℓ + |B⁻| / \max(e, eᵐⁱⁿ)`` with ``eᵐⁱⁿ`` the `minimum_tke` (so that the buoyancy
+``-Lᵉ = 𝕊ᴰ \sqrt{e} / ℓ + |B⁻| / \max(e, eᵐⁱⁿ)`` with ``eᵐⁱⁿ`` the `minimum_tke` (so that the buoyancy
 sink is continuous at ``e = eᵐⁱⁿ`` and falls linearly with ``e`` below it), and the damping of ``e``
 that advection drives negative, at the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together
 with the vertical diffusion of ``e``, so that ``e`` stays positive for any time step. The sources —

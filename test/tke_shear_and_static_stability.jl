@@ -3,14 +3,14 @@ include(joinpath(@__DIR__, "setup.jl"))
 # The two components of the Richardson number of `TKEBasedTurbulenceClosure`: the `shear`
 # (`GridMeanShear`, `TurbulenceAugmentedShear`) and the `static_stability` that blends the dry and
 # the saturated buoyancy frequency with a weight from an external subgrid cloud model
-# (`SubgridCloudStaticStability`).
+# (`SaturationWeightedStaticStability`).
 
 using Breeze
 using Breeze.TurbulenceClosures: TurbulenceClosures, TKE_NAME, Riᶜᶜᶠ, Riᶜᶜᶜ, richardson_number,
                                  static_stabilityᶜᶜᶠ, saturated_static_stabilityᶜᶜᶠ,
                                  turbulence_shear_squaredᶜᶜᶠ, effective_shear_squaredᶜᶜᶠ,
                                  tke_stability_functionᶜᶜᶠ, dissipation_stability_functionᶜᶜᶜ,
-                                 with_minimum_shear_squared, MicrophysicsSubgridModel, microphysics_subgrid_model
+                                 with_minimum_shear_squared, MicrophysicsSaturatedFraction, microphysics_subgrid_model
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.TurbulenceClosures: buoyancy_tracers, buoyancy_force
@@ -228,19 +228,19 @@ end
 ##### Static stability with a subgrid cloud weight
 #####
 
-@testset "SubgridCloudStaticStability [$(FT)]" for FT in test_float_types()
+@testset "SaturationWeightedStaticStability [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     case = column_cases.rico
     Nz = case.Nz
     interior_faces = 2:Nz
 
-    @test isbits(SubgridCloudStaticStability(ConstantWeight(FT(0.5))))
-    @test startswith(sprint(show, SubgridCloudStaticStability(ConstantWeight(0.5))), "SubgridCloudStaticStability(")
-    @test endswith(sprint(show, SubgridCloudStaticStability(ConstantWeight(0.5))), "ConstantWeight{Float64}(0.5))")
-    @test sprint(show, SubgridCloudStaticStability()) == "SubgridCloudStaticStability(MicrophysicsSubgridModel())"
-    @test adapt(Array, SubgridCloudStaticStability(ConstantWeight(FT(0.5)))) === SubgridCloudStaticStability(ConstantWeight(FT(0.5)))
+    @test isbits(SaturationWeightedStaticStability(ConstantWeight(FT(0.5))))
+    @test startswith(sprint(show, SaturationWeightedStaticStability(ConstantWeight(0.5))), "SaturationWeightedStaticStability(")
+    @test endswith(sprint(show, SaturationWeightedStaticStability(ConstantWeight(0.5))), "ConstantWeight{Float64}(0.5))")
+    @test sprint(show, SaturationWeightedStaticStability()) == "SaturationWeightedStaticStability(MicrophysicsSaturatedFraction())"
+    @test adapt(Array, SaturationWeightedStaticStability(ConstantWeight(FT(0.5)))) === SaturationWeightedStaticStability(ConstantWeight(FT(0.5)))
 
-    with_weight(model; kw...) = TKEBasedTurbulenceClosure(; static_stability = SubgridCloudStaticStability(model), kw...)
+    with_weight(model; kw...) = TKEBasedTurbulenceClosure(; static_stability = SaturationWeightedStaticStability(model), kw...)
 
     dry = column_model(TKEBasedTurbulenceClosure(static_stability = DryStaticStability()), case)
     buoyancy, tracers = buoyancy_force(dry), buoyancy_tracers(dry)
@@ -254,13 +254,13 @@ end
     @test maximum(abs, N²ˢ[interior_faces] .- N²ᵈ[interior_faces]) > 1e-5
 
     @testset "the subgrid model of the microphysics" begin
-        @test SubgridCloudStaticStability() === SubgridCloudStaticStability(MicrophysicsSubgridModel())
+        @test SaturationWeightedStaticStability() === SaturationWeightedStaticStability(MicrophysicsSaturatedFraction())
         @test microphysics_subgrid_model(nothing) === nothing
         @test microphysics_subgrid_model(warm_adjustment()) === nothing
         # P3 hands over the model in its subgrid supersaturation hook: here a constant weight
         w = FT(0.3)
         p3_case = merge(case, (; microphysics = P3Microphysics(FT; subgrid = ConstantWeight(w))))
-        from_microphysics = column_model(TKEBasedTurbulenceClosure(static_stability = SubgridCloudStaticStability()), p3_case)
+        from_microphysics = column_model(TKEBasedTurbulenceClosure(static_stability = SaturationWeightedStaticStability()), p3_case)
         own = column_model(with_weight(ConstantWeight(w)), p3_case)
         @test microphysics_subgrid_model(from_microphysics.microphysics) === ConstantWeight(w)
         N² = column(from_microphysics.closure_fields.N²)
@@ -327,7 +327,7 @@ end
     Oceananigans.defaults.FloatType = FT
     case = column_cases[name]
     shears = (GridMeanShear(), TurbulenceAugmentedShear(turbulence_shear_coefficient = 0.5))
-    stabilities = (MoistStaticStability(), SubgridCloudStaticStability(MixingLengthWeight(FT(100))))
+    stabilities = (MoistStaticStability(), SaturationWeightedStaticStability(MixingLengthWeight(FT(100))))
     states = [state(run_steps!(column_model(TKEBasedTurbulenceClosure(; shear, static_stability), case)))
               for shear in shears, static_stability in stabilities]
     for s in states
@@ -351,7 +351,7 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
     Oceananigans.defaults.FloatType = Float64
     case = column_cases.rico
     template = TKEBasedTurbulenceClosure(shear = TurbulenceAugmentedShear(turbulence_shear_coefficient = 0.3),
-                                         static_stability = SubgridCloudStaticStability(MixingLengthWeight(100.0)))
+                                         static_stability = SaturationWeightedStaticStability(MixingLengthWeight(100.0)))
     model = run_steps!(column_model(template, case; arch = CPU()); steps = 20)
     grid, fields, velocities = model.grid, model.closure_fields, model.velocities
     e = compute!(Field(specific_tke(model)))
@@ -383,10 +383,10 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
         # The weight: ∂N²/∂w = N²ˢ - N²ᵈ, and through the parameter of a weight that reads ℓ
         N²ᵈ = ∂z_b(1, 1, k, grid, buoyancy, tracers)
         N²ˢ = saturated_static_stabilityᶜᶜᶠ(1, 1, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
-        in_weight = w -> static_stabilityᶜᶜᶠ(1, 1, k, grid, SubgridCloudStaticStability(ConstantWeight(w)), buoyancy, tracers, fields)
+        in_weight = w -> static_stabilityᶜᶜᶠ(1, 1, k, grid, SaturationWeightedStaticStability(ConstantWeight(w)), buoyancy, tracers, fields)
         @test reverse_gradient(in_weight, 0.4) ≈ N²ˢ - N²ᵈ rtol=1e-10
         @test reverse_gradient(in_weight, 0.4) ≈ central_difference(in_weight, 0.4, 1e-4) rtol=1e-6
-        in_length = ℓ⁰ -> static_stabilityᶜᶜᶠ(1, 1, k, grid, SubgridCloudStaticStability(MixingLengthWeight(ℓ⁰)), buoyancy, tracers, fields)
+        in_length = ℓ⁰ -> static_stabilityᶜᶜᶠ(1, 1, k, grid, SaturationWeightedStaticStability(MixingLengthWeight(ℓ⁰)), buoyancy, tracers, fields)
         ad = reverse_gradient(in_length, 100.0)
         @test isfinite(ad)
         @test ad ≈ central_difference(in_length, 100.0, 1e-5) rtol=1e-5 atol=1e-16

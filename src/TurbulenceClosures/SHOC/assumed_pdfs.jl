@@ -103,12 +103,12 @@ scalar skewness follows (it is not imposed). SHOC's rule instead matches an impo
 skewness (zero for θˡ, a ramp of `ℂᵍ₂ Sk_w` for qᵗ), which for `|Sk_w| ≳ 1.25` asks for a negative
 variance in the narrow component, clipped to zero: a component of no width, whose cloud is all
 or nothing. The equal share needs `r² ≤ 1 - ℂᵍ`; beyond it the within-component variance is zero
-(the flux-correlation bound `ℂʳ` of [`SubgridDistribution`](@ref) keeps `r` below it). The
+(the flux-correlation bound `ℂʳ` of [`DoubleGaussian`](@ref) keeps `r` below it). The
 within-component θˡⁱ–qᵗ correlation is that of the covariance left after the components' means.
 
 $(TYPEDFIELDS)
 """
-struct EqualShareDoubleGaussianPDF{FT} <: AbstractSHOCComponent
+struct EqualWidthDoubleGaussianPDF{FT} <: AbstractSHOCComponent
     "Within-component fraction of the vertical velocity variance at zero skewness"
     ℂᵍ₀ :: FT
     "Slope of the within-component fraction in the skewness of w (in the sigmoid's argument)"
@@ -126,34 +126,40 @@ struct EqualShareDoubleGaussianPDF{FT} <: AbstractSHOCComponent
     "Lowest liquid water temperature of a component, K"
     Tl_min :: FT
     "Lowest weight of the updraft component"
-    plume_fraction_min :: FT
+    minimum_updraft_fraction :: FT
     "Highest weight of the updraft component"
-    plume_fraction_max :: FT
+    maximum_updraft_fraction :: FT
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `EqualShareDoubleGaussianPDF{FT}` with the coefficients and tolerances of
+Return `EqualWidthDoubleGaussianPDF{FT}` with the coefficients and tolerances of
 [`DoubleGaussianPDF`](@ref). Every field is a keyword argument.
 """
-function EqualShareDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; ℂᵍ₀ = 0.4, kw...)
+function EqualWidthDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; ℂᵍ₀ = 0.4, kw...)
     0 < ℂᵍ₀ < 1 || throw(ArgumentError("ℂᵍ₀ must be in (0, 1), got $ℂᵍ₀"))
     x = 2 * ℂᵍ₀ - 1
     y₀ = x / sqrt(1 - x * x)
-    return component_from_keywords(EqualShareDoubleGaussianPDF, FT,
+    return component_from_keywords(EqualWidthDoubleGaussianPDF, FT,
                                    (ℂᵍ₀ = ℂᵍ₀, ℂᵍˢ = 0, ℂᵍˢˢ = 0, y₀ = y₀, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2,
-                                    Tl_min = 100, plume_fraction_min = 0.01, plume_fraction_max = 0.99), kw)
+                                    Tl_min = 100, minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99), kw)
 end
 
-Adapt.@adapt_structure EqualShareDoubleGaussianPDF
+Adapt.@adapt_structure EqualWidthDoubleGaussianPDF
 
-const ComponentDoubleGaussianPDF = Union{DoubleGaussianPDF, EqualShareDoubleGaussianPDF}
+const ComponentDoubleGaussianPDF = Union{DoubleGaussianPDF, EqualWidthDoubleGaussianPDF}
+
+# The bounds of the weight of the updraft component
+@inline minimum_updraft_fraction(pdf::DoubleGaussianPDF) = pdf.plume_fraction_min
+@inline maximum_updraft_fraction(pdf::DoubleGaussianPDF) = pdf.plume_fraction_max
+@inline minimum_updraft_fraction(pdf::EqualWidthDoubleGaussianPDF) = pdf.minimum_updraft_fraction
+@inline maximum_updraft_fraction(pdf::EqualWidthDoubleGaussianPDF) = pdf.maximum_updraft_fraction
 
 # The within-component fraction of the vertical velocity variance: SHOC's constant, or ℂᵍ(Sk)
 @inline within_component_share(pdf::DoubleGaussianPDF, Sk) = pdf.ℂᵍ₁
 
-@inline function within_component_share(pdf::EqualShareDoubleGaussianPDF, Sk)
+@inline function within_component_share(pdf::EqualWidthDoubleGaussianPDF, Sk)
     y = pdf.y₀ + pdf.ℂᵍˢ * Sk + pdf.ℂᵍˢˢ * Sk * Sk
     constant = (pdf.ℂᵍˢ == 0) & (pdf.ℂᵍˢˢ == 0) # a property of the parameters, not of the state
     return ifelse(constant, pdf.ℂᵍ₀, (1 + y / sqrt(1 + y * y)) / 2)
@@ -212,9 +218,9 @@ end
     return x1_1, x1_2, x2_1, x2_2, zero_safe_sqrt(x2_1), zero_safe_sqrt(x2_2)
 end
 
-# The equal share of the within-component variance (EqualShareDoubleGaussianPDF)
+# The equal share of the within-component variance (EqualWidthDoubleGaussianPDF)
 @inline function scalar_plume_parameters(cp, flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed,
-                                         p::EqualShareDoubleGaussianPDF)
+                                         p::EqualWidthDoubleGaussianPDF)
     FT = typeof(sec)
     r = clip_between(cp, flux / (sqrtw2 * sqrt_sec), -1, 1, 1)
     uniform = (sec <= tol * tol) | (abs(w1_2 - w1_1) <= 0)
@@ -307,7 +313,7 @@ and [`ModelThermodynamicsSaturation`](@ref)), with the `thermodynamics` of the m
     w2_1 = within_component_share(pdf, Skew_w)
     omw = 1 - w2_1
     a = clip_between(cp, convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))),
-                     pdf.plume_fraction_min, pdf.plume_fraction_max, 1)
+                     minimum_updraft_fraction(pdf), maximum_updraft_fraction(pdf), 1)
     sqrtw2t = sqrt(1 - w2_1)
     w1_1 = sqrt((1 - a) / a) * sqrtw2t
     w1_2 = -1 * sqrt(a / (1 - a)) * sqrtw2t

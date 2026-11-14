@@ -2,7 +2,7 @@
 ##### `TKEBasedTurbulenceClosure`: a vertical eddy-diffusivity closure with prognostic turbulent
 ##### kinetic energy, in the spirit of CATKE (Wagner et al. 2025)
 #####
-#####   Kᵘ = Sᵘ ℓ √e,   Kᶜ = Sᶜ ℓ √e,   Kᵉ = Sᵉ ℓ √e,   ε = Sᴰ e^{3/2} / ℓ
+#####   Kᵘ = 𝕊ᵘ ℓ √e,   Kᶜ = 𝕊ᶜ ℓ √e,   Kᵉ = 𝕊ᵉ ℓ √e,   ε = 𝕊ᴰ e^{3/2} / ℓ
 #####   ℓ  = a mixing-length formulation built on the buoyancy penetration depth ℓᵇ = √e / N and the wall length ℂˢ z
 #####   ∂ₜ(ρe) + ∇·(ρ u e) = ∂z(ρ Kᵉ ∂z e) + ρ (P + B − ε),   P = Kᵘ S²,  B = −Kᶜ N²
 #####
@@ -21,7 +21,7 @@
 ##### which bounds ℓ by the stratified air above and below an elevated neutral or unstable layer, where
 ##### the local minimum lets it grow to the distance to the ground.
 #####
-##### The stability functions Sᵘ, Sᶜ, Sᵉ, Sᴰ are either constants (`ConstantStabilityFunctions`) or
+##### The stability functions 𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ are either constants (`ConstantStabilityFunctions`) or
 ##### rational functions of the Richardson number (`RationalStabilityFunction`), in
 ##### richardson_number_stability_functions.jl.
 #####
@@ -371,8 +371,8 @@ A vertical eddy-diffusivity closure carrying one prognostic equation for the sub
 kinetic energy ``e``, in the spirit of CATKE ([Wagner et al. 2025](@cite Wagner25catke)):
 
 ```math
-Kᵘ = Sᵘ ℓ \\sqrt{e}, \\qquad Kᶜ = Sᶜ ℓ \\sqrt{e}, \\qquad Kᵉ = Sᵉ ℓ \\sqrt{e}, \\qquad
-ε = Sᴰ e^{3/2} / ℓ,
+Kᵘ = 𝕊ᵘ ℓ \\sqrt{e}, \\qquad Kᶜ = 𝕊ᶜ ℓ \\sqrt{e}, \\qquad Kᵉ = 𝕊ᵉ ℓ \\sqrt{e}, \\qquad
+ε = 𝕊ᴰ e^{3/2} / ℓ,
 ```
 
 ```math
@@ -382,12 +382,12 @@ Kᵘ = Sᵘ ℓ \\sqrt{e}, \\qquad Kᶜ = Sᶜ ℓ \\sqrt{e}, \\qquad Kᵉ = S�
 where ``Kᵘ``, ``Kᶜ`` and ``Kᵉ`` are the eddy diffusivities of momentum, scalars and turbulent
 kinetic energy, ``S²`` the squared vertical shear, ``N²`` the squared buoyancy frequency, ``ℓ`` the
 primary mixing length ([`AbstractMixingLength`](@ref): [`GradientLimitedMixingLength`](@ref) by default,
-[`LocalMinimumMixingLength`](@ref) or [`IntegralMixingLength`](@ref)), and ``Sᵘ, Sᶜ, Sᵉ, Sᴰ`` stability functions
+[`LocalMinimumMixingLength`](@ref) or [`IntegralMixingLength`](@ref)), and ``𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ`` stability functions
 ([`ConstantStabilityFunctions`](@ref) or
 [`RationalStabilityFunction`](@ref)). ``N²`` is
 diagnosed once per time-step stage at the cell
 interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default,
-[`DryStaticStability`](@ref) or [`SubgridCloudStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
+[`DryStaticStability`](@ref) or [`SaturationWeightedStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
 the tracer `ρe`, which the
 closure adds to the model; it is advected and vertically diffused like every other scalar, and the
 closure applies the local production, buoyancy flux and dissipation.
@@ -401,14 +401,15 @@ and its floor ``S²ᵐⁱⁿ`` from the `shear` component: [`GridMeanShear`](@re
 the resolved wind, or [`TurbulenceAugmentedShear`](@ref), which adds the turnover rate of the
 subgrid eddies. The floor keeps ``Ri`` finite and continuous where the shear vanishes.
 
-`subgrid_cloud_formulation` is `nothing` by default. A [`SubgridCloudFormulation`](@ref) adds
-the subgrid cloud scheme of SHOC to the closure: the subgrid distribution of θˡ, qᵗ and w from
-the closure's ``ℓ``, ``e`` and ``Kᶜ``, the cloud buoyancy flux in the TKE equation, and the
-cloud fraction and cloud liquid of the model through the microphysics option `ClosureCloud`.
+`subgrid_distribution` is `nothing` by default. A [`DoubleGaussian`](@ref) adds the subgrid
+distribution of θˡ, qᵗ and w from the closure's ``ℓ``, ``e`` and ``Kᶜ``; with it the shear and
+buoyancy production of the TKE equation are the energy conversions of the fluxes the closure
+applies to the mean state, and the dissipated energy heats the air. `solver` solves the coupling of
+the static stability with the saturated fraction of the distribution.
 """
-struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SC} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
+struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
     mixing_length :: ML                   # the primary mixing length ℓ
-    stability_functions :: SF             # Sᵘ, Sᶜ, Sᵉ, Sᴰ
+    stability_functions :: SF             # 𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ
     static_stability :: SS                # how N² is diagnosed
     maximum_viscosity :: FT               # upper bound on Kᵘ, m² s⁻¹
     maximum_tracer_diffusivity :: FT      # upper bound on Kᶜ, m² s⁻¹
@@ -416,7 +417,8 @@ struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SC} <: AbstractScalarDi
     minimum_tke :: FT                     # floor on e inside √e, m² s⁻²
     shear :: SH                           # the squared shear S² and its floor S²ᵐⁱⁿ in Ri = N² / (S² + S²ᵐⁱⁿ)
     negative_tke_damping_time_scale :: FT # time scale on which negative e is damped, s
-    subgrid_cloud_formulation :: SC       # `nothing`, or a `SubgridCloudFormulation`
+    subgrid_distribution :: SD            # `nothing`, or a `DoubleGaussian`
+    solver :: SV                          # solver of the coupling of N² and the saturated fraction
 end
 
 const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where TD
@@ -431,7 +433,8 @@ function Adapt.adapt_structure(to, closure::TKEBasedTurbulenceClosure{TD}) where
                                          adapt(to, closure.minimum_tke),
                                          adapt(to, closure.shear),
                                          adapt(to, closure.negative_tke_damping_time_scale),
-                                         adapt(to, closure.subgrid_cloud_formulation))
+                                         adapt(to, closure.subgrid_distribution),
+                                         closure.solver)
 end
 
 """Either a single `TKEBasedTurbulenceClosure` or an ensemble array of them."""
@@ -442,13 +445,14 @@ function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::S
                                        maximum_tke_diffusivity::FT, minimum_tke::FT,
                                        shear::SH,
                                        negative_tke_damping_time_scale::FT,
-                                       subgrid_cloud_formulation::SC = nothing) where {TD, ML, SF, SS, FT, SH, SC}
-    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SC}(mixing_length, stability_functions, static_stability,
+                                       subgrid_distribution::SD = nothing,
+                                       solver::SV = SinglePass()) where {TD, ML, SF, SS, FT, SH, SD, SV}
+    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV}(mixing_length, stability_functions, static_stability,
                                                                  maximum_viscosity, maximum_tracer_diffusivity,
                                                                  maximum_tke_diffusivity, minimum_tke,
                                                                  shear,
                                                                  negative_tke_damping_time_scale,
-                                                                 subgrid_cloud_formulation)
+                                                                 subgrid_distribution, solver)
 end
 
 """
@@ -470,10 +474,11 @@ with the sign of a rounding-level ``N²``. There the stability functions pass fr
 limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``; where ``S² ≫ S²ᵐⁱⁿ`` they are unchanged to relative order
 ``S²ᵐⁱⁿ / S²``. The shear does not enter [`ConstantStabilityFunctions`](@ref).
 
-`subgrid_cloud_formulation` (default `nothing`) is a [`SubgridCloudFormulation`](@ref), or
-`nothing` for none. If its buoyancy flux is `CloudBuoyancyFlux(stability = true)`, the static
-stability becomes `SubgridCloudStaticStability(LiquidFluxFraction(static_stability))`, whose weight
-is the liquid flux fraction of the subgrid distribution.
+`subgrid_distribution` (default `nothing`) is a [`DoubleGaussian`](@ref), or `nothing` for none.
+`static_stability = SaturationWeightedStaticStability(CondensateFluxFraction())` weights the
+saturated static stability by the condensate flux fraction of the distribution; `solver`
+([`SinglePass`](@ref) by default, [`DampedFixedPoint`](@ref), [`BracketedFractionSolve`](@ref), ...)
+solves that coupling.
 
 ```jldoctest
 using Breeze
@@ -498,7 +503,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    # CATKE's value; atmospheric turbulence evolves faster than the
                                    # ocean's, so a shorter time scale may be more appropriate here.
                                    negative_tke_damping_time_scale = 1minute,
-                                   subgrid_cloud_formulation = nothing) where TD
+                                   subgrid_distribution = nothing,
+                                   solver = SinglePass()) where TD
 
     shear = with_minimum_shear_squared(shear, minimum_shear_squared)
     validate_shear(shear)
@@ -506,9 +512,9 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
     mixing_length = convert_eltype(FT, mixing_length)
     stability_functions = convert_eltype(FT, stability_functions)
     static_stability = convert_eltype(FT, static_stability)
-    subgrid_cloud_formulation = convert_eltype(FT, subgrid_cloud_formulation)
-    static_stability = liquid_flux_fraction_stability(static_stability, subgrid_cloud_formulation)
-    validate_static_stability(static_stability, subgrid_cloud_formulation)
+    subgrid_distribution = convert_eltype(FT, subgrid_distribution)
+    solver = convert_eltype(FT, solver)
+    validate_subgrid_coupling(static_stability, subgrid_distribution, solver)
 
     return TKEBasedTurbulenceClosure{TD}(mixing_length,
                                          stability_functions,
@@ -519,7 +525,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                          convert(FT, minimum_tke),
                                          convert_eltype(FT, shear),
                                          convert(FT, negative_tke_damping_time_scale),
-                                         subgrid_cloud_formulation)
+                                         subgrid_distribution,
+                                         solver)
 end
 
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
@@ -530,7 +537,7 @@ TKEBasedTurbulenceClosure(FT::DataType; kw...) =
 @inline convert_eltype(::Type{FT}, ss::DryStaticStability) where FT = ss
 @inline convert_eltype(::Type{FT}, ss::MoistStaticStability) where FT = ss
 @inline convert_eltype(::Type{FT}, ::Nothing) where FT = nothing
-@inline convert_eltype(::Type{FT}, ss::SubgridCloudStaticStability) where FT = ss
+@inline convert_eltype(::Type{FT}, ss::SaturationWeightedStaticStability) where FT = ss
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -650,14 +657,16 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
     implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Lᵉ : ZeroField() for name in tracer_names)
 
-    subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_cloud_formulation(closure), tracer_names)
+    subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_distribution(closure), closure_solver(closure), tracer_names)
 
     return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients, subgrid_cloud)
 end
 
 # The subgrid cloud formulation of a closure or of an ensemble of closures (which share one)
-subgrid_cloud_formulation(closure::TKEBasedTurbulenceClosure) = closure.subgrid_cloud_formulation
-subgrid_cloud_formulation(closure::TKEClosureArray) = first(closure).subgrid_cloud_formulation
+subgrid_distribution(closure::TKEBasedTurbulenceClosure) = closure.subgrid_distribution
+subgrid_distribution(closure::TKEClosureArray) = first(closure).subgrid_distribution
+closure_solver(closure::TKEBasedTurbulenceClosure) = closure.solver
+closure_solver(closure::TKEClosureArray) = first(closure).solver
 
 build_subgrid_cloud_fields(grid, ::Nothing, tracer_names) = nothing
 
@@ -910,13 +919,13 @@ end
     ℓ = @inbounds ℓᵐ[i, j, k]
     K = ℓ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
 
-    Sᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
-    Sᶜ = tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
-    Sᵉ = tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
+    𝕊ᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
+    𝕊ᶜ = tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
+    𝕊ᵉ = tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
 
-    Kᵘ = min(Sᵘ * K, closure_ij.maximum_viscosity)
-    Kᶜ = min(Sᶜ * K, closure_ij.maximum_tracer_diffusivity)
-    Kᵉ = min(Sᵉ * K, closure_ij.maximum_tke_diffusivity)
+    Kᵘ = min(𝕊ᵘ * K, closure_ij.maximum_viscosity)
+    Kᶜ = min(𝕊ᶜ * K, closure_ij.maximum_tracer_diffusivity)
+    Kᵉ = min(𝕊ᵉ * K, closure_ij.maximum_tke_diffusivity)
 
     FT = eltype(grid)
     @inbounds begin
@@ -944,7 +953,7 @@ stability; negative in stable stratification.
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The dissipation rate ``ε = Sᴰ e^{3/2} / ℓ`` at cell centers, from the specific turbulent kinetic
+The dissipation rate ``ε = 𝕊ᴰ e^{3/2} / ℓ`` at cell centers, from the specific turbulent kinetic
 energy field `e`, the velocities and the closure fields, whose stored ``ℓ`` and ``N²`` it reads;
 a diagnostic, evaluated in a `KernelFunctionOperation` at (Center, Center, Center) to compare the
 closure's TKE budget with a large-eddy simulation's. Negative ``e`` dissipates nothing.
@@ -952,15 +961,15 @@ closure's TKE budget with a large-eddy simulation's. Negative ``e`` dissipates n
 @inline function dissipationᶜᶜᶜ(i, j, k, grid, closure, e, velocities, closure_fields)
     eᵢ = max(0, @inbounds e[i, j, k])
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
-    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
-    return Sᴰ * eᵢ * sqrt(eᵢ) / ℓ
+    𝕊ᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
+    return 𝕊ᴰ * eᵢ * sqrt(eᵢ) / ℓ
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The rate at which the sinks of the TKE equation remove turbulent kinetic energy, ``-Lᵉ ≥ 0``:
-the dissipation rate ``ω = Sᴰ \\sqrt{e} / ℓ`` — or, where ``e`` is negative, the damping rate
+the dissipation rate ``ω = 𝕊ᴰ \\sqrt{e} / ℓ`` — or, where ``e`` is negative, the damping rate
 ``1/τ`` — plus the buoyancy sink rate ``ωᴮ = -B⁻ / \\max(e, eᵐⁱⁿ)``, the negative part of the
 buoyancy flux divided by ``e`` floored at `minimum_tke` ``eᵐⁱⁿ``. Above the floor the buoyancy
 sink ``ωᴮ e`` is ``-B⁻``; below it the sink falls linearly with ``e``, continuously at
@@ -971,13 +980,13 @@ stays positive for any time step.
     eᵐⁱⁿ = closure.minimum_tke
     eᵢ = @inbounds e[i, j, k]
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
-    Sᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
+    𝕊ᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
 
     # `minimum_tke` floors only the turbulent velocity of the mixing length above; the dissipation
     # rate follows √e all the way down, so that ε ∝ e^{3/2} below the floor too (as in CATKE).
     # The `abs` keeps the unselected branch of the `ifelse` from taking √ of a negative number.
     τ = closure.negative_tke_damping_time_scale
-    ω = ifelse(eᵢ < 0, 1 / τ, Sᴰ * sqrt(abs(eᵢ)) / ℓ)
+    ω = ifelse(eᵢ < 0, 1 / τ, 𝕊ᴰ * sqrt(abs(eᵢ)) / ℓ)
 
     # The buoyancy sink rate: -B⁻ / e above the floor and -B⁻ / eᵐⁱⁿ below it, so that the
     # implicit sink ωᴮ e is continuous at e = eᵐⁱⁿ and vanishes linearly with e
@@ -992,8 +1001,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The buoyancy production of the TKE equation at cell centers: ``-Kᶜ N²``, formed at the faces and
 reconstructed to the center, or, with the cloud buoyancy flux of a
-[`SubgridCloudFormulation`](@ref), the exact conversion of the scalar fluxes the closure applies
-(see [`CloudBuoyancyFlux`](@ref)).
+subgrid distribution, the exact conversion of the scalar fluxes the closure applies.
 """
 @inline tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields) =
     tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields)
@@ -1133,7 +1141,8 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
     show(io, closure.shear)
     print(io, '\n',
               "├── negative_tke_damping_time_scale: ", prettysummary(closure.negative_tke_damping_time_scale), '\n',
-              "└── subgrid_cloud_formulation: ", summary(closure.subgrid_cloud_formulation))
+              "├── subgrid_distribution: ", summary(closure.subgrid_distribution), "\n",
+              "└── solver: ", summary(closure.solver))
 end
 
 # All closure fields are recomputed by update_state! from the prognostic state alone.

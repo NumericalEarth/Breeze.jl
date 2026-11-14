@@ -3,10 +3,10 @@
 #####
 ##### A TKE update component holds the shear production coefficient `ℂᴾ` and implements
 #####
-#####     tke_step(tke_update, cp, c, dtime, e, P, B, ℓ, Sᴰ) -> (e_new, ε, ω, e_stored)
+#####     tke_step(tke_update, cp, c, dtime, e, P, B, ℓ, 𝕊ᴰ) -> (e_new, ε, ω, e_stored)
 #####
 ##### level by level in the turbulence sweep (`P` and `B` are the shear and buoyancy production,
-##### `ℓ` the mixing length and `Sᴰ` the dissipation coefficient; it returns the turbulent kinetic
+##### `ℓ` the mixing length and `𝕊ᴰ` the dissipation coefficient; it returns the turbulent kinetic
 ##### energy that the time scale and the diffusivities see, the dissipation `ε`, the rate `ω` of
 ##### the sinks left to the implicit solve, `nothing` if there are none, and the value to store,
 ##### which the implicit solve takes as its right-hand side), and
@@ -46,7 +46,7 @@ $(TYPEDEF)
 The update of turbulent kinetic energy of E3SM `shoc.F90` (`adv_sgs_tke`): forward Euler in the
 production and the dissipation,
 
-    e ← e + Δt (max(0, P + B) - ε),    ε = Sᴰ e^{3/2} / ℓ,    P = ℂᴾ Kᵘ |∂z u|²
+    e ← e + Δt (max(0, P + B) - ε),    ε = 𝕊ᴰ e^{3/2} / ℓ,    P = ℂᴾ Kᵘ |∂z u|²
 
 kept between the minimum and the maximum of the `SHOCConstants`; the diffusion of `e` shares the
 implicit solve of θˡ and qᵗ.
@@ -116,11 +116,11 @@ An update of turbulent kinetic energy that keeps it positive for any time step w
 as [`TKEBasedTurbulenceClosure`](@ref) does: the sources are explicit and the sinks are linear in
 `e` and implicit, in the same vertical solve as the diffusion,
 
-    (1 + Δt ω - Δt ∂z Kᶜ ∂z) eⁿ⁺¹ = e + Δt (P + B⁺),    ω = Sᴰ √e / ℓ + (-B⁻) / max(e, eᵐⁱⁿ)
+    (1 + Δt ω - Δt ∂z Kᶜ ∂z) eⁿ⁺¹ = e + Δt (P + B⁺),    ω = 𝕊ᴰ √e / ℓ + (-B⁻) / max(e, eᵐⁱⁿ)
 
 where `B⁺` and `B⁻` are the positive and the negative part of the buoyancy production, taken
-through the clipping policy. The dissipation rate `Sᴰ √e / ℓ` times `e` is the dissipation
-`Sᴰ e^{3/2} / ℓ` of [`ForwardEulerTKE`](@ref) with `√e` of the old state, and a negative
+through the clipping policy. The dissipation rate `𝕊ᴰ √e / ℓ` times `e` is the dissipation
+`𝕊ᴰ e^{3/2} / ℓ` of [`ForwardEulerTKE`](@ref) with `√e` of the old state, and a negative
 buoyancy production removes the fraction of `e` it would remove explicitly. The time scale and
 the diffusivities of the step see the estimate `(e + Δt (P + B⁺)) / (1 + Δt ω)`.
 

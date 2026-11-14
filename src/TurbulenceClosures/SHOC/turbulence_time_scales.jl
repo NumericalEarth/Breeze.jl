@@ -4,7 +4,7 @@
 ##### A time scale component implements
 #####
 #####     time_scale_column(ts, cp, c, brunt_int)                -> column
-#####     dissipation_coefficient(ts, column, N², shear_term, tke_update) -> Sᴰ, with ε = Sᴰ e^{3/2} / ℓ
+#####     dissipation_coefficient(ts, column, N², shear_term, tke_update) -> 𝕊ᴰ, with ε = 𝕊ᴰ e^{3/2} / ℓ
 #####     cold_surface_fallback(ts, tabs_sfc, z, pblh)           -> runaway
 #####     time_scale_and_diffusivities(ts, cp, c, column, e, ε, ℓ, N², shear_term, tke_update, runaway) -> (τ, Kᶜ, Kᵘ)
 #####
@@ -27,8 +27,8 @@ The return-to-isotropy time scale and eddy diffusivities of E3SM `shoc.F90` (`is
     τ = min(maxiso, τ₀ / (1 + λ N²⁺ τ₀²)),    Kᶜ = ℂᶜ τ e,    Kᵘ = ℂᵘ τ e
 
 where `λ = ℂᵝ₁ + (∫N² dz / g - ℂᵝ₄) ℂᵝ₃`, kept between `ℂᵝ₁` and `ℂᵝ₂`, is one number per column,
-and the dissipation is `ε = Sᴰ e^{3/2} / ℓ` with the constant
-`Sᴰ = (ℂᴰ₃ + ℂᴰ₄) / ℂᴰ₅ × ℂᴰ₁³ / ℂᴰ₂⁴`. Over a surface colder than `temp_crit` (182 K) the
+and the dissipation is `ε = 𝕊ᴰ e^{3/2} / ℓ` with the constant
+`𝕊ᴰ = (ℂᴰ₃ + ℂᴰ₄) / ℂᴰ₅ × ℂᴰ₁³ / ℂᴰ₂⁴`. Over a surface colder than `temp_crit` (182 K) the
 diffusivities fall back to `ℂᶜₛ ℓ² |∂z u|` and `ℂᵘₛ ℓ² |∂z u|` up to `pbl_trans` (200 m) above
 the boundary layer top.
 
@@ -48,7 +48,7 @@ the boundary layer top.
 | `ℂᴰ₄` | literal `0.51` (`Ce2 = Ce / 0.7 × 0.51`) | 0.51 | dissipation, see `ℂᴰ₁` |
 | `ℂᴰ₅` | literal `0.7`  | 0.7  | dissipation, see `ℂᴰ₁` |
 
-The five `ℂᴰ` enter the closure only through the one product `Sᴰ`, so a calibration can
+The five `ℂᴰ` enter the closure only through the one product `𝕊ᴰ`, so a calibration can
 determine no more than one of them. The fields after them are bounds and switches, all
 dimensional; none is an empirical coefficient.
 
@@ -154,7 +154,7 @@ Eddy diffusivities and dissipation from stability functions of the local gradien
 number, as in [`TKEBasedTurbulenceClosure`](@ref) and with its functions (by default
 [`RationalStabilityFunction`](@ref), reused as it is):
 
-    Kᶜ = Sᶜ(Ri) ℓ √e,    Kᵘ = Sᵘ(Ri) ℓ √e,    ε = Sᴰ(Ri) e^{3/2} / ℓ,    Ri = N² / (S² + S²ᵐⁱⁿ)
+    Kᶜ = 𝕊ᶜ(Ri) ℓ √e,    Kᵘ = 𝕊ᵘ(Ri) ℓ √e,    ε = 𝕊ᴰ(Ri) e^{3/2} / ℓ,    Ri = N² / (S² + S²ᵐⁱⁿ)
 
 in place of the damping by the stability of the whole column of
 [`ColumnStabilityDamping`](@ref), which is one number per column and jumps to zero where the

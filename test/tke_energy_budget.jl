@@ -37,8 +37,8 @@ function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2
     microphysics = PredictedParticlePropertiesMicrophysics(;
                                                            negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
-    closure = TKEBasedTurbulenceClosure(; static_stability = DryStaticStability(), minimum_tke = 4e-4,
-                                        subgrid_cloud_formulation = SubgridCloudFormulation(; cloud = nothing))
+    closure = TKEBasedTurbulenceClosure(; static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()), minimum_tke = 4e-4,
+                                        subgrid_distribution = DoubleGaussian())
     boundary_conditions = surface_fluxes ?
         (ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 8e-3)),
          ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 5.2e-5)),
@@ -115,7 +115,7 @@ function closure_energy_conversions(model)
             latent_production = sum(ρ .* Δzᶜ .* budget_column(cl.Bᴸ)),
             latent_conversion = sum(ρᶠ .* Δzᶠ .* Kᶜ[2:Nz] .* budget_column(cl.ΔN²ᴸ)[2:Nz]),
             dissipation = sum(ρ .* Δzᶜ .* ε),
-            β = β, stored_β = hcat(budget_column(cl.βᶿ), budget_column(cl.βᵛ), budget_column(cl.βˡ), budget_column(cl.βⁱ)))
+            β = β, stored_β = hcat(budget_column(cl.b_θ), budget_column(cl.b_qᵛ), budget_column(cl.b_qˡ), budget_column(cl.b_qⁱ)))
 end
 
 # The rates at the state of an update: the stage conversions equal the energy the fluxes take
@@ -155,7 +155,7 @@ function stage_energy_budget(model, Δt)
           KE(budget_column(cl.ρu⁻), budget_column(cl.ρv⁻))
 
     # dynamic enthalpy, linearized with the stage's derivatives (trapezoid rule for Z = ∫ β dz)
-    β = hcat(budget_column(cl.stage_βᶿ), budget_column(cl.stage_βᵛ), budget_column(cl.stage_βˡ), budget_column(cl.stage_βⁱ))
+    β = hcat(budget_column(cl.stage_b_θ), budget_column(cl.stage_b_qᵛ), budget_column(cl.stage_b_qˡ), budget_column(cl.stage_b_qⁱ))
     Z = zeros(Nz, 4)
     for s in 1:4
         Z[1, s] = β[1, s] * (zᶜ[1] - zᶠ[1])
