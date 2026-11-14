@@ -64,7 +64,7 @@ using Oceananigans.TimeSteppers: materialize_lagrangian_particles, update_state!
 using Oceananigans.TurbulenceClosures: ScalarDiffusivity, ThreeDimensionalFormulation
 using Oceananigans.Utils: KernelParameters, interpolator, launch!
 
-using Breeze.AtmosphereModels: AtmosphereModels, dynamics_density, dynamics_pressure,
+using Breeze.AtmosphereModels: AtmosphereModels, continuity_density, dynamics_pressure,
                                 standard_pressure, kernel_time_step
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 using Breeze.TimeSteppers: AcousticRungeKutta3, SSPRungeKutta3

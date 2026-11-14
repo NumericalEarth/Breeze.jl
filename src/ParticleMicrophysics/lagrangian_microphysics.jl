@@ -648,7 +648,7 @@ function AtmosphereModels.microphysics_model_update!(μ::LagrangianMicrophysics,
     Nd = length(droplets)
     constants = model.thermodynamic_constants
 
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
     p = dynamics_pressure(model.dynamics)
     pˢᵗ = standard_pressure(model.dynamics)
     ρθ = model.formulation.potential_temperature_density
