@@ -213,25 +213,15 @@ end
             relaxation_fraction * transient_response) / psychrometric_correction
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Compute cloud, rain, and ice diffusional growth rates using a shared
-semi-analytic saturation adjustment, in the `SCF = SPF = 1` limit; the subgrid
-cloud/precipitation fraction framework is handled separately.
-"""
-@inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
-                                                     qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
-                                                     constants, transport, q,
-                                                     μᶜˡ, λᶜˡ, nᶜˡ_bounded,
-                                                     temperature_tendency,
-                                                     pressure_tendency,
-                                                     lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ),
-                                                     Γ = nothing)
+# The vapor relaxation coefficients ε [s⁻¹] of cloud liquid, rain, dry ice and liquid-coated ice,
+# with the psychrometric corrections ξˡ, ξⁱ and the ice-liquid coupling of the coupled solver.
+# Species `x` grows at εˣ (qᵛ - qᵛ⁺ˣ) / ξˣ in the absence of the coupling, so εˣ / ξˣ is its
+# phase relaxation rate (see `p3_phase_relaxation_rate`). Shared by the coupled solver and
+# `p3_phase_relaxation_rate`, so that ωᶜ is the rate that drives P3's own condensation.
+@inline function p3_vapor_relaxation_coefficients(p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ, qᵛ⁺ˡ, qᵛ⁺ⁱ,
+                                                  T, P, ρ, constants, transport, q,
+                                                  μᶜˡ, λᶜˡ, nᶜˡ_bounded, lookups)
     FT = typeof(qᶜˡ)
-    parameters = p3.process_rates
-    floors = parameters.floors
-    τ = max(parameters.sink_limiting_timescale, eps(FT))
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     ℒⁱ = sublimation_latent_heat(constants, T)
@@ -267,6 +257,44 @@ cloud/precipitation fraction framework is handled separately.
         ice_relaxation, zero(FT))
 
     ice_liquid_coupling = (1 + ℒⁱ * dqᵛ⁺ˡ_dT / cᵖᵈ) / ξⁱ
+    return (; cloud_relaxation, rain_relaxation, dry_ice_relaxation, coating_relaxation,
+            ice_liquid_coupling, ξˡ, ξⁱ, ℒˡ, ℒⁱ, Rᵛ, qⁱ_total, Fˡ)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Compute cloud, rain, and ice diffusional growth rates using a shared
+semi-analytic saturation adjustment, in the `SCF = SPF = 1` limit; the subgrid
+cloud/precipitation fraction framework is handled separately.
+"""
+@inline function coupled_saturation_adjustment_rates(p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ,
+                                                     qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, ρ,
+                                                     constants, transport, q,
+                                                     μᶜˡ, λᶜˡ, nᶜˡ_bounded,
+                                                     temperature_tendency,
+                                                     pressure_tendency,
+                                                     lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ),
+                                                     Γ = nothing)
+    FT = typeof(qᶜˡ)
+    parameters = p3.process_rates
+    floors = parameters.floors
+    τ = max(parameters.sink_limiting_timescale, eps(FT))
+    coefficients = p3_vapor_relaxation_coefficients(p3, qᶜˡ, qʳ, nʳ, qⁱ, qʷⁱ, nⁱ, qᵛ⁺ˡ, qᵛ⁺ⁱ,
+                                                    T, P, ρ, constants, transport, q,
+                                                    μᶜˡ, λᶜˡ, nᶜˡ_bounded, lookups)
+    cloud_relaxation = coefficients.cloud_relaxation
+    rain_relaxation = coefficients.rain_relaxation
+    dry_ice_relaxation = coefficients.dry_ice_relaxation
+    coating_relaxation = coefficients.coating_relaxation
+    ice_liquid_coupling = coefficients.ice_liquid_coupling
+    ξˡ = coefficients.ξˡ
+    ξⁱ = coefficients.ξⁱ
+    ℒˡ = coefficients.ℒˡ
+    Rᵛ = coefficients.Rᵛ
+    qⁱ_total = coefficients.qⁱ_total
+    Fˡ = coefficients.Fˡ
+
     total_relaxation = max(cloud_relaxation + rain_relaxation +
                            dry_ice_relaxation * ice_liquid_coupling + coating_relaxation,
                            FT(floors.rate_scale))
@@ -337,4 +365,61 @@ cloud/precipitation fraction framework is handled separately.
 
     return P3CoupledVaporRates{FT}(condensation, rain_evaporation, rain_condensation,
                                    deposition, coating_condensation, coating_evaporation)
+end
+
+#####
+##### Phase relaxation rate ωᶜ = ωˡ + ωⁱ (see `AtmosphereModels.phase_relaxation_rate`)
+#####
+#
+# The coupled solver grows species x at εˣ (qᵛ - qᵛ⁺ˣ) / ξˣ, before the coupling between species,
+# with the vapor relaxation coefficients εˣ of `p3_vapor_relaxation_coefficients`. For cloud
+# liquid, with gamma-distributed droplets of number concentration Nᶜˡ, shape μᶜˡ and slope λᶜˡ,
+#
+#   εˡ = 2π Dᵛ Nᶜˡ (μᶜˡ + 1) / λᶜˡ = 4π Dᵛ Nᶜˡ r̄,   r̄ = (μᶜˡ + 1) / (2λᶜˡ) the mean radius,
+#
+# and ξˡ = 1 + ℒˡ (∂qᵛ⁺ˡ/∂T) / cᵖᵈ is the psychrometric correction for the latent heating of the
+# drops. The phase relaxation rates are the coefficients of the vapor excess in the condensation
+# rates:
+#
+#   ωˡ = εˡ / ξˡ,   ωⁱ = ℂᵈⁱᶠᶠ₁ εⁱ / ξⁱ + εʷⁱ / ξˡ,   ωᶜ = ωˡ + ωⁱ,
+#
+# with εⁱ the dry-ice and εʷⁱ the liquid-coated-ice coefficient (one of them is zero) and ℂᵈⁱᶠᶠ₁
+# the deposition calibration factor. Rain is not condensate that the subgrid condensation acts
+# on and is not included. The same εˡ and ξˡ drive `coupled_saturation_adjustment_rates`.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the phase relaxation rates `(; ωˡ, ωⁱ, ωᶜ)` [s⁻¹] of P3 at density `ρ`, microphysical state
+`ℳ` and thermodynamic state `𝒰`: the coefficients of the vapor excess in the condensation rate
+of cloud liquid (``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ``) and the deposition rate of ice (``ωⁱ``), and their sum
+``ωᶜ = ωˡ + ωⁱ``.
+"""
+@inline function p3_phase_relaxation_rates(p3, ρ, ℳ, 𝒰, constants)
+    T = temperature(𝒰, constants)
+    ρᵗʰ = density(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    P = air_pressure(𝒰, constants)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
+    qᵛ⁺ⁱ = p3_ice_saturation_specific_humidity(T, ρᵗʰ, constants, p3.process_rates.freezing_temperature, qᵛ⁺ˡ)
+    transport = air_transport_properties(T, P, constants)
+
+    properties = p3_process_properties(p3, ρ, ℳ)
+    cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
+    qʷⁱ = active_liquid_on_ice(p3, ℳ.qʷⁱ)
+    lookups = p3_ice_lookups(p3, ℳ.qⁱ, qʷⁱ, properties.nⁱ, properties.Fᶠ, properties.Fˡ, properties.ρᶠ, ρ)
+
+    coefficients = p3_vapor_relaxation_coefficients(p3, ℳ.qᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.qⁱ, qʷⁱ, properties.nⁱ,
+                                                    qᵛ⁺ˡ, qᵛ⁺ⁱ, T, P, ρ, constants, transport, q,
+                                                    cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ, lookups)
+
+    return phase_relaxation_rates(p3, coefficients)
+end
+
+@inline function phase_relaxation_rates(p3, coefficients)
+    ℂᵈⁱᶠᶠ₁ = p3.process_rates.calibration_factor_deposition
+    ωˡ = coefficients.cloud_relaxation / coefficients.ξˡ
+    ωⁱ = ℂᵈⁱᶠᶠ₁ * coefficients.dry_ice_relaxation / coefficients.ξⁱ +
+         coefficients.coating_relaxation / coefficients.ξˡ
+    return (; ωˡ, ωⁱ, ωᶜ = ωˡ + ωⁱ)
 end
