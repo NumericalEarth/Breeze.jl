@@ -1197,10 +1197,8 @@ end
 #####
 
 # Terrain grids specialize these gradients to retain the constant-height chain rule.
-@inline x_damping_gradient(i, j, k, grid, args...) =
-    topology_aware_δxᶠᵃᵃ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-@inline y_damping_gradient(i, j, k, grid, args...) =
-    topology_aware_δyᵃᶠᵃ(i, j, k, grid, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+@inline x_damping_gradient(i, j, k, grid, args...) = topology_aware_δxᶠᵃᵃ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+@inline y_damping_gradient(i, j, k, grid, args...) = topology_aware_δyᵃᶠᵃ(i, j, k, grid, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
 
 # No-op default
 @inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
