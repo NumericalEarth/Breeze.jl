@@ -2,7 +2,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.ParticleMicrophysics: droplet_water_mass
-using Breeze.Thermodynamics: saturation_vapor_pressure, vapor_gas_constant, dry_air_gas_constant, PlanarLiquidSurface
+using Breeze.Thermodynamics: saturation_vapor_pressure, vapor_gas_constant, dry_air_gas_constant, PlanarLiquidSurface, reference_value
 using Oceananigans
 using Statistics: mean
 using Test
@@ -36,7 +36,8 @@ function water_budget(model)
             total = vapor + liquid + book.removed_liquid_mass - book.injected_liquid_mass)
 end
 
-liquid_diagnostic(model) = sum(Array(interior(model.microphysical_fields.qˡ)) .* Array(interior(model.dynamics.reference_state.density))) *
+# The liquid mass diagnosed on the grid: Σ ρᵣ qˡ V over the cells (the Boussinesq reference density is uniform)
+liquid_diagnostic(model) = sum(Array(interior(model.microphysical_fields.qˡ))) * reference_value(model.dynamics.reference_state.density) *
                            minimum_xspacing(model.grid) * minimum_yspacing(model.grid) * minimum_zspacing(model.grid)
 
 @testset "ChamberSources: construction and empty cases [$FT]" for FT in test_float_types()
