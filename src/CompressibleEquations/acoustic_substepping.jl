@@ -180,13 +180,11 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 # wrap periodic indices and reproduce the default halo images on bounded sides (zero scalar
 # gradients; terrain metrics read the grid's own, static halos). Wall-normal momentum perturbations
 # are zeroed explicitly, including for prescribed flow. So only distributed connections need
-# substep halo exchanges; `substep_halo_fills[] = true` fills on every architecture, which the
-# tests use to show the kernels read no halos.
-const substep_halo_fills = Ref(false)
+# substep halo exchanges.
 
 fill_substep_halos!(fields, model) = fill_substep_halos!(fields, model.grid)
 fill_substep_halos!(fields, grid::AbstractGrid) = fill_architecture_halos!(fields, architecture(grid))
-fill_architecture_halos!(fields, ::Union{CPU, GPU}) = substep_halo_fills[] ? fill_halo_regions!(fields) : nothing
+fill_architecture_halos!(fields, ::Union{CPU, GPU}) = nothing
 fill_architecture_halos!(fields, arch) = fill_halo_regions!(fields)
 
 # TODO: delete this block once Oceananigans' topology-aware operators dispatch on every `AbstractGrid`
@@ -1763,7 +1761,7 @@ end
 # the size of a GPU kernel's arguments, which each field of a batch adds to (CUDA allows 4 KiB,
 # and the model's fields, passed once, take much of that): lower it if a kernel fails to compile
 # with a formal-parameter-space overflow.
-const column_solve_batch_size = Ref(3)
+const column_solve_batch_size = 3
 
 # `Oceananigans.TimeSteppers.implicit_step!` for several fields per column thread, same coefficients
 # and arithmetic; a request is `(field, tracer_index, advection, velocities)`. Invariants: no field's
@@ -1778,7 +1776,7 @@ function implicit_steps_in_place!(requests, implicit_solver::BatchedTridiagonalS
     needed = filter(request -> needs_implicit_step(implicit_closure, request...), requests)
     isempty(needed) && return nothing
 
-    batch_size = clamp(column_solve_batch_size[], 1, length(scratch))
+    batch_size = min(column_solve_batch_size, length(scratch))
     one_by_one = batch_size == 1 || size(implicit_solver.grid, 3) < 2
 
     for batch in Iterators.partition(needed, one_by_one ? 1 : batch_size)

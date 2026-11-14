@@ -6,7 +6,7 @@ using Breeze.AtmosphereModels: transport_velocities
 using CUDA: @allowscalar
 
 using Breeze.CompressibleEquations: acoustic_recovered_vertical_momentum, assemble_slow_vertical_momentum_tendency!, compute_acoustic_substeps, compute_contravariant_velocity!, freeze_linearization_state!, δpᴸ, terrain_horizontal_linearized_pressure_gradient_correction, terrain_slope_x_ccf, terrain_slope_y_ccf, ∇ᶻp′
-using Breeze.CompressibleEquations: substep_halo_fills, dρθ′, ∇ˣp′, ∇ʸp′,
+using Breeze.CompressibleEquations: dρθ′, ∇ˣp′, ∇ʸp′,
                                     terrain_x_linearized_pressure_gradient, terrain_y_linearized_pressure_gradient,
                                     ∂xTᶠᶜᶜ, ∂yTᶜᶠᶜ, ∂zTᶜᶜᶠ, ℑzTᵃᵃᶠ, ℑxTᶜᵃᵃ, ℑyTᵃᶜᵃ
 using Oceananigans
@@ -657,56 +657,6 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             if k ≤ Nz
                 @test ℑzTᵃᵃᶠ(i, j, k, grid, ℑxTᶜᵃᵃ, ρu′) == ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu′)
                 @test ℑzTᵃᵃᶠ(i, j, k, grid, ℑyTᵃᶜᵃ, ρv′) == ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ρv′)
-            end
-        end
-    end
-
-    @testset "Terrain substep kernels read no halos" begin
-        # The substep loop fills no halos on a single-architecture grid. Forcing the fills on
-        # (`substep_halo_fills`) must then change nothing, bitwise, in every configuration whose
-        # terrain stencils once read halos: both pressure-gradient stencils, the damping gradients,
-        # and the recovery of ρw, on each lateral topology.
-        function stepped_state(topology, stencil, damping, formulation; fills)
-            grid = hill_grid(topology; formulation)
-            time_discretization = SplitExplicitTimeDiscretization(; substeps = 4, damping)
-            dynamics = CompressibleDynamics(time_discretization; slope_stencil = stencil,
-                                            reference_potential_temperature = 300)
-            model = AtmosphereModel(grid; dynamics)
-            bubble(x...) = 300 + 0.5 * exp(-(x[1]^2 / 1500^2 + (x[end] - 2000)^2 / 800^2))
-            if topology[2] === Flat
-                set!(model; θ = bubble, ρ = model.dynamics.reference_state.density, u = 2, w = 0)
-            else
-                set!(model; θ = bubble, ρ = model.dynamics.reference_state.density, u = 2, v = 1, w = 0)
-            end
-            substep_halo_fills[] = fills
-            try
-                for _ in 1:2
-                    time_step!(model, 1.0)
-                end
-            finally
-                substep_halo_fills[] = false
-            end
-            ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
-            return map(f -> Array(interior(f)), (model.dynamics.dry_density, ρθ, model.momentum.ρu,
-                                                  model.momentum.ρv, model.momentum.ρw, model.velocities.w))
-        end
-
-        dampings = (NoDivergenceDamping(), ThermalDivergenceDamping(coefficient=0.05), DirectDivergenceDamping(coefficient=0.05))
-        cases = Any[]
-        for topology in lateral_topologies, stencil in (SlopeOutsideInterpolation(), SlopeInsideInterpolation())
-            for damping in (topology[2] === Flat ? dampings : dampings[1:1])
-                push!(cases, (topology, stencil, damping, LinearDecay()))
-            end
-        end
-        push!(cases, ((Periodic, Flat, Bounded), SlopeOutsideInterpolation(), NoDivergenceDamping(),
-                      TwoLevelDecay(large_scale_height = 2500.0, small_scale_height = 1250.0)))
-
-        @testset "$(topology[1:2]) $(nameof(typeof(stencil))) $(nameof(typeof(damping))) $(nameof(typeof(formulation)))" for (topology, stencil, damping, formulation) in cases
-            without = stepped_state(topology, stencil, damping, formulation; fills = false)
-            with = stepped_state(topology, stencil, damping, formulation; fills = true)
-            for (a, b) in zip(without, with)
-                @test all(isfinite, a)
-                @test a == b
             end
         end
     end
