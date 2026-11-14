@@ -12,8 +12,8 @@ using InteractiveUtils: subtypes
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Update the radiative fluxes of `rtm` from the current model state when they are due; the
-computation itself is `_update_radiation!(rtm, model)`.
+Compute the initial radiative fluxes of `rtm` from the current model state; the computation
+itself is `_update_radiation!(rtm, model)`. Called by `update_state!`.
 
 `update_state!` runs several times per time step: after each Runge-Kutta stage, and again after an
 operator-split update such as Kessler microphysics. Radiation is updated
@@ -21,33 +21,70 @@ operator-split update such as Kessler microphysics. Radiation is updated
 - at initialization: by every `update_state!` between steps at iteration 0 (`clock.stage == 1`),
   that is model construction, `set!` and the preparation of the first step, which all see the
   initial state;
-- during time stepping: once per iteration `n > 0` at which `rtm.schedule` actuates, by the
-  first-stage `update_state!` of the step that begins at `n` (the clock is then at stage 2 in
-  Breeze's Runge-Kutta steppers). The new fluxes enter from the second stage of that step. Later
-  stages, the end of the step and operator-split updates do not update radiation.
+- during time stepping: once at the end of every step after which `rtm.schedule` actuates, by
+  `update_radiation_at_end_of_step!`, which the time steppers call after the last
+  Runge-Kutta stage and after any operator-split microphysics update. The fluxes therefore
+  describe the end-of-step state that the next step starts from, and the tendencies of that
+  next step's first stage are rebuilt with them. `update_state!` never updates radiation
+  during time stepping.
 
-With `schedule = IterationInterval(80)` and `Δt = 7.5` s, the fluxes are computed from the initial
-state and then every 600 s, in the steps that begin at iterations 80, 160, …
+The schedule is evaluated on the end-of-step clock. With `schedule = IterationInterval(80)` and
+`Δt = 7.5` s, the fluxes are computed from the initial state and then every 600 s, from the
+states at iterations 80, 160, …, at the end of the steps that reach them.
 
-Under Reactant the iteration is traced: `BreezeReactantExt` applies the scheduled update with a
-traced conditional, which requires a stateless schedule such as `IterationInterval`, and computes
-the initial fluxes in `Breeze.TimeSteppers.prepare_first_time_step!`
-(also called by `first_time_step!`), which a traced window calls before its loop of `time_step!`.
+Under Reactant the iteration is traced: `BreezeReactantExt` applies the scheduled end-of-step
+update with a traced conditional, which requires a stateless schedule such as
+`IterationInterval`, and computes the initial fluxes in
+`Breeze.TimeSteppers.prepare_first_time_step!` (also called by `first_time_step!`), which a
+traced window calls before its loop of `time_step!`.
 """
 function update_radiation!(rtm, model)
     isnothing(rtm) && return nothing
-    due = radiation_update_due(rtm.schedule, model.clock, model)
+    due = radiation_initialization_due(model.clock)
     conditionally_update_radiation!(due, rtm, model)
     return nothing
 end
 
-function radiation_update_due(schedule, clock, model)
-    initialization = clock.iteration == 0 && clock.stage == 1
-    return initialization || (clock.iteration > 0 && clock.stage == 2 && schedule(model))
+radiation_initialization_due(clock) = clock.iteration == 0 && clock.stage == 1
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Update the radiative fluxes of `model.radiation` at the end of a time step, when its schedule
+actuates on the end-of-step clock, and rebuild the tendencies with the new fluxes so that the
+first stage of the next step uses them. Breeze's time steppers call this after the last
+Runge-Kutta stage and after the operator-split microphysics update (`microphysics_model_update!`),
+so the fluxes are computed from the state the next step starts from. See `update_radiation!`.
+"""
+function update_radiation_at_end_of_step!(model, callbacks=[])
+    rtm = model.radiation
+    isnothing(rtm) && return nothing
+    due = rtm.schedule(model)
+    conditionally_update_radiation_and_tendencies!(due, rtm, model, callbacks)
+    return nothing
 end
 
 function conditionally_update_radiation!(due::Bool, rtm, model)
     due && _update_radiation!(rtm, model)
+    return nothing
+end
+
+function conditionally_update_radiation_and_tendencies!(due::Bool, rtm, model, callbacks)
+    due && update_radiation_and_tendencies!(rtm, model, callbacks)
+    return nothing
+end
+
+# The last `update_state!` of the step built the next step's first-stage tendencies with the
+# previous fluxes; rebuild them with the new ones. The rest of that `update_state!` (halos,
+# auxiliary variables, boundary conditions, advection state) does not depend on the fluxes and
+# is still current, so only the forcings and tendencies are recomputed. As in `update_state!`,
+# the tendencies see the tracers as specific quantities.
+function update_radiation_and_tendencies!(rtm, model, callbacks)
+    _update_radiation!(rtm, model)
+    compute_forcings!(model)
+    tracer_density_to_specific!(model)
+    compute_tendencies!(model, callbacks)
+    tracer_specific_to_density!(model)
     return nothing
 end
 

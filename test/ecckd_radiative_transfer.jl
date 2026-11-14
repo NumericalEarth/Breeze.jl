@@ -7,7 +7,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze.AtmosphereModels: standard_ozone_profile, top_face_pressure, bottom_face_pressure,
                                dynamics_pressure, total_density, specific_humidity, materialize_background_atmosphere,
-                               _update_radiation!
+                               _update_radiation!, update_radiation_at_end_of_step!
 using Adapt: adapt
 using Dates
 using GPUArraysCore: @allowscalar
@@ -515,14 +515,17 @@ previous_float_type = Oceananigans.defaults.FloatType
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100
         interior(ℐ_lw_up) .= 0
 
-        # Scheduled updates happen in the first-stage update_state! of a step (clock at stage 2)
-        model.clock.stage = 2
+        # Scheduled updates happen once at the end of a step, on the end-of-step clock (stage 1);
+        # update_state! never updates radiation during time stepping
         model.clock.iteration = 1
-        Oceananigans.TimeSteppers.update_state!(model; compute_tendencies = false)
+        update_radiation_at_end_of_step!(model)
         @allowscalar @test ℐ_lw_up[1, 1, 1] == 0
 
         model.clock.iteration = 3
         Oceananigans.TimeSteppers.update_state!(model; compute_tendencies = false)
+        @allowscalar @test ℐ_lw_up[1, 1, 1] == 0
+
+        update_radiation_at_end_of_step!(model)
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100
     end
 
