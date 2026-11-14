@@ -159,6 +159,7 @@ struct P3SinkFractions{FT}
     ice :: FT
     ice_number :: FT
     coating :: FT
+    aerosol :: FT
 end
 
 @inline function p3_sink_fractions(i, j, k, G, stage, p3::P3, ρ, rates::P3ProcessRates)
@@ -198,8 +199,14 @@ end
         patankar_sink_fraction(i, j, k, G.ρnʳ, stage, Val(:ρnʳ), ρ * rain_number_loss),
         patankar_sink_fraction(i, j, k, G.ρqⁱ, stage, Val(:ρqⁱ), ρ * ice_loss),
         patankar_sink_fraction(i, j, k, G.ρnⁱ, stage, Val(:ρnⁱ), ρ * ice_number_loss),
-        patankar_sink_fraction(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ), ρ * coating_loss))
+        patankar_sink_fraction(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ), ρ * coating_loss),
+        aerosol_sink_fraction(i, j, k, G, stage, p3.aerosol, ρ * rates.ccn_activation_number))
 end
+
+# Activation draws on the aerosol reservoir only where that reservoir is prognostic.
+@inline aerosol_sink_fraction(i, j, k, G, stage, aerosol, L) = one(L)
+@inline aerosol_sink_fraction(i, j, k, G, stage, ::AerosolActivation{<:Any, true}, L) =
+    patankar_sink_fraction(i, j, k, G.ρnᵃ, stage, Val(:ρnᵃ), L)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -214,6 +221,7 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
     rn = min(r, φ.rain_number)
     in = min(i, φ.ice_number)
     cw = min(c, w)
+    va = min(v, φ.aerosol)
 
     return P3ProcessRates(
         rates.condensation * ifelse(rates.condensation > 0, v, c),
@@ -264,8 +272,8 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
         rates.wet_growth_rain * r,
         rates.wet_growth_shedding * cw,
         rates.wet_growth_shedding_number * cw,
-        rates.ccn_activation_mass * v,
-        rates.ccn_activation_number * v,
+        rates.ccn_activation_mass * va,
+        rates.ccn_activation_number * va,
         rates.rain_condensation * v,
         rates.coating_condensation * v,
         rates.coating_evaporation * w,
