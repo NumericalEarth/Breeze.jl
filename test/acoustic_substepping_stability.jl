@@ -362,4 +362,58 @@ for arch in arches
         Oceananigans.defaults.FloatType = old_FT
     end
 
+    #####
+    ##### Saturated air at large Δt: the 2Δx mode
+    #####
+    ##### A moist-stable x–z column with a seeded 2Δx θ perturbation in a 15 m/s wind, undamped, at
+    ##### Δt = 10 s, under saturation adjustment (after NumericalEarth/Breeze.jl#1086): saturated
+    ##### throughout, and with a cloud layer between unsaturated air. The loop must linearize the
+    ##### pressure that the adjustment re-diagnoses. With the partition held, it overestimates the
+    ##### response of saturated air to the thermodynamic and moisture densities nearly threefold and
+    ##### the 2Δx mode of w grows to several m/s within the hour, until the cloud evaporates. A dry
+    ##### density term of the adjusted pressure carried in the loop's flux, which jumps by more than θ
+    ##### across a cloud edge, is unstable at the edges of the layer. Float64 only (the amplitudes are
+    ##### calibrated in Float64), so it is skipped on Metal.
+    #####
+
+    arch isa GPU{MetalBackend} || @testset "Saturated air keeps a seeded 2Δx mode at its amplitude [$(arch), $(label)]" for (label, qᵗ) in
+            (("saturated throughout", 0.02), ("cloud layer", (x, z) -> ifelse(1500 < z < 4000, 0.02, 0.0)))
+
+        old_FT = Oceananigans.defaults.FloatType
+        Oceananigans.defaults.FloatType = Float64
+
+        Nx, Nz, Δx = 32, 40, 3e3
+        θ̄(z) = 280 + 0.01z
+        θᵢ(x, z) = θ̄(z) * (1 + 1e-5 * cos(π * round(Int, x / Δx - 0.5)))
+
+        grid = RectilinearGrid(arch; size = (Nx, Nz), halo = (5, 5), x = (0, Nx * Δx), z = (0, 10e3),
+                               topology = (Periodic, Flat, Bounded))
+        td = SplitExplicitTimeDiscretization(; damping = NoDivergenceDamping())
+        dynamics = CompressibleDynamics(td; base_pressure = 1e5, reference_potential_temperature = θ̄)
+        microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+        model = AtmosphereModel(grid; dynamics, microphysics, advection = WENO(order = 5))
+        set!(model; θ = θᵢ, u = 15, ρ = Breeze.HydrostaticallyBalancedDensity())
+        set!(model; qᵗ)
+
+        for _ in 1:360
+            time_step!(model, 10)
+        end
+
+        # rms over k = 2:16, which spans the base of the cloud layer, of the (−1)ⁱ projection of w
+        w = Array(interior(model.velocities.w))
+        checkerboard_amplitude = sqrt(sum(k -> (sum((-1)^i * w[i, 1, k] for i in 1:Nx) / Nx)^2, 2:16) / 15)
+        @test checkerboard_amplitude < 1e-4
+
+        # The cloud is still there: everywhere, or in the layer alone.
+        qˡ = Array(interior(model.microphysical_fields.qˡ))
+        if qᵗ isa Number
+            @test minimum(qˡ) > 0
+        else
+            @test minimum(qˡ[:, 1, 8:15]) > 0
+            @test maximum(qˡ[:, 1, 20:Nz]) == 0
+        end
+
+        Oceananigans.defaults.FloatType = old_FT
+    end
+
 end
