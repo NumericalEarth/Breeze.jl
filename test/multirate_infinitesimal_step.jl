@@ -140,6 +140,81 @@ end
     @test minimum(qˡ[:, 1, 8:15]) > 0
 end
 
+using Breeze.CompressibleEquations: freeze_linearization_state!, compute_step_start_moisture_content!,
+                                    StageEntryForceRemainder, linearized_pressure_remainder
+using Breeze.TimeSteppers: store_step_start_state!
+using Breeze.AtmosphereModels: moisture_prognostic_name
+using CloudMicrophysics: CloudMicrophysics
+
+const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt).OneMomentCloudMicrophysics
+
+# The force remainder that MIS recombines as slow is the pressure gradient its loop does not account
+# for (`StageEntryForceRemainder`). For a stage-entry state that differs from the step-start state by
+# 10⁻⁶ in any density, the pressure the loop accounts for must be the difference of the re-diagnosed
+# pressures, so that the remainder vanishes to that order: under saturation adjustment, where the
+# loop's pressure is that of the adjusted partition and the difference enters it scaled, with and
+# without precipitation, and for a scheme that carries its cloud. At the held partition the
+# remainder was 1.5 times the pressure difference in warm cloud.
+@testset "MIS force remainder vanishes to first order [$label]" for (label, cloud_formation, condensates) in
+        (("warm-phase saturation adjustment", :warm, (;)),
+         ("one-moment, mixed-phase saturation adjustment", :mixed, (; ρqʳ = 2e-3, ρqˢⁿ = 1e-3)),
+         ("one-moment, non-equilibrium cloud", :non_equilibrium, (; ρqᶜˡ = 3e-3, ρqʳ = 2e-3)))
+
+    FT = Float64
+    temperature_solver = Breeze.NewtonSolver(FT; reltol=0, abstol=1e-11, maxiter=50)
+    solver = Breeze.SecantSolver(FT; reltol=0, abstol=1e-11, maxiter=200)
+
+    microphysics = if cloud_formation == :warm
+        SaturationAdjustment(FT; equilibrium = WarmPhaseEquilibrium(), solver)
+    elseif cloud_formation == :mixed
+        OneMomentCloudMicrophysics(FT; cloud_formation = SaturationAdjustment(FT; equilibrium = MixedPhaseEquilibrium(FT), solver))
+    else
+        OneMomentCloudMicrophysics(FT)
+    end
+
+    grid = RectilinearGrid(default_arch, FT; size=6, z=(0, 600), topology=(Flat, Flat, Bounded))
+    formulation = LiquidIcePotentialTemperatureFormulation(; temperature_solver)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); standard_pressure=1e5)
+
+    # Warm cloud below 200 m, unsaturated air to 400 m, and cloud near 260 K above.
+    ρᵈ(z) = z < 400 ? 1.1 : 0.8
+    θ(z) = z < 200 ? 285.0 : z < 400 ? 300.0 : 295.0
+    ρqᵐ(z) = z < 200 ? 0.02 : z < 400 ? 0.005 : 0.004
+    moisture_name = moisture_prognostic_name(microphysics)
+    names = (:ρθ, moisture_name, :ρᵈ, keys(condensates)...)
+
+    for perturbed in (map(tuple, names)..., names)
+        model = AtmosphereModel(grid; formulation, dynamics, microphysics, timestepper = :MultirateInfinitesimalStep)
+        set!(model; ρᵈ, ρθ = z -> ρᵈ(z) * θ(z), NamedTuple{(moisture_name,)}((ρqᵐ,))..., condensates...)
+        update_state!(model)
+
+        timestepper = model.timestepper
+        substepper = timestepper.substepper
+        U = prognostic_fields(model)
+
+        for name in keys(U)
+            parent(timestepper.Uⁿ[name]) .= parent(U[name])
+        end
+
+        store_step_start_state!(timestepper.step_start, model)
+        freeze_linearization_state!(substepper, model)
+        pⁿ = Array(interior(model.dynamics.pressure))
+
+        for name in perturbed
+            parent(U[name]) .*= 1 + 1e-6
+        end
+
+        update_state!(model)
+        compute_step_start_moisture_content!(timestepper.step_start, substepper, model, timestepper.Uⁿ)
+        remainder = StageEntryForceRemainder(Val(:z), substepper, model, timestepper.step_start)
+        δp = Array(interior(model.dynamics.pressure)) .- pⁿ
+
+        for k in 1:6
+            @test abs(@allowscalar linearized_pressure_remainder(1, 1, k, grid, remainder)) < 1e-4 * abs(δp[1, 1, k])
+        end
+    end
+end
+
 @testset "MIS with adaptive-implicit vertical advection" begin
     using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, adaptive_advection_timestep
     grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
