@@ -176,13 +176,10 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 ##### Halo fills of the substep loop
 #####
 
-# The substep kernels take every horizontal difference of the fields the loop writes with
-# Oceananigans' topology-aware operators (`δxTᶠᵃᵃ`, `δxTᶜᵃᵃ`, `δyTᵃᶠᵃ`, `δyTᵃᶜᵃ`), as the
-# split-explicit barotropic substepping does: they read the periodic image, or apply the
-# no-flux / impenetrability condition the perturbations carry on a `Bounded` side, from the
-# interior. So between substeps a single-architecture grid needs no halo fill; a distributed grid
-# exchanges the halos of its connected sides, where the operators fall back to reading them.
-# The terrain dynamics fills (see `terrain_compressible_physics.jl`).
+# Topology-aware differences wrap periodic indices and impose zero scalar gradients and normal
+# momentum perturbations on bounded sides. Those faces are zeroed explicitly, including for
+# prescribed flow. Only distributed connections need substep halo exchanges; terrain grids
+# retain full fills (see `terrain_compressible_physics.jl`).
 fill_substep_halos!(fields, model) = fill_substep_halos!(fields, model.grid)
 fill_substep_halos!(fields, grid::AbstractGrid) = fill_architecture_halos!(fields, architecture(grid))
 fill_architecture_halos!(fields, ::Union{CPU, GPU}) = nothing
@@ -203,11 +200,10 @@ fill_architecture_halos!(fields, arch) = fill_halo_regions!(fields)
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Construct an `AcousticSubstepper`. The perturbation face fields ``(ρu)′, (ρv)′, (ρw)′`` and the
-scalar-transport velocities use topology-derived BCs (periodic wrap / impenetrability), **not** the
-prognostic momentum's BCs: inheriting them would imprint the full-state wall target onto the perturbation
-halo for a nonzero `NormalFlowBoundaryCondition` (issue \\#716) and apply momentum BCs to velocity fields.
-The wall target re-enters via the prognostic momentum's own BC after each substep's momentum update.
+Construct an `AcousticSubstepper` with auxiliary BCs for perturbations and transport velocities.
+Bounded normal faces default to `nothing`; the loop explicitly zeros lateral momentum perturbations.
+Prescribed flow stays in the stage-entry state, with prognostic BCs reapplied after stage recovery.
+Inheriting momentum BCs would impose full-state targets on perturbations (issue \\#716) and velocities.
 The `prognostic_momentum` kwarg is retained for backwards compatibility but no longer consulted.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
@@ -1580,9 +1576,7 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch)
     return nothing
 end
 
-# Per-substep impenetrability enforcement on the wall-normal momentum
-# perturbations — the closed-wall companion of `apply_open_boundary_relaxation!`
-# above (which handles open lateral boundaries).
+# Zero normal perturbations at walls and prescribed-flow faces.
 
 @kernel function _zero_x_wall_face!(ρu′, iᶠ)
     j, k = @index(Global, NTuple)
@@ -1599,9 +1593,8 @@ function enforce_wall_impenetrability!(substepper, model, grid, arch)
     Nx, Ny, _ = size(grid)
     ρu′ = substepper.momentum_perturbation.u
     ρv′ = substepper.momentum_perturbation.v
-    # The perturbations carry impenetrability on every `Bounded` side, open ones included (an open
-    # boundary acts through `apply_open_boundary_relaxation!` on ρ′, (ρθ)′): their halo fill zeroed
-    # these faces, and the topology-aware divergence (`δxTᶜᵃᵃ`) assumes it.
+    # Auxiliary `nothing` BCs do not zero faces. Enforce zero perturbations explicitly
+    # to match the topology-aware divergence and hold prescribed flow in the stage-entry state.
     if TX === Bounded
         launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
         launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
