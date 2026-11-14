@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
-using Breeze.ParticleMicrophysics: droplet_water_mass, droplet_cell
+using Breeze.ParticleMicrophysics: ParticleMicrophysics, droplet_water_mass, droplet_cell
 using Breeze.Thermodynamics: saturation_vapor_pressure, vapor_gas_constant, dry_air_gas_constant, PlanarLiquidSurface, reference_value
 using Oceananigans
 using Statistics: mean
@@ -295,15 +295,20 @@ end
     @test water_budget(model).total ≈ budget₀.total rtol = budget_tolerance(model, budget₀, 20, exchanged)
 end
 
+# No vapor diffusion: the growth resistance is infinite, so the growth rate is exactly zero and droplets keep their radii
+struct NoVaporDiffusion end
+ParticleMicrophysics.vapor_diffusivity(::NoVaporDiffusion, T, p) = zero(T)
+
 @testset "ChamberSources: exact budget when nothing happens [$FT]" for FT in test_float_types()
-    # Dry, insoluble aerosol (κ = 0, r = rᵈ) in a subsaturated box neither grows nor evaporates, injected particles are dry
-    # (wet radius factor 1) and removal through a small chamber drops them: the vapor must be bit-identical, the liquid
-    # identically zero, and the counts exact
+    # Without vapor diffusion droplets neither grow nor evaporate (a dry insoluble particle at r = rᵈ would not do: the κ-Köhler
+    # activity is 0/0 there and the step flickers by an ulp), injected particles are dry (wet radius factor 1) and removal through
+    # a small chamber drops them: the vapor must be bit-identical, the liquid of the dry particles identically zero, and the counts exact
     L = FT(0.02)
     Nd = 300
-    droplets = merge(scattered(L, Nd), (r = fill(FT(1e-7), Nd), rᵈ = fill(FT(1e-7), Nd), κ = zeros(FT, Nd)))
-    physics = DropletPhysicsParameters(FT; terminal_velocity=StokesTerminalVelocity())
-    injection = AerosolInjection(FT; rate=1e8, dry_radius=1e-7, hygroscopicity=0, interval=0.05, wet_radius_factor=1, seed=21)
+    droplets = merge(scattered(L, Nd), (r = fill(FT(1e-7), Nd), rᵈ = fill(FT(1e-7), Nd), κ = fill(FT(0.6), Nd)))
+    physics = DropletPhysicsParameters(FT; terminal_velocity=StokesTerminalVelocity(), vapor_diffusivity=NoVaporDiffusion(),
+                                       ventilation=NoVentilation())
+    injection = AerosolInjection(FT; rate=1e8, dry_radius=1e-7, hygroscopicity=0.6, interval=0.05, wet_radius_factor=1, seed=21)
     removal = VirtualChamberRemoval(FT; size=(0.05, 0.05, 0.05), interval=0.05, rule=ResampledVirtualPosition(), seed=22)
     # Quiescent: with a flow, even a uniform vapor field changes by the round-off of the discrete divergence
     model = chamber_box(FT; L, S=0.9, droplets, physics, sources=ChamberSources(; injection, removal))
@@ -323,17 +328,19 @@ end
 end
 
 @testset "ChamberSources: budget with condensation and evaporation [$FT]" for FT in test_float_types()
-    # Radii change (supersaturated: growth; subsaturated: evaporation) while droplets settle out of a shallow chamber;
-    # the budget closes within the per-operation rounding budget and the exchanged water is far above it
+    # Radii change (supersaturated: growth; subsaturated: evaporation) while droplets settle out of a chamber; the budget
+    # closes within the per-operation rounding budget, and the exchanged water is at least ten times that budget so that a
+    # lost exchange would be detected (in Float32 the worst-case budget is 13 × 200 × eps ≈ 3e-4 of the water, so the case
+    # needs a few percent of the water to be exchanged: 2000 droplets of 5 μm at 2% supersaturation)
     L = FT(0.02)
-    Nd = 500
+    Nd = 2000
     physics = DropletPhysicsParameters(FT; terminal_velocity=StokesTerminalVelocity())
-    for (S, r₀) in ((FT(1.01), FT(5e-6)), (FT(0.90), FT(8e-6)))
+    for (S, r₀) in ((FT(1.02), FT(5e-6)), (FT(0.90), FT(8e-6)))
         droplets = merge(scattered(L, Nd), (r = fill(r₀, Nd), rᵈ = fill(FT(5e-8), Nd), κ = fill(FT(0.6), Nd)))
-        removal = VirtualChamberRemoval(FT; size=(2, 2, 0.002), seed=23) # integrated rule: a 2 mm fall to the floor
+        removal = VirtualChamberRemoval(FT; size=(2, 2, 0.02), seed=23) # integrated rule: a 2 cm fall to the floor
         model = chamber_box(FT; L, S, droplets, physics, sources=ChamberSources(; removal))
         budget₀ = water_budget(model)
-        nsteps = 100
+        nsteps = 200
         exchanged = 0.0
         vapor_prev = budget₀.vapor
         for _ in 1:nsteps
@@ -345,7 +352,7 @@ end
         end
         b = water_budget(model)
         @test b.vapor != budget₀.vapor # condensation or evaporation happened
-        @test abs(b.vapor - budget₀.vapor) > 1e3 * eps(FT) * budget₀.total # and by much more than the rounding budget
+        @test abs(b.vapor - budget₀.vapor) > 10 * budget_tolerance(model, budget₀, nsteps, exchanged) * budget₀.total
         @test (S > 1) == (b.vapor < budget₀.vapor)
         @test model.microphysics.sources.bookkeeping.removed > 0
         @test liquid_diagnostic(model) ≈ b.liquid rtol = deposit_tolerance(model)
