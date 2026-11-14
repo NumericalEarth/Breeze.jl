@@ -668,8 +668,13 @@ end
 
 # One thread per column. A backend that runs loops over k slowly inside a kernel (Reactant, where
 # they become one round of launches per level on GPU) may extend this for a whole-array form.
-compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²) =
-    launch!(grid.architecture, grid, :xy, _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
+compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²; parameters = :xyz) =
+    launch!(grid.architecture, grid, column_kernel_parameters(parameters),
+            _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
+
+# The horizontal part of the volume kernel parameters, for kernels that run one thread per column.
+column_kernel_parameters(::Symbol) = :xy
+column_kernel_parameters(::KernelParameters{S, O}) where {S, O} = KernelParameters(S[1:2], O[1:2])
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -827,7 +832,8 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
             closure_fields.N², grid, closure, tracers, buoyancy)
 
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²;
+                           parameters)
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers)
