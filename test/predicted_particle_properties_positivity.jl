@@ -159,3 +159,65 @@ end
     @test stage_remainder(1, 1, 1, G, from_initial, Val(:c)) ≈ 3
     @test patankar_sink_fraction(1, 1, 1, G, from_initial, Val(:c), FT(0.3)) ≈ FT(1 / 2)
 end
+
+#####
+##### A kinematic column without negative-density repair
+#####
+##### P3 repairs nothing between stages, so its prognostics stay non-negative only if transport
+##### keeps them so. This is the setup of `examples/kinematic_driver.jl`, shortened. With plain
+##### WENO the condensate densities go negative within minutes, grow, and drive the temperature
+##### negative; with positivity-bounded WENO on every non-negative scalar none goes negative.
+#####
+
+@testset "P3 kinematic column stays non-negative with bounded advection" begin
+    using Breeze: ReferenceState, PrescribedDynamics, PrognosticVaporExcess, SaturationSpecificHumidity,
+                  surface_density
+    using Breeze.AtmosphereModels: prognostic_field_names
+    using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation, AerosolMode
+    using Oceananigans.BoundaryConditions: NormalFlowBoundaryCondition
+
+    grid = RectilinearGrid(default_arch; size=40, z=(0, 12e3), topology=(Flat, Flat, Bounded))
+    constants = ThermodynamicConstants()
+    θ₀, p₀, ℋ₀, W₀, nᵃ₀ = 300, 1e5, 0.8, 2, 3e8
+    θᵢ(z) = θ₀ + 43 * (z / 12e3)^(5/4)
+    reference_state = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θᵢ)
+    dynamics = PrescribedDynamics(reference_state; divergence_correction=true)
+    aerosol = AerosolActivation(AerosolMode(number_mixing_ratio=nᵃ₀); prognostic=true)
+    microphysics = PredictedParticlePropertiesMicrophysics(; aerosol, vapor_excess=PrognosticVaporExcess())
+
+    ρ₀ = surface_density(reference_state)
+    qᵛ⁺ˡ₀ = saturation_specific_humidity(θ₀, ρ₀, constants, PlanarLiquidSurface())
+    bcs = NamedTuple(name => FieldBoundaryConditions(bottom=ValueBoundaryCondition(0))
+                     for name in prognostic_field_names(microphysics))
+    bcs = merge(bcs, (; ρθ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * θ₀)),
+                        ρqᵗ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * ℋ₀ * qᵛ⁺ˡ₀)),
+                        ρδqᵛ⁺ˡ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * (ℋ₀ - 1) * qᵛ⁺ˡ₀)),
+                        ρnᵃ = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * nᵃ₀)),
+                        w = FieldBoundaryConditions(bottom=NormalFlowBoundaryCondition(W₀),
+                                                    top=NormalFlowBoundaryCondition(W₀))))
+
+    weno = WENO(order=5)
+    nonnegative_weno = WENO(order=5, bounds=(0.0, 1e30))
+    signed_scalars = (:ρθ, :ρδqᵛ⁺ˡ)
+    scalar_advection = NamedTuple(name => ifelse(name in signed_scalars, weno, nonnegative_weno)
+                                  for name in (:ρθ, :ρqᵛ, prognostic_field_names(microphysics)...))
+
+    model = AtmosphereModel(grid; dynamics, microphysics, boundary_conditions=bcs,
+                            momentum_advection=weno, scalar_advection, thermodynamic_constants=constants)
+    set!(model; θ=θᵢ, ℋ=ℋ₀, w=W₀)
+    μ = model.microphysical_fields
+    set!(model; ρδqᵛ⁺ˡ = reference_state.density * (μ.qᵛ - SaturationSpecificHumidity(model)))
+
+    names = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ, :ρnᵃ)
+    minima = Dict(name => Inf for name in names)
+    for _ in 1:600
+        time_step!(model, 2)
+        for name in names
+            minima[name] = min(minima[name], minimum(getproperty(μ, name)))
+        end
+    end
+
+    @test maximum(μ.ρqᶜˡ) > 0
+    @test all(minima[name] ≥ 0 for name in names)
+    @test minimum(model.moisture_density) > 0
+end
