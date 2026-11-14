@@ -37,6 +37,9 @@ function water_budget(model)
 end
 
 # The liquid mass diagnosed on the grid: Σ ρᵣ qˡ V over the cells (the Boussinesq reference density is uniform)
+# Round-off bound for budgets summed over the droplets and the grid cells (10 eps per summand)
+budget_rtol(model) = 10 * eps(eltype(model.grid)) * (length(model.microphysics.droplets) + prod(size(model.grid)) + 1)
+
 liquid_diagnostic(model) = sum(Array(interior(model.microphysical_fields.qˡ))) * reference_value(model.dynamics.reference_state.density) *
                            minimum_xspacing(model.grid) * minimum_yspacing(model.grid) * minimum_zspacing(model.grid)
 
@@ -98,7 +101,7 @@ end
         @test all(isfinite, Array(droplets.r))
         @test book.injected_liquid_mass ≈ book.injected * droplet_water_mass(cbrt(FT(2)) * FT(1e-7), FT(1e-7), constants) rtol=1e-6
         # The haze is in the diagnosed liquid of the step in which it was injected
-        @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol=1e-6
+        @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol=budget_rtol(model)
         @test all(Array(interior(model.moisture_density)) .> 0)
     end
     @test counts[1] == counts[2]
@@ -143,8 +146,8 @@ end
         @test all(z -> 0 ≤ z ≤ L, Array(d.z)) # computational positions remain periodic
         # Vapor + liquid + removed − injected is conserved to round-off: condensation moves water between
         # vapor and droplets exactly, and removal moves the droplets' water into the removed tally
-        @test water_budget(model).total ≈ budget₀.total rtol = 100 * eps(FT)
-        @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = 1e-5
+        @test water_budget(model).total ≈ budget₀.total rtol = budget_rtol(model)
+        @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = budget_rtol(model)
     end
     book = model.microphysics.sources.bookkeeping
     @test issorted(counts; rev=true)
@@ -196,7 +199,7 @@ end
     removed_fraction = model.microphysics.sources.bookkeeping.removed / Nd
     expected = 1 - (1 - 𝕎 * 0.05 / 1)^3 # three events with 𝕎 known (the first sees 𝕎 = 0 of the initial state)
     @test 0.5 * expected < removed_fraction < 1.5 * expected
-    @test water_budget(model).total ≈ budget₀.total rtol = 100 * eps(FT)
+    @test water_budget(model).total ≈ budget₀.total rtol = budget_rtol(model)
 end
 
 @testset "ChamberSources: steady state of injection and removal [$FT]" for FT in test_float_types()
@@ -221,6 +224,6 @@ end
     @test all(isfinite, Array(model.microphysics.droplets.properties.r))
     @test all(Array(model.microphysics.droplets.properties.r) .> 0)
     @test all(isfinite, Array(interior(model.formulation.potential_temperature_density)))
-    @test water_budget(model).total ≈ budget₀.total rtol = 100 * eps(FT)
-    @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = 1e-5
+    @test water_budget(model).total ≈ budget₀.total rtol = budget_rtol(model)
+    @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = budget_rtol(model)
 end
