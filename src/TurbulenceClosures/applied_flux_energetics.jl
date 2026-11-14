@@ -216,7 +216,7 @@ end
         cl.P[i, j, k] = P + Pˢ
         cl.Bˢ[i, j, k] = Bˢ
         cl.Pˢ[i, j, k] = Pˢ
-        cl.ωᴮ[i, j, k] = -min(0, B) / max(e[i, j, k], buoyancy_sink_floor_value(closure_ij))
+        cl.ωᴮ[i, j, k] = -min(0, B) / max(e[i, j, k], buoyancy_sink_floor_value(eltype(grid)))
     end
 end
 
@@ -279,10 +279,12 @@ end
 # `minimum_tke`, so below it the sink removes less than the mean state gains. With the cloud
 # buoyancy flux the floor is a tiny positive number instead, kept only so that ωᴮ is finite at
 # e = 0 (its benefit: the implicit sink cannot divide by zero, and e stays non-negative in the
-# implicit solve); the conversion is exact wherever e exceeds it.
-@inline buoyancy_sink_floor(fields, closure) = closure.minimum_tke
-@inline buoyancy_sink_floor(::SubgridCloudFields{<:AppliedFluxEnergetics}, closure) = buoyancy_sink_floor_value(closure)
-@inline buoyancy_sink_floor_value(closure) = sqrt(floatmin(typeof(closure.minimum_tke)))
+# implicit solve); the conversion is exact wherever e exceeds it. The floor is taken in the float
+# type `FT` of the grid, where ωᴮ is stored: a floor in the type of closure parameters wider than the
+# grid's (Float64 parameters on a Float32 grid) would underflow there and make ωᴮ infinite.
+@inline buoyancy_sink_floor(fields, closure, FT) = closure.minimum_tke
+@inline buoyancy_sink_floor(::SubgridCloudFields{<:AppliedFluxEnergetics}, closure, FT) = buoyancy_sink_floor_value(FT)
+@inline buoyancy_sink_floor_value(FT) = sqrt(floatmin(FT))
 
 #####
 ##### Dissipative heating and the conversions of the solved state

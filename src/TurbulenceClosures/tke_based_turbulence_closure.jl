@@ -991,7 +991,7 @@ stays positive for any time step.
     # The buoyancy sink rate: -B⁻ / e above the floor and -B⁻ / eᵐⁱⁿ below it, so that the
     # implicit sink ωᴮ e is continuous at e = eᵐⁱⁿ and vanishes linearly with e
     B⁻ = min(0, B)
-    ωᴮ = -B⁻ / max(eᵢ, buoyancy_sink_floor(closure_fields.subgrid_cloud, closure))
+    ωᴮ = -B⁻ / max(eᵢ, buoyancy_sink_floor(closure_fields.subgrid_cloud, closure, eltype(grid)))
 
     return ω + ωᴮ
 end

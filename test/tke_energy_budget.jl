@@ -42,11 +42,12 @@ closure_paths = (distribution = (static_stability = SaturationWeightedStaticStab
 budget_column(f::ZeroField, Nz) = zeros(Nz)
 budget_column(f, Nz) = budget_column(f)
 
-function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2400, path = :distribution)
-    grid = RectilinearGrid(CPU(); size=Nz, z=(0, H), topology=(Flat, Flat, Bounded))
-    constants = ThermodynamicConstants()
+function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2400, path = :distribution, FT = Float64,
+                          e₀ = z -> 0.6 * exp(-z / 500))
+    grid = RectilinearGrid(CPU(), FT; size=Nz, z=(0, H), topology=(Flat, Flat, Bounded))
+    constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)
-    microphysics = PredictedParticlePropertiesMicrophysics(;
+    microphysics = PredictedParticlePropertiesMicrophysics(FT; thermodynamic_constants = constants,
                                                            negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
     closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4, closure_paths[path]...)
@@ -55,13 +56,13 @@ function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2
          ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 5.2e-5)),
          ρu = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 0.08)),
          ρv = FieldBoundaryConditions(bottom = FluxBoundaryCondition(-1.17 * 0.02))) : NamedTuple()
-    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics, closure, boundary_conditions)
+    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants, microphysics, closure, boundary_conditions)
 
     # BOMEX-like: a mixed layer, a conditionally unstable cloud layer moistened to saturation, an inversion
     θ₀(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4 + (z - 1480) * 5.8 / 520
     qᵗ₀(z) = 1e-3 * (z < 520 ? 17.0 - z * 0.7 / 520 : z < 1480 ? 16.3 - (z - 520) * 5.6 / 960 : max(4.2, 10.7 - (z - 1480) * 6.5 / 520))
     q₀(z) = qᵗ₀(z) + (500 < z < 1100 ? 2.5e-3 : 0.0)
-        set!(model; θ=θ₀, qᵗ=q₀, u = z -> z < 700 ? -8.75 : -8.75 + (z - 700) * 1.8e-3, ρe = z -> 0.6 * exp(-z / 500))
+        set!(model; θ=θ₀, qᵗ=q₀, u = z -> z < 700 ? -8.75 : -8.75 + (z - 700) * 1.8e-3, ρe = e₀)
     if rain
         set!(model.microphysical_fields.ρqʳ, z -> 300 < z < 1200 ? 2.2e-4 : 0.0)
         set!(model.microphysical_fields.ρnʳ, z -> 300 < z < 1200 ? 2.2e4 : 0.0)
@@ -210,5 +211,21 @@ end
         @test -b.Δhᵈ ≈ b.buoyancy rtol=(rain ? 1e-5 : 1e-7) atol=1e-11 * scale
         # the TKE receives what the solves converted, less what it dissipates (which heats the air)
         @test b.Δρe + b.given_explicitly ≈ b.converted - b.dissipated + b.shortfall rtol=1e-9 atol=1e-11 * scale
+    end
+end
+
+# A Float32 grid with the closure's parameters in Float64 (the default float type): where e = 0
+# under a negative buoyancy conversion the buoyancy sink rate -B⁻ / max(e, floor) must stay finite
+# in Float32, so its floor has to be representable there. Here e = 0 above 1500 m, in the inversion.
+@testset "Float32 BOMEX-like column with the distribution stays finite ($path)" for path in keys(closure_paths)
+    model = moist_tke_column(; surface_fluxes = true, path, FT = Float32, e₀ = z -> z < 1500 ? 0.6 * exp(-z / 500) : 0.0)
+    @test eltype(model.grid) == Float32
+    Oceananigans.TimeSteppers.update_state!(model)
+    @test all(isfinite, interior(model.closure_fields.Lᵉ))
+    for n in 1:10
+        time_step!(model, 10)
+    end
+    for field in (Oceananigans.prognostic_fields(model)..., model.closure_fields.Kᶜ, model.closure_fields.Lᵉ)
+        @test all(isfinite, interior(field))
     end
 end
