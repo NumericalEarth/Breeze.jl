@@ -860,7 +860,7 @@ end
     end
 end
 
-function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergetics{N, W, <:LaggedStability}},
+function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergetics{N, W, <:LaggedStability}, <:NamedTuple},
                                 closure_fields, closure, model, tracers, parameters) where {N, W}
     grid = model.grid
     arch = grid.architecture

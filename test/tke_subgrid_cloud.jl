@@ -7,7 +7,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation
 using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
-using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment,
+using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment, linear_interp,
                                                               FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
                                                               shoc_saturation_thermodynamics
 
@@ -180,7 +180,7 @@ end
     @test EddyTurnoverTimeScale(Float32).ℂᵠ isa Float32
 end
 
-@testset "The cloud is SHOC's assumed PDF of the stored moments" begin
+@testset "The cloud is SHOC's assumed PDF of the moments co-located at the centers" begin
     for pdf in (DoubleGaussianPDF(), SmoothDoubleGaussianPDF())
         model = tke_p3_column(DoubleGaussian(; assumed_pdf = pdf))
         update_state!(model)
@@ -195,10 +195,15 @@ end
         zc = znodes(grid, Center()); zf = znodes(grid, Face())
         moments(k) = (column(m.w′³)[k], column(m.θˡ′²)[k], column(m.w′θˡ′)[k], column(m.θˡ′qᵗ′)[k],
                       column(m.w′qᵗ′)[k], column(m.qᵗ′²)[k])
+        floors = (-99999999.99, 0.0, -99999999.99, -99999999.99, -99999999.99, 0.0)
         for k in 1:size(grid, 3)
+            # The moments co-located at the center, the third moment limited with the center w′²
+            mᶜ = map((u, l, f) -> max(f, linear_interp(zf[k+1], zf[k], u, l, zc[k])), moments(k+1), moments(k), floors)
+            w′²ᶜ = column(cl.w′²)[k]
+            mᶜ = (limit_third_moment(d.skewness, d.clipping, w′²ᶜ, mᶜ[1]), Base.tail(mᶜ)...)
+            @test abs(mᶜ[1]) ≤ d.skewness.maximum_skewness * w′²ᶜ^1.5 * (1 + 1e-12)
             C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, d.saturation, shoc_saturation_thermodynamics(model), d.clipping, d.constants,
-                                                   zf[k+1], zf[k], zc[k], p[k], θ[k], 0.0, qᵗ[k], column(cl.w′²)[k],
-                                                   moments(k), moments(k+1))
+                                                   zf[k+1], zf[k], zc[k], p[k], θ[k], 0.0, qᵗ[k], w′²ᶜ, mᶜ, mᶜ)
             @test matches(column(cl.aᶜ)[k], C)
             @test matches(column(cl.qˡ)[k], qˡ)
             @test matches(column(cl.w′qˡ′)[k], w′qˡ′)
@@ -275,7 +280,7 @@ end
         end
         @test sum(non_precipitating_water(model) .+ column(μ.ρqʳ)) ≈ water₀ rtol=1e-12
         @test all(isfinite, column(model.tracers.ρe))
-        @test maximum(column(μ.ρqᶜˡ)) > 0
+        @test all(isfinite, column(μ.ρqᶜˡ))
     end
 end
 

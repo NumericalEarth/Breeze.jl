@@ -477,3 +477,10 @@ end
     σ = zero_safe_sqrt(max(0, vq + ∂qˢ∂θ * ∂qˢ∂θ * vθ - 2 * ∂qˢ∂θ * r * σθ * σq))
     return qw - qˢ, σ
 end
+
+# A PDF without a component form here supplies no spread: the microphysics' grid-mean rate
+@inline function component_vapor_excess(pdf, thermodynamics, cp, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first,
+                                        wsec, moments_l, moments_u)
+    FT = typeof(thl_first)
+    return convert(FT, 0.5), zero(FT), zero(FT), zero(FT), zero(FT)
+end

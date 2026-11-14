@@ -119,7 +119,7 @@ example an external subgrid supersaturation model). `nothing` for a microphysics
 one, for which there is no weight.
 """
 @inline microphysics_subgrid_model(microphysics) = nothing
-@inline microphysics_subgrid_model(p3::PredictedParticlePropertiesMicrophysics) = p3.subgrid
+@inline microphysics_subgrid_model(p3::PredictedParticlePropertiesMicrophysics) = p3.condensation
 
 # The cloud model may hold traced coefficients when the closure is differentiated.
 Adapt.adapt_structure(to, ss::SaturationWeightedStaticStability) = SaturationWeightedStaticStability(adapt(to, ss.fraction))

@@ -279,12 +279,12 @@ end
             @test column(Field(operation)) == N²
         end
 
-        # No weight: the dry closure, bit for bit, after a run
-        a = state(run_steps!(column_model(TKEBasedTurbulenceClosure(static_stability = DryStaticStability()), case)))
-        b = state(run_steps!(column_model(with_weight(ConstantWeight(zero(FT))), case)))
-        for field in keys(a)
-            @test isequal(a[field], b[field])
-        end
+        # No weight: the dry static stability, bit for bit. (A run differs: with a saturated fraction the
+        # closure's buoyancy production is the conversion of its applied fluxes, not -Kᶜ N².)
+        a = column_model(TKEBasedTurbulenceClosure(static_stability = DryStaticStability()), case)
+        b = column_model(with_weight(ConstantWeight(zero(FT))), case)
+        @test isequal(column(a.closure_fields.N²), column(b.closure_fields.N²))
+        @test b.closure_fields.subgrid_cloud isa Breeze.TurbulenceClosures.SubgridCloudFields
     end
 
     @testset "the stored N² reaches the mixing length and the Richardson number" begin
