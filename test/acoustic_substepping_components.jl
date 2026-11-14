@@ -28,7 +28,9 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors, prepare_acoustic_cache!
+                                    implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
+                                    factor_vertical_solver!,
+                                    solve_tridiagonal_columns_in_place!
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, continuity_density, standard_pressure
@@ -37,10 +39,10 @@ using Breeze.Thermodynamics: ExnerReferenceState, surface_density, LiquidIceDens
                              mixture_heat_capacity, dry_air_gas_constant, condensate_latent_energy
 using GPUArraysCore: @allowscalar
 using Oceananigans
-using Oceananigans.Architectures: architecture
+using Oceananigans.Architectures: architecture, on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Solvers: get_coefficient
+using Oceananigans.Solvers: BatchedTridiagonalSolver, get_coefficient, solve!
 using Oceananigans.Units
 using Oceananigans.Utils: KernelParameters, launch!
 using Test
@@ -413,6 +415,91 @@ for arch in arches
         @test model.clock.iteration == 3
         @test !any(isnan, parent(model.dynamics.dry_density))
         Oceananigans.defaults.FloatType = old_FT
+    end
+
+    # On a periodic or bounded horizontal grid the substep kernels difference the perturbations with
+    # topology-aware operators, so the substep loop reads no horizontal halo of the fields it writes
+    # (and only the discarded boundary rows of the vertical right-hand side read their vertical halos).
+    # Poisoned halos must therefore not reach the interior.
+    @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT), $(TX), $(Damping)]" for FT in as_test_float_types(arch),
+                                                                                         TX in (Periodic, Bounded),
+                                                                                         Damping in (ThermalDivergenceDamping, DirectDivergenceDamping)
+        old_FT = Oceananigans.defaults.FloatType
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5), topology=(TX, Periodic, Bounded),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+
+        damping = Damping(coefficient=FT(0.1))
+        td = SplitExplicitTimeDiscretization(; substeps=8, damping)
+        dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics)
+        θᵢ(x, y, z) = 300 + 2 * exp(-((x - 4kilometers)^2 + (y - 4kilometers)^2 + (z - 4kilometers)^2) / (1kilometers)^2)
+        set!(model; θ=θᵢ, qᵗ=0, ρ=model.dynamics.reference_state.density)
+        time_step!(model, 6)
+
+        # The perturbations and slow tendencies of the last stage are a valid substep state.
+        substepper = model.timestepper.substepper
+        for field in (substepper.density_perturbation,
+                      substepper.density_potential_temperature_perturbation,
+                      substepper.previous_density_potential_temperature_perturbation,
+                      substepper.momentum_perturbation.u,
+                      substepper.momentum_perturbation.v)
+            values = copy(interior(field))
+            fill!(parent(field), NaN)
+            copyto!(interior(field), values)
+        end
+
+        Δτ = FT(1//2)
+        ω = FT(substepper.forward_weight)
+        stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ)
+        factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
+        acoustic_substep_loop!(2, model, substepper, stage, nothing)
+
+        for field in (substepper.density_perturbation,
+                      substepper.density_potential_temperature_perturbation,
+                      substepper.momentum_perturbation...)
+            @test all(isfinite, Array(interior(field)))
+        end
+        @test maximum(abs, interior(substepper.momentum_perturbation.w)) > 0
+        Oceananigans.defaults.FloatType = old_FT
+    end
+
+    # Breeze's column sweeps carry the Thomas recurrence in registers; they must reproduce the
+    # Oceananigans solve bit for bit, zero off-diagonals (masked products) included.
+    @testset "Column Thomas sweeps reproduce BatchedTridiagonalSolver [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        grid = RectilinearGrid(arch, FT; size=(4, 3, 9), x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Periodic, Periodic, Bounded))
+        Nx, Ny, Nz = size(grid)
+        wave(α, β, γ) = on_architecture(arch, FT[sin(α * i + β * j + γ * k) for i in 1:Nx, j in 1:Ny, k in 1:Nz])
+        lower = on_architecture(arch, FT[ifelse(k == 4, 0, -(3 + sin(i + 2j + 3k)) / 10) for i in 1:Nx, j in 1:Ny, k in 1:Nz])
+        upper = wave(2, 1, 5) ./ 4 .- FT(1//2)
+        diagonal = wave(3, 5, 1) ./ 5 .+ 2
+        rhs = wave(1, 3, 2)
+
+        solver = BatchedTridiagonalSolver(grid; lower_diagonal=lower, diagonal, upper_diagonal=upper)
+        reference = similar(rhs)
+        solve!(reference, solver, rhs)
+        reference = Array(reference)
+
+        in_place = copy(rhs)
+        solve!(in_place, solver, in_place)
+        @test Array(in_place) == reference
+
+        # Several right-hand sides per column thread
+        other_rhs = (wave(2, 2, 1), wave(1, 1, 4))
+        other_references = map(other_rhs) do f
+            ϕ = similar(f)
+            solve!(ϕ, solver, f)
+            Array(ϕ)
+        end
+        no_arguments(shared, specific, ϕ) = ()
+        scratch = (similar(rhs), similar(rhs), similar(rhs))
+        batch = (copy(rhs), copy(other_rhs[1]), copy(other_rhs[2]))
+        solve_tridiagonal_columns_in_place!(batch, solver, scratch, no_arguments, nothing,
+                                            (nothing, nothing, nothing))
+        @test Array(batch[1]) == reference
+        @test Array(batch[2]) == other_references[1]
+        @test Array(batch[3]) == other_references[2]
     end
 
     # `_build_vertical_rhs!` reads (ρw)′ at faces k−1, k, k+1 for the implicit vertical-damping

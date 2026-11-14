@@ -2,7 +2,7 @@
 ##### Tendencies for CompressibleDynamics
 #####
 
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, div_xyᶜᶜᶜ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 
 ##### Pressure gradient
 @inline AtmosphereModels.x_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
@@ -29,18 +29,8 @@ end
 @inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ref::ExnerReferenceState) = ∂zᶜᶜᶠ(i, j, k, grid, ref.pressure)
 
 ##### Density tendency
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Compute the density tendency for compressible dynamics using the continuity equation.
-
-The density evolves according to:
-```math
-\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot \\,} (\\rho \\boldsymbol{u})
-```
-
-Since momentum `ρu` is already available, this is simply the negative divergence of momentum.
-"""
+# Continuity equation ∂t ρ = -∇⋅(ρu): the negative divergence of the prognostic momentum.
 function AtmosphereModels.compute_dynamics_tendency!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
