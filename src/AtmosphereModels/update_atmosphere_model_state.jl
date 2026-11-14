@@ -518,8 +518,7 @@ launch_scalar_tendency!(split::SplitScalarTendencies, arch, grid, name, Gc, args
     c, id, name, c_forcing, advection, dynamics, formulation, constants,
         specific_prognostic_moisture, velocities, microphysics, microphysical_fields = args
     @inbounds begin
-        C[i, j, k] = scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities,
-                                               microphysics, microphysical_fields)
+        C[i, j, k] = scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities, microphysics, microphysical_fields)
         Gc[i, j, k] += nonadvective_scalar_tendency(i, j, k, grid, args...)
     end
 end
