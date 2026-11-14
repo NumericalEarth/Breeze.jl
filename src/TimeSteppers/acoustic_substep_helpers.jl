@@ -6,8 +6,6 @@ using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, vertical_scheme
 using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: launch!, KernelParameters
 
-using Oceananigans.TimeSteppers: implicit_step!
-
 using Breeze.AtmosphereModels:
     AtmosphereModel,
     advecting_vertical_velocity,
@@ -22,7 +20,7 @@ using Breeze.AtmosphereModels:
     implicit_step_scheme,
     implicit_sedimentation_step!
 
-using Breeze.CompressibleEquations: CompressibleDynamics
+using Breeze.CompressibleEquations: CompressibleDynamics, implicit_steps_in_place!, implicit_step_scratch
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics
 
 const TerrainCompressibleAcousticModel =
@@ -56,44 +54,24 @@ end
 ##### Scalar (tracer / moisture) update with time-averaged velocities
 #####
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Freeze the time-averaged transport velocity that `update_state!` just built the moisture and
-tracer tendencies from. The next acoustic loop resets and rebuilds `time_averaged_velocities`
-(and `freeze_linearization_state!` reseeds it at outer-step start), so the stage cannot read it
-live. The implicit remainder in `scalar_substep!` pairs fluxes with those tendencies: it has to
-split the same velocity the explicit fraction in `Gⁿ` was scaled by (invariant: ⟨w⟩ = wᵉ + wⁱ),
-as does `implicit_sedimentation_step!`. (The condensate sedimentation term of the thermodynamic
-tendency is built in `update_state!` with the same live velocity.) Called after every tendency
-computation the stepper issues, once per stage.
-"""
+# Freeze the time-averaged transport velocity the moisture and tracer tendencies were just built
+# from: the next acoustic loop rebuilds it, and the implicit remainder in `scalar_substep!` (and
+# `implicit_sedimentation_step!`) must split the same velocity the explicit fraction in Gⁿ was
+# scaled by (invariant: ⟨w⟩ = wᵉ + wⁱ). Called once per stage, after each tendency computation.
 function cache_transport_velocity!(model)
     w_cache = model.timestepper.substepper.time_averaged_vertical_velocity_cache
     copyto!(parent(w_cache), parent(transport_velocities(model).w))
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The transport velocities the moisture and tracer tendencies in `Gⁿ` were built with: the live
-horizontal components and the frozen vertical one. Only `w` is frozen — under adaptive implicit
-vertical advection the horizontal fluxes stay fully explicit, so the implicit solve reads no
-horizontal velocity, and condensate sediments vertically.
-"""
+# Only `w` is frozen: under adaptive implicit vertical advection the horizontal fluxes stay fully
+# explicit, so the implicit solve reads no horizontal velocity, and condensate sediments vertically.
 tendency_transport_velocities(model) =
     merge(transport_velocities(model), (; w = model.timestepper.substepper.time_averaged_vertical_velocity_cache))
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Update non-acoustic scalar fields (moisture, microphysics, tracers) with the
-Wicker–Skamarock stage update ``u = u⁰ + Δt G``, rounded with the round-off
-treatment `rounding`, followed by their implicit solves over `Δt_stage`. Iterates over prognostic
-fields, skipping the ones the acoustic substep loop advances (see `acoustic_prognostic_names`).
-`kernel_Δt` is `Δt_stage` as the kernels take it (see `kernel_time_step`).
-"""
+# Wicker–Skamarock stage update u = u⁰ + Δt G of the non-acoustic scalars (moisture, microphysics,
+# tracers), followed by their implicit solves over `Δt_stage`. `kernel_Δt` is `Δt_stage` as the
+# kernels take it (`kernel_time_step`).
 function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     grid = model.grid
     arch = grid.architecture
@@ -111,6 +89,8 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     # average, while `Gⁿ` was scaled by the previous one.
     ρ = total_density(model.dynamics)
     velocities = tendency_transport_velocities(model)
+    implicit_solver = model.timestepper.implicit_solver
+    implicit_requests = []
 
     for (field_number, (name, u, u⁰, G)) in enumerate(zip(names, prognostic, U⁰, Gⁿ))
         name ∈ acoustic_names && continue
@@ -123,26 +103,25 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
 
         # Guarded on the solver rather than on `needs_implicit_solver(advection)`; see the note in
         # ssp_runge_kutta_3.jl for why that predicate would drop the mass-flux weighting.
-        if !isnothing(model.timestepper.implicit_solver)
+        if !isnothing(implicit_solver)
             # The explicit tendency advected this species with the full transport velocity —
             # dynamical plus microphysical (terminal) — so the implicit half must split the
             # same combined velocity, or precipitating species lose the withheld fraction of
             # their sedimentation flux wherever the split engages (issue #914);
             # `implicit_advection_velocities` forms that sum and lets the implicit remainder
             # carry sedimenting condensate out through the bottom.
-            implicit_step!(u,
-                           model.timestepper.implicit_solver,
-                           model.closure,
-                           model.closure_fields,
-                           field_index,
-                           model.clock,
-                           fields(model),
-                           Δt_stage,
-                           implicit_step_scheme(advection),
-                           implicit_advection_velocities(model.dynamics, velocities, name,
-                                                         model.microphysics, model.microphysical_fields),
-                           ρ)
+            w = implicit_advection_velocities(model.dynamics, velocities, name,
+                                              model.microphysics, model.microphysical_fields)
+            push!(implicit_requests, (u, field_index, implicit_step_scheme(advection), w))
         end
+    end
+
+    # The scalars' implicit solves, several fields per column thread, once every scalar has taken
+    # its explicit update: no scalar's implicit coefficients depend on another scalar.
+    if !isnothing(implicit_solver)
+        scratch = implicit_step_scratch(model.timestepper.substepper, implicit_solver)
+        implicit_steps_in_place!(implicit_requests, implicit_solver, scratch, model.closure, model.closure_fields,
+                                 model.clock, fields(model), kernel_Δt, ρ)
     end
 
     # The tracers' solves have just moved sedimenting condensate implicitly; move its latent
@@ -156,13 +135,7 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The prognostic fields the acoustic substep loop advances — the dynamics-specific prognostics
-(the compressible dry density), momentum and the thermodynamic variable — and which
-`scalar_substep!` therefore skips.
-"""
+# The prognostics the acoustic substep loop advances, which `scalar_substep!` therefore skips.
 acoustic_prognostic_names(model) = tuple(keys(dynamics_prognostic_fields(model.dynamics))...,
                                          keys(model.momentum)...,
                                          thermodynamic_density_name(model.formulation))
@@ -171,14 +144,10 @@ acoustic_prognostic_names(model) = tuple(keys(dynamics_prognostic_fields(model.d
 ##### Implicit vertical solve for the acoustic prognostics
 #####
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Freeze the stage-entry advecting velocity and the density that weights it so `implicit_substep!` sizes
-the withheld remainder from the state whose fluxes the slow tendencies split (invariant:
-wᴸ = wᵉ + wⁱ). The full wᴸ is cached, not the clipped wᵉ, which loses the remainder in
-saturated cells. A no-op when the substepper carries no cache.
-"""
+# Freeze the stage-entry advecting velocity and its weighting density so `implicit_substep!` sizes
+# the withheld remainder from the state whose fluxes the slow tendencies split (invariant:
+# wᴸ = wᵉ + wⁱ). The full wᴸ is cached, not the clipped wᵉ, which loses the remainder in
+# saturated cells.
 cache_advecting_state!(model) =
     cache_advecting_state!(model.timestepper.substepper.vertical_velocity_cache,
                            model.timestepper.substepper.density_cache, model)
@@ -213,33 +182,6 @@ advecting_state(::Nothing, ::Nothing, model) = (advecting_vertical_velocity(mode
 
 advecting_state(w_cache, ρ_cache, model) = (w_cache, ρ_cache)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Apply the vertically-implicit tridiagonal solve to the prognostics that the acoustic substep
-loop advances: momentum and the thermodynamic variable. Dispatch on the timestepper's
-`implicit_solver` selects the method: `nothing` means nothing in the model is vertically
-implicit and the substep is a no-op.
-
-Each field's solve combines every implicit vertical piece into a single tridiagonal system:
-the first-order-upwind remainder of adaptive implicit vertical advection (whose CFL-limited
-explicit flux the slow tendencies carry through the advection dispatch), plus vertically-implicit
-closure diffusion. Explicit advection schemes contribute no advection coefficients and explicit
-closures no diffusion coefficients, so each combination reduces to the right system. The solve
-runs once per RK stage after the substep loop and after the scalar update, whose
-`implicit_sedimentation_step!` adds to the thermodynamic variable content that takes this
-solve's diffusion too, over the stage interval — the operator split WRF and CM1 use for their
-implicit vertical pieces. Under an adaptive-implicit thermodynamic scheme the advection half of
-this solve is empty (`postloop_thermodynamic_scheme`): it was applied inside the loop. Continuity takes no implicit solve: the continuity-density tendency is the
-acoustic mass-flux divergence itself, not scalar advection.
-
-The advecting velocity passed to each solve must be the one its slow tendency was built with,
-so the explicit/implicit velocity split is consistent: the RK stage-entry predictor velocities
-(see `slow_thermodynamic_velocities`), not the
-substepper's time-averaged transport velocities that moisture and tracers use. The one exception,
-on both sides of the split, is the condensate sedimentation term, which pairs with the tracers'
-mass fluxes and reads their velocity.
-"""
 # First-order upwind flux of the stage-entry thermodynamic state carried by the implicit
 # half's velocity wⁱ = (1 - s) w, density-weighted like the implicit Center-field
 # coefficients so base + perturbation sum to the full-field operator.
@@ -257,17 +199,10 @@ end
         δzᵃᵃᶜ(i, j, k, grid, implicit_advective_base_flux, scheme, td, W, ρθ, ρᵈ)
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Fold the base-state part of the IMEX vertical-advection split's implicit half into the
-slow tendency: `Gˢρθ` gains the first-order upwind flux divergence of the frozen stage-entry
-(ρθ, ρᵈ) carried by wⁱ = (1 - s) w. The predictors then apply it per substep with the same
-Crank-Nicolson factors as the rest of the slow tendency, so the acoustic pressure adjusts to
-the implicit-half transport inside the loop (issue #897). The perturbation part is handled
-per substep by `implicit_advection_substep!` inside the loop. A no-op unless the scheme's
-vertical discretization is adaptive-implicit (dispatch below).
-"""
+# Fold the base-state part of the IMEX vertical-advection split's implicit half into the slow
+# tendency: Gˢρθ gains the first-order upwind flux divergence of the frozen stage-entry (ρθ, ρᵈ)
+# carried by wⁱ = (1 - s) w, so the acoustic pressure adjusts to the implicit-half transport
+# inside the loop (issue #897). The perturbation part is `implicit_advection_substep!`.
 add_implicit_advection_tendency!(model) =
     add_implicit_advection_tendency!(model,
         field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation)))
@@ -292,6 +227,11 @@ end
 postloop_thermodynamic_scheme(advection, ρ) = implicit_step_scheme(advection, ρ)
 postloop_thermodynamic_scheme(::AdaptiveImplicitVerticalAdvection, ρ) = implicit_step_scheme(nothing, ρ)
 
+# Post-loop vertically-implicit solve of momentum and the thermodynamic variable (continuity takes
+# none: its tendency is the acoustic mass-flux divergence). Each field's solve combines the upwind
+# remainder of adaptive implicit vertical advection with implicit closure diffusion in one
+# tridiagonal system, the operator split WRF and CM1 use. The advecting velocity must be the one
+# the field's slow tendency was built with (the stage-entry predictor velocities).
 implicit_substep!(model, Δt_stage) =
     implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
 
@@ -308,35 +248,27 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
     # advective split it has no explicit fraction to pair with the frozen state.
     diffusion_density = continuity_density(model.dynamics)
 
+    # The step enters every coefficient of the column sweeps: in the float type of the grid.
+    grid = model.grid
+    Δt = kernel_time_step(architecture(grid), grid, Δt_stage)
+
     prognostic = prognostic_fields(model)
-    momentum_advection = model.advection.momentum
-    for name in (:ρu, :ρv, :ρw)
-        implicit_step!(prognostic[name],
-                       implicit_solver,
-                       model.closure,
-                       model.closure_fields,
-                       nothing,
-                       model.clock,
-                       fields(model),
-                       Δt_stage,
-                       implicit_step_scheme(momentum_advection, diffusion_density),
-                       (; w),
-                       ρᵈ)
-    end
+    momentum_scheme = implicit_step_scheme(model.advection.momentum, diffusion_density)
 
     θ_name = thermodynamic_density_name(model.formulation)
     θ_advection = field_advection_scheme(model.advection, θ_name)
-    implicit_step!(prognostic[θ_name],
-                   implicit_solver,
-                   model.closure,
-                   model.closure_fields,
-                   closure_scalar_index(model, θ_name),
-                   model.clock,
-                   fields(model),
-                   Δt_stage,
-                   postloop_thermodynamic_scheme(θ_advection, diffusion_density),
-                   merge(slow_thermodynamic_velocities(model), (; w)),
-                   ρᵈ)
+    θ_scheme = postloop_thermodynamic_scheme(θ_advection, diffusion_density)
+    θ_velocities = merge(slow_thermodynamic_velocities(model), (; w))
+
+    # One request per field: (field, closure tracer index, scheme, velocities).
+    requests = [(prognostic.ρu, nothing, momentum_scheme, (; w)),
+                (prognostic.ρv, nothing, momentum_scheme, (; w)),
+                (prognostic.ρw, nothing, momentum_scheme, (; w)),
+                (prognostic[θ_name], closure_scalar_index(model, θ_name), θ_scheme, θ_velocities)]
+
+    scratch = implicit_step_scratch(model.timestepper.substepper, implicit_solver)
+    implicit_steps_in_place!(requests, implicit_solver, scratch, model.closure, model.closure_fields,
+                             model.clock, fields(model), Δt, ρᵈ)
 
     return nothing
 end
