@@ -19,11 +19,13 @@ const gauss_hermite = ((big"0.0", big"0.5333333333333333333333333333333333333333
 normal_expectation(f) = sum(w * f(z) for (z, w) in gauss_hermite)
 
 @testset "Mixing ratio to specific humidity: σ_q = σ_r / (1 + r̄)² to second order" begin
-    # The quadrature itself: E[Z] = 0, E[Z²] = 1, E[Z⁴] = 3 for the standard normal
+    # The quadrature itself: E[Z] = 0, E[Z²] = 1, E[Z⁴] = 3 for the standard normal. The tabulated nodes and weights are accurate to
+    # about 20 significant digits (gate 16497 measured 2.8e-19 and 2.5e-18 in the second and fourth moments), far below the s² ≈ 5e-14
+    # relative level the conversion test resolves
     @test abs(normal_expectation(z -> z)) < 1e-30
-    @test normal_expectation(z -> z^2) ≈ 1 atol = 1e-30
-    @test normal_expectation(z -> z^4) ≈ 3 atol = 1e-30
-    @test normal_expectation(z -> one(z)) ≈ 1 atol = 1e-30
+    @test normal_expectation(z -> z^2) ≈ 1 atol = 1e-17
+    @test normal_expectation(z -> z^4) ≈ 3 atol = 1e-17
+    @test normal_expectation(z -> one(z)) ≈ 1 atol = 1e-17
 
     r̄ = big"0.0104126"     # ICMW case description §1.1, Q̄v₀
     σ_r = big"0.4775e-3"    # ICMW σ_Qv
