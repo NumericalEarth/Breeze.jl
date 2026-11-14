@@ -6,10 +6,14 @@ using Breeze.AtmosphereModels: transport_velocities
 using CUDA: @allowscalar
 
 using Breeze.CompressibleEquations: acoustic_recovered_vertical_momentum, assemble_slow_vertical_momentum_tendency!, compute_acoustic_substeps, compute_contravariant_velocity!, freeze_linearization_state!, δpᴸ, terrain_horizontal_linearized_pressure_gradient_correction, terrain_slope_x_ccf, terrain_slope_y_ccf, ∇ᶻp′
+using Breeze.CompressibleEquations: substep_halo_fills, dρθ′, ∇ˣp′, ∇ʸp′,
+                                    terrain_x_linearized_pressure_gradient, terrain_y_linearized_pressure_gradient,
+                                    ∂xTᶠᶜᶜ, ∂yTᶜᶠᶜ, ∂zTᶜᶜᶠ, ℑzTᵃᵃᶠ, ℑxTᶜᵃᵃ, ℑyTᵃᶜᵃ
 using Oceananigans
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: xnode, znode
-using Oceananigans.Operators: ∂zᶜᶜᶠ
+using Oceananigans.Operators: ∂zᶜᶜᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ,
+                              ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!
 using Breeze.Thermodynamics: dry_air_gas_constant
 using Test
@@ -566,6 +570,145 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         time_step!(model, 0.1)
         @test isfinite(maximum(abs, model.velocities.w))
         @test isfinite(maximum(abs, model.velocities.v))
+    end
+
+    # Terrain grids of every lateral topology the substep loop supports, with a hill in the middle
+    # (the Bounded ones are 2D in a Flat direction, or 3D).
+    function hill_grid(topology; Nx = 8, Ny = 8, Nz = 6, formulation = LinearDecay())
+        Lx, Ly, Lz = 10000.0, 10000.0, 5000.0
+        z = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation)
+        if topology[2] === Flat
+            grid = RectilinearGrid(default_arch; size=(Nx, Nz), halo=(5, 5), x=(-Lx/2, Lx/2), z, topology)
+            materialize_terrain!(grid, x -> 400 * exp(-x^2 / 2000^2))
+        else
+            grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz), halo=(5, 5, 5),
+                                   x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z, topology)
+            materialize_terrain!(grid, (x, y) -> 400 * exp(-(x^2 + y^2) / 2000^2))
+        end
+        return grid
+    end
+
+    lateral_topologies = ((Periodic, Flat, Bounded), (Bounded, Flat, Bounded),
+                          (Periodic, Periodic, Bounded), (Bounded, Bounded, Bounded))
+
+    @testset "Topology-aware terrain operators match the halo-reading ones on filled fields [$topology]" for topology in lateral_topologies
+        grid = hill_grid(topology)
+        Nx, Ny, Nz = size(grid)
+        TX, TY, _ = topology
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+        model = AtmosphereModel(grid; dynamics)
+        d = model.dynamics
+
+        # Non-separable fields, with halos filled by the default conditions of the substep fields
+        # (zero gradient on bounded sides): what the halo-reading operators see in the loop.
+        ρθ′, Cᴸ, δ = CenterField(grid), CenterField(grid), CenterField(grid)
+        ρu′, ρv′ = XFaceField(grid), YFaceField(grid)
+        set!(ρθ′, (x...) -> sinpi(x[1] / 3000) * cospi(x[end] / 2000) + x[end] / 5000)
+        set!(Cᴸ, (x...) -> 400 + 10 * cospi(x[1] / 4000) * (1 + x[end] / 5000))
+        set!(δ, (x...) -> cospi(x[1] / 2500) + 0.3 * sinpi(x[end] / 1500))
+        set!(ρu′, (x...) -> 1 + 0.2 * cospi(x[1] / 3000) * sinpi(x[end] / 2000))
+        set!(ρv′, (x...) -> 0.5 + 0.1 * sinpi(x[1] / 2000) * cospi(x[end] / 2500))
+        fill_halo_regions!((ρθ′, Cᴸ, δ))
+        fill_halo_regions!(ρu′)
+        fill_halo_regions!(ρv′)
+
+        xfaces = TX === Periodic ? (1:Nx) : (1:Nx+1)
+        yfaces = TY === Flat ? (1:1) : TY === Periodic ? (1:Ny) : (1:Ny+1)
+        js = TY === Flat ? (1:1) : (1:Ny)
+
+        # The old slope-inside correction, written with the halo-reading operators.
+        slope_x_∂z(i, j, k, grid, ρθ′, Cᴸ) = terrain_slope_x_ccf(i, j, k, grid) * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+        slope_y_∂z(i, j, k, grid, ρθ′, Cᴸ) = terrain_slope_y_ccf(i, j, k, grid) * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+        inside_x(i, j, k) = δxᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid) - ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, slope_x_∂z, ρθ′, Cᴸ)
+        inside_y(i, j, k) = δyᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid) - ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, slope_y_∂z, ρθ′, Cᴸ)
+
+        # Both pressure-gradient stencils, and the divergence-damping gradients, at every x-face
+        # of the domain including the walls, and every level.
+        for k in 1:Nz, j in js, i in xfaces
+            @test ∂xTᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) == ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+            @test ∂xTᶠᶜᶜ(i, j, k, grid, δ) == ∂xᶠᶜᶜ(i, j, k, grid, δ)
+            @test ∂xTᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, δ) == ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, δ)
+            @test ∇ˣp′(i, j, k, grid, d, ρθ′, Cᴸ) == ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+            # The slope-inside stencil reads the slope's own halo at a wall face, which the terrain
+            # never fills, so only the faces off the walls are reproduced.
+            if TX === Periodic || 1 < i < Nx + 1
+                @test terrain_x_linearized_pressure_gradient(i, j, k, grid, d, SlopeInsideInterpolation(), ρθ′, Cᴸ) == inside_x(i, j, k)
+            end
+        end
+
+        for k in 1:Nz, j in yfaces, i in 1:Nx
+            @test ∂yTᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) == ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+            @test ∂yTᶜᶠᶜ(i, j, k, grid, δ) == ∂yᶜᶠᶜ(i, j, k, grid, δ)
+            @test ∇ʸp′(i, j, k, grid, d, ρθ′, Cᴸ) == ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+            if TY !== Bounded || 1 < j < Ny + 1
+                @test terrain_y_linearized_pressure_gradient(i, j, k, grid, d, SlopeInsideInterpolation(), ρθ′, Cᴸ) == inside_y(i, j, k)
+            end
+        end
+
+        # The vertical solve's gradient (its boundary rows k = 1, Nz + 1 are discarded) and the
+        # post-solve recovery, at every cell.
+        for k in 1:Nz+1, j in js, i in 1:Nx
+            @test ∂zTᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) == ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+            if 1 < k < Nz + 1
+                @test terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid, d, ρθ′, Cᴸ) ==
+                      terrain_slope_x_ccf(i, j, k, grid) * ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ∇ˣp′, d, ρθ′, Cᴸ) +
+                      terrain_slope_y_ccf(i, j, k, grid) * ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ∇ʸp′, d, ρθ′, Cᴸ)
+            end
+            if k ≤ Nz
+                @test ℑzTᵃᵃᶠ(i, j, k, grid, ℑxTᶜᵃᵃ, ρu′) == ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu′)
+                @test ℑzTᵃᵃᶠ(i, j, k, grid, ℑyTᵃᶜᵃ, ρv′) == ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ρv′)
+            end
+        end
+    end
+
+    @testset "Terrain substep kernels read no halos" begin
+        # The substep loop fills no halos on a single-architecture grid. Forcing the fills on
+        # (`substep_halo_fills`) must then change nothing, bitwise, in every configuration whose
+        # terrain stencils once read halos: both pressure-gradient stencils, the damping gradients,
+        # and the recovery of ρw, on each lateral topology.
+        function stepped_state(topology, stencil, damping, formulation; fills)
+            grid = hill_grid(topology; formulation)
+            time_discretization = SplitExplicitTimeDiscretization(; substeps = 4, damping)
+            dynamics = CompressibleDynamics(time_discretization; slope_stencil = stencil,
+                                            reference_potential_temperature = 300)
+            model = AtmosphereModel(grid; dynamics)
+            bubble(x...) = 300 + 0.5 * exp(-(x[1]^2 / 1500^2 + (x[end] - 2000)^2 / 800^2))
+            if topology[2] === Flat
+                set!(model; θ = bubble, ρ = model.dynamics.reference_state.density, u = 2, w = 0)
+            else
+                set!(model; θ = bubble, ρ = model.dynamics.reference_state.density, u = 2, v = 1, w = 0)
+            end
+            substep_halo_fills[] = fills
+            try
+                for _ in 1:2
+                    time_step!(model, 1.0)
+                end
+            finally
+                substep_halo_fills[] = false
+            end
+            ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
+            return map(f -> Array(interior(f)), (model.dynamics.dry_density, ρθ, model.momentum.ρu,
+                                                  model.momentum.ρv, model.momentum.ρw, model.velocities.w))
+        end
+
+        dampings = (NoDivergenceDamping(), ThermalDivergenceDamping(coefficient=0.05), DirectDivergenceDamping(coefficient=0.05))
+        cases = Any[]
+        for topology in lateral_topologies, stencil in (SlopeOutsideInterpolation(), SlopeInsideInterpolation())
+            for damping in (topology[2] === Flat ? dampings : dampings[1:1])
+                push!(cases, (topology, stencil, damping, LinearDecay()))
+            end
+        end
+        push!(cases, ((Periodic, Flat, Bounded), SlopeOutsideInterpolation(), NoDivergenceDamping(),
+                      TwoLevelDecay(large_scale_height = 2500.0, small_scale_height = 1250.0)))
+
+        @testset "$(topology[1:2]) $(nameof(typeof(stencil))) $(nameof(typeof(damping))) $(nameof(typeof(formulation)))" for (topology, stencil, damping, formulation) in cases
+            without = stepped_state(topology, stencil, damping, formulation; fills = false)
+            with = stepped_state(topology, stencil, damping, formulation; fills = true)
+            for (a, b) in zip(without, with)
+                @test all(isfinite, a)
+                @test a == b
+            end
+        end
     end
 
 end

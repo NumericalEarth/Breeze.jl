@@ -32,7 +32,6 @@ using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.Grids: ZDirection, rnode, znode, node, Periodic, TwoSided, Closed
-using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Solvers: BatchedTridiagonalSolver, compute_factorization!, solve!
 using Oceananigans.TurbulenceClosures: vertically_implicit_closures, VerticallyImplicitDiffusionLowerDiagonal,
                                       VerticallyImplicitDiffusionDiagonal, VerticallyImplicitDiffusionUpperDiagonal
@@ -40,7 +39,7 @@ using Oceananigans.Operators: Operators
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
-    δxᶠᵃᵃ, δyᵃᶠᵃ,
+    δxᶠᵃᵃ, δyᵃᶠᵃ, δzᵃᵃᶠ,
     Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ,
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
     Δz⁻¹ᶜᶜᶜ, Δz⁻¹ᶜᶜᶠ,
@@ -177,52 +176,121 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 ##### Halo fills of the substep loop
 #####
 
-# Topology-aware differences wrap periodic indices and impose zero scalar gradients and normal
-# momentum perturbations on bounded sides. Those faces are zeroed explicitly, including for
-# prescribed flow. Only distributed connections need substep halo exchanges; terrain grids
-# retain full fills (see `terrain_compressible_physics.jl`).
+# The substep kernels differentiate and interpolate with the topology-aware operators below, which
+# wrap periodic indices and reproduce the default halo images on bounded sides (zero scalar
+# gradients; terrain metrics read the grid's own, static halos). Wall-normal momentum perturbations
+# are zeroed explicitly, including for prescribed flow. So only distributed connections need
+# substep halo exchanges; `substep_halo_fills[] = true` fills on every architecture, which the
+# tests use to show the kernels read no halos.
+const substep_halo_fills = Ref(false)
+
 fill_substep_halos!(fields, model) = fill_substep_halos!(fields, model.grid)
 fill_substep_halos!(fields, grid::AbstractGrid) = fill_architecture_halos!(fields, architecture(grid))
-fill_architecture_halos!(fields, ::Union{CPU, GPU}) = nothing
+fill_architecture_halos!(fields, ::Union{CPU, GPU}) = substep_halo_fills[] ? fill_halo_regions!(fields) : nothing
 fill_architecture_halos!(fields, arch) = fill_halo_regions!(fields)
 
-# TODO: remove this block once Oceananigans' topology-aware operators dispatch on
-# `ImmersedBoundaryGrid`, and import `δxTᶠᵃᵃ`, `δyTᵃᶠᵃ`, `δxTᶜᵃᵃ`, `δyTᵃᶜᵃ` from Oceananigans.Operators.
-# Oceananigans defines their Periodic and TwoSided methods only for underlying grids, so on an
-# immersed grid they fall back to the halo-reading `δx`, `δy`. These local copies add the
-# immersed-grid methods and evaluate `f` on the immersed grid itself.
-@inline δxTᶠᵃᵃ(i, j, k, grid, args...) = Operators.δxTᶠᵃᵃ(i, j, k, grid, args...)
-@inline δyTᵃᶠᵃ(i, j, k, grid, args...) = Operators.δyTᵃᶠᵃ(i, j, k, grid, args...)
-@inline δxTᶜᵃᵃ(i, j, k, grid, args...) = Operators.δxTᶜᵃᵃ(i, j, k, grid, args...)
-@inline δyTᵃᶜᵃ(i, j, k, grid, args...) = Operators.δyTᵃᶜᵃ(i, j, k, grid, args...)
+# TODO: delete this block once Oceananigans' topology-aware operators dispatch on every `AbstractGrid`
+# and include the interpolations (CliMA/Oceananigans.jl#6520), and import `δxTᶠᵃᵃ`, `δyTᵃᶠᵃ`,
+# `δxTᶜᵃᵃ`, `δyTᵃᶜᵃ`, `ℑxTᶠᵃᵃ`, `ℑyTᵃᶠᵃ`, `ℑxTᶜᵃᵃ`, `ℑyTᵃᶜᵃ` from Oceananigans.Operators. Oceananigans
+# 0.118 defines the differences for underlying grids only, so an immersed grid falls back to the
+# halo-reading `δx`, `δy`. These copies dispatch on `AbstractGrid` (so `f` is evaluated on the
+# immersed grid itself), and the x-face operators also treat a `Closed` right wall, where the terrain
+# correction evaluates them (i = Nx + 1). Convention: `δxTᶠᵃᵃ`, `ℑxTᶠᵃᵃ` take a cell-centered `f`,
+# whose difference vanishes and whose image is the wall cell at a `Closed` wall; `δxTᶜᵃᵃ`, `ℑxTᶜᵃᵃ`
+# take an x-face `f`, which vanishes at a `Closed` wall.
+const AGXP = AbstractGrid{FT, Periodic} where FT
+const AGXS = AbstractGrid{FT, TwoSided{L, R}} where {FT, L, R}
+const AGYP = AbstractGrid{FT, <:Any, Periodic} where FT
+const AGYS = AbstractGrid{FT, <:Any, TwoSided{L, R}} where {FT, L, R}
 
-const IBGXP = ImmersedBoundaryGrid{<:Any, Periodic}
-const IBGYP = ImmersedBoundaryGrid{<:Any, <:Any, Periodic}
-const IBGXS = ImmersedBoundaryGrid{FT, TwoSided{L, R}} where {FT, L, R}
-const IBGYS = ImmersedBoundaryGrid{FT, <:Any, TwoSided{L, R}} where {FT, L, R}
+# Fallbacks (Flat; folded topologies of underlying grids, which Oceananigans treats)
+@inline δxTᶠᵃᵃ(i, j, k, grid, f, args...) = Operators.δxTᶠᵃᵃ(i, j, k, grid, f, args...)
+@inline δyTᵃᶠᵃ(i, j, k, grid, f, args...) = Operators.δyTᵃᶠᵃ(i, j, k, grid, f, args...)
+@inline δxTᶜᵃᵃ(i, j, k, grid, f, args...) = Operators.δxTᶜᵃᵃ(i, j, k, grid, f, args...)
+@inline δyTᵃᶜᵃ(i, j, k, grid, f, args...) = Operators.δyTᵃᶜᵃ(i, j, k, grid, f, args...)
 
-@inline value(i, j, k, grid, f::Function, args...) = f(i, j, k, grid, args...)
-@inline value(i, j, k, grid, c::AbstractArray) = @inbounds c[i, j, k]
+@inline ℑxTᶠᵃᵃ(i, j, k, grid, f, args...) = ℑxᶠᵃᵃ(i, j, k, grid, f, args...)
+@inline ℑyTᵃᶠᵃ(i, j, k, grid, f, args...) = ℑyᵃᶠᵃ(i, j, k, grid, f, args...)
+@inline ℑxTᶜᵃᵃ(i, j, k, grid, f, args...) = ℑxᶜᵃᵃ(i, j, k, grid, f, args...)
+@inline ℑyTᵃᶜᵃ(i, j, k, grid, f, args...) = ℑyᵃᶜᵃ(i, j, k, grid, f, args...)
 
-@inline δxTᶠᵃᵃ(i, j, k, ibg::IBGXP, f, args...) =
-    value(i, j, k, ibg, f, args...) - value(ifelse(i == 1, ibg.underlying_grid.Nx, i - 1), j, k, ibg, f, args...)
-@inline δyTᵃᶠᵃ(i, j, k, ibg::IBGYP, f, args...) =
-    value(i, j, k, ibg, f, args...) - value(i, ifelse(j == 1, ibg.underlying_grid.Ny, j - 1), k, ibg, f, args...)
-@inline δxTᶜᵃᵃ(i, j, k, ibg::IBGXP, f, args...) =
-    value(ifelse(i == ibg.underlying_grid.Nx, 1, i + 1), j, k, ibg, f, args...) - value(i, j, k, ibg, f, args...)
-@inline δyTᵃᶜᵃ(i, j, k, ibg::IBGYP, f, args...) =
-    value(i, ifelse(j == ibg.underlying_grid.Ny, 1, j + 1), k, ibg, f, args...) - value(i, j, k, ibg, f, args...)
+# Periodic: wrap the indices
+@inline δxTᶠᵃᵃ(i, j, k, grid::AGXP, f, args...) = f(i, j, k, grid, args...) - f(ifelse(i == 1, grid.Nx, i - 1), j, k, grid, args...)
+@inline δyTᵃᶠᵃ(i, j, k, grid::AGYP, f, args...) = f(i, j, k, grid, args...) - f(i, ifelse(j == 1, grid.Ny, j - 1), k, grid, args...)
 
-@inline δxTᶠᵃᵃ(i, j, k, ibg::IBGXS{FT, L}, f, args...) where {FT, L} =
-    ifelse((L === Closed) & (i == 1), zero(FT), δxᶠᵃᵃ(i, j, k, ibg, f, args...))
-@inline δyTᵃᶠᵃ(i, j, k, ibg::IBGYS{FT, L}, f, args...) where {FT, L} =
-    ifelse((L === Closed) & (j == 1), zero(FT), δyᵃᶠᵃ(i, j, k, ibg, f, args...))
-@inline δxTᶜᵃᵃ(i, j, k, ibg::IBGXS{FT, L, R}, f, args...) where {FT, L, R} =
-    Operators.impenetrable_difference(value(i + 1, j, k, ibg, f, args...), value(i, j, k, ibg, f, args...),
-                                      (L === Closed) & (i == 1), (R === Closed) & (i == ibg.underlying_grid.Nx))
-@inline δyTᵃᶜᵃ(i, j, k, ibg::IBGYS{FT, L, R}, f, args...) where {FT, L, R} =
-    Operators.impenetrable_difference(value(i, j + 1, k, ibg, f, args...), value(i, j, k, ibg, f, args...),
-                                      (L === Closed) & (j == 1), (R === Closed) & (j == ibg.underlying_grid.Ny))
+@inline δxTᶠᵃᵃ(i, j, k, grid::AGXP, c::AbstractArray) = @inbounds c[i, j, k] - c[ifelse(i == 1, grid.Nx, i - 1), j, k]
+@inline δyTᵃᶠᵃ(i, j, k, grid::AGYP, c::AbstractArray) = @inbounds c[i, j, k] - c[i, ifelse(j == 1, grid.Ny, j - 1), k]
+
+@inline δxTᶜᵃᵃ(i, j, k, grid::AGXP, f, args...) = f(ifelse(i == grid.Nx, 1, i + 1), j, k, grid, args...) - f(i, j, k, grid, args...)
+@inline δyTᵃᶜᵃ(i, j, k, grid::AGYP, f, args...) = f(i, ifelse(j == grid.Ny, 1, j + 1), k, grid, args...) - f(i, j, k, grid, args...)
+
+@inline δxTᶜᵃᵃ(i, j, k, grid::AGXP, u::AbstractArray) = @inbounds u[ifelse(i == grid.Nx, 1, i + 1), j, k] - u[i, j, k]
+@inline δyTᵃᶜᵃ(i, j, k, grid::AGYP, v::AbstractArray) = @inbounds v[i, ifelse(j == grid.Ny, 1, j + 1), k] - v[i, j, k]
+
+@inline ℑxTᶠᵃᵃ(i, j, k, grid::AGXP{FT}, f, args...) where FT = FT(0.5) * (f(ifelse(i == 1, grid.Nx, i - 1), j, k, grid, args...) + f(i, j, k, grid, args...))
+@inline ℑyTᵃᶠᵃ(i, j, k, grid::AGYP{FT}, f, args...) where FT = FT(0.5) * (f(i, ifelse(j == 1, grid.Ny, j - 1), k, grid, args...) + f(i, j, k, grid, args...))
+
+@inline ℑxTᶠᵃᵃ(i, j, k, grid::AGXP{FT}, c::AbstractArray) where FT = @inbounds FT(0.5) * (c[ifelse(i == 1, grid.Nx, i - 1), j, k] + c[i, j, k])
+@inline ℑyTᵃᶠᵃ(i, j, k, grid::AGYP{FT}, c::AbstractArray) where FT = @inbounds FT(0.5) * (c[i, ifelse(j == 1, grid.Ny, j - 1), k] + c[i, j, k])
+
+@inline ℑxTᶜᵃᵃ(i, j, k, grid::AGXP{FT}, f, args...) where FT = FT(0.5) * (f(i, j, k, grid, args...) + f(ifelse(i == grid.Nx, 1, i + 1), j, k, grid, args...))
+@inline ℑyTᵃᶜᵃ(i, j, k, grid::AGYP{FT}, f, args...) where FT = FT(0.5) * (f(i, j, k, grid, args...) + f(i, ifelse(j == grid.Ny, 1, j + 1), k, grid, args...))
+
+@inline ℑxTᶜᵃᵃ(i, j, k, grid::AGXP{FT}, u::AbstractArray) where FT = @inbounds FT(0.5) * (u[i, j, k] + u[ifelse(i == grid.Nx, 1, i + 1), j, k])
+@inline ℑyTᵃᶜᵃ(i, j, k, grid::AGYP{FT}, v::AbstractArray) where FT = @inbounds FT(0.5) * (v[i, j, k] + v[i, ifelse(j == grid.Ny, 1, j + 1), k])
+
+# Closed walls: no flux across either wall for a cell-centered `f` (`δ`), whose image across the
+# wall is the wall cell (`ℑ`); no penetration for an x-face `f` (`impenetrable_difference`).
+@inline δxTᶠᵃᵃ(i, j, k, grid::AGXS{FT, L, R}, f, args...) where {FT, L, R} =
+    ifelse(((L === Closed) & (i == 1)) | ((R === Closed) & (i == grid.Nx + 1)), zero(FT), δxᶠᵃᵃ(i, j, k, grid, f, args...))
+@inline δyTᵃᶠᵃ(i, j, k, grid::AGYS{FT, L, R}, f, args...) where {FT, L, R} =
+    ifelse(((L === Closed) & (j == 1)) | ((R === Closed) & (j == grid.Ny + 1)), zero(FT), δyᵃᶠᵃ(i, j, k, grid, f, args...))
+
+@inline ℑxTᶠᵃᵃ(i, j, k, grid::AGXS{FT, L, R}, f, args...) where {FT, L, R} =
+    FT(0.5) * (f(ifelse((L === Closed) & (i == 1), i, i - 1), j, k, grid, args...) +
+               f(ifelse((R === Closed) & (i == grid.Nx + 1), i - 1, i), j, k, grid, args...))
+@inline ℑyTᵃᶠᵃ(i, j, k, grid::AGYS{FT, L, R}, f, args...) where {FT, L, R} =
+    FT(0.5) * (f(i, ifelse((L === Closed) & (j == 1), j, j - 1), k, grid, args...) +
+               f(i, ifelse((R === Closed) & (j == grid.Ny + 1), j - 1, j), k, grid, args...))
+
+@inline ℑxTᶠᵃᵃ(i, j, k, grid::AGXS{FT, L, R}, c::AbstractArray) where {FT, L, R} =
+    @inbounds FT(0.5) * (c[ifelse((L === Closed) & (i == 1), i, i - 1), j, k] + c[ifelse((R === Closed) & (i == grid.Nx + 1), i - 1, i), j, k])
+@inline ℑyTᵃᶠᵃ(i, j, k, grid::AGYS{FT, L, R}, c::AbstractArray) where {FT, L, R} =
+    @inbounds FT(0.5) * (c[i, ifelse((L === Closed) & (j == 1), j, j - 1), k] + c[i, ifelse((R === Closed) & (j == grid.Ny + 1), j - 1, j), k])
+
+@inline δxTᶜᵃᵃ(i, j, k, grid::AGXS{<:Any, L, R}, f, args...) where {L, R} =
+    Operators.impenetrable_difference(f(i + 1, j, k, grid, args...), f(i, j, k, grid, args...),
+                                      (L === Closed) & (i == 1), (R === Closed) & (i == grid.Nx))
+@inline δyTᵃᶜᵃ(i, j, k, grid::AGYS{<:Any, L, R}, f, args...) where {L, R} =
+    Operators.impenetrable_difference(f(i, j + 1, k, grid, args...), f(i, j, k, grid, args...),
+                                      (L === Closed) & (j == 1), (R === Closed) & (j == grid.Ny))
+
+@inline δxTᶜᵃᵃ(i, j, k, grid::AGXS{<:Any, L, R}, u::AbstractArray) where {L, R} =
+    @inbounds Operators.impenetrable_difference(u[i + 1, j, k], u[i, j, k], (L === Closed) & (i == 1), (R === Closed) & (i == grid.Nx))
+@inline δyTᵃᶜᵃ(i, j, k, grid::AGYS{<:Any, L, R}, v::AbstractArray) where {L, R} =
+    @inbounds Operators.impenetrable_difference(v[i, j + 1, k], v[i, j, k], (L === Closed) & (j == 1), (R === Closed) & (j == grid.Ny))
+
+# Vertical counterparts on a `Bounded` z, which Oceananigans has no convention for: a cell-centered
+# `f` has zero-gradient images across the bottom and top faces, the images `fill_halo_regions!`
+# makes with the default no-flux conditions of the substep fields, so `δzTᵃᵃᶠ` vanishes on those
+# faces and `ℑzTᵃᵃᶠ` returns the boundary cell there. Nothing reads past k = 1 or k = Nz + 1.
+# TODO: move to Oceananigans with the block above.
+const AGZB = AbstractGrid{FT, <:Any, <:Any, Bounded} where FT
+
+@inline ℑzTᵃᵃᶠ(i, j, k, grid, f, args...) = ℑzᵃᵃᶠ(i, j, k, grid, f, args...)
+@inline δzTᵃᵃᶠ(i, j, k, grid, f, args...) = δzᵃᵃᶠ(i, j, k, grid, f, args...)
+
+@inline ℑzTᵃᵃᶠ(i, j, k, grid::AGZB{FT}, f, args...) where FT =
+    FT(0.5) * (f(i, j, ifelse(k == 1, k, k - 1), grid, args...) + f(i, j, ifelse(k == grid.Nz + 1, k - 1, k), grid, args...))
+@inline ℑzTᵃᵃᶠ(i, j, k, grid::AGZB{FT}, c::AbstractArray) where FT =
+    @inbounds FT(0.5) * (c[i, j, ifelse(k == 1, k, k - 1)] + c[i, j, ifelse(k == grid.Nz + 1, k - 1, k)])
+
+@inline δzTᵃᵃᶠ(i, j, k, grid::AGZB, f, args...) =
+    f(i, j, ifelse(k == grid.Nz + 1, k - 1, k), grid, args...) - f(i, j, ifelse(k == 1, k, k - 1), grid, args...)
+@inline δzTᵃᵃᶠ(i, j, k, grid::AGZB, c::AbstractArray) =
+    @inbounds c[i, j, ifelse(k == grid.Nz + 1, k - 1, k)] - c[i, j, ifelse(k == 1, k, k - 1)]
+
+@inline ∂zTᶜᶜᶠ(i, j, k, grid, f, args...) = δzTᵃᵃᶠ(i, j, k, grid, f, args...) * Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
 
 #####
 ##### Section 2 — Constructor
@@ -1063,8 +1131,7 @@ function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 end
 
 # Apply the last substep's fused divergence damping, then fill the halos of (ρu)′, (ρv)′ and enforce
-# impenetrability: inside the loop the next substep's own fill precedes any reader of those halos,
-# so only the last substep's damped values need them, for the state recovery.
+# impenetrability, as the loop does after its explicit horizontal step.
 function finish_horizontal_momentum_perturbations!(model, substepper, stage)
     grid = model.grid
     apply_divergence_damping!(fused_divergence_damping(substepper.damping), substepper, grid, stage.Δτ,
@@ -1190,9 +1257,9 @@ fused_divergence_damping(damping::ThermalDivergenceDamping) = damping
 separate_divergence_damping(damping) = damping
 separate_divergence_damping(::ThermalDivergenceDamping) = NoDivergenceDamping()
 
-# The fields whose halos are filled after `_post_solve_recovery!`, in one launch per side: (ρθ)′,
-# whose horizontal and vertical neighbors the next substep reads, and what the damping reads next
-# to it. Nothing else read off-column is written in a substep except (ρu)′, (ρv)′.
+# The fields whose halos are exchanged after `_post_solve_recovery!` on a distributed grid, in one
+# launch per side: (ρθ)′, whose horizontal and vertical neighbors the next substep reads, and what
+# the damping reads next to it. Nothing else read off-column is written in a substep except (ρu)′, (ρv)′.
 post_recovery_halo_fields(damping, substepper) = (substepper.density_potential_temperature_perturbation,)
 
 # `ThermalDivergenceDamping` differentiates (ρθ)′ − (ρθ)′ˢ⁻ horizontally, and reads no halo of
@@ -1791,7 +1858,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # substep before when that is fused into this step.
     explicit_horizontal_step!(fused_divergence_damping(substepper.damping), substepper, model, Δτ)
 
-    # No fills on a single-architecture grid (`fill_substep_halos!`), here and below.
+    # Distributed exchanges only (`fill_substep_halos!`), here and below: the kernels read no halos.
     fill_substep_halos!(substepper.momentum_perturbation.u, model)
     fill_substep_halos!(substepper.momentum_perturbation.v, model)
 
