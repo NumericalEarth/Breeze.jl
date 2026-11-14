@@ -45,7 +45,7 @@ using Oceananigans.Grids: Flat, topology, znode, rnode, ξnode, ηnode
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Models: LagrangianParticleTracking
 using Oceananigans.TimeSteppers: AbstractLagrangianParticles
-using Oceananigans.Utils: instantiate, interpolator, launch!
+using Oceananigans.Utils: instantiate, launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ
 

@@ -248,7 +248,9 @@ raises `nⁱ` where the tabulated lower bound binds and lowers it where the uppe
     # Losses (all positive magnitudes)
     # sublimation_number — ice number loss from sublimation
     # ni_limit: global Nⁱ cap; relaxation sink above Nⁱ_max/ρ.
-    loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit
+    # homogeneous_number_excess: frozen number that does not fit under the Nⁱ cap.
+    loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit +
+           rates.homogeneous_number_excess
     return ρ * (gain - loss + rates.ice_number_correction)
 end
 

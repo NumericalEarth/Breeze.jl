@@ -132,7 +132,18 @@ transport then advects the water with the preceding loop's mean velocity (the
 outer-step-start velocity in stage 1;
 [#1089](https://github.com/NumericalEarth/Breeze.jl/issues/1089)), so the water follows the
 loop-mean compression of the
-air, one stage late, but not the acoustic oscillation within a loop. The loop linearizes at
+air, one stage late, but not the acoustic oscillation within a loop. Because the preceding
+loop's mean differs from the one continuity applies, a uniform mass fraction does not stay
+uniform. With `timestepper_kwargs = (; post_loop_scalar_tendencies = true)` the water and
+tracer tendencies are instead rebuilt after each stage's own loop, from its mean mass flux, as
+WRF and MPAS do; their fluxes are then exactly ``q / (1 - q)`` times the dry-mass flux the stage
+applied, and a uniform mass fraction stays uniform to round-off with `AcousticRungeKutta3`. Under
+a multirate infinitesimal step the whole post-loop tendency, advection included, is recombined
+across stages with the tableau like any other slow tendency. Leaving the advective part at weight
+one from the current stage would keep the fluxes paired with continuity's, but it integrates
+advection with a first-order, anti-diffusive method that amplifies scalars at every Courant
+number; recombined, a uniform mass fraction stays uniform to the accuracy of the scheme rather
+than to round-off. The loop linearizes at
 fixed composition. This is exact for the slow, loop-mean compression, where it keeps the loop
 consistent with the re-diagnosed pressure in balanced flow, and it gives the moist adiabatic
 compressibility. For the oscillation itself the re-diagnosed state is closer to fixed water
@@ -150,6 +161,53 @@ at the converged root. Without condensate this vanishes for every inversion, so
 ``p' = C^L (ρθ)'`` is the complete linearization. In cloud the loop omits it; for 5 g/kg of cloud
 liquid it is about 5% of ``C^L θ^L``.
 
+Where the microphysics adjusts the partition of its moisture density to saturation, as
+saturation adjustment does in cloud, the pressure that the core re-diagnoses is that of the
+adjusted partition: the vapor density is the saturation one, ``ρ^{v+}(T)``, and the cloud
+condensate takes up the rest of the moisture density, a fraction ``λ(T)`` of it as liquid.
+Warming evaporates condensate, which takes up most of the heat. The loop linearizes that
+pressure there. Let ``\bar{C}^L`` be the slope above, at the held partition, and ``Λ^x`` the
+thermodynamic density that a unit of phase ``x`` holds at fixed pressure,
+``∂p/∂ρ^x = - \bar{C}^L Λ^x``, with ``Λ^c = λ Λ^l + (1 - λ) Λ^i`` that of the cloud condensate.
+A change at the held temperature puts the moisture into the cloud condensate; the temperature
+then moves, and with it the partition. With ``s^v = \mathrm{d}ρ^{v+}/\mathrm{d}T`` and ``ρ^c`` the
+cloud condensate density, eliminating the temperature between the two and
+``p = (ρ^d R^d + ρ^v R^v) T`` gives the slope at fixed densities,
+
+```math
+\frac{∂p}{∂(ρθ)} = ζ \, \bar{C}^L , \qquad
+ζ = \frac{1}{1 + \bar{C}^L σ} , \qquad
+σ = \frac{(Λ^v - Λ^c) \, s^v + (Λ^l - Λ^i) \, ρ^c \, \mathrm{d}λ/\mathrm{d}T}{ρ R^m + R^v T s^v} ,
+```
+
+and, at fixed ``ρθ`` and mixing ratios,
+
+```math
+\frac{∂p}{∂ρ^d} = ζ \, \bar{C}^L \left( Λ^H + E \right) , \qquad
+Λ^H = θ^L \frac{H^c}{c^p_m T - H^c} , \qquad
+E = (Λ^v - Λ^c) \frac{ρ^v}{ρ^d} + R^d T σ .
+```
+
+``ζ`` is about 0.4 at 290 K: at fixed densities the adjusted pressure responds to the
+thermodynamic density at less than half the rate of a held partition, and a unit of dry air
+adds the rest of its partial pressure, so that ``E`` is about as large as ``θ``. The loop's own
+flux compresses the air at fixed ``θ`` and mixing ratios, and along that path the adjusted
+pressure follows the moist adiabat. There the loop's coefficient is the slope along its flux,
+
+```math
+C^L = ζ \, \bar{C}^L \left( 1 + \frac{E}{θ^L + Λ^H} \right) ,
+```
+
+which is 10 to 15% below ``\bar{C}^L``, the ratio of the equilibrium to the frozen sound speed
+squared. A loop that linearized at the held partition would be that much stiffer than the
+pressure which the next stage re-diagnoses, and grid-scale modes in saturated air would grow at
+large time steps without divergence damping
+([#1086](https://github.com/NumericalEarth/Breeze.jl/issues/1086)). What does not follow the
+loop's flux, the state a stage starts from and its slow tendencies, enters the loop's pressure
+with the slopes above, in units of ``C^L``. ``s^v`` and ``\mathrm{d}λ/\mathrm{d}T`` are centered
+differences of the saturation vapor density and liquid fraction that the adjustment itself
+uses, so they follow the selected saturation vapor pressure and phase equilibrium.
+
 The momentum is the dry-mass momentum ``ρ^d \boldsymbol{u}``, and the compressible core applies
 the full pressure gradient and gravity ``-∇p - g ρ \hat{\boldsymbol{z}}`` to it. Its acoustic
 inertia is therefore ``ρ^d`` rather than ``ρ``. Thus the sound speed is ``\sqrt{γ^e p / ρ^d}``. In
@@ -160,8 +218,9 @@ because that formulation's adiabat uses ``κ^d``. In unsaturated air ``C^L`` giv
 the same speed as the stage-entry pressure gradient and
 [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping), which both use
 the exact equation of state. In cloud they differ: the loop omits ``∂p/∂ρ^d``, which lowers its
-``c^2`` by the fraction ``H^c / (c^p_m T - H^c)``, and holds the composition fixed, while
-saturation adjustment re-equilibrates the condensate at every stage. Weighting the pressure
+``c^2`` by the fraction ``H^c / (c^p_m T - H^c)``, and holds the composition fixed. Where
+saturation adjustment re-equilibrates the condensate at every stage, the loop has the sound speed
+along the moist adiabat, as the pressure that the adjustment re-diagnoses does. Weighting the pressure
 gradient and gravity by ``ρ^d / ρ``, as WRF-ARW does, would give ``c^2 = γ^e R^m T`` with the same
 ``C^L``, which is ``γ^m R^m T`` in unsaturated air with the vapor-equivalent exponent
 ([#1210](https://github.com/NumericalEarth/Breeze.jl/issues/1210)).
@@ -469,6 +528,15 @@ floating-point noise through the non-normal substep operator (see
 [Stability analysis](@ref stability-analysis)).
 A fully implicit backward Euler scheme is obtained with ``ω = 1`` and offers the most dissipation.
 The default ``ω = 0.65`` adds modest dissipation; the dimensionless parameter ``ε = 2ω - 1 = 0.3`` quantifies the deviation from centered.
+
+### Lateral boundary conditions
+
+Each substep zeros normal momentum perturbations on bounded lateral faces, including prescribed-flow
+faces. Prescribed momentum is carried by the stage-entry state, with BCs reapplied after stage recovery.
+This deliberately replaces west/south open-face updates, matching east/north.
+
+At active `NormalFlowBoundaryCondition` sides, the outermost ``ρ'`` and ``(ρθ)'`` cells relax
+toward prescribed scalar values each substep, controlled by `open_boundary_relaxation`.
 
 ### Recovery
 

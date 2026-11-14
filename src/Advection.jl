@@ -1,16 +1,22 @@
 module Advection
 
 export div_ρUc,
-       bottom_advective_tracer_flux
+       bottom_advective_tracer_flux,
+       FrozenWeightsWENO
 
 using Oceananigans.Advection:
+    Advection as OceananigansAdvection,
     _advective_tracer_flux_x,
     _advective_tracer_flux_y,
     _advective_tracer_flux_z,
     AdaptiveImplicitVerticalAdvection,
+    AbstractUpwindBiasedAdvectionScheme,
+    _biased_interpolate_xᶠᵃᵃ,
+    _biased_interpolate_yᵃᶠᵃ,
     _biased_interpolate_zᵃᵃᶠ,
     BoundsPreservation,
     BoundsPreservingWENO,
+    FunctionStencil,
     LeftBias,
     RightBias,
     upwind_biased_product,
@@ -20,17 +26,25 @@ using Oceananigans.Advection:
     bounded_tracer_flux_divergence_y,
     bounded_tracer_flux_divergence_z,
     explicit_velocity_scaleᶜᶜᶠ,
+    materialize_advection,
+    adapt_advection_order,
+    update_adaptive_timestep!,
     vertical_scheme,
     WENO
 
-using Adapt: Adapt
+using Adapt: Adapt, adapt
+using Oceananigans: Oceananigans, CenterField
 using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.Fields: Field, ZeroField
 using Oceananigans.Grids: Center
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
-using Oceananigans.TimeSteppers: time_discretization
+using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_discretization
+using DocStringExtensions: TYPEDEF
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+
+using Breeze.TimeSteppers: tendencies_feed_first_stage
 
 using ..AtmosphereModels:
     AtmosphereModels,
@@ -265,6 +279,132 @@ function AtmosphereModels.bottom_precipitation_flux(model, microphysics)
                                                                  total_density(model.dynamics),
                                                                  transport_velocities(model).w)
     return Field(operation)
+end
+
+#####
+##### WENO with nonlinear weights frozen at the outer-step start
+#####
+
+# Reads the stored step-start tracer. A `Function` subtype, so WENO's `FunctionStencil` path
+# loads its smoothness stencil from this field in place of the reconstructed one.
+struct StepStartTracer{F} <: Function
+    field :: F
+end
+
+@inline (c::StepStartTracer)(i, j, k, grid) = @inbounds c.field[i, j, k]
+
+Adapt.adapt_structure(to, c::StepStartTracer) = StepStartTracer(adapt(to, c.field))
+Architectures.on_architecture(to, c::StepStartTracer) = StepStartTracer(on_architecture(to, c.field))
+
+Adapt.adapt_structure(to, VI::FunctionStencil{<:StepStartTracer}) = FunctionStencil(adapt(to, VI.func))
+Architectures.on_architecture(to, VI::FunctionStencil{<:StepStartTracer}) = FunctionStencil(on_architecture(to, VI.func))
+
+"""
+$(TYPEDEF)
+
+A scalar advection scheme that reconstructs with the stencils and optimal weights of a `WENO`
+scheme, but with the nonlinear smoothness weights computed from the tracer at the start of the
+outer time step rather than from the stage state being reconstructed. The fluxes stay live: only
+the weights are frozen, so the stage reconstruction is linear in the stage tracer and the
+[`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep) stage recombination sees one consistent advection operator
+for the whole step, as it does with `UpwindBiased`. Under any other time stepper the frozen
+tracer is refreshed before every tendency evaluation, and the scheme reduces to its `WENO`.
+
+The scheme carries one `CenterField` per tracer, the tracer copy at the step start, which
+`update_advection!` refreshes before the tendency evaluations that feed the first stage of a
+step (`Breeze.TimeSteppers.tendencies_feed_first_stage`). It is a scalar
+scheme: momentum has no step-start copy, so it cannot be given as `momentum_advection`.
+Bounds preservation is not supported.
+
+```jldoctest
+using Breeze
+
+FrozenWeightsWENO(order=9)
+
+# output
+FrozenWeightsWENO(order=9)
+└── weno: WENO{5, Float64, Nothing}(order=9)
+```
+"""
+struct FrozenWeightsWENO{N, FT, TD, W, S} <: AbstractUpwindBiasedAdvectionScheme{N, FT, TD}
+    weno :: W                # stencils, smoothness indicators and optimal weights
+    smoothness_stencil :: S  # `nothing` until materialized; then reads the step-start tracer
+
+    function FrozenWeightsWENO(weno::WENO{N, FT, WCT, TD}, smoothness_stencil::S) where {N, FT, WCT, TD, S}
+        isnothing(weno.bounds) ||
+            throw(ArgumentError("FrozenWeightsWENO does not support bounds-preserving WENO."))
+        return new{N, FT, TD, typeof(weno), S}(weno, smoothness_stencil)
+    end
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Construct a [`FrozenWeightsWENO`](@ref) from `weno`, or from the `WENO` built with `FT` and the
+keyword arguments of `WENO`.
+"""
+FrozenWeightsWENO(weno::WENO) = FrozenWeightsWENO(weno, nothing)
+FrozenWeightsWENO(FT::DataType=Oceananigans.defaults.FloatType; kwargs...) = FrozenWeightsWENO(WENO(FT; kwargs...))
+
+step_start_tracer(scheme::FrozenWeightsWENO) = scheme.smoothness_stencil.func.field
+
+Base.summary(::FrozenWeightsWENO{N}) where N = string("FrozenWeightsWENO(order=", 2N-1, ")")
+
+function Base.show(io::IO, scheme::FrozenWeightsWENO)
+    print(io, summary(scheme), '\n')
+    print(io, "└── weno: ", summary(scheme.weno))
+end
+
+Adapt.adapt_structure(to, scheme::FrozenWeightsWENO) =
+    FrozenWeightsWENO(adapt(to, scheme.weno), adapt(to, scheme.smoothness_stencil))
+
+Architectures.on_architecture(to, scheme::FrozenWeightsWENO) =
+    FrozenWeightsWENO(on_architecture(to, scheme.weno), on_architecture(to, scheme.smoothness_stencil))
+
+@inline OceananigansTimeSteppers.time_discretization(scheme::FrozenWeightsWENO) = time_discretization(scheme.weno)
+
+# The step-start copy is allocated here, once per tracer, like the bounds-preserving limiter.
+OceananigansAdvection.materialize_advection(scheme::FrozenWeightsWENO, grid) =
+    FrozenWeightsWENO(materialize_advection(scheme.weno, grid), FunctionStencil(StepStartTracer(CenterField(grid))))
+
+# Order adaptation on small grids happens after materialization in `AtmosphereModel`, so the
+# lowered-order WENO is materialized here and the step-start copy is kept.
+function OceananigansAdvection.adapt_advection_order(scheme::FrozenWeightsWENO{B}, N::Int, grid) where B
+    N >= B && return scheme
+    return FrozenWeightsWENO(materialize_advection(adapt_advection_order(scheme.weno, N, grid), grid), scheme.smoothness_stencil)
+end
+
+AtmosphereModels.validate_momentum_advection(::FrozenWeightsWENO, grid) =
+    throw(ArgumentError("FrozenWeightsWENO is a scalar advection scheme; pass it as `scalar_advection` " *
+                        "and give `momentum_advection` a scheme of its own."))
+
+# The reconstruction: WENO's `FunctionStencil` path loads the stencil of `ψ` for the anchor and
+# differences, and the stencil of the step-start tracer for the smoothness indicators. Routing
+# through the topologically conditional `_biased_interpolate` of the inner scheme keeps the
+# buffer-scheme fallback near boundaries, which passes the stencil on to the lower-order WENOs.
+@inline OceananigansAdvection._biased_interpolate_xᶠᵃᵃ(i, j, k, grid, scheme::FrozenWeightsWENO, bias, ψ) =
+    _biased_interpolate_xᶠᵃᵃ(i, j, k, grid, scheme.weno, bias, ψ, scheme.smoothness_stencil)
+
+@inline OceananigansAdvection._biased_interpolate_yᵃᶠᵃ(i, j, k, grid, scheme::FrozenWeightsWENO, bias, ψ) =
+    _biased_interpolate_yᵃᶠᵃ(i, j, k, grid, scheme.weno, bias, ψ, scheme.smoothness_stencil)
+
+@inline OceananigansAdvection._biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme::FrozenWeightsWENO, bias, ψ) =
+    _biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme.weno, bias, ψ, scheme.smoothness_stencil)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Refresh the step-start copy of `tracer` that `scheme` computes its smoothness weights from, when the
+tendencies about to be built feed the first stage of an outer step; between the stages of a
+[`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep) the copy is left as it is. The halos are copied with the
+interior, so no halo fill follows.
+"""
+function OceananigansAdvection.update_advection!(scheme::FrozenWeightsWENO, model, tracer)
+    update_adaptive_timestep!(scheme, model)
+    if tendencies_feed_first_stage(model.timestepper)
+        copyto!(parent(step_start_tracer(scheme)), parent(tracer))
+    end
+    return nothing
 end
 
 end # module

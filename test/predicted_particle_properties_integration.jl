@@ -13,7 +13,7 @@ using Breeze.ParcelModels: step_parcel_state!
 using GPUArraysCore: @allowscalar
 
 using Oceananigans: Bounded, CPU, Center, CenterField, Face, Field, Flat, GridFittedBottom,
-                     ImmersedBoundaryGrid, RectilinearGrid, compute!, set!, time_step!
+                     ImmersedBoundaryGrid, RectilinearGrid, WENO, compute!, set!, time_step!
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.Fields: interior, location
@@ -141,6 +141,67 @@ using Oceananigans.TimeSteppers: update_state!
         @test second_rain_source != first_rain_source
     end
 
+@testset "P3 number relaxations are stable for any time step [$FT]" for FT in test_float_types()
+    # Rain and ice number with no mass, in dry air: the only process acting is the
+    # relaxation of each number towards its bound, which is zero without mass. Advanced
+    # explicitly over τ = sink_limiting_timescale it overshoots through zero for Δt > τ
+    # and is unstable for Δt ≳ 2.5 τ under Wicker–Skamarock RK3. Advanced implicitly over
+    # each stage, the final stage leaves τ / (τ + Δt) of the step-start number for any Δt.
+    grid = RectilinearGrid(default_arch, FT; size = (6, 6, 6), halo = (5, 5, 5),
+                           x = (0, 6e3), y = (0, 6e3), z = (0, 6e3))
+    p3 = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = nothing)
+    τ = p3.process_rates.sink_limiting_timescale
+
+    compressible = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature = 300)
+
+    for (dynamics, Δt) in ((compressible, 5), (compressible, 45), (nothing, 45))
+        model = if isnothing(dynamics)
+            constants = ThermodynamicConstants(FT)
+            reference_state = ReferenceState(grid, constants; base_pressure = FT(101325),
+                                             potential_temperature = FT(300))
+            AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
+                            thermodynamic_constants = constants, microphysics = p3)
+        else
+            AtmosphereModel(grid; advection = WENO(), dynamics, microphysics = p3)
+        end
+
+        if isnothing(dynamics)
+            set!(model; θ = FT(300), qᵛ = FT(1e-4), enforce_mass_conservation = false)
+        else
+            set!(model; θ = 300, u = 0, qᵗ = FT(1e-4), ρ = model.dynamics.reference_state.density)
+        end
+
+        μ = model.microphysical_fields
+        fill!(parent(μ.ρnʳ), 1)
+        fill!(parent(μ.ρnⁱ), 1000)
+        update_state!(model)
+
+        time_step!(model, Δt)
+        time_step!(model, Δt)
+
+        ρnʳ₁ = Array(interior(μ.ρnʳ))
+        ρnⁱ₁ = Array(interior(μ.ρnⁱ))
+        time_step!(model, Δt)
+        ρnʳ₂ = Array(interior(μ.ρnʳ))
+        ρnⁱ₂ = Array(interior(μ.ρnⁱ))
+
+        @test all(ρnʳ₂ .> 0)
+        @test all(ρnⁱ₂ .> 0)
+
+        # The compressible stepper restarts its last stage from the step-start state, so
+        # the decay over a step is exactly backward Euler over Δt.
+        if !isnothing(dynamics)
+            decay = FT(τ / (τ + Δt))
+            @test all(isapprox.(ρnʳ₂ ./ ρnʳ₁, decay; rtol = 1e-3))
+            @test all(isapprox.(ρnⁱ₂ ./ ρnⁱ₁, decay; rtol = 1e-3))
+        else
+            @test all(ρnʳ₂ .< ρnʳ₁)
+            @test all(ρnⁱ₂ .< ρnⁱ₁)
+        end
+    end
+end
+
 @testset "P3 has no droplet-number state in the prescribed-Nᶜˡ path" begin
         # In the prescribed-Nᶜˡ path the droplet number is the scheme parameter at every
         # microphysics call, so it is not a state variable. Carrying `ρnᶜˡ`
@@ -207,36 +268,41 @@ using Oceananigans.TimeSteppers: update_state!
         @test all(≈(droplet_number), Array(interior(μₐ.nᶜˡ)))
         @test number_concentration(aerosol_model, :cloud_liquid) === μₐ.ρnᶜˡ
 
-        # Rime mass with no rime volume is not a representable P3 state: ρᶠ = qᶠ/bᶠ is
-        # undefined, so `consistent_rime_state` zeroes both. The repair has to reach the
-        # prognostics, otherwise the hidden rime sits still while the ice carrying it is
-        # transported away, and reappears once bᶠ grows back.
+        # Rime mass with no rime volume, or exceeding the dry ice mass, is not a
+        # representable P3 state. The process rates see a consistent rime state, but it is
+        # never written back: the prognostics keep what transport and the tendencies gave
+        # them, and the advected specific fields are their raw ratios, so transport stays
+        # consistent with the prognostics.
         set!(model; qⁱ = FT(0.002), qᶠ = FT(0.0005), enforce_mass_conservation = false)
+        ρqᶠ_before = cpu(μ.ρqᶠ)
         update_state!(model)
 
         ρ = density()
-        @test all(==(0), cpu(μ.ρqᶠ))
-        @test all(==(0), cpu(μ.ρbᶠ))
+        @test cpu(μ.ρqᶠ) == ρqᶠ_before
+        @test all(>(0), cpu(μ.ρqᶠ))
         @test cpu(μ.qᶠ) ≈ cpu(μ.ρqᶠ) ./ ρ
         @test cpu(μ.bᶠ) ≈ cpu(μ.ρbᶠ) ./ ρ
 
-        # Rime mass exceeding the dry ice mass is capped at that mass, at fixed rime
-        # density. Rime is a component of the ice mass rather than an independent
-        # reservoir, so capping it must leave the total density untouched.
         rime_density = FT(400)
         dry_ice = FT(1e-4)
         excess_rime = FT(1e-3)
         set!(model; qⁱ = dry_ice, qᶠ = excess_rime, bᶠ = excess_rime / rime_density,
              enforce_mass_conservation = false)
-        density_before_repair = density()
+        density_before = density()
+        ρqᶠ_before = cpu(μ.ρqᶠ)
         update_state!(model)
 
         ρ = density()
-        @test ρ ≈ density_before_repair
-        @test all(≈(dry_ice), cpu(μ.ρqᶠ) ./ ρ)
-        @test all(≈(dry_ice / rime_density), cpu(μ.ρbᶠ) ./ ρ)
+        @test ρ ≈ density_before
+        @test cpu(μ.ρqᶠ) == ρqᶠ_before
         @test cpu(μ.qᶠ) ≈ cpu(μ.ρqᶠ) ./ ρ
         @test cpu(μ.bᶠ) ≈ cpu(μ.ρbᶠ) ./ ρ
+
+        # What the rates see is the consistent state: rime capped at the dry ice mass.
+        ℳ = @allowscalar AtmosphereModels.grid_microphysical_state(1, 1, 1, model.grid, model.microphysics,
+                                                                   μ, ρ[1, 1, 1], nothing,
+                                                                   model.velocities)
+        @test ℳ.qᶠ ≈ dry_ice
     end
 
     @testset "P3 parcel substeps write back a consistent rime state" begin
@@ -360,13 +426,16 @@ using Oceananigans.TimeSteppers: update_state!
                                          base_pressure = FT(101325),
                                          potential_temperature = FT(285))
         dynamics = AnelasticDynamics(reference_state)
-        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        # The repair is opt-in: P3's process tendencies are sign-preserving over each stage,
+        # and a repair that overwrites the prognostics between stages breaks multistage
+        # time integration.
+        @test isnothing(AtmosphereModels.negative_moisture_correction(PredictedParticlePropertiesMicrophysics(FT)))
+
+        p3 = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = AtmosphereModels.SpeciesBorrowing())
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants = constants,
                                 microphysics = p3)
         μ = model.microphysical_fields
 
-        # The repair is opt-out, not opt-in: P3 carries eight prognostic densities in the
-        # default configuration, through a non-positive-definite advection operator.
         @test AtmosphereModels.negative_moisture_correction(p3) isa AtmosphereModels.SpeciesBorrowing
         @test AtmosphereModels.correction_moisture_fields(p3, μ) ===
               (μ.ρqʷⁱ, μ.ρqⁱ, μ.ρqʳ, μ.ρqᶜˡ)
@@ -468,9 +537,8 @@ using Oceananigans.TimeSteppers: update_state!
         qⁱ = FT(0.002)
         qʷⁱ = FT(0.001)
         qᶠ = FT(0.0005)
-        # Rime mass needs a rime volume to go with it: `consistent_rime_state` zeroes both
-        # when `bᶠ` vanishes, and `clamp_rime_state!` writes that repair back. Pick a rime
-        # density inside [minimum_rime_density, maximum_rime_density] so the state survives.
+        # Rime mass needs a rime volume to go with it, at a rime density inside
+        # [minimum_rime_density, maximum_rime_density], to be a representable state.
         rime_density = FT(400)
         bᶠ = qᶠ / rime_density
         nⁱ = FT(1e4)

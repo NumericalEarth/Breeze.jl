@@ -73,7 +73,8 @@ using Breeze.Microphysics:
     NumberConcentrationKernelFunction,
     condensation_rate,
     deposition_rate,
-    adjust_thermodynamic_state
+    adjust_thermodynamic_state,
+    equilibrium_moisture_phase_fractions
 
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN
 
@@ -85,6 +86,7 @@ using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
 
 include("cloud_microphysics_translations.jl")
+include("sink_budgets.jl")
 include("one_moment_microphysics.jl")
 include("one_moment_helpers.jl")
 include("two_moment_microphysics.jl")

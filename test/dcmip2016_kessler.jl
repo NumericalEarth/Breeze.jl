@@ -591,3 +591,28 @@ end
     model = AtmosphereModel(grid; microphysics, thermodynamic_constants=tetens_constants)
     @test model.microphysics isa DCMIP2016KesslerMicrophysics
 end
+
+@testset "Kessler leaves negative water unclipped and conserves water" begin
+    using Breeze.Microphysics: step_kessler_microphysics, mass_fractions_to_mixing_ratios
+    using Breeze.Thermodynamics: TetensFormulaThermodynamicConstants
+    FT = Float64
+    microphysics = DCMIP2016KesslerMicrophysics()
+    constants = ThermodynamicConstants(FT; saturation_vapor_pressure = TetensFormula())
+    f₅ = saturation_adjustment_coefficient(microphysics.dcmip_temperature_scale, constants)
+    δT = constants.saturation_vapor_pressure.liquid_temperature_offset
+    T, ρ, p, Δt = FT(285), FT(1.1), FT(9e4), FT(10)
+
+    # Advection undershoots: negative cloud and rain in subsaturated air
+    rᵛ, rᶜˡ, rʳ = FT(5e-3), FT(-1e-5), FT(-2e-6)
+    rᵛ⁺, rᶜˡ⁺, rʳ⁺, _ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, ρ, p, Δt,
+                                                   microphysics, constants, f₅, δT, FT)
+    @test rᶜˡ⁺ == rᶜˡ
+    @test rʳ⁺ == rʳ
+    @test rᵛ⁺ + rᶜˡ⁺ + rʳ⁺ ≈ rᵛ + rᶜˡ + rʳ
+
+    # Negative mass fractions convert without clipping
+    rᵛ₂, rᶜˡ₂, rʳ₂ = mass_fractions_to_mixing_ratios(FT(5e-3), FT(-1e-5), FT(-2e-6), FT(1))
+    @test rᶜˡ₂ < 0
+    @test rʳ₂ < 0
+    @test isfinite(kessler_terminal_velocity(FT(-1e-6), ρ, ρ, microphysics))
+end

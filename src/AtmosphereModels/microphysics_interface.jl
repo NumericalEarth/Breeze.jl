@@ -299,6 +299,156 @@ override this method directly to compute the bundle once per cell.
 compute_microphysical_tendencies!(model) =
     compute_microphysical_tendencies!(model.microphysics, model)
 
+#####
+##### The stage that the tendencies being built will be applied over
+#####
+#
+# A multi-stage time stepper applies the tendencies evaluated at one state to another:
+# Wicker–Skamarock RK3 evaluates them at the latest stage state and adds them to the
+# step-start state. A scheme that budgets its sinks against the state it is evaluated at
+# therefore guarantees nothing about the state it is applied to. `StageStart` hands a
+# microphysics kernel what it needs to budget against the right one.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether the coming stage of `timestepper` starts from the state at the start of the time
+step (`true`) or from the current state (`false`, as for forward Euler and SSP-RK3 stages).
+"""
+@inline stage_starts_from_initial_state(timestepper, clock) = false
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The prognostic fields at the start of the time step, for time steppers whose stages start
+from them (see [`stage_starts_from_initial_state`](@ref)); otherwise the current fields.
+"""
+@inline initial_state_fields(timestepper, model) = prognostic_fields(model)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The interval over which the coming stage applies the tendencies being built. It is not
+finite before the first time step.
+"""
+@inline stage_time_step(timestepper, clock) =
+    Oceananigans.Advection.adaptive_advection_timestep(timestepper, clock)
+
+"""
+$(TYPEDEF)
+
+The state that the coming stage starts from, and the interval `Δt` it advances over, for
+kernels that build tendencies. See [`stage_start_value`](@ref).
+"""
+struct StageStart{I, C, B, T}
+    initial :: I       # fields at the start of the time step
+    current :: C       # fields now
+    from_initial :: B  # whether the coming stage starts from `initial`
+    Δt :: T            # interval of the coming stage
+end
+
+# `from_initial` and `Δt` are adapted too: under Reactant both are traced numbers
+# that the kernel adaptor must convert.
+Adapt.adapt_structure(to, s::StageStart) =
+    StageStart(adapt(to, s.initial), adapt(to, s.current), adapt(to, s.from_initial), adapt(to, s.Δt))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The [`StageStart`](@ref) of `model` for the prognostic fields that `select` picks out of a
+`NamedTuple` of them.
+"""
+function StageStart(model, select)
+    timestepper = model.timestepper
+    grid = model.grid
+    Δt = kernel_time_step(grid.architecture, grid, stage_time_step(timestepper, model.clock))
+    return StageStart(select(initial_state_fields(timestepper, model)),
+                      select(prognostic_fields(model)),
+                      stage_starts_from_initial_state(timestepper, model.clock),
+                      Δt)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The value at `(i, j, k)` of the field `name` at the state the coming stage starts from.
+"""
+@inline function stage_start_value(i, j, k, s::StageStart, ::Val{name}) where name
+    @inbounds initial = getproperty(s.initial, name)[i, j, k]
+    @inbounds current = getproperty(s.current, name)[i, j, k]
+    return ifelse(s.from_initial, initial, current)
+end
+
+#####
+##### Patankar-limited sinks
+#####
+#
+# A scheme's process rates are evaluated at one state and applied by the time stepper to the
+# state the coming stage starts from, over the stage interval `Δt`, alongside transport.
+# Neither the state nor the interval need match those a rate was budgeted against, so the
+# rates alone cannot keep a species non-negative.
+#
+# A sink can instead be advanced in Patankar form. With `c̃ = c⁰ + Δt Gᵒ` what the stage start
+# `c⁰` and every other tendency `Gᵒ` leave of a species, and `L` its total microphysical loss
+# rate, the loss is weighted by the ratio of the updated to the available content,
+# `L c⁺ / c̃`, so that
+#
+#     c⁺ = c̃ / (1 + Δt L / c̃)
+#
+# is non-negative for any `Δt`. That is the explicit loss scaled by `φ = c̃ / (c̃ + Δt L)`.
+# Where each process is one transfer between species, scaling a transfer by the `φ` of the
+# species it draws on (the smallest, where it draws on several) scales the recipient's gain
+# by the same factor and conserves the exchange exactly. Gains are left out of `c̃`, which
+# makes each `φ` a function of the explicit rates alone and avoids a coupled solve; the
+# cost is that a species cannot spend, within a stage, what it gains in that stage.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether the interval of the coming stage is known. It is not before the first time step.
+"""
+@inline stage_interval_is_known(stage::StageStart) = isfinite(stage.Δt) & (stage.Δt > 0)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+What the state the coming stage starts from and the tendency `G` accumulated so far leave
+of the field `name` at `(i, j, k)`: `c̃ = c⁰ + Δt G`. Not clamped, so it is negative where
+transport has left a negative value.
+"""
+@inline function stage_remainder(i, j, k, G, stage::StageStart, name)
+    c⁰ = stage_start_value(i, j, k, stage, name)
+    @inbounds Gᵒ = G[i, j, k]
+    return c⁰ + stage.Δt * Gᵒ
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The Patankar weight `φ = c̃ / (c̃ + Δt L)` on a loss rate `L` drawn over `Δt` from the
+content `c̃`. `φ = 0` where nothing is left to give, and `φ = 1` where nothing is asked.
+"""
+@inline function patankar_fraction(c̃, Δt, L)
+    available = max(0, c̃)
+    demand = Δt * max(0, L)
+    φ = available / (available + demand)
+    return ifelse(available + demand > 0, φ, one(φ))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The Patankar weight `φ = c̃ / (c̃ + Δt L)` on the sinks of a species with loss rate `L`
+(a density tendency), where `c̃ = c⁰ + Δt Gᵒ` is what the state the coming stage starts
+from and every other tendency leave of it. `φ = 0` where nothing is left, and `φ = 1`
+before the first time step, when the stage interval is not known.
+"""
+@inline function patankar_sink_fraction(i, j, k, G, stage::StageStart, name, L)
+    c̃ = stage_remainder(i, j, k, G, stage, name)
+    φ = patankar_fraction(c̃, stage.Δt, L)
+    return ifelse(stage_interval_is_known(stage), φ, one(φ))
+end
+
 # No microphysics: nothing to add.
 compute_microphysical_tendencies!(::Nothing, model) = nothing
 
@@ -849,11 +999,14 @@ behind. The fraction is the enthalpy the mass carries, not what it falls with: P
 ice `ρqʷⁱ` falls at the ice speed yet is liquid, because no fusion enthalpy has been released
 for it and [`moisture_fractions`](@ref) counts it in the liquid mass fraction.
 
-The default `nothing` covers three cases, none needing a method: condensate that does not
-sediment (saturation-adjusted cloud), a sedimenting tracer that is not a condensate mass (a
-number moment such as `ρnᶜˡ`, or a non-additive property such as P3's `ρqᶠ` and `ρbᶠ`), and a
-scheme that precipitates by its own means. Only a sedimenting condensate mass with no liquid
-fraction is an error.
+The default `nothing` covers two cases, neither needing a method: condensate that is not a
+prognostic mass (saturation-adjusted cloud), and a tracer that is not a condensate mass (a
+number moment such as `ρnᶜˡ`, or a non-additive property such as P3's `ρqᶠ` and `ρbᶠ`). A
+sedimenting condensate mass with no liquid fraction is an error.
+
+The acoustic substep loop of the compressible core projects the tendency of every name in
+[`condensate_field_names`](@ref) onto its pressure with the sensitivity of the mass's phase, so
+there every such name must declare its fraction, whether or not it sediments.
 
 A mixed-phase particle is normally two condensate masses sharing a fall speed, as P3 carries ice
 `ρqⁱ` and the liquid on it `ρqʷⁱ`. One mass of mixed composition may instead return its liquid
@@ -861,6 +1014,37 @@ fraction, which `liquid_fraction_content` resolves exactly, the content being li
 composition.
 """
 @inline condensate_liquid_fraction(microphysics, ::Val) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the fractions `(vapor, liquid, ice)` of a change of the prognostic moisture density
+([`moisture_prognostic_name`](@ref)) that each phase takes at fixed temperature, in a cell whose
+moisture mass fractions are `q`.
+
+The default is all vapor: a scheme with prognostic condensate carries the vapor as its moisture
+density. A scheme whose moisture density includes condensate that it diagnoses (saturation
+adjustment) extends this with the partition its equilibrium gives a change.
+
+The acoustic substep loop of the compressible core projects the moisture tendency onto its
+pressure with the sensitivities of these phases.
+"""
+@inline prognostic_moisture_phase_fractions(i, j, k, grid, microphysics, microphysical_fields, q) =
+    (one(q.vapor), zero(q.vapor), zero(q.vapor))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the phase equilibrium to which the scheme adjusts the partition of its prognostic moisture
+density ([`moisture_prognostic_name`](@ref)) in saturated air, or `nothing` if it adjusts none.
+
+The default is `nothing`: a scheme with prognostic condensate holds the partition it carries.
+Saturation adjustment returns its equilibrium. In a cell where such a scheme holds cloud
+condensate (where [`prognostic_moisture_phase_fractions`](@ref) gives the vapor no share), the
+pressure that the compressible core re-diagnoses is that of the adjusted partition, in which
+warming evaporates condensate, and the acoustic substep loop linearizes that pressure.
+"""
+@inline saturation_adjusted_equilibrium(microphysics) = nothing
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

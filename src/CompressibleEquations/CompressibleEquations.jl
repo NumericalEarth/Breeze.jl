@@ -49,8 +49,14 @@ export
     GaussianRamp,
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
+    StageEntryForceRemainder,
+    stage_entry_force_remainder,
+    step_start_force_state,
+    store_step_start_force_state!,
+    compute_step_start_moisture_content!,
     freeze_linearization_state!,
-    acoustic_rk3_substep_loop!
+    acoustic_rk3_substep_loop!,
+    compute_transport_density_tendency!
 
 using DocStringExtensions: TYPEDEF
 using Adapt: Adapt, adapt
@@ -65,7 +71,9 @@ using Oceananigans.Utils: prettysummary, launch!, KernelParameters
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
                                base_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture
+                               thermodynamic_density_name, specific_prognostic_moisture,
+                               moisture_prognostic_name, condensate_field_names, condensate_liquid_fraction,
+                               prognostic_moisture_phase_fractions, saturation_adjusted_equilibrium
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Solvers: NewtonSolver
 using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key
@@ -73,7 +81,14 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
                              vapor_equivalent_heat_capacity, condensate_latent_energy, exner_exponent,
                              reject_renamed_surface_pressure,
                              vapor_gas_constant, ExnerReferenceState, temperature, temperature_and_sensitivity,
+                             equilibrated_surface, saturation_vapor_pressure,
+                             PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
                              LiquidIceDensityState
+
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
+                               base_pressure, standard_pressure, thermodynamic_density,
+                               thermodynamic_density_name, specific_prognostic_moisture
+using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using ReactantCore: @trace
@@ -87,6 +102,7 @@ const CompressibleModel = AtmosphereModel{<:CompressibleDynamics}
 
 include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
+include("tridiagonal_column_batches.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
 

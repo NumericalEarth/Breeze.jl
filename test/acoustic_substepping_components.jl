@@ -19,6 +19,7 @@ using Breeze
 using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps, minimum_horizontal_spacing,
+                                    stage_substep_count_and_size, ProportionalSubsteps,
                                     sponge_term_diag, sponge_rhs, sponge_slow_tendency,
                                     materialize_sponge,
                                     assemble_slow_vertical_momentum_tendency!,
@@ -28,19 +29,21 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors, prepare_acoustic_cache!
+                                    implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
+                                    factor_vertical_solver!,
+                                    solve_tridiagonal_columns_in_place!
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, continuity_density, standard_pressure
 using Breeze.Thermodynamics: ExnerReferenceState, surface_density, LiquidIceDensityState, MoistureMassFractions,
-                             VaporEquivalentExponent, DryExponent, temperature, air_pressure,
-                             mixture_heat_capacity, dry_air_gas_constant, condensate_latent_energy
+                             VaporEquivalentExponent, DryExponent, air_pressure, dry_air_gas_constant
+using Breeze.Microphysics: adjust_thermodynamic_state
 using GPUArraysCore: @allowscalar
 using Oceananigans
-using Oceananigans.Architectures: architecture
+using Oceananigans.Architectures: architecture, on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Solvers: get_coefficient
+using Oceananigans.Solvers: BatchedTridiagonalSolver, get_coefficient, solve!
 using Oceananigans.Units
 using Oceananigans.Utils: KernelParameters, launch!
 using Test
@@ -330,6 +333,26 @@ for arch in arches
         Oceananigans.defaults.FloatType = old_FT
     end
 
+    @testset "Long stages take at least two adaptive substeps [$(arch)]" begin
+        constants = ThermodynamicConstants()
+        Δx_min = 5016.0 # the 5 km tropical-cyclone grid where a single 6.3 s substep went unstable
+        Δt = 11.25
+        distribution = ProportionalSubsteps()
+
+        # SSPMIS43's first stage covers 0.56 Δt: the CFL count alone gives one substep.
+        @test compute_acoustic_substeps(Δx_min, 0.56 * Δt, constants, 0.5) == 1
+        Nτ, Δτ = stage_substep_count_and_size(distribution, 0.56, Δt, Δx_min, constants, 0.5, nothing)
+        @test Nτ == 2
+        @test Δτ ≈ 0.56 * Δt / 2
+
+        # Stages covering at most half of Δt keep the CFL count.
+        @test first(stage_substep_count_and_size(distribution, 1/2, Δt, Δx_min, constants, 0.5, nothing)) == 1
+        @test first(stage_substep_count_and_size(distribution, 0.139, Δt, Δx_min, constants, 0.5, nothing)) == 1
+
+        # A fixed substep count is the user's choice and is not raised.
+        @test first(stage_substep_count_and_size(distribution, 0.56, Δt, Δx_min, constants, 0.5, 1)) == 1
+    end
+
     @testset "acoustic_cfl plumbed to AcousticSubstepper [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
@@ -413,6 +436,91 @@ for arch in arches
         @test model.clock.iteration == 3
         @test !any(isnan, parent(model.dynamics.dry_density))
         Oceananigans.defaults.FloatType = old_FT
+    end
+
+    # On a periodic or bounded horizontal grid the substep kernels difference the perturbations with
+    # topology-aware operators, so the substep loop reads no horizontal halo of the fields it writes
+    # (and only the discarded boundary rows of the vertical right-hand side read their vertical halos).
+    # Poisoned halos must therefore not reach the interior.
+    @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT), $(TX), $(Damping)]" for FT in as_test_float_types(arch),
+                                                                                         TX in (Periodic, Bounded),
+                                                                                         Damping in (ThermalDivergenceDamping, DirectDivergenceDamping)
+        old_FT = Oceananigans.defaults.FloatType
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5), topology=(TX, Periodic, Bounded),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+
+        damping = Damping(coefficient=FT(0.1))
+        td = SplitExplicitTimeDiscretization(; substeps=8, damping)
+        dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics)
+        θᵢ(x, y, z) = 300 + 2 * exp(-((x - 4kilometers)^2 + (y - 4kilometers)^2 + (z - 4kilometers)^2) / (1kilometers)^2)
+        set!(model; θ=θᵢ, qᵗ=0, ρ=model.dynamics.reference_state.density)
+        time_step!(model, 6)
+
+        # The perturbations and slow tendencies of the last stage are a valid substep state.
+        substepper = model.timestepper.substepper
+        for field in (substepper.density_perturbation,
+                      substepper.density_potential_temperature_perturbation,
+                      substepper.previous_density_potential_temperature_perturbation,
+                      substepper.momentum_perturbation.u,
+                      substepper.momentum_perturbation.v)
+            values = copy(interior(field))
+            fill!(parent(field), NaN)
+            copyto!(interior(field), values)
+        end
+
+        Δτ = FT(1//2)
+        ω = FT(substepper.forward_weight)
+        stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ)
+        factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
+        acoustic_substep_loop!(2, model, substepper, stage, nothing)
+
+        for field in (substepper.density_perturbation,
+                      substepper.density_potential_temperature_perturbation,
+                      substepper.momentum_perturbation...)
+            @test all(isfinite, Array(interior(field)))
+        end
+        @test maximum(abs, interior(substepper.momentum_perturbation.w)) > 0
+        Oceananigans.defaults.FloatType = old_FT
+    end
+
+    # Breeze's column sweeps carry the Thomas recurrence in registers; they must reproduce the
+    # Oceananigans solve bit for bit, zero off-diagonals (masked products) included.
+    @testset "Column Thomas sweeps reproduce BatchedTridiagonalSolver [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        grid = RectilinearGrid(arch, FT; size=(4, 3, 9), x=(0, 1), y=(0, 1), z=(0, 1),
+                               topology=(Periodic, Periodic, Bounded))
+        Nx, Ny, Nz = size(grid)
+        wave(α, β, γ) = on_architecture(arch, FT[sin(α * i + β * j + γ * k) for i in 1:Nx, j in 1:Ny, k in 1:Nz])
+        lower = on_architecture(arch, FT[ifelse(k == 4, 0, -(3 + sin(i + 2j + 3k)) / 10) for i in 1:Nx, j in 1:Ny, k in 1:Nz])
+        upper = wave(2, 1, 5) ./ 4 .- FT(1//2)
+        diagonal = wave(3, 5, 1) ./ 5 .+ 2
+        rhs = wave(1, 3, 2)
+
+        solver = BatchedTridiagonalSolver(grid; lower_diagonal=lower, diagonal, upper_diagonal=upper)
+        reference = similar(rhs)
+        solve!(reference, solver, rhs)
+        reference = Array(reference)
+
+        in_place = copy(rhs)
+        solve!(in_place, solver, in_place)
+        @test Array(in_place) == reference
+
+        # Several right-hand sides per column thread
+        other_rhs = (wave(2, 2, 1), wave(1, 1, 4))
+        other_references = map(other_rhs) do f
+            ϕ = similar(f)
+            solve!(ϕ, solver, f)
+            Array(ϕ)
+        end
+        no_arguments(shared, specific, ϕ) = ()
+        scratch = (similar(rhs), similar(rhs), similar(rhs))
+        batch = (copy(rhs), copy(other_rhs[1]), copy(other_rhs[2]))
+        solve_tridiagonal_columns_in_place!(batch, solver, scratch, no_arguments, nothing,
+                                            (nothing, nothing, nothing))
+        @test Array(batch[1]) == reference
+        @test Array(batch[2]) == other_references[1]
+        @test Array(batch[3]) == other_references[2]
     end
 
     # `_build_vertical_rhs!` reads (ρw)′ at faces k−1, k, k+1 for the implicit vertical-damping
@@ -853,9 +961,12 @@ end
 #####
 
 # Cᴸ must be the slope ∂p/∂(ρθ), at fixed dry density and composition, of the equation of state the
-# core closes with: finite differences of p = ρ Rᵐ T through the core's own inversion, in dry, moist
-# and cloudy cells, for every temperature solver. Compressing every partial density and ρθ together
-# changes p by Cᴸ (ρθ)′ alone without condensate; in cloud the loop omits ∂p/∂ρᵈ.
+# core closes with: finite differences of p = ρ Rᵐ T through the core's own inversion, in dry and
+# moist cells, for every temperature solver. In cloud the adjustment diagnoses the partition, and
+# the pressure the core re-diagnoses is the adjusted one: there Cᴸ is its slope along the loop's
+# flux, so that compressing every density and ρθ together, at fixed θ and mixing ratios, changes p
+# by Cᴸ (θᴸ + Λᴴ) ρᵈ′. That is less than at a held partition, because the compressed air evaporates
+# condensate.
 @testset "Linearized pressure coefficient is the slope of the equation of state [$FT, $(nameof(typeof(κ̂))), $(summary(temperature_solver))]" for FT in test_float_types(),
         κ̂ in (VaporEquivalentExponent(), DryExponent()),
         temperature_solver in temperature_solver_variants(FT)
@@ -878,6 +989,7 @@ end
     prepare_acoustic_cache!(model.timestepper.substepper, model)
 
     Cᴸ = Array(interior(model.timestepper.substepper.linearization_pressure_coefficient))
+    Λᴴ = Array(interior(model.timestepper.substepper.fixed_composition_sensitivity))
     ρᵈ = Array(interior(model.dynamics.dry_density))
     ρ  = Array(interior(model.dynamics.total_density))
     ρθ = Array(interior(model.formulation.potential_temperature_density))
@@ -892,29 +1004,49 @@ end
     cᵖᵈ = constants.dry_air.heat_capacity
     κᵈ  = Rᵈ / cᵖᵈ
     ε    = FT == Float64 ? FT(1e-4) : FT(1e-2)
-    rtol = FT == Float64 ? FT(1e-5) : FT(3e-3)
+    rtol = FT == Float64 ? FT(2e-4) : FT(3e-3)
     solver = model.formulation.temperature_solver
+
+    # The adjustment of the finite differences, converged further than the model's.
+    adjustment = SaturationAdjustment(FT; equilibrium = WarmPhaseEquilibrium(),
+                                      solver = SecantSolver(FT; reltol = 0, abstol = FT == Float64 ? 1e-11 : 1e-4, maxiter = 100))
 
     for I in CartesianIndices(ρθ)
         q = MoistureMassFractions(qᵛ[I], qˡ[I], zero(FT))
         θ = ρθ[I] / ρᵈ[I]
-        state(θ′, s = 1) = LiquidIceDensityState(θ′, q, pˢᵗ, s * ρ[I], solver, κ̂)
-        slope = (air_pressure(state(θ * (1 + ε)), constants) -
-                 air_pressure(state(θ * (1 - ε)), constants)) / (2ε * θ * ρᵈ[I])
-        @test Cᴸ[I] ≈ slope rtol = rtol
 
-        # Compress every partial density and ρθ by the same factor, at fixed θ and composition.
-        compression_slope = (air_pressure(state(θ, 1 + ε), constants) -
-                             air_pressure(state(θ, 1 - ε), constants)) / (2ε * ρᵈ[I])
+        # The pressure after adjustment of the cell's water, with θ scaled by 1 + a and every
+        # density by 1 + s.
+        function adjusted_pressure(a, s)
+            𝒰 = LiquidIceDensityState(θ * (1 + a), MoistureMassFractions(qᵛ[I] + qˡ[I]), pˢᵗ, (1 + s) * ρ[I], solver, κ̂)
+            return air_pressure(adjust_thermodynamic_state(𝒰, adjustment, constants), constants)
+        end
+
+        slope = (adjusted_pressure(ε, 0) - adjusted_pressure(-ε, 0)) / (2ε * θ * ρᵈ[I])
+
+        held(θ′) = LiquidIceDensityState(θ′, q, pˢᵗ, ρ[I], solver, κ̂)
+        held_slope = (air_pressure(held(θ * (1 + ε)), constants) -
+                      air_pressure(held(θ * (1 - ε)), constants)) / (2ε * θ * ρᵈ[I])
+
+        # Compress every partial density and ρθ by the same factor, at fixed θ and mixing ratios.
+        compression_slope = (adjusted_pressure(0, ε) - adjusted_pressure(0, -ε)) / (2ε * ρᵈ[I])
         if qˡ[I] == 0
+            @test Cᴸ[I] ≈ slope rtol = rtol
+            @test Cᴸ[I] ≈ held_slope rtol = rtol
+            @test Λᴴ[I] == 0
             @test Cᴸ[I] * θ ≈ compression_slope rtol = rtol
-        elseif temperature_solver === NewtonSolver(FT)
-            # In cloud the loop omits ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) at the converged root.
-            T  = temperature(state(θ), constants)
-            Hᶜ = condensate_latent_energy(q, constants)
-            omitted = Hᶜ / (mixture_heat_capacity(q, constants) * T - Hᶜ)
-            @test omitted > FT(0.01)
-            @test Cᴸ[I] * θ * (1 + omitted) ≈ compression_slope rtol = rtol
+        else
+            # The slope at the held partition overestimates the adjusted one, and the adjusted
+            # compression by a tenth (NumericalEarth/Breeze.jl#1086).
+            @test slope < FT(0.8) * held_slope
+            @test FT(1.05) * compression_slope < held_slope * θ
+            @test Cᴸ[I] < held_slope
+
+            # The adjusted response is built from the sensitivities at the converged root of the
+            # inversion.
+            if temperature_solver === NewtonSolver(FT)
+                @test Cᴸ[I] * (θ + Λᴴ[I]) ≈ compression_slope rtol = 5rtol
+            end
         end
 
         if qᵛ[I] == 0
