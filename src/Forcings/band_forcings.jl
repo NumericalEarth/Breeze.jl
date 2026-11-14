@@ -710,7 +710,7 @@ mutable struct ForcedScalar
     name :: Symbol
 end
 
-struct ScalarVarianceBandForcing{FT, G, B, W, A, YZ}
+struct ScalarVarianceBandForcing{FT, G, B, W, A, YZ, K}
     variance_injection_rate :: FT
     inverse_square_weighting :: Bool
     grid :: G
@@ -718,6 +718,7 @@ struct ScalarVarianceBandForcing{FT, G, B, W, A, YZ}
     workspace :: W
     amplitudes :: A
     yz_amplitudes :: YZ
+    squared_wavenumbers :: K # |k|² of each band mode, with the exact wavenumbers 2π n / L
     scalar :: ForcedScalar
 end
 
@@ -735,7 +736,8 @@ F = \\frac{r}{2 E_f} \\, φ_f , \\qquad E_f = \\sum_m w_m |\\hat φ_m|^2 ,
 
 where ``φ_f`` is the part of the scalar in the band, the sum runs over the half-space modes of the band,
 and the weights are ``w_m = 1`` (so that ``E_f = \\tfrac12 ⟨φ_f^2⟩`` and ``⟨φ_f F⟩ = r``) or, with
-`inverse_square_weighting = true`, ``w_m = 1 / |k̃_m|^2`` with ``k̃_m`` the modified wavenumber of the mode.
+`inverse_square_weighting = true`, ``w_m = 1 / |k_m|^2`` with ``k_m = 2π (n_x / L_x, n_y / L_y, n_z / L_z)`` the exact wavevector
+of the mode (not the modified wavenumber of the grid operators, so that the weights are those of the reference).
 The weighted form reproduces the scalar forcing of the NCAR cloud-chamber DNS (`force_tq` in
 `forcedim.F90` of the ICMW Pi-chamber code, Zenodo record 14957536), which rescales the band modes of
 ``T'`` and ``q_v'`` after every step so that ``\\sum_m |\\hat φ_m|^2 / k^2`` grows by a prescribed rate
@@ -774,9 +776,11 @@ function ScalarVarianceBandForcing(grid;
     amplitudes = on_architecture(architecture(grid), zeros(Complex{FT}, number_of_modes(band), 1))
     yz_amplitudes = on_architecture(architecture(grid), zeros(Complex{FT}, size(grid, 2), size(grid, 3),
                                                                 band.maximum_wavevector[1] + 1, 1))
+    k² = [FT((2π)^2 * ((n[1] / grid.Lx)^2 + (n[2] / grid.Ly)^2 + (n[3] / grid.Lz)^2)) for n in band.wavevectors]
+    squared_wavenumbers = on_architecture(architecture(grid), k²)
 
     return ScalarVarianceBandForcing(convert(FT, variance_injection_rate), inverse_square_weighting, grid, band,
-                                     workspace, amplitudes, yz_amplitudes, ForcedScalar(:unset))
+                                     workspace, amplitudes, yz_amplitudes, squared_wavenumbers, ForcedScalar(:unset))
 end
 
 Base.summary(forcing::ScalarVarianceBandForcing) =
@@ -807,7 +811,7 @@ function compute_band_forcing!(forcing::ScalarVarianceBandForcing, c, model)
     band = forcing.band
     compute_band_coefficients!(forcing.workspace, band, grid, 1, φ, center_phases(band))
     launch!(architecture(grid), grid, (1,), _compute_scalar_variance_amplitudes!,
-            forcing.amplitudes, forcing.workspace.coefficients, band.mode_indices, band.modified_wavenumbers,
+            forcing.amplitudes, forcing.workspace.coefficients, band.mode_indices, forcing.squared_wavenumbers,
             forcing.variance_injection_rate, forcing.inverse_square_weighting)
     X, Y, Z = center_phases(band)
     launch!(architecture(grid), grid, size(forcing.yz_amplitudes)[1:3], _compute_yz_amplitudes!,
@@ -816,7 +820,7 @@ function compute_band_forcing!(forcing::ScalarVarianceBandForcing, c, model)
 end
 
 # A single work item: the band contains few modes
-@kernel function _compute_scalar_variance_amplitudes!(A, φ̂, q, k̃, r, weighted)
+@kernel function _compute_scalar_variance_amplitudes!(A, φ̂, q, k², r, weighted)
     _ = @index(Global)
     E = zero(real(eltype(A)))
 
@@ -824,8 +828,7 @@ end
         @inbounds begin
             n = (q[m, 1], q[m, 2], q[m, 3])
             φ̂ₘ = φ̂[n[1], n[2], n[3], 1]
-            k² = k̃[m, 1]^2 + k̃[m, 2]^2 + k̃[m, 3]^2
-            w = ifelse(weighted, 1 / k², one(k²))
+            w = ifelse(weighted, 1 / k²[m], one(k²[m]))
             A[m, 1] = φ̂ₘ
         end
         E += w * abs2(φ̂ₘ)

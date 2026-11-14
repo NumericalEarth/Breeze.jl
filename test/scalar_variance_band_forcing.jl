@@ -40,7 +40,8 @@ field_variance(f) = var(Array{Float64}(interior(f)); corrected=false)
     @test mean(ρθ) ≈ m₀ rtol = 1e-6
     @test maximum(abs, model.velocities.w) == 0
 
-    # With the 1/k² weighting of the NCAR code, E = Σ |φ̂|² / k̃² for the single mode, so the variance grows at 2 r k̃²
+    # With the 1/k² weighting of the NCAR code, E = Σ |φ̂|² / k² for the single mode, so the variance grows at 2 r k², with
+    # the exact wavenumber k = 2π/L of the mode (the reference weights with exact wavenumbers)
     weighted = ScalarVarianceBandForcing(grid; variance_injection_rate=r, inverse_square_weighting=true)
     model = AtmosphereModel(grid; dynamics=BoussinesqDynamics(grid; temperature=290, buoyancy=false),
                             forcing=(; ρθ=weighted), closure=nothing)
@@ -49,8 +50,8 @@ field_variance(f) = var(Array{Float64}(interior(f)); corrected=false)
     for _ in 1:nsteps
         time_step!(model, Δt)
     end
-    k̃ = 2N / L * sin(π / N) # modified wavenumber of the mode n = 1
-    @test field_variance(model.formulation.potential_temperature_density) - v₀ ≈ 2r * k̃^2 * nsteps * Δt rtol = 0.02
+    k = 2π / L
+    @test field_variance(model.formulation.potential_temperature_density) - v₀ ≈ 2r * k^2 * nsteps * Δt rtol = 0.02
 
     # A forcing belongs to one scalar; forcing ρqᵛ needs its own instance
     @test_throws ArgumentError AtmosphereModel(grid; dynamics=BoussinesqDynamics(grid; buoyancy=false),

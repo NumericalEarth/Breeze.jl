@@ -21,27 +21,65 @@ function chamber_box(FT; L = 0.02, N = 4, S = 1.0, droplets = nothing, sources =
     return model
 end
 
-quasirandom(n, k=1) = mod(n * sqrt(2 + k), 1)
+# Deterministic quasi-random numbers in [0, 1) from the irrationals √2, √3, √5 (k = 0, 1, 3; √4 would be rational)
+quasirandom(n, k=0) = mod(n * sqrt(2 + k), 1)
+scattered(L, Nd) = (x = L .* quasirandom.(1:Nd, 0), y = L .* quasirandom.(1:Nd, 1), z = L .* quasirandom.(1:Nd, 3))
+
+# Sums over the state in extended precision, so that the budget checks measure the model's rounding and not the test's:
+# Julia's `sum` is naive within 1024-element blocks, and for 4000 identical 20 μm droplets its error reached 480 eps of the
+# total water (audit jobs 16264, 16268, 16281 on 2026-11-14), while the model's vapor change equalled the kernel's condensed
+# mass to 1e-6 of the exchanged mass.
+exact_sum(x) = Float64(sum(big.(x)))
 
 # Water in the box: vapor on the grid, liquid on the droplets, and the liquid that the sources added and removed
 function water_budget(model)
     grid = model.grid
-    V = prod(size(grid)) * minimum_xspacing(grid) * minimum_yspacing(grid) * minimum_zspacing(grid)
-    vapor = sum(Array(interior(model.moisture_density))) * V / prod(size(grid))
+    cell_volume = Float64(minimum_xspacing(grid)) * Float64(minimum_yspacing(grid)) * Float64(minimum_zspacing(grid))
+    vapor = exact_sum(Float64.(Array(interior(model.moisture_density)))) * cell_volume
     d = model.microphysics.droplets.properties
     constants = model.thermodynamic_constants
-    liquid = sum(Array(d.ξ) .* droplet_water_mass.(Array(d.r), Array(d.rᵈ), Ref(constants)); init=zero(vapor))
+    masses = Float64.(Array(d.ξ)) .* droplet_water_mass.(Float64.(Array(d.r)), Float64.(Array(d.rᵈ)), Ref(constants))
+    liquid = isempty(masses) ? 0.0 : exact_sum(masses)
     book = model.microphysics.sources.bookkeeping
     return (; vapor, liquid, removed=book.removed_liquid_mass, injected=book.injected_liquid_mass,
             total = vapor + liquid + book.removed_liquid_mass - book.injected_liquid_mass)
 end
 
-# The liquid mass diagnosed on the grid: Σ ρᵣ qˡ V over the cells (the Boussinesq reference density is uniform)
-# Round-off bound for budgets summed over the droplets and the grid cells (10 eps per summand)
-budget_rtol(model) = 10 * eps(eltype(model.grid)) * (length(model.microphysics.droplets) + prod(size(model.grid)) + 1)
+# Per-operation rounding budget of the water budget after `steps` time steps, relative to the total water `M` of `budget₀`
+# (derivation in the status notes of 2026-11-14, audits 16264–16282):
+#   - vapor: every step each cell computes ρqᵛ ← ρqᵛ − C with one rounding of at most eps(FT) ρqᵛ, so the vapor mass can drift
+#     by at most steps × eps(FT) × M_vapor if every rounding had the same sign (in practice they do not, and the measured drift is
+#     a few eps in total);
+#   - condensed mass: the kernel's Δm per droplet is accurate to a few eps of Δm itself, and the atomic adds of Δm/V into C round at
+#     eps(FT) C per add; both are of order eps(FT) × (exchanged mass) ≪ eps(FT) × M and are covered by the vapor term;
+#   - sources: the masses of removed droplets are evaluated in Float64 from the stored FT radii and accumulated in Float64, so the
+#     only FT rounding is that of the stored radii, at most 3 eps(FT) of the removed mass; injected haze masses are exact;
+#   - the two extended-precision state sums contribute nothing at this level.
+# The Float32 saturated box of these tests does not condense at all (Δr is below single precision), so the condensing cases below
+# use super- and subsaturated boxes; the measured Float32 residual without removals is exactly zero (audit 16268).
+function budget_tolerance(model, budget₀, steps)
+    FT = eltype(model.grid)
+    book = model.microphysics.sources.bookkeeping
+    M = budget₀.total
+    vapor = steps * eps(FT) * budget₀.vapor / M
+    sources = 3 * eps(FT) * (book.removed_liquid_mass + book.injected_liquid_mass) / M
+    return vapor + sources + 4 * eps(FT)
+end
 
-liquid_diagnostic(model) = sum(Array(interior(model.microphysical_fields.qˡ))) * reference_value(model.dynamics.reference_state.density) *
-                           minimum_xspacing(model.grid) * minimum_yspacing(model.grid) * minimum_zspacing(model.grid)
+# The liquid mass diagnosed on the grid: Σ ρᵣ qˡ V over the cells (the Boussinesq reference density is uniform). The deposit is a
+# sum of n atomic adds per cell in FT, each rounding at eps(FT) of the running cell sum, so it is within n_max eps(FT) of the exact
+# cell liquid, with n_max the largest number of droplets in one cell (measured: 0.5 / 1.1 / 12.4 eps(Float32) for 64 / 400 / 4000
+# droplets, audit 16268; 0–1.4 eps(Float64) against a same-assignment recomputation, audit 16278).
+liquid_diagnostic(model) = exact_sum(Float64.(Array(interior(model.microphysical_fields.qˡ)))) *
+                           Float64(reference_value(model.dynamics.reference_state.density)) *
+                           Float64(minimum_xspacing(model.grid)) * Float64(minimum_yspacing(model.grid)) * Float64(minimum_zspacing(model.grid))
+
+function deposit_tolerance(model)
+    FT = eltype(model.grid)
+    Nd = length(model.microphysics.droplets)
+    n_max = max(1, cld(Nd, prod(size(model.grid))))
+    return (4 * n_max + 2) * eps(FT) # four times the mean occupancy covers the clustering of the quasi-random placement
+end
 
 @testset "ChamberSources: construction and empty cases [$FT]" for FT in test_float_types()
     injection = AerosolInjection(FT; rate=1e8, dry_radius=1e-7, hygroscopicity=1.2, interval=0.1)
@@ -101,7 +139,7 @@ end
         @test all(isfinite, Array(droplets.r))
         @test book.injected_liquid_mass ≈ book.injected * droplet_water_mass(cbrt(FT(2)) * FT(1e-7), FT(1e-7), constants) rtol=1e-6
         # The haze is in the diagnosed liquid of the step in which it was injected
-        @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol=budget_rtol(model)
+        @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol=deposit_tolerance(model)
         @test all(Array(interior(model.moisture_density)) .> 0)
     end
     @test counts[1] == counts[2]
@@ -138,8 +176,8 @@ end
     @test book.injected_physical ≈ ξ * book.injected
     @test book.removed_physical ≈ ξ * book.removed
     @test all(Array(model.microphysics.droplets.properties.ξ) .== ξ)
-    @test water_budget(model).total ≈ budget₀.total rtol = budget_rtol(model)
-    @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = budget_rtol(model)
+    @test water_budget(model).total ≈ budget₀.total rtol = budget_tolerance(model, budget₀, 100)
+    @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = deposit_tolerance(model)
     # The vapor lost equals ξ times the growth of the computational droplets (the budget above), and is nonzero
     @test budget₀.vapor - water_budget(model).vapor > 0
     @test_throws ArgumentError AerosolInjection(FT; rate, dry_radius=1e-7, hygroscopicity=1.2, interval=0.1, multiplicity=0)
@@ -152,8 +190,7 @@ end
     Nd = 64
     n = 1:Nd
     r₀ = FT(20e-6)
-    droplets = (x = L .* quasirandom.(n, 1), y = L .* quasirandom.(n, 2), z = L .* quasirandom.(n, 3),
-                r = fill(r₀, Nd), rᵈ = fill(FT(5e-8), Nd), κ = fill(FT(0.6), Nd))
+    droplets = merge(scattered(L, Nd), (r = fill(r₀, Nd), rᵈ = fill(FT(5e-8), Nd), κ = fill(FT(0.6), Nd)))
     physics = DropletPhysicsParameters(FT; terminal_velocity=StokesTerminalVelocity())
     Lz = FT(0.02)
     removal = VirtualChamberRemoval(FT; size=(2, 2, Lz), seed=3)
@@ -174,8 +211,8 @@ end
         @test all(z -> 0 ≤ z ≤ L, Array(d.z)) # computational positions remain periodic
         # Vapor + liquid + removed − injected is conserved to round-off: condensation moves water between
         # vapor and droplets exactly, and removal moves the droplets' water into the removed tally
-        @test water_budget(model).total ≈ budget₀.total rtol = budget_rtol(model)
-        @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = budget_rtol(model)
+        @test water_budget(model).total ≈ budget₀.total rtol = budget_tolerance(model, budget₀, nsteps)
+        @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = deposit_tolerance(model)
     end
     book = model.microphysics.sources.bookkeeping
     @test issorted(counts; rev=true)
@@ -190,8 +227,7 @@ end
     # the virtual displacement equals u × t to round-off, across several periodic wraps
     Nd = 16
     n = 1:Nd
-    droplets = (x = L .* quasirandom.(n, 1), y = L .* quasirandom.(n, 2), z = L .* quasirandom.(n, 3),
-                r = fill(FT(1e-6), Nd), rᵈ = fill(FT(1e-7), Nd), κ = fill(FT(0.6), Nd))
+    droplets = merge(scattered(L, Nd), (r = fill(FT(1e-6), Nd), rᵈ = fill(FT(1e-7), Nd), κ = fill(FT(0.6), Nd)))
     no_settling = DropletPhysicsParameters(FT; terminal_velocity=RogersYauTerminalVelocity(FT; quadratic_coefficient=0,
                                                                                             linear_coefficient=0,
                                                                                             square_root_coefficient=0))
@@ -217,8 +253,7 @@ end
     removal = VirtualChamberRemoval(FT; size=(2, 2, 1), interval=0.05, rule=ResampledVirtualPosition(), seed=5)
     Nd = 4000
     n = 1:Nd
-    droplets = (x = L .* quasirandom.(n, 1), y = L .* quasirandom.(n, 2), z = L .* quasirandom.(n, 3),
-                r = fill(r₀, Nd), rᵈ = fill(FT(5e-8), Nd), κ = fill(FT(0.6), Nd))
+    droplets = merge(scattered(L, Nd), (r = fill(r₀, Nd), rᵈ = fill(FT(5e-8), Nd), κ = fill(FT(0.6), Nd)))
     model = chamber_box(FT; L, droplets, physics, sources=ChamberSources(; removal))
     budget₀ = water_budget(model)
     for _ in 1:20
@@ -227,7 +262,59 @@ end
     removed_fraction = model.microphysics.sources.bookkeeping.removed / Nd
     expected = 1 - (1 - 𝕎 * 0.05 / 1)^3 # three events with 𝕎 known (the first sees 𝕎 = 0 of the initial state)
     @test 0.5 * expected < removed_fraction < 1.5 * expected
-    @test water_budget(model).total ≈ budget₀.total rtol = budget_rtol(model)
+    @test water_budget(model).total ≈ budget₀.total rtol = budget_tolerance(model, budget₀, 20)
+end
+
+@testset "ChamberSources: exact budget when nothing happens [$FT]" for FT in test_float_types()
+    # Dry, insoluble aerosol (κ = 0, r = rᵈ) in a subsaturated box neither grows nor evaporates, injected particles are dry
+    # (wet radius factor 1) and removal through a small chamber drops them: the vapor must be bit-identical, the liquid
+    # identically zero, and the counts exact
+    L = FT(0.02)
+    Nd = 300
+    droplets = merge(scattered(L, Nd), (r = fill(FT(1e-7), Nd), rᵈ = fill(FT(1e-7), Nd), κ = zeros(FT, Nd)))
+    physics = DropletPhysicsParameters(FT; terminal_velocity=StokesTerminalVelocity())
+    injection = AerosolInjection(FT; rate=1e8, dry_radius=1e-7, hygroscopicity=0, interval=0.05, wet_radius_factor=1, seed=21)
+    removal = VirtualChamberRemoval(FT; size=(0.05, 0.05, 0.05), interval=0.05, rule=ResampledVirtualPosition(), seed=22)
+    # Quiescent: with a flow, even a uniform vapor field changes by the round-off of the discrete divergence
+    model = chamber_box(FT; L, S=0.9, droplets, physics, sources=ChamberSources(; injection, removal))
+    vapor₀ = Array(interior(model.moisture_density))
+    for _ in 1:100
+        time_step!(model, FT(0.01))
+    end
+    book = model.microphysics.sources.bookkeeping
+    @test Array(interior(model.moisture_density)) == vapor₀
+    @test water_budget(model).liquid == 0
+    @test book.injected_liquid_mass == 0
+    @test book.removed_liquid_mass == 0
+    @test liquid_diagnostic(model) == 0
+    @test abs(book.injected - 1e8 * L^3 * 1.0) ≤ 1
+    @test length(model.microphysics.droplets) == Nd + book.injected - book.removed
+    @test all(Array(model.microphysics.droplets.properties.r) .== FT(1e-7))
+end
+
+@testset "ChamberSources: budget with condensation and evaporation [$FT]" for FT in test_float_types()
+    # Radii change (supersaturated: growth; subsaturated: evaporation) while droplets settle out of a shallow chamber;
+    # the budget closes within the per-operation rounding budget and the exchanged water is far above it
+    L = FT(0.02)
+    Nd = 500
+    physics = DropletPhysicsParameters(FT; terminal_velocity=StokesTerminalVelocity())
+    for (S, r₀) in ((FT(1.01), FT(5e-6)), (FT(0.90), FT(8e-6)))
+        droplets = merge(scattered(L, Nd), (r = fill(r₀, Nd), rᵈ = fill(FT(5e-8), Nd), κ = fill(FT(0.6), Nd)))
+        removal = VirtualChamberRemoval(FT; size=(2, 2, 0.002), seed=23) # integrated rule: a 2 mm fall to the floor
+        model = chamber_box(FT; L, S, droplets, physics, sources=ChamberSources(; removal))
+        budget₀ = water_budget(model)
+        nsteps = 100
+        for _ in 1:nsteps
+            time_step!(model, FT(1e-2))
+            @test water_budget(model).total ≈ budget₀.total rtol = budget_tolerance(model, budget₀, nsteps)
+        end
+        b = water_budget(model)
+        @test b.vapor != budget₀.vapor # condensation or evaporation happened
+        @test abs(b.vapor - budget₀.vapor) > 1e3 * eps(FT) * budget₀.total # and by much more than the rounding budget
+        @test (S > 1) == (b.vapor < budget₀.vapor)
+        @test model.microphysics.sources.bookkeeping.removed > 0
+        @test liquid_diagnostic(model) ≈ b.liquid rtol = deposit_tolerance(model)
+    end
 end
 
 @testset "ChamberSources: steady state of injection and removal [$FT]" for FT in test_float_types()
@@ -252,6 +339,6 @@ end
     @test all(isfinite, Array(model.microphysics.droplets.properties.r))
     @test all(Array(model.microphysics.droplets.properties.r) .> 0)
     @test all(isfinite, Array(interior(model.formulation.potential_temperature_density)))
-    @test water_budget(model).total ≈ budget₀.total rtol = budget_rtol(model)
-    @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = budget_rtol(model)
+    @test water_budget(model).total ≈ budget₀.total rtol = budget_tolerance(model, budget₀, 200)
+    @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = deposit_tolerance(model)
 end

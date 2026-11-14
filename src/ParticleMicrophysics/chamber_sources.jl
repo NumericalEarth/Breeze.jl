@@ -140,6 +140,10 @@ of the simulation: `injected` and `removed` computational particles, `injected_p
 (multiplicity-weighted counts), `injected_liquid_mass` (the haze water of injected particles, kg) and
 `removed_liquid_mass` (the liquid water of removed particles, kg; both multiplicity-weighted), the times of the
 next injection and removal events, and the fractional batch carried to the next injection.
+
+The counts and masses accumulate in `Float64` whatever the precision of the model, and the mass of each removed
+droplet is evaluated in `Float64` from its stored radii: the accumulated masses are then exact to the precision of
+the stored state, and a water budget closes to the rounding of the model's own vapor updates (see the tests).
 """
 mutable struct SourceSinkBookkeeping{FT}
           next_injection :: FT
@@ -147,10 +151,10 @@ mutable struct SourceSinkBookkeeping{FT}
          injection_carry :: FT
                 injected :: Int
                  removed :: Int
-       injected_physical :: FT
-        removed_physical :: FT
-    injected_liquid_mass :: FT
-     removed_liquid_mass :: FT
+       injected_physical :: Float64
+        removed_physical :: Float64
+    injected_liquid_mass :: Float64
+     removed_liquid_mass :: Float64
 end
 
 first_event(::Nothing, FT) = convert(FT, Inf)
@@ -308,9 +312,9 @@ function remove_particles!(removal::VirtualChamberRemoval, s::ChamberSources, μ
     nremoved == 0 && return nothing
     constants = model.thermodynamic_constants
     book.removed += nremoved
-    book.removed_physical += mapreduce((f, ξ) -> f * ξ, +, flags, properties.ξ; init = zero(FT))
-    book.removed_liquid_mass += mapreduce((f, r, rᵈ, ξ) -> f * ξ * droplet_water_mass(r, rᵈ, constants), +,
-                                          flags, properties.r, properties.rᵈ, properties.ξ; init = zero(FT))
+    book.removed_physical += mapreduce((f, ξ) -> f * Float64(ξ), +, flags, properties.ξ; init = 0.0)
+    book.removed_liquid_mass += mapreduce((f, r, rᵈ, ξ) -> f * Float64(ξ) * droplet_water_mass(Float64(r), Float64(rᵈ), constants), +,
+                                          flags, properties.r, properties.rᵈ, properties.ξ; init = 0.0)
     absorbed = s.workspace.removal.absorbed
     resize!(absorbed, Np)
     copyto!(absorbed, flags)
@@ -403,8 +407,8 @@ function inject_batch!(injection::AerosolInjection, s::ChamberSources, μ, model
     end
 
     book.injected += n
-    book.injected_physical += n * injection.multiplicity
-    book.injected_liquid_mass += n * injection.multiplicity * droplet_water_mass(r, rᵈ, model.thermodynamic_constants)
+    book.injected_physical += n * Float64(injection.multiplicity)
+    book.injected_liquid_mass += n * Float64(injection.multiplicity) * droplet_water_mass(Float64(r), Float64(rᵈ), model.thermodynamic_constants)
     return nothing
 end
 
