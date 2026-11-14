@@ -31,15 +31,16 @@ using Oceananigans: Field, CenterField, XFaceField, YFaceField, ZFaceField, arch
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
-using Oceananigans.Grids: ZDirection, rnode, znode, node
+using Oceananigans.Grids: ZDirection, rnode, znode, node, Periodic, TwoSided, Closed
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Solvers: BatchedTridiagonalSolver, compute_factorization!, solve!
 using Oceananigans.TurbulenceClosures: vertically_implicit_closures, VerticallyImplicitDiffusionLowerDiagonal,
                                       VerticallyImplicitDiffusionDiagonal, VerticallyImplicitDiffusionUpperDiagonal
+using Oceananigans.Operators: Operators
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
-    δxTᶠᵃᵃ, δyTᵃᶠᵃ, δxTᶜᵃᵃ, δyTᵃᶜᵃ, δxᶜᵃᵃ, δyᵃᶜᵃ,
+    δxᶠᵃᵃ, δyᵃᶠᵃ, δxᶜᵃᵃ, δyᵃᶜᵃ,
     Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ,
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
     Δz⁻¹ᶜᶜᶜ, Δz⁻¹ᶜᶜᶠ,
@@ -180,25 +181,52 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 ##### Halo fills of the substep loop
 #####
 
-# The substep kernels take every horizontal difference of the fields the loop writes with
-# Oceananigans' topology-aware operators (`δxTᶠᵃᵃ`, `δxTᶜᵃᵃ`, `δyTᵃᶠᵃ`, `δyTᵃᶜᵃ`), as the
-# split-explicit barotropic substepping does: they read the periodic image, or apply the
-# no-flux / impenetrability condition the perturbations carry on a `Bounded` side, from the
-# interior. So between substeps a single-architecture grid needs no halo fill; a distributed grid
-# exchanges the halos of its connected sides, where the operators fall back to reading them.
-# The terrain dynamics fills (see `terrain_compressible_physics.jl`).
+# Topology-aware differences wrap periodic indices and impose zero scalar gradients and normal
+# momentum perturbations on bounded sides. Those faces are zeroed explicitly, including for
+# prescribed flow. Only distributed connections need substep halo exchanges; terrain grids
+# retain full fills (see `terrain_compressible_physics.jl`).
 fill_substep_halos!(fields, model) = fill_substep_halos!(fields, model.grid)
 fill_substep_halos!(fields, grid::AbstractGrid) = fill_architecture_halos!(fields, architecture(grid))
 fill_architecture_halos!(fields, ::Union{CPU, GPU}) = nothing
 fill_architecture_halos!(fields, arch) = fill_halo_regions!(fields)
 
-# TODO: Oceananigans has no immersed-grid method for `δxTᶠᵃᵃ`, `δyTᵃᶠᵃ` (they fall back to
-# `δxᶠᵃᵃ`, which reads halos); it should provide immersed topology-aware operators. Until then
-# the substep kernels call these wrappers, which pass the underlying grid on an immersed grid.
-@inline topology_aware_δxᶠᵃᵃ(i, j, k, grid, args...) = δxTᶠᵃᵃ(i, j, k, grid, args...)
-@inline topology_aware_δyᵃᶠᵃ(i, j, k, grid, args...) = δyTᵃᶠᵃ(i, j, k, grid, args...)
-@inline topology_aware_δxᶠᵃᵃ(i, j, k, ibg::ImmersedBoundaryGrid, args...) = δxTᶠᵃᵃ(i, j, k, ibg.underlying_grid, args...)
-@inline topology_aware_δyᵃᶠᵃ(i, j, k, ibg::ImmersedBoundaryGrid, args...) = δyTᵃᶠᵃ(i, j, k, ibg.underlying_grid, args...)
+# TODO: remove this block once Oceananigans' topology-aware operators dispatch on
+# `ImmersedBoundaryGrid`, and import `δxTᶠᵃᵃ`, `δyTᵃᶠᵃ`, `δxTᶜᵃᵃ`, `δyTᵃᶜᵃ` from Oceananigans.Operators.
+# Oceananigans defines their Periodic and TwoSided methods only for underlying grids, so on an
+# immersed grid they fall back to the halo-reading `δx`, `δy`. These local copies add the
+# immersed-grid methods and evaluate `f` on the immersed grid itself.
+@inline δxTᶠᵃᵃ(i, j, k, grid, args...) = Operators.δxTᶠᵃᵃ(i, j, k, grid, args...)
+@inline δyTᵃᶠᵃ(i, j, k, grid, args...) = Operators.δyTᵃᶠᵃ(i, j, k, grid, args...)
+@inline δxTᶜᵃᵃ(i, j, k, grid, args...) = Operators.δxTᶜᵃᵃ(i, j, k, grid, args...)
+@inline δyTᵃᶜᵃ(i, j, k, grid, args...) = Operators.δyTᵃᶜᵃ(i, j, k, grid, args...)
+
+const IBGXP = ImmersedBoundaryGrid{<:Any, Periodic}
+const IBGYP = ImmersedBoundaryGrid{<:Any, <:Any, Periodic}
+const IBGXS = ImmersedBoundaryGrid{FT, TwoSided{L, R}} where {FT, L, R}
+const IBGYS = ImmersedBoundaryGrid{FT, <:Any, TwoSided{L, R}} where {FT, L, R}
+
+@inline value(i, j, k, grid, f::Function, args...) = f(i, j, k, grid, args...)
+@inline value(i, j, k, grid, c::AbstractArray) = @inbounds c[i, j, k]
+
+@inline δxTᶠᵃᵃ(i, j, k, ibg::IBGXP, f, args...) =
+    value(i, j, k, ibg, f, args...) - value(ifelse(i == 1, ibg.underlying_grid.Nx, i - 1), j, k, ibg, f, args...)
+@inline δyTᵃᶠᵃ(i, j, k, ibg::IBGYP, f, args...) =
+    value(i, j, k, ibg, f, args...) - value(i, ifelse(j == 1, ibg.underlying_grid.Ny, j - 1), k, ibg, f, args...)
+@inline δxTᶜᵃᵃ(i, j, k, ibg::IBGXP, f, args...) =
+    value(ifelse(i == ibg.underlying_grid.Nx, 1, i + 1), j, k, ibg, f, args...) - value(i, j, k, ibg, f, args...)
+@inline δyTᵃᶜᵃ(i, j, k, ibg::IBGYP, f, args...) =
+    value(i, ifelse(j == ibg.underlying_grid.Ny, 1, j + 1), k, ibg, f, args...) - value(i, j, k, ibg, f, args...)
+
+@inline δxTᶠᵃᵃ(i, j, k, ibg::IBGXS{FT, L}, f, args...) where {FT, L} =
+    ifelse((L === Closed) & (i == 1), zero(FT), δxᶠᵃᵃ(i, j, k, ibg, f, args...))
+@inline δyTᵃᶠᵃ(i, j, k, ibg::IBGYS{FT, L}, f, args...) where {FT, L} =
+    ifelse((L === Closed) & (j == 1), zero(FT), δyᵃᶠᵃ(i, j, k, ibg, f, args...))
+@inline δxTᶜᵃᵃ(i, j, k, ibg::IBGXS{FT, L, R}, f, args...) where {FT, L, R} =
+    Operators.impenetrable_difference(value(i + 1, j, k, ibg, f, args...), value(i, j, k, ibg, f, args...),
+                                      (L === Closed) & (i == 1), (R === Closed) & (i == ibg.underlying_grid.Nx))
+@inline δyTᵃᶜᵃ(i, j, k, ibg::IBGYS{FT, L, R}, f, args...) where {FT, L, R} =
+    Operators.impenetrable_difference(value(i, j + 1, k, ibg, f, args...), value(i, j, k, ibg, f, args...),
+                                      (L === Closed) & (j == 1), (R === Closed) & (j == ibg.underlying_grid.Ny))
 
 #####
 ##### Section 2 — Constructor
@@ -207,11 +235,10 @@ fill_architecture_halos!(fields, arch) = fill_halo_regions!(fields)
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Construct an `AcousticSubstepper`. The perturbation face fields ``(ρu)′, (ρv)′, (ρw)′`` and the
-scalar-transport velocities use topology-derived BCs (periodic wrap / impenetrability), **not** the
-prognostic momentum's BCs: inheriting them would imprint the full-state wall target onto the perturbation
-halo for a nonzero `NormalFlowBoundaryCondition` (issue \\#716) and apply momentum BCs to velocity fields.
-The wall target re-enters via the prognostic momentum's own BC after each substep's momentum update.
+Construct an `AcousticSubstepper` with auxiliary BCs for perturbations and transport velocities.
+Bounded normal faces default to `nothing`; the loop explicitly zeros lateral momentum perturbations.
+Prescribed flow stays in the stage-entry state, with prognostic BCs reapplied after stage recovery.
+Inheriting momentum BCs would impose full-state targets on perturbations (issue \\#716) and velocities.
 The `prognostic_momentum` kwarg is retained for backwards compatibility but no longer consulted.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
@@ -1441,8 +1468,8 @@ end
 
 @inline δpᴸ(i, j, k, grid, ρθ′, Cᴸ) = @inbounds Cᴸ[i, j, k] * ρθ′[i, j, k]
 
-@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = topology_aware_δxᶠᵃᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = topology_aware_δyᵃᶠᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = δxTᶠᵃᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = δyTᵃᶠᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 
 #####
@@ -1732,8 +1759,8 @@ end
 #####
 
 # Terrain grids specialize these gradients to retain the constant-height chain rule.
-@inline x_damping_gradient(i, j, k, grid, args...) = topology_aware_δxᶠᵃᵃ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-@inline y_damping_gradient(i, j, k, grid, args...) = topology_aware_δyᵃᶠᵃ(i, j, k, grid, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+@inline x_damping_gradient(i, j, k, grid, args...) = δxTᶠᵃᵃ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+@inline y_damping_gradient(i, j, k, grid, args...) = δyTᵃᶠᵃ(i, j, k, grid, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
 
 # No-op default
 @inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
@@ -2166,9 +2193,7 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch)
     return nothing
 end
 
-# Per-substep impenetrability enforcement on the wall-normal momentum
-# perturbations — the closed-wall companion of `apply_open_boundary_relaxation!`
-# above (which handles open lateral boundaries).
+# Zero normal perturbations at walls and prescribed-flow faces.
 
 @kernel function _zero_x_wall_face!(ρu′, iᶠ)
     j, k = @index(Global, NTuple)
@@ -2185,9 +2210,8 @@ function enforce_wall_impenetrability!(substepper, model, grid, arch)
     Nx, Ny, _ = size(grid)
     ρu′ = substepper.momentum_perturbation.u
     ρv′ = substepper.momentum_perturbation.v
-    # The perturbations carry impenetrability on every `Bounded` side, open ones included (an open
-    # boundary acts through `apply_open_boundary_relaxation!` on ρ′, (ρθ)′): their halo fill zeroed
-    # these faces, and the topology-aware divergence (`δxTᶜᵃᵃ`) assumes it.
+    # Auxiliary `nothing` BCs do not zero faces. Enforce zero perturbations explicitly
+    # to match the topology-aware divergence and hold prescribed flow in the stage-entry state.
     if TX === Bounded
         launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
         launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
