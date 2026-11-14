@@ -190,6 +190,24 @@ end
     @test droplet_terminal_velocity(r₀, FT(T₀), FT(90000), weightless, physics) == 0
 end
 
+@testset "Dry particles carry exactly zero liquid on the grid [$FT]" for FT in test_float_types()
+    # On GPUs the compiler contracts r³ − rᵈ³ into a fused multiply-add, which left a residual of order ε r³ for r = rᵈ
+    # (audit of 2026-11-14: 64 of 64 cells nonzero on GPU, zero on CPU); the factored difference of cubes is exactly zero
+    L = FT(0.02)
+    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, L), y=(0, L), z=(0, L), topology=(Periodic, Periodic, Periodic))
+    Nd = 300
+    n = 1:Nd
+    droplets = (x = L .* quasirandom.(n, 0), y = L .* quasirandom.(n, 1), z = L .* quasirandom.(n, 3),
+                r = fill(FT(1e-7), Nd), rᵈ = fill(FT(1e-7), Nd), κ = zeros(FT, Nd))
+    model = AtmosphereModel(grid; dynamics=BoussinesqDynamics(grid; pressure=90000, temperature=281, buoyancy=false),
+                            microphysics=LagrangianMicrophysics(FT; droplets))
+    set!(model; T=281, qᵗ=0.005)
+    time_step!(model, FT(0.01))
+    @test all(Array(model.microphysics.droplets.properties.r) .== FT(1e-7))
+    @test all(Array(interior(model.microphysical_fields.qˡ)) .== 0)
+    @test droplet_water_mass(FT(1e-7), FT(1e-7), model.thermodynamic_constants) == 0
+end
+
 @testset "LagrangianMicrophysics in single precision" begin
     # The per-step increments of θ and qᵛ in droplet DNS are comparable to the Float32 spacing of θ ≈ 300 K
     # and qᵛ ≈ 10⁻² (3 × 10⁻⁵ K and 5 × 10⁻¹⁰), and the per-step change of the frame pressure to Float32 epsilon.

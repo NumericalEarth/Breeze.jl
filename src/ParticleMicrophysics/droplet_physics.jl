@@ -1086,10 +1086,14 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the mass of liquid water (kg) in a droplet of wet radius `r` and dry radius `rᵈ`,
 ``(4π/3) ρᴸ (r^3 - rᵈ^3)``, assuming additive volumes of water and solute.
+
+The difference of cubes is evaluated as ``(r - rᵈ)(r^2 + r rᵈ + rᵈ^2)`` so that a dry particle
+(``r = rᵈ``) has exactly zero liquid also where the compiler contracts ``r^3 - rᵈ^3`` into a fused
+multiply-add, as on GPUs, where the direct form leaves a residual of order ``ε r^3``.
 """
 @inline function droplet_water_mass(r, rᵈ, constants)
     ρᴸ = constants.liquid.density
-    return π * ρᴸ * (r^3 - rᵈ^3) * 4 / 3
+    return π * ρᴸ * (r - rᵈ) * (r^2 + r * rᵈ + rᵈ^2) * 4 / 3
 end
 
 #####
