@@ -1,5 +1,5 @@
 using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant, vapor_gas_constant, absolute_zero_latent_heat,
-                             VaporEquivalentExponent, density
+                             VaporEquivalentExponent, adjustment_saturation_specific_humidity, density
 
 #####
 ##### Dynamics Interface
@@ -153,6 +153,20 @@ composition was changed immediately before setting temperature.
 """
 @inline function pressure_from_density_temperature(i, j, k, grid, dynamics, ρ, T, q, constants)
     return @inbounds dynamics_pressure(dynamics)[i, j, k]
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the saturation specific humidity at temperature `T` under the constraint that saturation
+adjustment applies for `dynamics`: the fixed [`dynamics_pressure`](@ref) by default (anelastic and
+kinematic), or the density `ρ` for compressible dynamics. Used by
+[`prescribed_temperature_moisture_fractions`](@ref).
+"""
+@inline function prescribed_temperature_saturation_specific_humidity(i, j, k, grid, dynamics, ρ, T, qᵗ,
+                                                                     constants, equilibrium)
+    pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
+    return adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
 end
 
 #####

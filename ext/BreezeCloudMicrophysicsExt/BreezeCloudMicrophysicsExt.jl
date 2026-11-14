@@ -73,7 +73,8 @@ using Breeze.Microphysics:
     NumberConcentrationKernelFunction,
     condensation_rate,
     deposition_rate,
-    adjust_thermodynamic_state
+    adjust_thermodynamic_state,
+    equilibrated_moisture_mass_fractions
 
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN
 

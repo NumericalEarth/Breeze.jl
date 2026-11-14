@@ -73,7 +73,7 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
                              vapor_equivalent_heat_capacity, condensate_latent_energy, exner_exponent,
                              reject_renamed_surface_pressure,
                              vapor_gas_constant, ExnerReferenceState, temperature, temperature_and_sensitivity,
-                             LiquidIceDensityState
+                             LiquidIceDensityState, saturation_specific_humidity
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using ReactantCore: @trace

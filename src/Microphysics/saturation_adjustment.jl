@@ -155,6 +155,27 @@ end
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the equilibrium moisture mass fractions of a cell at `(i, j, k)` with temperature `T`,
+total density `ρ`, and total specific moisture `qᵗ`, which includes the fixed
+`precipitation = (qʳ, qˢⁿ)`.
+
+The saturation constraint is the one `dynamics` imposes on the adjustment (see
+[`prescribed_temperature_saturation_specific_humidity`](@ref Breeze.AtmosphereModels.prescribed_temperature_saturation_specific_humidity)),
+so the result is a fixed point of [`adjust_thermodynamic_state`](@ref).
+"""
+@inline function equilibrated_moisture_mass_fractions(i, j, k, grid, dynamics, ρ, T, qᵗ, constants,
+                                                      equilibrium, precipitation=(0, 0))
+    qᵛ⁺ = prescribed_temperature_saturation_specific_humidity(i, j, k, grid, dynamics, ρ, T, qᵗ, constants, equilibrium)
+    return equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium, precipitation)
+end
+
+@inline AtmosphereModels.prescribed_temperature_moisture_fractions(i, j, k, grid, microphysics::SA, dynamics,
+                                                                   ρ, qᵉ, μ, T, constants) =
+    equilibrated_moisture_mass_fractions(i, j, k, grid, dynamics, ρ, T, qᵉ, constants, microphysics.equilibrium)
+
 # State-based moisture fractions for saturation adjustment (used by parcel models).
 # The moisture fractions come from the thermodynamic state after adjustment.
 # Since NothingMicrophysicalState has no prognostic variables, we return all vapor.
