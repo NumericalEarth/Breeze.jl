@@ -66,9 +66,18 @@ each stage.
 
 ## Boundary conditions
 
-Particles reflect off `Bounded` walls or are absorbed by them, according to the `ParticleBoundaryConditions`
-of `LagrangianParticles` (by default, `ReflectingBoundary(1)`, an elastic bounce;
-`ReflectingBoundary(0)` makes particles settle onto the wall), and wrap across `Periodic` boundaries.
+Particles wrap across `Periodic` boundaries. On `Bounded` walls their behavior is
+set by the `boundary_conditions` keyword of `LagrangianParticles`, a
+`ParticleBoundaryConditions` with one condition per side (`west`, `east`, `south`,
+`north`, `bottom`, `top`). A `ReflectingBoundary(restitution)` bounces particles
+back into the domain (`ReflectingBoundary()`, the default, is an elastic bounce;
+`ReflectingBoundary(0)` makes them settle onto the wall), while an
+`AbsorbingBoundary()` removes the particles that cross it:
+
+```julia
+boundary_conditions = ParticleBoundaryConditions(bottom = AbsorbingBoundary())
+particles = LagrangianParticles(x=[5e3], y=[5e3], z=[1e3]; boundary_conditions)
+```
 
 ## Terrain-following grids
 
@@ -105,8 +114,8 @@ Two limitations are worth noting:
   * The wall bounce reflects the vertical coordinate alone. On a sloping surface
     that is a vertical bounce, not a specular reflection about the surface normal:
     neither the horizontal position nor the velocity direction is modified. This
-    is exact for the flat lid, and for `ReflectingBoundary(0)`, where the particle
-    simply settles onto the ground; it is approximate for an elastic bounce off a
+    is exact for the flat lid, for `ReflectingBoundary(0)`, where the particle
+    simply settles onto the ground, and for `AbsorbingBoundary()`; it is approximate for an elastic bounce off a
     steep slope.
 
   * Particles are **not** supported on an `ImmersedBoundaryGrid` built on a

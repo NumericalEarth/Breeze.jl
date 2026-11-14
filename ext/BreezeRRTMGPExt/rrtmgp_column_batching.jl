@@ -30,7 +30,7 @@ const column_batches_docstring = """
   batches take about as long as a full solve each."""
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 RRTMGP grid parameters for `grid` with `ncol` set to the width of one batch of columns. These size
 the solver workspace, which every batch shares; the state arrays stay sized for the whole domain.
@@ -130,7 +130,7 @@ shortwave_lookups(lookups, ::ClearSkyRadiation) = (lookups.lookup_sw, nothing, l
 shortwave_lookups(lookups, ::AllSkyRadiation) = (lookups.lookup_sw, lookups.lookup_sw_cld, lookups.lookup_sw_aero)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve longwave and shortwave over each batch of columns in turn and copy the fluxes into the
 Oceananigans fields.

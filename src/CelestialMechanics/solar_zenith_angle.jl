@@ -8,14 +8,14 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the day of year (1-365/366) for a given `AbstractDateTime`.
 """
 day_of_year(dt::AbstractDateTime) = Dates.dayofyear(dt)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the solar declination angle (in radians) for a given day of year.
 
@@ -47,7 +47,7 @@ function solar_declination(day_of_year)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the equation of time (in minutes) for a given day of year.
 
@@ -72,7 +72,7 @@ function equation_of_time(day_of_year)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the hour angle (in radians) for a given datetime and longitude.
 
@@ -105,7 +105,7 @@ function hour_angle(datetime::AbstractDateTime, longitude)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the cosine of the solar zenith angle for a given datetime and location.
 
@@ -142,7 +142,7 @@ end
 const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the cosine of the solar zenith angle for the grid's location.
 

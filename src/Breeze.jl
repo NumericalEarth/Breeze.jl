@@ -36,6 +36,7 @@ export
     LinearRamp,
     CubicRamp,
     Sin2Ramp,
+    GaussianRamp,
     ExplicitTimeStepping,
     balance_adiabatically!,
     AdiabaticBalancer,
@@ -69,7 +70,7 @@ export
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
-    dynamics_density,
+    continuity_density,
     dynamics_pressure,
     total_density,
 
@@ -187,6 +188,7 @@ export
     FittedStabilityFunction,
     FilteredSurfaceVelocities,
     FilteredSurfaceScalar,
+    TKEGustiness,
     default_neutral_drag_polynomial,
     default_neutral_sensible_heat_polynomial,
     default_neutral_latent_heat_polynomial,
@@ -214,6 +216,8 @@ export
     SSPRungeKutta3,
     AcousticRungeKutta3,
     AcousticSubstepper,
+    RoundToNearest,
+    StochasticRounding,
 
     # ParcelDynamics
     ParcelDynamics,
@@ -234,6 +238,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     ImmersedBoundaryCondition, ImmersedBoundaryGrid, InMemory,
                     Integral, IterationInterval, JLD2Writer,
                     KernelFunctionOperation, LagrangianParticles,
+                    ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,
                     LatitudeLongitudeGrid, NetCDFWriter,
                     NonTraditionalBetaPlane, OnDisk, NormalFlowBoundaryCondition,
                     PartialCellBottom, Partition, Periodic,
@@ -278,7 +283,7 @@ export
     GradientLimitedMixingLength, ConstantStabilityFunctions,
     RationalStabilityFunction,
     DryStaticStability, MoistStaticStability,
-    LagrangianParticles,
+    LagrangianParticles, ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
     NetCDFWriter, JLD2Writer, Checkpointer,
@@ -292,6 +297,9 @@ using .Utils
 
 include("Solvers.jl")
 using .Solvers
+
+include("RoundingTreatments.jl")
+using .RoundingTreatments
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
@@ -332,7 +340,7 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,
                               UpperSponge,
-                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp,
+                              AbstractRamp, LinearRamp, CubicRamp, Sin2Ramp, GaussianRamp,
                               ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")

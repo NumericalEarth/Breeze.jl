@@ -19,7 +19,7 @@ using Adapt: adapt
 using Breeze: ReferenceState, AnelasticDynamics, total_density
 using Breeze.AtmosphereModels: materialize_dynamics, default_dynamics
 using Breeze.AtmosphereModels: dynamics_pressure, pressure_anomaly, total_pressure
-using Breeze.AtmosphereModels: dynamics_density
+using Breeze.AtmosphereModels: continuity_density
 
 @testset "AnelasticDynamics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
@@ -102,7 +102,7 @@ using Breeze.Thermodynamics: pressure_balanced_density
         @test dynamics isa CompressibleDynamics
         @test dynamics.dry_density isa Field
         @test dynamics.pressure isa Field
-        @test dynamics_density(dynamics) === dynamics.dry_density
+        @test continuity_density(dynamics) === dynamics.dry_density
         @test dynamics_pressure(dynamics) === dynamics.pressure
         @test total_density(dynamics) === dynamics.total_density
     end

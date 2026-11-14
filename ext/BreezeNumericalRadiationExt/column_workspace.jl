@@ -94,7 +94,7 @@ function ColumnWorkspace{FT}(args...) where FT
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Allocate a zeroed [`ColumnWorkspace`](@ref) of float type `FT` on architecture `arch` for batches
 of `rows` rows of `Nx` columns of `N` layers, and the cosine of the solar zenith angle of all `Nc`
@@ -157,21 +157,21 @@ Base.eltype(::ColumnWorkspace{FT}) where FT = FT
 Base.eltype(::Type{<:ColumnWorkspace{FT}}) where FT = FT
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The number of layers of the extended columns, `N = Nz + Nₑ`.
 """
 @inline number_of_layers(workspace::ColumnWorkspace) = size(workspace.dry_air, 2)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The number of columns of a batch, `Nb = Nx × rows`.
 """
 @inline batch_columns(workspace::ColumnWorkspace) = size(workspace.dry_air, 1)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The batches of the rows of `grid` that `workspace` holds one at a time: the `(row_offset, size)` of
 each, with `row_offset` the number of grid rows before the batch and `size = (Nx, rows)` the columns

@@ -27,8 +27,7 @@ struct StabilityFunction{FT}
 end
 
 """
-    StabilityFunction(FT = Oceananigans.defaults.FloatType;
-                      γᴰ = 19.3, γᵀ = 11.6, a = 1, b = 2/3, c = 5, d = 0.35)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Parameters for the integrated Monin-Obukhov stability functions ``Ψ^D(ζ)``
 and ``Ψ^T(ζ)``.
@@ -95,18 +94,7 @@ struct RichardsonNumberMapping{FT}
 end
 
 """
-    RichardsonNumberMapping(FT = Oceananigans.defaults.FloatType;
-                            stable_unstable_transition = 0,
-                            strongly_stable_transition = 0.2,
-                            aᵘ₁₁ =  0.0450, bᵘ₁₁ =  0.0030, bᵘ₁₂ =  0.0059,
-                            aᵘ₂₁ = -0.0828, aᵘ₂₂ =  0.8845,
-                            bᵘ₃₁ =  0.1739, bᵘ₃₂ = -0.9213, bᵘ₃₃ = -0.1057,
-                            aʷ₁₁ =  0.5738, aʷ₁₂ = -0.4399,
-                            aʷ₂₁ = -4.901,  aʷ₂₂ = 52.50,
-                            bʷ₁₁ = -0.0539, bʷ₁₂ =  1.540,
-                            bʷ₂₁ = -0.6690, bʷ₂₂ = -3.282,
-                            aˢ₁₁ =  0.7529, aˢ₂₁ = 14.94,
-                            bˢ₁₁ =  0.1569, bˢ₂₁ = -0.3091, bˢ₂₂ = -1.303)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Regression coefficients for the non-iterative mapping from bulk Richardson number
 ``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L``, following
@@ -156,9 +144,7 @@ struct FittedStabilityFunction{FT, RM, SP}
 end
 
 """
-    FittedStabilityFunction(scalar_roughness_length;
-                            richardson_number_mapping = RichardsonNumberMapping(typeof(scalar_roughness_length)),
-                            stability_function = StabilityFunction(typeof(scalar_roughness_length)))
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Stability correction based on Monin-Obukhov similarity theory using the
 [Li et al. (2010)](@cite Li2010) analytical mapping from bulk Richardson
@@ -226,7 +212,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Map bulk Richardson number ``Riᴮ`` to the Monin-Obukhov stability parameter
 ``ζ = z/L`` using the regression equations of Li et al. (2010).
@@ -246,13 +232,17 @@ Map bulk Richardson number ``Riᴮ`` to the Monin-Obukhov stability parameter
                   ifelse(Riᴮ ≤ mapping.strongly_stable_transition, ζʷ, ζˢ))
 end
 
-# Unstable regime (Riᴮ < 0), Li et al. (2010) Eq. 12
+# Unstable regime (Riᴮ < 0), Li et al. (2010) Eq. 12. The fit is a parabola in Riᴮ that is monotonic
+# only above its vertex Riᴮ = -B / 2A: below it ζ turns back towards zero and, for Riᴮ < -B / A, becomes
+# positive, so that light winds over a warm surface (free convection, Riᴮ ≪ 0) would be treated as strongly
+# stable and the transfer coefficients would collapse to zero. ζ is held at its vertex value beyond it.
 @inline function unstable_bulk_to_flux_richardson_number(Riᴮ, α, β, mapping)
     A = mapping.aᵘ₁₁ * α
     B = (mapping.bᵘ₁₁ * β + mapping.bᵘ₁₂) * α^2 +
         (mapping.aᵘ₂₁ * β + mapping.aᵘ₂₂) * α +
         (mapping.bᵘ₃₁ * β^2 + mapping.bᵘ₃₂ * β + mapping.bᵘ₃₃)
-    return A * Riᴮ^2 + B * Riᴮ
+    Ri = max(Riᴮ, - B / (2A))
+    return A * Ri^2 + B * Ri
 end
 
 # Weakly stable regime (0 ≤ Riᴮ ≤ Ri*), Li et al. (2010) Eq. 14
@@ -273,7 +263,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Integrated stability function for momentum ``Ψᴰ(ζ)``.
 
@@ -287,7 +277,7 @@ Note: ``Ψᴰ`` corresponds to ``Ψ_m`` in the literature.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Integrated stability function for scalars (heat, moisture) ``Ψᵀ(ζ)``.
 
@@ -353,7 +343,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The virtual potential temperature a stability-dependent bulk boundary condition compares against
 its surface value, evaluated from the model field tuple the boundary-condition kernel is handed
@@ -418,7 +408,7 @@ struct PolynomialCoefficient{FT, C, SF, S, θᵛ, SP, TC, TT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 A bulk transfer coefficient that depends on wind speed and atmospheric stability,
 following [Large and Yeager (2009)](@cite LargeYeager2009).
@@ -573,7 +563,7 @@ Base.summary(coef::PolynomialCoefficient) =
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute neutral transfer coefficient at 10 m using the
 [Large and Yeager (2009)](@cite LargeYeager2009) form:
@@ -600,7 +590,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute bulk Richardson number:
 ```math
@@ -629,7 +619,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the virtual potential temperature of a planar `surface` with surface temperature `Tˢ`,
 surface pressure `pˢ`, standard pressure `pˢᵗ`, moisture availability `β` and first-cell specific
@@ -661,7 +651,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Evaluate the bulk transfer coefficient for given conditions.
 
@@ -672,7 +662,8 @@ being evaluated, so it follows both terrain and the evolving state.
 # Arguments
 - `i`, `j`: Grid indices
 - `grid`: The grid
-- `U`: Wind speed (m/s)
+- `U`: Wind speed (m/s): the effective wind ``Ũ = \\sqrt{u² + v² + Uᵍ²}`` of the flux the
+  coefficient multiplies, gustiness ``Uᵍ`` included
 - `Tˢ`: Surface temperature (K) at location `(i, j)`
 - `h`: Measurement height (m) above the local surface; the short form uses half the first-cell
   thickness
@@ -749,7 +740,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The virtual potential temperature of the wall next to the cell `(i, j, k)`, from the wall
 temperature `Tˢ`, the air pressure `pˢ` at the wall, and the coefficient's standard pressure,
@@ -764,7 +755,7 @@ in the near-wall cell.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The surface-layer virtual potential temperature difference ``Δθᵥ = θᵥ(z₁) - θᵥˢ`` between the
 near-wall cell `(i, j, k)` and the wall at temperature `Tˢ`, from the instantaneous state: the
@@ -806,13 +797,19 @@ end
 ##### evaluated with the tangential wind at the cell centre and the wall distance of the
 ##### cell centre.
 #####
+##### The coefficient sees the same effective wind as the flux it multiplies,
+##### Ũ = √(u² + v² + Uᵍ²), with `Uᵍ²` the squared gustiness: both in the neutral polynomial
+##### and in the bulk Richardson number Riᴮ = g h Δθᵥ / (θᵥ Ũ²) that sets the stability
+##### correction. With the bare wind instead, calm air over a warm surface would see an
+##### unbounded Riᴮ and a coefficient for a wind far lighter than the one the flux uses.
+#####
 
-@inline bulk_coefficient(i, j, k, grid, side, C::Number, fields, Tˢ, fv, pˢ) = C
+@inline bulk_coefficient(i, j, k, grid, side, C::Number, fields, Tˢ, fv, pˢ, Uᵍ²) = C
 
-@inline function bulk_coefficient(i, j, k, grid, side, C::PolynomialCoefficient, fields, Tˢ, ::Nothing, pˢ)
+@inline function bulk_coefficient(i, j, k, grid, side, C::PolynomialCoefficient, fields, Tˢ, ::Nothing, pˢ, Uᵍ²)
     U² = tangential_speed²(i, j, k, grid, side, nothing, fields)
-    U = sqrt(U²)
-    return C(i, j, k, grid, side, U, Tˢ, fields, pˢ)
+    Ũ = sqrt(U² + Uᵍ²)
+    return C(i, j, k, grid, side, Ũ, Tˢ, fields, pˢ)
 end
 
 #####
@@ -825,11 +822,11 @@ end
 #####
 
 @inline function bulk_coefficient(i, j, k, grid, side::Bottom, C::PolynomialCoefficient, fields, Tˢ,
-                                  fv::FilteredSurfaceVelocities, pˢ)
+                                  fv::FilteredSurfaceVelocities, pˢ, Uᵍ²)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
-    U = sqrt(U²)
+    Ũ = sqrt(U² + Uᵍ²)
     h = evaluation_height(i, j, grid, fv.height)
-    return C(i, j, k, grid, side, U, Tˢ, h, fv.Δθᵥ, fields, pˢ)
+    return C(i, j, k, grid, side, Ũ, Tˢ, h, fv.Δθᵥ, fields, pˢ)
 end
 
 #####

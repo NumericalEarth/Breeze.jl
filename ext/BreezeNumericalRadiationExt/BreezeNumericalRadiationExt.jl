@@ -24,6 +24,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, Surface
                                dynamics_pressure, total_density, specific_prognostic_moisture,
                                grid_moisture_fractions
 using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using NumericalRadiation: EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel,
                           read_reference_ecckd_gas_optics, read_ecckd_tabulated_gas_optics,
@@ -46,7 +47,7 @@ using Oceananigans.Utils: launch!, IterationInterval, prettysummary
 using Adapt: Adapt, adapt
 using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using DocStringExtensions: TYPEDEF
 
 include("overlying_atmosphere.jl")
 include("column_workspace.jl")

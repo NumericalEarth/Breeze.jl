@@ -69,7 +69,7 @@ end
 
 # With divergence correction: c * ∇·(ρU)
 @inline function AtmosphereModels.c_div_ρU(i, j, k, grid, dynamics::PrescribedDynamics{true}, velocities, c)
-    return @inbounds c[i, j, k] * div_ρU(i, j, k, grid, dynamics_density(dynamics), velocities)
+    return @inbounds c[i, j, k] * div_ρU(i, j, k, grid, continuity_density(dynamics), velocities)
 end
 
 # Fixed density: no tendency to compute
@@ -79,7 +79,7 @@ AtmosphereModels.compute_dynamics_tendency!(::AtmosphereModel{<:PrescribedDynami
 function AtmosphereModels.compute_dynamics_tendency!(model::KinematicModel)
     grid = model.grid
     arch = grid.architecture
-    ρ = dynamics_density(model.dynamics)
+    ρ = continuity_density(model.dynamics)
     Gρ = model.timestepper.Gⁿ.ρ
 
     launch!(arch, grid, :xyz, _compute_density_tendency!, Gρ, grid, ρ, model.velocities)

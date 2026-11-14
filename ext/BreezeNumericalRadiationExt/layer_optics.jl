@@ -13,7 +13,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The scalar gas amounts (mol m⁻²) of `layer` (a [`layer_state`](@ref)) as a `NamedTuple` keyed by
 `ECCKD_GAS_NAMES`: its dry air, water vapor and ozone, and the well-mixed gases as
@@ -46,7 +46,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the gas optics stencil, gas amounts and water paths of every layer and the temperature of
 every interface of the `batch_size = (Nx, rows)` columns of the batch of `state`, and store them in

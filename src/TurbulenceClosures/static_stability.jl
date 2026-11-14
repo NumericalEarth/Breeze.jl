@@ -74,12 +74,12 @@ end
 end
 
 # The anelastic reference density normalizes prognostics but does not give their
-# vapor partial pressure. Saturation requires the local density from the moist EOS.
+# vapor partial pressure. Saturation requires the thermodynamic state density ρᵗʰ.
 @inline function local_saturation_specific_humidity(i, j, k, buoyancy, Tᵢ, q)
     constants = buoyancy.thermodynamic_constants
-    ρᵐ = gas_phase_density(i, j, k, buoyancy.dynamics, Tᵢ, q, constants)
+    ρᵗʰ = thermodynamic_state_density(i, j, k, buoyancy.dynamics, Tᵢ, q, constants)
     equilibrium = microphysics_phase_equilibrium(buoyancy.microphysics)
-    return saturation_specific_humidity(Tᵢ, ρᵐ, constants, equilibrium)
+    return saturation_specific_humidity(Tᵢ, ρᵗʰ, constants, equilibrium)
 end
 
 @inline function saturation_specific_humidityᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)

@@ -185,7 +185,7 @@ end
     @test sum(tendencies) ≈ zero(FT) atol=eps(FT)
 
     # TemperatureDependent formation uses the Frostenberg deposition timescale.
-    frostenberg = CMP.Frostenberg2023(; σ = FT(1), a = FT(1), b = FT(1), T_freeze = FT(273.15))
+    frostenberg = CMP.Frostenberg2023(; σ = FT(1), b = FT(1), T_freeze = FT(273.15))
     options = merge(disabled_options, (; cloud_ice_formation = CMP.TemperatureDependent()))
     parameters = override_process_params(CMP.Microphysics1MParams(FT; options...);
                                          cloud_ice_formation = (; τ_relax = FT(10), frostenberg))

@@ -1,6 +1,6 @@
 ---
 name: build-docs
-description: Build Breeze documentation locally with optional fast-build shortcuts
+description: Use when building or previewing the documentation locally, including a fast build that skips the Literate examples.
 ---
 
 # Build Documentation
@@ -15,8 +15,10 @@ Build the Breeze documentation locally.
    julia --project=docs/ docs/make.jl
    ```
 3. For **fast build**, temporarily modify `docs/make.jl`:
-   - Comment out Literate examples
-   - Comment out GPU-requiring pages
+   - Long examples (`build_always=false` in `docs/make.jl`) are skipped unless
+     `BREEZE_BUILD_ALL_EXAMPLES=true`; comment out the remaining entries in `examples` to skip them too
+   - To debug one literated example, comment out all the others
+   - Comment out pages and examples that need a GPU (`gpu=true`) when building on a CPU
    - Optionally set `doctest = false`, `linkcheck = false`
    - Run the build
    - **Revert all changes** to `docs/make.jl` after building

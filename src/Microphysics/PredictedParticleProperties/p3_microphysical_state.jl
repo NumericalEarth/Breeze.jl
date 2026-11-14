@@ -15,6 +15,14 @@ const P3 = PredictedParticlePropertiesMicrophysics
 @inline AM.precipitating_mass_fraction(i, j, k, ::P3, μ) =
     @inbounds μ.qʳ[i, j, k] + μ.qⁱ[i, j, k] + μ.qʷⁱ[i, j, k]
 
+# Liquid (cloud + rain + liquid on ice) and ice, partitioned as in `moisture_fractions`
+function AM.liquid_mass_fraction(::P3, model)
+    μ = model.microphysical_fields
+    return μ.qᶜˡ + μ.qʳ + μ.qʷⁱ
+end
+
+AM.ice_mass_fraction(::P3, model) = model.microphysical_fields.qⁱ
+
 #####
 ##### P3MicrophysicalState
 #####
@@ -100,7 +108,7 @@ end
 @inline AM.aerosol_field_names(p3::P3) = aerosol_prognostic_names(p3.aerosol)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return prognostic field names for the P3 scheme.
 
@@ -182,7 +190,7 @@ AM.negative_moisture_correction(p3::P3) = p3.negative_moisture_correction
 @inline aerosol_correction_fields(::AerosolActivation{<:Any, true}, μ) = (μ.ρnᵃ,)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Effective cloud droplet number concentration [kg⁻¹] seen by P3's process rates.
 
@@ -203,7 +211,7 @@ per-mass number `μ.ρnᶜˡ / ρ` as usual.
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 P3 is a non-equilibrium scheme: vapor (`qᵛ`) is the prognostic moisture variable.
 """
@@ -214,7 +222,7 @@ AM.moisture_prognostic_name(::P3) = :ρqᵛ
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create prognostic and diagnostic fields for P3 microphysics.
 
@@ -339,7 +347,7 @@ end
 @inline interpolate_w_to_center(grid, i, j, k, w_field, FT) = FT(ℑzᵃᵃᶜ(i, j, k, grid, w_field))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a [`P3MicrophysicalState`](@ref) from density-weighted prognostic variables.
 
@@ -507,7 +515,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update diagnostic microphysical fields after state update.
 
@@ -679,14 +687,14 @@ end
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
                                      constants, properties::P3ProcessProps,
                                      surface_temperature, temperature_tendency,
-                                     pressure_tendency, density_constraint = ρ)
+                                     pressure_tendency)
     Fᶠ = properties.Fᶠ
     ρᶠ = properties.ρᶠ
     # Passing `properties` lets compute_p3_process_rates skip the redundant
     # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                      surface_temperature, temperature_tendency,
-                                     pressure_tendency, density_constraint)
+                                     pressure_tendency)
 
     # Tendency extraction
     cloud_mass_tendency = tendency_ρqᶜˡ(rates, ρ)
@@ -807,7 +815,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute moisture mass fractions from P3 microphysical state.
 
@@ -922,10 +930,8 @@ end
     surface_temperature = temperature(𝒰, constants)
     temperature_tendency = p3_adiabatic_temperature_tendency(ℳ, 𝒰, constants)
     pressure_tendency = p3_adiabatic_pressure_tendency(ρ, ℳ, constants)
-    # Parcels are held at a prescribed pressure, not a fixed density, so the final vapor
-    # excess is re-diagnosed with the density of the updated thermodynamic state.
     return p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
-                               surface_temperature, temperature_tendency, pressure_tendency, nothing)
+                               surface_temperature, temperature_tendency, pressure_tendency)
 end
 
 # Name-to-slot map for `P3TendencyResult`. Names P3 does not evolve (`:s`, `:qᵗ`, host

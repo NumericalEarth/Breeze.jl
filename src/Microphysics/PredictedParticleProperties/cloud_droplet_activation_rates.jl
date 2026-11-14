@@ -10,7 +10,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the vapor-to-cloud mass rate [kg/kg/s] for prescribed droplet concentration `Nᶜˡ`.
 
@@ -51,7 +51,7 @@ consistent with `limit_vapor_rates` and `prognostic_vapor_excess_adjustment`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return cloud droplet activation rates `(; mass, number)` in [kg/kg/s] and [kg⁻¹ s⁻¹].
 

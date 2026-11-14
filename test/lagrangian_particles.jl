@@ -12,13 +12,14 @@ using Oceananigans.Models.LagrangianParticleTracking: particle_stage, advance_pa
 using Breeze.TimeSteppers: DisplacementParticleStage
 using Test
 
-function particles_at(FT, x, y, z; restitution = 1)
+function particles_at(FT, x, y, z; boundary_conditions = ParticleBoundaryConditions(ReflectingBoundary(one(FT))))
     x = on_architecture(default_arch, FT[x])
     y = on_architecture(default_arch, FT[y])
     z = on_architecture(default_arch, FT[z])
-    boundary_conditions = ParticleBoundaryConditions(ReflectingBoundary(FT(restitution)))
     return LagrangianParticles(; x, y, z, boundary_conditions)
 end
+
+settling_boundaries(FT) = ParticleBoundaryConditions(ReflectingBoundary(zero(FT)))
 
 uniform_flow_particles(FT) = particles_at(FT, 100, 200, 1000)
 
@@ -112,7 +113,7 @@ end
         x₀ = @allowscalar xnode(i, tf_grid, Center())
         y₀ = @allowscalar ynode(j, tf_grid, Center())
         z_surface = topography(x₀, y₀)
-        particles = particles_at(FT, x₀, y₀, z_surface + FT(10); restitution=0)
+        particles = particles_at(FT, x₀, y₀, z_surface + FT(10); boundary_conditions=settling_boundaries(FT))
         model = AtmosphereModel(tf_grid; dynamics, particles)
         set!(model.velocities.w, -FT(20))
         step_lagrangian_particles!(model, FT(1))
@@ -123,11 +124,24 @@ end
         @test z ≈ z_surface
 
         # The upper wall is the flat lid z = r_top, not h + z_top.
-        particles = particles_at(FT, x₀, y₀, Lz - FT(10); restitution=0)
+        particles = particles_at(FT, x₀, y₀, Lz - FT(10); boundary_conditions=settling_boundaries(FT))
         model = AtmosphereModel(tf_grid; dynamics, particles)
         set!(model.velocities.w, FT(20))
         step_lagrangian_particles!(model, FT(100))
         @test last(particle_position(particles)) ≈ Lz
+
+        # An absorbing bottom removes a particle that descends into the terrain,
+        # while one that stays above it is kept.
+        boundary_conditions = ParticleBoundaryConditions(ReflectingBoundary(one(FT)); bottom=AbsorbingBoundary())
+        x = on_architecture(default_arch, FT[x₀, x₀])
+        y = on_architecture(default_arch, FT[y₀, y₀])
+        z = on_architecture(default_arch, FT[z_surface + 10, z_surface + 1000])
+        particles = LagrangianParticles(; x, y, z, boundary_conditions)
+        model = AtmosphereModel(tf_grid; dynamics, particles)
+        set!(model.velocities.w, -FT(20))
+        step_lagrangian_particles!(model, FT(1))
+        @test length(particles) == 1
+        @test @allowscalar particles.properties.z[1] ≈ z_surface + 980
 
         # Horizontal wrapping happens in physical coordinates, and the terrain
         # wall is then evaluated over the far side of the domain.

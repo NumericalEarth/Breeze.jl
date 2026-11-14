@@ -84,14 +84,14 @@ function sedimentation_temperature_rates(model, phase, compressible)
     gas = (ρ .- ρv .- ρx) .* TH.dry_air_gas_constant(constants) .+ ρv .* TH.vapor_gas_constant(constants)
     capacity = (ρ .- ρv .- ρx) .* cd .+ ρv .* cv .+ ρx .* cx .- (compressible ? gas : zero(gas))
     pressure = compressible ? gas .* T : column(model.dynamics.reference_state.pressure)
-    carrier = column(AM.dynamics_density(model.dynamics))
+    weighting_density = column(AM.continuity_density(model.dynamics))
     function theta_density(k, temperature, condensate)
         density = compressible ? ρ[k] + condensate - ρx[k] : ρ[k]
         q = phase === :liquid ? TH.MoistureMassFractions(ρv[k] / density, condensate / density, 0.0) :
                                TH.MoistureMassFractions(ρv[k] / density, 0.0, condensate / density)
         p = compressible ? gas[k] * temperature : pressure[k]
         state = TH.LiquidIcePotentialTemperatureState(0.0, q, Float64(AM.standard_pressure(model.dynamics)), p)
-        return carrier[k] * TH.with_temperature(state, temperature, constants).potential_temperature
+        return weighting_density[k] * TH.with_temperature(state, temperature, constants).potential_temperature
     end
     derivative_T = [(theta_density(k, T[k] + 1e-3, ρx[k]) - theta_density(k, T[k] - 1e-3, ρx[k])) / 2e-3 for k in 1:2]
     derivative_mass = [(theta_density(k, T[k], ρx[k] + 1e-6) - theta_density(k, T[k], ρx[k] - 1e-6)) / 2e-6 for k in 1:2]

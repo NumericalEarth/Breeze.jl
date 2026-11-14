@@ -57,7 +57,8 @@ References: DCMIP2016 Fortran implementation (`kessler.f90` in [DOI: 10.5281/zen
 """
 function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constants, microphysics;
                                              sedimentation_density = ρ,
-                                             dry_air_coupled = false)
+                                             dry_air_coupled = false,
+                                             isochoric = false)
     Nz = length(T)
     FT = eltype(T)
 
@@ -162,8 +163,12 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             rᶜˡ_new = max(0.0, rᶜˡ[k] - Δrᴾ)
             rʳ_new = max(0.0, rʳ[k] + Δrᴾ + Δr𝕎)
 
-            # Saturation adjustment
-            qᵛ⁺ = saturation_specific_humidity(T[k], ρ[k], constants, PlanarLiquidSurface())
+            # Saturation adjustment. The Fortran saturation mixing ratio depends on pressure and
+            # temperature alone (rvs = 3.8 / p exp(...)), so on a fixed-pressure (anelastic) column
+            # it is evaluated at the thermodynamic state density at (p, T), not at the density that
+            # weights the rain. On the compressible core the update is isochoric: saturation is at ρ.
+            ρᵗʰ = isochoric ? ρ[k] : p[k] / (mixture_gas_constant(q, constants) * T[k])
+            qᵛ⁺ = saturation_specific_humidity(T[k], ρᵗʰ, constants, PlanarLiquidSurface())
             rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
             Δrˢᵃᵗ = (rᵛ[k] - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T[k] - T_offset)^2)
 
@@ -524,7 +529,8 @@ end
         dcmip2016_klemp_wilhelmson_kessler!(T_ref, qᵛ_ref, qᶜˡ_ref, qʳ_ref,
                                             ρ, p, Δt, z, constants, microphysics;
                                             sedimentation_density = ρᵈ,
-                                            dry_air_coupled = true)
+                                            dry_air_coupled = true,
+                                            isochoric = true)
 
     qᵗ_ref = qᵛ_ref .+ qᶜˡ_ref .+ qʳ_ref
     rᵛ_ref = qᵛ_ref ./ (1 .- qᵗ_ref)

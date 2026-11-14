@@ -17,7 +17,7 @@
 export psd_correction_spherical_volume
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the analytically exact PSD correction factor for volume-dependent
 immersion freezing of spherical drops with a gamma size distribution.

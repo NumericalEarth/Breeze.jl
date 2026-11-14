@@ -53,7 +53,7 @@ function OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The static stability ``N² = g ∂_z \\ln θᵨ`` at (Center, Center, Face), the vertical gradient of the
 buoyancy ``b = -g ρ′ / ρᵣ`` that the dynamics uses, written through the density potential
@@ -73,7 +73,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The density potential temperature at cell `(i, j, k)`,
 

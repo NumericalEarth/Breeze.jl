@@ -138,7 +138,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Validate and materialize the user's surface properties into a `SurfaceRadiation`.
 
@@ -177,7 +177,7 @@ end
 initialize_surface_temperature!(T₀, surface_temperature) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Copy the surface emissivity `ε` and the direct and diffuse albedos `αᵈ`, `αˢ` from
 `surface_radiation` into RRTMGP's band-by-column boundary-condition arrays `ε₀`, `αᵈ₀`, `αˢ₀`.

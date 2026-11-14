@@ -52,7 +52,7 @@ Adapt.adapt_structure(to, k::RelativeHumidityKernelFunction) =
 const RelativeHumidityOp = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:RelativeHumidityKernelFunction}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `KernelFunctionOperation` representing the *relative humidity* ``ℋ``,
 defined as the ratio of vapor pressure to saturation vapor pressure:
@@ -147,7 +147,7 @@ function (d::RelativeHumidityKernelFunction)(i, j, k, grid)
     # Vapor specific humidity
     qᵛ = q.vapor
 
-    ρ = gas_phase_density(i, j, k, d.dynamics, T, q, constants)
+    ρ = thermodynamic_state_density(i, j, k, d.dynamics, T, q, constants)
 
     # Vapor pressure from ideal gas law: pᵛ = ρᵛ Rᵛ T = ρ qᵛ Rᵛ T
     Rᵛ = vapor_gas_constant(constants)
@@ -165,7 +165,7 @@ const RelativeHumidityField = Field{C, C, C, <:RelativeHumidityOp}
 RelativeHumidityField(model) = Field(RelativeHumidity(model))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return an `AbstractOperation` representing the *supersaturation with respect to liquid water*,
 
@@ -212,7 +212,7 @@ true
 Supersaturation(model) = RelativeHumidity(model) - 1
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `Field` holding the supersaturation ``𝒮 = ℋ - 1``. See [`Supersaturation`](@ref).
 """
@@ -254,7 +254,7 @@ Adapt.adapt_structure(to, k::NumberConcentrationKernelFunction) =
 const NumberConcentrationOp = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:NumberConcentrationKernelFunction}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Lazy diagnostic returning the total number concentration ``ρnˣ`` (m⁻³) for the
 requested `species`.
@@ -294,7 +294,7 @@ number_concentration(model, microphysics, ::Val{species}) where {species} =
           "TwoMomentCloudMicrophysics, and PredictedParticlePropertiesMicrophysics.")
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Field-typed handle for the [`number_concentration`](@ref) diagnostic. Allocates a
 `Field` shell around lazy `KernelFunctionOperation`s (use `compute!` to populate

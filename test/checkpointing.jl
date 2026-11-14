@@ -25,7 +25,7 @@ end
 θᵢ(x, y, z) = 300 + 2 * sin(2π * x / 1_000) * cos(2π * y / 1_000) * exp(-z / 500)
 uᵢ(x, y, z) = 0.5 * cos(2π * x / 1_000) * sin(2π * z / 1_000)
 
-function anelastic_model(FT; microphysics=nothing, closure=nothing, optics=nothing)
+function anelastic_model(FT; microphysics=nothing, closure=nothing, optics=nothing, timestepper_kwargs=NamedTuple())
     grid = test_grid(FT)
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -39,15 +39,17 @@ function anelastic_model(FT; microphysics=nothing, closure=nothing, optics=nothi
                                                                       epoch = DateTime(2024, 6, 21, 16)),
                                schedule = TimeInterval(0.9))
 
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, microphysics, closure, radiation)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, microphysics, closure, radiation,
+                            timestepper_kwargs)
     set!(model; θ=θᵢ, qᵗ=0.015, u=uᵢ)
     return model
 end
 
-function compressible_model(FT; time_discretization=ExplicitTimeStepping(), microphysics=nothing, closure=nothing)
+function compressible_model(FT; time_discretization=ExplicitTimeStepping(), microphysics=nothing, closure=nothing,
+                            timestepper_kwargs=NamedTuple())
     grid = test_grid(FT)
     dynamics = CompressibleDynamics(time_discretization; reference_potential_temperature=300)
-    model = AtmosphereModel(grid; dynamics, microphysics, closure)
+    model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper_kwargs)
     set!(model; ρ=model.dynamics.reference_state.density, θ=θᵢ, qᵗ=0.015, u=uᵢ)
     return model
 end
@@ -122,6 +124,13 @@ end
         @testset "gray radiation" begin
             test_bitwise_restart(() -> anelastic_model(FT; optics=GrayOptics()))
         end
+
+        # Stochastic rounding keeps no state: its random numbers are a hash of the seed and the
+        # iteration, which the checkpoint restores.
+        @testset "stochastic rounding" begin
+            rounding = StochasticRounding(seed = 11)
+            test_bitwise_restart(() -> anelastic_model(FT; timestepper_kwargs = (; rounding)))
+        end
     end
 
     @testset "Compressible dynamics" begin
@@ -139,6 +148,12 @@ end
 
         @testset "prognostic TKE closure" begin
             test_bitwise_restart(() -> compressible_model(FT; closure=TKEBasedTurbulenceClosure()))
+        end
+
+        @testset "split-explicit, stochastic rounding" begin
+            rounding = StochasticRounding(seed = 11)
+            test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
+                                                          timestepper_kwargs = (; rounding)))
         end
     end
 end

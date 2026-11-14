@@ -15,9 +15,13 @@ using .BreezeCloudMicrophysicsExt:
     TwoMomentCategories,
     two_moment_cloud_microphysics_categories,
     AerosolActivation,
+    WarmPhaseTwoMomentState,
+    aerosol_activation_mass_tendency,
     default_aerosol_activation
 
 using Breeze.Microphysics: ConstantRateCondensateFormation
+using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, MoistureMassFractions, PlanarLiquidSurface,
+                             density, saturation_specific_humidity, with_temperature
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 
@@ -343,6 +347,30 @@ end
 #####
 ##### Aerosol activation tests
 #####
+
+@testset "Aerosol activation mass tendency keeps the float type [$FT]" for FT in all_float_types()
+    constants = ThermodynamicConstants(FT)
+    categories = two_moment_cloud_microphysics_categories(FT)
+    aerosol_activation = categories.aerosol_activation
+    T = FT(285)
+    p = FT(90000)
+    velocities = (; u = zero(FT), v = zero(FT), w = FT(1))
+    ℳ = WarmPhaseTwoMomentState(zero(FT), zero(FT), zero(FT), zero(FT), FT(1e8), velocities)
+
+    # Supersaturated air activates droplets at the Köhler radius; subsaturated air falls back
+    # to the nucleation radius, which must keep the float type too.
+    for supersaturation in (FT(0.005), FT(-0.05))
+        q₀ = MoistureMassFractions(FT(0.01), zero(FT), zero(FT))
+        ρ = density(with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q₀, FT(1e5), p), T, constants), constants)
+        qᵛ = (1 + supersaturation) * saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        q = MoistureMassFractions(qᵛ, zero(FT), zero(FT))
+        𝒰 = with_temperature(LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), p), T, constants)
+        tendency = @inferred aerosol_activation_mass_tendency(aerosol_activation, categories.air,
+                                                              density(𝒰, constants), ℳ, 𝒰, constants)
+        @test tendency isa FT
+        @test isfinite(tendency)
+    end
+end
 
 @testset "AerosolActivation construction [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT

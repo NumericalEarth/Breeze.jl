@@ -103,7 +103,7 @@ jobs:
       - name: "Check out repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: "Install Julia"
-        uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
+        uses: julia-actions/setup-julia@da908477b5db94c10ffce8cfea9f2b3b9d5db687 # v3.0.3
         # On the self-hosted GPU runners we use a Docker image with Julia pre-installed.
         if: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         with:
@@ -227,7 +227,7 @@ jobs:
       - name: Stop earlyoom
         cancel: earlyoom
       - name: "Upload Manifest"
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         timeout-minutes: 2
         with:
@@ -236,7 +236,7 @@ jobs:
           retention-days: 90
           overwrite: false
       - name: "Upload Reactant MLIR dumps as artifacts"
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: mlir-dumps-${{ matrix.version }}-${{ matrix.os }}

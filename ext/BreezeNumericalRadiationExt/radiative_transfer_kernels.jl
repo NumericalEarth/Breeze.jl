@@ -43,7 +43,7 @@ Base.size(flux::FaceFluxColumn) = (flux.layers + 1,)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve the longwave and shortwave fluxes of the `batch_size = (Nx, rows)` columns of the batch of
 `state`, whose layer state the layer pass has stored in `rtm`'s workspace: per column, stream the g points of the no-scattering longwave solver and of the two-stream
@@ -121,7 +121,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the ecCKD radiative fluxes of `rtm` from the current state of `model`. Batch by batch:
 integrate the extension pressures above the columns' tops, store the per-layer state, and solve

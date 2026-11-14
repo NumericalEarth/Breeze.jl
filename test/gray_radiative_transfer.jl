@@ -35,6 +35,11 @@ using RRTMGP
                                                       solar_position = FixedCosineZenith(FT[0.1, 0.2]))
 end
 
+@testset "RRTMGP radiation on ReactantState is an ArgumentError" begin
+    BreezeRRTMGPExt = Base.get_extension(Breeze, :BreezeRRTMGPExt)
+    @test_throws ArgumentError BreezeRRTMGPExt.rrtmgp_context(Oceananigans.Architectures.ReactantState())
+end
+
 @testset "GrayRadiativeTransferModel construction" begin
     @testset "Single column grid [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT

@@ -42,7 +42,7 @@ struct RationalStabilityFunction{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct rational stability functions for momentum, tracers, TKE, and dissipation:
 `S(Ri) = C⁰ + (C± - C⁰) x / (1 + x)`, where `x = |Ri| / Ri±`.

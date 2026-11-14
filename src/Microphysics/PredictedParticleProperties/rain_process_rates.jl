@@ -6,7 +6,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain autoconversion rate, dispatched on `p3.warm_rain_scheme`.
 
@@ -59,7 +59,7 @@ Available schemes:
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain accretion rate, dispatched on `p3.warm_rain_scheme`.
 
@@ -99,7 +99,7 @@ Falling rain drops collect cloud droplets via gravitational sweep-out. See
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain self-collection rate (number tendency only). Dispatches on
 `p3.warm_rain_scheme`.
@@ -133,7 +133,7 @@ with ``\\mathbb{C}_{\\mathrm{self},1} = 5.78`` m³ kg⁻¹ s⁻¹ by default.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain breakup rate.
 
@@ -218,7 +218,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain evaporation rate using ventilation-enhanced diffusion.
 
@@ -284,7 +284,7 @@ table read plus the runtime `1/√ν`, `ℂᵛᵉⁿᵗ` and Schmidt contributio
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rain ventilation integral and the slope quantities that go with it:
 
@@ -345,7 +345,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Cloud-droplet self-collection rate (number loss in cloud, not rain).
 
@@ -358,7 +358,7 @@ cloud-droplet self-collection. Returned as a positive magnitude.
 @inline cloud_self_collection_rate(::KhairoutdinovKogan2000, p3, qᶜˡ, Nᶜˡ, ρ) = zero(qᶜˡ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Cloud-droplet number loss from autoconversion (mass → drop count conversion),
 dispatched on `p3.warm_rain_scheme`. Returned as a positive magnitude.
@@ -376,7 +376,7 @@ proportion to the cloud mass lost.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Mass per newly-formed rain drop produced by autoconversion, dispatched on
 `p3.warm_rain_scheme`. Used to convert autoconversion mass rate into a rain

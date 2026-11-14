@@ -170,7 +170,7 @@ end
         # the anelastic reference density is already physical there, so the reservoir is seeded.
         model = Breeze.AtmosphereModel(grid; microphysics = p3)
 
-        ρ̄ = Breeze.AtmosphereModels.dynamics_density(model.dynamics)
+        ρ̄ = Breeze.AtmosphereModels.continuity_density(model.dynamics)
         ρnᵃ = Array(interior(model.microphysical_fields.ρnᵃ))
         ρ̄_interior = Array(interior(ρ̄))
         @test ρnᵃ ≈ ρ̄_interior .* nᵃ₀
@@ -217,7 +217,7 @@ end
         grid = RectilinearGrid(default_arch, size=(1, 1, 4), x=(0, 1), y=(0, 1), z=(0, 2000))
         model = Breeze.AtmosphereModel(grid; microphysics = p3_multimode)
 
-        ρ̄ = Array(interior(Breeze.AtmosphereModels.dynamics_density(model.dynamics)))
+        ρ̄ = Array(interior(Breeze.AtmosphereModels.continuity_density(model.dynamics)))
         ρnᵃ = Array(interior(model.microphysical_fields.ρnᵃ))
         @test ρnᵃ ./ ρ̄ ≈ fill(nᵃ_summed, size(ρ̄)) rtol=1e-12
     end
