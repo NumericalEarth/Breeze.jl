@@ -88,8 +88,6 @@ one_cell_fields(values) = NamedTuple{p3_density_names}(map(v -> fill(v, 1, 1, 1)
         for _ in 1:2000
             ρ, 𝒰, ℳ, specific = random_p3_state(rng, p3, constants, FT)
             properties = PPP.p3_process_properties(p3, ρ, ℳ)
-            rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
-                                             temperature(𝒰, constants), zero(FT), zero(FT))
 
             # The stage starts from a state unrelated to the one the rates saw (empty for
             # a third of the species), and every other tendency removes part of it or adds to it.
@@ -101,6 +99,11 @@ one_cell_fields(values) = NamedTuple{p3_density_names}(map(v -> fill(v, 1, 1, 1)
             fields = one_cell_fields(c⁰)
             G = one_cell_fields(Gᵒ)
             stage = StageStart(fields, fields, false, Δt)
+
+            # As in the tendency kernel, the liquid vapor exchange is relaxed implicitly over the stage.
+            rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                                             temperature(𝒰, constants), zero(FT), zero(FT),
+                                             nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
 
             φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)

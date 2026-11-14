@@ -245,6 +245,7 @@ include("process_rate_helpers.jl")
 include("tabulated_kernels.jl")
 include("cloud_droplet_activation_rates.jl")
 include("coupled_saturation_adjustment.jl")
+include("implicit_liquid_relaxation.jl")
 
 #####
 ##### P3ProcessRates struct + constructor and the per-process rate calculations

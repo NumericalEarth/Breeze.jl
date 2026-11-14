@@ -125,7 +125,8 @@ end
 
     rates = compute_p3_process_rates(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants, inputs.properties,
                                      inputs.surface_temperature, inputs.temperature_tendency,
-                                     inputs.pressure_tendency, statistics)
+                                     inputs.pressure_tendency, statistics,
+                                     GridLiquidRelaxationStage(i, j, k, G, stage))
 
     # Scale every transfer to what the coming stage leaves of the species it draws on.
     φ = p3_sink_fractions(i, j, k, G, stage, p3, inputs.ρ, rates)
@@ -142,6 +143,38 @@ end
 
     add_p3_tendencies!(G, i, j, k, grid, p3, result, relaxations, rime)
 end
+
+#####
+##### The stage of the implicit liquid relaxation
+#####
+
+# The stage that the implicit liquid relaxation advances over, at cell `(i, j, k)`. It holds only
+# what the kernel already has, and the tendencies `G` are read where the relaxation needs them
+# (`liquid_relaxation_stage`), so nothing more is carried through the process rates. `G` is read
+# before the P3 tendencies are added.
+struct GridLiquidRelaxationStage{I, G, S}
+    i :: I
+    j :: I
+    k :: I
+    tendencies :: G
+    stage :: S
+end
+
+# What the stage start and every other tendency leave of the cloud, per unit mass.
+@inline function liquid_relaxation_stage(grid_stage::GridLiquidRelaxationStage, aerosol, ρ)
+    i, j, k = grid_stage.i, grid_stage.j, grid_stage.k
+    G = grid_stage.tendencies
+    stage = grid_stage.stage
+    active = AM.stage_interval_is_known(stage)
+    Δt = ifelse(active, stage.Δt, zero(stage.Δt))
+    qᶜˡ = AM.stage_remainder(i, j, k, G.ρqᶜˡ, stage, Val(:ρqᶜˡ)) / ρ
+    nᶜˡ = p3_cloud_number_remainder(i, j, k, G, stage, aerosol) / ρ
+    return LiquidRelaxationStage(Δt, ifelse(active, qᶜˡ, zero(qᶜˡ)), ifelse(active, nᶜˡ, zero(nᶜˡ)), active)
+end
+
+@inline p3_cloud_number_remainder(i, j, k, G, stage, ::Nothing) = zero(stage.Δt)
+@inline p3_cloud_number_remainder(i, j, k, G, stage, ::AerosolActivation) =
+    AM.stage_remainder(i, j, k, G.ρnᶜˡ, stage, Val(:ρnᶜˡ))
 
 #####
 ##### Patankar-limited sinks

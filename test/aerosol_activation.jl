@@ -441,7 +441,12 @@ end
              nᵃ = small_pool, enforce_mass_conservation = false)
         for model in (fixed_model, prognostic_model)
             update_state!(model)
-            for _ in 1:20
+            # Activation relaxes toward its target by backward Euler over each stage, and the
+            # transfer is then scaled by the Patankar fraction of the reservoir. With
+            # x = Δt / activation_timescale the reservoir keeps (1 + x) / (1 + 2x) of itself over
+            # a stage, where the explicit rate with the Patankar fraction kept 1 / (1 + x): a
+            # slower drain, which takes 40 steps rather than 20 to pass below 1e-3 of the pool.
+            for _ in 1:40
                 time_step!(model, FT(1))
             end
         end

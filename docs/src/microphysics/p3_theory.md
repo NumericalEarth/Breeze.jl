@@ -2951,6 +2951,21 @@ interval that need not match that timescale:
   interval ``Δt``. Each transfer is scaled by the fraction of the species it draws
   on, which scales the recipient's gain by the same factor and conserves the
   exchange;
+- the vapor exchange of liquid is a relaxation, and is advanced by backward Euler over
+  the stage in place of the saturation-adjustment caps: cloud liquid relaxes towards
+  its equilibrium condensate ``\max(0, s̄) / ξ^l`` at the droplets' vapor relaxation rate
+  ``ε^l``, with ``s̄ = q^v - q^{v+l} + ξ^l q^{cl}`` the saturation excess of total water,
+  which condensation leaves unchanged. Rain condenses and evaporates on the same vapor
+  excess at its rate ``ε^r``, so the two are relaxed together, the excess decaying by
+  ``1 / (1 + Δt (ε^l + ε^r))`` and split between them by ``ε / (ε^l + ε^r)``. Droplet
+  activation relaxes towards the activated number (or seed mass) in the same way.
+  Each update is a convex combination of what the stage leaves of the cloud and a
+  non-negative target, applied as the tendency ``(c^+ - c̃) / Δt``, so it neither
+  overshoots the target nor depends on `sink_limiting_timescale`, and it reduces to
+  the explicit rate as ``ε Δt → 0``. The transfers are then scaled by the Patankar
+  fractions like every other, which bounds evaporation by the cloud and rain present
+  and activation by the aerosol reservoir. Ice deposition, the liquid coating of ice
+  and ice nucleation keep the explicit caps;
 - the relaxations of number towards its size-distribution bounds and of ice number
   towards its cap are advanced by backward Euler over the stage;
 - rime mass and volume loss is bounded by what the stage leaves of each.

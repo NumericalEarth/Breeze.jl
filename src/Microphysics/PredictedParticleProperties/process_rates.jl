@@ -573,7 +573,8 @@ end
                                           surface_temperature,
                                           temperature_tendency,
                                           pressure_tendency,
-                                          subgrid_statistics)
+                                          subgrid_statistics,
+                                          liquid_stage = nothing)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -769,6 +770,13 @@ end
                                     rain_cond, rain_evap, dep, coat_cond, coat_evap,
                                     nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
                                     dt_safety, T₀, temperature_tendency, pressure_tendency, Γ)
+    # On the grid, the liquid vapor exchange and activation are instead advanced implicitly over
+    # the coming stage (see `implicit_liquid_relaxation.jl`); the explicit caps above stay the
+    # gridless path and the fallback before the first time step.
+    vapor_rates = implicit_liquid_vapor_rates(liquid_stage, vapor_rates, p3, ρ, ℳ_adjusted, state,
+                                              qᵗ, constants, vapor_excess_adjustment.cloud_water_adjustment,
+                                              dep, nuc_q, nuc_n,
+                                              temperature_tendency, pressure_tendency)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number

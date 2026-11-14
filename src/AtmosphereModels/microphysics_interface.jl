@@ -449,6 +449,51 @@ before the first time step, when the stage interval is not known.
     return ifelse(stage_interval_is_known(stage), φ, one(φ))
 end
 
+#####
+##### Implicit relaxation toward a target
+#####
+#
+# A process that relaxes a content `c` toward a non-negative target `c_eq` at rate `ω`
+# (condensation toward the equilibrium condensate, activation toward the activated number) can
+# be advanced over the coming stage by backward Euler,
+#
+#     c⁺ = (c + ω Δt c_eq) / (1 + ω Δt),
+#
+# a convex combination of `c` and `c_eq`: non-negative when both are, and never past the
+# target, for any `ω Δt`. The time stepper takes tendencies, so the update is applied as the
+# equivalent rate `(c⁺ - c) / Δt = ω (c_eq - c) / (1 + ω Δt)`. Where several processes draw on
+# one excess `x` (cloud and rain on the vapor excess), the excess relaxes as
+# `x⁺ = x / (1 + Δt Σωᵢ)` and process `i` takes the share `ωᵢ / Σω` of `x - x⁺`.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The content `(c + ωΔt c_eq) / (1 + ωΔt)` that backward Euler leaves after relaxing `c` toward
+`c_eq` over a stage, with `ωΔt` the product of the relaxation rate and the stage interval.
+"""
+@inline implicit_relaxation(c, c_eq, ωΔt) = (c + ωΔt * c_eq) / (1 + ωΔt)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The rate `ω (c_eq - c) / (1 + ω Δt)` that, applied over `Δt`, takes `c` to
+[`implicit_relaxation`](@ref)`(c, c_eq, ω Δt)`. It is the explicit rate `ω (c_eq - c)` at
+`Δt = 0`.
+"""
+@inline implicit_relaxation_rate(c, c_eq, ω, Δt) = ω * (c_eq - c) / (1 + ω * Δt)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The rates `ωᵢ xᵢ / (1 + Δt Σω)` of processes with relaxation rates `ω` that draw on one
+shared excess, each seeing the excess `xᵢ` (the same `x` for all when they see one excess):
+backward Euler for the excess, `x⁺ = x / (1 + Δt Σω)`, split by `ωᵢ / Σω`.
+"""
+@inline function shared_excess_relaxation_rates(x::Tuple, ω::Tuple, Δt)
+    D = 1 + Δt * sum(ω)
+    return map((xᵢ, ωᵢ) -> ωᵢ * xᵢ / D, x, ω)
+end
+
 # No microphysics: nothing to add.
 compute_microphysical_tendencies!(::Nothing, model) = nothing
 
