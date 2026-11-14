@@ -104,6 +104,42 @@ end
     @test model.clock.time ≈ 100
 end
 
+# The saturated column of `acoustic_substepping_stability.jl`: a seeded 2Δx mode in a moist-stable
+# column in a 15 m/s wind, undamped at Δt = 10 s, under saturation adjustment. MIS linearizes once
+# per step with the substepper it shares with AcousticRungeKutta3, and recombines as slow the part
+# of the pressure gradient its loop does not account for. Both must be those of the pressure the
+# adjustment re-diagnoses, in air saturated throughout and at the edges of a cloud layer: with the
+# partition held the mode grew to several m/s.
+@testset "MIS keeps a seeded 2Δx mode in saturated air at its amplitude [$label]" for (label, qᵗ) in
+        (("saturated throughout", 0.02), ("cloud layer", (x, z) -> ifelse(1500 < z < 4000, 0.02, 0.0)))
+
+    Nx, Nz, Δx = 32, 40, 3e3
+    θ̄(z) = 280 + 0.01z
+    θᵢ(x, z) = θ̄(z) * (1 + 1e-5 * cos(π * round(Int, x / Δx - 0.5)))
+
+    grid = RectilinearGrid(default_arch; size = (Nx, Nz), halo = (5, 5), x = (0, Nx * Δx), z = (0, 10e3),
+                           topology = (Periodic, Flat, Bounded))
+    td = SplitExplicitTimeDiscretization(; damping = NoDivergenceDamping())
+    dynamics = CompressibleDynamics(td; base_pressure = 1e5, reference_potential_temperature = θ̄)
+    microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
+    model = AtmosphereModel(grid; dynamics, microphysics, advection = WENO(order = 5),
+                            timestepper = :MultirateInfinitesimalStep)
+    set!(model; θ = θᵢ, u = 15, ρ = Breeze.HydrostaticallyBalancedDensity())
+    set!(model; qᵗ)
+
+    for _ in 1:360
+        time_step!(model, 10)
+    end
+
+    # rms over k = 2:16, which spans the base of the cloud layer, of the (−1)ⁱ projection of w
+    w = Array(interior(model.velocities.w))
+    checkerboard_amplitude = sqrt(sum(k -> (sum((-1)^i * w[i, 1, k] for i in 1:Nx) / Nx)^2, 2:16) / 15)
+    @test checkerboard_amplitude < 1e-4
+
+    qˡ = Array(interior(model.microphysical_fields.qˡ))
+    @test minimum(qˡ[:, 1, 8:15]) > 0
+end
+
 @testset "MIS with adaptive-implicit vertical advection" begin
     using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, adaptive_advection_timestep
     grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
