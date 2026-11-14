@@ -162,7 +162,7 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The advective part of [`scalar_tendency`](@ref): the flux divergence ``-∇·(ρ 𝐔ᵗ c)`` of the specific
+The advective part of `scalar_tendency`: the flux divergence ``-∇·(ρ 𝐔ᵗ c)`` of the specific
 scalar `c`, weighted by the total density, by the transport velocity plus the species' sedimentation
 velocity (`microphysical_velocities`), ``𝐔ᵗ = 𝐔 + 𝐔ᵖ``.
 """
@@ -176,7 +176,7 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The non-advective part of [`scalar_tendency`](@ref), with its signature: closure diffusion, forcing and
+The non-advective part of `scalar_tendency`, with its signature: closure diffusion, forcing and
 the flux-form correction of prescribed dynamics — everything but [`scalar_advective_tendency`](@ref).
 The microphysical sources are added separately (`compute_microphysical_tendencies!`). A time stepper
 that treats a scalar's advection differently from its sources builds the two parts with one evaluation

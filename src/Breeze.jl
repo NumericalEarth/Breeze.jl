@@ -19,9 +19,6 @@ export
     CompressibleDynamics,
     CompressibleModel,
     SplitExplicitTimeDiscretization,
-    AcousticPressureCoefficient,
-    FrozenCompositionPressureCoefficient,
-    PhaseEquilibriumPressureCoefficient,
     AcousticOuterScheme,
     WickerSkamarock3,
     AcousticSubstepDistribution,
@@ -310,8 +307,6 @@ using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
                               SplitExplicitTimeDiscretization,
-                              AcousticPressureCoefficient, FrozenCompositionPressureCoefficient,
-                              PhaseEquilibriumPressureCoefficient,
                               AcousticOuterScheme, WickerSkamarock3,
                               AcousticSubstepDistribution, ProportionalSubsteps, MonolithicFirstStage,
                               AcousticDampingStrategy, NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping,

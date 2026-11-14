@@ -89,6 +89,10 @@ fraction and the size is fitted so the substeps exactly tile each stage — exac
 coverage at the minimum substep count (no global quantization; Δτ may differ
 slightly by stage).
 
+When the substep count is adaptive (`substeps = nothing`), a stage covering more
+than half of ``Δt`` takes at least two substeps: a single acoustic substep over
+most of the outer step can be unstable even below the acoustic CFL target.
+
 This is the default.
 """
 struct ProportionalSubsteps <: AcousticSubstepDistribution end
@@ -549,7 +553,7 @@ variation), so the sponge does not break zonal symmetry and remains uniform
 over terrain-following grids. That is also what makes the damping rate
 ``γ(z) = \\text{rate} × \\text{ramp}(z)`` a 1D profile over z-faces:
 `UpperSponge(; ...)` is a lightweight skeleton with `damping_profile = nothing`,
-and [`materialize_sponge`](@ref) evaluates `ramp` once per face at
+and `materialize_sponge` evaluates `ramp` once per face at
 `AcousticSubstepper` construction and stores the result. The substep kernels
 then read `γ` with a single load instead of re-evaluating the shape twice per
 face per acoustic substep.
@@ -586,66 +590,6 @@ convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
     UpperSponge(convert(FT, sponge.damping_rate), convert(FT, sponge.depth),
                 sponge.ramp, sponge.mask, sponge.damping_profile)
 
-#####
-##### Acoustic pressure coefficient: the slope the substep loop linearizes the pressure with
-#####
-
-"""
-$(TYPEDEF)
-
-Abstract supertype for the choice of the linearized pressure coefficient ``Cᴸ`` with which the
-acoustic substep loop forms its pressure perturbation ``p′ = Cᴸ (ρθ)′``. Concrete choices:
-
-  - [`FrozenCompositionPressureCoefficient`](@ref) (default): the slope ``∂p/∂(ρθ)`` of the
-    equation of state at fixed dry density and composition. Condensate does not change within
-    an acoustic loop.
-  - [`PhaseEquilibriumPressureCoefficient`](@ref): in saturated cells, the slope of the
-    saturation-adjusted pressure along a uniform compression, so that condensate evaporating
-    on compression and its latent cooling are included. Unsaturated cells use the frozen slope.
-"""
-abstract type AcousticPressureCoefficient end
-
-"""
-$(TYPEDEF)
-
-Linearize the acoustic pressure with ``Cᴸ = ∂p/∂(ρθ)`` at fixed dry density and composition: the
-condensate is frozen over the acoustic loop. This is the default. In saturated cells it overestimates
-the pressure response that saturation adjustment re-diagnoses at the next stage by 10–13% (the ratio
-of the frozen to the equilibrium sound speed squared), which destabilizes grid-scale modes in saturated
-air at large ``Δt`` without divergence damping
-([#1086](https://github.com/NumericalEarth/Breeze.jl/issues/1086)).
-"""
-struct FrozenCompositionPressureCoefficient <: AcousticPressureCoefficient end
-
-"""
-$(TYPEDEF)
-
-Linearize the acoustic pressure in saturated cells with the slope of the saturation-adjusted pressure
-along a uniform compression, in which the compressed air evaporates condensate, at the microphysics'
-phase equilibrium (`microphysics_phase_equilibrium`), and unsaturated cells with the frozen-composition
-slope. A cell is saturated when it holds cloud condensate at the linearization state, that is condensate
-in excess of the precipitating mass fraction. The slope is closed-form (see
-`equilibrium_pressure_coefficient`), so it costs no iteration; it is the slope at the converged
-temperature root, and it neglects the temperature dependence of the mixed-phase liquid fraction.
-The coefficient is refreshed wherever the linearization is: at every stage with
-`AcousticRungeKutta3`, and once per step with `MultirateInfinitesimalStep`.
-
-This removes the 10–13% overestimate of the pressure response in cloud that
-[`FrozenCompositionPressureCoefficient`](@ref) makes, and with it the grid-scale growth in saturated air
-at large ``Δt`` ([#1086](https://github.com/NumericalEarth/Breeze.jl/issues/1086)). Select it with
-
-```jldoctest
-using Breeze
-
-td = SplitExplicitTimeDiscretization(pressure_coefficient = PhaseEquilibriumPressureCoefficient())
-td.pressure_coefficient
-
-# output
-PhaseEquilibriumPressureCoefficient()
-```
-"""
-struct PhaseEquilibriumPressureCoefficient <: AcousticPressureCoefficient end
-
 """
 $(TYPEDEF)
 
@@ -656,11 +600,8 @@ split-explicit inner substeps.
 The constructor accepts `substeps` or an `acoustic_cfl` for choosing the
 number of acoustic substeps, a `forward_weight` for off-centering the acoustic
 solve, an acoustic `damping` strategy such as
-[`ThermalDivergenceDamping`](@ref), an optional [`UpperSponge`](@ref), a
-`substep_distribution` such as [`ProportionalSubsteps`](@ref), and a
-`pressure_coefficient` ([`FrozenCompositionPressureCoefficient`](@ref) by default, or
-[`PhaseEquilibriumPressureCoefficient`](@ref)) that selects the slope the acoustic loop
-linearizes the pressure with.
+[`ThermalDivergenceDamping`](@ref), an optional [`UpperSponge`](@ref), and a
+`substep_distribution` such as [`ProportionalSubsteps`](@ref).
 
 Backward integration (`time_step!(model, Δt)` with `Δt < 0`) is supported
 for the linearized acoustic substep loop. See the field-documentation
@@ -668,7 +609,7 @@ docstring for the A-stability argument, sign-handling of the adaptive
 substep count, and the irreversibility caveat for the optional
 [`UpperSponge`](@ref).
 """
-struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution, PC <: AcousticPressureCoefficient}
+struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistribution}
     substeps :: N
     acoustic_cfl :: FT
     forward_weight :: FT
@@ -680,7 +621,6 @@ struct SplitExplicitTimeDiscretization{N, FT, D, US, AD <: AcousticSubstepDistri
     sponge :: US
     substep_distribution :: AD
     open_boundary_relaxation :: FT
-    pressure_coefficient :: PC
 end
 
 function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
@@ -694,8 +634,7 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
                                          damping = ThermalDivergenceDamping(; coefficient = FT(0.1)),
                                          sponge = nothing,
                                          substep_distribution = ProportionalSubsteps(),
-                                         open_boundary_relaxation = FT(0.5),
-                                         pressure_coefficient = FrozenCompositionPressureCoefficient())
+                                         open_boundary_relaxation = FT(0.5))
 
     damping isa AcousticDampingStrategy ||
         throw(ArgumentError("`damping` must be an `AcousticDampingStrategy`"))
@@ -709,9 +648,6 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
     0 < open_boundary_relaxation ≤ 1 ||
         throw(ArgumentError("`open_boundary_relaxation` must be in (0, 1] (got $(open_boundary_relaxation))"))
 
-    pressure_coefficient isa AcousticPressureCoefficient ||
-        throw(ArgumentError("`pressure_coefficient` must be an `AcousticPressureCoefficient`"))
-
     return SplitExplicitTimeDiscretization(
         substeps,
         convert(FT, acoustic_cfl),
@@ -724,7 +660,6 @@ function SplitExplicitTimeDiscretization(FT=Oceananigans.defaults.FloatType;
         convert_acoustic_parameter(FT, sponge),
         substep_distribution,
         convert(FT, open_boundary_relaxation),
-        pressure_coefficient,
     )
 end
 
