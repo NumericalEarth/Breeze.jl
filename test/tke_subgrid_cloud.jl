@@ -8,7 +8,8 @@ using Breeze
 using Breeze.AtmosphereModels: ClosureCloud, ClosureCloudStatistics, NoSubgridCorrelation, subgrid_statisticsᶜᶜᶜ
 using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment,
-                                                              FixedConstantsLiquidSaturation
+                                                              FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
+                                                              shoc_saturation_thermodynamics
 
 using Oceananigans
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization
@@ -190,14 +191,13 @@ end
         moments(k) = (column(m.w′³)[k], column(m.θˡ′²)[k], column(m.w′θˡ′)[k], column(m.θˡ′qᵗ′)[k],
                       column(m.w′qᵗ′)[k], column(m.qᵗ′²)[k])
         for k in 1:size(grid, 3)
-            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, FixedConstantsLiquidSaturation(), nothing, d.clipping, d.constants,
+            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, d.saturation, shoc_saturation_thermodynamics(model), d.clipping, d.constants,
                                                    zf[k+1], zf[k], zc[k], p[k], θ[k], 0.0, qᵗ[k], column(cl.w′²)[k],
                                                    moments(k), moments(k+1))
             @test matches(column(cl.C)[k], C)
             @test matches(column(cl.qˡ)[k], qˡ)
             @test matches(column(cl.w′qˡ′)[k], w′qˡ′)
             @test matches(column(cl.w′θᵥ′)[k], w′θᵥ′)
-            @test isapprox(column(cl.B)[k], d.constants.ggr / d.constants.basetemp * w′θᵥ′; atol = default_arch isa CPU ? 0 : 1e-15)
         end
         @test maximum(column(cl.C)) > 0
         @test maximum(column(cl.qˡ)) > 0
@@ -290,7 +290,11 @@ end
 end
 
 @testset "All three parts, with the saturation of the model" begin
-    for saturation in (FixedConstantsLiquidSaturation(), ModelThermodynamicsSaturation())
+    # The distribution of this closure saturates with the model's thermodynamics only; the fixed
+    # constants of shoc.F90 are SimplifiedHigherOrderClosure's
+    @test SubgridDistribution().saturation isa ModelThermodynamicsSaturation
+    @test_throws ArgumentError SubgridDistribution(; saturation = FixedConstantsLiquidSaturation())
+    for saturation in (ModelThermodynamicsSaturation(),)
         formulation = SubgridCloudFormulation(; distribution = SubgridDistribution(; saturation))
         model = tke_p3_column(formulation; subgrid = ClosureCloud(), static_stability = DryStaticStability())
         μ = model.microphysical_fields

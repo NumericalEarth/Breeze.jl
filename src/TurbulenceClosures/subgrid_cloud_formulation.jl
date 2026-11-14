@@ -11,8 +11,10 @@
 #####      distribution of SHOC with its saturation (`pdf_saturation`), which gives the cloud
 #####      fraction, the cloud liquid, the liquid flux w′qˡ′ and the buoyancy flux
 #####      w′θᵥ′ = w′θˡ′ + A_q w′qᵗ′ + A_c w′qˡ′.
-#####   2. `buoyancy_flux` (`CloudBuoyancyFlux`): the TKE equation takes its buoyancy production
-#####      from (g / θ₀) w′θᵥ′ instead of -Kᶜ N². The positive part is an explicit source and the
+#####   2. `buoyancy_flux` (`CloudBuoyancyFlux`): the TKE equation takes its shear and buoyancy
+#####      production from the energy the fluxes the closure applies take from the mean state
+#####      (applied_flux_energetics.jl), and the dissipated energy heats the air. The buoyancy
+#####      production is not the distribution's w′θᵥ′. The positive part is an explicit source and the
 #####      negative part joins the implicit linear coefficient, as the buoyancy sink does without
 #####      the formulation. Its `stability_solver` and passes solve the coupling of the
 #####      distribution with the static stability when the closure's `static_stability` is
@@ -248,7 +250,7 @@ struct SubgridDistribution{TS, SM, TM, SB, SK, PDF, PS, CP, C, R}
     skewness :: SK
     "Assumed PDF ([`DoubleGaussianPDF`](@ref) or [`SmoothDoubleGaussianPDF`](@ref))"
     assumed_pdf :: PDF
-    "Saturation of the assumed PDF ([`FixedConstantsLiquidSaturation`](@ref) or [`ModelThermodynamicsSaturation`](@ref))"
+    "Saturation of the assumed PDF: [`ModelThermodynamicsSaturation`](@ref), the thermodynamics of the model"
     saturation :: PS
     "Clipping policy of the SHOC components"
     clipping :: CP
@@ -287,14 +289,24 @@ function SubgridDistribution(FT::DataType = Oceananigans.defaults.FloatType;
                              stratification_number_bound = RationalSaturatedStratificationNumber(FT),
                              skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = 0.85),
                              assumed_pdf = DoubleGaussianPDF(FT),
-                             saturation = FixedConstantsLiquidSaturation(),
+                             saturation = ModelThermodynamicsSaturation(),
                              clipping = HardClipping(),
                              constants = SHOCConstants(FT),
                              ℂʳ = nothing)
+    validate_distribution_saturation(saturation)
     ℂʳ = isnothing(ℂʳ) ? nothing : convert(FT, ℂʳ)
     return SubgridDistribution(time_scale, second_moments, third_moment, stratification_number_bound,
                                skewness, assumed_pdf, saturation, clipping, constants, ℂʳ)
 end
+
+# The distribution of this closure saturates with the thermodynamics of the model that holds it.
+# The fixed constants of shoc.F90 (liquid-only Murphy–Koop saturation, fixed `lcond`, `cp`, `rgas`,
+# `basetemp`) belong to `SimplifiedHigherOrderClosure`, which reproduces the Fortran.
+validate_distribution_saturation(saturation) = nothing
+validate_distribution_saturation(::FixedConstantsLiquidSaturation) =
+    throw(ArgumentError("The SubgridDistribution of TKEBasedTurbulenceClosure saturates with the model's " *
+                        "thermodynamics (ModelThermodynamicsSaturation); FixedConstantsLiquidSaturation is " *
+                        "SimplifiedHigherOrderClosure's."))
 
 convert_eltype(::Type{FT}, d::SubgridDistribution) where FT =
     SubgridDistribution(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
@@ -316,11 +328,24 @@ Base.summary(d::SubgridDistribution) = string("SubgridDistribution(", nameof(typ
 """
 $(TYPEDEF)
 
-The buoyancy production of the TKE equation from the buoyancy flux of the subgrid distribution,
-`B = (g / θ₀) w′θᵥ′` with `w′θᵥ′ = w′θˡ′ + A_q w′qᵗ′ + A_c w′qˡ′`, instead of `-Kᶜ N²`. The
-positive part enters the stage tendency; the negative part enters the implicit linear coefficient.
-`θ₀` is SHOC's `basetemp` with [`FixedConstantsLiquidSaturation`](@ref) and the level's θˡⁱ with
-[`ModelThermodynamicsSaturation`](@ref).
+The energy conversions of the TKE equation from the fluxes the closure applies to the mean state.
+Every scalar the closure mixes (θˡⁱ, vapor, cloud liquid, rain, ice, ...) is diffused with `Kᶜ`
+and momentum with `Kᵘ`; the buoyancy production is the exact discrete conversion of those fluxes,
+
+    Bᶠ = -Kᶜ Σₛ βₛᶠ δz φₛ,    βₛ = ∂b/∂φₛ,
+
+with `b` the buoyancy of the dynamics and its exact derivatives with respect to θˡⁱ and the vapor,
+liquid and ice mass fractions (all liquid and all ice, so that the latent heat inside θˡⁱ and the
+loading of every condensate species are counted), and the shear production is `Kᵘ S²` at the faces.
+Both are moved from the faces to the centers with half-cell, density-weighted volumes, so that
+`Σ ρ Δz B` is the change of the dynamic enthalpy and `Σ ρ Δz P` the loss of mean kinetic energy
+that the fluxes cause. The subgrid distribution does not enter them. The positive part of `B` enters
+the stage tendency; the negative part enters the implicit linear coefficient, with `e` floored only
+at a tiny value so that the implicit sink removes exactly the energy the mean state gains wherever
+`e > 0`. With `dissipative_heating = true` (the default) the dissipation `ε` that the TKE equation
+removes heats the air, `ρ ĉᵖ Π ∂t θˡⁱ += ρ ε`, which closes the energy budget. The conversions are
+formed from the stage state; the vertically implicit solve applies the fluxes of the solved state,
+an O(Δt) difference.
 
 `stability = true` is a shortcut: [`TKEBasedTurbulenceClosure`](@ref) then replaces its
 `static_stability` by `SubgridCloudStaticStability(LiquidFluxFraction(static_stability))`. The
@@ -330,8 +355,8 @@ gives, at the interior faces,
     N²ᵇ = (g / θ) (∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ,    Bˡ = (g / θ) A_c w′qˡ′,
 
 the stratification of the conserved variables less the part carried by the subgrid liquid flux,
-so that `-Kᶜ N²ᵇ` is the buoyancy flux of the distribution (with `g / θ` of the level in place of
-`g / θ₀`); `Bˡ / Kᶜ` is left out where `Kᶜ` vanishes. In clear air it is the stratification of
+so that `-Kᶜ N²ᵇ` is the buoyancy flux of the distribution (not the buoyancy production of the
+TKE equation, which is the conversion of the applied fluxes); `Bˡ / Kᶜ` is left out where `Kᶜ` vanishes. In clear air it is the stratification of
 θᵥ. This is `N²ᵇ = (1 - ℵ) N²ᶜ + ℵ N²ˢ` with the effective saturated fraction `ℵ = w′qˡ′ / w′s′`
 (see [`LiquidFluxFraction`](@ref)). The mixing length and the diffusivities are then formed again
 from it. The passes, the relaxation and the solver below are those of the closure update that
@@ -371,8 +396,7 @@ saturation excess at the level): where `w′qˡ′ ≈ C w′s′` and `w′s′
 static stability) is the same for all three; the secant and the bisection then start from it and
 from the closure's static stability.
 
-After the last pass the stored moments, cloud fields and buoyancy production `B` are those of the
-last distribution; `N²` is the relaxed blend of the stored `N²` and the `N²ᵇ` of that
+After the last pass the stored moments and cloud fields are those of the last distribution; `N²` is the relaxed blend of the stored `N²` and the `N²ᵇ` of that
 distribution's liquid flux (exactly that `N²ᵇ` when `ω = 1`; for the secant and the bisection,
 the update of the solver from that `N²ᵇ`), and `ℓᵐ`, `Kᶜ`, `Kᵘ`, `Kᵉ` are
 formed from that `N²`. The last distribution was itself computed with the diffusivities of the
@@ -387,8 +411,10 @@ struct CloudBuoyancyFlux{N, W, S}
     stability_relaxation :: W
     "The update of `N²` in the extra passes"
     stability_solver :: S
-    CloudBuoyancyFlux{N}(stability::Bool, ω::W = 1, solver::S = FixedPointIteration()) where {N, W, S} =
-        new{N, W, S}(stability, ω, solver)
+    "Whether the energy the TKE equation dissipates heats the air (`ρθ`)"
+    dissipative_heating :: Bool
+    CloudBuoyancyFlux{N}(stability::Bool, ω::W = 1, solver::S = FixedPointIteration(), heating::Bool = true) where {N, W, S} =
+        new{N, W, S}(stability, ω, solver, heating)
 end
 
 """
@@ -439,16 +465,16 @@ Base.summary(b::BisectionIteration) = string("BisectionIteration(final_interpola
 CloudBuoyancyFlux(stability::Bool) = CloudBuoyancyFlux{0}(stability)
 
 function CloudBuoyancyFlux(; stability = true, stability_iterations = 0, stability_relaxation = 1,
-                           stability_solver = FixedPointIteration())
+                           stability_solver = FixedPointIteration(), dissipative_heating = true)
     n = Int(stability_iterations)
     n >= 0 || throw(ArgumentError("stability_iterations must be ≥ 0, got $n."))
     (n == 0 || stability) || throw(ArgumentError("stability_iterations > 0 needs stability = true."))
     0 < stability_relaxation <= 1 || throw(ArgumentError("stability_relaxation must be in (0, 1], got $stability_relaxation."))
-    return CloudBuoyancyFlux{n}(stability, stability_relaxation, stability_solver)
+    return CloudBuoyancyFlux{n}(stability, stability_relaxation, stability_solver, dissipative_heating)
 end
 
 convert_eltype(::Type{FT}, b::CloudBuoyancyFlux{N}) where {FT, N} =
-    CloudBuoyancyFlux{N}(b.stability, convert(FT, b.stability_relaxation), b.stability_solver)
+    CloudBuoyancyFlux{N}(b.stability, convert(FT, b.stability_relaxation), b.stability_solver, b.dissipative_heating)
 
 """
     stability_iterations(buoyancy_flux::CloudBuoyancyFlux)
@@ -460,7 +486,8 @@ stability_iterations(::CloudBuoyancyFlux{N}) where N = N
 Base.summary(b::CloudBuoyancyFlux) = string("CloudBuoyancyFlux(stability = ", b.stability,
                                             ", stability_iterations = ", stability_iterations(b),
                                             ", stability_relaxation = ", b.stability_relaxation,
-                                            ", stability_solver = ", summary(b.stability_solver), ")")
+                                            ", stability_solver = ", summary(b.stability_solver),
+                                            ", dissipative_heating = ", b.dissipative_heating, ")")
 
 #####
 ##### The cloud model of the static stability slot: the liquid flux fraction of the distribution
@@ -611,8 +638,9 @@ $(TYPEDEF)
 The fields of a [`SubgridCloudFormulation`](@ref) in the closure fields of
 [`TKEBasedTurbulenceClosure`](@ref): the moments at faces (`τ`, `θˡ′²`, `qᵗ′²`, `θˡ′qᵗ′`,
 `w′θˡ′`, `w′qᵗ′`, `w′³`) and the cloud at centers (`w′²`, cloud fraction `C`, liquid `qˡ`, its
-variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, the buoyancy production `B` and its part
-`Bˡ = (g / θ₀) A_c w′qˡ′` carried by the liquid flux).
+variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, the part `Bˡ = (g / θ) A_c w′qˡ′` of its buoyancy
+flux carried by the liquid flux, and, with the cloud buoyancy flux, the shear and buoyancy
+production `P` and `B` of the TKE equation from the applied fluxes).
 """
 struct SubgridCloudFields{BF, CO, M, C, S}
     buoyancy_flux :: BF
@@ -633,7 +661,8 @@ function build_subgrid_cloud_fields(grid, f::SubgridCloudFormulation)
     moments = (τ = ZFaceField(grid), θˡ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡ′qᵗ′ = ZFaceField(grid),
                w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid), w′³ = ZFaceField(grid))
     cloud = (w′² = CenterField(grid), C = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
-             w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), B = CenterField(grid), Bˡ = CenterField(grid),
+             w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), B = CenterField(grid), P = CenterField(grid),
+             Bˡ = CenterField(grid),
              gθ = CenterField(grid), gA = CenterField(grid))
     return SubgridCloudFields(f.buoyancy_flux, f.cloud, moments, cloud, build_solver_state(grid, f.buoyancy_flux))
 end
@@ -710,11 +739,6 @@ end
 @inline subgrid_third_moment(::Nothing, d, c, args...) = zero(eltype(args[1]))
 @inline subgrid_third_moment(tm, d, c, args...) = third_moment(tm, d.stratification_number_bound, c, args...)
 
-# g / θ₀ of the buoyancy production
-@inline cloud_buoyancy_parameter(::FixedConstantsLiquidSaturation, c, thermodynamics, θ) = c.ggr / c.basetemp
-@inline cloud_buoyancy_parameter(::ModelThermodynamicsSaturation, c, thermodynamics, θ) =
-    thermodynamics.constants.gravitational_acceleration / θ
-
 # Raise θˡ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
 # small for the down-gradient fluxes (|correlation with w| > ℂʳ), and scale θˡ′qᵗ′ with them so that
 # the θˡ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
@@ -758,6 +782,11 @@ end
     eᵐⁱⁿ = closure.minimum_tke
     ccc = (Center(), Center(), Center())
     ccf = (Center(), Center(), Face())
+
+    # The gravitational acceleration of the model, in place of SHOC's `ggr`, for the third moment
+    # and the stability of the liquid flux fraction
+    g = thermodynamics.constants.gravitational_acceleration
+    c³ = (; ggr = g)
 
     @inbounds begin
         # The second moments at the interior faces, down the gradient
@@ -821,7 +850,7 @@ end
             τ³ = third_moment_time_scale(d.time_scale, m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k],
                                          ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e), closure_fields.N²[i, j, k])
             τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
-            w′³ = subgrid_third_moment(d.third_moment, d, c, τ³, closure_fields.N²[i, j, k], w′²ᶠ, θᶠ, thedz, thedz2,
+            w′³ = subgrid_third_moment(d.third_moment, d, c³, τ³, closure_fields.N²[i, j, k], w′²ᶠ, θᶠ, thedz, thedz2,
                                        m.θˡ′²[i, j, k+1] - m.θˡ′²[i, j, k-1],
                                        m.w′θˡ′[i, j, k+1] - m.w′θˡ′[i, j, k-1],
                                        cl.w′²[i, j, k] - cl.w′²[i, j, k-1],
@@ -847,13 +876,13 @@ end
             cl.qˡ′²[i, j, k] = qˡ′²
             cl.w′qˡ′[i, j, k] = w′qˡ′
             cl.w′θᵥ′[i, j, k] = w′θᵥ′
-            g_θ₀ = cloud_buoyancy_parameter(d.saturation, c, thermodynamics, θᵏ)
             A_q, A_c = buoyancy_flux_coefficients(d.saturation, thermodynamics, c, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
-            cl.B[i, j, k] = g_θ₀ * w′θᵥ′
-            # The stability uses the buoyancy parameter of the level, g / θˡⁱ
-            cl.gθ[i, j, k] = c.ggr / θᵏ
-            cl.gA[i, j, k] = c.ggr / θᵏ * A_q
-            cl.Bˡ[i, j, k] = c.ggr / θᵏ * A_c * w′qˡ′
+            # The stability uses the buoyancy parameter of the level, g / θˡⁱ. The buoyancy
+            # production of the TKE equation is not this distribution's: it is the conversion of
+            # the fluxes the closure applies (`compute_applied_flux_conversions!`).
+            cl.gθ[i, j, k] = g / θᵏ
+            cl.gA[i, j, k] = g / θᵏ * A_q
+            cl.Bˡ[i, j, k] = g / θᵏ * A_c * w′qˡ′
         end
     end
 
@@ -1077,7 +1106,7 @@ function cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, 
     return nothing
 end
 
-# The buoyancy production of the TKE equation: the distribution's with the cloud buoyancy flux
+# The buoyancy production of the TKE equation: the conversion of the applied fluxes with the cloud buoyancy flux
 @inline tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, fields::SubgridCloudFields{<:CloudBuoyancyFlux}, closure_fields) =
     @inbounds fields.cloud.B[i, j, k]
 

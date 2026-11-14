@@ -280,6 +280,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
                                       closure_parameters, with_parameters
 
 include("subgrid_cloud_formulation.jl")
+include("applied_flux_energetics.jl")
 include("bracketed_fraction_solve.jl")
 
 end # module TurbulenceClosures

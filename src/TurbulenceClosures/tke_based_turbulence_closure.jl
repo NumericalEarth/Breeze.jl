@@ -982,7 +982,7 @@ stays positive for any time step.
     # The buoyancy sink rate: -B⁻ / e above the floor and -B⁻ / eᵐⁱⁿ below it, so that the
     # implicit sink ωᴮ e is continuous at e = eᵐⁱⁿ and vanishes linearly with e
     B⁻ = min(0, B)
-    ωᴮ = -B⁻ / max(eᵢ, eᵐⁱⁿ)
+    ωᴮ = -B⁻ / max(eᵢ, buoyancy_sink_floor(closure_fields.subgrid_cloud, closure))
 
     return ω + ωᴮ
 end
@@ -992,7 +992,8 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The buoyancy production of the TKE equation at cell centers: ``-Kᶜ N²``, formed at the faces and
 reconstructed to the center, or, with the cloud buoyancy flux of a
-[`SubgridCloudFormulation`](@ref), ``(g / θ₀) w'θᵥ'`` from the subgrid distribution.
+[`SubgridCloudFormulation`](@ref), the exact conversion of the scalar fluxes the closure applies
+(see [`CloudBuoyancyFlux`](@ref)).
 """
 @inline tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields) =
     tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields)
@@ -1038,6 +1039,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
             closure_fields, grid, closure, model.velocities, tracers)
 
     compute_subgrid_cloud!(closure_fields.subgrid_cloud, closure_fields, closure, model, tracers, parameters)
+    compute_applied_flux_conversions!(closure_fields.subgrid_cloud, closure_fields, model)
 
     launch!(arch, grid, parameters, _compute_tke_implicit_linear_coefficient!,
             closure_fields.Lᵉ, grid, closure, closure_fields, model.velocities, tracers)
@@ -1079,7 +1081,7 @@ centers — to the tendency of the `ρe` tracer. Under an explicit time discreti
     # shear in both slots: averaging with the start of the full step changes the RHS
     # integrated by Runge–Kutta and can make production negative when the shear reverses.
     u, v = velocities.u, velocities.v
-    P = shear_production(i, j, k, grid, closure_fields.Kᵘ, u, u, v, v)
+    P = tke_shear_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields, u, v)
     B = tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields)
     B⁺ = max(0, B)
 
@@ -1100,6 +1102,8 @@ function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, clos
     launch!(arch, grid, :xyz, _add_tke_tendencies!,
             Gⁿ[TKE_NAME], grid, closure, closure_fields,
             model.velocities, model.tracers[TKE_NAME], ρ)
+
+    add_dissipative_heating!(Gⁿ, closure_fields.subgrid_cloud, closure_fields, closure, model)
 
     return nothing
 end

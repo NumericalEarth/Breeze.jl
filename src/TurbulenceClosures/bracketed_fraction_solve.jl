@@ -218,7 +218,7 @@ end
                                           p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], moments_l, moments_u)
         _, A_c = buoyancy_flux_coefficients(d.saturation, thermodynamics, c, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
     end
-    return c.ggr / θᵏ * A_c * w′qˡ′, C
+    return thermodynamics.constants.gravitational_acceleration / θᵏ * A_c * w′qˡ′, C
 end
 
 #####
