@@ -13,19 +13,21 @@
 ##### The terrain-corrected horizontal pressure gradient is:
 #####   (∂p/∂x)_z = (∂p/∂x)_r - (∂z/∂x)_r · (∂p/∂z)
 #####
-##### On MutableVerticalDiscretization grids, Oceananigans' generalized
-##### derivatives (∂xᶠᶜᶜ, ∂yᶜᶠᶜ) already include the chain-rule correction,
-##### so they compute (∂ϕ/∂x)_z directly. The SlopeOutsideInterpolation PG
-##### delegates to these operators. The SlopeInsideInterpolation PG uses
-##### δx/Δx (computational-coordinate derivative) with the slope multiplied
-##### inside the interpolation stencil.
+##### On terrain-following grids the generalized derivatives (∂xᶠᶜᶜ, ∂yᶜᶠᶜ)
+##### include the chain-rule correction, so they compute (∂ϕ/∂x)_z directly.
+##### The SlopeOutsideInterpolation PG delegates to these operators (the
+##### substep loop to their topology-aware copies ∂xTᶠᶜᶜ, ∂yTᶜᶠᶜ below, which
+##### read no halos). The SlopeInsideInterpolation PG uses δx/Δx
+##### (computational-coordinate derivative) with the slope multiplied inside
+##### the interpolation stencil.
 #####
 
 using Oceananigans: architecture
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Fields: Field, ZeroField, interior, set!
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶜ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶜ,
+                              ∂x_zᶠᶜᶜ, ∂y_zᶜᶠᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!, NormalFlowBoundaryCondition, FieldBoundaryConditions
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
@@ -236,17 +238,29 @@ end
 ##### Terrain-specialized acoustic substep helpers
 #####
 
-# The terrain metric terms read vertical and diagonal neighbors of the horizontal momenta and
-# vertical neighbors of (ρθ)′, which the topology-aware operators do not provide, so the loop fills halos.
-fill_substep_halos!(fields, ::TerrainCompressibleModel) = fill_halo_regions!(fields)
+# The chain rule of `Oceananigans.Operators.∂xᶠᶜᶜ` on a terrain-following grid (see
+# `TerrainFollowingDiscretization/terrain_amg_operators.jl`), with each halo-reading primitive
+# replaced by its topology-aware version from `acoustic_substepping.jl`, so the substep loop needs
+# no halo fills: same arithmetic in the interior, and on the boundaries the images the fills made.
+# The slope ∂x_z reads the grid's own (static, filled) halos.
+# TODO: move to Oceananigans with the topology-aware operators of `acoustic_substepping.jl`.
+@inline function ∂xTᶠᶜᶜ(i, j, k, grid::TerrainFollowingGrid, f, args...)
+    ∂x_at_r = δxTᶠᵃᵃ(i, j, k, grid, f, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    ∂z_f = ℑzᵃᵃᶜ(i, j, k, grid, ℑxTᶠᵃᵃ, ∂zTᶜᶜᶠ, f, args...)
+    ∂x_z = ∂x_zᶠᶜᶜ(i, j, k, grid)
+    return ∂x_at_r - ∂x_z * ∂z_f
+end
 
-# Direct damping fills its divergence scratch using the grid, without a model argument.
-fill_substep_halos!(fields, ::TerrainFollowingGrid) = fill_halo_regions!(fields)
+@inline function ∂yTᶜᶠᶜ(i, j, k, grid::TerrainFollowingGrid, f, args...)
+    ∂y_at_r = δyTᵃᶠᵃ(i, j, k, grid, f, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    ∂z_f = ℑzᵃᵃᶜ(i, j, k, grid, ℑyTᵃᶠᵃ, ∂zTᶜᶜᶠ, f, args...)
+    ∂y_z = ∂y_zᶜᶠᶜ(i, j, k, grid)
+    return ∂y_at_r - ∂y_z * ∂z_f
+end
 
-# Divergence damping differentiates at constant physical height. The terrain chain rule
-# reads vertical and diagonal halos, which the substep halo fills above provide.
-@inline x_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂xᶠᶜᶜ(i, j, k, grid, args...)
-@inline y_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂yᶜᶠᶜ(i, j, k, grid, args...)
+# Divergence damping differentiates at constant physical height.
+@inline x_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂xTᶠᶜᶜ(i, j, k, grid, args...)
+@inline y_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂yTᶜᶠᶜ(i, j, k, grid, args...)
 
 function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer)
     grid = model.grid
@@ -351,10 +365,10 @@ end
                                                                             dynamics, ρθ′, Cᴸ)
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    ∂x_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ∇ˣp′,
-                       dynamics, ρθ′, Cᴸ)
-    ∂y_p′_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ∇ʸp′,
-                       dynamics, ρθ′, Cᴸ)
+    ∂x_p′_ccf = ℑzTᵃᵃᶠ(i, j, k, grid, ℑxTᶜᵃᵃ, ∇ˣp′,
+                        dynamics, ρθ′, Cᴸ)
+    ∂y_p′_ccf = ℑzTᵃᵃᶠ(i, j, k, grid, ℑyTᵃᶜᵃ, ∇ʸp′,
+                        dynamics, ρθ′, Cᴸ)
     return slope_x * ∂x_p′_ccf + slope_y * ∂y_p′_ccf
 end
 
@@ -363,7 +377,7 @@ end
 @inline function ∇ᶻp′(i, j, k, grid,
                       dynamics::TerrainCompressibleDynamics,
                       ρθ′, Cᴸ)
-    ∂z_p′ = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+    ∂z_p′ = ∂zTᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
     correction = terrain_horizontal_linearized_pressure_gradient_correction(i, j, k, grid,
                                                                             dynamics, ρθ′, Cᴸ)
     return ∂z_p′ - correction
@@ -372,31 +386,31 @@ end
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeOutsideInterpolation,
                                                         ρθ′, Cᴸ)
-    return ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+    return ∂xTᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 end
 
 @inline function terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeOutsideInterpolation,
                                                         ρθ′, Cᴸ)
-    return ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+    return ∂yTᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 end
 
 @inline function slope_x_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Cᴸ)
     slope = terrain_slope_x_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+    return slope * ∂zTᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 end
 
 @inline function slope_y_times_∂z_linearized_pressure(i, j, k, grid::TerrainFollowingGrid, ρθ′, Cᴸ)
     slope = terrain_slope_y_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+    return slope * ∂zTᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 end
 
 @inline function terrain_x_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeInsideInterpolation,
                                                         ρθ′, Cᴸ)
-    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) *
+    ∂x_p′ = δxTᶠᵃᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) *
             Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ,
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxTᶠᵃᵃ,
                        slope_x_times_∂z_linearized_pressure,
                        ρθ′, Cᴸ)
     return ∂x_p′ - correction
@@ -405,9 +419,9 @@ end
 @inline function terrain_y_linearized_pressure_gradient(i, j, k, grid, dynamics,
                                                         ::SlopeInsideInterpolation,
                                                         ρθ′, Cᴸ)
-    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) *
+    ∂y_p′ = δyTᵃᶠᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) *
             Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
-    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ,
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyTᵃᶠᵃ,
                        slope_y_times_∂z_linearized_pressure,
                        ρθ′, Cᴸ)
     return ∂y_p′ - correction
@@ -450,8 +464,8 @@ end
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
 
-    ρu′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, ρu′)
-    ρv′ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, ρv′)
+    ρu′ᶜᶜᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, ℑxTᶜᵃᵃ, ρu′)
+    ρv′ᶜᶜᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, ℑyTᵃᶜᵃ, ρv′)
 
     @inbounds return (ρwᴸ_ccf + ρw̃′[i, j, k] + slope_x * ρu′ᶜᶜᶠ + slope_y * ρv′ᶜᶜᶠ)
 end
