@@ -385,8 +385,7 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
     # for the slow tendency is handled by `assemble_slow_vertical_momentum_tendency!`.
 
     # One tuple fill: fields that share a location and halo-filling kernels fill in one launch per side.
-    fill_halo_regions!((substepper.linearization_potential_temperature,
-                        substepper.linearization_pressure_coefficient))
+    fill_halo_regions!((substepper.linearization_potential_temperature, substepper.linearization_pressure_coefficient))
 
     return nothing
 end
