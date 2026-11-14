@@ -82,21 +82,41 @@ downdraft component of weight `a↓ = 1 - a↑`, from the first three moments of
 with the within-component variances of θˡⁱ and qᵗ shared equally between the components, as for
 vertical velocity:
 
-    σᵢ² = (1 - r² / (1 - ℂᵍ₁)) φ′²,    r = w′φ′ / √(w′² φ′²),
+    σᵢ² = (1 - r² / (1 - ℂᵍ)) φ′²,    r = w′φ′ / √(w′² φ′²),
 
-so that the components' means carry the flux and the rest of the variance is within them. The
+so that the components' means carry the flux and the rest of the variance is within them.
+
+The within-component fraction of `w′²` is a smooth function of the skewness `Sk` of w,
+
+    ℂᵍ(Sk) = (1 + y / √(1 + y²)) / 2,    y = y₀ + ℂᵍˢ Sk + ℂᵍˢˢ Sk²,
+
+an algebraic sigmoid in (0, 1) with `ℂᵍ(0) = ℂᵍ₀` (`y₀` is derived from `ℂᵍ₀` once, at
+construction; with zero slopes `ℂᵍ = ℂᵍ₀` exactly). It sets the weight of the updraft
+component, `a↑ = (1 - Sk / √(4 (1 - ℂᵍ)³ + Sk²)) / 2`, and with it the kurtosis of w: for this
+equal-spread mixture
+
+    Kurt = 3c² + 6c (1 - c) + (1 - c)² (1 - 3a↑ + 3a↑²) / (a↑ (1 - a↑)),    c = ℂᵍ(Sk),
+
+so choosing `ℂᵍ(Sk)` is choosing a kurtosis–skewness relation. The realizability of the scalar
+components requires `r² < 1 - ℂᵍ(Sk)`. The
 scalar skewness follows (it is not imposed). SHOC's rule instead matches an imposed scalar
 skewness (zero for θˡ, a ramp of `ℂᵍ₂ Sk_w` for qᵗ), which for `|Sk_w| ≳ 1.25` asks for a negative
 variance in the narrow component, clipped to zero: a component of no width, whose cloud is all
-or nothing. The equal share needs `r² ≤ 1 - ℂᵍ₁`; beyond it the within-component variance is zero
+or nothing. The equal share needs `r² ≤ 1 - ℂᵍ`; beyond it the within-component variance is zero
 (the flux-correlation bound `ℂʳ` of [`SubgridDistribution`](@ref) keeps `r` below it). The
 within-component θˡⁱ–qᵗ correlation is that of the covariance left after the components' means.
 
 $(TYPEDFIELDS)
 """
 struct EqualShareDoubleGaussianPDF{FT} <: AbstractSHOCComponent
-    "Within-component fraction of the vertical velocity variance"
-    ℂᵍ₁ :: FT
+    "Within-component fraction of the vertical velocity variance at zero skewness"
+    ℂᵍ₀ :: FT
+    "Slope of the within-component fraction in the skewness of w (in the sigmoid's argument)"
+    ℂᵍˢ :: FT
+    "Curvature of the within-component fraction in the skewness of w (in the sigmoid's argument)"
+    ℂᵍˢˢ :: FT
+    "Argument of the sigmoid at zero skewness, y₀ = (2ℂᵍ₀ - 1) / √(1 - (2ℂᵍ₀ - 1)²) (derived from ℂᵍ₀)"
+    y₀ :: FT
     "Standard deviation of θˡ below which it is uniform, K"
     thl_tol :: FT
     "Standard deviation of qᵗ below which it is uniform, kg kg⁻¹"
@@ -117,14 +137,27 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Return `EqualShareDoubleGaussianPDF{FT}` with the coefficients and tolerances of
 [`DoubleGaussianPDF`](@ref). Every field is a keyword argument.
 """
-EqualShareDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(EqualShareDoubleGaussianPDF, FT,
-                            (ℂᵍ₁ = 0.4, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2, Tl_min = 100,
-                             plume_fraction_min = 0.01, plume_fraction_max = 0.99), kw)
+function EqualShareDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; ℂᵍ₀ = 0.4, kw...)
+    0 < ℂᵍ₀ < 1 || throw(ArgumentError("ℂᵍ₀ must be in (0, 1), got $ℂᵍ₀"))
+    x = 2 * ℂᵍ₀ - 1
+    y₀ = x / sqrt(1 - x * x)
+    return component_from_keywords(EqualShareDoubleGaussianPDF, FT,
+                                   (ℂᵍ₀ = ℂᵍ₀, ℂᵍˢ = 0, ℂᵍˢˢ = 0, y₀ = y₀, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2,
+                                    Tl_min = 100, plume_fraction_min = 0.01, plume_fraction_max = 0.99), kw)
+end
 
 Adapt.@adapt_structure EqualShareDoubleGaussianPDF
 
 const ComponentDoubleGaussianPDF = Union{DoubleGaussianPDF, EqualShareDoubleGaussianPDF}
+
+# The within-component fraction of the vertical velocity variance: SHOC's constant, or ℂᵍ(Sk)
+@inline within_component_share(pdf::DoubleGaussianPDF, Sk) = pdf.ℂᵍ₁
+
+@inline function within_component_share(pdf::EqualShareDoubleGaussianPDF, Sk)
+    y = pdf.y₀ + pdf.ℂᵍˢ * Sk + pdf.ℂᵍˢˢ * Sk * Sk
+    constant = (pdf.ℂᵍˢ == 0) & (pdf.ℂᵍˢˢ == 0) # a property of the parameters, not of the state
+    return ifelse(constant, pdf.ℂᵍ₀, (1 + y / sqrt(1 + y * y)) / 2)
+end
 
 # Saturation vapor pressure over liquid of Murphy and Koop (2005) (wv_sat_scream.F90, MurphyKoop_svp)
 @inline function murphy_koop_liquid_svp(t::FT) where FT
@@ -187,7 +220,7 @@ end
     uniform = (sec <= tol * tol) | (abs(w1_2 - w1_1) <= 0)
     x1_1 = (-1 * r) / ifelse(uniform, one(FT), w1_2)
     x1_2 = (-1 * r) / ifelse(uniform, one(FT), w1_1)
-    x2 = max(0, 1 - r * r / (1 - p.ℂᵍ₁)) * sec
+    x2 = max(0, 1 - r * r / (1 - within_component_share(p, Skew_w))) * sec
     x1_1 = ifelse(uniform, x_first, x1_1 * sqrt_sec + x_first)
     x1_2 = ifelse(uniform, x_first, x1_2 * sqrt_sec + x_first)
     x2 = ifelse(uniform, zero(FT), x2)
@@ -271,7 +304,7 @@ and [`ModelThermodynamicsSaturation`](@ref)), with the `thermodynamics` of the m
     calm = wsec <= w_tol_sqd
     wsec_safe = ifelse(calm, one(FT), wsec)
     Skew_w = w3var / sqrt(wsec_safe * wsec_safe * wsec_safe)
-    w2_1 = pdf.ℂᵍ₁
+    w2_1 = within_component_share(pdf, Skew_w)
     omw = 1 - w2_1
     a = clip_between(cp, convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))),
                      pdf.plume_fraction_min, pdf.plume_fraction_max, 1)

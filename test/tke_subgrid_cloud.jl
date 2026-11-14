@@ -489,3 +489,25 @@ end
         @test all(isfinite, column(model.tracers.ρe))
     end
 end
+
+@testset "The within-component share of w′² as a function of the skewness" begin
+    using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: within_component_share
+    pdf = EqualShareDoubleGaussianPDF()
+    # zero slopes: the constant, exactly
+    @test all(within_component_share(pdf, Sk) === pdf.ℂᵍ₀ for Sk in (-3.0, -0.5, 0.0, 0.7, 2.5))
+    for (ℂᵍˢ, ℂᵍˢˢ) in ((0.3, 0.0), (0.0, 0.2), (-0.4, 0.15))
+        pdf = EqualShareDoubleGaussianPDF(; ℂᵍˢ, ℂᵍˢˢ)
+        @test within_component_share(pdf, 0.0) ≈ pdf.ℂᵍ₀ rtol=1e-14
+        for Sk in (-2.0, -0.5, 0.0, 0.8, 2.0)
+            c = within_component_share(pdf, Sk)
+            @test 0 < c < 1
+            # the two equal-spread components of the closure reproduce w′² = 1 and the skewness
+            a = (1 - Sk / sqrt(4 * (1 - c)^3 + Sk^2)) / 2
+            w₁ = sqrt((1 - a) / a) * sqrt(1 - c)
+            w₂ = -sqrt(a / (1 - a)) * sqrt(1 - c)
+            @test a * w₁ + (1 - a) * w₂ ≈ 0 atol=1e-12
+            @test a * (w₁^2 + c) + (1 - a) * (w₂^2 + c) ≈ 1 rtol=1e-12
+            @test a * (w₁^3 + 3w₁ * c) + (1 - a) * (w₂^3 + 3w₂ * c) ≈ Sk rtol=1e-10 atol=1e-12
+        end
+    end
+end
