@@ -21,6 +21,7 @@ using Breeze.CompressibleEquations: SplitExplicitTimeDiscretization,
                                     _build_predictors!, prepare_acoustic_cache!,
                                     factor_vertical_solver!, acoustic_substep_loop!
 using Breeze.AtmosphereModels: thermodynamic_density
+using Breeze.Microphysics: SaturationAdjustment, WarmPhaseEquilibrium
 using Breeze.Thermodynamics: ExnerReferenceState
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -180,7 +181,8 @@ for arch in arches
 
             Δτ = FT(1//4)
             ω = FT(substepper.forward_weight)
-            stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ)
+            stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ, U⁰ = model.timestepper.U⁰,
+                     forcing_interval = 3Δτ)
             factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
             acoustic_substep_loop!(3, model, substepper, stage, nothing)
 
@@ -358,6 +360,80 @@ for arch in arches
         @test ρθ_south ≥ ρθ_threshold
         @test ρθ_north ≥ ρθ_threshold
         Oceananigans.defaults.FloatType = old_FT
+    end
+
+    #####
+    ##### With moisture the loop's (ρθ)′ is its pressure variable, which holds the moisture content
+    ##### besides the perturbation of ρθ, and the end of the stage takes that content off every
+    ##### cell. The relaxation target has to hold the same content, or the boundary cell ends
+    ##### the stage biased by it. With α = 1 the outermost cell is its target after every substep,
+    ##### so it must end the step at the prescribed ρθ to rounding: moist inflow makes the content
+    ##### of the boundary cells about 10⁻⁴ of ρθ in unsaturated air, and several times that in
+    ##### cloud, where the adjusted partition scales the loop variable as well.
+    #####
+
+    @testset "Moist open boundary ends at the prescribed ρθ [$(arch), $(FT), $(label)]" for FT in as_test_float_types(arch),
+            (label, cloudy) in (("vapor", false), ("saturation adjustment", true))
+        old_FT = Oceananigans.defaults.FloatType
+        Oceananigans.defaults.FloatType = FT
+        try
+            grid = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
+                                   x=(0, 800), y=(0, 800), z=(0, 200),
+                                   topology=(Bounded, Bounded, Bounded))
+
+            time_discretization = SplitExplicitTimeDiscretization(; open_boundary_relaxation = 1)
+            dynamics = CompressibleDynamics(time_discretization; reference_potential_temperature=300)
+            microphysics = cloudy ? SaturationAdjustment(FT; equilibrium = WarmPhaseEquilibrium()) : nothing
+            ref = ExnerReferenceState(grid; potential_temperature=FT(300))
+            ρ_ref0 = @allowscalar interior(ref.density)[1, 1, 1]
+
+            # Air near 299 K, which the cloudy case saturates: air that is denser, warmer and moister than the interior flows in through the west
+            # and south faces and out through the east and north ones.
+            U = FT(10)
+            qᵗ_interior, qᵗ_wall = cloudy ? (FT(0.026), FT(0.032)) : (FT(0.005), FT(0.015))
+            ρᵈ_wall = FT(1.01 * ρ_ref0)
+            ρθ_wall = FT(ρᵈ_wall * 286)
+            ρqᵗ_wall = ρᵈ_wall * qᵗ_wall
+            all_sides(value) = FieldBoundaryConditions(west  = ValueBoundaryCondition(value),
+                                                       east  = ValueBoundaryCondition(value),
+                                                       south = ValueBoundaryCondition(value),
+                                                       north = ValueBoundaryCondition(value))
+            ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρᵈ_wall * U),
+                                             east = NormalFlowBoundaryCondition(ρᵈ_wall * U))
+            ρv_bcs = FieldBoundaryConditions(south = NormalFlowBoundaryCondition(ρᵈ_wall * U),
+                                             north = NormalFlowBoundaryCondition(ρᵈ_wall * U))
+            boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρᵈ = all_sides(ρᵈ_wall),
+                                   ρθ = all_sides(ρθ_wall), ρqᵗ = all_sides(ρqᵗ_wall))
+
+            model = AtmosphereModel(grid; advection=WENO(), dynamics, microphysics, boundary_conditions)
+            set!(model; θ=285, u=U, v=U, qᵗ=qᵗ_interior, ρ=ρ_ref0)
+
+            for _ in 1:3
+                time_step!(model, FT(0.2))
+            end
+
+            if cloudy
+                @test minimum(interior(model.microphysical_fields.qˡ)) > 0
+            end
+
+            ρθ = Array(interior(thermodynamic_density(model.formulation)))
+            ρᵈ = Array(interior(model.dynamics.dry_density))
+            relative_error(values, wall) = maximum(abs, values .- wall) / wall
+            tolerance = 50 * eps(FT)
+
+            for boundary_cells in (ρθ[1, :, :], ρθ[end, :, :], ρθ[:, 1, :], ρθ[:, end, :])
+                @test relative_error(boundary_cells, ρθ_wall) < tolerance
+            end
+
+            for boundary_cells in (ρᵈ[1, :, :], ρᵈ[end, :, :], ρᵈ[:, 1, :], ρᵈ[:, end, :])
+                @test relative_error(boundary_cells, ρᵈ_wall) < tolerance
+            end
+
+            # The interior is not relaxed, so the test is not vacuous.
+            @test relative_error(ρθ[4:5, 4:5, :], ρθ_wall) > FT(1e-3)
+        finally
+            Oceananigans.defaults.FloatType = old_FT
+        end
     end
 
     @testset "Asymmetric wall values: each side tracks its own prescribed ρ [$(arch), $(FT)]" for FT in as_test_float_types(arch)

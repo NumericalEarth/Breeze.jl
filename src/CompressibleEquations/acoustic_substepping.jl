@@ -122,6 +122,8 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, TD, MP, TAV, GT, TS, WC, DC, TWC
     linearization_pressure_coefficient :: CF
     fixed_composition_sensitivity :: CF           # Λᴴ, cached with θᴸ and Cᴸ
     transport_density_tendency :: TD              # dry air's share of the divergence of the moisture's transport mass flux
+    scaled_thermodynamic_tendency :: TD           # ς (Gρᵡ + Gᵂ), the slow forcing of the loop's pressure, rebuilt at each stage start
+    stage_end_moisture_content :: TD              # what the loop's pressure holds at the stage's end besides (ρᵡ)′ and the loop's own flux
 
     density_perturbation :: CF
     density_potential_temperature_perturbation :: CF
@@ -161,6 +163,8 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.linearization_pressure_coefficient),
                        adapt(to, a.fixed_composition_sensitivity),
                        adapt(to, a.transport_density_tendency),
+                       adapt(to, a.scaled_thermodynamic_tendency),
+                       adapt(to, a.stage_end_moisture_content),
                        adapt(to, a.density_perturbation),
                        adapt(to, a.density_potential_temperature_perturbation),
                        adapt(to, a.momentum_perturbation),
@@ -340,6 +344,12 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     fixed_composition_sensitivity = CenterField(grid, substep_floattype)
     transport_density_tendency = CenterField(grid)
 
+    # Written by the kernel that starts a stage and read until the stage ends, so that the sensitivities
+    # of the pressure to the moisture are evaluated once per stage (see Section 3b). They hold sums of
+    # the model's own tendencies and densities, so they stay FT like those.
+    scaled_thermodynamic_tendency = CenterField(grid)
+    stage_end_moisture_content = CenterField(grid)
+
     density_perturbation = CenterField(grid, substep_floattype)
     density_potential_temperature_perturbation = CenterField(grid, substep_floattype)
 
@@ -383,6 +393,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               linearization_pressure_coefficient,
                               fixed_composition_sensitivity,
                               transport_density_tendency,
+                              scaled_thermodynamic_tendency,
+                              stage_end_moisture_content,
                               density_perturbation,
                               density_potential_temperature_perturbation,
                               momentum_perturbation,
@@ -576,9 +588,14 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
 #####     − ∇·(Λᴴ M), the content the loop's flux M built. The thermodynamic density is left
 #####     with its own tendency and the flux divergence − ∇·(θᴸ M).
 #####
-##### The Λₐ are evaluated where they are used, at the stage-entry state, by the two kernels that
-##### add and remove the content; only Λᴴ, which the loop's flux needs at neighbors, is stored.
-##### Without moisture every term is exactly zero.
+##### The Λₐ are evaluated once per stage, at the stage-entry state, by the kernel that adds the
+##### content (`_initialize_stage_perturbations!`). The forcing interval the stage ends at is known
+##### then, so that kernel also stores the part of the content the end of the stage takes off that
+##### does not depend on the loop (`stage_end_moisture_content`), and the forcing it gives the loop
+##### in a field of its own (`scaled_thermodynamic_tendency`), which leaves the thermodynamic
+##### tendency as it was. The end of the stage then only adds the divergence of Λᴴ M, for which
+##### Λᴴ, which the loop's flux needs at neighbors too, is stored. Without moisture every term is
+##### exactly zero.
 #####
 ##### Where the microphysics adjusts the partition of its moisture density to saturation
 ##### (`saturation_adjusted_equilibrium`) and the cell holds cloud, the pressure the core
@@ -754,8 +771,8 @@ end
            condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, Base.tail(liquid_fractions), Base.tail(fields))
 end
 
-# Everything the two content kernels read: the stage-entry state the sensitivities are evaluated
-# at, the start state, and the slow tendencies.
+# Everything the content of a stage is evaluated from: the stage-entry state the sensitivities are
+# evaluated at, the start state, and the slow tendencies.
 function moisture_content_arguments(substepper, model, U⁰)
     microphysics = model.microphysics
     Gⁿ = model.timestepper.Gⁿ
@@ -769,10 +786,7 @@ function moisture_content_arguments(substepper, model, U⁰)
              qᵛᵉ = specific_prognostic_moisture(model), Λᴴ = substepper.fixed_composition_sensitivity,
              liquid_fractions = condensate_liquid_fractions(microphysics, condensate_names))
 
-    ρᵡ_name = thermodynamic_density_name(model.formulation)
-
-    densities = (; ρᵡ⁰ = U⁰[ρᵡ_name], ρᵡ = thermodynamic_density(model.formulation),
-                 ρᵈ⁰ = U⁰.ρᵈ, Gᵗρᵈ = substepper.transport_density_tendency, Gˢρᵈ = Gⁿ.ρᵈ,
+    densities = (; ρᵈ⁰ = U⁰.ρᵈ, Gᵗρᵈ = substepper.transport_density_tendency, Gˢρᵈ = Gⁿ.ρᵈ,
                  ρqᵐ⁰ = U⁰[moisture_name], ρqᵐ = model.moisture_density, Gρqᵐ = Gⁿ[moisture_name],
                  ρqᶜ⁰ = values(U⁰[condensate_names]),
                  ρqᶜ = values(model.microphysical_fields[condensate_names]),
@@ -846,47 +860,54 @@ end
 end
 
 # Take the moisture content off the loop's pressure at the end of a stage, which leaves the
-# perturbation of the thermodynamic density for `_recover_full_state!`, and off the thermodynamic
-# tendency: the content of the start state, the ramp of its slow rate over `forcing_interval`, and
-# the content `− ∇·(Λᴴ M)` that the loop's own mass flux built, with `M` that flux integrated over
-# the stage's substeps of size `Δτ`. `M` is the sum the transport velocity is averaged from, so
-# this runs before `finalize_time_averaged_velocity!` normalizes it (see Section 10). Where the
-# slow path was scaled to the loop's coefficient (a scheme that adjusts the partition of its
-# moisture, Section 3b), what the scaling added to the slow path of the thermodynamic density
-# comes off with the content.
-function remove_moisture_content!(substepper::AcousticSubstepper, model, U⁰, forcing_interval, Δτ)
+# perturbation of the thermodynamic density for `_recover_full_state!`: the part the start of the
+# stage evaluated (`stage_end_moisture_content`: the content of the start state and the ramp of its
+# slow rate over the stage's forcing interval), and the content `− ∇·(Λᴴ M)` that the loop's own
+# mass flux built, with `M` that flux integrated over the stage's substeps of size `Δτ`. `M` is the
+# sum the transport velocity is averaged from, so this runs before
+# `finalize_time_averaged_velocity!` normalizes it (see Section 10).
+function remove_moisture_content!(substepper::AcousticSubstepper, model, U⁰, Δτ)
     grid = model.grid
-    state, densities = moisture_content_arguments(substepper, model, U⁰)
-    M = substepper.time_averaged_velocities
-    Gˢρᵡ = model.timestepper.Gⁿ[thermodynamic_density_name(model.formulation)]
     launch!(architecture(grid), grid, :xyz, _remove_moisture_content!,
-            substepper.density_potential_temperature_perturbation, Gˢρᵡ, grid, state, densities,
-            M.u, M.v, M.w, substepper.momentum_perturbation.w, U⁰.ρw, model.momentum.ρw,
-            forcing_interval, Δτ, 1 - substepper.forward_weight)
+            substepper.density_potential_temperature_perturbation,
+            substepper.stage_end_moisture_content,
+            fast_content_arguments(substepper, model, U⁰)..., Δτ, 1 - substepper.forward_weight)
     return nothing
 end
 
-@kernel function _remove_moisture_content!(ϖ, Gˢρᵡ, grid, state, densities, Σρu′, Σρv′, Σρw′, ρw′, ρw⁰, ρwᴸ,
-                                           forcing_interval, Δτ, ωˢ⁻)
-    i, j, k = @index(Global, NTuple)
-    W⁰, Gᵂ, ς = moisture_content_and_tendency(i, j, k, grid, state, densities)
-    Λᴴ = state.Λᴴ
-    @inbounds begin
-        ∇ʰ_ΛM = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, Λᴴ, Σρu′) + δyTᵃᶜᵃ(i, j, k, grid, θFʸ, Λᴴ, Σρv′))
-        ∂z_ΛM = ∂zᶜᶜᶜ(i, j, k, grid, fast_content_flux_z, Λᴴ, Σρw′, ρw′, ρw⁰, ρwᴸ, ωˢ⁻)
-
-        # The thermodynamic tendency itself, and the slow path of the thermodynamic density it
-        # ramps from the start state: the loop held both scaled by ς, like the content.
-        Gᵡ = Gˢρᵡ[i, j, k] / ς - Gᵂ
-        ρᵡˢ = (densities.ρᵡ⁰[i, j, k] - densities.ρᵡ[i, j, k]) + forcing_interval * Gᵡ
-
-        ϖ[i, j, k] -= (ς - 1) * ρᵡˢ + ς * (W⁰ + forcing_interval * Gᵂ) - Δτ * (∇ʰ_ΛM + ∂z_ΛM)
-        Gˢρᵡ[i, j, k] = Gᵡ
-    end
+# The arguments of `fast_content_divergence` after the indices, up to the substep size.
+function fast_content_arguments(substepper, model, U⁰)
+    M = substepper.time_averaged_velocities
+    return (model.grid, substepper.fixed_composition_sensitivity, model.dynamics,
+            M.u, M.v, M.w, substepper.momentum_perturbation.w, U⁰.ρu, U⁰.ρv, U⁰.ρw, model.momentum)
 end
 
-@inline fast_content_flux_z(i, j, k, grid, Λᴴ, Σρw′, ρw′, ρw⁰, ρwᴸ, ωˢ⁻) =
-    @inbounds ℑbzᵃᵃᶠ(i, j, k, grid, Λᴴ) * (Σρw′[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - (ρw⁰[i, j, k] - ρwᴸ[i, j, k])))
+@kernel function _remove_moisture_content!(ϖ, content, grid, Λᴴ, dynamics, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ,
+                                           Δτ, ωˢ⁻)
+    i, j, k = @index(Global, NTuple)
+    ∇_ΛM = fast_content_divergence(i, j, k, grid, Λᴴ, dynamics, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    @inbounds ϖ[i, j, k] -= content[i, j, k] - Δτ * ∇_ΛM
+end
+
+# The divergence of Λᴴ times the mass flux the loop has summed to `Σρu′, Σρv′, Σρw′`: less `Δτ`
+# times this is the content the loop's own flux has built in its pressure variable.
+@inline function fast_content_divergence(i, j, k, grid, Λᴴ, dynamics, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    ∇ʰ_ΛM = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, Λᴴ, Σρu′) + δyTᵃᶜᵃ(i, j, k, grid, θFʸ, Λᴴ, Σρv′))
+    ∂z_ΛM = ∂zᶜᶜᶜ(i, j, k, grid, fast_content_flux_z, Λᴴ, dynamics, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    return ∇ʰ_ΛM + ∂z_ΛM
+end
+
+# Λᴴ times the vertical mass flux the loop integrated: the sum of (ρw)′ over the substeps, less the
+# off-centering's share of its change over the stage (Section 10). (ρw)′ is the loop's vertical
+# momentum, which is the contravariant one over terrain, so the rewind it started from is the
+# difference of `transport_ρw`, as in `_finalize_time_averaged_velocity!`. The top face, which
+# `initialize_vertical_momentum_perturbation!` does not reach, starts from zero.
+@inline function fast_content_flux_z(i, j, k, grid, Λᴴ, dynamics, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    rewind = transport_ρw(i, j, k, grid, dynamics, ρu⁰, ρv⁰, ρw⁰) -
+             transport_ρw(i, j, k, grid, dynamics, ρ𝐮ᴸ.ρu, ρ𝐮ᴸ.ρv, ρ𝐮ᴸ.ρw)
+    ρw′⁰ = ifelse(k > size(grid, 3), zero(rewind), rewind)
+    return @inbounds ℑbzᵃᵃᶠ(i, j, k, grid, Λᴴ) * (Σρw′[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - ρw′⁰))
+end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -1341,7 +1362,7 @@ end
 # then uses per-stage Uᴸ as base, collapsing back to ``U_outer + Δevolved`` —
 # preserving the invariant. Auxiliary fields (predictors, divergence/damping
 # workspace) reset to zero; they carry no stage-to-stage history.
-function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
+function initialize_stage_perturbations!(substepper, model, Uᴸ_outer, forcing_interval)
     grid = model.grid
     arch = architecture(grid)
 
@@ -1367,7 +1388,9 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     # substep (see `fused_divergence_damping`) then adds exactly zero.
     # The loop integrates the pressure, so the thermodynamic perturbation (and the copy the divergence
     # damping differences) also gains the moisture content of the start state, and the slow forcing the
-    # rate of that content (Section 3b). Both are added in the same launch as the rewind.
+    # rate of that content (Section 3b). Both are added in the same launch as the rewind, which also
+    # evaluates what the end of the stage takes off again, after the slow tendencies have ramped over
+    # `forcing_interval` (`remove_moisture_content!`).
     state, densities = moisture_content_arguments(substepper, model, Uᴸ_outer)
     launch!(arch, grid, :xyz, _initialize_stage_perturbations!,
             substepper.density_perturbation,
@@ -1375,10 +1398,12 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
             substepper.previous_density_potential_temperature_perturbation,
             substepper.momentum_perturbation.u,
             substepper.momentum_perturbation.v,
+            substepper.scaled_thermodynamic_tendency,
+            substepper.stage_end_moisture_content,
             model.timestepper.Gⁿ[ρᵡ_name],
             Uᴸ_outer.ρᵈ, Uᴸ_outer[ρᵡ_name], Uᴸ_outer.ρu, Uᴸ_outer.ρv,
             model.dynamics.dry_density, ρᵡ, model.momentum.ρu, model.momentum.ρv,
-            grid, state, densities)
+            grid, state, densities, forcing_interval)
     # ρw is dispatched: terrain models initialize the contravariant ρw̃ instead.
     initialize_vertical_momentum_perturbation!(substepper, model, Uᴸ_outer)
 
@@ -1409,10 +1434,19 @@ end
 # moisture content W⁰ of the start state to ρθ′ and its stash and its slow rate Gᵂ to the thermodynamic
 # tendency (see `moisture_content_and_tendency`). ρθ′ is the rewind plus W⁰, evaluated in that order,
 # and both sums are scaled by ς, which is one except where the partition of the moisture is adjusted.
-@kernel function _initialize_stage_perturbations!(ρ′, ρθ′, ρθ′ˢ⁻, ρu′, ρv′, Gˢρᵡ,
+# The scaled tendency `Gˢρᵡ` is what the loop is forced with; the thermodynamic tendency `Gρᵡ` is
+# left as it is.
+#
+# The same launch evaluates `content`, what the loop's pressure variable holds beyond the
+# perturbation of the thermodynamic density and the content of the loop's own mass flux once the
+# slow tendencies have ramped over `forcing_interval`: the content of the start state and the ramp
+# of its rate, and, where the slow path was scaled to the loop's coefficient (a scheme that adjusts
+# the partition of its moisture, Section 3b), what the scaling added to the slow path ρᵡˢ of the
+# thermodynamic density. The end of the stage takes it off (`_remove_moisture_content!`).
+@kernel function _initialize_stage_perturbations!(ρ′, ρθ′, ρθ′ˢ⁻, ρu′, ρv′, Gˢρᵡ, content, Gρᵡ,
                                                   ρ_outer, ρθ_outer, ρu_outer, ρv_outer,
                                                   ρ_stage, ρθ_stage, ρu_stage, ρv_stage,
-                                                  grid, state, densities)
+                                                  grid, state, densities, forcing_interval)
     i, j, k = @index(Global, NTuple)
     W⁰, Gᵂ, ς = moisture_content_and_tendency(i, j, k, grid, state, densities)
     @inbounds begin
@@ -1421,7 +1455,15 @@ end
         ρθ′ˢ⁻[i, j, k] = ς * ((ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + W⁰)
         ρu′[i, j, k] = ρu_outer[i, j, k] - ρu_stage[i, j, k]
         ρv′[i, j, k] = ρv_outer[i, j, k] - ρv_stage[i, j, k]
-        Gˢρᵡ[i, j, k] = ς * (Gˢρᵡ[i, j, k] + Gᵂ)
+
+        Gˢ = ς * (Gρᵡ[i, j, k] + Gᵂ)
+        Gˢρᵡ[i, j, k] = Gˢ
+
+        # The thermodynamic tendency as the scaled sum holds it, and the slow path of the
+        # thermodynamic density it ramps from the start state.
+        Gᵡ = Gˢ / ς - Gᵂ
+        ρᵡˢ = (ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + forcing_interval * Gᵡ
+        content[i, j, k] = (ς - 1) * ρᵡˢ + ς * (W⁰ + forcing_interval * Gᵂ)
     end
 end
 
@@ -1707,8 +1749,8 @@ end
 # `while` loop under Reactant, so the compiled program holds one copy of the substep body rather
 # than `Nτ`. Reverse-mode differentiation of that loop caches a minimal cut of its values (`mincut`).
 function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
-    @trace mincut=true track_numbers=false for _ in 1:Nτ
-        acoustic_substep!(model, substepper, stage, advection)
+    @trace mincut=true track_numbers=false for n in 1:Nτ
+        acoustic_substep!(model, substepper, stage, advection, n)
     end
     finish_horizontal_momentum_perturbations!(model, substepper, stage)
     return nothing
@@ -2208,6 +2250,13 @@ end
 # prognostic `ValueBoundaryCondition` to the base at stage entry, so
 # `ρᴸ[halo] = 2v − ρᴸ[cell]` and the target perturbation is
 # `v − ρᴸ[cell] = (ρᴸ[halo] − ρᴸ[cell]) / 2`, read straight from the base field.
+# The loop's `(ρθ)′` is its pressure variable ϖ, which holds the moisture content
+# besides the perturbation of the thermodynamic density (Section 3b), and the end
+# of the stage takes that content off the boundary cell like any other. Its target
+# is therefore the prescribed perturbation plus the content the cell holds after
+# this substep (the content at the forcing interval the substep has reached),
+# so that the relaxed cell is the prescribed thermodynamic density once the
+# content comes off. The content is zero in dry air.
 # Relaxation factor `α ∈ (0, 1]` (default 0.5, via
 # `SplitExplicitTimeDiscretization(; open_boundary_relaxation = α)`). No-op on any
 # side without an active `NormalFlowBoundaryCondition` (periodic/walls/`nothing`
@@ -2216,45 +2265,64 @@ end
 @inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:NormalFlow}) && !(bc.condition isa Nothing)
 
 # Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the prescribed
-# wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2.
+# wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2, plus
+# the content of the loop's (ρθ)′ there (`content_arguments` are those of `substep_content`).
 # `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
-@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, iᴮ, iᴴ, α)
+@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, iᴮ, iᴴ, α, content_arguments)
     j, k = @index(Global, NTuple)
+    content = substep_content(iᴮ, j, k, content_arguments...)
     @inbounds begin
         ρ′[iᴮ, j, k]  += α * ((ρᴸ[iᴴ, j, k]  - ρᴸ[iᴮ, j, k])  / 2 - ρ′[iᴮ, j, k])
-        ρθ′[iᴮ, j, k] += α * ((ρθᴸ[iᴴ, j, k] - ρθᴸ[iᴮ, j, k]) / 2 - ρθ′[iᴮ, j, k])
+        ρθ′[iᴮ, j, k] += α * (((ρθᴸ[iᴴ, j, k] - ρθᴸ[iᴮ, j, k]) / 2 + content) - ρθ′[iᴮ, j, k])
     end
 end
 
-@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, jᴮ, jᴴ, α)
+@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, jᴮ, jᴴ, α, content_arguments)
     i, k = @index(Global, NTuple)
+    content = substep_content(i, jᴮ, k, content_arguments...)
     @inbounds begin
         ρ′[i, jᴮ, k]  += α * ((ρᴸ[i, jᴴ, k]  - ρᴸ[i, jᴮ, k])  / 2 - ρ′[i, jᴮ, k])
-        ρθ′[i, jᴮ, k] += α * ((ρθᴸ[i, jᴴ, k] - ρθᴸ[i, jᴮ, k]) / 2 - ρθ′[i, jᴮ, k])
+        ρθ′[i, jᴮ, k] += α * (((ρθᴸ[i, jᴴ, k] - ρθᴸ[i, jᴮ, k]) / 2 + content) - ρθ′[i, jᴮ, k])
     end
 end
 
-function apply_open_boundary_relaxation!(substepper, model, grid, arch)
+# What the loop's pressure variable holds beyond the perturbation of the thermodynamic density with
+# `remaining_interval` of the stage's forcing interval still to run: the content the end of the
+# stage takes off (`_remove_moisture_content!`), less the ramp over the remaining interval. The
+# rate of that ramp, (ς − 1) Gρᵡ + ς Gᵂ, is the difference of the scaled and the thermodynamic
+# tendency, so the sensitivities are not evaluated again.
+@inline function substep_content(i, j, k, content, Gˢρᵡ, Gρᵡ, remaining_interval, grid, Λᴴ, dynamics,
+                                 Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, Δτ, ωˢ⁻)
+    ∇_ΛM = fast_content_divergence(i, j, k, grid, Λᴴ, dynamics, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    return @inbounds content[i, j, k] - remaining_interval * (Gˢρᵡ[i, j, k] - Gρᵡ[i, j, k]) - Δτ * ∇_ΛM
+end
+
+# `n` substeps of the stage have run.
+function apply_open_boundary_relaxation!(substepper, model, grid, arch, stage, n)
     bcs_u = model.momentum.ρu.boundary_conditions
     bcs_v = model.momentum.ρv.boundary_conditions
+    west, east = is_active_open_bc(bcs_u.west), is_active_open_bc(bcs_u.east)
+    south, north = is_active_open_bc(bcs_v.south), is_active_open_bc(bcs_v.north)
+    west || east || south || north || return nothing
+
     Nx, Ny, _ = size(grid)
     α   = substepper.open_boundary_relaxation
     ρ′  = substepper.density_perturbation
     ρθ′ = substepper.density_potential_temperature_perturbation
     ρᴸ  = model.dynamics.dry_density
     ρθᴸ = thermodynamic_density(model.formulation)
-    if is_active_open_bc(bcs_u.west)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
-    end
-    if is_active_open_bc(bcs_u.east)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, Nx, Nx + 1, α)
-    end
-    if is_active_open_bc(bcs_v.south)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
-    end
-    if is_active_open_bc(bcs_v.north)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, Ny, Ny + 1, α)
-    end
+
+    # The forcing interval this substep has reached falls short of the stage's by this much.
+    (; Δτ, Gˢρᵡ, U⁰, forcing_interval) = stage
+    remaining_interval = forcing_interval - n * Δτ * substepper.thermodynamic_tendency_factor
+    Gρᵡ = model.timestepper.Gⁿ[thermodynamic_density_name(model.formulation)]
+    content_arguments = (substepper.stage_end_moisture_content, Gˢρᵡ, Gρᵡ, remaining_interval,
+                         fast_content_arguments(substepper, model, U⁰)..., Δτ, 1 - substepper.forward_weight)
+
+    west  && launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α, content_arguments)
+    east  && launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, Nx, Nx + 1, α, content_arguments)
+    south && launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α, content_arguments)
+    north && launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, Ny, Ny + 1, α, content_arguments)
     return nothing
 end
 
@@ -2425,10 +2493,11 @@ function factor_vertical_solver!(substepper, grid, thermodynamic_constants, δτ
     return nothing
 end
 
-# One acoustic substep of size `stage.Δτ`. `stage` holds the loop-invariant quantities of the RK3
-# stage (Δτ, the Crank–Nicolson weights δτᵐ⁺ and δτˢ⁻, the slow thermodynamic tendency Gˢρᵡ);
-# everything is passed explicitly so Reactant can trace the calling loop with no captured state.
-function acoustic_substep!(model, substepper, stage, advection)
+# Substep `n` of the stage, of size `stage.Δτ`. `stage` holds the loop-invariant quantities of the RK3
+# stage (Δτ, the Crank–Nicolson weights δτᵐ⁺ and δτˢ⁻, the slow thermodynamic tendency Gˢρᵡ, the
+# state U⁰ the stage starts from, the forcing interval it ends at); everything is passed explicitly so
+# Reactant can trace the calling loop with no captured state.
+function acoustic_substep!(model, substepper, stage, advection, n)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -2436,7 +2505,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     g = convert(FT, constants.gravitational_acceleration)
     ω = FT(substepper.forward_weight)
     Gⁿ = model.timestepper.Gⁿ
-    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰) = stage
 
     # Step A: explicit horizontal forward of (ρu)′, (ρv)′, after the divergence damping of the
     # substep before when that is fused into this step.
@@ -2518,7 +2587,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # Per-substep open-boundary enforcement (issue #738): relax the outermost
     # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
     # the halo fill, so the boundary cell tracks the prescribed inflow state.
-    apply_open_boundary_relaxation!(substepper, model, grid, arch)
+    apply_open_boundary_relaxation!(substepper, model, grid, arch, stage, n)
 
     # ρ′ takes no fill: nothing in the loop reads its halos (see `initialize_stage_perturbations!`).
     fill_substep_halos!(post_recovery_halo_fields(substepper.damping, substepper), model)
@@ -2572,14 +2641,13 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     assemble_slow_vertical_momentum_tendency!(substepper, model, β_stage, Δτ)
 
     # Initialize perturbations with the SK08 rewind term so the substep
-    # effectively starts from U(t) = Uᴸ (the outer-step-start state).
-    initialize_stage_perturbations!(substepper, model, Uᴸ)
+    # effectively starts from U(t) = Uᴸ (the outer-step-start state). The slow thermodynamic
+    # tendency ramps over `forcing_interval` in the stage.
+    forcing_interval = Nτ * Δτ * substepper.thermodynamic_tendency_factor
+    initialize_stage_perturbations!(substepper, model, Uᴸ, forcing_interval)
 
-    Gⁿ = model.timestepper.Gⁿ
-    ρᵡ_name = thermodynamic_density_name(model.formulation)
-    Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
-
-    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
+    Gˢρᵡ = substepper.scaled_thermodynamic_tendency
+    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰ = Uᴸ, forcing_interval)
     factor_implicit_advection!(model, substepper, advection, Δτ)
     factor_vertical_solver!(substepper, grid, constants, δτᵐ⁺)
     acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
@@ -2590,7 +2658,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Done BEFORE `_recover_full_state!` so we read the stage-entry
     # `model.momentum.*` (substep loop hasn't touched it) and stage-entry
     # `model.dynamics.dry_density` as the Uᴸ_stage reference.
-    remove_moisture_content!(substepper, model, Uᴸ, Nτ * Δτ * substepper.thermodynamic_tendency_factor, Δτ)
+    remove_moisture_content!(substepper, model, Uᴸ, Δτ)
     finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
