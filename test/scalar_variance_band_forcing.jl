@@ -6,8 +6,10 @@ using Oceananigans
 using Statistics: mean, var
 using Test
 
-# Variance of the interior of a field, ⟨φ²⟩ - ⟨φ⟩²
-field_variance(f) = var(Array(interior(f)); corrected=false)
+# Variance of the interior of a field, ⟨φ²⟩ - ⟨φ⟩², reduced in Float64: the moisture perturbations are 10⁻⁴ of the
+# mean, so a single-precision reduction of (ρqᵛ)² would be limited to about eps(Float32) ⟨ρqᵛ⟩² ≈ 10⁻¹¹, the size of the
+# variance increment being tested; the stored Float32 values themselves resolve the perturbations to 10⁻³
+field_variance(f) = var(Array{Float64}(interior(f)); corrected=false)
 
 @testset "ScalarVarianceBandForcing [$FT]" for FT in test_float_types()
     L = FT(0.2)
