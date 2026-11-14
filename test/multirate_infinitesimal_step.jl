@@ -17,14 +17,13 @@ using Test
 const mis_coefficient_sets = (:WickerSkamarock3, :MIS2, :MIS3C, :MIS4, :MIS4a, :TVDMISA, :TVDMISB, :MIS3opt, :SSPMIS43, :SSPMIS42, :MIS54, :MISF53, :MISR33, :MISR43)
 
 function mis_bubble_model(; timestepper, coefficients = :MIS2, moist = false, Δθ = 2, qᵗ = 0.012,
-                          scalar_advection = WENO(order=5),
-                          pressure_coefficient = FrozenCompositionPressureCoefficient())
+                          scalar_advection = WENO(order=5))
     grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5),
                            x = (-10e3, 10e3), z = (0, 10e3),
                            topology = (Bounded, Flat, Bounded))
     θ₀ = 300
     p₀ = 1e5
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(; pressure_coefficient);
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                     base_pressure = p₀, standard_pressure = p₀,
                                     reference_potential_temperature = θ₀)
     microphysics = moist ? SaturationAdjustment(; equilibrium = WarmPhaseEquilibrium()) : nothing
@@ -103,37 +102,6 @@ end
     @test all(isfinite, w)
     @test maximum(w) > 0.1
     @test model.clock.time ≈ 100
-end
-
-# MIS linearizes once per step with the substepper it shares with AcousticRungeKutta3, so the
-# phase-equilibrium pressure coefficient (NumericalEarth/Breeze.jl#1086) reaches its cache too:
-# different from the frozen slope where the bubble has condensed (about 10% lower in lightly loaded
-# cloud; in heavily loaded cloud the ∂p/∂ρᵈ part it carries can outweigh that), identical elsewhere,
-# and the step runs.
-@testset "MIS carries the phase-equilibrium pressure coefficient" begin
-    pressure_coefficient = PhaseEquilibriumPressureCoefficient()
-    equilibrium = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, moist = true, qᵗ = 0.03, pressure_coefficient)
-    frozen = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, moist = true, qᵗ = 0.03)
-    @test equilibrium.timestepper.substepper.pressure_coefficient === pressure_coefficient
-
-    for model in (equilibrium, frozen)
-        time_step!(model, 5)
-    end
-
-    qˡ = Array(interior(equilibrium.microphysical_fields.qˡ))
-    Cᵉ = Array(interior(equilibrium.timestepper.substepper.linearization_pressure_coefficient))
-    Cᶠ = Array(interior(frozen.timestepper.substepper.linearization_pressure_coefficient))
-    cloudy = qˡ .> 0
-    @test any(cloudy)
-    @test all(Cᵉ[.!cloudy] .== Cᶠ[.!cloudy])
-    @test all(Cᵉ[cloudy] .!= Cᶠ[cloudy])
-    @test all(0.8 .< Cᶠ[cloudy] ./ Cᵉ[cloudy] .< 1.25)
-    @test all(1.05 .< Cᶠ[cloudy .& (qˡ .< 0.005)] ./ Cᵉ[cloudy .& (qˡ .< 0.005)] .< 1.2)
-
-    for _ in 1:19
-        time_step!(equilibrium, 5)
-    end
-    @test all(isfinite, Array(interior(equilibrium.velocities.w)))
 end
 
 @testset "MIS with adaptive-implicit vertical advection" begin

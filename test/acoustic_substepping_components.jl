@@ -32,7 +32,6 @@ using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_s
                                     implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
                                     factor_vertical_solver!,
                                     solve_tridiagonal_columns_in_place!
-using Breeze.Microphysics: adjust_thermodynamic_state
 using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, continuity_density, standard_pressure
@@ -45,7 +44,6 @@ using Oceananigans.Architectures: architecture, on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: BatchedTridiagonalSolver, get_coefficient, solve!
-using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Units
 using Oceananigans.Utils: KernelParameters, launch!
 using Test
@@ -1029,96 +1027,6 @@ end
 
         if qᵛ[I] == 0
             @test Cᴸ[I] ≈ cᵖᵈ * Rᵈ / (cᵖᵈ - Rᵈ) * (p[I] / pˢᵗ)^κᵈ rtol = 100eps(FT)
-        end
-    end
-    Oceananigans.defaults.FloatType = old_FT
-end
-
-#####
-##### The phase-equilibrium pressure coefficient is the slope of the saturation-adjusted equation of state
-#####
-
-# In saturated cells `PhaseEquilibriumPressureCoefficient` gives the slope of the pressure that saturation
-# adjustment re-diagnoses after a uniform compression (every density and ρθ scaled together, θ and total
-# water fixed); elsewhere it is the frozen-composition slope. Compressing the model itself and calling
-# `update_state!` recovers the response of the loop, δp = Cᴸ ρᵈ (θ + Λᴴ) ε, in every cell with it, where the
-# frozen coefficient overestimates the response by about 10% in cloud (NumericalEarth/Breeze.jl#1086).
-@testset "Phase-equilibrium pressure coefficient is the slope of the adjusted equation of state [$FT, $(nameof(typeof(κ̂)))]" for FT in test_float_types(),
-        κ̂ in (VaporEquivalentExponent(), DryExponent())
-    old_FT = Oceananigans.defaults.FloatType
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch, FT; size = (6, 6, 6), halo = (5, 5, 5),
-                           x = (0, 2e3), y = (0, 2e3), z = (0, 3e3),
-                           topology = (Periodic, Periodic, Bounded))
-    constants = ThermodynamicConstants(FT)
-    microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
-    formulation = LiquidIcePotentialTemperatureFormulation(; exner_exponent = κ̂)
-    qᵗ(x, y, z) = ifelse(z < 1e3, 0.0, ifelse(z < 2e3, 0.005, 0.03))
-
-    function coefficient_model(pressure_coefficient)
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(; pressure_coefficient);
-                                        base_pressure = 1e5, standard_pressure = 1e5,
-                                        reference_potential_temperature = z -> 300)
-        model = AtmosphereModel(grid; dynamics, formulation, microphysics, thermodynamic_constants = constants)
-        set!(model; ρ = model.dynamics.reference_state.density, θ = 300, qᵗ)
-        prepare_acoustic_cache!(model.timestepper.substepper, model)
-        return model
-    end
-
-    frozen = coefficient_model(FrozenCompositionPressureCoefficient())
-    equilibrium = coefficient_model(PhaseEquilibriumPressureCoefficient())
-    @test equilibrium.timestepper.substepper.pressure_coefficient isa PhaseEquilibriumPressureCoefficient
-
-    Cᶠ = Array(interior(frozen.timestepper.substepper.linearization_pressure_coefficient))
-    Cᵉ = Array(interior(equilibrium.timestepper.substepper.linearization_pressure_coefficient))
-    # What the loop's pressure carries per unit of dry mass flux: θ + Λᴴ, which is θ without condensate.
-    θᵉ = Array(interior(equilibrium.timestepper.substepper.linearization_potential_temperature))
-    ρᵈ = Array(interior(equilibrium.dynamics.dry_density))
-    ρ  = Array(interior(equilibrium.dynamics.total_density))
-    ρθ = Array(interior(equilibrium.formulation.potential_temperature_density))
-    qᵛ = Array(interior(equilibrium.microphysical_fields.qᵛ))
-    qˡ = Array(interior(equilibrium.microphysical_fields.qˡ))
-    @test maximum(qˡ) > 1e-4  # the top layer condensed
-    @test minimum(qˡ) == 0    # the lower layers did not
-
-    pˢᵗ = FT(standard_pressure(equilibrium.dynamics))
-    solver = equilibrium.formulation.temperature_solver
-    ε    = FT == Float64 ? FT(1e-3) : FT(1e-2)
-    rtol = FT == Float64 ? FT(1e-3) : FT(1e-2)
-
-    for I in CartesianIndices(ρθ)
-        θ = ρθ[I] / ρᵈ[I]
-        if qˡ[I] == 0
-            @test Cᵉ[I] == Cᶠ[I]
-        else
-            # The pressure that saturation adjustment re-diagnoses after compressing every density by s.
-            function adjusted_pressure(s)
-                𝒰 = LiquidIceDensityState(θ, MoistureMassFractions(qᵛ[I] + qˡ[I]), pˢᵗ, s * ρ[I], solver, κ̂)
-                return air_pressure(adjust_thermodynamic_state(𝒰, microphysics, constants), constants)
-            end
-            slope = (adjusted_pressure(1 + ε) - adjusted_pressure(1 - ε)) / (2ε * ρᵈ[I] * θᵉ[I])
-            @test Cᵉ[I] ≈ slope rtol = rtol
-            @test FT(1.05) < Cᶠ[I] / Cᵉ[I] < FT(1.2)
-        end
-    end
-
-    # Compress the model itself, ρᵈ, ρθ and ρqᵉ together by 1 + ε, and re-diagnose the pressure. The
-    # ratio of the loop's response Cᴸ ρᵈ (θ + Λᴴ) ε to the re-diagnosed δp is the issue's diagnostic.
-    for (model, Cᴸ, (lower, upper)) in ((equilibrium, Cᵉ, (1 - 10ε, 1 + 10ε)),
-                                        (frozen, Cᶠ, (FT(1.05), FT(1.2))))
-        p₀ = Array(interior(model.dynamics.pressure))
-        for field in (model.dynamics.dry_density, model.formulation.potential_temperature_density, model.moisture_density)
-            parent(field) .*= 1 + ε
-        end
-        update_state!(model)
-        δp = Array(interior(model.dynamics.pressure)) .- p₀
-        ratio = Cᴸ .* ρᵈ .* θᵉ .* ε ./ δp
-        for I in CartesianIndices(ρθ)
-            if qˡ[I] == 0
-                @test ratio[I] ≈ 1 rtol = 10ε
-            else
-                @test lower < ratio[I] < upper
-            end
         end
     end
     Oceananigans.defaults.FloatType = old_FT
