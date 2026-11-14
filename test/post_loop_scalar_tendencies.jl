@@ -65,8 +65,77 @@ const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep,
         time_step!(post_loop, Δt)
     end
     @test maximum(abs, interior(post_loop.velocities.w)) > 5
-    @test moisture_uniformity_error(post_loop) < 1e-12
-    @test tracer_uniformity_error(post_loop) < 1e-12
+
+    # Wicker–Skamarock applies each stage's flux alone, q/(1 − q) times the dry-mass flux continuity
+    # applied, and keeps a uniform mass fraction to round-off. A multirate infinitesimal step
+    # recombines the stages' fluxes with its tableau (leaving them at weight one would be unstable:
+    # see the passive-scalar test below), while continuity integrates the mass flux inside the
+    # loop, so the two no longer pair and the mass fraction stays uniform only to the accuracy of
+    # the scheme, about 1e-3 here, as with pre-loop tendencies.
+    # TODO: a mass-consistent multirate scalar update (the stage's own mass flux times a
+    # recombined mass fraction, instead of a recombined flux) would restore round-off uniformity.
+    if timestepper === :AcousticRungeKutta3
+        @test moisture_uniformity_error(post_loop) < 1e-12
+        @test tracer_uniformity_error(post_loop) < 1e-12
+    else
+        @test moisture_uniformity_error(post_loop) < 5e-3
+        @test tracer_uniformity_error(post_loop) < 5e-3
+    end
+end
+
+#####
+##### A passive scalar in a uniform wind
+#####
+##### Advection can only reduce the maximum of a blob. The post-loop advective tendency has to be
+##### recombined across the stages of a multirate infinitesimal step like any other slow tendency:
+##### applied at weight one from the current stage it is integrated with the tableau (α, diag(d), γ),
+##### first order with b̃·c < 1/2 for every non-diagonal set — an anti-diffusive scheme that
+##### amplifies the blob at every Courant number.
+#####
+
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.TimeSteppers: update_state!
+using Oceananigans: prognostic_fields
+
+function advected_blob_growth(; coefficients, advection, Δt, post_loop_scalar_tendencies = true, Nt = 200, U = 20)
+    Nx, Nz, Δx = 64, 8, 200
+    grid = RectilinearGrid(default_arch, Float64; size = (Nx, Nz), halo = (5, 5), x = (0, Nx * Δx), z = (0, Nz * Δx),
+                           topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, momentum_advection = advection, scalar_advection = advection,
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies))
+
+    # The discrete reference state, exactly, so that the wind stays uniform.
+    reference = model.dynamics.reference_state
+    Rᵈ = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
+    ρ = model.dynamics.dry_density
+    parent(ρ) .= parent(reference.density)
+    parent(Breeze.AtmosphereModels.thermodynamic_density(model.formulation)) .= parent(reference.pressure) ./ (Rᵈ .* parent(reference.exner_function))
+
+    qᵛ = CenterField(grid)
+    set!(qᵛ, (x, z) -> 1e-6 * cos(π * min(1, abs(x - Nx * Δx / 2) / (8Δx)) / 2)^2)
+    ρqᵛ = prognostic_fields(model).ρqᵛ
+    interior(ρqᵛ) .= interior(ρ) .* interior(qᵛ)
+    interior(model.momentum.ρu) .= interior(ρ) .* U
+    fill_halo_regions!((ρqᵛ, model.momentum.ρu))
+    update_state!(model)
+
+    mass_fraction() = Array(interior(ρqᵛ)) ./ Array(interior(ρ))
+    initial_maximum = maximum(mass_fraction())
+    for _ in 1:Nt
+        time_step!(model, Δt)
+    end
+    return maximum(mass_fraction()) / initial_maximum
+end
+
+@testset "Post-loop MIS advection does not amplify a passive scalar [$coefficients, Courant number $courant]" for
+        coefficients in (:SSPMIS43, :TVDMISB, :MIS3C, :MIS4a), courant in (0.5, 1.0)
+    for advection in (WENO(order = 5), WENO(order = 5, bounds = (0, 1)))
+        growth = advected_blob_growth(; coefficients, advection, Δt = courant * 200 / 20)
+        @test growth ≤ 1 + 1e-3
+    end
 end
 
 @testset "TendencyCallsite callbacks edit the post-loop scalar tendencies once per stage [$timestepper]" for (timestepper, coefficients) in steppers[1:2]

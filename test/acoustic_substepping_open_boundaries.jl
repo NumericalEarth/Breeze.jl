@@ -16,12 +16,17 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze: AcousticSubstepper
-using Breeze.CompressibleEquations: SplitExplicitTimeDiscretization
+using Breeze.CompressibleEquations: SplitExplicitTimeDiscretization,
+                                    explicit_horizontal_step!, enforce_wall_impenetrability!,
+                                    _build_predictors!, prepare_acoustic_cache!,
+                                    factor_vertical_solver!, acoustic_substep_loop!
 using Breeze.AtmosphereModels: thermodynamic_density
 using Breeze.Thermodynamics: ExnerReferenceState
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Units
+using Oceananigans.Utils: launch!
 using Statistics: mean
 using Test
 using Metal: Metal, MetalBackend
@@ -29,6 +34,21 @@ using Metal: Metal, MetalBackend
 const arches = (Metal.functional() || get(ENV, "BREEZE_FORCE_METAL_FUNCTIONAL", "false") == "true") ? (default_arch, GPU(MetalBackend())) : (default_arch,)
 
 as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float_types()
+
+function open_boundary_momentum_model(arch, FT, damping)
+    grid = RectilinearGrid(arch, FT; size=(6, 6, 4), halo=(5, 5, 5),
+                           x=(0, 6kilometers), y=(0, 6kilometers), z=(0, 200),
+                           topology=(Bounded, Bounded, Bounded))
+    boundary_conditions = (
+        ρu = FieldBoundaryConditions(west=NormalFlowBoundaryCondition(FT(2)),
+                                     east=NormalFlowBoundaryCondition(FT(3))),
+        ρv = FieldBoundaryConditions(south=NormalFlowBoundaryCondition(FT(4)),
+                                     north=NormalFlowBoundaryCondition(FT(5))))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(; damping))
+    model = AtmosphereModel(grid; dynamics, boundary_conditions)
+    set!(model; θ=300, qᵗ=0, ρ=model.dynamics.reference_state.density)
+    return model
+end
 
 for arch in arches
 
@@ -86,6 +106,102 @@ for arch in arches
         @test !any(isnan, parent(model.momentum.ρw))
         @test !any(isnan, parent(model.dynamics.dry_density))
         Oceananigans.defaults.FloatType = old_FT
+    end
+
+    @testset "Open-face predictors match zero boundary perturbation flux [$(arch), $(FT)]" for FT in as_test_float_types(arch)
+        old_FT = Oceananigans.defaults.FloatType
+        Oceananigans.defaults.FloatType = FT
+        try
+            model = open_boundary_momentum_model(arch, FT, NoDivergenceDamping())
+            grid = model.grid
+            substepper = model.timestepper.substepper
+            ρu′, ρv′, ρw′ = substepper.momentum_perturbation
+            Gⁿ = model.timestepper.Gⁿ
+            fill!(ρu′, 1)
+            fill!(ρv′, 1)
+            fill!(ρw′, 0)
+            fill!(Gⁿ.ρu, 2)
+            fill!(Gⁿ.ρv, 4)
+            fill!(Gⁿ.ρᵈ, 0)
+            fill!(Gⁿ.ρθ, 0)
+            set!(substepper.linearization_potential_temperature, 300)
+            set!(substepper.linearization_pressure_coefficient, 1)
+
+            # Only west/south faces receive the explicit update; halo fills preserve all four faces.
+            Δτ = FT(1//2)
+            explicit_horizontal_step!(NoDivergenceDamping(), substepper, model, Δτ)
+            ρu_explicit = Array(interior(ρu′))
+            ρv_explicit = Array(interior(ρv′))
+            @test all(==(FT(2)), ρu_explicit[1, :, :])
+            @test all(==(FT(3)), ρv_explicit[:, 1, :])
+            @test all(==(one(FT)), ρu_explicit[end, :, :])
+            @test all(==(one(FT)), ρv_explicit[:, end, :])
+            fill_halo_regions!((ρu′, ρv′))
+            @test Array(interior(ρu′)) == ρu_explicit
+            @test Array(interior(ρv′)) == ρv_explicit
+
+            enforce_wall_impenetrability!(substepper, model, grid, arch)
+            ρu_values = Array(interior(ρu′))
+            ρv_values = Array(interior(ρv′))
+            @test all(iszero, ρu_values[[1, end], :, :])
+            @test all(iszero, ρv_values[:, [1, end], :])
+
+            launch!(arch, grid, :xyz, _build_predictors!,
+                    substepper.density_predictor,
+                    substepper.density_potential_temperature_predictor,
+                    substepper.previous_density_potential_temperature_perturbation,
+                    substepper.density_perturbation,
+                    substepper.density_potential_temperature_perturbation,
+                    ρw′, ρu′, ρv′, grid, model.dynamics, Δτ, zero(FT),
+                    Gⁿ.ρᵈ, Gⁿ.ρθ, one(FT), substepper.linearization_potential_temperature)
+
+            # Compare every predictor cell with the finite-volume divergence of the actual face fluxes.
+            divergence = (diff(ρu_values; dims=1) + diff(ρv_values; dims=2)) / FT(1kilometers)
+            @test Array(interior(substepper.density_predictor)) ≈ -Δτ * divergence
+            @test Array(interior(substepper.density_potential_temperature_predictor)) ≈ -Δτ * 300 * divergence
+        finally
+            Oceananigans.defaults.FloatType = old_FT
+        end
+    end
+
+    @testset "Open-face momentum and transport increments vanish [$(arch), $(FT), $(Damping)]" for FT in as_test_float_types(arch),
+                                                                                               Damping in (NoDivergenceDamping, ThermalDivergenceDamping, DirectDivergenceDamping)
+        old_FT = Oceananigans.defaults.FloatType
+        Oceananigans.defaults.FloatType = FT
+        try
+            model = open_boundary_momentum_model(arch, FT, Damping())
+            grid = model.grid
+            substepper = model.timestepper.substepper
+            prepare_acoustic_cache!(substepper, model)
+            fill!(substepper.momentum_perturbation.u, 1)
+            fill!(substepper.momentum_perturbation.v, 1)
+            fill!(model.timestepper.Gⁿ.ρu, FT(0.02))
+            fill!(model.timestepper.Gⁿ.ρv, FT(0.03))
+
+            Δτ = FT(1//4)
+            ω = FT(substepper.forward_weight)
+            stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ)
+            factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
+            acoustic_substep_loop!(3, model, substepper, stage, nothing)
+
+            # Check momentum increments and the raw transport sum.
+            for momentum in (substepper.momentum_perturbation, substepper.time_averaged_velocities)
+                ρu_values = Array(interior(momentum.u))
+                ρv_values = Array(interior(momentum.v))
+                @test all(iszero, ρu_values[[1, end], :, :])
+                @test all(iszero, ρv_values[:, [1, end], :])
+                @test maximum(abs, ρu_values[2:end-1, :, :]) > 0
+                @test maximum(abs, ρv_values[:, 2:end-1, :]) > 0
+            end
+            @test all(isfinite, Array(interior(substepper.density_perturbation)))
+            @test all(isfinite, Array(interior(substepper.density_potential_temperature_perturbation)))
+            @test all(==(FT(2)), Array(interior(model.momentum.ρu))[1, :, :])
+            @test all(==(FT(3)), Array(interior(model.momentum.ρu))[end, :, :])
+            @test all(==(FT(4)), Array(interior(model.momentum.ρv))[:, 1, :])
+            @test all(==(FT(5)), Array(interior(model.momentum.ρv))[:, end, :])
+        finally
+            Oceananigans.defaults.FloatType = old_FT
+        end
     end
 
     #####

@@ -4,12 +4,12 @@
   "timezone": "UTC",
   "labels": ["dependencies 🖇️"],
   "ignorePaths": ["validation/**", "utils/**"],
-  "ignoreDeps": ["Breeze"],
+  "ignoreDeps": ["Breeze", "KernelAbstractions"],
   "packageRules": [
     {
       "matchManagers": ["julia"],
       "matchFileNames": ["benchmarking/Project.toml"],
-      "matchDepNames": ["Reactant"],
+      "matchDepNames": ["Oceananigans", "Reactant"],
       "rangeStrategy": "pin"
     },
     {

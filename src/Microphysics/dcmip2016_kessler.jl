@@ -229,6 +229,12 @@ Return the names of prognostic microphysical fields for the Kessler scheme.
 """
 AtmosphereModels.prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
 
+# Both condensate masses are liquid. Neither sediments through the tracer interface (the scheme's
+# own column kernel moves the rain); the acoustic substep loop reads the phase to project their
+# tendencies onto its pressure.
+@inline AtmosphereModels.condensate_liquid_fraction(::DCMIP2016KM, ::Val{:ρqᶜˡ}) = 1
+@inline AtmosphereModels.condensate_liquid_fraction(::DCMIP2016KM, ::Val{:ρqʳ}) = 1
+
 # Gridless microphysical state: convert density-weighted prognostics to specific quantities.
 # The grid-indexed version is a generic wrapper that extracts μ from fields and calls this.
 # The velocities argument is required for interface compatibility but not used by the Kessler schemes.
