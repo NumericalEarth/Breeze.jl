@@ -674,15 +674,24 @@ end
     return P3FallSpeedResult{FT}(𝕎ᶜˡ, 𝕎ⁿᶜˡ, 𝕎ʳ, 𝕎ⁿʳ, 𝕎ⁱ, 𝕎ⁿⁱ)
 end
 
+@inline p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
+                            constants, properties::P3ProcessProps,
+                            surface_temperature, temperature_tendency, pressure_tendency) =
+    p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
+                        surface_temperature, temperature_tendency, pressure_tendency,
+                        nothing)
+
+# `subgrid_statistics` are the statistics of the `condensation` option (`nothing`
+# for `GridMeanCondensation`).
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
                                      constants, properties::P3ProcessProps,
                                      surface_temperature, temperature_tendency,
-                                     pressure_tendency)
+                                     pressure_tendency, subgrid_statistics)
     # Passing `properties` lets compute_p3_process_rates skip the redundant
     # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                      surface_temperature, temperature_tendency,
-                                     pressure_tendency)
+                                     pressure_tendency, subgrid_statistics)
 
     return p3_tendencies(p3, ρ, ℳ, properties, rates)
 end

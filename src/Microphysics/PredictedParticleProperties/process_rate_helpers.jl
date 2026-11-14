@@ -100,7 +100,6 @@ Returns a NamedTuple of the possibly-rescaled rates.
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
-    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
     # Liquid-phase saturation-adjustment caps. In the SCF=1 limit the condensation
     # and evaporation budgets collapse to the same signed increment `δqˡ`;
@@ -128,6 +127,78 @@ Returns a NamedTuple of the possibly-rescaled rates.
     cond = max(0, cond) * f_cond + min(0, cond) * f_evp
     rain_evap = rain_evap * f_evp
     coat_evap = coat_evap * f_evp
+
+    return limit_ice_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                 rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                                 nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                 dt_safety, freezing_temperature,
+                                 temperature_tendency, pressure_tendency)
+end
+
+# Without a subgrid supersaturation model: the grid-mean caps above
+@inline limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                          rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                          nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
+                          dt_safety, freezing_temperature,
+                          temperature_tendency, pressure_tendency, ::Nothing) =
+    limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                      rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                      nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
+                      dt_safety, freezing_temperature,
+                      temperature_tendency, pressure_tendency)
+
+# With the subgrid supersaturation correlation Γ, the vapor exchange of cloud liquid (its
+# condensation, its evaporation, and the seed mass `ccn_activation_mass`) is capped by the
+# increment of the vapor excess that cloud liquid sees, δqˡ + Γ / ξˡ. Rain and the liquid coating
+# of ice keep the grid-mean caps, and the ice-phase caps are unchanged.
+@inline function limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                   rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                                   nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
+                                   dt_safety, freezing_temperature,
+                                   temperature_tendency, pressure_tendency, Γ)
+    FT = typeof(qᵛ)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+
+    Aˡ = external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, temperature_tendency,
+                                       pressure_tendency, constants)
+    δqˡ = (qᵛ - qᵛ⁺ˡ + Aˡ * dt_safety) / ξˡ
+    δqˡᶜ = δqˡ + Γ / ξˡ
+
+    # Cloud liquid
+    cloud_source_total = max(0, cond) + ccn_activation_mass
+    f_cloud_cond = sink_limiting_factor(cloud_source_total, max(0, δqˡᶜ), dt_safety)
+    f_cloud_evp = sink_limiting_factor(max(0, -cond), max(0, -δqˡᶜ), dt_safety)
+    ccn_activation_mass = ccn_activation_mass * f_cloud_cond
+    ccn_activation_number = ccn_activation_number * f_cloud_cond
+    cond = max(0, cond) * f_cloud_cond + min(0, cond) * f_cloud_evp
+
+    # Rain and the liquid coating of ice
+    f_cond = sink_limiting_factor(rain_cond + coat_cond, max(0, δqˡ), dt_safety)
+    f_evp = sink_limiting_factor(rain_evap + coat_evap, max(0, -δqˡ), dt_safety)
+    rain_cond = rain_cond * f_cond
+    coat_cond = coat_cond * f_cond
+    rain_evap = rain_evap * f_evp
+    coat_evap = coat_evap * f_evp
+
+    return limit_ice_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                 rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                                 nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                 dt_safety, freezing_temperature,
+                                 temperature_tendency, pressure_tendency)
+end
+
+# The ice-phase caps of `limit_vapor_rates`, given the liquid-phase rates already limited
+@inline function limit_ice_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                       rain_cond, rain_evap, dep, coat_cond, coat_evap,
+                                       nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                       dt_safety, freezing_temperature,
+                                       temperature_tendency, pressure_tendency)
+    FT = typeof(qᵛ)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)
+    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
     # Ice-phase cap, after netting the rescaled liquid tendencies into qᵛ and T.
     net_liquid = max(0, cond) + ccn_activation_mass + rain_cond + coat_cond -

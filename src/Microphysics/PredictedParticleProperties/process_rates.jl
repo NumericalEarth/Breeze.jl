@@ -266,7 +266,7 @@ struct P3ProcessRates{FT}
 end
 
 @inline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
-                                 temperature_tendency, pressure_tendency)
+                                 temperature_tendency, pressure_tendency, Γ = nothing)
     FT = typeof(ρ)
 
     # Unpack derived state (field access on concrete struct — GPU-safe)
@@ -295,12 +295,12 @@ end
                                                       transport, q,
                                                       state.μᶜˡ, state.λᶜˡ, state.nᶜˡ,
                                                       temperature_tendency, pressure_tendency,
-                                                      state.lookups)
+                                                      state.lookups, Γ)
     cond = vapor_rates.condensation
 
     # Cloud droplet activation
     activation = compute_cloud_droplet_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ,
-                                                  qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+                                                  seed_vapor(p3.aerosol, Γ, qᵛ), qᵛ⁺ˡ, T, ρ, constants)
     ccn_activation_mass = activation.mass
     ccn_activation_number = activation.number
 
@@ -561,10 +561,19 @@ end
 # Everything from here down is `@inline`. A `@noinline` device function would receive `p3`
 # (several KB of table handles), `ℳ`, `𝒰`, and `constants` as local-memory copies, and
 # ptxas allocates registers over the whole call graph anyway.
+@inline compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                                  surface_temperature, temperature_tendency, pressure_tendency) =
+    compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                             surface_temperature, temperature_tendency, pressure_tendency,
+                             nothing)
+
+# `subgrid_statistics` are the statistics that the `condensation` option of P3 reads (`nothing` for
+# `GridMeanCondensation`).
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
-                                          pressure_tendency)
+                                          pressure_tendency,
+                                          subgrid_statistics)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -653,8 +662,12 @@ end
                                                            lookups)
 
     # === PHASE 1 & 2 RATES ===
+    # Subgrid supersaturation correlation of cloud condensation; `nothing` for `GridMeanCondensation`
+    Γ = cloud_condensation_correlation(p3.condensation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
+                                       ℳ_adjusted.qᶜˡ, T, P, ρ, constants)
+
     phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
-                             temperature_tendency, pressure_tendency)
+                             temperature_tendency, pressure_tendency, Γ)
     phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===
@@ -755,7 +768,7 @@ end
     vapor_rates = limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
                                     rain_cond, rain_evap, dep, coat_cond, coat_evap,
                                     nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
-                                    dt_safety, T₀, temperature_tendency, pressure_tendency)
+                                    dt_safety, T₀, temperature_tendency, pressure_tendency, Γ)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number

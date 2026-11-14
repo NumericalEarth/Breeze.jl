@@ -113,15 +113,19 @@ end
     return (; ρ, ℳ, 𝒰, properties, surface_temperature, temperature_tendency, pressure_tendency)
 end
 
-@kernel function _p3_add_tendencies_kernel!(G, stage, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities)
+@kernel function _p3_add_tendencies_kernel!(G, stage, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities,
+                                            condensation_fields)
     i, j, k = @index(Global, NTuple)
 
     inputs = p3_grid_process_inputs(i, j, k, grid, p3, μ, formulation, dynamics,
                                     constants, ρ_field, velocities)
 
+    # Statistics of the `condensation` option; `nothing` for `GridMeanCondensation`
+    statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.condensation, condensation_fields)
+
     rates = compute_p3_process_rates(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants, inputs.properties,
                                      inputs.surface_temperature, inputs.temperature_tendency,
-                                     inputs.pressure_tendency)
+                                     inputs.pressure_tendency, statistics)
 
     # Scale every transfer to what the coming stage leaves of the species it draws on.
     φ = p3_sink_fractions(i, j, k, G, stage, p3, inputs.ρ, rates)
@@ -500,9 +504,37 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
             p3_tendency_fields(model.timestepper.Gⁿ, p3), stage,
             μ, model.formulation, model.dynamics, grid,
             model.thermodynamic_constants, p3, ρ_field,
-            model.velocities)
+            model.velocities,
+            subgrid_supersaturation_fields(p3.condensation, model))
 
     return nothing
+end
+
+#####
+##### Phase relaxation rate (see `AtmosphereModels.phase_relaxation_rate`)
+#####
+
+@inline function AM.phase_relaxation_rate(i, j, k, grid, p3::P3, μ, 𝒰, constants)
+    ρ = density(𝒰, constants)
+    ℳ = p3_relaxation_microphysical_state(i, j, k, p3, μ, ρ)
+    return p3_phase_relaxation_rates(p3, ρ, ℳ, 𝒰, constants).ωᶜ
+end
+
+# The microphysical state that the phase relaxation rate reads, at density ρ (no velocities).
+@inline function p3_relaxation_microphysical_state(i, j, k, p3, μ, ρ)
+    FT = typeof(ρ)
+    nᶜˡ = grid_cloud_droplet_number(p3, p3.aerosol, μ, i, j, k, ρ)
+    @inbounds begin
+        qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
+        qʳ  = μ.ρqʳ[i, j, k] / ρ
+        nʳ  = μ.ρnʳ[i, j, k] / ρ
+        qⁱ  = μ.ρqⁱ[i, j, k] / ρ
+        nⁱ  = μ.ρnⁱ[i, j, k] / ρ
+        qᶠ  = μ.ρqᶠ[i, j, k] / ρ
+        bᶠ  = μ.ρbᶠ[i, j, k] / ρ
+        qʷⁱ = μ.ρqʷⁱ[i, j, k] / ρ
+    end
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, zero(FT), zero(FT), zero(FT))
 end
 
 #####

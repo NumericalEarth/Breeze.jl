@@ -47,6 +47,8 @@ module PredictedParticleProperties
 export
     # Main scheme type
     PredictedParticlePropertiesMicrophysics,
+    GridMeanCondensation,
+    SubgridCondensation,
     P3Microphysics,
     P3MicrophysicalState,
     ProcessRate,
@@ -116,7 +118,7 @@ export
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using DocStringExtensions: TYPEDFIELDS, TYPEDEF
-using SpecialFunctions: erf
+using SpecialFunctions: erf, erfc
 
 using Adapt: Adapt
 using Oceananigans: Oceananigans
@@ -238,6 +240,7 @@ include("rain_quadrature.jl")
 ##### and the coupled saturation-adjustment solver
 #####
 
+include("subgrid_supersaturation.jl")
 include("process_rate_helpers.jl")
 include("tabulated_kernels.jl")
 include("cloud_droplet_activation_rates.jl")
