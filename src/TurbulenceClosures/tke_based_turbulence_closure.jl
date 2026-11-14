@@ -1055,7 +1055,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     return nothing
 end
 
-# The subgrid cloud formulation, if any, after the diffusivities (subgrid_cloud_formulation.jl)
+# The subgrid distribution, if any, after the diffusivities (subgrid_distribution.jl)
 compute_subgrid_cloud!(::Nothing, closure_fields, closure, model, tracers, parameters) = nothing
 
 #####

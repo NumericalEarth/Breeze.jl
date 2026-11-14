@@ -566,9 +566,8 @@ end
                              surface_temperature, temperature_tendency, pressure_tendency,
                              nothing, DiracStatistics())
 
-# Subgrid inputs for the model in `p3.subgrid`: `subgrid_statistics` feed an external subgrid
-# supersaturation model (`nothing` otherwise), and `𝒮` are the closure's subgrid statistics of the
-# cell for `ClosureCloud` (`DiracStatistics()` otherwise).
+# `subgrid_statistics` are the statistics that the `condensation` option of P3 reads (`nothing` for
+# `GridMeanCondensation`); `𝒮` is `DiracStatistics()`, the grid-mean form of the warm-phase rates.
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
@@ -664,8 +663,8 @@ end
 
     # === PHASE 1 & 2 RATES ===
     # Subgrid supersaturation correlation of cloud condensation; `nothing` without an external model
-    Γ = subgrid_supersaturation(p3.subgrid, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
-                                ℳ_adjusted.qᶜˡ, T, P, ρ, constants)
+    Γ = cloud_condensation_correlation(p3.condensation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
+                                       ℳ_adjusted.qᶜˡ, T, P, ρ, constants, p3, state)
 
     phase1_grid_mean = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
                                        temperature_tendency, pressure_tendency, Γ)

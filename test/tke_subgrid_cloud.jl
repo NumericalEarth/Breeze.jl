@@ -5,7 +5,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: ClosureCloud, ClosureCloudStatistics, NoSubgridCorrelation, subgrid_statisticsᶜᶜᶜ
+using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation
 using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment,
                                                               FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
@@ -26,12 +26,12 @@ column(field) = Array(interior(field))[1, 1, :]
 # Kernel arithmetic on the device can differ from the host by rounding (fused multiply-add): exact on the CPU, close on the GPU
 matches(a, b) = default_arch isa CPU ? a == b : isapprox(a, b; rtol=1e-10, atol=1e-15)
 
-function tke_p3_column(distribution; subgrid = NoSubgridCorrelation(), arch = default_arch, static_stability = MoistStaticStability(),
+function tke_p3_column(distribution; condensation = GridMeanCondensation(), arch = default_arch, static_stability = MoistStaticStability(),
                        shear = GridMeanShear(), solver = SinglePass())
     grid = RectilinearGrid(arch; size=32, z=(0, 1600), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=290)
-    microphysics = PredictedParticlePropertiesMicrophysics(; subgrid,
+    microphysics = PredictedParticlePropertiesMicrophysics(; condensation,
                                                            negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
     closure = TKEBasedTurbulenceClosure(; static_stability, shear, subgrid_distribution = distribution, solver)
@@ -252,40 +252,8 @@ end
     @test all(isfinite, column(model.tracers.ρe))
 end
 
-@testset "The closure owns the cloud of a P3 column; water and energy are conserved" begin
-    model = tke_p3_column(DoubleGaussian(); subgrid = ClosureCloud())
-    μ = model.microphysical_fields
-    ρ = column(model.dynamics.reference_state.density)
-    ρθ = model.formulation.potential_temperature_density
-
-    water₀ = sum(non_precipitating_water(model) .+ column(μ.ρqʳ))
-    for _ in 1:5
-        time_step!(model, 60)
-    end
-    sc = model.closure_fields.subgrid_cloud
-    @test maximum(column(sc.cloud.qˡ)) > 1e-6
-    @test 0 < maximum(column(sc.cloud.aᶜ)) ≤ 1
-    stats = @allowscalar subgrid_statisticsᶜᶜᶜ(1, 1, 20, model.grid, ClosureCloud(), model.closure, model.closure_fields)
-    @test stats == ClosureCloudStatistics(column(sc.cloud.aᶜ)[20], column(sc.cloud.qˡ)[20])
-
-    # Total water of a closed column with rain
-    water = sum(non_precipitating_water(model) .+ column(μ.ρqʳ))
-    @test water ≈ water₀ rtol=1e-12
-    @test all(column(model.moisture_density) .≥ 0)
-
-    # The step after the stages repartitions vapor and cloud liquid to the liquid of the
-    # distribution of the end-of-step state, conserving their sum and ∫ρθ exactly
-    heat = sum(column(ρθ))
-    water = sum(non_precipitating_water(model))
-    step_closure_prognostics!(model.closure_fields, model.closure, model, 60)
-    @test sum(column(ρθ)) == heat
-    @test sum(non_precipitating_water(model)) ≈ water rtol=1e-14
-    qˡ = column(sc.cloud.qˡ)
-    qᵗ = non_precipitating_water(model) ./ ρ
-    @test column(μ.ρqᶜˡ) ≈ ρ .* min.(max.(qˡ, 0), max.(qᵗ, 0)) rtol=1e-14
-
-    # Without ClosureCloud the closure leaves the cloud liquid to the microphysics
-    model = tke_p3_column(DoubleGaussian(); subgrid = NoSubgridCorrelation())
+@testset "With P3 the closure leaves the cloud liquid to the microphysics" begin
+    model = tke_p3_column(DoubleGaussian())
     set!(model.microphysical_fields.ρqᶜˡ, z -> ifelse(600 < z < 800, 1.2e-4, 0.0))
     update_state!(model)
     cloud_liquid = column(model.microphysical_fields.ρqᶜˡ)
@@ -299,7 +267,7 @@ end
     @test DoubleGaussian().saturation isa ModelThermodynamicsSaturation
     @test_throws ArgumentError DoubleGaussian(; saturation = FixedConstantsLiquidSaturation())
     for saturation in (ModelThermodynamicsSaturation(),)
-        model = tke_p3_column(DoubleGaussian(; saturation); subgrid = ClosureCloud(), static_stability = fraction_stability)
+        model = tke_p3_column(DoubleGaussian(; saturation); static_stability = fraction_stability)
         μ = model.microphysical_fields
         water₀ = sum(non_precipitating_water(model) .+ column(μ.ρqʳ))
         for _ in 1:10
@@ -326,11 +294,11 @@ end
 
     closure_columns(model) = (cf = model.closure_fields; sc = cf.subgrid_cloud;
                               map(column, (cf.N², cf.ℓᵐ, cf.Kᶜ, sc.moments..., sc.cloud...)))
-    build(n; relaxation = 1) = tke_p3_column(DoubleGaussian(); subgrid = ClosureCloud(), static_stability = fraction_stability,
+    build(n; relaxation = 1) = tke_p3_column(DoubleGaussian(); static_stability = fraction_stability,
                                              solver = DampedFixedPoint(; iterations = n, relaxation))
 
     reference = build(0)
-    default = tke_p3_column(DoubleGaussian(); subgrid = ClosureCloud(), static_stability = fraction_stability)
+    default = tke_p3_column(DoubleGaussian(); static_stability = fraction_stability)
     for m in (reference, default), _ in 1:3
         time_step!(m, 30)
     end
@@ -366,7 +334,7 @@ end
 @testset "Secant and bisection solves of the static stability and the saturated fraction" begin
     @test BisectionIteration().final_interpolation
     @test occursin("SecantIteration", summary(SecantIteration()))
-    build(solver) = tke_p3_column(DoubleGaussian(); subgrid = ClosureCloud(), static_stability = fraction_stability, solver)
+    build(solver) = tke_p3_column(DoubleGaussian(); static_stability = fraction_stability, solver)
     for solver in (SecantIteration(; iterations = 4), BisectionIteration(; iterations = 4),
                    BisectionIteration(; iterations = 4, final_interpolation = false))
         model = build(solver)
@@ -388,7 +356,7 @@ end
 end
 
 @testset "Lagged stability" begin
-    model = tke_p3_column(DoubleGaussian(); subgrid = ClosureCloud(), static_stability = fraction_stability, solver = LaggedStability())
+    model = tke_p3_column(DoubleGaussian(); static_stability = fraction_stability, solver = LaggedStability())
     N²₋ = model.closure_fields.subgrid_cloud.solver_state.N²₋
     update_state!(model)
     @test column(N²₋) == column(model.closure_fields.N²)
@@ -439,7 +407,7 @@ end
     @test_throws ArgumentError BracketedFractionSolve(-1)
     @test summary(BracketedFractionSolve(1; lagged_envelope = true)) == "BracketedFractionSolve(1, lagged_envelope = true)"
     for (n, lagged_envelope) in ((0, false), (2, false), (2, true))
-        model = tke_p3_column(DoubleGaussian(); subgrid = ClosureCloud(), static_stability = fraction_stability,
+        model = tke_p3_column(DoubleGaussian(); static_stability = fraction_stability,
                               solver = BracketedFractionSolve(n; lagged_envelope))
         @test model.closure.static_stability isa SaturationWeightedStaticStability{<:CondensateFluxFraction}
         state = model.closure_fields.subgrid_cloud.solver_state

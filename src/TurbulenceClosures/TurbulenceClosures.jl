@@ -279,7 +279,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
                                       SHOCConstants,
                                       closure_parameters, with_parameters
 
-include("subgrid_cloud_formulation.jl")
+include("subgrid_distribution.jl")
 include("applied_flux_energetics.jl")
 include("bracketed_fraction_solve.jl")
 

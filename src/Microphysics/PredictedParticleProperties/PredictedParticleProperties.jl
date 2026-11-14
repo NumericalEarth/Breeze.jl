@@ -47,6 +47,8 @@ module PredictedParticleProperties
 export
     # Main scheme type
     PredictedParticlePropertiesMicrophysics,
+    GridMeanCondensation,
+    SubgridCondensation,
     P3Microphysics,
     P3MicrophysicalState,
     ProcessRate,
@@ -116,16 +118,16 @@ export
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using DocStringExtensions: TYPEDFIELDS, TYPEDEF
-using SpecialFunctions: erf
+using SpecialFunctions: erf, erfc
 
 using Adapt: Adapt
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU, on_architecture
 using Breeze.AtmosphereModels: prognostic_field_names,
                                 DiracStatistics,
-                                ClosureCloudStatistics,
                                 AbstractSubgridCorrelation,
-                                NoSubgridCorrelation
+                                NoSubgridCorrelation,
+                                ClosureCloud
 using Breeze.Microphysics: thermodynamic_adjustment_factor
 using Breeze.Thermodynamics: MoistureMassFractions,
                              PlanarIceSurface,

@@ -85,6 +85,43 @@ All values are SI or dimensionless. The velocity scales are in m s⁻¹ (the pub
 is stated in cm s⁻¹), and the mass argument of the fall-speed law is the dimensionless
 ratio `drop_mass / one_gram`, numerically the drop mass in grams.
 
+## Condensation options
+
+P3 condenses and evaporates its own cloud liquid; the `condensation` keyword decides which vapor
+excess drives that rate.
+
+- `GridMeanCondensation()` (default) uses the grid-mean vapor excess over liquid,
+  ``μ = δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``: the rate is ``ωˡ μ``, with evaporation limited by the cloud liquid present.
+- `SubgridCondensation(statistics)` averages the local rate over a subgrid distribution of the
+  vapor excess, whose spread ``σ`` comes from `supersaturation_statistics(statistics, i, j, k, grid,
+  closure, closure_fields, model_fields)`. For a Gaussian,
+
+```math
+⟨\max(0, δqᵛ⁺ˡ)⟩ = μ + Γ, \qquad Γ = σ G(μ / σ) - μ ≥ 0, \qquad G(Q) = φ(Q) + Q Φ(Q),
+```
+
+  and the rate is ``ωˡ (μ + Γ)``. Locally, cloud liquid evaporates no faster than ``qᶜˡ / τ``, so
+  the truncation is taken about ``μ + e`` with ``e = qᶜˡ / (τ ωˡ)``: without cloud liquid only the
+  supersaturated part of the cell condenses, and as ``σ → 0`` the grid-mean rate is recovered.
+  A mixture of plumes (weights ``aᵢ``, means ``μᵢ``, spreads ``σᵢ``) sums the per-plume terms with
+  their weights, about P3's own grid mean. Use `PrescribedStatistics(σ)` for a fixed spread, or a
+  turbulence closure's statistics (`TurbulenceClosureStatistics()`).
+
+The rate coefficient is the phase relaxation rate of the cloud droplets,
+
+```math
+ωˡ = \frac{4π Dᵛ Nᶜˡ r̄}{ξˡ}, \qquad r̄ = \frac{μᶜˡ + 1}{2 λᶜˡ},
+```
+
+with ``Nᶜˡ`` the droplet number concentration, ``μᶜˡ`` and ``λᶜˡ`` the shape and slope of the
+gamma size distribution, ``Dᵛ`` the vapor diffusivity and ``ξˡ`` the psychrometric correction. For
+100 droplets per cm³ of radius near 10 µm, ``1/ωˡ`` is about 8 s. With the ice deposition rate
+``ωⁱ`` it forms ``ωᶜ = ωˡ + ωⁱ``, which `AtmosphereModels.phase_relaxation_rate` returns to a
+turbulence closure. The same ``ωˡ`` drives P3's coupled diffusional growth.
+
+`ClosureCloud`, under which a turbulence closure overwrote P3's cloud liquid, is retired, and the
+`subgrid` keyword is deprecated in favor of `condensation`.
+
 ## [P3 Examples and Visualization](@id p3_examples)
 
 This section provides worked examples demonstrating P3 microphysics concepts

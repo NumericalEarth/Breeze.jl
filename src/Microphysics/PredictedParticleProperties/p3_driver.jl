@@ -90,7 +90,7 @@ end
 # tendency kernel assembles it, so that the process-rate diagnostics
 # (`MicrophysicalProcessRate`) evaluate the very rates that drive the model.
 @inline function p3_grid_process_inputs(i, j, k, grid, p3, μ, formulation, dynamics,
-                                        constants, ρ_field, velocities, closure, closure_fields)
+                                        constants, ρ_field, velocities)
     @inbounds begin
         ρ = ρ_field[i, j, k]
         qᵛᵉ = μ.qᵛ[i, j, k]
@@ -110,21 +110,21 @@ end
 
     properties = p3_process_properties(p3, ρ, ℳ)
 
-    # Subgrid statistics from the closure; `DiracStatistics` without a subgrid choice.
-    𝒮 = p3_closure_statistics(i, j, k, grid, p3.subgrid, closure, closure_fields)
+    # The warm-phase rates keep their grid-mean form: no closure statistics replace them.
+    𝒮 = DiracStatistics()
 
     return (; ρ, ℳ, 𝒰, properties, surface_temperature, temperature_tendency, pressure_tendency, 𝒮)
 end
 
 @kernel function _p3_add_tendencies_kernel!(G, μ, formulation, dynamics, grid, constants, p3, ρ_field, velocities,
-                                            subgrid_fields, closure, closure_fields)
+                                            condensation_fields)
     i, j, k = @index(Global, NTuple)
 
     inputs = p3_grid_process_inputs(i, j, k, grid, p3, μ, formulation, dynamics,
-                                    constants, ρ_field, velocities, closure, closure_fields)
+                                    constants, ρ_field, velocities)
 
-    # Statistics for the subgrid supersaturation model; `nothing` without one
-    statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.subgrid, subgrid_fields)
+    # Statistics of the `condensation` option; `nothing` for `GridMeanCondensation`
+    statistics = subgrid_supersaturation_statistics(i, j, k, grid, p3.condensation, condensation_fields)
 
     result = p3_tendency_compute(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants, inputs.properties,
                                  inputs.surface_temperature, inputs.temperature_tendency,
@@ -172,28 +172,40 @@ function AM.compute_microphysical_tendencies!(p3::P3, model)
             μ, model.formulation, model.dynamics, grid,
             model.thermodynamic_constants, p3, ρ_field,
             model.velocities,
-            subgrid_supersaturation_fields(p3.subgrid, model),
-            p3_subgrid_closure(p3.subgrid, model)...)
+            subgrid_supersaturation_fields(p3.condensation, model))
 
     return nothing
 end
 
-AM.subgrid_correlation(p3::P3) = p3.subgrid
+# P3 condenses its own cloud liquid: no turbulence closure sets it (`subgrid_correlation` keeps
+# its default `NoSubgridCorrelation()`).
 
-# The one `subgrid` slot of P3 selects the subgrid model by its type:
-#   * `NoSubgridCorrelation()` (default): plain P3;
-#   * another `AbstractSubgridCorrelation` (`ClosureCloud`): the closure owns the cloud, and P3
-#     reads the closure's subgrid statistics;
-#   * any other object: an external model of the subgrid supersaturation correlation Γ (see
-#     subgrid_supersaturation.jl), which reads its own fields and not the closure statistics.
-# The closure and its fields reach the P3 kernels only when the subgrid choice reads them.
-p3_subgrid_closure(::NoSubgridCorrelation, model) = (nothing, nothing)
-p3_subgrid_closure(::AbstractSubgridCorrelation, model) = (model.closure, model.closure_fields)
-p3_subgrid_closure(subgrid, model) = (nothing, nothing)
+#####
+##### Phase relaxation rate (see `AtmosphereModels.phase_relaxation_rate`)
+#####
 
-@inline p3_closure_statistics(i, j, k, grid, subgrid::AbstractSubgridCorrelation, closure, closure_fields) =
-    AM.subgrid_statisticsᶜᶜᶜ(i, j, k, grid, subgrid, closure, closure_fields)
-@inline p3_closure_statistics(i, j, k, grid, subgrid, closure, closure_fields) = DiracStatistics()
+@inline function AM.phase_relaxation_rate(i, j, k, grid, p3::P3, μ, 𝒰, constants)
+    ρ = density(𝒰, constants)
+    ℳ = p3_relaxation_microphysical_state(i, j, k, p3, μ, ρ)
+    return p3_phase_relaxation_rates(p3, ρ, ℳ, 𝒰, constants).ωᶜ
+end
+
+# The microphysical state that the phase relaxation rate reads, at density ρ (no velocities).
+@inline function p3_relaxation_microphysical_state(i, j, k, p3, μ, ρ)
+    FT = typeof(ρ)
+    nᶜˡ = grid_cloud_droplet_number(p3, p3.aerosol, μ, i, j, k, ρ)
+    @inbounds begin
+        qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
+        qʳ  = μ.ρqʳ[i, j, k] / ρ
+        nʳ  = μ.ρnʳ[i, j, k] / ρ
+        qⁱ  = μ.ρqⁱ[i, j, k] / ρ
+        nⁱ  = μ.ρnⁱ[i, j, k] / ρ
+        qᶠ  = μ.ρqᶠ[i, j, k] / ρ
+        bᶠ  = μ.ρbᶠ[i, j, k] / ρ
+        qʷⁱ = μ.ρqʷⁱ[i, j, k] / ρ
+    end
+    return P3MicrophysicalState(qᶜˡ, nᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, qʷⁱ, zero(FT), zero(FT), zero(FT))
+end
 
 #####
 ##### Number concentration diagnostic

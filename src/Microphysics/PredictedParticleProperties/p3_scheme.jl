@@ -33,19 +33,19 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     aerosol :: AERO
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
     warm_rain_scheme :: WRS
-    # The subgrid model, selected by its type: `NoSubgridCorrelation()` (plain P3), `ClosureCloud`
-    # (cloud owned by the turbulence closure), or an external subgrid supersaturation model
-    subgrid :: SG
+    # Condensation of cloud liquid: `GridMeanCondensation()` or `SubgridCondensation(statistics)`
+    # (or, deprecated, an external subgrid supersaturation model)
+    condensation :: SG
 end
 
-# Without a subgrid model
+# With grid-mean condensation
 PredictedParticlePropertiesMicrophysics(minimum_mass_mixing_ratio, minimum_number_mixing_ratio, ice, rain, cloud,
                                         process_rates, precipitation_boundary_condition,
                                         negative_moisture_correction, aerosol, warm_rain_scheme) =
     PredictedParticlePropertiesMicrophysics(minimum_mass_mixing_ratio, minimum_number_mixing_ratio, ice, rain, cloud,
                                             process_rates, precipitation_boundary_condition,
                                             negative_moisture_correction, aerosol, warm_rain_scheme,
-                                            NoSubgridCorrelation())
+                                            GridMeanCondensation())
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -138,21 +138,25 @@ Pass `aerosol = AerosolActivation(AerosolMode())` to predict droplet number from
 aerosol activation. Set `prognostic=true` in [`AerosolActivation`](@ref) to also
 track depletion of the unactivated aerosol reservoir.
 
-# Subgrid models
+# Condensation
 
-The `subgrid` keyword selects one subgrid model by its type. The default `NoSubgridCorrelation()`
-is the grid-mean scheme.
+The `condensation` keyword selects how cloud liquid condenses and evaporates. P3 always
+condenses its own cloud liquid; a turbulence closure supplies at most statistics.
 
-`subgrid = ClosureCloud(FT)` leaves the cloud to a turbulence closure that diagnoses subgrid
-cloud (`SimplifiedHigherOrderClosure`): the closure sets the cloud liquid once per time step and
-supplies the cloud fraction through `subgrid_statisticsᶜᶜᶜ`; P3 neither condenses nor evaporates
-cloud liquid, autoconversion and accretion act on the in-cloud liquid over the cloud fraction,
-and rain evaporates in the mean subsaturation of the cell. Ice processes are unchanged.
+- `GridMeanCondensation()` (default): at ``ωˡ δqᵛ⁺ˡ``, with ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ`` the grid-mean
+  vapor excess over liquid.
+- `SubgridCondensation(statistics)`: at ``ωˡ (δqᵛ⁺ˡ + Γ)``, the rate averaged over the subgrid
+  distribution of the vapor excess that `supersaturation_statistics(statistics, ...)` supplies
+  (for example `SubgridCondensation(TurbulenceClosureStatistics())`, or `PrescribedStatistics(σ)`);
+  see [`SubgridCondensation`](@ref Breeze.Microphysics.PredictedParticleProperties.SubgridCondensation).
 
-Any other object is an external model of the subgrid supersaturation correlation Γ that is added
-to the grid-mean vapor excess `qᵛ - qᵛ⁺ˡ` in the condensation and evaporation of cloud liquid; it
-extends [`subgrid_supersaturation`](@ref Breeze.Microphysics.PredictedParticleProperties.subgrid_supersaturation)
-and its two companion functions.
+Here ``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ`` is the phase relaxation rate of the cloud droplets
+(`AtmosphereModels.phase_relaxation_rate`). Rain, ice, activation and collection keep their
+grid-mean form.
+
+Deprecated: the `subgrid` keyword (use `condensation`), and an external model of Γ in the
+`condensation` slot that extends [`subgrid_supersaturation`](@ref Breeze.Microphysics.PredictedParticleProperties.subgrid_supersaturation)
+and its two companion functions. `ClosureCloud` is retired and raises an error.
 
 # Configuring the empirical warm-phase parameters
 
@@ -226,7 +230,9 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  vapor_excess = DiagnosticVaporExcess(),
                                                  liquid_fraction = PrognosticLiquidFraction(),
                                                  warm_rain_scheme = KhairoutdinovKogan2000(),
-                                                 subgrid = NoSubgridCorrelation())
+                                                 condensation = GridMeanCondensation(),
+                                                 subgrid = nothing)
+    condensation = p3_condensation(condensation, subgrid)
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
                                     vapor_excess, liquid_fraction)
@@ -236,7 +242,7 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                               minimum_mass_mixing_ratio, minimum_number_mixing_ratio,
                               precipitation_boundary_condition,
                               negative_moisture_correction,
-                              aerosol, cloud, rain, process_rates, warm_rain_scheme, subgrid)
+                              aerosol, cloud, rain, process_rates, warm_rain_scheme, condensation)
 end
 
 # Shorthand alias

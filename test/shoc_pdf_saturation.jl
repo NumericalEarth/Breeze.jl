@@ -6,7 +6,6 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: ClosureCloud, MicrophysicalProcessRate
 using Breeze.Thermodynamics: CondensedPhase, WarmPhaseEquilibrium, MixedPhaseEquilibrium, DryExponent,
                              VaporEquivalentExponent, saturation_vapor_pressure, PlanarLiquidSurface, PlanarIceSurface,
                              liquid_latent_heat, ice_latent_heat
@@ -175,104 +174,5 @@ end
         mx = assumed_pdf(DoubleGaussianPDF(FT), mixed, thermo, HardClipping(), c, 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ, 0.6, moments, moments)
         @test mx[1] ≥ lw[1]
         @test mx[2] > lw[2]
-    end
-end
-
-#####
-##### A coupled column: SHOC with the saturation of the model owns the cloud of P3
-#####
-
-implicit_transport() = WENO(; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(Float64; cfl=0.5))
-
-function saturation_p3_column(subgrid, pdf_saturation; arch = default_arch, vapor_excess = nothing)
-    grid = RectilinearGrid(arch; size=32, z=(0, 1600), topology=(Flat, Flat, Bounded))
-    constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=290)
-    p3_kw = isnothing(vapor_excess) ? (;) : (; vapor_excess)
-    microphysics = PredictedParticlePropertiesMicrophysics(; subgrid, p3_kw...,
-                                                           negative_moisture_correction = nothing,
-                                                           precipitation_boundary_condition = ImpenetrableBoundaryCondition())
-    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics,
-                            closure=SimplifiedHigherOrderClosure(; pdf_saturation), scalar_advection=implicit_transport())
-    θ₀(z) = ifelse(z < 800, 290.0, 290.0 + 8 * (1 - exp(-(z - 800) / 100)))
-    qᵗ₀(z) = ifelse(z < 800, 10.0e-3, 4.0e-3)
-    set!(model; θ=θ₀, qᵗ=qᵗ₀, ρe=z -> 1.2 * 0.3)
-    return model
-end
-
-column(field) = Array(interior(field))[1, 1, :]
-non_precipitating_water(model) = column(model.moisture_density) .+ column(model.microphysical_fields.ρqᶜˡ)
-
-@testset "Conservation in a coupled column with ModelThermodynamicsSaturation" begin
-    for pdf_saturation in (FixedConstantsLiquidSaturation(), ModelThermodynamicsSaturation())
-        model = saturation_p3_column(ClosureCloud(), pdf_saturation)
-        μ = model.microphysical_fields
-        diagnostics = model.closure_fields.diagnostics
-        ρ = column(model.dynamics.reference_state.density)
-        ρθ = model.formulation.potential_temperature_density
-        water₀ = sum(non_precipitating_water(model) .+ column(μ.ρqʳ))
-
-        for _ in 1:5
-            time_step!(model, 60)
-        end
-
-        ql = column(diagnostics.shoc_ql)
-        @test maximum(ql) > 1e-5
-        @test all(isfinite, column(model.temperature))
-        @test sum(non_precipitating_water(model) .+ column(μ.ρqʳ)) ≈ water₀ rtol = 1e-12
-
-        condensation = Field(MicrophysicalProcessRate(model, :condensation))
-        compute!(condensation)
-        @test all(column(condensation) .== 0)
-
-        # One SHOC step: vapor and cloud liquid repartitioned at fixed ρθ and total water
-        heat = sum(column(ρθ))
-        water = sum(non_precipitating_water(model))
-        step_closure_prognostics!(model.closure_fields, model.closure, model, 60)
-        @test sum(column(ρθ)) ≈ heat rtol = 1e-13
-        @test sum(non_precipitating_water(model)) ≈ water rtol = 1e-13
-        qw = non_precipitating_water(model) ./ ρ
-        @test column(μ.ρqᶜˡ) ≈ ρ .* min.(max.(column(diagnostics.shoc_ql), 0), max.(qw, 0)) rtol = 1e-14
-    end
-
-    # With the saturation of the model, a cell that SHOC leaves without cloud is not supersaturated
-    # over liquid in the mean: SHOC and P3 agree on saturation. (With the fixed constants the
-    # vapor of a cloud-free cell may exceed the saturation of the model.)
-    model = saturation_p3_column(ClosureCloud(), ModelThermodynamicsSaturation())
-    for _ in 1:5
-        time_step!(model, 60)
-    end
-    T = column(model.temperature)
-    ρ = column(model.dynamics.reference_state.density)
-    qv = column(model.moisture_density) ./ ρ
-    qs = [Breeze.Thermodynamics.saturation_specific_humidity(T[k], ρ[k], model.thermodynamic_constants, PlanarLiquidSurface())
-          for k in eachindex(T)]
-    cloud_free = column(model.closure_fields.diagnostics.shoc_cldfrac) .== 0
-    @test all(qv[cloud_free] .≤ qs[cloud_free] .* (1 + 1e-3))
-end
-
-@testset "ClosureCloud: P3 does not condense on top of SHOC (PrognosticVaporExcess)" begin
-    @test ClosureCloud().microphysics_aligns_vapor_excess == false
-    @test ClosureCloud(; microphysics_aligns_vapor_excess = true).microphysics_aligns_vapor_excess
-
-    # After a SHOC step the cloud liquid is SHOC's. The vapor excess of P3 starts at zero, so where
-    # the cell is supersaturated over P3's saturation the alignment would condense it.
-    cloud_liquid_rate(model) = (r = Field(MicrophysicalProcessRate(model, :condensation)); compute!(r); column(r))
-    for aligns in (false, true)
-        model = saturation_p3_column(ClosureCloud(; microphysics_aligns_vapor_excess = aligns), FixedConstantsLiquidSaturation();
-                                     vapor_excess = PrognosticVaporExcess())
-        μ = model.microphysical_fields
-        ρ = column(model.dynamics.reference_state.density)
-        water₀ = sum(non_precipitating_water(model) .+ column(μ.ρqʳ))
-        for _ in 1:3
-            time_step!(model, 60)
-        end
-        @test sum(non_precipitating_water(model) .+ column(μ.ρqʳ)) ≈ water₀ rtol = 1e-12
-        rate = cloud_liquid_rate(model)
-        if aligns
-            @test maximum(abs, rate) > 0
-        else
-            @test all(rate .== 0)
-        end
     end
 end

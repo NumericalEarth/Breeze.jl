@@ -53,11 +53,11 @@ function cell_rates(p3, qᵛ, qᶜˡ, constants; T = 285.0, qʳ = 0.0, statistic
     return compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, nothing, T, 0.0, 0.0, statistics)
 end
 
-with_subgrid(Γ; options...) = P3Microphysics(Float64; subgrid = ScaledSupersaturation(Γ), options...)
+with_subgrid(Γ; options...) = P3Microphysics(Float64; condensation = ScaledSupersaturation(Γ), options...)
 
 @testset "P3 subgrid supersaturation hook: defaults" begin
     p3 = P3Microphysics(Float64)
-    @test p3.subgrid === NoSubgridCorrelation()
+    @test p3.condensation === PPP.GridMeanCondensation()
     for none in (NoSubgridCorrelation(), ClosureCloud())
         @test subgrid_supersaturation(none, nothing, 1e-2, 1.1e-2, 0.0, 285.0, 9e4, 1.1, nothing) === nothing
         @test subgrid_supersaturation_statistics(1, 1, 1, nothing, none, nothing) === nothing
@@ -68,7 +68,7 @@ with_subgrid(Γ; options...) = P3Microphysics(Float64; subgrid = ScaledSupersatu
 
     # The ten-argument constructor of the scheme without a subgrid model
     rebuilt = PredictedParticlePropertiesMicrophysics(ntuple(n -> getfield(p3, n), Val(10))...)
-    @test rebuilt.subgrid === NoSubgridCorrelation()
+    @test rebuilt.condensation === PPP.GridMeanCondensation()
     @test typeof(rebuilt) === typeof(p3)
 
     # Without a subgrid model the statistics are ignored: the rates are plain P3's, bitwise
@@ -194,7 +194,7 @@ end
     grid = RectilinearGrid(default_arch, FT; size = (2, 2, 8), x = (0, 200), y = (0, 200), z = (0, 800))
 
     function hook_model(subgrid)
-        model = AtmosphereModel(grid; microphysics = P3Microphysics(FT; subgrid))
+        model = AtmosphereModel(grid; microphysics = P3Microphysics(FT; condensation = subgrid))
         cloud(x, y, z) = ifelse(z > 400, FT(2e-4), zero(FT))
         updraft(x, y, z) = sinpi(z / 800) / 2
         set!(model; θ = 285, qᵛ = 0.005, qᶜˡ = cloud, qʳ = 1e-5, nʳ = 1e4, w = updraft,
@@ -202,7 +202,7 @@ end
         return model
     end
 
-    plain = hook_model(NoSubgridCorrelation())
+    plain = hook_model(PPP.GridMeanCondensation())
     subgrid = hook_model(ScaledSupersaturation(FT(8e-3)))
     Nz = size(grid, 3)
 
@@ -211,8 +211,8 @@ end
     column(operation) = @allowscalar Array(interior(compute!(Field(operation))))[1, 1, :]
     plain_condensation = MicrophysicalProcessRate(plain, :condensation)
     subgrid_condensation = MicrophysicalProcessRate(subgrid, :condensation)
-    @test plain_condensation.kernel_function.subgrid_fields === nothing
-    @test subgrid_condensation.kernel_function.subgrid_fields.scale === subgrid.velocities.w
+    @test plain_condensation.kernel_function.condensation_fields === nothing
+    @test subgrid_condensation.kernel_function.condensation_fields.scale === subgrid.velocities.w
 
     Sᵖ = column(plain_condensation)
     Sˢ = column(subgrid_condensation)
@@ -224,12 +224,12 @@ end
     ρ = total_density(subgrid.dynamics)
     constants = subgrid.thermodynamic_constants
     p3 = subgrid.microphysics
-    fields = subgrid_supersaturation_fields(p3.subgrid, subgrid)
+    fields = subgrid_supersaturation_fields(p3.condensation, subgrid)
     for k in (2, Nz - 1)
         rates = @allowscalar begin
             inputs = p3_grid_process_inputs(1, 1, k, grid, p3, μ, subgrid.formulation, subgrid.dynamics,
-                                            constants, ρ, subgrid.velocities, nothing, nothing)
-            statistics = subgrid_supersaturation_statistics(1, 1, k, grid, p3.subgrid, fields)
+                                            constants, ρ, subgrid.velocities)
+            statistics = subgrid_supersaturation_statistics(1, 1, k, grid, p3.condensation, fields)
             compute_p3_process_rates(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants, inputs.properties,
                                      inputs.surface_temperature, inputs.temperature_tendency,
                                      inputs.pressure_tendency, statistics)
