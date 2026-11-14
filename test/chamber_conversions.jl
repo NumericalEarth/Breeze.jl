@@ -8,24 +8,23 @@ using Test
 # Conversions used to map the ICMW Pi-chamber protocol (mixing ratio Qv, temperature T; Chen et al. 2025, case description
 # doi:10.7910/DVN/JWRBE7) onto Breeze's prognostic variables (specific humidity qᵛ, potential temperature θ; status notes 2026-11-14).
 
-# Five-point Gauss–Hermite quadrature for a standard normal variable (probabilists' nodes and weights, exact for polynomials of
-# degree ≤ 9), evaluated in extended precision. This is a local moment/asymptotic check of the conversion around the mean state;
-# it is not a bound over the full real line, where q = r/(1 + r) has a pole at r = −1 that the physical mixing ratio never approaches.
-const gauss_hermite = ((big"0.0", big"0.5333333333333333333333333333333333333333"),
-                       (big"1.3556261799742658658080683367683698143286", big"0.2220759220056126443997707275806856297604"),
-                       (big"-1.3556261799742658658080683367683698143286", big"0.2220759220056126443997707275806856297604"),
-                       (big"2.8569700138728056542106403118606126472195", big"0.0112574113277206889519629478396614033396"),
-                       (big"-2.8569700138728056542106403118606126472195", big"0.0112574113277206889519629478396614033396"))
+# Five-point Gauss–Hermite quadrature for a standard normal variable (probabilists' rule, exact for polynomials of degree ≤ 9), with
+# nodes and weights in closed form, evaluated in BigFloat: nodes 0, ±√(5 − √10), ±√(5 + √10); weights 8/15, (7 + 2√10)/60 (inner pair),
+# (7 − 2√10)/60 (outer pair), summing to 1. This is a local moment/asymptotic check of the conversion around the mean state; it is not
+# a bound over the full real line, where q = r/(1 + r) has a pole at r = −1 that the physical mixing ratio never approaches.
+const gauss_hermite = let s10 = sqrt(big"10"), inner = sqrt(5 - s10), outer = sqrt(5 + s10)
+    ((big"0", big"8" / 15), (inner, (7 + 2s10) / 60), (-inner, (7 + 2s10) / 60), (outer, (7 - 2s10) / 60), (-outer, (7 - 2s10) / 60))
+end
 normal_expectation(f) = sum(w * f(z) for (z, w) in gauss_hermite)
 
 @testset "Mixing ratio to specific humidity: σ_q = σ_r / (1 + r̄)² to second order" begin
-    # The quadrature itself: E[Z] = 0, E[Z²] = 1, E[Z⁴] = 3 for the standard normal. The tabulated nodes and weights are accurate to
-    # about 20 significant digits (gate 16497 measured 2.8e-19 and 2.5e-18 in the second and fourth moments), far below the s² ≈ 5e-14
-    # relative level the conversion test resolves
-    @test abs(normal_expectation(z -> z)) < 1e-30
-    @test normal_expectation(z -> z^2) ≈ 1 atol = 1e-17
-    @test normal_expectation(z -> z^4) ≈ 3 atol = 1e-17
-    @test normal_expectation(z -> one(z)) ≈ 1 atol = 1e-17
+    # The rule reproduces the standard-normal moments through degree 9 exactly; the tolerance is a few BigFloat eps of the largest moment
+    ε = 8 * eps(big"15.0")
+    @test normal_expectation(z -> one(z)) ≈ 1 atol = ε
+    @test abs(normal_expectation(z -> z)) < ε
+    @test normal_expectation(z -> z^2) ≈ 1 atol = ε
+    @test normal_expectation(z -> z^4) ≈ 3 atol = ε
+    @test normal_expectation(z -> z^6) ≈ 15 atol = ε
 
     r̄ = big"0.0104126"     # ICMW case description §1.1, Q̄v₀
     σ_r = big"0.4775e-3"    # ICMW σ_Qv
