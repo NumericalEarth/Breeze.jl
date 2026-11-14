@@ -537,3 +537,27 @@ end
 
 compute_closure_tendencies!(Gⁿ, closure_fields::Tuple, closures::Tuple, model) =
     throw(ArgumentError("The numbers of closures and closure fields must match."))
+
+#####
+##### Closure work around the vertically implicit solves of a stage
+#####
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Hooks a closure may extend to act on the state around the vertically implicit solves of a
+Runge–Kutta stage of length `Δt` (the stage's `α Δt`), so that what it adds is formed from the
+state the solves produce:
+
+* `closure_before_implicit_solve!(closure_fields, closure, model, name)` — just before the solve of
+  the prognostic `name` (after its explicit stage update);
+* `closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt)` — after the solves of
+  momentum and every tracer, before the solve of the thermodynamic variable;
+* `closure_after_implicit_solves!(closure_fields, closure, model, Δt)` — after every solve.
+
+All are no-ops by default.
+"""
+closure_after_implicit_solves!(closure_fields, closure, model, Δt) = nothing
+closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt) = nothing
+closure_before_implicit_solve!(closure_fields, closure, model, name) = nothing
+

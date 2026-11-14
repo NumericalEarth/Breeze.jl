@@ -39,7 +39,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!
 using Oceananigans.BuoyancyFormulations: ∂z_b
-using Oceananigans.Fields: CenterField, ZFaceField, ZeroField
+using Oceananigans.Fields: CenterField, XFaceField, YFaceField, ZFaceField, ZeroField
 using Oceananigans.Grids: AbstractUnderlyingGrid, Bounded, Center, Face, inactive_cell
 
 using Oceananigans.Operators:

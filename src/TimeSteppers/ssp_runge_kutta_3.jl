@@ -15,7 +15,9 @@ using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, ma
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_scheme, implicit_sedimentation_step!,
-                                thermodynamic_density_name
+                                thermodynamic_density_name,
+                                closure_before_implicit_solve!, closure_before_thermodynamic_solve!,
+                                closure_after_implicit_solves!
 using Oceananigans.Utils: launch!, time_difference_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -161,6 +163,7 @@ function ssp_rk3_substep!(model, Δt, α)
         # The thermodynamic variable's solve waits for the tracers' solves (see below).
         name === thermodynamic_name && continue
 
+        closure_before_implicit_solve!(model.closure_fields, model.closure, model, name)
         implicit_stage_step!(model, name, u, α * Δt)
     end
 
@@ -169,7 +172,9 @@ function ssp_rk3_substep!(model, Δt, α)
     # variable, so the moved content takes the same transport and diffusion as the rest of the
     # field (see `implicit_sedimentation_step!`).
     isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, α * Δt, model.velocities)
+    closure_before_thermodynamic_solve!(model.closure_fields, model.closure, model, α * Δt)
     implicit_stage_step!(model, thermodynamic_name, prognostic[thermodynamic_name], α * Δt)
+    closure_after_implicit_solves!(model.closure_fields, model.closure, model, α * Δt)
 
     return nothing
 end

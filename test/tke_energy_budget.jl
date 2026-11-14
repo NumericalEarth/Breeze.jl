@@ -3,8 +3,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 ##### The energy budget of TKEBasedTurbulenceClosure with the cloud buoyancy flux: the TKE equation
 ##### receives exactly the energy the closure's fluxes take from the mean state, and the energy it
-##### dissipates heats the air. Checked step by step on a moist column with P3, ClosureCloud and
-##### the subgrid distribution, with and without rain, from conversions computed here independently
+##### dissipates heats the air. Checked step by step on a moist column with P3 (its own
+##### condensation; no closure-owned cloud) and the subgrid distribution, with and without rain and surface fluxes, from conversions computed here independently
 ##### of the closure (the derivatives of the buoyancy by central differences of the model's
 ##### temperature and equation of state).
 #####
@@ -17,10 +17,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: ClosureCloud
 using Breeze.Thermodynamics: MoistureMassFractions, temperature_from_potential_temperature,
                              mixture_gas_constant, mixture_heat_capacity
-using Breeze.TurbulenceClosures: add_dissipative_heating!
 
 using Oceananigans
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
@@ -32,16 +30,21 @@ budget_column(f) = Array(interior(f))[1, 1, :]
 budget_column(f::ZeroField, Nz) = zeros(Nz)
 budget_column(f, Nz) = budget_column(f)
 
-function moist_tke_column(; rain = false, Nz = 40, H = 2400)
+function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2400)
     grid = RectilinearGrid(CPU(); size=Nz, z=(0, H), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)
-    microphysics = PredictedParticlePropertiesMicrophysics(; subgrid = ClosureCloud(),
+    microphysics = PredictedParticlePropertiesMicrophysics(;
                                                            negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
     closure = TKEBasedTurbulenceClosure(; static_stability = DryStaticStability(), minimum_tke = 4e-4,
-                                        subgrid_cloud_formulation = SubgridCloudFormulation())
-    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics, closure)
+                                        subgrid_cloud_formulation = SubgridCloudFormulation(; cloud = nothing))
+    boundary_conditions = surface_fluxes ?
+        (ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 8e-3)),
+         ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 5.2e-5)),
+         ρu = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 0.08)),
+         ρv = FieldBoundaryConditions(bottom = FluxBoundaryCondition(-1.17 * 0.02))) : NamedTuple()
+    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics, closure, boundary_conditions)
 
     # BOMEX-like: a mixed layer, a conditionally unstable cloud layer moistened to saturation, an inversion
     θ₀(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4 + (z - 1480) * 5.8 / 520
@@ -105,41 +108,92 @@ function closure_energy_conversions(model)
     ωᴮ = -min.(0, B) ./ max.(e, floor)
     ε = (-budget_column(cf.Lᵉ) .- ωᴮ) .* e
 
-    G = (; ρθ = CenterField(grid))
-    add_dissipative_heating!(G, cf.subgrid_cloud, cf, model.closure, model)
-    ∂H∂θ = map(1:Nz) do k
-        q = MoistureMassFractions(qᵛ[k], qˡ[k], qⁱ[k])
-        T(θ) = temperature_from_potential_temperature(θ, p[k], pˢᵗ, constants, q)
-        mixture_heat_capacity(q, constants) * (T(θ[k] + 1e-4) - T(θ[k] - 1e-4)) / 2e-4
-    end
-
     return (mean_kinetic_energy_loss = sum(ρᶠ .* Δzᶠ .* Pᶠ),
             shear_production = sum(ρ .* Δzᶜ .* budget_column(cl.P)),
             buoyancy_conversion = sum(ρᶠ .* Δzᶠ .* Bᶠ),
-            buoyancy_production = sum(ρ .* Δzᶜ .* (max.(B, 0) .- ωᴮ .* e)),
+            buoyancy_production = sum(ρ .* Δzᶜ .* B),
             dissipation = sum(ρ .* Δzᶜ .* ε),
-            heating = sum(Δzᶜ .* budget_column(G.ρθ) .* ∂H∂θ))
+            β = β, stored_β = hcat(budget_column(cl.βᶿ), budget_column(cl.βᵛ), budget_column(cl.βˡ), budget_column(cl.βⁱ)))
 end
 
-@testset "TKE energy budget with the cloud buoyancy flux (rain = $rain)" for rain in (false, true)
+# The rates at the state of an update: the stage conversions equal the energy the fluxes take
+@testset "TKE conversions of the applied fluxes (rain = $rain)" for rain in (false, true)
     model = moist_tke_column(; rain)
     Oceananigans.TimeSteppers.update_state!(model)
-    for n in 1:15
+    for n in 1:5
         time_step!(model, 10)
+        Oceananigans.TimeSteppers.update_state!(model)
         c = closure_energy_conversions(model)
         scale = c.mean_kinetic_energy_loss + abs(c.buoyancy_conversion) + c.dissipation
-        @info "step $n" c.mean_kinetic_energy_loss c.shear_production c.buoyancy_conversion c.buoyancy_production c.dissipation c.heating
-        # Shear production is the mean kinetic energy the momentum fluxes remove (round-off)
         @test c.shear_production ≈ c.mean_kinetic_energy_loss rtol=1e-12
-        # Buoyancy production is the dynamic enthalpy the scalar fluxes remove, to the accuracy
-        # of the central differences of the buoyancy here (≈1e-9)
+        # to the accuracy of the central differences of the buoyancy here (≈1e-9)
         @test c.buoyancy_production ≈ c.buoyancy_conversion rtol=1e-7 atol=1e-7 * scale
-        # The dissipated energy heats the air
-        @test c.heating ≈ c.dissipation rtol=1e-8
-        total = (c.shear_production - c.mean_kinetic_energy_loss) +
-                (c.buoyancy_production - c.buoyancy_conversion) +
-                (c.heating - c.dissipation)
-        @test abs(total) < 1e-7 * scale
+        @test c.stored_β ≈ c.β rtol=1e-6
     end
-    @test maximum(budget_column(model.closure_fields.subgrid_cloud.cloud.qˡ)) > 0
+end
+
+# The last Runge–Kutta stage of every step: across the vertically implicit solves the mean state
+# loses exactly the energy the TKE gains, and the dissipation the TKE loses heats the air
+function stage_energy_budget(model, Δt)
+    grid = model.grid
+    Nz = size(grid, 3)
+    cf = model.closure_fields
+    cl = cf.subgrid_cloud.cloud
+    pre = cf.subgrid_cloud.presolve
+    μ = model.microphysical_fields
+    ρ = budget_column(model.dynamics.reference_state.density)
+    zᶜ = znodes(grid, Center()); zᶠ = znodes(grid, Face())
+    Δzᶜ = diff(zᶠ); Δzᶠ = diff(zᶜ)
+
+    # mean kinetic energy across the momentum solves
+    KE(ρu, ρv) = sum(Δzᶜ .* (ρu .^ 2 .+ ρv .^ 2) ./ (2ρ))
+    ΔKE = KE(budget_column(model.momentum.ρu), budget_column(model.momentum.ρv)) -
+          KE(budget_column(cl.ρu⁻), budget_column(cl.ρv⁻))
+
+    # dynamic enthalpy, linearized with the stage's derivatives (trapezoid rule for Z = ∫ β dz)
+    β = hcat(budget_column(cl.stage_βᶿ), budget_column(cl.stage_βᵛ), budget_column(cl.stage_βˡ), budget_column(cl.stage_βⁱ))
+    Z = zeros(Nz, 4)
+    for s in 1:4
+        Z[1, s] = β[1, s] * (zᶜ[1] - zᶠ[1])
+        for k in 2:Nz
+            Z[k, s] = Z[k-1, s] + (β[k, s] + β[k-1, s]) / 2 * Δzᶠ[k-1]
+        end
+    end
+    ρφ(fields) = hcat(budget_column(fields.ρθ), budget_column(fields.ρqᵛ),
+                      budget_column(fields.ρqᶜˡ) .+ budget_column(fields.ρqʳ) .+ budget_column(fields.ρqʷⁱ),
+                      budget_column(fields.ρqⁱ))
+    after = ρφ(merge(Oceananigans.prognostic_fields(model), (; ρθ = model.formulation.potential_temperature_density)))
+    after[:, 1] .+= budget_column(cl.shortfall_ρθ) # the solves' change, without the cooling after them
+    before = ρφ(pre)
+    Δhᵈ = -sum(Δzᶜ .* sum(Z .* (after .- before), dims=2))
+
+    # the TKE: explicit stage sources were added before its solve; the solve and the correction after
+    Δρe = sum(Δzᶜ .* (budget_column(model.tracers.ρe) .- budget_column(pre.ρe)))
+    given_explicitly = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.given))
+    converted = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ) .+ budget_column(cl.stage_surface)))
+    dissipated = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.ε))
+    shortfall = sum(Δzᶜ .* budget_column(cl.shortfall)) # paid by the internal energy instead of the TKE
+    return (; ΔKE, Δhᵈ, Δρe, given_explicitly, converted, dissipated, shortfall,
+            shear = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Pᵖ)), buoyancy = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Bᵖ)))
+end
+
+@testset "TKE energy budget across the implicit solves (rain = $rain, surface fluxes = $surface_fluxes)" for rain in (false, true), surface_fluxes in (false, true)
+    model = moist_tke_column(; rain, surface_fluxes)
+    Δt = 10
+    Δtₛ = model.timestepper.α³ * Δt # the last stage
+    for n in 1:15
+        time_step!(model, Δt)
+        b = stage_energy_budget(model, Δtₛ)
+        @info "step $n" b.ΔKE b.shear b.Δhᵈ b.buoyancy b.Δρe b.converted b.dissipated
+        scale = abs(b.ΔKE) + abs(b.Δhᵈ) + abs(b.dissipated)
+        # mean kinetic energy lost by the momentum solves = shear production (with backward Euler's own dissipation)
+        @test -b.ΔKE ≈ b.shear rtol=1e-8 atol=1e-12 * scale # a difference of sums of ρ|u|²: round-off ≈1e-10
+        # dynamic enthalpy lost by the scalar solves = buoyancy production (Σ Z Δ(ρθ) is a
+        # difference of sums of O(Z ρθ) terms, so round-off here is ≈1e-8 relative)
+        # With rain, the solve of ρqʳ also sediments it (implicit advection by its fall speed); the
+        # loading change of that sedimentation (≈1e-6 of the conversion) is microphysics, not mixing
+        @test -b.Δhᵈ ≈ b.buoyancy rtol=(rain ? 1e-5 : 1e-7) atol=1e-11 * scale
+        # the TKE receives what the solves converted, less what it dissipates (which heats the air)
+        @test b.Δρe + b.given_explicitly ≈ b.converted - b.dissipated + b.shortfall rtol=1e-9 atol=1e-11 * scale
+    end
 end

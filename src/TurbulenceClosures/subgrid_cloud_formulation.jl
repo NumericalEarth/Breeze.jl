@@ -343,9 +343,15 @@ that the fluxes cause. The subgrid distribution does not enter them. The positiv
 the stage tendency; the negative part enters the implicit linear coefficient, with `e` floored only
 at a tiny value so that the implicit sink removes exactly the energy the mean state gains wherever
 `e > 0`. With `dissipative_heating = true` (the default) the dissipation `ε` that the TKE equation
-removes heats the air, `ρ ĉᵖ Π ∂t θˡⁱ += ρ ε`, which closes the energy budget. The conversions are
-formed from the stage state; the vertically implicit solve applies the fluxes of the solved state,
-an O(Δt) difference.
+removes heats the air, `ρ ĉᵖ Π ∂t θˡⁱ += ρ ε`. The surface stress work and the surface buoyancy
+flux are converted within the bottom half-cell (no external TKE surface flux is needed). Under the
+vertically implicit time discretization the stage tendency carries the conversions of the stage
+state; after the implicit solves of each SSP Runge–Kutta stage the closure corrects the TKE to the
+conversions of the solved state (including the dissipation of backward Euler itself) and heats the
+air by what the implicit sinks removed from the solved `e`, so the energy budget of the stage closes
+to round-off. Where `e ≈ 0` cannot pay what the solved fluxes converted (the diffusivities are
+floored at `minimum_tke`), the shortfall is taken from the internal energy instead of driving `e`
+negative. The acoustic Runge–Kutta time stepper does not call these hooks.
 
 `stability = true` is a shortcut: [`TKEBasedTurbulenceClosure`](@ref) then replaces its
 `static_stability` by `SubgridCloudStaticStability(LiquidFluxFraction(static_stability))`. The
@@ -642,30 +648,49 @@ variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, the part `Bˡ =
 flux carried by the liquid flux, and, with the cloud buoyancy flux, the shear and buoyancy
 production `P` and `B` of the TKE equation from the applied fluxes).
 """
-struct SubgridCloudFields{BF, CO, M, C, S}
+struct SubgridCloudFields{BF, CO, M, C, S, P}
     buoyancy_flux :: BF
     cloud_ownership :: CO
     moments :: M
     cloud :: C
     solver_state :: S
+    presolve :: P # every closure scalar just before its implicit solve (the stage energy budget), or `nothing`
 end
 
-SubgridCloudFields(bf, co, m, c) = SubgridCloudFields(bf, co, m, c, nothing)
+SubgridCloudFields(bf, co, m, c) = SubgridCloudFields(bf, co, m, c, nothing, nothing)
+SubgridCloudFields(bf, co, m, c, s) = SubgridCloudFields(bf, co, m, c, s, nothing)
 
 Adapt.adapt_structure(to, f::SubgridCloudFields) =
-    SubgridCloudFields(f.buoyancy_flux, f.cloud_ownership, adapt(to, f.moments), adapt(to, f.cloud), adapt(to, f.solver_state))
+    SubgridCloudFields(f.buoyancy_flux, f.cloud_ownership, adapt(to, f.moments), adapt(to, f.cloud), adapt(to, f.solver_state),
+                       adapt(to, f.presolve))
 
-build_subgrid_cloud_fields(grid, ::SubgridCloudFormulation{Nothing}) = nothing
+build_subgrid_cloud_fields(grid, ::SubgridCloudFormulation{Nothing}, tracer_names) = nothing
 
-function build_subgrid_cloud_fields(grid, f::SubgridCloudFormulation)
+function build_subgrid_cloud_fields(grid, f::SubgridCloudFormulation, tracer_names)
     moments = (τ = ZFaceField(grid), θˡ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡ′qᵗ′ = ZFaceField(grid),
                w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid), w′³ = ZFaceField(grid))
     cloud = (w′² = CenterField(grid), C = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
-             w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), B = CenterField(grid), P = CenterField(grid),
-             Bˡ = CenterField(grid),
+             w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
+             applied_flux_conversion_fields(grid, f.buoyancy_flux, tracer_names)...,
              gθ = CenterField(grid), gA = CenterField(grid))
-    return SubgridCloudFields(f.buoyancy_flux, f.cloud, moments, cloud, build_solver_state(grid, f.buoyancy_flux))
+    return SubgridCloudFields(f.buoyancy_flux, f.cloud, moments, cloud, build_solver_state(grid, f.buoyancy_flux),
+                              build_presolve_fields(grid, f.buoyancy_flux, tracer_names))
 end
+
+# The production of the TKE equation from the applied fluxes and what the stage hooks need
+# (applied_flux_energetics.jl): the stage conversions (with their surface parts), the buoyancy sink
+# rate, the stored derivatives of the buoyancy and ĉᵖ Π, momentum before its solve, and the
+# conversions of the solved state and the dissipation of the last stage (diagnostics)
+applied_flux_conversion_fields(grid, buoyancy_flux, tracer_names) = (; B = CenterField(grid))
+
+function applied_flux_conversion_fields(grid, ::CloudBuoyancyFlux, tracer_names)
+    centers = NamedTuple(name => CenterField(grid) for name in (:B, :P, :Bˢ, :Pˢ, :ωᴮ, :βᶿ, :βᵛ, :βˡ, :βⁱ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_βᶿ, :stage_βᵛ, :stage_βˡ, :stage_βⁱ, :stage_surface, :shortfall, :shortfall_ρθ))
+    return merge(centers, (ρu⁻ = XFaceField(grid), ρv⁻ = YFaceField(grid)))
+end
+
+# Every closure scalar just before its solve (diagnostic: the stage's energy budget)
+build_presolve_fields(grid, buoyancy_flux, tracer_names) = nothing
+build_presolve_fields(grid, ::CloudBuoyancyFlux, tracer_names) = NamedTuple(name => CenterField(grid) for name in tracer_names)
 
 # The last pass (N², r) and the bracket of the secant and the bisection, at the faces
 build_solver_state(grid, buoyancy_flux) = nothing
