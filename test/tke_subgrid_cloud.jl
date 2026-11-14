@@ -133,10 +133,10 @@ end
         @test column(m.w′θˡ′)[k] ≈ -Kᶜ[k] * (θ[k] - θ[k-1]) / Δz rtol=1e-12
         @test column(m.w′qᵗ′)[k] ≈ -Kᶜ[k] * (qᵗ[k] - qᵗ[k-1]) / Δz rtol=1e-12
     end
-    # The limited skewness
+    # The skewness at the centers, limited with the center w′²
     w² = column(cf.subgrid_cloud.cloud.w′²)
-    w³ = column(m.w′³)
-    @test all(abs.(w³[2:Nz]) .≤ d.skewness.maximum_skewness .* ((w²[1:Nz-1] .+ w²[2:Nz]) ./ 2) .^ 1.5 .* (1 + 1e-12))
+    w³ = column(cf.subgrid_cloud.cloud.w′³)
+    @test all(abs.(w³) .≤ d.skewness.maximum_skewness .* w² .^ 1.5 .* (1 + 1e-12))
     @test any(!=(0), w³)
 end
 
@@ -173,7 +173,7 @@ end
             end
         end
         @test n > 0
-        @test all(isfinite, column(m.w′³))
+        @test all(isfinite, column(cf.subgrid_cloud.cloud.w′³))
         @test all(isfinite, column(cf.subgrid_cloud.cloud.aᶜ))
     end
     @test DissipationTimeScale(Float32).ℂᵠ isa Float32
@@ -193,15 +193,15 @@ end
         qᵗ = (column(model.moisture_density) .+ column(model.microphysical_fields.ρqᶜˡ)) ./ ρ
         p = column(model.dynamics.reference_state.pressure)
         zc = znodes(grid, Center()); zf = znodes(grid, Face())
-        moments(k) = (column(m.w′³)[k], column(m.θˡ′²)[k], column(m.w′θˡ′)[k], column(m.θˡ′qᵗ′)[k],
-                      column(m.w′qᵗ′)[k], column(m.qᵗ′²)[k])
-        floors = (-99999999.99, 0.0, -99999999.99, -99999999.99, -99999999.99, 0.0)
+        moments(k) = (column(m.θˡ′²)[k], column(m.w′θˡ′)[k], column(m.θˡ′qᵗ′)[k], column(m.w′qᵗ′)[k], column(m.qᵗ′²)[k])
+        floors = (0.0, -99999999.99, -99999999.99, -99999999.99, 0.0)
         for k in 1:size(grid, 3)
-            # The moments co-located at the center, the third moment limited with the center w′²
+            # The second moments interpolated to the center, with the third moment diagnosed there
             mᶜ = map((u, l, f) -> max(f, linear_interp(zf[k+1], zf[k], u, l, zc[k])), moments(k+1), moments(k), floors)
             w′²ᶜ = column(cl.w′²)[k]
-            mᶜ = (limit_third_moment(d.skewness, d.clipping, w′²ᶜ, mᶜ[1]), Base.tail(mᶜ)...)
-            @test abs(mᶜ[1]) ≤ d.skewness.maximum_skewness * w′²ᶜ^1.5 * (1 + 1e-12)
+            w′³ᶜ = column(cl.w′³)[k]
+            @test abs(w′³ᶜ) ≤ d.skewness.maximum_skewness * w′²ᶜ^1.5 * (1 + 1e-12)
+            mᶜ = (w′³ᶜ, mᶜ...)
             C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, d.saturation, shoc_saturation_thermodynamics(model), d.clipping, d.constants,
                                                    zf[k+1], zf[k], zc[k], p[k], θ[k], 0.0, qᵗ[k], w′²ᶜ, mᶜ, mᶜ)
             @test matches(column(cl.aᶜ)[k], C)
@@ -455,4 +455,63 @@ end
             @test a * (w₁^3 + 3w₁ * c) + (1 - a) * (w₂^3 + 3w₂ * c) ≈ Sk rtol=1e-10 atol=1e-12
         end
     end
+end
+
+#####
+##### The ratios the distribution supplies are formed where it lives: the condensate flux fraction aʷ at the
+##### centers (averaged to the faces), the skewness from w′³ and w′² at the centers. With aʷ formed at the faces
+##### from the condensate flux averaged there over the raw face flux of the saturation excess, the diffusivity
+##### and the 2Δz of the gradients pass to aʷ, and the diffusivity of a cloudy layer settles in a 2Δz
+##### checkerboard (Kᶜ alternating by an order of magnitude); formed at the centers they cancel.
+#####
+
+# A BOMEX-like column with surface fluxes, its cloud layer moistened to saturation
+function saturated_layer_column()
+    grid = RectilinearGrid(default_arch; size=40, z=(0, 2400), topology=(Flat, Flat, Bounded))
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)
+    microphysics = PredictedParticlePropertiesMicrophysics(; negative_moisture_correction = nothing,
+                                                           precipitation_boundary_condition = ImpenetrableBoundaryCondition())
+    closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4, subgrid_distribution = DoubleGaussian(),
+                                        static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()))
+    boundary_conditions = (ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 8e-3)),
+                           ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 5.2e-5)),
+                           ρu = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 0.08)),
+                           ρv = FieldBoundaryConditions(bottom = FluxBoundaryCondition(-1.17 * 0.02)))
+    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants,
+                            microphysics, closure, boundary_conditions)
+    θ₀(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4 + (z - 1480) * 5.8 / 520
+    qᵗ₀(z) = 1e-3 * (z < 520 ? 17.0 - z * 0.7 / 520 : z < 1480 ? 16.3 - (z - 520) * 5.6 / 960 : max(4.2, 10.7 - (z - 1480) * 6.5 / 520))
+    set!(model; θ=θ₀, qᵗ = z -> qᵗ₀(z) + (500 < z < 1100 ? 2.5e-3 : 0.0),
+         u = z -> z < 700 ? -8.75 : -8.75 + (z - 700) * 1.8e-3, ρe = z -> 0.6 * exp(-z / 500))
+    return model
+end
+
+# The 2Δz content of K over the turbulent faces: Σ|δ²K| / (4 Σ|K|), 1 for a pure 2Δz mode
+checkerboard(K) = sum(abs, K[1:end-2] .- 2 .* K[2:end-1] .+ K[3:end]) / (4 * sum(abs, K[2:end-1]))
+
+@testset "A seeded 2Δz perturbation leaves no checkerboard of Kᶜ in a cloudy column" begin
+    model = saturated_layer_column()
+    for _ in 1:50
+        time_step!(model, 2)
+    end
+    @test maximum(column(model.closure_fields.subgrid_cloud.cloud.aᶜ)) > 0
+
+    # 0.01 K of θ in the 2Δz mode
+    Nz = size(model.grid, 3)
+    ρ = column(model.dynamics.reference_state.density)
+    ρθ = column(model.formulation.potential_temperature_density)
+    set!(model.formulation.potential_temperature_density, reshape(ρθ .+ 0.01 .* ρ .* [(-1.0)^k for k in 1:Nz], 1, 1, Nz))
+    update_state!(model)
+
+    for _ in 1:20
+        time_step!(model, 2)
+        Kᶜ = column(model.closure_fields.Kᶜ)[2:Nz]
+        turbulent = Kᶜ[Kᶜ .> 1]
+        @test length(turbulent) > 20
+        @test checkerboard(turbulent) < 0.2 # 0.75 with aʷ formed at the faces
+    end
+    @test all(isfinite, column(model.closure_fields.Kᶜ))
+    aʷ = column(model.closure_fields.subgrid_cloud.cloud.aʷ)
+    @test all(a -> 0 ≤ a ≤ 1, aʷ)
 end

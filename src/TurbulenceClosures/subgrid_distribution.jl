@@ -21,7 +21,7 @@
 ##### shared, the coefficients are this closure's own. The time stepping is the closure's: the
 ##### moments are diagnosed once per stage, after the diffusivities, and there is no split solve.
 #####
-##### The fields of part 1 (the moments at faces, w′² and w′³, the cloud at centers) are stored,
+##### The fields of part 1 (the second moments at faces, w′², w′³ and the cloud at centers) are stored,
 ##### so that a microphysics correlation may later read the spread of the saturation deficit or
 ##### the skewness through `subgrid_statisticsᶜᶜᶜ` without changing this structure.
 #####
@@ -540,8 +540,8 @@ end
 $(TYPEDEF)
 
 The fields of the [`DoubleGaussian`](@ref) subgrid distribution in the closure fields of
-[`TKEBasedTurbulenceClosure`](@ref): the moments at faces (`τ`, `θˡ′²`, `qᵗ′²`, `θˡ′qᵗ′`,
-`w′θˡ′`, `w′qᵗ′`, `w′³`) and the cloud at centers (`w′²`, cloud fraction `aᶜ`, liquid `qˡ`, its
+[`TKEBasedTurbulenceClosure`](@ref): the second moments at faces (`τ`, `θˡ′²`, `qᵗ′²`, `θˡ′qᵗ′`,
+`w′θˡ′`, `w′qᵗ′`) and the cloud at centers (`w′²`, `w′³`, cloud fraction `aᶜ`, liquid `qˡ`, its
 variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, the part `Bˡ = (g / θ) A_c w′qˡ′` of its buoyancy
 flux carried by the condensate flux, and the shear and buoyancy production `P` and `B` of the TKE
 equation from the applied fluxes).
@@ -573,8 +573,8 @@ end
 function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names)
     energetics = AppliedFluxEnergetics(solver)
     moments = (τ = ZFaceField(grid), θˡ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡ′qᵗ′ = ZFaceField(grid),
-               w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid), w′³ = ZFaceField(grid))
-    cloud = (w′² = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
+               w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid))
+    cloud = (w′² = CenterField(grid), w′³ = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
              vapor_excess_component_fields(grid)...,
              applied_flux_conversion_fields(grid, energetics, tracer_names)...,
@@ -699,6 +699,42 @@ end
     return θ², q², θˡ′qᵗ′ * sqrt(fθ * fq)
 end
 
+# w′³ at the center k, where the PDF forms the skewness w′³ / (w′²)^{3/2}. The second moments of the faces
+# k and k+1 are differenced across the cell (compact), w′² and e across the neighbouring centers, and the
+# coefficients are the averages of the two faces. `lower` and `upper` are (τ, ℓ, N², θˡ′², w′θˡ′) at the
+# faces k and k+1; `w′θˡ′ᶜ` is the flux interpolated to the center; `c³` carries the gravitational acceleration.
+@inline function center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡ′ᶜ, lower, upper)
+    FT = eltype(grid)
+    Nz = size(grid, 3)
+    c = d.constants
+    cp = d.clipping
+    eᵐⁱⁿ = closure.minimum_tke
+    ccc = (Center(), Center(), Center())
+    τˡ, ℓˡ, N²ˡ, θˡ′²ˡ, w′θˡ′ˡ = lower
+    τᵘ, ℓᵘ, N²ᵘ, θˡ′²ᵘ, w′θˡ′ᵘ = upper
+    @inbounds begin
+        kᵘ = min(k + 1, Nz)
+        kˡ = max(k - 1, 1)
+        ℓ = (ℓˡ + ℓᵘ) / 2
+        N² = (N²ˡ + N²ᵘ) / 2
+        u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
+        τ³ = third_moment_time_scale(d.time_scale, (τˡ + τᵘ) / 2, ℓ, u, N²)
+        τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
+        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * c.mintke
+        w′² = cl.w′²[i, j, k]
+        Δzʷ = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
+        thedz = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
+        w′³ = subgrid_third_moment(d.third_moment, d, c³, τ³, N², clip_below(cp, w′², w′²ᵐⁱⁿ, c.mintke), θ[i, j, k],
+                                   thedz, 1 / Δzᶜᶜᶜ(i, j, k, grid),
+                                   θˡ′²ᵘ - θˡ′²ˡ,
+                                   w′θˡ′ᵘ - w′θˡ′ˡ,
+                                   cl.w′²[i, j, kᵘ] - cl.w′²[i, j, kˡ],
+                                   max(e[i, j, kᵘ], eᵐⁱⁿ) - max(e[i, j, kˡ], eᵐⁱⁿ),
+                                   w′θˡ′ᶜ)
+    end
+    return limit_third_moment(d.skewness, cp, w′², w′³)
+end
+
 @inline function subgrid_distribution_column!(m, cl, i, j, grid, d, closure, closure_fields, θ, qᵗ, e, velocities, p, thermodynamics)
     w = velocities.w
     Nz = size(grid, 3)
@@ -759,41 +795,18 @@ end
         m.θˡ′qᵗ′[i, j, Nz+1] = 0
         m.w′θˡ′[i, j, Nz+1] = 0
         m.w′qᵗ′[i, j, Nz+1] = 0
-        m.w′³[i, j, 1] = 0
-        m.w′³[i, j, Nz+1] = 0
 
         # The vertical velocity variance at the centers
         for k in 1:Nz
             cl.w′²[i, j, k] = vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ))
         end
 
-        # The third moment at the interior faces
-        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * c.mintke
-        for k in 2:Nz
-            w′²ᶠ = clip_below(cp, (cl.w′²[i, j, k] + cl.w′²[i, j, k-1]) / 2, w′²ᵐⁱⁿ, c.mintke)
-            θᶠ = (θ[i, j, k] + θ[i, j, k-1]) / 2
-            thedz = 1 / Δzᶜᶜᶠ(i, j, k, grid)
-            thedz2 = 1 / (Δzᶜᶜᶜ(i, j, k-1, grid) + Δzᶜᶜᶜ(i, j, k, grid))
-            τ³ = third_moment_time_scale(d.time_scale, m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k],
-                                         ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e), closure_fields.N²[i, j, k])
-            τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
-            w′³ = subgrid_third_moment(d.third_moment, d, c³, τ³, closure_fields.N²[i, j, k], w′²ᶠ, θᶠ, thedz, thedz2,
-                                       m.θˡ′²[i, j, k+1] - m.θˡ′²[i, j, k-1],
-                                       m.w′θˡ′[i, j, k+1] - m.w′θˡ′[i, j, k-1],
-                                       cl.w′²[i, j, k] - cl.w′²[i, j, k-1],
-                                       max(e[i, j, k], eᵐⁱⁿ) - max(e[i, j, k-1], eᵐⁱⁿ),
-                                       m.w′θˡ′[i, j, k])
-            m.w′³[i, j, k] = limit_third_moment(d.skewness, cp, w′²ᶠ, w′³)
-        end
-
-        # The assumed PDF at the centers, from moments co-located there: the face moments are
-        # interpolated to the center, and the third moment is limited with the center w′², where the
-        # PDF evaluates the skewness (the face limit alone lets the center skewness grow without
-        # bound where w′² differs between the center and the faces)
-        interface_moments(k) = (m.w′³[i, j, k], m.θˡ′²[i, j, k], m.w′θˡ′[i, j, k],
-                                m.θˡ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
+        # The assumed PDF at the centers, from moments co-located there: the second moments are
+        # interpolated from the faces to the center, and w′³ is diagnosed at the center, so that the
+        # skewness w′³ / (w′²)^{3/2} the PDF forms is a ratio of quantities at one location
+        interface_moments(k) = (m.θˡ′²[i, j, k], m.w′θˡ′[i, j, k], m.θˡ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
         largeneg = convert(FT, -99999999.99)
-        floors = (largeneg, zero(FT), largeneg, largeneg, largeneg, zero(FT))
+        floors = (zero(FT), largeneg, largeneg, largeneg, zero(FT))
         for k in 1:Nz
             zᶜ = znode(i, j, k, grid, ccc...)
             zˡ = znode(i, j, k, grid, ccf...)
@@ -804,8 +817,11 @@ end
             mˡ = interface_moments(k)
             mᵘ = interface_moments(k+1)
             mᶜ = map((yᵘ, yˡ, floor) -> hard_floor(linear_interp(zᵘ, zˡ, yᵘ, yˡ, zᶜ), floor), mᵘ, mˡ, floors)
-            w′³ᶜ = limit_third_moment(d.skewness, cp, w′²ᶜ, mᶜ[1])
-            mᶜ = (w′³ᶜ, Base.tail(mᶜ)...)
+            lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡ′²[i, j, k], m.w′θˡ′[i, j, k])
+            upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡ′²[i, j, k+1], m.w′θˡ′[i, j, k+1])
+            w′³ᶜ = center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, mᶜ[2], lower, upper)
+            cl.w′³[i, j, k] = w′³ᶜ
+            mᶜ = (w′³ᶜ, mᶜ...)
             C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, d.saturation, thermodynamics, cp, c, zᵘ, zˡ, zᶜ,
                                                    p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
             store_vapor_excess_components!(cl, i, j, k,
@@ -888,26 +904,40 @@ end
 solve_static_stability!(static_stability, buoyancy_flux, args...) = nothing
 solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args...) = cloud_buoyancy_stability!(buoyancy_flux, args...)
 
-# N²ᵇ = (g / θ)(∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces, then the mixing length and the
-# diffusivities again from it
+# N²ᵇ = (g / θ)(∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces (`condensate_flux_stabilityᶜᶜᶠ`), then the
+# mixing length and the diffusivities again from it
 @inline relax_stability(N², N²ᵇ, ::Nothing) = N²ᵇ
 @inline relax_stability(N², N²ᵇ, ω) = (1 - ω) * N² + ω * N²ᵇ
 
-@kernel function _cloud_buoyancy_stability!(N², grid, θ, qᵗ, gθ, gA, Bˡ, Kᶜ, ω)
-    i, j, k = @index(Global, NTuple)
-    FT = eltype(grid)
+# The stratification of the mixed variables N²ᶜ = Σ b̄_χ δz χ at the interior face k and the latent-corrected
+# N²ᵇ = N²ᶜ - Bˡ / Kᶜ, with Bˡ / Kᶜ in the form in which Kᶜ cancels: Bˡ = (b_qˡ - b_qᵛ) w′qˡ′ and
+# w′qˡ′ = aʷ w′s′, w′s′ = -Kᶜ ∂z s̄, so -Bˡ / Kᶜ = (b_qˡ - b_qᵛ) aʷ ∂z s̄, with (b_qˡ - b_qᵛ) aʷ formed at the
+# centers from the distribution's collocated condensate flux and flux of the saturation excess
+# (`center_condensate_flux_fraction`) and averaged to the face. Also returns ∂z s̄ and the face A_c.
+@inline function condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics, sat, c)
+    km = max(k - 1, 1)
     @inbounds begin
-        interior_face = k > 1
-        km = max(k - 1, 1)
         Δz = Δzᶜᶜᶠ(i, j, k, grid)
         ∂zθ = (θ[i, j, k] - θ[i, j, km]) / Δz
         ∂zq = (qᵗ[i, j, k] - qᵗ[i, j, km]) / Δz
-        gθᶠ = (gθ[i, j, k] + gθ[i, j, km]) / 2
-        gAᶠ = (gA[i, j, k] + gA[i, j, km]) / 2
-        Bᶠ = (Bˡ[i, j, k] + Bˡ[i, j, km]) / 2
-        Kᶜᵢ = Kᶜ[i, j, k]
-        resolved = Kᶜᵢ > sqrt(floatmin(FT))
-        N²ᵇ = gθᶠ * ∂zθ + gAᶠ * ∂zq - ifelse(resolved, Bᶠ / ifelse(resolved, Kᶜᵢ, one(FT)), zero(FT))
+        gθᶠ = (cl.gθ[i, j, k] + cl.gθ[i, j, km]) / 2
+        gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, km]) / 2
+        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(sat, thermodynamics, c, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
+        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(sat, thermodynamics, c, θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
+        bˡᵛaʷ⁺ = (cl.b_qˡ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, m, cl, c_q⁺, c_θ⁺)
+        bˡᵛaʷ⁻ = (cl.b_qˡ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, m, cl, c_q⁻, c_θ⁻)
+    end
+    N²ᶜ = gθᶠ * ∂zθ + gAᶠ * ∂zq
+    ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
+    N²ᵇ = N²ᶜ + (bˡᵛaʷ⁺ + bˡᵛaʷ⁻) / 2 * ∂zs
+    return N²ᶜ, N²ᵇ, ∂zs, gθᶠ * (A⁺ + A⁻) / 2
+end
+
+@kernel function _cloud_buoyancy_stability!(N², grid, m, cl, θ, qᵗ, p, thermodynamics, sat, c, ω)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        interior_face = k > 1
+        _, N²ᵇ, _, _ = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics, sat, c)
         N²[i, j, k] = ifelse(interior_face, relax_stability(N²[i, j, k], N²ᵇ, ω), N²[i, j, k])
     end
 end
@@ -931,8 +961,7 @@ function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_f
     cl = fields.cloud
     d = closure.subgrid_distribution
     launch!(arch, grid, parameters, _solve_cloud_buoyancy_stability!, closure_fields.N², fields.solver_state, solver,
-            P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, d.saturation, d.constants,
-            cl.gθ, cl.gA, cl.Bˡ, closure_fields.Kᶜ)
+            P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, d.saturation, d.constants, fields.moments, cl)
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
     launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
     return nothing
@@ -978,28 +1007,13 @@ end
     return x′, L′, U′
 end
 
-@kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, sat, c,
-                                                  gθ, gA, Bˡ, Kᶜ)
+@kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, sat, c, m, cl)
     i, j, k = @index(Global, NTuple)
     FT = eltype(grid)
     @inbounds begin
         interior_face = k > 1
-        km = max(k - 1, 1)
-        Δz = Δzᶜᶜᶠ(i, j, k, grid)
-        ∂zθ = (θ[i, j, k] - θ[i, j, km]) / Δz
-        ∂zq = (qᵗ[i, j, k] - qᵗ[i, j, km]) / Δz
-        gθᶠ = (gθ[i, j, k] + gθ[i, j, km]) / 2
-        gAᶠ = (gA[i, j, k] + gA[i, j, km]) / 2
-        Bᶠ = (Bˡ[i, j, k] + Bˡ[i, j, km]) / 2
-        Kᶜᵢ = Kᶜ[i, j, k]
-        resolved = Kᶜᵢ > sqrt(floatmin(FT))
-        N²ᶜ = gθᶠ * ∂zθ + gAᶠ * ∂zq
-        G = N²ᶜ - ifelse(resolved, Bᶠ / ifelse(resolved, Kᶜᵢ, one(FT)), zero(FT))
-
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(sat, thermodynamics, c, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(sat, thermodynamics, c, θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
-        ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
-        N²ˢ = N²ᶜ + gθᶠ * (A⁺ + A⁻) / 2 * ∂zs
+        N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics, sat, c)
+        N²ˢ = N²ᶜ + gA_c * ∂zs
         L = min(N²ᶜ, N²ˢ)
         U = max(N²ᶜ, N²ˢ)
 
@@ -1040,7 +1054,9 @@ function cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, 
     arch = grid.architecture
     s = distribution_state(model, nothing)
     cl = fields.cloud
-    launch!(arch, grid, parameters, _cloud_buoyancy_stability!, closure_fields.N², grid, s.θ, s.qᵗ, cl.gθ, cl.gA, cl.Bˡ, closure_fields.Kᶜ, ω)
+    d = closure.subgrid_distribution
+    launch!(arch, grid, parameters, _cloud_buoyancy_stability!, closure_fields.N², grid, fields.moments, cl, s.θ, s.qᵗ, s.p,
+            s.thermodynamics, d.saturation, d.constants, ω)
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
     launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
     return nothing

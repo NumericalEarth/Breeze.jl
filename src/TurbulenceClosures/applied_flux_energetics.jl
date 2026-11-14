@@ -489,6 +489,22 @@ end
 @inline saturated_response_shareᶜᶜᶠ(::Val{false}, tₑ, i, j, k, grid, s) =
     condensing_fraction(tₑ * (cell_phase_relaxation_rate(i, j, k, grid, s) + cell_phase_relaxation_rate(i, j, k-1, grid, s)) / 2)
 
+# aʷ = w′qˡ′ / w′s′ at the center k: the condensate flux of the distribution there over the flux of the
+# saturation excess s = c_q qᵗ - c_θ θˡ formed from the face moments interpolated to the center, which
+# are those the distribution at the center was built from. A ratio of collocated quantities (the
+# distribution's own (qˡ₁ - qˡ₂) / (s₁ - s₂)), so the diffusivity cancels; kept in [0, 1].
+@inline function center_condensate_flux_fraction(i, j, k, m, cl, c_q, c_θ)
+    FT = typeof(c_q)
+    @inbounds begin
+        w′qᵗ′ = (m.w′qᵗ′[i, j, k] + m.w′qᵗ′[i, j, k+1]) / 2
+        w′θˡ′ = (m.w′θˡ′[i, j, k] + m.w′θˡ′[i, j, k+1]) / 2
+        w′qˡ′ = cl.w′qˡ′[i, j, k]
+    end
+    w′s′ = c_q * w′qᵗ′ - c_θ * w′θˡ′
+    resolved = abs(w′s′) > sqrt(floatmin(FT))
+    return clamp(ifelse(resolved, w′qˡ′ / ifelse(resolved, w′s′, one(FT)), zero(FT)), zero(FT), one(FT))
+end
+
 @kernel function _latent_corrected_stability!(N², cl, m, grid, closure, closure_fields, velocities, s, qʷ, e, thermodynamics, sat, c, ω)
     i, j, k = @index(Global, NTuple)
     FT = eltype(grid)
@@ -514,11 +530,10 @@ end
         N²ᵇ = applied_stratificationᶜᶜᶠ(i, j, kₛ, grid, s, cl)
         N²ˢ = N²ᵇ + bˡᵛ * (∂z_s - ∂z_qᶜ)
 
-        # aʷ = w′qˡ′ / w′s′ at the face; the ratio of interpolated fluxes is kept in [0, 1]
-        w′qˡ′ = (cl.w′qˡ′[i, j, kₛ] + cl.w′qˡ′[i, j, kₛ-1]) / 2
-        w′s′ = c_q * m.w′qᵗ′[i, j, kₛ] - c_θ * m.w′θˡ′[i, j, kₛ]
-        resolved = abs(w′s′) > sqrt(floatmin(FT))
-        aʷ = clamp(ifelse(resolved, w′qˡ′ / ifelse(resolved, w′s′, one(FT)), zero(FT)), zero(FT), one(FT))
+        # aʷ = w′qˡ′ / w′s′ formed at the centers above and below, where numerator and denominator come
+        # from the same moments, and averaged to the face
+        aʷ = (center_condensate_flux_fraction(i, j, kₛ, m, cl, c_q⁺, c_θ⁺) +
+              center_condensate_flux_fraction(i, j, kₛ-1, m, cl, c_q⁻, c_θ⁻)) / 2
 
         # η over the eddy time tₑ = e / ε = ℓ / (𝕊ᴰ √e) at the face
         ℓ = closure_fields.ℓᵐ[i, j, kₛ]

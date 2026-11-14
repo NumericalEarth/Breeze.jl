@@ -179,24 +179,11 @@ end
     θˡ′², qᵗ′², θˡ′qᵗ′ = bound_flux_correlation(d.ℂʳ, input.w′²ᶠ, θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
 
     @inbounds begin
-        # The third moment at the face, with the stored moments of the faces above and below
-        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * c.mintke
-        w′²ᶠ = clip_below(cp, (cl.w′²[i, j, k] + cl.w′²[i, j, k-1]) / 2, w′²ᵐⁱⁿ, c.mintke)
-        θᶠ = (θ[i, j, k] + θ[i, j, k-1]) / 2
-        thedz = 1 / Δzᶜᶜᶠ(i, j, k, grid)
-        thedz2 = 1 / (Δzᶜᶜᶜ(i, j, k-1, grid) + Δzᶜᶜᶜ(i, j, k, grid))
-        τ³ = third_moment_time_scale(d.time_scale, τ, ℓ, u, N²)
-        τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
-        w′³ = subgrid_third_moment(d.third_moment, d, c, τ³, N², w′²ᶠ, θᶠ, thedz, thedz2,
-                                   m.θˡ′²[i, j, k+1] - m.θˡ′²[i, j, k-1],
-                                   m.w′θˡ′[i, j, k+1] - m.w′θˡ′[i, j, k-1],
-                                   cl.w′²[i, j, k] - cl.w′²[i, j, k-1],
-                                   max(e[i, j, k], eᵐⁱⁿ) - max(e[i, j, k-1], eᵐⁱⁿ),
-                                   w′θˡ′)
-        w′³ = limit_third_moment(d.skewness, cp, w′²ᶠ, w′³)
-
-        trial = (w′³, θˡ′², w′θˡ′, θˡ′qᵗ′, w′qᵗ′, qᵗ′²)
-        stored(n) = (m.w′³[i, j, n], m.θˡ′²[i, j, n], m.w′θˡ′[i, j, n], m.θˡ′qᵗ′[i, j, n], m.w′qᵗ′[i, j, n], m.qᵗ′²[i, j, n])
+        # The second moments of the trial at face k and the stored ones of the faces below and above;
+        # w′³ of each center is the stored one (it is diagnosed at the centers from the moments of the
+        # distribution's own evaluation and held fixed across the trials of the face)
+        trial = (θˡ′², w′θˡ′, θˡ′qᵗ′, w′qᵗ′, qᵗ′²)
+        stored(n) = (m.θˡ′²[i, j, n], m.w′θˡ′[i, j, n], m.θˡ′qᵗ′[i, j, n], m.w′qᵗ′[i, j, n], m.qᵗ′²[i, j, n])
 
         # The assumed PDF at the center below (face k is its upper face) and above (its lower face)
         Bˡ⁻, C⁻ = center_liquid_buoyancy(i, j, k-1, grid, d, cp, c, cl, w, θ, qᵗ, p, thermodynamics, stored(k-1), trial)
@@ -218,8 +205,9 @@ end
         zᵘ = znode(i, j, k+1, grid, ccf...)
         wᶜ = (w[i, j, k] + w[i, j, k+1]) / 2
         θᵏ = θ[i, j, k]
+        w′³ = cl.w′³[i, j, k]
         C, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, d.saturation, thermodynamics, cp, c, zᵘ, zˡ, zᶜ,
-                                          p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], moments_l, moments_u)
+                                          p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], (w′³, moments_l...), (w′³, moments_u...))
         _, A_c = buoyancy_flux_coefficients(d.saturation, thermodynamics, c, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
     end
     return thermodynamics.constants.gravitational_acceleration / θᵏ * A_c * w′qˡ′, C
