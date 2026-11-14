@@ -378,10 +378,16 @@ end
         ρe⁺′ = ifelse(ρe⁺ < 0, min(ρe[i, j, k], zero(ρe⁺)), ρe⁺)
         shortfall = ρe⁺′ - ρe⁺ # ≥ 0: energy the TKE did not pay
         ρe[i, j, k] = ρe⁺′
-        ρθ[i, j, k] -= shortfall / cl.ĉᵖΠ[i, j, k]
         cl.shortfall[i, j, k] = shortfall
         cl.shortfall_ρθ[i, j, k] = shortfall / cl.ĉᵖΠ[i, j, k]
     end
+end
+
+# The cooling by the shortfall, after all the conversions of the solved state are formed (they read
+# θ at the neighbouring cells, so it cannot be applied in the same kernel)
+@kernel function _cool_by_shortfall!(ρθ, cl)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρθ[i, j, k] -= cl.shortfall_ρθ[i, j, k]
 end
 
 function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
@@ -396,6 +402,7 @@ function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClos
     v = SpecificValue(model.momentum.ρv, ρ)
     launch!(grid.architecture, grid, :xyz, _correct_tke_to_solved_conversions!, model.tracers[TKE_NAME], s.ρθ, cl, grid, s,
             closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, Δt)
+    launch!(grid.architecture, grid, :xyz, _cool_by_shortfall!, s.ρθ, cl)
     return nothing
 end
 
@@ -558,5 +565,61 @@ function draw_latent_conversion!(Gⁿ, fields::SubgridCloudFields{<:AppliedFluxE
     grid = model.grid
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     launch!(grid.architecture, grid, :xyz, _draw_latent_conversion!, Gⁿ[name], grid, fields.cloud, total_density(model.dynamics))
+    return nothing
+end
+
+#####
+##### Without a distribution: the condensate flux implied by the saturated fraction of the microphysics
+#####
+##### With `static_stability = SaturationWeightedStaticStability(fraction)` and no subgrid
+##### distribution, the saturated fraction a of the fraction model (for example
+##### `MicrophysicsSaturatedFraction()`, the subgrid model of the microphysics) implies the condensate
+##### flux w′qᶜ′ = a w′s′, w′s′ = -Kᶜ ∂z s̄, where the closure applies -Kᶜ ∂z qᶜ. Its buoyancy
+##### conversion beyond that of the applied fluxes is the latent part
+#####
+#####   Bᴸ = (b̄ˡ - b̄ᵛ) (a w′s′ + Kᶜ ∂z qᶜ) = Kᶜ a (N²ᵇ - N²ˢ),
+#####
+##### the same as with the distribution's aᴺ: it enters the buoyancy production, its energy is drawn
+##### from the internal energy, and the energy budget of the stage covers it. The static stability
+##### the fraction gives (for Ri and ℓ) and the buoyancy production then use one saturated fraction.
+#####
+
+@kernel function _microphysics_latent_correction!(cl, grid, closure, s, qʷ, thermodynamics, sat, c, tracers, buoyancy, closure_fields)
+    i, j, k = @index(Global, NTuple)
+    FT = eltype(grid)
+    closure_ij = getclosure(i, j, closure)
+    kₛ = max(k, 2)
+    @inbounds begin
+        ρ⁺ = s.ρ[i, j, kₛ]
+        ρ⁻ = s.ρ[i, j, kₛ-1]
+        θ⁺ = s.ρθ[i, j, kₛ] / ρ⁺
+        θ⁻ = s.ρθ[i, j, kₛ-1] / ρ⁻
+        qʷ⁺ = qʷ[i, j, kₛ]
+        qʷ⁻ = qʷ[i, j, kₛ-1]
+        qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, kₛ] / ρ⁺
+        qᶜ⁻ = qʷ⁻ - s.ρqᵛᵉ[i, j, kₛ-1] / ρ⁻
+        Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
+        c_q⁺, c_θ⁺, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁺, qʷ⁺, s.p[i, j, kₛ])
+        c_q⁻, c_θ⁻, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        ∂z_s = ((c_q⁺ + c_q⁻) / 2 * (qʷ⁺ - qʷ⁻) - (c_θ⁺ + c_θ⁻) / 2 * (θ⁺ - θ⁻)) / Δz
+        ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
+        bˡᵛ = (cl.b_qˡ[i, j, kₛ] + cl.b_qˡ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
+        a = saturated_stability_weightᶜᶜᶠ(i, j, kₛ, grid, closure_ij.static_stability.fraction, buoyancy, tracers, closure_fields)
+        ΔN²ᴸ = -a * bˡᵛ * (∂z_s - ∂z_qᶜ)
+        interior = k > 1
+        cl.aʷ[i, j, k] = ifelse(interior, a, zero(FT))
+        cl.aᴺ[i, j, k] = ifelse(interior, a, zero(FT))
+        cl.ΔN²ᴸ[i, j, k] = ifelse(interior, ΔN²ᴸ, zero(FT))
+    end
+end
+
+function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergetics, Nothing}, closure_fields, closure, model, tracers, parameters)
+    compute_buoyancy_derivatives!(fields, model)
+    grid = model.grid
+    d = distribution_state(model, nothing)
+    buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
+    launch!(grid.architecture, grid, parameters, _microphysics_latent_correction!, fields.cloud, grid, closure,
+            applied_flux_state(model), d.qᵗ, d.thermodynamics, ModelThermodynamicsSaturation(), nothing,
+            tracers, buoyancy, closure_fields)
     return nothing
 end

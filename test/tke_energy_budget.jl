@@ -27,18 +27,29 @@ using Oceananigans.Grids: znodes
 using Test
 
 budget_column(f) = Array(interior(f))[1, 1, :]
+
+# Without a distribution: a saturated fraction from outside the closure (as a microphysics subgrid
+# model supplies it), which implies a condensate flux and its latent conversion
+struct HalfSaturatedFraction end
+@inline Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ::HalfSaturatedFraction, buoyancy, tracers, closure_fields) =
+    one(eltype(grid)) / 2
+
+# The two paths: the DoubleGaussian distribution, and none with the microphysics-like fraction
+closure_paths = (distribution = (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                 subgrid_distribution = DoubleGaussian()),
+                 no_distribution = (static_stability = SaturationWeightedStaticStability(HalfSaturatedFraction()),
+                                    subgrid_distribution = nothing))
 budget_column(f::ZeroField, Nz) = zeros(Nz)
 budget_column(f, Nz) = budget_column(f)
 
-function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2400)
+function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2400, path = :distribution)
     grid = RectilinearGrid(CPU(); size=Nz, z=(0, H), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)
     microphysics = PredictedParticlePropertiesMicrophysics(;
                                                            negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
-    closure = TKEBasedTurbulenceClosure(; static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()), minimum_tke = 4e-4,
-                                        subgrid_distribution = DoubleGaussian())
+    closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4, closure_paths[path]...)
     boundary_conditions = surface_fluxes ?
         (ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 8e-3)),
          ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 5.2e-5)),
@@ -50,7 +61,7 @@ function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2
     θ₀(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4 + (z - 1480) * 5.8 / 520
     qᵗ₀(z) = 1e-3 * (z < 520 ? 17.0 - z * 0.7 / 520 : z < 1480 ? 16.3 - (z - 520) * 5.6 / 960 : max(4.2, 10.7 - (z - 1480) * 6.5 / 520))
     q₀(z) = qᵗ₀(z) + (500 < z < 1100 ? 2.5e-3 : 0.0)
-    set!(model; θ=θ₀, qᵗ=q₀, u = z -> z < 700 ? -8.75 : -8.75 + (z - 700) * 1.8e-3, ρe = z -> 0.6 * exp(-z / 500))
+        set!(model; θ=θ₀, qᵗ=q₀, u = z -> z < 700 ? -8.75 : -8.75 + (z - 700) * 1.8e-3, ρe = z -> 0.6 * exp(-z / 500))
     if rain
         set!(model.microphysical_fields.ρqʳ, z -> 300 < z < 1200 ? 2.2e-4 : 0.0)
         set!(model.microphysical_fields.ρnʳ, z -> 300 < z < 1200 ? 2.2e4 : 0.0)
@@ -119,8 +130,8 @@ function closure_energy_conversions(model)
 end
 
 # The rates at the state of an update: the stage conversions equal the energy the fluxes take
-@testset "TKE conversions of the applied fluxes (rain = $rain)" for rain in (false, true)
-    model = moist_tke_column(; rain)
+@testset "TKE conversions of the applied fluxes (rain = $rain, $path)" for rain in (false, true), path in keys(closure_paths)
+    model = moist_tke_column(; rain, path)
     Oceananigans.TimeSteppers.update_state!(model)
     for n in 1:5
         time_step!(model, 10)
@@ -181,8 +192,8 @@ function stage_energy_budget(model, Δt)
             shear = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Pᵖ)), buoyancy = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Bᵖ)))
 end
 
-@testset "TKE energy budget across the implicit solves (rain = $rain, surface fluxes = $surface_fluxes)" for rain in (false, true), surface_fluxes in (false, true)
-    model = moist_tke_column(; rain, surface_fluxes)
+@testset "TKE energy budget across the implicit solves (rain = $rain, surface fluxes = $surface_fluxes, $path)" for rain in (false, true), surface_fluxes in (false, true), path in keys(closure_paths)
+    model = moist_tke_column(; rain, surface_fluxes, path)
     Δt = 10
     Δtₛ = model.timestepper.α³ * Δt # the last stage
     for n in 1:15

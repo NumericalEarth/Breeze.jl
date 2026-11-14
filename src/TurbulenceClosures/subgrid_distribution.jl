@@ -559,15 +559,24 @@ Adapt.adapt_structure(to, f::SubgridCloudFields) =
     SubgridCloudFields(f.buoyancy_flux, adapt(to, f.moments), adapt(to, f.cloud), adapt(to, f.solver_state),
                        adapt(to, f.presolve))
 
-build_subgrid_cloud_fields(grid, ::Nothing, solver, tracer_names) = nothing
+# Without a distribution: the plain closure, or, with a saturated fraction from the microphysics
+# (or any fraction other than the distribution's), the energetics of the applied fluxes with the
+# latent conversion of the condensate flux that the fraction implies
+build_subgrid_cloud_fields(grid, ::Nothing, solver, static_stability, tracer_names) = nothing
 
-function build_subgrid_cloud_fields(grid, distribution, solver, tracer_names)
+function build_subgrid_cloud_fields(grid, ::Nothing, solver, ::SaturationWeightedStaticStability, tracer_names)
+    energetics = AppliedFluxEnergetics(solver)
+    cloud = applied_flux_conversion_fields(grid, energetics, tracer_names)
+    return SubgridCloudFields(energetics, nothing, cloud, nothing, build_presolve_fields(grid, energetics, tracer_names))
+end
+
+function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names)
     energetics = AppliedFluxEnergetics(solver)
     moments = (τ = ZFaceField(grid), θˡ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡ′qᵗ′ = ZFaceField(grid),
                w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid), w′³ = ZFaceField(grid))
     cloud = (w′² = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
-             components = vapor_excess_component_fields(grid),
+             vapor_excess_component_fields(grid)...,
              applied_flux_conversion_fields(grid, energetics, tracer_names)...,
              gθ = CenterField(grid), gA = CenterField(grid))
     return SubgridCloudFields(energetics, moments, cloud, build_solver_state(grid, energetics),
@@ -799,7 +808,7 @@ end
             mᶜ = (w′³ᶜ, Base.tail(mᶜ)...)
             C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, d.saturation, thermodynamics, cp, c, zᵘ, zˡ, zᶜ,
                                                    p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
-            store_vapor_excess_components!(cl.components, i, j, k,
+            store_vapor_excess_components!(cl, i, j, k,
                                            component_vapor_excess(d.assumed_pdf, thermodynamics, cp, zᵘ, zˡ, zᶜ,
                                                                   p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ))
             cl.aᶜ[i, j, k] = C
@@ -1094,12 +1103,12 @@ end
 
 # The double Gaussian at the centers as the distribution of the vapor excess over liquid: the
 # weight `a` of the updraft component, and each component's mean `μ₁`, `μ₂` and spread `σ₁`, `σ₂`
-vapor_excess_component_fields(grid) = (a = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
+vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
                                        σ₁ = CenterField(grid), σ₂ = CenterField(grid))
 
 @inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂))
     @inbounds begin
-        components.a[i, j, k] = a
+        components.a₁[i, j, k] = a
         components.μ₁[i, j, k] = μ₁
         components.μ₂[i, j, k] = μ₂
         components.σ₁[i, j, k] = σ₁
@@ -1110,7 +1119,7 @@ end
 
 @inline function stored_vapor_excess_components(i, j, k, components)
     @inbounds begin
-        a = components.a[i, j, k]
+        a = components.a₁[i, j, k]
         return (; a = (a, 1 - a), μ = (components.μ₁[i, j, k], components.μ₂[i, j, k]),
                   σ = (components.σ₁[i, j, k], components.σ₂[i, j, k]))
     end
@@ -1126,5 +1135,8 @@ end
     return (; μ = zero(FT), σ = zero(FT), skewness = zero(FT), f⁺ = zero(FT))
 end
 
+@inline closure_vapor_excess_statistics(i, j, k, grid, fields::SubgridCloudFields{<:Any, Nothing}) =
+    closure_vapor_excess_statistics(i, j, k, grid, nothing)
+
 @inline closure_vapor_excess_statistics(i, j, k, grid, fields::SubgridCloudFields) =
-    stored_vapor_excess_components(i, j, k, fields.cloud.components)
+    stored_vapor_excess_components(i, j, k, fields.cloud)

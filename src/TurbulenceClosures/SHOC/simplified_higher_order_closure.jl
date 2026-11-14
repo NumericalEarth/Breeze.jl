@@ -386,9 +386,9 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     interface_diagnostics = NamedTuple{INTERFACE_DIAGNOSTICS}(map(name -> ZFaceField(grid), INTERFACE_DIAGNOSTICS))
     # The double Gaussian as the distribution of the vapor excess over liquid, for the microphysics
     # (`TurbulenceClosureStatistics`): weight of the updraft component, component means and spreads
-    vapor_excess_components = (a = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
+    vapor_excess_components = (a₁ = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
                                σ₁ = CenterField(grid), σ₂ = CenterField(grid))
-    diagnostics = merge(level_diagnostics, interface_diagnostics, (; pblh = surface_field(grid), vapor_excess_components))
+    diagnostics = merge(level_diagnostics, interface_diagnostics, (; pblh = surface_field(grid)), vapor_excess_components)
 
     # The tridiagonal factorization, and the fields of the components that need their own
     scratch = merge((du = CenterField(grid), dl = CenterField(grid), d = CenterField(grid)),
@@ -683,7 +683,7 @@ Oceananigans.restore_prognostic_state!(fields::SHOCFields, ::Nothing) = fields
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     state, host, d = fields.state, fields.host, fields.diagnostics
-    v = d.vapor_excess_components
+    v = d
     @inbounds begin
         moments(k) = (d.w3[i, j, k], d.thl_sec[i, j, k], d.wthl_sec[i, j, k],
                       d.qwthl_sec[i, j, k], d.wqw_sec[i, j, k], d.qw_sec[i, j, k])
@@ -691,7 +691,7 @@ Oceananigans.restore_prognostic_state!(fields::SHOCFields, ::Nothing) = fields
                                                    host.zi_grid[i, j, k+1], host.zi_grid[i, j, k], host.zt_grid[i, j, k],
                                                    host.pres[i, j, k], state.thetal[i, j, k], host.w_field[i, j, k],
                                                    state.qw[i, j, k], d.w_sec[i, j, k], moments(k), moments(k+1))
-        v.a[i, j, k] = a
+        v.a₁[i, j, k] = a
         v.μ₁[i, j, k] = μ₁
         v.μ₂[i, j, k] = μ₂
         v.σ₁[i, j, k] = σ₁
@@ -701,9 +701,9 @@ end
 
 @inline function AtmosphereModels.supersaturation_statistics(::AtmosphereModels.TurbulenceClosureStatistics, i, j, k, grid,
                                                              ::FlavorOfSHOC, fields::SHOCFields, model_fields)
-    v = fields.diagnostics.vapor_excess_components
+    v = fields.diagnostics
     @inbounds begin
-        a = v.a[i, j, k]
+        a = v.a₁[i, j, k]
         return (; a = (a, 1 - a), μ = (v.μ₁[i, j, k], v.μ₂[i, j, k]), σ = (v.σ₁[i, j, k], v.σ₂[i, j, k]))
     end
 end

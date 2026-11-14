@@ -657,7 +657,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
     implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Lᵉ : ZeroField() for name in tracer_names)
 
-    subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_distribution(closure), closure_solver(closure), tracer_names)
+    subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_distribution(closure), closure_solver(closure), closure_static_stability(closure), tracer_names)
 
     return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients, subgrid_cloud)
 end
@@ -667,8 +667,8 @@ subgrid_distribution(closure::TKEBasedTurbulenceClosure) = closure.subgrid_distr
 subgrid_distribution(closure::TKEClosureArray) = first(closure).subgrid_distribution
 closure_solver(closure::TKEBasedTurbulenceClosure) = closure.solver
 closure_solver(closure::TKEClosureArray) = first(closure).solver
-
-build_subgrid_cloud_fields(grid, ::Nothing, tracer_names) = nothing
+closure_static_stability(closure::TKEBasedTurbulenceClosure) = closure.static_stability
+closure_static_stability(closure::TKEClosureArray) = first(closure).static_stability
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
 @inline Oceananigans.TurbulenceClosures.diffusivity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
