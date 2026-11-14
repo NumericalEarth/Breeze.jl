@@ -205,7 +205,7 @@ function start_pressure_ratio(model, perturbed, ε)
         parent(U⁰[name]) .*= 1 + ε
     end
 
-    initialize_stage_perturbations!(substepper, model, U⁰)
+    initialize_stage_perturbations!(substepper, model, U⁰, 0)
     p′ = Array(interior(substepper.linearization_pressure_coefficient)) .*
          Array(interior(substepper.density_potential_temperature_perturbation))
 
@@ -327,13 +327,13 @@ using Breeze.TerrainFollowingDiscretization: materialize_terrain!
 
     Gρθ = timestepper.Gⁿ.ρθ
     parent(Gρθ) .= 1
-    initialize_stage_perturbations!(substepper, model, U⁰)
+    initialize_stage_perturbations!(substepper, model, U⁰, 0)
 
     ϖ = substepper.density_potential_temperature_perturbation
     content = maximum(abs, Array(interior(ϖ)))
     @test content > 1
 
-    remove_moisture_content!(substepper, model, U⁰, 0, 1)
+    remove_moisture_content!(substepper, model, U⁰, 1)
     @test maximum(abs, Array(interior(ϖ))) < 1e-12 * content
     @test all(G -> isapprox(G, 1; rtol=1e-12), Array(interior(Gρθ)))
 end
