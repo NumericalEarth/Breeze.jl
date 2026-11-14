@@ -391,13 +391,17 @@ function complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
     # always be skipped.
     skip_tendencies = skip_pre_microphysics_tendencies(model.microphysics, Δt, callbacks)
     update_state!(model, callbacks; compute_tendencies = !skip_tendencies)
-    # These tendencies are consumed by stage 1 of the next step, after
-    # `freeze_linearization_state!` has reseeded the live field.
-    cache_transport_velocity!(model)
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
+
+    # After the step's last tendency build, which is the one inside the microphysics update for a
+    # scheme that refreshes the state itself (`refreshes_state_after_update`): the transport density
+    # tendency is the divergence of the mass flux the moisture tendencies were built with, total
+    # density included. These tendencies are consumed by stage 1 of the next step, after
+    # `freeze_linearization_state!` has reseeded the live field.
+    cache_transport_velocity!(model)
 
     # Advect particles once per step, over the full Δt, with the velocity of the state
     # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,

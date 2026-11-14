@@ -10,6 +10,8 @@ using Test
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, TwoMomentCloudMicrophysics
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
+using Breeze.Thermodynamics: TetensFormula
 
 const NSPIN = 6
 const NRESTART = 4
@@ -46,10 +48,10 @@ function anelastic_model(FT; microphysics=nothing, closure=nothing, optics=nothi
 end
 
 function compressible_model(FT; time_discretization=ExplicitTimeStepping(), microphysics=nothing, closure=nothing,
-                            timestepper=nothing, timestepper_kwargs=NamedTuple())
+                            timestepper=nothing, timestepper_kwargs=NamedTuple(), model_kwargs...)
     grid = test_grid(FT)
     dynamics = CompressibleDynamics(time_discretization; reference_potential_temperature=300)
-    model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper, timestepper_kwargs)
+    model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper, timestepper_kwargs, model_kwargs...)
     set!(model; ρ=model.dynamics.reference_state.density, θ=θᵢ, qᵗ=0.015, u=uᵢ)
     return model
 end
@@ -157,6 +159,15 @@ end
 
         @testset "non-equilibrium microphysics, two species" begin
             test_bitwise_restart(() -> compressible_model(FT; microphysics=OneMomentCloudMicrophysics()))
+        end
+
+        # The scheme rebuilds the tendencies in its own update at the end of the step, and the
+        # checkpointed transport density tendency has to be the one paired with them.
+        @testset "split-explicit, Kessler microphysics" begin
+            thermodynamic_constants = ThermodynamicConstants(FT; saturation_vapor_pressure=TetensFormula(FT))
+            test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
+                                                          microphysics=DCMIP2016KesslerMicrophysics(FT),
+                                                          thermodynamic_constants))
         end
 
         @testset "prognostic TKE closure" begin

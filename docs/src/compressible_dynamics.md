@@ -537,6 +537,9 @@ This deliberately replaces west/south open-face updates, matching east/north.
 
 At active `NormalFlowBoundaryCondition` sides, the outermost ``ρ'`` and ``(ρθ)'`` cells relax
 toward prescribed scalar values each substep, controlled by `open_boundary_relaxation`.
+With moisture, the loop's ``(ρθ)'`` also holds the moisture's part of the pressure, which the end
+of the stage takes off every cell. The target of the relaxation holds the same content, evaluated
+after each substep, so that the boundary cell relaxes toward the prescribed ``ρθ`` itself.
 
 ### Recovery
 
