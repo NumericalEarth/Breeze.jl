@@ -1,6 +1,7 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans.Utils: time_difference_seconds
+using Oceananigans: TendencyCallsite
+using Oceananigans.Utils: time_difference_in_seconds
 
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
@@ -366,15 +367,11 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Finish an outer step of an `AcousticTimeStepper` after its last stage: land the clock on
-`tⁿ⁺¹`, step the closure prognostics, rebuild the tendencies stage 1 of the next step uses,
-apply the once-per-step microphysics update, and advect particles.
-"""
+# Finish an outer step of an `AcousticTimeStepper` after its last stage: land the clock on
+# `tⁿ⁺¹`, step the closure prognostics, rebuild the tendencies stage 1 of the next step uses,
+# apply the once-per-step microphysics update, and advect particles.
 function complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
-    corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
+    corrected_Δt = time_difference_in_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)

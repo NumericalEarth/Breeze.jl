@@ -553,7 +553,7 @@ variation), so the sponge does not break zonal symmetry and remains uniform
 over terrain-following grids. That is also what makes the damping rate
 ``γ(z) = \\text{rate} × \\text{ramp}(z)`` a 1D profile over z-faces:
 `UpperSponge(; ...)` is a lightweight skeleton with `damping_profile = nothing`,
-and [`materialize_sponge`](@ref) evaluates `ramp` once per face at
+and `materialize_sponge` evaluates `ramp` once per face at
 `AcousticSubstepper` construction and stores the result. The substep kernels
 then read `γ` with a single load instead of re-evaluating the shape twice per
 face per acoustic substep.
