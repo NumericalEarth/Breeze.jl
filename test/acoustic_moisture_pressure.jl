@@ -205,7 +205,7 @@ function start_pressure_ratio(model, perturbed, ε)
         parent(U⁰[name]) .*= 1 + ε
     end
 
-    initialize_stage_perturbations!(substepper, model, U⁰)
+    initialize_stage_perturbations!(substepper, model, U⁰, 0)
     p′ = Array(interior(substepper.linearization_pressure_coefficient)) .*
          Array(interior(substepper.density_potential_temperature_perturbation))
 
@@ -273,4 +273,67 @@ end
             @test all(abs.(qᶜ[1, 1, 3:4]) .< 1e-12)
         end
     end
+end
+
+#####
+##### The end of a stage takes off what its start added. With no substep between them the loop has
+##### built no content of its own, so `remove_moisture_content!` must leave the rewind of the
+##### thermodynamic density and its tendency as they were, in cloud and over terrain. Over terrain
+##### the loop's vertical momentum is the contravariant one, which a start state that differs in
+##### the horizontal momentum rewinds while the Cartesian one stays put: the vertical flux of the
+##### content must telescope from that rewind.
+#####
+
+using Breeze.CompressibleEquations: remove_moisture_content!
+using Breeze.TerrainFollowingDiscretization: materialize_terrain!
+
+@testset "Stage end removes the moisture content the stage start added [$label]" for (label, hill) in
+        (("flat", nothing), ("terrain", x -> 300 * exp(-x^2 / 2000^2)))
+
+    FT = Float64
+    Oceananigans.defaults.FloatType = FT
+
+    Nz = 6
+    z = isnothing(hill) ? (0, 3000) : TerrainFollowingVerticalDiscretization(collect(range(0, 3000, length=Nz+1)))
+    grid = RectilinearGrid(default_arch, FT; size=(8, Nz), halo=(5, 5), x=(-8000, 8000), z,
+                           topology=(Periodic, Flat, Bounded))
+    isnothing(hill) || materialize_terrain!(grid, hill)
+
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); standard_pressure=1e5)
+    microphysics = SaturationAdjustment(FT; equilibrium = WarmPhaseEquilibrium())
+    model = AtmosphereModel(grid; dynamics, microphysics)
+
+    # Cloud throughout, in a uniform wind.
+    set!(model; ρᵈ = 1.1, ρθ = 1.1 * 285, ρqᵉ = 0.02, u = 10)
+
+    timestepper = model.timestepper
+    substepper = timestepper.substepper
+    U = prognostic_fields(model)
+    U⁰ = timestepper.U⁰
+
+    update_state!(model)
+    prepare_acoustic_cache!(substepper, model)
+    @test minimum(Array(interior(substepper.fixed_composition_sensitivity))) > 1
+
+    # A start state that differs from the stage-entry state in the moisture, the dry density
+    # and the horizontal momentum.
+    for name in keys(U)
+        parent(U⁰[name]) .= parent(U[name])
+    end
+
+    for name in (:ρqᵉ, :ρᵈ, :ρu)
+        parent(U⁰[name]) .*= 1 + 1e-2
+    end
+
+    Gρθ = timestepper.Gⁿ.ρθ
+    parent(Gρθ) .= 1
+    initialize_stage_perturbations!(substepper, model, U⁰, 0)
+
+    ϖ = substepper.density_potential_temperature_perturbation
+    content = maximum(abs, Array(interior(ϖ)))
+    @test content > 1
+
+    remove_moisture_content!(substepper, model, U⁰, 1)
+    @test maximum(abs, Array(interior(ϖ))) < 1e-12 * content
+    @test all(G -> isapprox(G, 1; rtol=1e-12), Array(interior(Gρθ)))
 end
