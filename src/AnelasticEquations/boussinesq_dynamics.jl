@@ -25,7 +25,7 @@ On grids with a `Periodic` vertical direction, the pressure is computed with an 
 const BoussinesqDynamics = AnelasticDynamics{<:BoussinesqReferenceState}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return [`BoussinesqDynamics`](@ref) on `grid`, expanded about a [`BoussinesqReferenceState`](@ref)
 constructed from `constants`, `frame_vertical_velocity`, and `reference_state_kwargs`, such as

@@ -20,7 +20,8 @@ using Breeze.Thermodynamics: PlanarLiquidSurface, dry_air_gas_constant, liquid_l
 using Oceananigans: Oceananigans
 using Oceananigans.Utils: prettysummary
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using DocStringExtensions: TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 #####
 ##### Air transport properties
@@ -47,7 +48,7 @@ struct PowerLawVaporDiffusivity{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`PowerLawVaporDiffusivity`](@ref).
 
@@ -92,7 +93,7 @@ struct LinearThermalConductivity{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`LinearThermalConductivity`](@ref).
 
@@ -133,7 +134,7 @@ struct SutherlandViscosity{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`SutherlandViscosity`](@ref).
 
@@ -176,7 +177,7 @@ struct LinearViscosity{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`LinearViscosity`](@ref).
 
@@ -200,7 +201,7 @@ function LinearViscosity(FT = Oceananigans.defaults.FloatType;
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the diffusivity of water vapor in air ``Dᵛ`` (m² s⁻¹) at temperature `T` and pressure `p`
 according to `model`.
@@ -214,7 +215,7 @@ according to `model`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the thermal conductivity of air ``Kᵀ`` (W m⁻¹ K⁻¹) at temperature `T` and pressure `p`
 according to `model`.
@@ -227,7 +228,7 @@ according to `model`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the dynamic viscosity of air ``μ`` (Pa s) at temperature `T` according to `model`.
 """
@@ -273,7 +274,7 @@ struct KineticCorrection{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`KineticCorrection`](@ref). The defaults use unit condensation and thermal accommodation
 coefficients and the jump lengths ``Δᵛ = 0.104`` μm and ``Δᵀ = 0.216`` μm of
@@ -392,7 +393,7 @@ struct RogersYauTerminalVelocity{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`RogersYauTerminalVelocity`](@ref).
 
@@ -438,7 +439,7 @@ struct BeardTerminalVelocity{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`BeardTerminalVelocity`](@ref) with the coefficients of [Beard (1976)](@cite Beard1976).
 The mean free path of air molecules, which enters the slip correction, is
@@ -499,7 +500,7 @@ struct DropletPhysicsParameters{FT, D, K, M, C, V, A, W, S}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `DropletPhysicsParameters` with float type `FT`.
 
@@ -632,7 +633,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the curvature (Kelvin) coefficient ``A = 2σ / (Rᵛ ρᴸ T)`` (m) at temperature `T`.
 """
@@ -697,7 +698,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the equilibrium supersaturation ``𝒮ᵉ`` of a droplet with wet radius `r`, dry radius `rᵈ`
 and hygroscopicity `κ` at temperature `T`,
@@ -750,7 +751,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the critical radius ``rᶜ`` of a droplet with dry radius `rᵈ > 0` and hygroscopicity `κ`
 at temperature `T`: the radius at which the equilibrium supersaturation (the Köhler curve)
@@ -776,7 +777,7 @@ round(rᶜ, sigdigits=4)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the critical supersaturation ``𝒮ᶜ = 𝒮ᵉ(rᶜ)`` of a droplet with dry radius `rᵈ > 0`
 and hygroscopicity `κ` at temperature `T`, the maximum of the Köhler curve.
@@ -801,7 +802,7 @@ round(𝒮ᶜ, sigdigits=4)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the stable (haze) equilibrium radius of a droplet with dry radius `rᵈ > 0` and
 hygroscopicity `κ` in air with supersaturation `𝒮` at temperature `T`: the root of
@@ -937,7 +938,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the diffusional growth rate ``r \\, dr/dt`` (m² s⁻¹) of a droplet with wet radius `r`,
 dry radius `rᵈ` and hygroscopicity `κ`, in air with supersaturation `𝒮` (over a planar liquid
@@ -967,7 +968,7 @@ latent heating in that cell (see [`LagrangianMicrophysics`](@ref)).
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the radius of a droplet with wet radius `r`, dry radius `rᵈ` and hygroscopicity `κ`
 over the time step `Δt` by diffusional growth at fixed ambient supersaturation `𝒮`,
@@ -1081,7 +1082,7 @@ round(step.radius, sigdigits=4), round(step.condensed_mass, sigdigits=3)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the mass of liquid water (kg) in a droplet of wet radius `r` and dry radius `rᵈ`,
 ``(4π/3) ρᴸ (r^3 - rᵈ^3)``, assuming additive volumes of water and solute.
@@ -1096,7 +1097,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the ventilation factor ``fᵛ`` for the Reynolds number `Re` and Schmidt number `Sc`
 according to `ventilation` ([`BeardPruppacherVentilation`](@ref) or [`NoVentilation`](@ref)).
@@ -1112,7 +1113,7 @@ according to `ventilation` ([`BeardPruppacherVentilation`](@ref) or [`NoVentilat
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the ventilation factor ``fᵛ`` of a droplet of radius `r` moving with speed
 `slip_speed` relative to air at temperature `T` and pressure `p`, with
@@ -1134,7 +1135,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the [Schiller and Naumann (1933)](@cite SchillerNaumann1933) correction to Stokes drag,
 ``fᴰ = 1 + 0.15 \\mathrm{Re}^{0.687}``, at droplet Reynolds number `Re`.
@@ -1145,7 +1146,7 @@ Return the [Schiller and Naumann (1933)](@cite SchillerNaumann1933) correction t
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the response time ``τ = τᵖ / fᴰ(\\mathrm{Re})`` (s) of a droplet of radius `r` moving with
 speed `slip_speed` relative to air at temperature `T` and pressure `p`: the Stokes response
@@ -1175,7 +1176,7 @@ round(τ, sigdigits=4)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance one component of the velocity `v` of a droplet with response time `τ`
 (see [`droplet_response_time`](@ref)) over the time step `Δt`, under drag toward the
@@ -1221,7 +1222,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the terminal fall speed ``𝕎`` (m s⁻¹, positive downward) of a water drop of radius `r`
 in still air at temperature `T` and pressure `p`, according to `parameters.terminal_velocity`

@@ -346,7 +346,7 @@ function discrete_time_remainder(amplification, z)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the cell value of the droplet's own quasi-steady perturbation per unit sink, sampled one time step
 after deposition, for diffusion over `τ = κ Δt`: the sum over the Laplacian's nonzero modes of
@@ -372,7 +372,7 @@ regular_spacing(Δ::Number) = Δ
 regular_spacing(Δ) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the cell value g of the discrete Green's function of `-∇²` (second-order differences)
 on the regular `grid`, for a unit point source spread over one cell, excluding the domain mean:
@@ -478,7 +478,7 @@ AtmosphereModels.prognostic_field_names(::LagrangianMicrophysics) = tuple()
 AtmosphereModels.moisture_prognostic_name(::LagrangianMicrophysics) = :ρqᵛ
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the fields of `LagrangianMicrophysics`: the vapor mass fraction `qᵛ`,
 the liquid mass fraction `qˡ` of the droplets in each cell (a diagnostic that does not

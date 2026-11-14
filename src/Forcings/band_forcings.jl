@@ -28,7 +28,7 @@ using Adapt: Adapt
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the integer wavevectors ``n = (nx, ny, nz)``, one for each conjugate pair, whose
 physical wavenumbers ``k = 2π (nx / Lx, ny / Ly, nz / Lz)`` satisfy
@@ -329,7 +329,7 @@ function PartialTransformWorkspace(grid, band)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the Fourier coefficients of velocity component `c` (1, 2, 3 for `u`, `v`, `w`), stored in `φ`,
 for every wavevector in the box that contains the `band`, by summing over ``z``, then ``y``, then ``x``.
@@ -370,7 +370,7 @@ struct ConstantPowerBandForcing{FT, G, B, W, A, YZ}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a deterministic forcing of homogeneous turbulence on the triply-periodic `grid`
 that injects kinetic energy at the constant rate `energy_injection_rate` ``ε`` by
@@ -546,7 +546,7 @@ struct StochasticBandForcing{FT, G, B, A, YZ, S}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a stochastic forcing of homogeneous turbulence on the triply-periodic `grid`, following
 [Eswaran and Pope (1988)](@cite EswaranPope1988). The forcing of the velocity is
@@ -622,7 +622,7 @@ AtmosphereModels.materialize_atmosphere_model_forcing(forcing::StochasticBandFor
     materialize_band_forcing_component(forcing, name)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the standard deviation of each real component of the Ornstein-Uhlenbeck amplitudes of `forcing`.
 The projected amplitude of each of the ``M`` half-space modes has two complex components,
@@ -646,7 +646,7 @@ function compute_band_forcing!(forcing::StochasticBandForcing, c, model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the Ornstein-Uhlenbeck amplitudes of `forcing` to `time` with the exact transition
 ``b ← b \\, e^{-δt/T_f} + σ \\sqrt{1 - e^{-2δt/T_f}} \\, ξ``, where ``δt`` is the time elapsed since the

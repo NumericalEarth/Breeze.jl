@@ -506,7 +506,7 @@ Called by the `AtmosphereModel` constructor after the time stepper is built. Ret
 materialize_microphysics(microphysics, grid, timestepper) = microphysics
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the Lagrangian particles of particle-based `microphysics`, which are advanced with the
 time-stepping scheme of the model, or `nothing` (the default).
@@ -514,7 +514,7 @@ time-stepping scheme of the model, or `nothing` (the default).
 microphysics_particles(microphysics) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the aerosol population stored in a microphysics scheme's native units.
 
@@ -1299,7 +1299,7 @@ overwritten. Defaults to `false`.
 microphysics_model_update_refreshes_state(microphysics) = false
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Validate that `microphysics` is compatible with the model's `thermodynamic_constants`.
 

@@ -30,7 +30,7 @@ struct AdiabaticExpansion{V, G}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `AdiabaticExpansion`, which represents the expansion of air displaced vertically relative to
 the moving frame of a [`BoussinesqDynamics`](@ref) through its `adiabatic_expansion` keyword.
@@ -189,7 +189,7 @@ function frame_supersaturation(θ, qᵛ, p, pˢᵗ, constants)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the background gradients of an [`AdiabaticExpansion`](@ref) for a frame with pressure `p`,
 temperature `T`, vapor mass fraction `qᵛ`, and gravitational acceleration `g`. The partial derivatives

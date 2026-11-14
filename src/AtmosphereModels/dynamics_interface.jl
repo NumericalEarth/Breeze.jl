@@ -623,7 +623,7 @@ where ``R^m`` is the mixture gas constant.
 compute_auxiliary_dynamics_variables!(model) = nothing  # default: no-op
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance time-dependent dynamics state, such as the pressure of a moving reference frame,
 to the current time of `model`. Called before auxiliary thermodynamic variables are computed.
@@ -631,7 +631,7 @@ to the current time of `model`. Called before auxiliary thermodynamic variables 
 advance_dynamics_state!(dynamics, model) = nothing  # default: no-op
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Declare the time-dependent dynamics state, such as the pressure of a moving reference frame,
 to hold at the current time of `model` without advancing it. Called when the model state is set
@@ -641,7 +641,7 @@ and not when the clock is changed by hand.
 synchronize_dynamics_state!(dynamics, model) = nothing  # default: no-op
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the reference frame of `dynamics`, or `nothing` if the dynamics has no moving reference frame.
 """

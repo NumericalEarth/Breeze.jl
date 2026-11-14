@@ -94,7 +94,7 @@ Adapt.adapt_structure(to, ref::BoussinesqReferenceState) =
 Base.eltype(::BoussinesqReferenceState{FT}) where FT = FT
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`BoussinesqReferenceState`](@ref) on `grid` with uniform `pressure`, `temperature`,
 and moisture mass fractions. The reference density follows from the ideal gas law,
@@ -202,7 +202,7 @@ surface_density(ref::BoussinesqReferenceState) = reference_value(ref.density)
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Advance the reference pressure of a moving `frame` from `frame.time` to `time`, assuming that the domain-mean
 temperature and moisture are constant over the interval, and that the mean density is ``ρ̄ = pᵣ / (R^m T̄)``.
@@ -230,7 +230,7 @@ end
 advance_frame!(::Nothing, time, constants) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the time of a moving `frame` to `time` without changing its pressure, so that the current
 pressure becomes the pressure at `time`.

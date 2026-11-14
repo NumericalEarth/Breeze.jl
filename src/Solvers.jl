@@ -242,7 +242,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve `r(x) = 0` within the bracket `[a, b]` by safeguarded Newton iteration,
 where `residual_and_derivative(x)` returns the tuple `(r(x), r′(x))`. The bracket must

@@ -82,7 +82,7 @@ this method; the fallback calls `compute_forcing!(forcing)`.
 compute_forcing!(forcing, model) = compute_forcing!(forcing)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `true` if `forcing` produces a density-weighted tendency `F_{ρϕ}` directly
 (i.e., already includes the multiplication by `ρ`).
