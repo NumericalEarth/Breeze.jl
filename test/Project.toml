@@ -27,14 +27,13 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Breeze = {path = ".."}
-Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "glw/tridiagonal-register-sweeps-v0.117.2"}
 
 [compat]
 Adapt = "4.3.0"
 Aqua = "0.8 - 0.8.16"
 CUDA = "5, ~6.0, 6.2"
 ClimaComms = "0.6"
-CloudMicrophysics = "0.47, 0.48"
+CloudMicrophysics = "0.47, 0.48, 0.49"
 Dates = "<0.0.1, 1"
 Documenter = "1.20"
 Enzyme = "0.13.118"
@@ -45,7 +44,7 @@ MPI = "0.20"
 Metal = "1.10"
 NCDatasets = "0.14"
 NumericalRadiation = "0.2"
-Oceananigans = "0.117.2"
+Oceananigans = "0.118.1"
 ParallelTestRunner = "2.7.0"
 Pkg = "<0.0.1, 1"
 Printf = "<0.0.1, 1"

@@ -17,19 +17,11 @@ using Oceananigans.Solvers: BatchedTridiagonalSolver, get_coefficient, masked_mu
 using Oceananigans.Architectures: architecture as architecture_of
 using Oceananigans.Grids: ZDirection
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Solve in place the z-direction tridiagonal systems of `solver` for the tuple of fields `ϕ`, in one
-kernel that sweeps all of them in each column thread: `ϕ[n]` holds the right-hand side of system `n` on
-entry and its solution on return, bitwise as `solve!(ϕ[n], solver, ϕ[n], args...)` would leave it.
-
-The coefficient arguments of system `n` are `arguments(shared, specific[n], ϕ[n])`: `shared` holds what
-all systems have in common and is passed to the kernel once, which keeps a kernel's arguments from
-growing with every field by the size of, say, the model's fields (GPU kernels limit the total size of
-their arguments). `scratch` is a tuple of at least `length(ϕ)` arrays of the solver's scratch size, one
-per system. The coefficients of each level are evaluated one level ahead of their use.
-"""
+# Solve the z-direction tridiagonal systems of `solver` for the tuple of fields `ϕ` in one kernel
+# sweeping all of them per column thread; `ϕ[n]` is the right-hand side on entry and the solution on
+# return, bitwise as `solve!(ϕ[n], solver, ϕ[n], args...)` would leave it. The coefficient
+# arguments of system `n` are `arguments(shared, specific[n], ϕ[n])`: `shared` is passed to the
+# kernel once so its argument size does not grow with every field (GPU kernels cap it).
 function solve_tridiagonal_columns_in_place!(ϕ::Tuple, solver::BatchedTridiagonalSolver, scratch::Tuple,
                                              arguments, shared, specific::Tuple)
     grid = solver.grid
