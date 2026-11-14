@@ -836,19 +836,40 @@ end
 # comes off with the content.
 function remove_moisture_content!(substepper::AcousticSubstepper, model, U⁰, forcing_interval, Δτ)
     grid = model.grid
-    state, densities = moisture_content_arguments(substepper, model, U⁰)
-    M = substepper.time_averaged_velocities
-    Gˢρᵡ = model.timestepper.Gⁿ[thermodynamic_density_name(model.formulation)]
     launch!(architecture(grid), grid, :xyz, _remove_moisture_content!,
-            substepper.density_potential_temperature_perturbation, Gˢρᵡ, grid, state, densities,
-            M.u, M.v, M.w, substepper.momentum_perturbation.w, U⁰.ρu, U⁰.ρv, U⁰.ρw, model.momentum,
-            forcing_interval, Δτ, 1 - substepper.forward_weight)
+            substepper.density_potential_temperature_perturbation,
+            loop_content_arguments(substepper, model, U⁰)..., forcing_interval, Δτ, 1 - substepper.forward_weight)
     return nothing
 end
 
-@kernel function _remove_moisture_content!(ϖ, Gˢρᵡ, grid, state, densities, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ,
+# The arguments of `loop_content` after the indices, up to the forcing interval.
+function loop_content_arguments(substepper, model, U⁰)
+    state, densities = moisture_content_arguments(substepper, model, U⁰)
+    M = substepper.time_averaged_velocities
+    Gˢρᵡ = model.timestepper.Gⁿ[thermodynamic_density_name(model.formulation)]
+    return (model.grid, Gˢρᵡ, state, densities, M.u, M.v, M.w, substepper.momentum_perturbation.w,
+            U⁰.ρu, U⁰.ρv, U⁰.ρw, model.momentum)
+end
+
+@kernel function _remove_moisture_content!(ϖ, grid, Gˢρᵡ, state, densities, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ,
                                            forcing_interval, Δτ, ωˢ⁻)
     i, j, k = @index(Global, NTuple)
+    content, Gᵡ = loop_content(i, j, k, grid, Gˢρᵡ, state, densities, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ,
+                               forcing_interval, Δτ, ωˢ⁻)
+    @inbounds begin
+        ϖ[i, j, k] -= content
+        Gˢρᵡ[i, j, k] = Gᵡ
+    end
+end
+
+# What the loop's pressure variable ϖ holds beyond the perturbation of the thermodynamic density,
+# once the slow tendencies have ramped over `forcing_interval` and the loop's mass flux has summed
+# to `Σρu′, Σρv′, Σρw′`, and the thermodynamic tendency Gᵡ itself, recovered from the scaled sum
+# `Gˢρᵡ` that the loop holds. The end of the stage takes this content off
+# (`_remove_moisture_content!`); the open-boundary relaxation evaluates it after each substep, at
+# the interval that substep has reached (`_relax_open_boundary_x!`).
+@inline function loop_content(i, j, k, grid, Gˢρᵡ, state, densities, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ,
+                              forcing_interval, Δτ, ωˢ⁻)
     W⁰, Gᵂ, ς = moisture_content_and_tendency(i, j, k, grid, state, densities)
     Λᴴ = state.Λᴴ
     @inbounds begin
@@ -859,10 +880,10 @@ end
         # ramps from the start state: the loop held both scaled by ς, like the content.
         Gᵡ = Gˢρᵡ[i, j, k] / ς - Gᵂ
         ρᵡˢ = (densities.ρᵡ⁰[i, j, k] - densities.ρᵡ[i, j, k]) + forcing_interval * Gᵡ
-
-        ϖ[i, j, k] -= (ς - 1) * ρᵡˢ + ς * (W⁰ + forcing_interval * Gᵂ) - Δτ * (∇ʰ_ΛM + ∂z_ΛM)
-        Gˢρᵡ[i, j, k] = Gᵡ
     end
+
+    content = (ς - 1) * ρᵡˢ + ς * (W⁰ + forcing_interval * Gᵂ) - Δτ * (∇ʰ_ΛM + ∂z_ΛM)
+    return content, Gᵡ
 end
 
 # Λᴴ times the vertical mass flux the loop integrated: the sum of (ρw)′ over the substeps, less the
@@ -1523,8 +1544,8 @@ end
 # `while` loop under Reactant, so the compiled program holds one copy of the substep body rather
 # than `Nτ`. Reverse-mode differentiation of that loop caches a minimal cut of its values (`mincut`).
 function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
-    @trace mincut=true track_numbers=false for _ in 1:Nτ
-        acoustic_substep!(model, substepper, stage, advection)
+    @trace mincut=true track_numbers=false for n in 1:Nτ
+        acoustic_substep!(model, substepper, stage, advection, n)
     end
     finish_horizontal_momentum_perturbations!(model, substepper, stage)
     return nothing
@@ -2024,6 +2045,13 @@ end
 # prognostic `ValueBoundaryCondition` to the base at stage entry, so
 # `ρᴸ[halo] = 2v − ρᴸ[cell]` and the target perturbation is
 # `v − ρᴸ[cell] = (ρᴸ[halo] − ρᴸ[cell]) / 2`, read straight from the base field.
+# The loop's `(ρθ)′` is its pressure variable ϖ, which holds the moisture content
+# besides the perturbation of the thermodynamic density (Section 3b), and the end
+# of the stage takes that content off the boundary cell like any other. Its target
+# is therefore the prescribed perturbation plus the content the cell holds after
+# this substep (`loop_content` at the forcing interval the substep has reached),
+# so that the relaxed cell is the prescribed thermodynamic density once the
+# content comes off. The content is zero in dry air.
 # Relaxation factor `α ∈ (0, 1]` (default 0.5, via
 # `SplitExplicitTimeDiscretization(; open_boundary_relaxation = α)`). No-op on any
 # side without an active `NormalFlowBoundaryCondition` (periodic/walls/`nothing`
@@ -2032,45 +2060,51 @@ end
 @inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:NormalFlow}) && !(bc.condition isa Nothing)
 
 # Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the prescribed
-# wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2.
+# wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2, plus
+# the content of the loop's (ρθ)′ there (`content_arguments` are those of `loop_content`).
 # `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
-@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, iᴮ, iᴴ, α)
+@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, iᴮ, iᴴ, α, content_arguments)
     j, k = @index(Global, NTuple)
+    content, _ = loop_content(iᴮ, j, k, content_arguments...)
     @inbounds begin
         ρ′[iᴮ, j, k]  += α * ((ρᴸ[iᴴ, j, k]  - ρᴸ[iᴮ, j, k])  / 2 - ρ′[iᴮ, j, k])
-        ρθ′[iᴮ, j, k] += α * ((ρθᴸ[iᴴ, j, k] - ρθᴸ[iᴮ, j, k]) / 2 - ρθ′[iᴮ, j, k])
+        ρθ′[iᴮ, j, k] += α * (((ρθᴸ[iᴴ, j, k] - ρθᴸ[iᴮ, j, k]) / 2 + content) - ρθ′[iᴮ, j, k])
     end
 end
 
-@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, jᴮ, jᴴ, α)
+@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, jᴮ, jᴴ, α, content_arguments)
     i, k = @index(Global, NTuple)
+    content, _ = loop_content(i, jᴮ, k, content_arguments...)
     @inbounds begin
         ρ′[i, jᴮ, k]  += α * ((ρᴸ[i, jᴴ, k]  - ρᴸ[i, jᴮ, k])  / 2 - ρ′[i, jᴮ, k])
-        ρθ′[i, jᴮ, k] += α * ((ρθᴸ[i, jᴴ, k] - ρθᴸ[i, jᴮ, k]) / 2 - ρθ′[i, jᴮ, k])
+        ρθ′[i, jᴮ, k] += α * (((ρθᴸ[i, jᴴ, k] - ρθᴸ[i, jᴮ, k]) / 2 + content) - ρθ′[i, jᴮ, k])
     end
 end
 
-function apply_open_boundary_relaxation!(substepper, model, grid, arch)
+# `n` substeps of the stage have run, and `U⁰` is the state it started from.
+function apply_open_boundary_relaxation!(substepper, model, grid, arch, U⁰, Δτ, n)
     bcs_u = model.momentum.ρu.boundary_conditions
     bcs_v = model.momentum.ρv.boundary_conditions
+    west, east = is_active_open_bc(bcs_u.west), is_active_open_bc(bcs_u.east)
+    south, north = is_active_open_bc(bcs_v.south), is_active_open_bc(bcs_v.north)
+    west || east || south || north || return nothing
+
     Nx, Ny, _ = size(grid)
     α   = substepper.open_boundary_relaxation
     ρ′  = substepper.density_perturbation
     ρθ′ = substepper.density_potential_temperature_perturbation
     ρᴸ  = model.dynamics.dry_density
     ρθᴸ = thermodynamic_density(model.formulation)
-    if is_active_open_bc(bcs_u.west)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
-    end
-    if is_active_open_bc(bcs_u.east)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, Nx, Nx + 1, α)
-    end
-    if is_active_open_bc(bcs_v.south)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
-    end
-    if is_active_open_bc(bcs_v.north)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, Ny, Ny + 1, α)
-    end
+
+    # The interval and off-centering that `remove_moisture_content!` takes after the last substep.
+    forcing_interval = n * Δτ * substepper.thermodynamic_tendency_factor
+    content_arguments = (loop_content_arguments(substepper, model, U⁰)...,
+                         forcing_interval, Δτ, 1 - substepper.forward_weight)
+
+    west  && launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α, content_arguments)
+    east  && launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, Nx, Nx + 1, α, content_arguments)
+    south && launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α, content_arguments)
+    north && launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, Ny, Ny + 1, α, content_arguments)
     return nothing
 end
 
@@ -2241,10 +2275,11 @@ function factor_vertical_solver!(substepper, grid, thermodynamic_constants, δτ
     return nothing
 end
 
-# One acoustic substep of size `stage.Δτ`. `stage` holds the loop-invariant quantities of the RK3
-# stage (Δτ, the Crank–Nicolson weights δτᵐ⁺ and δτˢ⁻, the slow thermodynamic tendency Gˢρᵡ);
-# everything is passed explicitly so Reactant can trace the calling loop with no captured state.
-function acoustic_substep!(model, substepper, stage, advection)
+# Substep `n` of the stage, of size `stage.Δτ`. `stage` holds the loop-invariant quantities of the RK3
+# stage (Δτ, the Crank–Nicolson weights δτᵐ⁺ and δτˢ⁻, the slow thermodynamic tendency Gˢρᵡ, the
+# state U⁰ the stage starts from); everything is passed explicitly so Reactant can trace the calling
+# loop with no captured state.
+function acoustic_substep!(model, substepper, stage, advection, n)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -2252,7 +2287,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     g = convert(FT, constants.gravitational_acceleration)
     ω = FT(substepper.forward_weight)
     Gⁿ = model.timestepper.Gⁿ
-    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰) = stage
 
     # Step A: explicit horizontal forward of (ρu)′, (ρv)′, after the divergence damping of the
     # substep before when that is fused into this step.
@@ -2334,7 +2369,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # Per-substep open-boundary enforcement (issue #738): relax the outermost
     # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
     # the halo fill, so the boundary cell tracks the prescribed inflow state.
-    apply_open_boundary_relaxation!(substepper, model, grid, arch)
+    apply_open_boundary_relaxation!(substepper, model, grid, arch, U⁰, Δτ, n)
 
     # ρ′ takes no fill: nothing in the loop reads its halos (see `initialize_stage_perturbations!`).
     fill_substep_halos!(post_recovery_halo_fields(substepper.damping, substepper), model)
@@ -2395,7 +2430,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
 
-    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
+    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰ = Uᴸ)
     factor_implicit_advection!(model, substepper, advection, Δτ)
     factor_vertical_solver!(substepper, grid, constants, δτᵐ⁺)
     acoustic_substep_loop!(Nτ, model, substepper, stage, advection)

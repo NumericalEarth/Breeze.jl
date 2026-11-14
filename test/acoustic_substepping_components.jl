@@ -451,7 +451,7 @@ for arch in arches
 
         Δτ = FT(1//2)
         ω = FT(substepper.forward_weight)
-        stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ)
+        stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ, U⁰ = model.timestepper.U⁰)
         factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
         acoustic_substep_loop!(2, model, substepper, stage, nothing)
 
