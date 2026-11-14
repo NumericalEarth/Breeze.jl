@@ -221,3 +221,25 @@ end
     @test abs(w̄_fixed_reference) > 1e-4
     @test abs(w̄_mean_reference) < 1e-3 * abs(w̄_fixed_reference)
 end
+
+@testset "buoyancy = false suppresses buoyancy but keeps gravity [$FT]" for FT in test_float_types()
+    grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), extent=(1, 1, 1), topology=(Periodic, Periodic, Periodic))
+    warm(x, y, z) = 290 + exp(-((x - 0.5)^2 + (y - 0.5)^2 + (z - 0.5)^2) / 0.1^2)
+
+    vertical_velocities = map((true, false)) do buoyancy
+        dynamics = BoussinesqDynamics(grid; temperature=290, buoyancy)
+        @test dynamics.buoyancy == buoyancy
+        @test occursin("buoyancy=false", summary(dynamics)) == !buoyancy
+        model = AtmosphereModel(grid; dynamics, closure=ScalarDiffusivity(ν=1e-3, κ=1e-3))
+        @test model.thermodynamic_constants.gravitational_acceleration > 9
+        set!(model, θ=warm)
+        simulation = Simulation(model; Δt=0.01, stop_iteration=20, verbose=false)
+        run!(simulation)
+        maximum(abs, model.velocities.w)
+    end
+
+    w_buoyant, w_unbuoyant = vertical_velocities
+    @test w_buoyant > 1e-4
+    @test w_unbuoyant == 0
+end
+

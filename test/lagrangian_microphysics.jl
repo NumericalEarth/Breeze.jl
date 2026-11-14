@@ -136,6 +136,60 @@ end
     @test Array(interior(sorted.moisture_density)) ≈ Array(interior(unsorted.moisture_density))
 end
 
+@testset "Droplets settle at their terminal velocity without buoyancy [$FT]" for FT in test_float_types()
+    # A quiescent, saturated box with buoyancy suppressed but gravity intact: droplets fall at the Stokes
+    # speed 2 ρˡ g r² / (9 μ), and the water mass is conserved.
+    L = FT(0.02)
+    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, L), y=(0, L), z=(0, L),
+                           topology=(Periodic, Periodic, Periodic))
+    dynamics = BoussinesqDynamics(grid; pressure=90000, temperature=281, buoyancy=false)
+    Nd = 50
+    n = 1:Nd
+    r₀ = FT(10e-6)
+    droplets = (x = L .* quasirandom.(n, 1), y = L .* quasirandom.(n, 2), z = fill(L / 2, Nd),
+                r = fill(r₀, Nd), rᵈ = fill(FT(2e-8), Nd), κ = fill(FT(0.6), Nd))
+    physics = DropletPhysicsParameters(FT; terminal_velocity=StokesTerminalVelocity())
+    microphysics = LagrangianMicrophysics(FT; droplets, physics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
+    constants = model.thermodynamic_constants
+    g = constants.gravitational_acceleration
+    @test g > 9
+
+    T₀ = 281
+    pᵛ = saturation_vapor_pressure(T₀, constants, PlanarLiquidSurface())
+    ε = dry_air_gas_constant(constants) / vapor_gas_constant(constants)
+    set!(model; T=T₀, qᵗ=ε * pᵛ / (90000 - (1 - ε) * pᵛ))
+    vapor₀, liquid₀ = water_masses(model)
+
+    Δt = FT(1e-3)
+    Nt = 20
+    for _ in 1:Nt
+        time_step!(model, Δt)
+    end
+
+    properties = model.microphysics.droplets.properties
+    𝕎 = Array(properties.𝕎)
+    # Rogers and Yau (1989): 𝕎 = k₁ r² with k₁ = 1.19 × 10⁸ m⁻¹ s⁻¹ at 20 °C; a few percent faster at 281 K
+    𝕎ᴿʸ = 1.19e8 * r₀^2
+    @test all(𝕎 .> 0)
+    @test mean(𝕎) ≈ 𝕎ᴿʸ rtol=0.06
+    @test mean(𝕎) ≈ droplet_terminal_velocity(r₀, FT(T₀), FT(90000), constants, physics) rtol=0.01
+
+    # Downward displacement of 𝕎 Δt per step (positions are updated at the start of the step
+    # with the previous terminal velocity, so allow one step of slack)
+    Δz = Array(properties.z) .- L / 2
+    @test all(Δz .< 0)
+    @test mean(Δz) ≈ -mean(𝕎) * Nt * Δt rtol=0.1
+
+    vapor₁, liquid₁ = water_masses(model)
+    @test (vapor₁ + liquid₁) ≈ (vapor₀ + liquid₀) rtol = 100 * eps(FT)
+    @test maximum(abs, model.velocities.w) == 0
+
+    # Gravity-free constants switch the fall speed off, which is what buoyancy = false avoids
+    weightless = ThermodynamicConstants(FT; gravitational_acceleration=0)
+    @test droplet_terminal_velocity(r₀, FT(T₀), FT(90000), weightless, physics) == 0
+end
+
 @testset "LagrangianMicrophysics in single precision" begin
     # The per-step increments of θ and qᵛ in droplet DNS are comparable to the Float32 spacing of θ ≈ 300 K
     # and qᵛ ≈ 10⁻² (3 × 10⁻⁵ K and 5 × 10⁻¹⁰), and the per-step change of the frame pressure to Float32 epsilon.

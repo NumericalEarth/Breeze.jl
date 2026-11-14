@@ -39,6 +39,9 @@ Set `adiabatic_expansion = nothing` to disable it.
 `pressure_solver_float_type` is the floating-point type of the pressure solve (see [`AnelasticDynamics`](@ref)).
 Default: `Float64`.
 
+`buoyancy = false` suppresses the buoyancy force while keeping the gravitational acceleration of `constants`,
+so that droplets still fall at their terminal velocity (see [`AnelasticDynamics`](@ref)). Default: `true`.
+
 Examples
 ========
 
@@ -57,11 +60,12 @@ function BoussinesqDynamics(grid, constants=ThermodynamicConstants(eltype(grid))
                             frame_vertical_velocity = nothing,
                             adiabatic_expansion = default_adiabatic_expansion(frame_vertical_velocity),
                             pressure_solver_float_type = Float64,
+                            buoyancy = true,
                             reference_state_kwargs...)
 
     reference_state = BoussinesqReferenceState(grid, constants; frame_vertical_velocity, reference_state_kwargs...)
     validate_adiabatic_expansion(adiabatic_expansion, reference_state.frame)
-    return AnelasticDynamics(reference_state, nothing, pressure_solver_float_type, adiabatic_expansion)
+    return AnelasticDynamics(reference_state, nothing, pressure_solver_float_type, adiabatic_expansion, buoyancy)
 end
 
 function Base.summary(dynamics::BoussinesqDynamics)
@@ -70,8 +74,11 @@ function Base.summary(dynamics::BoussinesqDynamics)
                   ", Tᵣ=", prettysummary(reference_value(ref.temperature)),
                   ", ρᵣ=", prettysummary(reference_value(ref.density)),
                   frame_summary(ref.frame),
-                  expansion_summary(dynamics.adiabatic_expansion), ")")
+                  expansion_summary(dynamics.adiabatic_expansion),
+                  buoyancy_summary(dynamics.buoyancy), ")")
 end
+
+buoyancy_summary(buoyancy) = buoyancy ? "" : ", buoyancy=false"
 
 const BoussinesqModel = AtmosphereModel{<:BoussinesqDynamics}
 
