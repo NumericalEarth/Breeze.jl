@@ -45,7 +45,7 @@ using Oceananigans.TimeSteppers: ExplicitTimeDiscretization
 using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure, getclosure
 using Oceananigans.Utils: Utils, launch!, prettysummary
 
-using Breeze.AtmosphereModels: AtmosphereModels, ClosureCloud, ClosureCloudStatistics
+using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.TurbulenceClosures: TurbulenceClosures, convert_eltype,
                                  GradientLimitedMixingLength, HardMinimum, HarmonicBlend, fill_mixing_length!, mixing_lengthᶜᶜᶜ,
                                  RationalStabilityFunction, richardson_number, momentum_stability_function,

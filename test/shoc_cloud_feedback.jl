@@ -1,12 +1,11 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 #####
-##### The `ClosureCloud` interface of `SimplifiedHigherOrderClosure`. P3 no longer accepts
-##### `ClosureCloud`: it condenses its own cloud liquid, and SHOC leaves it alone
+##### SHOC with P3: P3 condenses its own cloud liquid, and SHOC leaves it alone
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: ClosureCloud, ClosureCloudStatistics, DiracStatistics, NoSubgridCorrelation,
+using Breeze.AtmosphereModels: DiracStatistics, NoSubgridCorrelation,
                                MicrophysicalProcessRate, subgrid_correlation, subgrid_statisticsᶜᶜᶜ
 
 using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation
@@ -46,19 +45,10 @@ function non_precipitating_water(model)
     return column(model.moisture_density) .+ column(μ.ρqᶜˡ)
 end
 
-@testset "ClosureCloud interface" begin
-    @test ClosureCloud(Float64).autoconversion_enhancement == 1
-    @test ClosureCloud(Float32; autoconversion_enhancement=3).autoconversion_enhancement === 3f0
+@testset "Subgrid statistics interface" begin
     @test subgrid_correlation(nothing) isa NoSubgridCorrelation
-
     grid = RectilinearGrid(CPU(); size=4, z=(0, 1), topology=(Flat, Flat, Bounded))
     @test subgrid_statisticsᶜᶜᶜ(1, 1, 1, grid, NoSubgridCorrelation(), nothing, nothing) isa DiracStatistics
-    no_cloud = subgrid_statisticsᶜᶜᶜ(1, 1, 1, grid, ClosureCloud(), nothing, nothing)
-    @test no_cloud == ClosureCloudStatistics(0.0, 0.0)
-end
-
-@testset "P3 rejects ClosureCloud" begin
-    @test_throws ArgumentError PredictedParticlePropertiesMicrophysics(; condensation = ClosureCloud())
 end
 
 @testset "With P3, SHOC leaves the cloud liquid alone" begin

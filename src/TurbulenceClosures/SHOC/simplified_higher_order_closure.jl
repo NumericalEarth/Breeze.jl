@@ -118,13 +118,11 @@ SHOC has its own surface source of turbulent kinetic energy (`u★³` from the s
 bottom flux boundary condition on `ρe` is not applied at all: neither by the stages nor by SHOC.
 
 The model must use the liquid-ice potential temperature formulation; `ρθ / ρ` is SHOC's liquid
-water potential temperature and the model's moisture density over `ρ` its total water. By
-default the liquid water SHOC diagnoses is not fed back to the thermodynamics of the model. With
-a microphysics scheme whose subgrid choice is `Breeze.AtmosphereModels.ClosureCloud` (for example
-`PredictedParticlePropertiesMicrophysics(subgrid=ClosureCloud())`) SHOC owns the cloud: its total
-water is the vapor plus the cloud liquid of the model, after every step the cloud liquid of the
-model is SHOC's `shoc_ql` and the vapor the rest, and the microphysics reads `shoc_cldfrac` as
-the cloud fraction and keeps the precipitation.
+water potential temperature and the model's moisture density over `ρ` its total water. The
+liquid water `shoc_ql` and cloud fraction `shoc_cldfrac` SHOC diagnoses are not fed back to the
+thermodynamics of the model; they remain outputs (`closure_fields.diagnostics`). The microphysics
+condenses its own cloud liquid, and may condense over SHOC's double-Gaussian distribution with
+`PredictedParticlePropertiesMicrophysics(condensation = SubgridCondensation(TurbulenceClosureStatistics()))`.
 
 Keyword arguments
 =================

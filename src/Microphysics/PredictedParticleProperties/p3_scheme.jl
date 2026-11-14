@@ -154,9 +154,9 @@ Here ``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ`` is the phase relaxation rate of the c
 (`AtmosphereModels.phase_relaxation_rate`). Rain, ice, activation and collection keep their
 grid-mean form.
 
-Deprecated: the `subgrid` keyword (use `condensation`), and an external model of Γ in the
+Deprecated: an external model of Γ in the
 `condensation` slot that extends [`subgrid_supersaturation`](@ref Breeze.Microphysics.PredictedParticleProperties.subgrid_supersaturation)
-and its two companion functions. `ClosureCloud` is retired and raises an error.
+and its two companion functions. `ClosureCloud` is retired.
 
 # Configuring the empirical warm-phase parameters
 
@@ -230,9 +230,8 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  vapor_excess = DiagnosticVaporExcess(),
                                                  liquid_fraction = PrognosticLiquidFraction(),
                                                  warm_rain_scheme = KhairoutdinovKogan2000(),
-                                                 condensation = GridMeanCondensation(),
-                                                 subgrid = nothing)
-    condensation = p3_condensation(condensation, subgrid)
+                                                 condensation = GridMeanCondensation())
+    condensation = validate_p3_condensation(condensation)
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
                                     vapor_excess, liquid_fraction)

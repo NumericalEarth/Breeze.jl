@@ -6,7 +6,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: AtmosphereModels, ClosureCloud, NoSubgridCorrelation, PrescribedStatistics,
+using Breeze.AtmosphereModels: AtmosphereModels, NoSubgridCorrelation, PrescribedStatistics,
                                PrescribedPlumeStatistics, supersaturation_statistics, phase_relaxation_rate,
                                instantaneous_phase_relaxation
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticleProperties, GridMeanCondensation,
@@ -74,11 +74,7 @@ end
     subgrid = SubgridCondensation(PrescribedStatistics(1e-4))
     @test P3Microphysics(Float64; condensation = subgrid).condensation === subgrid
 
-    # The retired `subgrid` keyword
-    @test (@test_deprecated P3Microphysics(Float64; subgrid = NoSubgridCorrelation())).condensation === GridMeanCondensation()
-    @test_throws ArgumentError P3Microphysics(Float64; subgrid = ClosureCloud())
-    @test_throws ArgumentError P3Microphysics(Float64; condensation = ClosureCloud())
-    @test_throws ArgumentError P3Microphysics(Float64; condensation = subgrid, subgrid = NoSubgridCorrelation())
+    @test P3Microphysics(Float64; condensation = NoSubgridCorrelation()).condensation === GridMeanCondensation()
 
     # P3 owns its cloud: a closure is never asked to set it
     @test AtmosphereModels.subgrid_correlation(P3Microphysics(Float64; condensation = subgrid)) === NoSubgridCorrelation()

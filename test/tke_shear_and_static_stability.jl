@@ -259,7 +259,7 @@ end
         @test microphysics_subgrid_model(warm_adjustment()) === nothing
         # P3 hands over the model in its subgrid supersaturation hook: here a constant weight
         w = FT(0.3)
-        p3_case = merge(case, (; microphysics = P3Microphysics(FT; subgrid = ConstantWeight(w))))
+        p3_case = merge(case, (; microphysics = P3Microphysics(FT; condensation = ConstantWeight(w))))
         from_microphysics = column_model(TKEBasedTurbulenceClosure(static_stability = SaturationWeightedStaticStability()), p3_case)
         own = column_model(with_weight(ConstantWeight(w)), p3_case)
         @test microphysics_subgrid_model(from_microphysics.microphysics) === ConstantWeight(w)

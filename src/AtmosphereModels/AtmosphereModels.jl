@@ -51,10 +51,8 @@ export
     # Subgrid statistics (closure → microphysics)
     AbstractSubgridStatistics,
     DiracStatistics,
-    ClosureCloudStatistics,
     AbstractSubgridCorrelation,
     NoSubgridCorrelation,
-    ClosureCloud,
     subgrid_correlation,
     subgrid_statisticsᶜᶜᶜ,
 

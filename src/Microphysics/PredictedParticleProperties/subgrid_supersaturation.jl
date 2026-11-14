@@ -193,29 +193,9 @@ julia> cloud_vapor_excess(0.5, -1.0)
 @inline seed_vapor(::Nothing, Γ, qᵛ) = qᵛ + Γ
 
 #####
-##### The `condensation` keyword of P3, and the retired `subgrid` keyword
+##### The `condensation` keyword of P3
 #####
 
-const closure_cloud_retired_message =
-    "ClosureCloud is retired from PredictedParticlePropertiesMicrophysics: P3 condenses its own cloud liquid " *
-    "and a turbulence closure no longer overwrites it. Use " *
-    "`condensation = SubgridCondensation(TurbulenceClosureStatistics())` to condense over the closure's " *
-    "subgrid distribution, or `condensation = GridMeanCondensation()` for the grid mean."
-
-p3_condensation(condensation, ::Nothing) = validate_p3_condensation(condensation)
-p3_condensation(condensation::GridMeanCondensation, ::Nothing) = condensation
-
-function p3_condensation(::GridMeanCondensation, subgrid)
-    Base.depwarn("The `subgrid` keyword of PredictedParticlePropertiesMicrophysics is deprecated; " *
-                 "use `condensation` (`GridMeanCondensation()` or `SubgridCondensation(statistics)`).",
-                 :PredictedParticlePropertiesMicrophysics)
-    return validate_p3_condensation(subgrid)
-end
-
-p3_condensation(condensation, subgrid) =
-    throw(ArgumentError("Pass `condensation` only; the `subgrid` keyword is deprecated."))
-
-validate_p3_condensation(::ClosureCloud) = throw(ArgumentError(closure_cloud_retired_message))
 validate_p3_condensation(::NoSubgridCorrelation) = GridMeanCondensation()
 validate_p3_condensation(condensation::GridMeanCondensation) = condensation
 validate_p3_condensation(condensation::SubgridCondensation) = condensation

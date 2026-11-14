@@ -14,9 +14,8 @@
 #####   * the coupling with the static stability: with `static_stability =
 #####     SaturationWeightedStaticStability(CondensateFluxFraction())` the saturated fraction is
 #####     aᴺ = w′qᶜ′ / w′s′ of the distribution, solved with N² by the closure's `solver`.
-#####   * the cloud of the model (`ClosureOwnedCloud`, internal): with a microphysics whose subgrid choice is
-#####     `ClosureCloud`, the closure supplies the cloud fraction and cloud liquid and sets the cloud
-#####     liquid of the model once per time step to the liquid of the distribution.
+#####   * the statistics of the vapor excess for the microphysics (`TurbulenceClosureStatistics`); the
+#####     microphysics condenses its own cloud liquid.
 #####
 ##### The components of part 1 are those of `SimplifiedHigherOrderClosure`: the formulation is
 ##### shared, the coefficients are this closure's own. The time stepping is the closure's: the
@@ -36,7 +35,6 @@ using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocit
                                       clip_below, shoc_saturation_thermodynamics,
                                       rate_norm_factor
 
-using ..AtmosphereModels: ClosureCloud, ClosureCloudStatistics, subgrid_correlation
 
 #####
 ##### The time scale of the moments
@@ -519,23 +517,6 @@ const CondensateFluxFractionStability = SaturationWeightedStaticStability{<:Cond
     static_stabilityᶜᶜᶠ(i, j, k, grid, ss.fraction.initial_stability, buoyancy, tracers, closure_fields)
 
 #####
-##### Cloud owned by the closure
-#####
-
-"""
-$(TYPEDEF)
-
-Internal: with a microphysics whose subgrid choice is `ClosureCloud`, a closure with a subgrid
-distribution supplies `ClosureCloudStatistics` (the cloud fraction and liquid of the distribution)
-and, once per time step after the last stage, sets the cloud liquid of the model to the liquid of
-the distribution diagnosed from the state at the end of the step, moving the difference to or from
-the vapor; the total water and the liquid-ice potential temperature are unchanged. With any other
-microphysics it does nothing.
-"""
-struct ClosureOwnedCloud end
-Base.summary(::ClosureOwnedCloud) = "ClosureOwnedCloud"
-
-#####
 ##### Validation of the keywords of the closure
 #####
 
@@ -565,20 +546,17 @@ variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, the part `Bˡ =
 flux carried by the condensate flux, and the shear and buoyancy production `P` and `B` of the TKE
 equation from the applied fluxes).
 """
-struct SubgridCloudFields{BF, CO, M, C, S, P}
+struct SubgridCloudFields{BF, M, C, S, P}
     buoyancy_flux :: BF
-    cloud_ownership :: CO
     moments :: M
     cloud :: C
     solver_state :: S
     presolve :: P # every closure scalar just before its implicit solve (the stage energy budget), or `nothing`
 end
 
-SubgridCloudFields(bf, co, m, c) = SubgridCloudFields(bf, co, m, c, nothing, nothing)
-SubgridCloudFields(bf, co, m, c, s) = SubgridCloudFields(bf, co, m, c, s, nothing)
 
 Adapt.adapt_structure(to, f::SubgridCloudFields) =
-    SubgridCloudFields(f.buoyancy_flux, f.cloud_ownership, adapt(to, f.moments), adapt(to, f.cloud), adapt(to, f.solver_state),
+    SubgridCloudFields(f.buoyancy_flux, adapt(to, f.moments), adapt(to, f.cloud), adapt(to, f.solver_state),
                        adapt(to, f.presolve))
 
 build_subgrid_cloud_fields(grid, ::Nothing, solver, tracer_names) = nothing
@@ -591,7 +569,7 @@ function build_subgrid_cloud_fields(grid, distribution, solver, tracer_names)
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
              applied_flux_conversion_fields(grid, energetics, tracer_names)...,
              gθ = CenterField(grid), gA = CenterField(grid))
-    return SubgridCloudFields(energetics, ClosureOwnedCloud(), moments, cloud, build_solver_state(grid, energetics),
+    return SubgridCloudFields(energetics, moments, cloud, build_solver_state(grid, energetics),
                               build_presolve_fields(grid, energetics, tracer_names))
 end
 
@@ -1046,52 +1024,6 @@ end
 # The buoyancy production of the TKE equation: the conversion of the applied fluxes
 @inline tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields) =
     @inbounds fields.cloud.B[i, j, k]
-
-#####
-##### Part 3: the cloud of the model
-#####
-
-@inline AtmosphereModels.subgrid_statisticsᶜᶜᶜ(i, j, k, grid, ::ClosureCloud, ::FlavorOfTKEClosure, fields::TKEClosureFields) =
-    closure_cloud_statistics(i, j, k, grid, fields.subgrid_cloud)
-
-@inline closure_cloud_statistics(i, j, k, grid, fields) = ClosureCloudStatistics(zero(grid), zero(grid))
-
-@inline closure_cloud_statistics(i, j, k, grid, fields::SubgridCloudFields{<:Any, ClosureOwnedCloud}) =
-    @inbounds ClosureCloudStatistics(fields.cloud.aᶜ[i, j, k], fields.cloud.qˡ[i, j, k])
-
-# The liquid of the distribution becomes the cloud liquid of the model, bounded by the water there is
-@kernel function _set_closure_cloud_liquid!(ρqᵛ, ρqᶜˡ, ρ, qˡ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        ρᵢ = ρ[i, j, k]
-        ρqᵗ = ρqᵛ[i, j, k] + ρqᶜˡ[i, j, k]
-        qᵗ = ρqᵗ / ρᵢ
-        qᶜˡ = min(max(0, qˡ[i, j, k]), max(0, qᵗ))
-        ρqᶜˡ[i, j, k] = ρᵢ * qᶜˡ
-        ρqᵛ[i, j, k] = ρqᵗ - ρᵢ * qᶜˡ
-    end
-end
-
-function Oceananigans.TimeSteppers.step_closure_prognostics!(closure_fields::TKEClosureFields, closure::FlavorOfTKEClosure, model, Δt)
-    step_subgrid_cloud!(closure_fields.subgrid_cloud, closure_fields, closure, model)
-    return nothing
-end
-
-step_subgrid_cloud!(fields, closure_fields, closure, model) = nothing
-
-function step_subgrid_cloud!(fields::SubgridCloudFields{<:Any, ClosureOwnedCloud}, closure_fields, closure, model)
-    subgrid_correlation(model.microphysics) isa ClosureCloud || return nothing
-    ρqᶜˡ = cloud_liquid_density(model.microphysical_fields)
-    isnothing(ρqᶜˡ) && return nothing
-
-    # The distribution of the state at the end of the step, with the diffusivities of its last stage
-    ρ = AtmosphereModels.total_density(model.dynamics)
-    compute_subgrid_distribution!(fields, closure_fields, closure, model, ρ)
-
-    grid = model.grid
-    launch!(grid.architecture, grid, :xyz, _set_closure_cloud_liquid!, model.moisture_density, ρqᶜˡ, ρ, fields.cloud.qˡ)
-    return nothing
-end
 
 #####
 ##### The coefficients of the closure, as one flat view (as for `SimplifiedHigherOrderClosure`)

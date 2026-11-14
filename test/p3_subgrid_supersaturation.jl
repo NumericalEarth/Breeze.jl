@@ -5,7 +5,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: total_density, NoSubgridCorrelation, ClosureCloud
+using Breeze.AtmosphereModels: total_density, NoSubgridCorrelation
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticleProperties, AerosolActivation, AerosolMode,
                                                        P3MicrophysicalState, ProcessRate, compute_p3_process_rates,
                                                        p3_grid_process_inputs, limit_vapor_rates,
@@ -58,7 +58,7 @@ with_subgrid(Γ; options...) = P3Microphysics(Float64; condensation = ScaledSupe
 @testset "P3 subgrid supersaturation hook: defaults" begin
     p3 = P3Microphysics(Float64)
     @test p3.condensation === PPP.GridMeanCondensation()
-    for none in (NoSubgridCorrelation(), ClosureCloud())
+    for none in (NoSubgridCorrelation(),)
         @test subgrid_supersaturation(none, nothing, 1e-2, 1.1e-2, 0.0, 285.0, 9e4, 1.1, nothing) === nothing
         @test subgrid_supersaturation_statistics(1, 1, 1, nothing, none, nothing) === nothing
         @test subgrid_supersaturation_fields(none, nothing) === nothing
