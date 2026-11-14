@@ -384,7 +384,11 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
 
     level_diagnostics = NamedTuple{LEVEL_DIAGNOSTICS}(map(name -> CenterField(grid), LEVEL_DIAGNOSTICS))
     interface_diagnostics = NamedTuple{INTERFACE_DIAGNOSTICS}(map(name -> ZFaceField(grid), INTERFACE_DIAGNOSTICS))
-    diagnostics = merge(level_diagnostics, interface_diagnostics, (; pblh = surface_field(grid)))
+    # The double Gaussian as the distribution of the vapor excess over liquid, for the microphysics
+    # (`TurbulenceClosureStatistics`): weight of the updraft component, component means and spreads
+    vapor_excess_components = (a = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
+                               σ₁ = CenterField(grid), σ₂ = CenterField(grid))
+    diagnostics = merge(level_diagnostics, interface_diagnostics, (; pblh = surface_field(grid), vapor_excess_components))
 
     # The tridiagonal factorization, and the fields of the components that need their own
     scratch = merge((du = CenterField(grid), dl = CenterField(grid), d = CenterField(grid)),
@@ -659,6 +663,8 @@ function Oceananigans.TimeSteppers.step_closure_prognostics!(fields::SHOCFields,
 
     launch!(arch, grid, :xyz, _add_shoc_momentum_increments!, ρu, ρv, grid, ρ, fields.increments)
 
+    launch!(arch, grid, :xyz, _compute_shoc_vapor_excess_components!, grid, closure, fields, thermodynamics)
+
     return nothing
 end
 
@@ -666,3 +672,38 @@ end
 # TODO: checkpoint `shoc_ql`, `shoc_cldfrac`, `wthv_sec`, `tkh` and `tk`.
 Oceananigans.prognostic_state(::SHOCFields) = nothing
 Oceananigans.restore_prognostic_state!(fields::SHOCFields, ::Nothing) = fields
+
+#####
+##### The statistics of the vapor excess for the microphysics (`TurbulenceClosureStatistics`)
+#####
+
+# SHOC's double Gaussian after the step, as the distribution of the vapor excess over liquid with
+# the model's saturation; SHOC's own cloud (`shoc_cldfrac`, `shoc_ql`) is unchanged
+@kernel function _compute_shoc_vapor_excess_components!(grid, closure, fields, thermodynamics)
+    i, j, k = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    state, host, d = fields.state, fields.host, fields.diagnostics
+    v = d.vapor_excess_components
+    @inbounds begin
+        moments(k) = (d.w3[i, j, k], d.thl_sec[i, j, k], d.wthl_sec[i, j, k],
+                      d.qwthl_sec[i, j, k], d.wqw_sec[i, j, k], d.qw_sec[i, j, k])
+        a, μ₁, μ₂, σ₁, σ₂ = component_vapor_excess(closure_ij.assumed_pdf, thermodynamics, closure_ij.clipping,
+                                                   host.zi_grid[i, j, k+1], host.zi_grid[i, j, k], host.zt_grid[i, j, k],
+                                                   host.pres[i, j, k], state.thetal[i, j, k], host.w_field[i, j, k],
+                                                   state.qw[i, j, k], d.w_sec[i, j, k], moments(k), moments(k+1))
+        v.a[i, j, k] = a
+        v.μ₁[i, j, k] = μ₁
+        v.μ₂[i, j, k] = μ₂
+        v.σ₁[i, j, k] = σ₁
+        v.σ₂[i, j, k] = σ₂
+    end
+end
+
+@inline function AtmosphereModels.supersaturation_statistics(::AtmosphereModels.TurbulenceClosureStatistics, i, j, k, grid,
+                                                             ::FlavorOfSHOC, fields::SHOCFields, model_fields)
+    v = fields.diagnostics.vapor_excess_components
+    @inbounds begin
+        a = v.a[i, j, k]
+        return (; a = (a, 1 - a), μ = (v.μ₁[i, j, k], v.μ₂[i, j, k]), σ = (v.σ₁[i, j, k], v.σ₂[i, j, k]))
+    end
+end

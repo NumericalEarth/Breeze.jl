@@ -234,6 +234,7 @@ function applied_flux_state(model)
             standard_pressure = standard_pressure(model.dynamics),
             exner_exponent = AtmosphereModels.liquid_ice_exner_exponent(model.formulation),
             dynamics = model.dynamics,
+            formulation = model.formulation,
             microphysics = model.microphysics,
             microphysical_fields = model.microphysical_fields,
             constants = model.thermodynamic_constants)
@@ -444,16 +445,40 @@ end
 ##### the latent heat of the subgrid condensation and is taken from the internal energy.
 #####
 
-# The rate at which the microphysics relaxes the supersaturation, ωᶜ (s⁻¹): instantaneous until the
-# microphysics supplies `phase_relaxation_rate` (phase 3)
-@inline subgrid_phase_relaxation_rate(microphysics, i, j, k) = Inf
+# The rate ωᶜ (s⁻¹) at which the condensate of the cell absorbs vapor excess, from the microphysics
+# (`AtmosphereModels.phase_relaxation_rate`; 0 without condensing microphysics). It includes the
+# psychrometric correction ξ of the latent heating (P3: ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ), so x = tₑ ωᶜ.
+@inline function cell_phase_relaxation_rate(i, j, k, grid, s)
+    @inbounds begin
+        ρ = s.ρ[i, j, k]
+        qᵛᵉ = s.qᵛᵉ[i, j, k]
+    end
+    q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵛᵉ, s.microphysical_fields)
+    𝒰 = AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid, s.formulation, s.dynamics, q)
+    return AtmosphereModels.phase_relaxation_rate(i, j, k, grid, s.microphysics, s.microphysical_fields, 𝒰, s.constants)
+end
 
+"""
+    condensing_fraction(x)
+
+The share ``η(x) = 1 - (1 - e^{-x}) / x`` of the saturated response that a parcel displaced for an
+eddy time ``tₑ`` feels when its condensate relaxes the vapor excess at the rate ``ωᶜ``, with
+``x = tₑ ωᶜ``. Below ``x = 10⁻³`` it is the series ``x/2 - x²/6 + x³/24`` (that of ``1 - (1 - x/2 + x²/6 - x³/24)``) (``1 - (1 - e^{-x})/x`` loses
+its digits to cancellation there), so that the value and its derivative are accurate and finite
+down to ``x = 0``, where ``η = 0``.
+"""
 @inline function condensing_fraction(x)
     FT = typeof(x)
-    small = x < convert(FT, 1e-4)
+    small = x < convert(FT, 1e-3)
     xˢ = ifelse(small, one(FT), x)
-    return ifelse(small, x / 2, 1 + expm1(-xˢ) / xˢ)
+    return ifelse(small, x * (1 / convert(FT, 2) - x * (1 / convert(FT, 6) - x / 24)), 1 + expm1(-xˢ) / xˢ)
 end
+
+# η at the face k: 1 for a microphysics that removes the vapor excess instantly (saturation
+# adjustment), without forming tₑ ωᶜ = ∞; otherwise η(tₑ ωᶜ) with ωᶜ interpolated to the face
+@inline saturated_response_shareᶜᶜᶠ(::Val{true}, tₑ, i, j, k, grid, s) = one(tₑ)
+@inline saturated_response_shareᶜᶜᶠ(::Val{false}, tₑ, i, j, k, grid, s) =
+    condensing_fraction(tₑ * (cell_phase_relaxation_rate(i, j, k, grid, s) + cell_phase_relaxation_rate(i, j, k-1, grid, s)) / 2)
 
 @kernel function _latent_corrected_stability!(N², cl, m, grid, closure, closure_fields, velocities, s, qʷ, e, thermodynamics, sat, c, ω)
     i, j, k = @index(Global, NTuple)
@@ -491,8 +516,8 @@ end
         u = ℑzᵃᵃᶠ(i, j, kₛ, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
         𝕊ᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, kₛ, grid, closure_ij, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
         tₑ = ℓ / (𝕊ᴰ * u)
-        ωᶜ = subgrid_phase_relaxation_rate(s.microphysics, i, j, kₛ)
-        η = ifelse(isinf(ωᶜ), one(FT), condensing_fraction(tₑ * ωᶜ))
+        instantaneous = Val(AtmosphereModels.instantaneous_phase_relaxation(s.microphysics))
+        η = saturated_response_shareᶜᶜᶠ(instantaneous, tₑ, i, j, kₛ, grid, s)
         aᴺ = η * aʷ
 
         ΔN²ᴸ = aᴺ * (N²ᵇ - N²ˢ)

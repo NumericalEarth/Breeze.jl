@@ -175,15 +175,17 @@ end
 @inline function plume_saturation(s::ModelThermodynamicsSaturation, thermodynamics, c, Tl, qw, pval)
     constants = thermodynamics.constants
     surface = equilibrated_surface(s.phase_equilibrium, Tl)
-    esval = saturation_vapor_pressure(Tl, constants, surface)
-    ε = dry_air_gas_constant(constants) / vapor_gas_constant(constants)
-    dry_pressure = max(esval, pval - esval)
-    qs = ε * (1 - qw) * esval / dry_pressure
+    # The saturation specific humidity of the model (the one the microphysics uses),
+    # qˢ = pᵛ⁺ / (ρ Rᵛ T), at the density ρ = p / (Rᵐ T) of the component's air with its total
+    # water as vapor
+    Rᵐ = mixture_gas_constant(MoistureMassFractions(qw), constants)
+    ρ = pval / (Rᵐ * Tl)
+    qs = saturation_specific_humidity(Tl, ρ, constants, surface)
 
     ℒ, log_slope = condensate_latent_heat_and_log_slope(s.phase_equilibrium, constants, Tl)
     cᵖ = plume_heat_capacity(constants, qw)
-    # β q_s = (ℒ / ĉᵖ) ∂q_s/∂T
-    beta = (ℒ / cᵖ) * (pval / dry_pressure) * log_slope
+    # β q_s = (ℒ / ĉᵖ) ∂q_s/∂T at fixed p and composition: ∂ ln q_s / ∂T = ∂ ln e_s / ∂T
+    beta = (ℒ / cᵖ) * log_slope
     return qs, beta, cᵖ / ℒ, plume_exner_function(thermodynamics, qw, pval)
 end
 

@@ -54,7 +54,7 @@ using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equilibrated_surface, saturation_vapor_pressure,
                              PlanarLiquidSurface, PlanarIceSurface, dry_air_gas_constant, vapor_gas_constant,
                              liquid_latent_heat, ice_latent_heat, MoistureMassFractions, vapor_equivalent_heat_capacity,
-                             exner_exponent
+                             exner_exponent, saturation_specific_humidity, mixture_gas_constant
 
 include("shoc_constants.jl")
 include("clipping.jl")

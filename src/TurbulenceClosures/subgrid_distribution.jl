@@ -33,7 +33,7 @@ using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocit
                                       third_moment, limit_third_moment, assumed_pdf, buoyancy_flux_coefficients,
                                       plume_liquid_water_temperature, plume_saturation,
                                       clip_below, shoc_saturation_thermodynamics,
-                                      rate_norm_factor
+                                      rate_norm_factor, linear_interp, hard_floor, component_vapor_excess
 
 
 #####
@@ -567,6 +567,7 @@ function build_subgrid_cloud_fields(grid, distribution, solver, tracer_names)
                w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid), w′³ = ZFaceField(grid))
     cloud = (w′² = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
+             components = vapor_excess_component_fields(grid),
              applied_flux_conversion_fields(grid, energetics, tracer_names)...,
              gθ = CenterField(grid), gA = CenterField(grid))
     return SubgridCloudFields(energetics, moments, cloud, build_solver_state(grid, energetics),
@@ -776,30 +777,45 @@ end
             m.w′³[i, j, k] = limit_third_moment(d.skewness, cp, w′²ᶠ, w′³)
         end
 
-        # The assumed PDF at the centers
+        # The assumed PDF at the centers, from moments co-located there: the face moments are
+        # interpolated to the center, and the third moment is limited with the center w′², where the
+        # PDF evaluates the skewness (the face limit alone lets the center skewness grow without
+        # bound where w′² differs between the center and the faces)
         interface_moments(k) = (m.w′³[i, j, k], m.θˡ′²[i, j, k], m.w′θˡ′[i, j, k],
                                 m.θˡ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
+        largeneg = convert(FT, -99999999.99)
+        floors = (largeneg, zero(FT), largeneg, largeneg, largeneg, zero(FT))
         for k in 1:Nz
             zᶜ = znode(i, j, k, grid, ccc...)
             zˡ = znode(i, j, k, grid, ccf...)
             zᵘ = znode(i, j, k+1, grid, ccf...)
             wᶜ = (w[i, j, k] + w[i, j, k+1]) / 2
             θᵏ = θ[i, j, k]
+            w′²ᶜ = cl.w′²[i, j, k]
+            mˡ = interface_moments(k)
+            mᵘ = interface_moments(k+1)
+            mᶜ = map((yᵘ, yˡ, floor) -> hard_floor(linear_interp(zᵘ, zˡ, yᵘ, yˡ, zᶜ), floor), mᵘ, mˡ, floors)
+            w′³ᶜ = limit_third_moment(d.skewness, cp, w′²ᶜ, mᶜ[1])
+            mᶜ = (w′³ᶜ, Base.tail(mᶜ)...)
             C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, d.saturation, thermodynamics, cp, c, zᵘ, zˡ, zᶜ,
-                                                   p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k],
-                                                   interface_moments(k), interface_moments(k+1))
+                                                   p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
+            store_vapor_excess_components!(cl.components, i, j, k,
+                                           component_vapor_excess(d.assumed_pdf, thermodynamics, cp, zᵘ, zˡ, zᶜ,
+                                                                  p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ))
             cl.aᶜ[i, j, k] = C
             cl.qˡ[i, j, k] = qˡ
             cl.qˡ′²[i, j, k] = qˡ′²
             cl.w′qˡ′[i, j, k] = w′qˡ′
             cl.w′θᵥ′[i, j, k] = w′θᵥ′
-            A_q, A_c = buoyancy_flux_coefficients(d.saturation, thermodynamics, c, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
-            # The stability uses the buoyancy parameter of the level, g / θˡⁱ. The buoyancy
-            # production of the TKE equation is not this distribution's: it is the conversion of
-            # the fluxes the closure applies (`compute_applied_flux_conversions!`).
-            cl.gθ[i, j, k] = g / θᵏ
-            cl.gA[i, j, k] = g / θᵏ * A_q
-            cl.Bˡ[i, j, k] = g / θᵏ * A_c * w′qˡ′
+            # The stability uses the exact derivatives b_χ of the model's buoyancy at the level
+            # (g / θᵥ, the moisture dependence of Π and the loading included):
+            # w′b′ = b_θ w′θˡⁱ′ + b_qᵛ w′qᵗ′ + (b_qˡ - b_qᵛ) w′qˡ′. The buoyancy production of the TKE
+            # equation is not this distribution's: it is the conversion of the fluxes the closure
+            # applies (`compute_applied_flux_conversions!`).
+            b_qᵛ = cl.b_qᵛ[i, j, k]
+            cl.gθ[i, j, k] = cl.b_θ[i, j, k]
+            cl.gA[i, j, k] = b_qᵛ
+            cl.Bˡ[i, j, k] = (cl.b_qˡ[i, j, k] - b_qᵛ) * w′qˡ′
         end
     end
 
@@ -1071,3 +1087,44 @@ function SimplifiedHigherOrderClosures.with_parameters(closure::TKEBasedTurbulen
                                          closure.maximum_tke_diffusivity, closure.minimum_tke, shear,
                                          closure.negative_tke_damping_time_scale, subgrid_distribution, closure.solver)
 end
+
+#####
+##### The statistics of the vapor excess for the microphysics (`TurbulenceClosureStatistics`)
+#####
+
+# The double Gaussian at the centers as the distribution of the vapor excess over liquid: the
+# weight `a` of the updraft component, and each component's mean `μ₁`, `μ₂` and spread `σ₁`, `σ₂`
+vapor_excess_component_fields(grid) = (a = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
+                                       σ₁ = CenterField(grid), σ₂ = CenterField(grid))
+
+@inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂))
+    @inbounds begin
+        components.a[i, j, k] = a
+        components.μ₁[i, j, k] = μ₁
+        components.μ₂[i, j, k] = μ₂
+        components.σ₁[i, j, k] = σ₁
+        components.σ₂[i, j, k] = σ₂
+    end
+    return nothing
+end
+
+@inline function stored_vapor_excess_components(i, j, k, components)
+    @inbounds begin
+        a = components.a[i, j, k]
+        return (; a = (a, 1 - a), μ = (components.μ₁[i, j, k], components.μ₂[i, j, k]),
+                  σ = (components.σ₁[i, j, k], components.σ₂[i, j, k]))
+    end
+end
+
+@inline AtmosphereModels.supersaturation_statistics(::TurbulenceClosureStatistics, i, j, k, grid, ::FlavorOfTKEClosure,
+                                                    closure_fields::TKEClosureFields, model_fields) =
+    closure_vapor_excess_statistics(i, j, k, grid, closure_fields.subgrid_cloud)
+
+# Without a subgrid distribution: no spread, the grid-mean rate
+@inline function closure_vapor_excess_statistics(i, j, k, grid, ::Nothing)
+    FT = eltype(grid)
+    return (; μ = zero(FT), σ = zero(FT), skewness = zero(FT), f⁺ = zero(FT))
+end
+
+@inline closure_vapor_excess_statistics(i, j, k, grid, fields::SubgridCloudFields) =
+    stored_vapor_excess_components(i, j, k, fields.cloud.components)

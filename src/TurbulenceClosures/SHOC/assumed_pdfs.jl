@@ -218,14 +218,35 @@ end
     return x1_1, x1_2, x2_1, x2_2, zero_safe_sqrt(x2_1), zero_safe_sqrt(x2_2)
 end
 
+# The correlation of w with a scalar that the components carry, bounded smoothly so that the
+# components are realizable by construction: r² < 1 - ℂᵍ(Sk), so that the within-component
+# variance (1 - r² / (1 - ℂᵍ)) x′² is positive and no component has zero width, and
+# |r| σ / min|ŵᵢ| < x̄, so that the component means x̄ + (deviation) of a non-negative scalar
+# (total water) stay positive. With r₁ = √(1 - ℂᵍ) and r₂ = x̄ min|ŵᵢ| / σ,
+#
+#     r = r₀ / (1 + (r₀ / r₁)⁴ + (r₀ / r₂)⁴)^(1/4),
+#
+# smooth in r₀, odd, and below both bounds; r ≈ r₀ (1 - (r₀/r₁)⁴/4 - ...) where r₀ is well inside
+# them. The flux the components carry is reduced by the same factor.
+@inline function realizable_correlation(r₀, one_minus_share, x̄, σ, ŵᵐⁱⁿ)
+    FT = typeof(r₀)
+    t₁ = r₀ * r₀ / one_minus_share
+    t₂ = r₀ * σ / max(max(x̄, zero(FT)) * ŵᵐⁱⁿ, floatmin(FT))
+    t₂² = t₂ * t₂
+    return r₀ / sqrt(sqrt(1 + t₁ * t₁ + t₂² * t₂²))
+end
+
 # The equal share of the within-component variance (EqualWidthDoubleGaussianPDF)
 @inline function scalar_plume_parameters(cp, flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed,
                                          p::EqualWidthDoubleGaussianPDF)
     FT = typeof(sec)
-    r = clip_between(cp, flux / (sqrtw2 * sqrt_sec), -1, 1, 1)
+    r₀ = clip_between(cp, flux / (sqrtw2 * sqrt_sec), -1, 1, 1)
     uniform = (sec <= tol * tol) | (abs(w1_2 - w1_1) <= 0)
-    x1_1 = (-1 * r) / ifelse(uniform, one(FT), w1_2)
-    x1_2 = (-1 * r) / ifelse(uniform, one(FT), w1_1)
+    w1_1ˢ = ifelse(uniform, one(FT), w1_1)
+    w1_2ˢ = ifelse(uniform, -one(FT), w1_2)
+    r = realizable_correlation(r₀, 1 - within_component_share(p, Skew_w), x_first, sqrt_sec, min(abs(w1_1ˢ), abs(w1_2ˢ)))
+    x1_1 = (-1 * r) / w1_2ˢ
+    x1_2 = (-1 * r) / w1_1ˢ
     x2 = max(0, 1 - r * r / (1 - within_component_share(p, Skew_w))) * sec
     x1_1 = ifelse(uniform, x_first, x1_1 * sqrt_sec + x_first)
     x1_2 = ifelse(uniform, x_first, x1_2 * sqrt_sec + x_first)
@@ -377,3 +398,82 @@ end
 @inline assumed_pdf(pdf, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first, wsec, moments_l, moments_u) =
     assumed_pdf(pdf, FixedConstantsLiquidSaturation(), nothing, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first,
                 wsec, moments_l, moments_u)
+
+#####
+##### The components of the double Gaussian in the vapor excess over liquid, for the microphysics
+#####
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The double Gaussian of `pdf` at a level (the moments are those [`assumed_pdf`](@ref) reads) as the
+distribution of the vapor excess over liquid ``δqᵛ⁺ˡ = qᵗ - qᵛ⁺ˡ`` of each component's air without
+condensate, as the microphysics defines it: the weight `a` of the updraft component (1) and, per
+component, the mean ``μᵢ = qᵗᵢ - qᵛ⁺ˡ(Tᵢ, ρᵢ)`` at its liquid-water temperature ``Tᵢ = Π θˡⁱᵢ`` and the
+density ``ρᵢ = p / (Rᵐ Tᵢ)``, and the within-component spread
+``σᵢ² = qᵗ′²ᵢ + (∂qᵛ⁺ˡ/∂θ)² θ′²ᵢ - 2 (∂qᵛ⁺ˡ/∂θ) r σθᵢ σqᵢ``, with the model's saturation over liquid
+(the formula the microphysics uses). Returns `(a, μ₁, μ₂, σ₁, σ₂)`.
+"""
+@inline function component_vapor_excess(pdf::ComponentDoubleGaussianPDF, thermodynamics, cp, zi_u, zi_l, zt_k, pval,
+                                        thl_first, w_first, qw_first, wsec, moments_l, moments_u)
+    FT = typeof(thl_first)
+    largeneg = convert(FT, -99999999.99)
+    thl_tol = pdf.thl_tol
+    rt_tol = pdf.rt_tol
+    w_tol_sqd = pdf.w_tol * pdf.w_tol
+
+    interpolate(n, minthresh) = hard_floor(linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k), minthresh)
+    w3var = interpolate(1, largeneg)
+    thlsec = interpolate(2, zero(FT))
+    wthlsec = interpolate(3, largeneg)
+    qwthlsec = interpolate(4, largeneg)
+    wqwsec = interpolate(5, largeneg)
+    qwsec = interpolate(6, zero(FT))
+
+    sqrtw2 = zero_safe_sqrt(wsec)
+    sqrtthl = clip_max(cp, thl_tol, zero_safe_sqrt(thlsec), thl_tol)
+    sqrtqt = clip_max(cp, rt_tol, zero_safe_sqrt(qwsec), rt_tol)
+
+    calm = wsec <= w_tol_sqd
+    wsec_safe = ifelse(calm, one(FT), wsec)
+    Skew_w = w3var / sqrt(wsec_safe * wsec_safe * wsec_safe)
+    w2_1 = within_component_share(pdf, Skew_w)
+    omw = 1 - w2_1
+    a = clip_between(cp, convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))),
+                     minimum_updraft_fraction(pdf), maximum_updraft_fraction(pdf), 1)
+    sqrtw2t = sqrt(1 - w2_1)
+    w1_1 = sqrt((1 - a) / a) * sqrtw2t
+    w1_2 = -1 * sqrt(a / (1 - a)) * sqrtw2t
+    Skew_w = ifelse(calm, zero(FT), Skew_w)
+    a = ifelse(calm, convert(FT, 0.5), a)
+    w1_1 = ifelse(calm, w_first, w1_1)
+    w1_2 = ifelse(calm, w_first, w1_2)
+
+    thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 =
+        scalar_plume_parameters(cp, wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, pdf)
+    qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 =
+        scalar_plume_parameters(cp, wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, pdf)
+
+    testvar = a * sqrtqw2_1 * sqrtthl2_1 + (1 - a) * sqrtqw2_2 * sqrtthl2_2
+    uncorrelated = testvar == 0
+    r = clip_between(cp, (qwthlsec - a * (qw1_1 - qw_first) * (thl1_1 - thl_first)
+                          - (1 - a) * (qw1_2 - qw_first) * (thl1_2 - thl_first)) /
+                         ifelse(uncorrelated, one(FT), testvar), -1, 1, 1)
+    r = ifelse(uncorrelated, zero(FT), r)
+
+    μ₁, σ₁ = component_vapor_excess_moments(thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r)
+    μ₂, σ₂ = component_vapor_excess_moments(thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r)
+    return a, μ₁, μ₂, σ₁, σ₂
+end
+
+@inline function component_vapor_excess_moments(thermodynamics, pval, thl, qw, vθ, vq, σθ, σq, r)
+    constants = thermodynamics.constants
+    Π = plume_exner_function(thermodynamics, qw, pval)
+    T = Π * thl
+    Rᵐ = mixture_gas_constant(MoistureMassFractions(qw), constants)
+    qˢ = saturation_specific_humidity(T, pval / (Rᵐ * T), constants, PlanarLiquidSurface())
+    _, log_slope = condensate_latent_heat_and_log_slope(WarmPhaseEquilibrium(), constants, T)
+    ∂qˢ∂θ = qˢ * log_slope * Π
+    σ = zero_safe_sqrt(max(0, vq + ∂qˢ∂θ * ∂qˢ∂θ * vθ - 2 * ∂qˢ∂θ * r * σθ * σq))
+    return qw - qˢ, σ
+end

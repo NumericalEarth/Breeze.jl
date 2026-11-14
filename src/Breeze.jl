@@ -144,6 +144,7 @@ export
     ConstantRateCondensateFormation,
     P3Microphysics,
     PredictedParticlePropertiesMicrophysics,
+    TurbulenceClosureStatistics,
     DiagnosticVaporExcess,
     PrognosticVaporExcess,
     PrognosticLiquidFraction,

@@ -81,13 +81,20 @@ Adapt.adapt_structure(to, condensation::SubgridCondensation) =
 # Γ(μ, σ) = σ G(μ/σ) - μ = σ [φ(Q) - Q Φ(-Q)], Q = μ/σ, written without the cancellation of
 # σ G(Q) - μ for large Q. The spread is floored at a tiny value so that σ = 0 gives Γ = 0 and the
 # rate is smooth in σ; `max(0, ⋅)` removes round-off below zero.
+#
+# Beyond |Q| = 40 the Gaussian tail is below round-off in Float64 (and Float32), and Γ is its limit,
+# max(0, -μ): 0 for Q > 40 and -μ for Q < -40. Q is clamped inside the formula, so that an
+# overflowing Q (σ → 0, or a huge evaporation shift) never forms ∞ ⋅ 0.
 @inline function gaussian_excess_correlation(μ, σ)
     FT = typeof(μ)
     σ₊ = max(σ, floatmin(FT) / eps(FT))
     Q = μ / σ₊
-    φ = exp(-Q^2 / 2) / sqrt(2 * FT(π))
-    Φ⁻ = erfc(Q / sqrt(FT(2))) / 2
-    return max(0, σ₊ * (φ - Q * Φ⁻))
+    Qᵐᵃˣ = convert(FT, 40)
+    Qᶜ = clamp(Q, -Qᵐᵃˣ, Qᵐᵃˣ)
+    φ = exp(-Qᶜ^2 / 2) / sqrt(2 * FT(π))
+    Φ⁻ = erfc(Qᶜ / sqrt(FT(2))) / 2
+    tail = ifelse(Q > Qᵐᵃˣ, zero(FT), -μ)
+    return max(0, ifelse(abs(Q) > Qᵐᵃˣ, tail, σ₊ * (φ - Qᶜ * Φ⁻)))
 end
 
 """
