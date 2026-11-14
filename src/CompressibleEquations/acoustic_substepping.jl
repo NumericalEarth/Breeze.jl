@@ -899,7 +899,7 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     ρᵡ_name = thermodynamic_density_name(model.formulation)
     # The stashed (ρθ)′ˢ⁻ starts equal to (ρθ)′: the divergence damping measures the change of
     # (ρθ)′ over a substep, and none has run. A damping applied at the start of the first
-    # substep (see `deferred_divergence_damping`) then adds exactly zero.
+    # substep (see `fused_divergence_damping`) then adds exactly zero.
     launch!(arch, grid, :xyz, _initialize_stage_perturbations!,
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
@@ -1023,8 +1023,8 @@ end
     end
 end
 
-# Step A of a substep, with the damping of the substep before when it is deferred to this step
-# (`deferred_divergence_damping`).
+# Step A of a substep, with the damping of the substep before fused in
+# (`fused_divergence_damping`).
 function explicit_horizontal_step!(::NoDivergenceDamping, substepper, model, Δτ)
     grid = model.grid
     Gⁿ = model.timestepper.Gⁿ
@@ -1082,8 +1082,8 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Apply the divergence damping of the last acoustic substep of a stage, when it is deferred to the
-explicit step of the substep after (`deferred_divergence_damping`), then fill the halos of ``(ρu)′``
+Apply the divergence damping of the last acoustic substep of a stage, when it is fused into the
+explicit step of the substep after (`fused_divergence_damping`), then fill the halos of ``(ρu)′``
 and ``(ρv)′`` and enforce impenetrability on them. The divergence damping that ends each substep
 writes their interior, and inside the loop the next reader of their halos and wall faces is the
 predictor of the following substep, which comes after that substep's own explicit step, fill and
@@ -1091,7 +1091,7 @@ enforcement. So only the last substep's damped values need them, for the recover
 """
 function finish_horizontal_momentum_perturbations!(model, substepper, stage)
     grid = model.grid
-    apply_divergence_damping!(deferred_divergence_damping(substepper.damping), substepper, grid, stage.Δτ,
+    apply_divergence_damping!(fused_divergence_damping(substepper.damping), substepper, grid, stage.Δτ,
                               model.thermodynamic_constants)
     fill_halo_regions!(substepper.momentum_perturbation.u)
     fill_halo_regions!(substepper.momentum_perturbation.v)
@@ -1203,15 +1203,16 @@ end
 # No-op default
 @inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
 
-# The damping that each substep's explicit horizontal step applies for the substep before
-# (`explicit_horizontal_step!`), and the damping applied right after each substep: one of the two
-# is `NoDivergenceDamping`. Only `ThermalDivergenceDamping` can be deferred: its correction is
-# a single pass over fields that stay put until the next substep's predictors.
-deferred_divergence_damping(damping) = NoDivergenceDamping()
-deferred_divergence_damping(damping::ThermalDivergenceDamping) = damping
+# Divergence damping is applied either in its own kernel right after each substep (separate), or
+# fused into the next substep's explicit horizontal step (`explicit_horizontal_step!`). Both compute
+# the same correction; fusing saves a kernel launch and a halo fill per substep. One of the two
+# functions below returns `NoDivergenceDamping`. Only `ThermalDivergenceDamping` can be fused: its
+# correction is a single pass over fields that stay put until the next substep's predictors.
+fused_divergence_damping(damping) = NoDivergenceDamping()
+fused_divergence_damping(damping::ThermalDivergenceDamping) = damping
 
-immediate_divergence_damping(damping) = damping
-immediate_divergence_damping(::ThermalDivergenceDamping) = NoDivergenceDamping()
+separate_divergence_damping(damping) = damping
+separate_divergence_damping(::ThermalDivergenceDamping) = NoDivergenceDamping()
 
 # The fields whose halos are filled after `_post_solve_recovery!`, in one launch per side: (ρθ)′,
 # whose horizontal and vertical neighbors the next substep reads, and what the damping reads next
@@ -1847,8 +1848,8 @@ function acoustic_substep!(model, substepper, stage, advection)
     (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
 
     # Step A: explicit horizontal forward of (ρu)′, (ρv)′, after the divergence damping of the
-    # substep before when that is deferred to this step.
-    explicit_horizontal_step!(deferred_divergence_damping(substepper.damping), substepper, model, Δτ)
+    # substep before when that is fused into this step.
+    explicit_horizontal_step!(fused_divergence_damping(substepper.damping), substepper, model, Δτ)
 
     # No fills on a single-architecture grid (`fill_substep_halos!`), here and below.
     fill_substep_halos!(substepper.momentum_perturbation.u, model)
@@ -1936,7 +1937,7 @@ function acoustic_substep!(model, substepper, stage, advection)
     # this substep's last reader of them: the next substep's explicit step adds to them and then
     # fills their halos and enforces impenetrability, and the last substep's are finished by
     # `finish_horizontal_momentum_perturbations!`.
-    apply_divergence_damping!(immediate_divergence_damping(substepper.damping), substepper, grid, Δτ, constants)
+    apply_divergence_damping!(separate_divergence_damping(substepper.damping), substepper, grid, Δτ, constants)
     # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
     return nothing
 end
