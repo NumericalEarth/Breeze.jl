@@ -518,6 +518,15 @@ floating-point noise through the non-normal substep operator (see
 A fully implicit backward Euler scheme is obtained with ``ω = 1`` and offers the most dissipation.
 The default ``ω = 0.65`` adds modest dissipation; the dimensionless parameter ``ε = 2ω - 1 = 0.3`` quantifies the deviation from centered.
 
+### Lateral boundary conditions
+
+Each substep zeros normal momentum perturbations on bounded lateral faces, including prescribed-flow
+faces. Prescribed momentum is carried by the stage-entry state, with BCs reapplied after stage recovery.
+This deliberately replaces west/south open-face updates, matching east/north.
+
+At active `NormalFlowBoundaryCondition` sides, the outermost ``ρ'`` and ``(ρθ)'`` cells relax
+toward prescribed scalar values each substep, controlled by `open_boundary_relaxation`.
+
 ### Recovery
 
 After ``N_τ`` substeps, the full prognostic state is recovered by addition:
