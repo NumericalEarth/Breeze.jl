@@ -26,7 +26,9 @@
     Droplet{FT}
 
 A cloud droplet with position `(x, y, z)`, wet radius `r`, dry (solute) radius `rᵈ`,
-hygroscopicity `κ`, and terminal velocity `𝕎` (positive downwards).
+hygroscopicity `κ`, terminal velocity `𝕎` (positive downwards), and the virtual position
+`(xᵛ, yᵛ, zᵛ)` in a physical chamber that [`ChamberSources`](@ref) use to remove droplets
+(zero when there are no sources).
 """
 struct Droplet{FT}
      x :: FT
@@ -36,6 +38,9 @@ struct Droplet{FT}
     rᵈ :: FT
      κ :: FT
      𝕎 :: FT
+    xᵛ :: FT
+    yᵛ :: FT
+    zᵛ :: FT
 end
 
 """
@@ -96,7 +101,8 @@ Adapt.adapt_structure(to, ::DiffusiveSelfInteraction) = nothing
                            physics = DropletPhysicsParameters(FT),
                            self_interaction = DiffusiveSelfInteraction(),
                            sorting = nothing,
-                           droplets = nothing)
+                           droplets = nothing,
+                           sources = nothing)
 
 Return Lagrangian microphysics in which every cloud droplet is a Lagrangian particle.
 
@@ -110,25 +116,32 @@ time step (`CountingSort()` or `ComparisonSort()` from Oceananigans), which keep
 droplets in the same cell together, or `nothing` (the default) to keep the droplets in their initial order.
 The droplets are allocated on the architecture of the grid
 when the model is built, and can be accessed with `model.microphysics.droplets`.
+`sources` is a [`ChamberSources`](@ref) that injects and removes droplets once per time step, or `nothing`.
 """
-struct LagrangianMicrophysics{P, S, O, D}
+struct LagrangianMicrophysics{P, S, O, D, C}
              physics :: P
     self_interaction :: S
              sorting :: O
             droplets :: D
+             sources :: C
 end
 
 LagrangianMicrophysics(FT = Oceananigans.defaults.FloatType; physics = DropletPhysicsParameters(FT),
-                       self_interaction = DiffusiveSelfInteraction(), sorting = nothing, droplets = nothing) =
-    LagrangianMicrophysics(physics, self_interaction, sorting, droplets)
+                       self_interaction = DiffusiveSelfInteraction(), sorting = nothing, droplets = nothing,
+                       sources = nothing) =
+    LagrangianMicrophysics(physics, self_interaction, sorting, droplets, sources)
 
 Base.summary(::LagrangianMicrophysics) = "LagrangianMicrophysics"
 
 function Base.show(io::IO, μ::LagrangianMicrophysics)
     print(io, summary(μ), '\n',
               "├── self_interaction: ", self_interaction_summary(μ.self_interaction), '\n',
+              "├── sources: ", sources_summary(μ.sources), '\n',
               "└── droplets: ", droplet_summary(μ.droplets))
 end
+
+sources_summary(::Nothing) = "none"
+sources_summary(s) = summary(s)
 
 self_interaction_summary(::Nothing) = "nothing"
 self_interaction_summary(::DiffusiveSelfInteraction{Nothing}) = "DiffusiveSelfInteraction()"
@@ -141,7 +154,7 @@ droplet_summary(droplets::NamedTuple) = string(length(droplets.x), " droplets (n
 
 # The droplets are not used inside kernels, where only the physics parameters are needed
 Adapt.adapt_structure(to, μ::LagrangianMicrophysics) =
-    LagrangianMicrophysics(adapt(to, μ.physics), adapt(to, μ.self_interaction), nothing, nothing)
+    LagrangianMicrophysics(adapt(to, μ.physics), adapt(to, μ.self_interaction), nothing, nothing, nothing)
 
 # Droplets are moved to the architecture of the grid when the model is built
 Architectures.on_architecture(arch, μ::LagrangianMicrophysics) = μ
@@ -153,20 +166,25 @@ Architectures.on_architecture(arch, μ::LagrangianMicrophysics) = μ
 function AtmosphereModels.materialize_microphysics(μ::LagrangianMicrophysics, grid, timestepper)
     FT = eltype(grid)
     arch = architecture(grid)
+    validate_sources(μ.sources, grid)
     initial = initial_droplets(μ.droplets, FT)
     Nd = length(initial.x)
+    virtual = initial_virtual_positions(μ.sources, initial, grid, FT)
 
     components = (x = initial.x, y = initial.y, z = initial.z,
-                  r = initial.r, rᵈ = initial.rᵈ, κ = initial.κ, 𝕎 = zeros(FT, Nd))
+                  r = initial.r, rᵈ = initial.rᵈ, κ = initial.κ, 𝕎 = zeros(FT, Nd),
+                  xᵛ = virtual.xᵛ, yᵛ = virtual.yᵛ, zᵛ = virtual.zᵛ)
 
     components = map(c -> on_architecture(arch, convert(Vector{FT}, c)), components)
     properties = StructArray{Droplet{FT}}(components)
+    sources = materialize_sources(μ.sources, properties, FT)
     droplets = LagrangianParticles(properties; sorting = μ.sorting)
+    droplets = with_removal(droplets, sources)
     droplets = materialize_lagrangian_particles(droplets, timestepper)
 
     self_interaction = materialize_self_interaction(μ.self_interaction, grid, timestepper)
 
-    return LagrangianMicrophysics(μ.physics, self_interaction, μ.sorting, droplets)
+    return LagrangianMicrophysics(μ.physics, self_interaction, μ.sorting, droplets, sources)
 end
 
 AtmosphereModels.materialize_microphysics(μ::LagrangianMicrophysics{<:Any, <:Any, <:Any, <:LagrangianParticles}, grid, timestepper) = μ
@@ -668,7 +686,13 @@ function AtmosphereModels.microphysics_model_update!(μ::LagrangianMicrophysics,
                       self_interaction)
     launch!(arch, grid, :xyz, _apply_condensation!, ρθ, ρqᵛ, C, T, ρ, p, pˢᵗ, constants)
 
-    # Diagnose the liquid mass fraction of the droplets in each cell
+    # Remove droplets that left the virtual chamber and inject new aerosol (see chamber_sources.jl). The droplets
+    # removed here have grown and deposited their condensate during this step; those injected first move at the next.
+    apply_chamber_sources!(μ.sources, μ, model, Δt)
+
+    # Diagnose the liquid mass fraction of the droplets now present in each cell
+    droplets = μ.droplets.properties
+    Nd = length(droplets)
     fill!(parent(qˡ), 0)
     Nd > 0 && launch!(arch, grid, KernelParameters(1:Nd), _deposit_droplet_liquid!,
                       parent(qˡ), halo, droplets, grid, ρ, constants)

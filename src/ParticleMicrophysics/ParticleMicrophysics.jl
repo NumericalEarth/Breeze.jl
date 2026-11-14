@@ -10,6 +10,12 @@ export
     LagrangianMicrophysics,
     DiffusiveSelfInteraction,
     Droplet,
+    ChamberSources,
+    AerosolInjection,
+    VirtualChamberRemoval,
+    IntegratedVirtualPosition,
+    ResampledVirtualPosition,
+    SourceSinkBookkeeping,
 
     # Parameters and component models
     DropletPhysicsParameters,
@@ -57,12 +63,13 @@ using KernelAbstractions: @kernel, @index, @atomic
 using Oceananigans.Advection: Centered
 using Oceananigans.Architectures: Architectures, architecture, on_architecture
 using Oceananigans.Fields: CenterField, FractionalIndices
-using Oceananigans.Grids: Bounded, Face, Flat, Periodic, RectilinearGrid, halo_size, topology
-using Oceananigans.Models.LagrangianParticleTracking: LagrangianParticleTracking, LagrangianParticles, StructArray
+using Oceananigans.Grids: Bounded, Face, Flat, Periodic, RectilinearGrid, halo_size, topology, xnodes, ynodes, znodes
+using Oceananigans.Models.LagrangianParticleTracking: LagrangianParticleTracking, LagrangianParticles, StructArray,
+                                                      ParticleRemoval, remove_absorbed_particles!
 using Oceananigans.Operators: Vᶜᶜᶜ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ
 using Oceananigans.TimeSteppers: materialize_lagrangian_particles, update_state!
 using Oceananigans.TurbulenceClosures: ScalarDiffusivity, ThreeDimensionalFormulation
-using Oceananigans.Utils: KernelParameters, interpolator, launch!
+using Oceananigans.Utils: KernelParameters, interpolator, launch!, prettysummary
 
 using Breeze.AtmosphereModels: AtmosphereModels, continuity_density, dynamics_pressure,
                                 standard_pressure, kernel_time_step
@@ -71,5 +78,6 @@ using Breeze.TimeSteppers: AcousticRungeKutta3, SSPRungeKutta3
 using Breeze.Thermodynamics: MoistureMassFractions, mixture_gas_constant, mixture_heat_capacity, supersaturation
 
 include("lagrangian_microphysics.jl")
+include("chamber_sources.jl")
 
 end # module ParticleMicrophysics
