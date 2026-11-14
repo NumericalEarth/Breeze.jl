@@ -1679,11 +1679,12 @@ remainder subtracts from ``ρθ − ρθⁿ`` like ``Wⁿ``; elsewhere ``ς = 1`
 """
 function compute_step_start_moisture_content!(step_start, substepper, model, Uⁿ)
     grid = model.grid
-    state, densities = moisture_content_arguments(substepper, model, Uⁿ)
+    state, _ = moisture_content_arguments(substepper, model, Uⁿ)
     moisture_name = moisture_prognostic_name(model.microphysics)
     condensate_names = condensate_field_names(model.microphysics)
+    ρᵡ_name = thermodynamic_density_name(model.formulation)
     launch!(architecture(grid), grid, :xyz, _compute_step_start_moisture_content!,
-            step_start.moisture_content, grid, state, densities.ρᵡ⁰, densities.ρᵡ,
+            step_start.moisture_content, grid, state, Uⁿ[ρᵡ_name], thermodynamic_density(model.formulation),
             Uⁿ.ρᵈ, Uⁿ[moisture_name], values(Uⁿ[condensate_names]),
             model.moisture_density, values(model.microphysical_fields[condensate_names]))
     fill_halo_regions!(step_start.moisture_content)
