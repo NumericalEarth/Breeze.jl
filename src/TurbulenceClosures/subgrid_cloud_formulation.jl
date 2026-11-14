@@ -283,14 +283,14 @@ the scalar-variance budget with the same `ℓ`, `√e` and `Ri` as `Kᶜ`, so th
 correlation of `w` with θˡ and qᵗ is a function of `Ri` alone, bounded by a bound on `ℂᵠ`.
 """
 function SubgridDistribution(FT::DataType = Oceananigans.defaults.FloatType;
-                             time_scale = StratificationLimitedMomentTimeScale(FT),
+                             time_scale = DissipationTimeScale(FT; ℂᵠ = 1.3),
                              second_moments = DowngradientSecondMoments(FT),
                              third_moment = AlgebraicThirdMoment(FT),
                              stratification_number_bound = RationalSaturatedStratificationNumber(FT),
                              skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = 0.85),
-                             assumed_pdf = DoubleGaussianPDF(FT),
+                             assumed_pdf = EqualShareDoubleGaussianPDF(FT),
                              saturation = ModelThermodynamicsSaturation(),
-                             clipping = HardClipping(),
+                             clipping = SmoothClipping(),
                              constants = SHOCConstants(FT),
                              ℂʳ = nothing)
     validate_distribution_saturation(saturation)
@@ -684,8 +684,9 @@ end
 applied_flux_conversion_fields(grid, buoyancy_flux, tracer_names) = (; B = CenterField(grid))
 
 function applied_flux_conversion_fields(grid, ::CloudBuoyancyFlux, tracer_names)
-    centers = NamedTuple(name => CenterField(grid) for name in (:B, :P, :Bˢ, :Pˢ, :ωᴮ, :βᶿ, :βᵛ, :βˡ, :βⁱ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_βᶿ, :stage_βᵛ, :stage_βˡ, :stage_βⁱ, :stage_surface, :shortfall, :shortfall_ρθ))
-    return merge(centers, (ρu⁻ = XFaceField(grid), ρv⁻ = YFaceField(grid)))
+    centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :P, :Bˢ, :Pˢ, :ωᴮ, :βᶿ, :βᵛ, :βˡ, :βⁱ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_βᶿ, :stage_βᵛ, :stage_βˡ, :stage_βⁱ, :stage_surface, :shortfall, :shortfall_ρθ))
+    faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid))
+    return merge(centers, faces, (ρu⁻ = XFaceField(grid), ρv⁻ = YFaceField(grid)))
 end
 
 # Every closure scalar just before its solve (diagnostic: the stage's energy budget)
@@ -948,6 +949,7 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:CloudBuoyancyFlux{N
     grid = model.grid
     arch = grid.architecture
     N²₋ = fields.solver_state.N²₋
+    compute_buoyancy_derivatives!(fields, model)
     launch!(arch, grid, parameters, _set_lagged_stability!, closure_fields.N², N²₋)
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
     launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
@@ -959,6 +961,7 @@ end
 
 # Within `update_state!`, after the diffusivities and before the implicit coefficient
 function compute_subgrid_cloud!(fields::SubgridCloudFields, closure_fields, closure, model, tracers, parameters)
+    compute_buoyancy_derivatives!(fields, model)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
     solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
     return nothing

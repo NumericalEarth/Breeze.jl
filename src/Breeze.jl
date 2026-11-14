@@ -254,7 +254,7 @@ export
     SimplifiedHigherOrderClosure, SHOC, smooth_shoc_components,
     BlendedMixingLength, ColumnStabilityDamping, RichardsonStabilityFunctions, StratificationLimitedTimeScale, ForwardEulerTKE, ImplicitSinkTKE, PDFBuoyancyFlux, DowngradientBuoyancyFlux, DowngradientSecondMoments,
     AlgebraicThirdMoment, UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
-    ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness, DoubleGaussianPDF, SmoothDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation, HardClipping, SmoothClipping, BulkRichardsonBoundaryLayerDepth, SHOCConstants,
+    ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness, DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualShareDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation, HardClipping, SmoothClipping, BulkRichardsonBoundaryLayerDepth, SHOCConstants,
     closure_parameters, with_parameters,
     SubgridCloudFormulation, SubgridDistribution, CloudBuoyancyFlux, LiquidFluxFraction, BracketedFractionSolve, ClosureOwnedCloud, StratificationLimitedMomentTimeScale, FixedPointIteration, SecantIteration, BisectionIteration, LaggedStability, DissipationTimeScale, EddyTurnoverTimeScale,
     LagrangianParticles, ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,

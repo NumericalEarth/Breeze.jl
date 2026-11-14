@@ -111,7 +111,9 @@ function closure_energy_conversions(model)
     return (mean_kinetic_energy_loss = sum(ρᶠ .* Δzᶠ .* Pᶠ),
             shear_production = sum(ρ .* Δzᶜ .* budget_column(cl.P)),
             buoyancy_conversion = sum(ρᶠ .* Δzᶠ .* Bᶠ),
-            buoyancy_production = sum(ρ .* Δzᶜ .* B),
+            buoyancy_production = sum(ρ .* Δzᶜ .* (B .- budget_column(cl.Bᴸ))),
+            latent_production = sum(ρ .* Δzᶜ .* budget_column(cl.Bᴸ)),
+            latent_conversion = sum(ρᶠ .* Δzᶠ .* Kᶜ[2:Nz] .* budget_column(cl.ΔN²ᴸ)[2:Nz]),
             dissipation = sum(ρ .* Δzᶜ .* ε),
             β = β, stored_β = hcat(budget_column(cl.βᶿ), budget_column(cl.βᵛ), budget_column(cl.βˡ), budget_column(cl.βⁱ)))
 end
@@ -129,6 +131,8 @@ end
         # to the accuracy of the central differences of the buoyancy here (≈1e-9)
         @test c.buoyancy_production ≈ c.buoyancy_conversion rtol=1e-7 atol=1e-7 * scale
         @test c.stored_β ≈ c.β rtol=1e-6
+        # the latent part: Kᶜ aᴺ (N²ᵇ - N²ˢ) at the faces, drawn from the internal energy
+        @test c.latent_production ≈ c.latent_conversion rtol=1e-12 atol=1e-14 * scale
     end
 end
 

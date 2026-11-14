@@ -74,6 +74,58 @@ DoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
 
 Adapt.@adapt_structure DoubleGaussianPDF
 
+"""
+$(TYPEDEF)
+
+The double-Gaussian PDF of [`DoubleGaussianPDF`](@ref) (the updraft component of weight `a↑` and the
+downdraft component of weight `a↓ = 1 - a↑`, from the first three moments of vertical velocity)
+with the within-component variances of θˡⁱ and qᵗ shared equally between the components, as for
+vertical velocity:
+
+    σᵢ² = (1 - r² / (1 - ℂᵍ₁)) φ′²,    r = w′φ′ / √(w′² φ′²),
+
+so that the components' means carry the flux and the rest of the variance is within them. The
+scalar skewness follows (it is not imposed). SHOC's rule instead matches an imposed scalar
+skewness (zero for θˡ, a ramp of `ℂᵍ₂ Sk_w` for qᵗ), which for `|Sk_w| ≳ 1.25` asks for a negative
+variance in the narrow component, clipped to zero: a component of no width, whose cloud is all
+or nothing. The equal share needs `r² ≤ 1 - ℂᵍ₁`; beyond it the within-component variance is zero
+(the flux-correlation bound `ℂʳ` of [`SubgridDistribution`](@ref) keeps `r` below it). The
+within-component θˡⁱ–qᵗ correlation is that of the covariance left after the components' means.
+
+$(TYPEDFIELDS)
+"""
+struct EqualShareDoubleGaussianPDF{FT} <: AbstractSHOCComponent
+    "Within-component fraction of the vertical velocity variance"
+    ℂᵍ₁ :: FT
+    "Standard deviation of θˡ below which it is uniform, K"
+    thl_tol :: FT
+    "Standard deviation of qᵗ below which it is uniform, kg kg⁻¹"
+    rt_tol :: FT
+    "Standard deviation of vertical velocity below which the air is calm, m s⁻¹"
+    w_tol :: FT
+    "Lowest liquid water temperature of a component, K"
+    Tl_min :: FT
+    "Lowest weight of the updraft component"
+    plume_fraction_min :: FT
+    "Highest weight of the updraft component"
+    plume_fraction_max :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `EqualShareDoubleGaussianPDF{FT}` with the coefficients and tolerances of
+[`DoubleGaussianPDF`](@ref). Every field is a keyword argument.
+"""
+EqualShareDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(EqualShareDoubleGaussianPDF, FT,
+                            (ℂᵍ₁ = 0.4, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2, Tl_min = 100,
+                             plume_fraction_min = 0.01, plume_fraction_max = 0.99), kw)
+
+Adapt.@adapt_structure EqualShareDoubleGaussianPDF
+
+const ComponentDoubleGaussianPDF = Union{DoubleGaussianPDF, EqualShareDoubleGaussianPDF}
+
 # Saturation vapor pressure over liquid of Murphy and Koop (2005) (wv_sat_scream.F90, MurphyKoop_svp)
 @inline function murphy_koop_liquid_svp(t::FT) where FT
     logt = log(t)
@@ -127,6 +179,22 @@ end
     return x1_1, x1_2, x2_1, x2_2, zero_safe_sqrt(x2_1), zero_safe_sqrt(x2_2)
 end
 
+# The equal share of the within-component variance (EqualShareDoubleGaussianPDF)
+@inline function scalar_plume_parameters(cp, flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed,
+                                         p::EqualShareDoubleGaussianPDF)
+    FT = typeof(sec)
+    r = clip_between(cp, flux / (sqrtw2 * sqrt_sec), -1, 1, 1)
+    uniform = (sec <= tol * tol) | (abs(w1_2 - w1_1) <= 0)
+    x1_1 = (-1 * r) / ifelse(uniform, one(FT), w1_2)
+    x1_2 = (-1 * r) / ifelse(uniform, one(FT), w1_1)
+    x2 = max(0, 1 - r * r / (1 - p.ℂᵍ₁)) * sec
+    x1_1 = ifelse(uniform, x_first, x1_1 * sqrt_sec + x_first)
+    x1_2 = ifelse(uniform, x_first, x1_2 * sqrt_sec + x_first)
+    x2 = ifelse(uniform, zero(FT), x2)
+    σ = zero_safe_sqrt(x2)
+    return x1_1, x1_2, x2, x2, σ, σ
+end
+
 # shoc_assumed_pdf_compute_qs for one plume, with the fixed constants of shoc.F90
 @inline plume_saturation(Tl, pval, p) =
     plume_saturation(FixedConstantsLiquidSaturation(), nothing, p, Tl, zero(Tl), pval)[1:2]
@@ -175,7 +243,7 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
 The plumes saturate by the saturation component `sat` (see [`FixedConstantsLiquidSaturation`](@ref)
 and [`ModelThermodynamicsSaturation`](@ref)), with the `thermodynamics` of the model.
 """
-@inline function assumed_pdf(pdf::DoubleGaussianPDF, sat, thermodynamics, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first,
+@inline function assumed_pdf(pdf::ComponentDoubleGaussianPDF, sat, thermodynamics, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first,
                              qw_first, wsec, moments_l, moments_u)
     p = c # the physical constants, under the name they have in the expressions below
     FT = typeof(thl_first)

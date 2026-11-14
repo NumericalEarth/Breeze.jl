@@ -51,7 +51,9 @@ state_columns(model) = (column(model.formulation.potential_temperature_density),
 non_precipitating_water(model) = column(model.moisture_density) .+ column(model.microphysical_fields.ρqᶜˡ)
 
 all_parts(; kw...) = SubgridCloudFormulation(; kw...)
-distribution_only() = SubgridCloudFormulation(; buoyancy_flux = nothing, cloud = nothing)
+# SHOC's moment time scale, whose τ the structural checks below recompute (the default is DissipationTimeScale)
+distribution_only() = SubgridCloudFormulation(; distribution = SubgridDistribution(; time_scale = StratificationLimitedMomentTimeScale()),
+                                                buoyancy_flux = nothing, cloud = nothing)
 with_buoyancy_flux(; stability = false) = SubgridCloudFormulation(; buoyancy_flux = CloudBuoyancyFlux(; stability), cloud = nothing)
 with_cloud_ownership() = SubgridCloudFormulation(; buoyancy_flux = nothing)
 
@@ -68,7 +70,8 @@ with_cloud_ownership() = SubgridCloudFormulation(; buoyancy_flux = nothing)
     @test SubgridCloudFormulation(; distribution = nothing, buoyancy_flux = nothing, cloud = nothing).distribution === nothing
     closure = TKEBasedTurbulenceClosure(Float32; subgrid_cloud_formulation = SubgridCloudFormulation(Float64))
     @test closure.subgrid_cloud_formulation.distribution.second_moments.ℂᵛ₁ isa Float32
-    @test closure.subgrid_cloud_formulation.distribution.time_scale.ℂᴺ === 4.5f0
+    @test closure.subgrid_cloud_formulation.distribution.time_scale.ℂᵠ === 1.3f0 # DissipationTimeScale is the default
+    @test closure.subgrid_cloud_formulation.distribution.time_scale.third_moment_time_scale.ℂᴺ === 4.5f0
     @test occursin("subgrid_cloud_formulation", sprint(show, closure))
 end
 
@@ -222,24 +225,23 @@ end
     @test all(column(model.tracers.ρe) .≥ 0)
     @test all(isfinite, column(model.tracers.ρe))
 
-    # Optionally the stability of the diffusivities is that of the cloud buoyancy flux:
-    # (g / θ)(∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ, with Bˡ the part carried by the liquid flux
+    # With the stability of the cloud buoyancy flux, N² is the stratification of the mixed variables
+    # less the latent correction, N² = Σ b̄_χ δz χ - aᴺ (N²ᵇ - N²ˢ), with b_χ the stored derivatives
     model = tke_p3_column(with_buoyancy_flux(; stability = true))
     update_state!(model)
     cf = model.closure_fields
     cl = cf.subgrid_cloud.cloud
+    μ = model.microphysical_fields
     ρ = column(model.dynamics.reference_state.density)
-    θ = column(model.formulation.potential_temperature_density) ./ ρ
-    qᵗ = (column(model.moisture_density) .+ column(model.microphysical_fields.ρqᶜˡ)) ./ ρ
+    φ = hcat(column(model.formulation.potential_temperature_density) ./ ρ, column(model.moisture_density) ./ ρ,
+             (column(μ.ρqᶜˡ) .+ column(μ.ρqʳ) .+ column(μ.ρqʷⁱ)) ./ ρ, column(μ.ρqⁱ) ./ ρ)
+    β = hcat(column(cl.βᶿ), column(cl.βᵛ), column(cl.βˡ), column(cl.βⁱ))
     zc = znodes(model.grid, Center())
-    # Kᶜ of the first pass, from which Bˡ / Kᶜ was formed, is overwritten by the second; check where Bˡ = 0
-    gθ, gA, Bˡ = column(cl.gθ), column(cl.gA), column(cl.Bˡ)
     for k in 2:size(model.grid, 3)
-        Bˡ[k] == 0 && Bˡ[k-1] == 0 || continue
-        N²ᵇ = (gθ[k] + gθ[k-1]) / 2 * (θ[k] - θ[k-1]) / (zc[k] - zc[k-1]) + (gA[k] + gA[k-1]) / 2 * (qᵗ[k] - qᵗ[k-1]) / (zc[k] - zc[k-1])
-        @test column(cf.N²)[k] ≈ N²ᵇ rtol=1e-12
+        N²ᵇ = sum((β[k, s] + β[k-1, s]) / 2 * (φ[k, s] - φ[k-1, s]) for s in 1:4) / (zc[k] - zc[k-1])
+        @test column(cf.N²)[k] ≈ N²ᵇ - column(cl.ΔN²ᴸ)[k] rtol=1e-10 atol=1e-14
     end
-    @test any(!=(0), Bˡ)
+    @test all(0 .≤ column(cl.aᴺ) .≤ 1)
     @test all(isfinite, column(cf.N²))
     @test all(isfinite, column(cf.Kᶜ))
     for _ in 1:4

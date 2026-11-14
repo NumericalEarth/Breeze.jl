@@ -127,8 +127,23 @@ end
     end
 end
 
+compute_buoyancy_derivatives!(fields, model) = nothing
+
+function compute_buoyancy_derivatives!(fields::SubgridCloudFields{<:CloudBuoyancyFlux}, model)
+    grid = model.grid
+    cl = fields.cloud
+    launch!(grid.architecture, grid, :xyz, _compute_buoyancy_derivatives!, cl, grid, applied_flux_state(model))
+    fill_halo_regions!((cl.βᶿ, cl.βᵛ, cl.βˡ, cl.βⁱ))
+    return nothing
+end
+
 # Bᶠ at the interior face k from the stored derivatives and the current state
-@inline function applied_buoyancy_conversionᶜᶜᶠ(i, j, k, grid, s, cl, Kᶜ)
+@inline applied_buoyancy_conversionᶜᶜᶠ(i, j, k, grid, s, cl, Kᶜ) =
+    - @inbounds(Kᶜ[i, j, k]) * applied_stratificationᶜᶜᶠ(i, j, k, grid, s, cl)
+
+# The stratification of the mixed variables, Σ b̄_χ δz χ: the buoyancy gradient a displacement
+# without phase change feels (the stratification behind the applied buoyancy flux)
+@inline function applied_stratificationᶜᶜᶠ(i, j, k, grid, s, cl)
     @inbounds begin
         ρ⁺ = s.ρ[i, j, k]
         ρ⁻ = s.ρ[i, j, k-1]
@@ -140,7 +155,7 @@ end
              (cl.βᵛ[i, j, k] + cl.βᵛ[i, j, k-1]) / 2 * (q⁺.vapor - q⁻.vapor) +
              (cl.βˡ[i, j, k] + cl.βˡ[i, j, k-1]) / 2 * (q⁺.liquid - q⁻.liquid) +
              (cl.βⁱ[i, j, k] + cl.βⁱ[i, j, k-1]) / 2 * (q⁺.ice - q⁻.ice)
-        return - Kᶜ[i, j, k] * Δb / Δzᶜᶜᶠ(i, j, k, grid)
+        return Δb / Δzᶜᶜᶠ(i, j, k, grid)
     end
 end
 
@@ -155,14 +170,19 @@ end
     kᵘᵖ = min(k + 1, Nz)
     Bˡᵒʷ = ifelse(k > 1, applied_buoyancy_conversionᶜᶜᶠ(i, j, kˡᵒʷ, grid, s, cl, Kᶜ), zero(FT))
     Bᵘᵖ = ifelse(k < Nz, applied_buoyancy_conversionᶜᶜᶠ(i, j, kᵘᵖ, grid, s, cl, Kᶜ), zero(FT))
+    Lˡᵒʷ = ifelse(k > 1, latent_conversionᶜᶜᶠ(i, j, kˡᵒʷ, grid, cl, Kᶜ), zero(FT))
+    Lᵘᵖ = ifelse(k < Nz, latent_conversionᶜᶜᶠ(i, j, kᵘᵖ, grid, cl, Kᶜ), zero(FT))
     Pˡᵒʷ = ifelse(k > 1, applied_shear_conversionᶜᶜᶠ(i, j, kˡᵒʷ, grid, Kᵘ, u, v), zero(FT))
     Pᵘᵖ = ifelse(k < Nz, applied_shear_conversionᶜᶜᶠ(i, j, kᵘᵖ, grid, Kᵘ, u, v), zero(FT))
     zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
     wˡᵒʷ = ℑzᵃᵃᶠ(i, j, k, grid, s.ρ) * (zᶜ - znode(i, j, k, grid, Center(), Center(), Face()))
     wᵘᵖ = ℑzᵃᵃᶠ(i, j, k + 1, grid, s.ρ) * (znode(i, j, k + 1, grid, Center(), Center(), Face()) - zᶜ)
     ρΔz = @inbounds s.ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
-    return (wˡᵒʷ * Bˡᵒʷ + wᵘᵖ * Bᵘᵖ) / ρΔz, (wˡᵒʷ * Pˡᵒʷ + wᵘᵖ * Pᵘᵖ) / ρΔz
+    return (wˡᵒʷ * Bˡᵒʷ + wᵘᵖ * Bᵘᵖ) / ρΔz, (wˡᵒʷ * Pˡᵒʷ + wᵘᵖ * Pᵘᵖ) / ρΔz, (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
 end
+
+# The latent part of the buoyancy production at a face, Kᶜ aᴺ (N²ᵇ - N²ˢ) (see `_latent_corrected_stability!`)
+@inline latent_conversionᶜᶜᶠ(i, j, k, grid, cl, Kᶜ) = @inbounds Kᶜ[i, j, k] * cl.ΔN²ᴸ[i, j, k]
 
 # The conversions of the surface fluxes within the bottom half-cell: the work of the surface
 # stress on the lowest level, -u₁ 𝒯ˣ - v₁ 𝒯ʸ (𝒯 the upward flux of ρu, ρv), and the dynamic
@@ -187,11 +207,12 @@ end
 @kernel function _compute_applied_flux_conversions!(cl, grid, closure, s, Kᶜ, Kᵘ, u, v, e, bottom_bcs, bc_args)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
-    B, P = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+    B, P, Bᴸ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     Bˢ, Pˢ = surface_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, u, v, bottom_bcs, bc_args)
-    B = B + Bˢ
+    B = B + Bˢ + Bᴸ
     @inbounds begin
         cl.B[i, j, k] = B
+        cl.Bᴸ[i, j, k] = Bᴸ
         cl.P[i, j, k] = P + Pˢ
         cl.Bˢ[i, j, k] = Bˢ
         cl.Pˢ[i, j, k] = Pˢ
@@ -234,8 +255,6 @@ function compute_applied_flux_conversions!(fields::SubgridCloudFields{<:CloudBuo
     arch = grid.architecture
     cl = fields.cloud
     s = applied_flux_state(model)
-    launch!(arch, grid, :xyz, _compute_buoyancy_derivatives!, cl, grid, s)
-    fill_halo_regions!((cl.βᶿ, cl.βᵛ, cl.βˡ, cl.βⁱ))
     u, v = model.velocities.u, model.velocities.v
     launch!(arch, grid, :xyz, _compute_applied_flux_conversions!, cl, grid, closure, s, closure_fields.Kᶜ,
             closure_fields.Kᵘ, u, v, tracers[TKE_NAME], applied_flux_bottom_bcs(model), boundary_condition_args(model))
@@ -328,7 +347,7 @@ end
 
 @kernel function _correct_tke_to_solved_conversions!(ρe, ρθ, cl, grid, s, Kᶜ, Kᵘ, u, v, Δt)
     i, j, k = @index(Global, NTuple)
-    Bᵖ, Pᵖ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+    Bᵖ, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     @inbounds begin
         ρᵢ = s.ρ[i, j, k]
         e = ρe[i, j, k] / ρᵢ
@@ -339,7 +358,8 @@ end
         # what the stage gave: P and B⁺ explicitly, -ωᴮ e implicitly; what the solves converted:
         # Pᵖ + Dᵘ + Pˢ and Bᵖ + Bˢ
         given = cl.P[i, j, k] + max(B, 0) - cl.ωᴮ[i, j, k] * e
-        converted = Pᵖ + Dᵘ + cl.Pˢ[i, j, k] + Bᵖ + cl.Bˢ[i, j, k]
+        # the latent part was drawn from the internal energy in the stage tendency (stage value)
+        converted = Pᵖ + Dᵘ + cl.Pˢ[i, j, k] + Bᵖ + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k]
         cl.Pᵖ[i, j, k] = Pᵖ + Dᵘ
         cl.Bᵖ[i, j, k] = Bᵖ
         # the stage's values, kept for the energy budget after `update_state!` recomputes the others
@@ -348,7 +368,7 @@ end
         cl.stage_βᵛ[i, j, k] = cl.βᵛ[i, j, k]
         cl.stage_βˡ[i, j, k] = cl.βˡ[i, j, k]
         cl.stage_βⁱ[i, j, k] = cl.βⁱ[i, j, k]
-        cl.stage_surface[i, j, k] = cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k]
+        cl.stage_surface[i, j, k] = cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k]
         # Where the TKE cannot pay what the solved fluxes converted (e ≈ 0 while the diffusivities,
         # floored at `minimum_tke`, still mix), the shortfall is taken from the internal energy
         # instead of driving e negative: the mixing of that floor is powered by the heat of the air.
@@ -400,5 +420,120 @@ function add_dissipative_heating!(Gⁿ, fields::SubgridCloudFields{<:CloudBuoyan
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     launch!(grid.architecture, grid, :xyz, _add_dissipative_heating!, Gⁿ[name], grid, closure, closure_fields,
             model.tracers[TKE_NAME], total_density(model.dynamics))
+    return nothing
+end
+
+#####
+##### The latent correction of the static stability and of the buoyancy production
+#####
+##### A displacement that condenses as it goes feels the saturated stratification N²ˢ; one
+##### without phase change feels N²ᵇ = Σ b̄_χ δz χ. With (θˡⁱ, qᵗ, qᶜ) for (θˡⁱ, vapor, cloud
+##### condensate), a saturated displacement keeps s = 0 with its condensate following the
+##### saturation excess s̄ at fixed pressure, so
+#####
+#####   N²ˢ - N²ᵇ = (b̄ˡ - b̄ᵛ) (∂z s̄ - ∂z qᶜ),   ∂z s̄ = c̄_q ∂z qʷ - c̄_θ ∂z θˡⁱ
+#####
+##### (c_q, c_θ: the linearized saturation excess of the level with the model's thermodynamics).
+##### The static stability and the buoyancy production use
+#####
+#####   N² = N²ᵇ - aᴺ (N²ᵇ - N²ˢ),    aᴺ = η(tₑ ωᶜ) aʷ,    η(x) = 1 - (1 - e⁻ˣ) / x,
+#####
+##### aʷ the share of the flux of the saturation excess carried by the supersaturated part of the
+##### distribution, w′qˡ′ / w′s′ of the double Gaussian (its fluxes share one Kᶜ, which cancels),
+##### and η the fraction of the excess that condenses over an eddy time tₑ = e / ε when it relaxes at
+##### the rate ωᶜ (η = 1 for instantaneous condensation). The buoyancy production gains
+##### Bᴸ = Kᶜ aᴺ (N²ᵇ - N²ˢ) over the conversion of the applied fluxes; that energy is the work of
+##### the latent heat of the subgrid condensation and is taken from the internal energy.
+#####
+
+# The rate at which the microphysics relaxes the supersaturation, ωᶜ (s⁻¹): instantaneous until the
+# microphysics supplies `phase_relaxation_rate` (phase 3)
+@inline subgrid_phase_relaxation_rate(microphysics, i, j, k) = Inf
+
+@inline function condensing_fraction(x)
+    FT = typeof(x)
+    small = x < convert(FT, 1e-4)
+    xˢ = ifelse(small, one(FT), x)
+    return ifelse(small, x / 2, 1 + expm1(-xˢ) / xˢ)
+end
+
+@kernel function _latent_corrected_stability!(N², cl, m, grid, closure, closure_fields, velocities, s, qʷ, e, thermodynamics, sat, c, ω)
+    i, j, k = @index(Global, NTuple)
+    FT = eltype(grid)
+    closure_ij = getclosure(i, j, closure)
+    kₛ = max(k, 2)
+    @inbounds begin
+        ρ⁺ = s.ρ[i, j, kₛ]
+        ρ⁻ = s.ρ[i, j, kₛ-1]
+        θ⁺ = s.ρθ[i, j, kₛ] / ρ⁺
+        θ⁻ = s.ρθ[i, j, kₛ-1] / ρ⁻
+        qʷ⁺ = qʷ[i, j, kₛ]
+        qʷ⁻ = qʷ[i, j, kₛ-1]
+        qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, kₛ] / ρ⁺
+        qᶜ⁻ = qʷ⁻ - s.ρqᵛᵉ[i, j, kₛ-1] / ρ⁻
+        Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
+        c_q⁺, c_θ⁺, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁺, qʷ⁺, s.p[i, j, kₛ])
+        c_q⁻, c_θ⁻, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        c_q = (c_q⁺ + c_q⁻) / 2
+        c_θ = (c_θ⁺ + c_θ⁻) / 2
+        ∂z_s = (c_q * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
+        ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
+        bˡᵛ = (cl.βˡ[i, j, kₛ] + cl.βˡ[i, j, kₛ-1] - cl.βᵛ[i, j, kₛ] - cl.βᵛ[i, j, kₛ-1]) / 2
+        N²ᵇ = applied_stratificationᶜᶜᶠ(i, j, kₛ, grid, s, cl)
+        N²ˢ = N²ᵇ + bˡᵛ * (∂z_s - ∂z_qᶜ)
+
+        # aʷ = w′qˡ′ / w′s′ at the face; the ratio of interpolated fluxes is kept in [0, 1]
+        w′qˡ′ = (cl.w′qˡ′[i, j, kₛ] + cl.w′qˡ′[i, j, kₛ-1]) / 2
+        w′s′ = c_q * m.w′qᵗ′[i, j, kₛ] - c_θ * m.w′θˡ′[i, j, kₛ]
+        resolved = abs(w′s′) > sqrt(floatmin(FT))
+        aʷ = clamp(ifelse(resolved, w′qˡ′ / ifelse(resolved, w′s′, one(FT)), zero(FT)), zero(FT), one(FT))
+
+        # η over the eddy time tₑ = e / ε = ℓ / (𝕊ᴰ √e) at the face
+        ℓ = closure_fields.ℓᵐ[i, j, kₛ]
+        u = ℑzᵃᵃᶠ(i, j, kₛ, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
+        𝕊ᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, kₛ, grid, closure_ij, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
+        tₑ = ℓ / (𝕊ᴰ * u)
+        ωᶜ = subgrid_phase_relaxation_rate(s.microphysics, i, j, kₛ)
+        η = ifelse(isinf(ωᶜ), one(FT), condensing_fraction(tₑ * ωᶜ))
+        aᴺ = η * aʷ
+
+        ΔN²ᴸ = aᴺ * (N²ᵇ - N²ˢ)
+        N²ᵉ = N²ᵇ - ΔN²ᴸ
+        interior = k > 1
+        cl.aʷ[i, j, k] = ifelse(interior, aʷ, zero(FT))
+        cl.aᴺ[i, j, k] = ifelse(interior, aᴺ, zero(FT))
+        cl.ΔN²ᴸ[i, j, k] = ifelse(interior, ΔN²ᴸ, zero(FT))
+        N²[i, j, k] = ifelse(interior, relax_stability(N²[i, j, k], N²ᵉ, ω), N²[i, j, k])
+    end
+end
+
+# The pass of the stability coupling with the cloud buoyancy flux: the latent-corrected N², then the
+# mixing length and the diffusivities from it
+function cloud_buoyancy_stability_pass!(fields::SubgridCloudFields{<:CloudBuoyancyFlux}, closure_fields, closure, model, tracers,
+                                        parameters, ω = nothing)
+    grid = model.grid
+    arch = grid.architecture
+    d = distribution_state(model, nothing)
+    dist = subgrid_cloud_formulation(closure).distribution
+    launch!(arch, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments, grid, closure,
+            closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, tracers[TKE_NAME], d.thermodynamics,
+            dist.saturation, dist.constants, ω)
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
+    launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
+    return nothing
+end
+
+# The latent part of the buoyancy production is drawn from the internal energy: ρ ĉᵖ Π ∂t θˡⁱ -= ρ Bᴸ
+@kernel function _draw_latent_conversion!(Gρθ, grid, cl, ρ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρθ[i, j, k] -= ρ[i, j, k] * cl.Bᴸ[i, j, k] / cl.ĉᵖΠ[i, j, k] * !inactive_cell(i, j, k, grid)
+end
+
+draw_latent_conversion!(Gⁿ, fields, model) = nothing
+
+function draw_latent_conversion!(Gⁿ, fields::SubgridCloudFields{<:CloudBuoyancyFlux}, model)
+    grid = model.grid
+    name = AtmosphereModels.thermodynamic_density_name(model.formulation)
+    launch!(grid.architecture, grid, :xyz, _draw_latent_conversion!, Gⁿ[name], grid, fields.cloud, total_density(model.dynamics))
     return nothing
 end

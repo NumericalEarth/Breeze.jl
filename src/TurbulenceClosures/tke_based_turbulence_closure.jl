@@ -1104,6 +1104,7 @@ function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, clos
             model.velocities, model.tracers[TKE_NAME], ρ)
 
     add_dissipative_heating!(Gⁿ, closure_fields.subgrid_cloud, closure_fields, closure, model)
+    draw_latent_conversion!(Gⁿ, closure_fields.subgrid_cloud, model)
 
     return nothing
 end
