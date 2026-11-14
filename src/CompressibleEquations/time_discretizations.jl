@@ -578,6 +578,10 @@ Adapt.adapt_structure(to, sponge::UpperSponge) =
                 nothing,
                 adapt(to, sponge.damping_profile))
 
+# On a MultiRegionGrid `damping_profile` is a multi-region field: the substepper's regional kernels need the
+# panel's own field (without this the whole MultiRegionObject reaches the GPU kernel as a non-bitstype argument).
+@regional UpperSponge
+
 convert_acoustic_parameter(::Type{FT}, ::Nothing) where FT = nothing
 
 # Only the scalars are converted here: this runs on the gridless skeleton, and

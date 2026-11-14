@@ -20,6 +20,7 @@ export
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using Breeze.Solvers: SecantSolver
+using Breeze.Utils: @regional
 
 using Breeze.Thermodynamics:
     Thermodynamics,

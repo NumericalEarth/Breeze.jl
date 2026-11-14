@@ -121,6 +121,8 @@ function SSPRungeKutta3(grid, prognostic_fields;
     return SSPRungeKutta3{FT, U0, TG, TI, R}(α¹, α², α³, U⁰, Gⁿ, implicit_solver, rounding)
 end
 
+@regional SSPRungeKutta3
+
 #####
 ##### Stage update kernel
 #####
@@ -136,7 +138,9 @@ where ``u^{(0)}`` is stored in the time stepper, ``u^{(m-1)}`` is the current fi
 and ``G`` is the current tendency. The sum is rounded by the time stepper's round-off treatment
 (see [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding)).
 """
-function ssp_rk3_substep!(model, Δt, α)
+ssp_rk3_substep!(model, Δt, α) = @apply_regionally launch_ssp_rk3_substep!(model, Δt, α)
+
+function launch_ssp_rk3_substep!(model, Δt, α)
     grid = model.grid
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
@@ -246,7 +250,7 @@ Copy prognostic fields to `U⁰` storage for use in later RK3 stages.
 function store_initial_state!(model)
     U⁰ = model.timestepper.U⁰
     for (u⁰, u) in zip(U⁰, prognostic_fields(model))
-        parent(u⁰) .= parent(u)
+        copy_parent!(u⁰, u)
     end
     return nothing
 end

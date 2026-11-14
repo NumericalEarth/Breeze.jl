@@ -31,7 +31,7 @@ using DocStringExtensions: TYPEDEF
 using Oceananigans: Oceananigans
 
 using Breeze.Solvers: NewtonSolver, SecantSolver, FixedIterations, newton_solve, secant_solve
-using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using Breeze.Utils: @regional, TYPEDSIGNATURES_WITH_DEFAULTS
 
 include("thermodynamics_constants.jl")
 include("vapor_saturation.jl")
