@@ -572,6 +572,8 @@ kinetic energy back as densities.
 
     shoc_cloud!(i, j, Nz, closure_ij, grid, fields.state, fields.host, fields.surface, fields.diagnostics, thermodynamics)
 
+    mix_microphysical_tracers!(i, j, Nz, Δt, closure_ij, fields, ρ, ρqᵗ)
+
     store_shoc_column!(i, j, grid, fields, ρ, ρθ, ρqᵗ, ρe)
 end
 

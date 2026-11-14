@@ -55,6 +55,11 @@ with ``φ`` and ``Φ`` the standard normal density and distribution function, so
 ``aᵢ``, offsets ``μᵢ - Σⱼ aⱼ μⱼ`` and spreads ``σᵢ``, ``Γ = Σᵢ aᵢ [σᵢ G(μ̃ᵢ / σᵢ) - μ̃ᵢ]`` with
 ``μ̃ᵢ = μ + μᵢ - Σⱼ aⱼ μⱼ``. As ``σ → 0``, ``Γ → 0`` and the grid-mean rate is recovered.
 
+The distribution is that of the saturation excess of total water. Where cloud liquid is present
+the truncation is taken about the grid-mean saturation excess ``s̄ = μ + ξˡ qᶜˡ`` instead of
+``μ`` (``ξˡ`` the psychrometric correction), so that the rate is ``ωˡ (⟨s⁺⟩ - ξˡ qᶜˡ)`` and
+vanishes when the cloud liquid is the distribution's equilibrium condensate.
+
 $(TYPEDFIELDS)
 
 ```jldoctest
@@ -224,34 +229,36 @@ end
 @inline cloud_condensation_correlation(condensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants, p3, state) =
     subgrid_supersaturation(condensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants)
 
-# Subgrid condensation. Locally cloud liquid changes at ωˡ δqᵛ⁺ˡ, but evaporates no faster than
-# the cloud liquid available allows, qᶜˡ / τ (τ the sink-limiting time scale). The local rate is
-# therefore ωˡ max(δqᵛ⁺ˡ, -e) with e = qᶜˡ / (τ ωˡ), and its cell average is
+# Subgrid condensation. The statistics are those of the saturation excess of total water,
+# s = qᵗ - qᵛ⁺ˡ(Tˡ), which in P3's linearization is s = δqᵛ⁺ˡ + ξˡ qᶜˡ: the vapor excess plus the
+# vapor the cloud liquid would return, ξˡ = 1 + ℒˡ ∂qᵛ⁺ˡ/∂T / cᵖᵈ accounting for the cooling by
+# its evaporation. Cloud liquid is taken to lie where s > 0, shaped as the equilibrium condensate
+# s⁺ / ξˡ: locally qᶜˡ = λ s⁺ / ξˡ with λ = ξˡ q̄ᶜˡ / ⟨s⁺⟩, so that the local vapor excess is
+# s - λ s⁺ where s > 0 and s, with no liquid to evaporate, elsewhere. Locally cloud liquid changes
+# at ωˡ δqᵛ⁺ˡ, and the cell average is
 #
-#   ωˡ (μ + Γ),   Γ = ⟨max(0, δqᵛ⁺ˡ + e)⟩ - (μ + e),
+#   ωˡ (1 - λ) ⟨s⁺⟩ = ωˡ (⟨s⁺⟩ - ξˡ q̄ᶜˡ) = ωˡ (μ + Γ),   Γ = ⟨s⁺⟩ - s̄,   s̄ = μ + ξˡ q̄ᶜˡ,
 #
-# the Gaussian truncation of `subgrid_vapor_excess_correlation` about μ + e. Without cloud liquid
-# (e = 0) only supersaturated air condenses; as σ → 0, μ + Γ → max(μ, -e), the grid-mean rate
-# with its evaporation limit.
+# the Gaussian truncation of `subgrid_vapor_excess_correlation` about the grid-mean saturation
+# excess s̄ (not about μ: the positive part of the distribution is already condensed). The rate
+# vanishes when the cloud liquid is the distribution's equilibrium condensate ⟨s⁺⟩ / ξˡ. Without
+# cloud liquid s̄ = μ and only supersaturated air condenses. As σ → 0, μ + Γ → max(μ, -ξˡ q̄ᶜˡ):
+# the grid-mean rate, with evaporation no faster than ωˡ ξˡ q̄ᶜˡ (all the liquid relaxing at
+# the droplets' rate εˡ = ωˡ ξˡ).
 @inline function cloud_condensation_correlation(::SubgridCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ,
                                                 T, P, ρ, constants, p3, state)
-    FT = typeof(qᵛ)
-    ωˡ = p3_cloud_phase_relaxation_rate(p3, qᶜˡ, qᵛ⁺ˡ, T, ρ, constants, state)
-    τ = max(p3.process_rates.sink_limiting_timescale, eps(FT))
-    e = max(0, qᶜˡ) / (τ * max(ωˡ, floatmin(FT)))
+    ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
     μ = qᵛ - qᵛ⁺ˡ
-    return subgrid_vapor_excess_correlation(statistics, μ + e)
+    s̄ = μ + ξˡ * max(0, qᶜˡ)
+    return subgrid_vapor_excess_correlation(statistics, s̄)
 end
 
-# ωˡ = εˡ / ξˡ with the cloud coefficient and psychrometric correction of
-# `p3_vapor_relaxation_coefficients`.
-@inline function p3_cloud_phase_relaxation_rate(p3, qᶜˡ, qᵛ⁺ˡ, T, ρ, constants, state)
+# ξˡ = 1 + ℒˡ ∂qᵛ⁺ˡ/∂T / cᵖᵈ, with P3's dry-air heat capacity convention
+@inline function p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
     FT = typeof(T)
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
     dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
-    ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
-    εˡ = cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, state.Dᵛ, state.μᶜˡ, state.λᶜˡ, state.nᶜˡ)
-    return εˡ / ξˡ
+    return 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
 end

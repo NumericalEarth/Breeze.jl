@@ -142,6 +142,26 @@ using Breeze.Thermodynamics: temperature
     @test plume_rates.condensation > reference.condensation
 end
 
+@testset "SubgridCondensation relaxes cloud liquid to the distribution's condensate [$FT]" for FT in (Float32, Float64)
+    # Statistics of the total-water saturation excess s ~ N(s̄, σ²), cloud liquid shaped as λ s⁺ / ξˡ:
+    # the exact cell-mean rate is ωˡ (1 - λ) ⟨s⁺⟩, zero at the equilibrium condensate (λ = 1)
+    constants = ThermodynamicConstants(FT)
+    condensation = SubgridCondensation(PrescribedStatistics(zero(FT)))
+    T = FT(290)
+    qᵛ⁺ˡ = FT(1.2e-2)
+    ξˡ = PPP.p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+    @test 2 < ξˡ < 4
+    σ = FT(4e-4)
+    for s̄ in FT.((-5e-4, 0, 3e-4)), λ in FT.((0, 0.5, 1, 1.5))
+        positive_excess = s̄ + quadrature_correlation(Float64(s̄), Float64(σ))
+        qᶜˡ = λ * FT(positive_excess) / ξˡ
+        qᵛ = qᵛ⁺ˡ + s̄ - ξˡ * qᶜˡ
+        Γ = PPP.cloud_condensation_correlation(condensation, gaussian(zero(FT), σ), qᵛ, qᵛ⁺ˡ, qᶜˡ,
+                                               T, FT(9e4), one(FT), constants, nothing, nothing)
+        @test qᵛ - qᵛ⁺ˡ + Γ ≈ (1 - λ) * positive_excess atol = sqrt(eps(FT)) * σ
+    end
+end
+
 @testset "P3 SubgridCondensation conserves water and energy" begin
     constants = ThermodynamicConstants(Float64)
     p3 = P3Microphysics(Float64; condensation = SubgridCondensation(PrescribedStatistics(3e-4)))
