@@ -161,6 +161,9 @@ end
 @inline AtmosphereModels.prognostic_moisture_phase_fractions(i, j, k, grid, ::SA, μ, q) =
     equilibrium_moisture_phase_fractions(q.liquid, q.ice)
 
+# In such cells the pressure re-diagnosed is that of the partition this equilibrium adjusts to.
+@inline AtmosphereModels.saturation_adjusted_equilibrium(μ::SA) = μ.equilibrium
+
 @inline function equilibrium_moisture_phase_fractions(qᶜˡ, qᶜⁱ)
     qᶜ = qᶜˡ + qᶜⁱ
     saturated = qᶜ > 0

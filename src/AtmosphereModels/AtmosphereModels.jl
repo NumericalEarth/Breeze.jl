@@ -66,6 +66,7 @@ export
     sedimentation_velocity,
     condensate_liquid_fraction,
     prognostic_moisture_phase_fractions,
+    saturation_adjusted_equilibrium,
     sedimentation_velocity_field,
     write_sedimentation_velocity!,
     microphysical_velocities,

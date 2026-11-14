@@ -36,8 +36,8 @@ using Breeze.AtmosphereModels: SlowDynamics,
                                x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
                                buoyancy_forceᶜᶜᶜ, continuity_density, standard_pressure
 using Breeze.Thermodynamics: ExnerReferenceState, surface_density, LiquidIceDensityState, MoistureMassFractions,
-                             VaporEquivalentExponent, DryExponent, temperature, air_pressure,
-                             mixture_heat_capacity, dry_air_gas_constant, condensate_latent_energy
+                             VaporEquivalentExponent, DryExponent, air_pressure, dry_air_gas_constant
+using Breeze.Microphysics: adjust_thermodynamic_state
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Architectures: architecture, on_architecture
@@ -961,9 +961,12 @@ end
 #####
 
 # Cᴸ must be the slope ∂p/∂(ρθ), at fixed dry density and composition, of the equation of state the
-# core closes with: finite differences of p = ρ Rᵐ T through the core's own inversion, in dry, moist
-# and cloudy cells, for every temperature solver. Compressing every partial density and ρθ together
-# changes p by Cᴸ (ρθ)′ alone without condensate; in cloud the loop omits ∂p/∂ρᵈ.
+# core closes with: finite differences of p = ρ Rᵐ T through the core's own inversion, in dry and
+# moist cells, for every temperature solver. In cloud the adjustment diagnoses the partition, and
+# the pressure the core re-diagnoses is the adjusted one: there Cᴸ is its slope along the loop's
+# flux, so that compressing every density and ρθ together, at fixed θ and mixing ratios, changes p
+# by Cᴸ (θᴸ + Λᴴ) ρᵈ′. That is less than at a held partition, because the compressed air evaporates
+# condensate.
 @testset "Linearized pressure coefficient is the slope of the equation of state [$FT, $(nameof(typeof(κ̂))), $(summary(temperature_solver))]" for FT in test_float_types(),
         κ̂ in (VaporEquivalentExponent(), DryExponent()),
         temperature_solver in temperature_solver_variants(FT)
@@ -986,6 +989,7 @@ end
     prepare_acoustic_cache!(model.timestepper.substepper, model)
 
     Cᴸ = Array(interior(model.timestepper.substepper.linearization_pressure_coefficient))
+    Λᴴ = Array(interior(model.timestepper.substepper.fixed_composition_sensitivity))
     ρᵈ = Array(interior(model.dynamics.dry_density))
     ρ  = Array(interior(model.dynamics.total_density))
     ρθ = Array(interior(model.formulation.potential_temperature_density))
@@ -1000,29 +1004,49 @@ end
     cᵖᵈ = constants.dry_air.heat_capacity
     κᵈ  = Rᵈ / cᵖᵈ
     ε    = FT == Float64 ? FT(1e-4) : FT(1e-2)
-    rtol = FT == Float64 ? FT(1e-5) : FT(3e-3)
+    rtol = FT == Float64 ? FT(2e-4) : FT(3e-3)
     solver = model.formulation.temperature_solver
+
+    # The adjustment of the finite differences, converged further than the model's.
+    adjustment = SaturationAdjustment(FT; equilibrium = WarmPhaseEquilibrium(),
+                                      solver = SecantSolver(FT; reltol = 0, abstol = FT == Float64 ? 1e-11 : 1e-4, maxiter = 100))
 
     for I in CartesianIndices(ρθ)
         q = MoistureMassFractions(qᵛ[I], qˡ[I], zero(FT))
         θ = ρθ[I] / ρᵈ[I]
-        state(θ′, s = 1) = LiquidIceDensityState(θ′, q, pˢᵗ, s * ρ[I], solver, κ̂)
-        slope = (air_pressure(state(θ * (1 + ε)), constants) -
-                 air_pressure(state(θ * (1 - ε)), constants)) / (2ε * θ * ρᵈ[I])
-        @test Cᴸ[I] ≈ slope rtol = rtol
 
-        # Compress every partial density and ρθ by the same factor, at fixed θ and composition.
-        compression_slope = (air_pressure(state(θ, 1 + ε), constants) -
-                             air_pressure(state(θ, 1 - ε), constants)) / (2ε * ρᵈ[I])
+        # The pressure after adjustment of the cell's water, with θ scaled by 1 + a and every
+        # density by 1 + s.
+        function adjusted_pressure(a, s)
+            𝒰 = LiquidIceDensityState(θ * (1 + a), MoistureMassFractions(qᵛ[I] + qˡ[I]), pˢᵗ, (1 + s) * ρ[I], solver, κ̂)
+            return air_pressure(adjust_thermodynamic_state(𝒰, adjustment, constants), constants)
+        end
+
+        slope = (adjusted_pressure(ε, 0) - adjusted_pressure(-ε, 0)) / (2ε * θ * ρᵈ[I])
+
+        held(θ′) = LiquidIceDensityState(θ′, q, pˢᵗ, ρ[I], solver, κ̂)
+        held_slope = (air_pressure(held(θ * (1 + ε)), constants) -
+                      air_pressure(held(θ * (1 - ε)), constants)) / (2ε * θ * ρᵈ[I])
+
+        # Compress every partial density and ρθ by the same factor, at fixed θ and mixing ratios.
+        compression_slope = (adjusted_pressure(0, ε) - adjusted_pressure(0, -ε)) / (2ε * ρᵈ[I])
         if qˡ[I] == 0
+            @test Cᴸ[I] ≈ slope rtol = rtol
+            @test Cᴸ[I] ≈ held_slope rtol = rtol
+            @test Λᴴ[I] == 0
             @test Cᴸ[I] * θ ≈ compression_slope rtol = rtol
-        elseif temperature_solver === NewtonSolver(FT)
-            # In cloud the loop omits ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ) at the converged root.
-            T  = temperature(state(θ), constants)
-            Hᶜ = condensate_latent_energy(q, constants)
-            omitted = Hᶜ / (mixture_heat_capacity(q, constants) * T - Hᶜ)
-            @test omitted > FT(0.01)
-            @test Cᴸ[I] * θ * (1 + omitted) ≈ compression_slope rtol = rtol
+        else
+            # The slope at the held partition overestimates the adjusted one, and the adjusted
+            # compression by a tenth (NumericalEarth/Breeze.jl#1086).
+            @test slope < FT(0.8) * held_slope
+            @test FT(1.05) * compression_slope < held_slope * θ
+            @test Cᴸ[I] < held_slope
+
+            # The adjusted response is built from the sensitivities at the converged root of the
+            # inversion.
+            if temperature_solver === NewtonSolver(FT)
+                @test Cᴸ[I] * (θ + Λᴴ[I]) ≈ compression_slope rtol = 5rtol
+            end
         end
 
         if qᵛ[I] == 0

@@ -360,8 +360,11 @@ outer_step_start_transport_velocities(model) = model.velocities
 # The loop's pressure perturbation is p′ = Cᴸ (ρθ)′, so Cᴸ is the slope ∂p/∂(ρθ), at fixed dry
 # density and composition, of the equation of state p = ρ Rᵐ T that the core closes with
 # `compressible_density_state`. The kernel differentiates the selected temperature inversion, so
-# stopped and non-iterated solves use the slope of the temperature they return. Derivation, closed
-# forms and the limits of this linearization: docs/src/compressible_dynamics.md.
+# stopped and non-iterated solves use the slope of the temperature they return. Where the
+# microphysics adjusts the partition of the moisture to saturation, the pressure the core
+# re-diagnoses is that of the adjusted partition, and Cᴸ is its slope along the loop's own flux
+# (`adjusted_partition_response`, Section 3b). Derivation, closed forms and the limits of this
+# linearization: docs/src/compressible_dynamics.md.
 # TODO: carry ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ), which the loop omits in cloud, as a ρ′ term of p′
 # (cached per stage next to Cᴸ, differentiated through the selected inversion). It enters the
 # horizontal pressure gradient and the vertical Schur complement next to Cᴸ θᴸ.
@@ -402,8 +405,10 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
 end
 
 # θᴸ and Cᴸ = ρ Rᵐ (θ ∂T/∂θ) / (ρᵈ θ) per cell, from the same moisture and state the core closes
-# the thermodynamics with (`_compute_temperature_and_pressure!`). The divisors are zero only before
-# `set!`; there they are replaced by one, and θ = 0 has zero sensitivity.
+# the thermodynamics with (`_compute_temperature_and_pressure!`). In saturated cells of a scheme
+# that adjusts the partition of its moisture, Cᴸ is the slope of the adjusted pressure along the
+# loop's flux instead. The divisors are zero only before `set!`; there they are replaced by one,
+# and θ = 0 has zero sensitivity.
 @kernel function _compute_linearization_basic_state!(θᴸ, Cᴸ, Λᴴ, grid, formulation, dynamics, dry_density,
                                                      total_density, specific_prognostic_moisture,
                                                      microphysics, microphysical_fields, constants)
@@ -421,13 +426,24 @@ end
     θ̂  = ifelse(θ == 0, one(θ), θ)
     T, θ∂T∂θ = temperature_and_sensitivity(𝒰, constants)
     Rᵐ = mixture_gas_constant(q, constants)
+    C  = ρ * Rᵐ * θ∂T∂θ / (ρ̂ᵈ * θ̂)
     λᴴ = fixed_composition_sensitivity(formulation, 𝒰, T, constants)
+
+    # Where the scheme adjusts the partition of its moisture and the cell holds cloud, the
+    # pressure of the adjusted partition: its slope ζ C at fixed densities, and E more in the
+    # dry density than Λᴴ, both along the loop's flux (Section 3b). Elsewhere ζ = 1 and E = 0.
+    equilibrium = saturation_adjusted_equilibrium(microphysics)
+    σ, E = adjusted_partition_response(equilibrium, formulation, i, j, k, grid, 𝒰, T, ρᵈ, qᵛᵉ,
+                                       microphysics, microphysical_fields, constants)
+    ζ = 1 / (1 + C * σ)
+    θ⁺ = θ + λᴴ
+    θ̂⁺ = ifelse(θ⁺ == 0, one(θ⁺), θ⁺)
 
     @inbounds begin
         # The loop's flux of its pressure carries θᴸ + Λᴴ per unit of its own mass flux (Section 3b).
-        θᴸ[i, j, k] = θ + λᴴ
+        θᴸ[i, j, k] = θ⁺
         Λᴴ[i, j, k] = λᴴ
-        Cᴸ[i, j, k] = ρ * Rᵐ * θ∂T∂θ / (ρ̂ᵈ * θ̂)
+        Cᴸ[i, j, k] = ζ * C * (1 + E / θ̂⁺)
     end
 end
 
@@ -477,6 +493,27 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
 ##### add and remove the content; only Λᴴ, which the loop's flux needs at neighbors, is stored.
 ##### Without moisture every term is exactly zero.
 #####
+##### Where the microphysics adjusts the partition of its moisture density to saturation
+##### (`saturation_adjusted_equilibrium`) and the cell holds cloud, the pressure the core
+##### re-diagnoses is that of the adjusted partition, in which warming evaporates condensate
+##### (`adjusted_partition_response`). Its slope in ρθ at fixed densities is ζ ≈ 0.4 of the slope
+##### C̄ at the held partition, the moisture density keeps the cloud condensate's sensitivity, and
+##### the dry density holds E more than Λᴴ: what the vapor it carries along is worth as
+##### condensate, and the rest of the dry air's partial pressure, (1 − ζ) Rᵈ T / (ζ C̄), which is
+##### about as large as θ. Carried in the flux like Λᴴ, E would jump by that much across a cloud
+##### edge, and the flux of the loop's pressure with it. It is folded into the coefficient
+##### instead: the loop's own flux compresses the air at fixed θ and mixing ratios, where the
+##### adjusted pressure changes by ζ C̄ (θᴸ + Λᴴ + E) ρᵈ′, so
+#####
+#####   Cᴸ = ζ C̄ (1 + E / (θᴸ + Λᴴ))
+#####
+##### is its slope along the loop's flux, that of the moist adiabat: 10 to 15% below C̄, the
+##### mismatch of NumericalEarth/Breeze.jl#1086. The slow path, which is not a compression at
+##### fixed θ, enters in the units of that slope: the start state's perturbation of ρθ plus its
+##### content, and the thermodynamic tendency plus Gᵂ, both with E added to Λᴴ in their dry
+##### density terms, are scaled by ς = ζ C̄ / Cᴸ = (θᴸ + Λᴴ) / (θᴸ + Λᴴ + E). The end of the stage
+##### takes off what that scaling added along with the content.
+#####
 
 # Λᴴ = θ Hᶜ / (cᵖᵐ T − Hᶜ): ∂p/∂ρᵈ = Cᴸ Λᴴ at fixed composition and thermodynamic density.
 @inline function fixed_composition_sensitivity(::LiquidIcePotentialTemperatureFormulation, 𝒰, T, constants)
@@ -487,6 +524,89 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
 end
 
 @inline fixed_composition_sensitivity(formulation, 𝒰, T, constants) = zero(T)
+
+# The response (σ, E) of the pressure that the core re-diagnoses where the scheme adjusts the
+# partition of its moisture density to the phase `equilibrium`: in a cell that holds cloud, the
+# vapor density is the saturation one, ρᵛ⁺(T), and the cloud condensate takes up the rest of the
+# moisture density, a fraction λ(T) of it as liquid. Elsewhere, and for a scheme that adjusts no
+# partition (`equilibrium = nothing`), both are zero.
+#
+# Derivation, with C̄ and Λᴴ the slopes at the held partition. A change at the held temperature
+# puts the moisture into the cloud condensate, so the pressure changes by
+# dp₀ = C̄ [d(ρθ) − Λᶜ d(ρqᵉ) + …], Λᶜ = λ Λˡ + (1 − λ) Λⁱ. The temperature then moves by dT, and
+# with it the partition: the vapor density by sᵛ dT, sᵛ = dρᵛ⁺/dT, at the cost of the condensate,
+# and the liquid by ρᶜ (dλ/dT) dT at the cost of the ice, with ρᶜ the cloud condensate density.
+# Hence dp = dp₀ − C̄ S dT with S = (Λᵛ − Λᶜ) sᵛ + (Λˡ − Λⁱ) ρᶜ dλ/dT. The equation of state
+# p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T closes it, N dT = dp − Rᵈ T dρᵈ with N = ρ Rᵐ + Rᵛ T sᵛ, so that
+#
+#   dp = ζ dp₀ + (1 − ζ) Rᵈ T dρᵈ ,        ζ = 1 / (1 + C̄ σ) ,        σ = S / N .
+#
+# Warming evaporates condensate, which takes up most of the heat: ζ is about 0.4 at 290 K, and a
+# unit of dry air adds the rest of its partial pressure. At fixed mixing ratios the dry air also
+# carries the vapor along, which the held-temperature change counts as condensate. In units of
+# the adjusted slope ζ C̄, the dry density therefore holds, beyond Λᴴ,
+#
+#   E = (Λᵛ − Λᶜ) ρᵛ / ρᵈ + Rᵈ T σ ,
+#
+# and the moisture density keeps the sensitivity Λᶜ that `prognostic_moisture_phase_fractions`
+# gives it. sᵛ and dλ/dT are centered differences over ± 1/8 K of the saturation vapor density
+# and liquid fraction the adjustment itself uses, so they follow the selected saturation vapor
+# pressure and phase equilibrium; the truncation is 10⁻⁵ of sᵛ.
+@inline adjusted_partition_response(::Nothing, 𝒰, T, ρᵈ, qᵛᵉ, fᵛ, fˡ, fⁱ, λᵛ, λˡ, λⁱ, constants) = zero(T), zero(T)
+
+@inline function adjusted_partition_response(equilibrium, 𝒰, T, ρᵈ, qᵛᵉ, fᵛ, fˡ, fⁱ, λᵛ, λˡ, λⁱ, constants)
+    q = 𝒰.moisture_mass_fractions
+    ρ = 𝒰.density
+    T̂ = ifelse(T == 0, one(T), T)
+    ρ̂ᵈ = ifelse(ρᵈ == 0, one(ρᵈ), ρᵈ)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+
+    # The cloud condensate takes the moisture's changes where the vapor takes none, and is the
+    # moisture the vapor leaves.
+    adjusted = fᵛ == 0
+    ρᶜ = ρ * max(0, qᵛᵉ - q.vapor)
+    λᶜ = fˡ * λˡ + fⁱ * λⁱ
+
+    δ = convert(typeof(T̂), 1//8)
+    ρᵛ₊, λ₊ = equilibrium_partition(T̂ + δ, equilibrium, constants)
+    ρᵛ₋, λ₋ = equilibrium_partition(T̂ - δ, equilibrium, constants)
+    sᵛ = (ρᵛ₊ - ρᵛ₋) / 2δ
+    ∂λ∂T = (λ₊ - λ₋) / 2δ
+
+    S = (λᵛ - λᶜ) * sᵛ + (λˡ - λⁱ) * ρᶜ * ∂λ∂T
+    N = ρ * Rᵐ + Rᵛ * T̂ * sᵛ
+    σ = S / ifelse(N == 0, one(N), N)
+    E = (λᵛ - λᶜ) * ρ * q.vapor / ρ̂ᵈ + Rᵈ * T̂ * σ
+
+    return ifelse(adjusted, σ, zero(σ)), ifelse(adjusted, E, zero(E))
+end
+
+# The same, from the cell: the sensitivities and the phases of the moisture are evaluated only
+# for a scheme that adjusts a partition.
+@inline adjusted_partition_response(::Nothing, formulation, i, j, k, grid, 𝒰, T, ρᵈ, qᵛᵉ,
+                                    microphysics, microphysical_fields, constants) = zero(T), zero(T)
+
+@inline function adjusted_partition_response(equilibrium, formulation, i, j, k, grid, 𝒰, T, ρᵈ, qᵛᵉ,
+                                             microphysics, microphysical_fields, constants)
+    q = 𝒰.moisture_mass_fractions
+    fᵛ, fˡ, fⁱ = prognostic_moisture_phase_fractions(i, j, k, grid, microphysics, microphysical_fields, q)
+    λᵛ, λˡ, λⁱ = moisture_pressure_sensitivities(formulation, 𝒰, T, ρᵈ, constants)
+    return adjusted_partition_response(equilibrium, 𝒰, T, ρᵈ, qᵛᵉ, fᵛ, fˡ, fⁱ, λᵛ, λˡ, λⁱ, constants)
+end
+
+# The saturation vapor density and the liquid fraction of the cloud condensate that the phase
+# equilibrium adjusts to at temperature T.
+@inline function equilibrium_partition(T, equilibrium, constants)
+    surface = equilibrated_surface(equilibrium, T)
+    ρᵛ⁺ = saturation_vapor_pressure(T, constants, surface) / (vapor_gas_constant(constants) * T)
+    return ρᵛ⁺, surface_liquid_fraction(surface)
+end
+
+@inline surface_liquid_fraction(::PlanarLiquidSurface) = true
+@inline surface_liquid_fraction(::PlanarIceSurface) = false
+@inline surface_liquid_fraction(surface::PlanarMixedPhaseSurface) = surface.liquid_fraction
 
 # The sensitivities (Λᵛ, Λˡ, Λⁱ) of the pressure to the partial densities of vapor, liquid and
 # ice at fixed dry and thermodynamic densities, dp = Cᴸ [d(ρθ) − Σₓ Λˣ dρˣ] (from #1253):
@@ -556,12 +676,16 @@ function moisture_content_arguments(substepper, model, U⁰)
     condensate_names = condensate_field_names(microphysics)
 
     state = (; formulation = model.formulation, dynamics = model.dynamics, microphysics,
+             equilibrium = saturation_adjusted_equilibrium(microphysics),
              microphysical_fields = model.microphysical_fields, constants = model.thermodynamic_constants,
              ρᵈ = model.dynamics.dry_density, ρ = model.dynamics.total_density,
              qᵛᵉ = specific_prognostic_moisture(model), Λᴴ = substepper.fixed_composition_sensitivity,
              liquid_fractions = condensate_liquid_fractions(microphysics, condensate_names))
 
-    densities = (; ρᵈ⁰ = U⁰.ρᵈ, Gᵗρᵈ = substepper.transport_density_tendency, Gˢρᵈ = Gⁿ.ρᵈ,
+    ρᵡ_name = thermodynamic_density_name(model.formulation)
+
+    densities = (; ρᵡ⁰ = U⁰[ρᵡ_name], ρᵡ = thermodynamic_density(model.formulation),
+                 ρᵈ⁰ = U⁰.ρᵈ, Gᵗρᵈ = substepper.transport_density_tendency, Gˢρᵈ = Gⁿ.ρᵈ,
                  ρqᵐ⁰ = U⁰[moisture_name], ρqᵐ = model.moisture_density, Gρqᵐ = Gⁿ[moisture_name],
                  ρqᶜ⁰ = values(U⁰[condensate_names]),
                  ρqᶜ = values(model.microphysical_fields[condensate_names]),
@@ -571,7 +695,10 @@ function moisture_content_arguments(substepper, model, U⁰)
 end
 
 # The sensitivities at the stage-entry state: λᵐ of the prognostic moisture density, λˡ and λⁱ of the
-# condensate phases, and the dilution Σₐ λₐ rₐ, with the cached Λᴴ.
+# condensate phases, the dilution Σₐ λₐ rₐ, what the dry density holds beyond the dilution (the
+# cached Λᴴ, plus E where the scheme adjusts the partition of its moisture), and the scale ς of the
+# slow path in the units of the loop's coefficient: one, except where the partition is adjusted
+# (Section 3b).
 @inline function stage_entry_sensitivities(i, j, k, grid, s, ρqᶜ)
     @inbounds begin
         ρᵈ = s.ρᵈ[i, j, k]
@@ -592,35 +719,43 @@ end
     λᵐ = fᵛ * λᵛ + fˡ * λˡ + fⁱ * λⁱ
     Σλr = (λᵐ * ρ * qᵛᵉ + condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, s.liquid_fractions, ρqᶜ)) / ρ̂ᵈ
 
-    return λᵐ, λˡ, λⁱ, Σλr, λᴴ
+    # Where the partition is adjusted, the dry density holds E more than Λᴴ, and the slow path
+    # is scaled to the loop's coefficient, the slope along its own flux.
+    _, E = adjusted_partition_response(s.equilibrium, 𝒰, T, ρᵈ, qᵛᵉ, fᵛ, fˡ, fⁱ, λᵛ, λˡ, λⁱ, s.constants)
+    θ⁺ = 𝒰.potential_temperature + λᴴ
+    θ⁺ᴱ = θ⁺ + E
+    ς = ifelse(θ⁺ᴱ == 0, one(θ⁺), θ⁺ / ifelse(θ⁺ᴱ == 0, one(θ⁺), θ⁺ᴱ))
+
+    return λᵐ, λˡ, λⁱ, Σλr, λᴴ + E, ς
 end
 
 # The content of the state with dry density `ρᵈ⁰`, moisture density `ρqᵐ⁰` and condensate masses
 # `ρqᶜ⁰` relative to the stage-entry state, at the stage-entry sensitivities: W(U⁰) − W(Yᵢ₋₁).
 @inline function relative_moisture_content(i, j, k, grid, s, sensitivities, ρᵈ⁰, ρqᵐ⁰, ρqᶜ⁰, ρqᵐ, ρqᶜ)
-    λᵐ, λˡ, λⁱ, Σλr, λᴴ = sensitivities
+    λᵐ, λˡ, λⁱ, Σλr, λᴴᴱ, ς = sensitivities
     @inbounds begin
         Δρᵈ = ρᵈ⁰[i, j, k] - s.ρᵈ[i, j, k]
         W⁰ = - λᵐ * (ρqᵐ⁰[i, j, k] - ρqᵐ[i, j, k]) -
                (condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, s.liquid_fractions, ρqᶜ⁰) -
                 condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, s.liquid_fractions, ρqᶜ)) +
-               (Σλr + λᴴ) * Δρᵈ
+               (Σλr + λᴴᴱ) * Δρᵈ
     end
     return W⁰
 end
 
-# The content W⁰ of the start state relative to the stage-entry state, and its slow rate Gᵂ.
+# The content W⁰ of the start state relative to the stage-entry state, its slow rate Gᵂ, and the
+# scale ς of the slow path.
 @inline function moisture_content_and_tendency(i, j, k, grid, s, d)
     sensitivities = stage_entry_sensitivities(i, j, k, grid, s, d.ρqᶜ)
-    λᵐ, λˡ, λⁱ, Σλr, λᴴ = sensitivities
+    λᵐ, λˡ, λⁱ, Σλr, λᴴᴱ, ς = sensitivities
     W⁰ = relative_moisture_content(i, j, k, grid, s, sensitivities, d.ρᵈ⁰, d.ρqᵐ⁰, d.ρqᶜ⁰, d.ρqᵐ, d.ρqᶜ)
 
     @inbounds begin
         Gᵂ = - λᵐ * d.Gρqᵐ[i, j, k] - condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, s.liquid_fractions, d.Gρqᶜ) +
-               Σλr * d.Gᵗρᵈ[i, j, k] + λᴴ * d.Gˢρᵈ[i, j, k]
+               Σλr * d.Gᵗρᵈ[i, j, k] + λᴴᴱ * d.Gˢρᵈ[i, j, k]
     end
 
-    return W⁰, Gᵂ
+    return W⁰, Gᵂ, ς
 end
 
 """
@@ -631,7 +766,10 @@ perturbation of the thermodynamic density for `_recover_full_state!`, and off th
 tendency: the content of the start state, the ramp of its slow rate over `forcing_interval`, and
 the content `− ∇·(Λᴴ M)` that the loop's own mass flux built, with `M` that flux integrated over
 the stage's substeps of size `Δτ`. `M` is the sum the transport velocity is averaged from, so
-this runs before `finalize_time_averaged_velocity!` normalizes it (see Section 10).
+this runs before `finalize_time_averaged_velocity!` normalizes it (see Section 10). Where the
+slow path was scaled to the loop's coefficient (a scheme that adjusts the partition of its
+moisture, Section 3b), what the scaling added to the slow path of the thermodynamic density
+comes off with the content.
 """
 function remove_moisture_content!(substepper::AcousticSubstepper, model, U⁰, forcing_interval, Δτ)
     grid = model.grid
@@ -648,13 +786,19 @@ end
 @kernel function _remove_moisture_content!(ϖ, Gˢρᵡ, grid, state, densities, Σρu′, Σρv′, Σρw′, ρw′, ρw⁰, ρwᴸ,
                                            forcing_interval, Δτ, ωˢ⁻)
     i, j, k = @index(Global, NTuple)
-    W⁰, Gᵂ = moisture_content_and_tendency(i, j, k, grid, state, densities)
+    W⁰, Gᵂ, ς = moisture_content_and_tendency(i, j, k, grid, state, densities)
     Λᴴ = state.Λᴴ
     @inbounds begin
         ∇ʰ_ΛM = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, Λᴴ, Σρu′) + δyTᵃᶜᵃ(i, j, k, grid, θFʸ, Λᴴ, Σρv′))
         ∂z_ΛM = ∂zᶜᶜᶜ(i, j, k, grid, fast_content_flux_z, Λᴴ, Σρw′, ρw′, ρw⁰, ρwᴸ, ωˢ⁻)
-        ϖ[i, j, k] -= W⁰ + forcing_interval * Gᵂ - Δτ * (∇ʰ_ΛM + ∂z_ΛM)
-        Gˢρᵡ[i, j, k] -= Gᵂ
+
+        # The thermodynamic tendency itself, and the slow path of the thermodynamic density it
+        # ramps from the start state: the loop held both scaled by ς, like the content.
+        Gᵡ = Gˢρᵡ[i, j, k] / ς - Gᵂ
+        ρᵡˢ = (densities.ρᵡ⁰[i, j, k] - densities.ρᵡ[i, j, k]) + forcing_interval * Gᵡ
+
+        ϖ[i, j, k] -= (ς - 1) * ρᵡˢ + ς * (W⁰ + forcing_interval * Gᵂ) - Δτ * (∇ʰ_ΛM + ∂z_ΛM)
+        Gˢρᵡ[i, j, k] = Gᵡ
     end
 end
 
@@ -1211,20 +1355,21 @@ end
 
 # Rewind-initialize the four non-vertical perturbations (ρ′, ρθ′, ρu′, ρv′) in one launch, and add the
 # moisture content W⁰ of the start state to ρθ′ and its stash and its slow rate Gᵂ to the thermodynamic
-# tendency (see `moisture_content_and_tendency`). ρθ′ is the rewind plus W⁰, evaluated in that order.
+# tendency (see `moisture_content_and_tendency`). ρθ′ is the rewind plus W⁰, evaluated in that order,
+# and both sums are scaled by ς, which is one except where the partition of the moisture is adjusted.
 @kernel function _initialize_stage_perturbations!(ρ′, ρθ′, ρθ′ˢ⁻, ρu′, ρv′, Gˢρᵡ,
                                                   ρ_outer, ρθ_outer, ρu_outer, ρv_outer,
                                                   ρ_stage, ρθ_stage, ρu_stage, ρv_stage,
                                                   grid, state, densities)
     i, j, k = @index(Global, NTuple)
-    W⁰, Gᵂ = moisture_content_and_tendency(i, j, k, grid, state, densities)
+    W⁰, Gᵂ, ς = moisture_content_and_tendency(i, j, k, grid, state, densities)
     @inbounds begin
         ρ′[i, j, k]  = ρ_outer[i, j, k]  - ρ_stage[i, j, k]
-        ρθ′[i, j, k] = (ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + W⁰
-        ρθ′ˢ⁻[i, j, k] = (ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + W⁰
+        ρθ′[i, j, k] = ς * ((ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + W⁰)
+        ρθ′ˢ⁻[i, j, k] = ς * ((ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + W⁰)
         ρu′[i, j, k] = ρu_outer[i, j, k] - ρu_stage[i, j, k]
         ρv′[i, j, k] = ρv_outer[i, j, k] - ρv_stage[i, j, k]
-        Gˢρᵡ[i, j, k] += Gᵂ
+        Gˢρᵡ[i, j, k] = ς * (Gˢρᵡ[i, j, k] + Gᵂ)
     end
 end
 
@@ -1379,7 +1524,7 @@ struct StageEntryForceRemainder{D, G, P, PN, T, TN, C, R, RD, WN, WC, FT}
     total_density :: R                      # ρ
     dry_density :: RD                       # ρᵈ
     step_start_water_density :: WN          # (ρ - ρᵈ)ⁿ
-    step_start_moisture_content :: WC       # Wⁿ = W(Uⁿ) − W(Yᵢ₋₁), see `compute_step_start_moisture_content!`
+    step_start_moisture_content :: WC       # Wⁿ = W(Uⁿ) − W(Yᵢ₋₁), scaled; see `compute_step_start_moisture_content!`
     gravitational_acceleration :: FT
 end
 
@@ -1432,14 +1577,19 @@ the step start, is ``Cᴸ [(ρθ − ρθⁿ) + W(Yᵢ₋₁) − W(Uⁿ)] = C�
 [`StageEntryForceRemainder`](@ref) subtracts exactly that, so that what is recombined as slow is
 only what the loop does not carry: equation-of-state curvature and the part of the composition
 dependence the first-order content misses. Without moisture ``Wⁿ = 0`` exactly.
+
+Where the microphysics adjusts the partition of its moisture, a difference of states enters the
+loop's pressure scaled by ``ς`` (Section 3b), so the loop accounts for
+``Cᴸ ς [(ρθ − ρθⁿ) − Wⁿ]``. What is stored there is ``(1 − ς) (ρθ − ρθⁿ) + ς Wⁿ``, which the
+remainder subtracts from ``ρθ − ρθⁿ`` like ``Wⁿ``; elsewhere ``ς = 1`` and it is ``Wⁿ``.
 """
 function compute_step_start_moisture_content!(step_start, substepper, model, Uⁿ)
     grid = model.grid
-    state, _ = moisture_content_arguments(substepper, model, Uⁿ)
+    state, densities = moisture_content_arguments(substepper, model, Uⁿ)
     moisture_name = moisture_prognostic_name(model.microphysics)
     condensate_names = condensate_field_names(model.microphysics)
     launch!(architecture(grid), grid, :xyz, _compute_step_start_moisture_content!,
-            step_start.moisture_content, grid, state,
+            step_start.moisture_content, grid, state, densities.ρᵡ⁰, densities.ρᵡ,
             Uⁿ.ρᵈ, Uⁿ[moisture_name], values(Uⁿ[condensate_names]),
             model.moisture_density, values(model.microphysical_fields[condensate_names]))
     fill_halo_regions!(step_start.moisture_content)
@@ -1448,10 +1598,12 @@ end
 
 compute_step_start_moisture_content!(::Nothing, substepper, model, Uⁿ) = nothing
 
-@kernel function _compute_step_start_moisture_content!(Wⁿ, grid, state, ρᵈⁿ, ρqᵐⁿ, ρqᶜⁿ, ρqᵐ, ρqᶜ)
+@kernel function _compute_step_start_moisture_content!(Wⁿ, grid, state, ρᵡⁿ, ρᵡ, ρᵈⁿ, ρqᵐⁿ, ρqᶜⁿ, ρqᵐ, ρqᶜ)
     i, j, k = @index(Global, NTuple)
     sensitivities = stage_entry_sensitivities(i, j, k, grid, state, ρqᶜ)
-    @inbounds Wⁿ[i, j, k] = relative_moisture_content(i, j, k, grid, state, sensitivities, ρᵈⁿ, ρqᵐⁿ, ρqᶜⁿ, ρqᵐ, ρqᶜ)
+    ς = last(sensitivities)
+    W = relative_moisture_content(i, j, k, grid, state, sensitivities, ρᵈⁿ, ρqᵐⁿ, ρqᶜⁿ, ρqᵐ, ρqᶜ)
+    @inbounds Wⁿ[i, j, k] = (1 - ς) * (ρᵡ[i, j, k] - ρᵡⁿ[i, j, k]) + ς * W
 end
 
 """
