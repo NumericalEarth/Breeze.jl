@@ -841,19 +841,19 @@ function remove_moisture_content!(substepper::AcousticSubstepper, model, U⁰, f
     Gˢρᵡ = model.timestepper.Gⁿ[thermodynamic_density_name(model.formulation)]
     launch!(architecture(grid), grid, :xyz, _remove_moisture_content!,
             substepper.density_potential_temperature_perturbation, Gˢρᵡ, grid, state, densities,
-            M.u, M.v, M.w, substepper.momentum_perturbation.w, U⁰.ρw, model.momentum.ρw,
+            M.u, M.v, M.w, substepper.momentum_perturbation.w, U⁰.ρu, U⁰.ρv, U⁰.ρw, model.momentum,
             forcing_interval, Δτ, 1 - substepper.forward_weight)
     return nothing
 end
 
-@kernel function _remove_moisture_content!(ϖ, Gˢρᵡ, grid, state, densities, Σρu′, Σρv′, Σρw′, ρw′, ρw⁰, ρwᴸ,
+@kernel function _remove_moisture_content!(ϖ, Gˢρᵡ, grid, state, densities, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ,
                                            forcing_interval, Δτ, ωˢ⁻)
     i, j, k = @index(Global, NTuple)
     W⁰, Gᵂ, ς = moisture_content_and_tendency(i, j, k, grid, state, densities)
     Λᴴ = state.Λᴴ
     @inbounds begin
         ∇ʰ_ΛM = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, Λᴴ, Σρu′) + δyTᵃᶜᵃ(i, j, k, grid, θFʸ, Λᴴ, Σρv′))
-        ∂z_ΛM = ∂zᶜᶜᶜ(i, j, k, grid, fast_content_flux_z, Λᴴ, Σρw′, ρw′, ρw⁰, ρwᴸ, ωˢ⁻)
+        ∂z_ΛM = ∂zᶜᶜᶜ(i, j, k, grid, fast_content_flux_z, Λᴴ, state.dynamics, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
 
         # The thermodynamic tendency itself, and the slow path of the thermodynamic density it
         # ramps from the start state: the loop held both scaled by ς, like the content.
@@ -865,8 +865,17 @@ end
     end
 end
 
-@inline fast_content_flux_z(i, j, k, grid, Λᴴ, Σρw′, ρw′, ρw⁰, ρwᴸ, ωˢ⁻) =
-    @inbounds ℑbzᵃᵃᶠ(i, j, k, grid, Λᴴ) * (Σρw′[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - (ρw⁰[i, j, k] - ρwᴸ[i, j, k])))
+# Λᴴ times the vertical mass flux the loop integrated: the sum of (ρw)′ over the substeps, less the
+# off-centering's share of its change over the stage (Section 10). (ρw)′ is the loop's vertical
+# momentum, which is the contravariant one over terrain, so the rewind it started from is the
+# difference of `transport_ρw`, as in `_finalize_time_averaged_velocity!`. The top face, which
+# `initialize_vertical_momentum_perturbation!` does not reach, starts from zero.
+@inline function fast_content_flux_z(i, j, k, grid, Λᴴ, dynamics, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    rewind = transport_ρw(i, j, k, grid, dynamics, ρu⁰, ρv⁰, ρw⁰) -
+             transport_ρw(i, j, k, grid, dynamics, ρ𝐮ᴸ.ρu, ρ𝐮ᴸ.ρv, ρ𝐮ᴸ.ρw)
+    ρw′⁰ = ifelse(k > size(grid, 3), zero(rewind), rewind)
+    return @inbounds ℑbzᵃᵃᶠ(i, j, k, grid, Λᴴ) * (Σρw′[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - ρw′⁰))
+end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
