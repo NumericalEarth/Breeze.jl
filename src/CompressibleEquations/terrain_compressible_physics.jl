@@ -49,14 +49,9 @@ const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
 @inline AtmosphereModels.advecting_vertical_velocity(dynamics::TerrainCompressibleDynamics, velocities) =
     dynamics.contravariant_vertical_velocity
 
-"""
-$(TYPEDEF)
-
-Callable piecewise-linear vertical profile. `profile(z)` linearly interpolates `values`
-against `heights` (both ordered bottom-to-top) and holds the nearest end value constant for
-`z` below `heights[1]` or above `heights[end]`. Subtypes `Function` so it is picked up by
-`evaluate_profile` wherever a `z`-dependent reference profile is expected.
-"""
+# Callable piecewise-linear vertical profile: `profile(z)` interpolates `values` against `heights`
+# (bottom-to-top) and holds the end values constant outside their range. Subtypes `Function` so
+# `evaluate_profile` accepts it wherever a z-dependent reference profile is expected.
 struct HorizontalMeanProfile{H, V} <: Function
     heights :: H
     values :: V
@@ -80,16 +75,9 @@ function (profile::HorizontalMeanProfile)(z)
     return values[end]
 end
 
-"""
-$(TYPEDEF)
-
-Adapter that makes a vertical profile — a `Number`, a callable `φ(z)`, or a
-[`HorizontalMeanProfile`](@ref) — settable onto a `Field` of any dimensionality. `set!` calls it
-with the field's node coordinates, which are `(x, z)` on a `Flat`-`y` grid, `(x, y, z)` in 3D and
-`(λ, φ, z)` on a latitude-longitude grid; only the last of those — the physical height, which on a
-terrain-following grid varies per column — is used. Subtypes `Function` so `set!` takes its
-function-evaluation path (which evaluates on the host and transfers once).
-"""
+# Makes a vertical profile (a `Number`, a callable φ(z), or a `HorizontalMeanProfile`) settable onto
+# a `Field` of any dimensionality: only the last node coordinate, the physical height, is used.
+# Subtypes `Function` so `set!` takes its function-evaluation path (host evaluation, one transfer).
 struct HeightProfile{P} <: Function
     profile :: P
 end
@@ -98,28 +86,11 @@ end
 
 @inline physical_heightᶜᶜᶜ(i, j, k, grid) = znode(i, j, k, grid, Center(), Center(), Center())
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Reduce a 3D `field` to a `HorizontalMeanProfile` of its horizontal mean **at constant physical
-height**. On a terrain-following grid the cell-center height `znode(i, j, k, …)` varies with
-`(i, j)`, so a plain per-`k` average would blend, e.g., valley-floor and mountain-top air at the
-same computational level. Instead every column is first interpolated onto a common set of physical
-heights and the mean is taken there, giving a genuine `θ̄(z)` — the horizontally-uniform reference
-profile that WRF-style base states use, evaluated per column at its own terrain by
-[`compute_terrain_reference_state!`](@ref).
-
-The common heights are the columnwise minima of the cell-center heights at each level `k`, obtained
-by a `minimum!` reduction: on a terrain-following grid these are the levels of the lowest-terrain
-column, they increase strictly with `k`, and every column's level-`k` center lies at or above
-them — so the per-column interpolation never extrapolates above a column's top.
-
-A column whose terrain rises above a given height has no air there, and contributes nothing to that
-height's mean: the interpolation kernel also fills an indicator field, and the mean is the ratio of
-the two `sum!` reductions. Extending such columns downward instead (holding the surface value) would
-bias the mean towards near-surface air by `~(z̄ − z_surface)·dφ/dz` at the lowest levels. The
-lowest-terrain column contributes to every height, so no level is ever empty.
-"""
+# Horizontal mean at constant *physical* height: a per-k average on a terrain-following grid would
+# blend valley-floor and mountain-top air. Columns are interpolated onto the columnwise minima of
+# the level-k center heights (the lowest-terrain column's levels, so nothing extrapolates above its
+# top). A column whose terrain rises above a height contributes nothing to that height's mean
+# (indicator field); extending it downward instead would bias the mean towards near-surface air.
 function horizontal_mean_profile(field)
     grid = field.grid
     arch = architecture(grid)
@@ -183,21 +154,8 @@ end
 ##### Compute contravariant vertical velocity and momentum
 #####
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Compute the contravariant vertical velocity ``\\tilde{w}`` and
-contravariant vertical momentum ``\\rho \\tilde{w}`` from the
-Cartesian velocity and momentum fields.
-
-The contravariant vertical velocity is the velocity component normal
-to the terrain-following coordinate surfaces:
-
-```math
-\\tilde{w} = w - \\left(\\frac{\\partial z}{\\partial x}\\right)_r u
-                    - \\left(\\frac{\\partial z}{\\partial y}\\right)_r v
-```
-"""
+# Contravariant vertical velocity w̃ = w - (∂z/∂x)ᵣ u - (∂z/∂y)ᵣ v (the component normal to the
+# terrain-following coordinate surfaces) and the matching momentum ρw̃, from the Cartesian fields.
 function compute_contravariant_velocity!(model::TerrainCompressibleModel)
     grid = model.grid
     arch = architecture(grid)
@@ -792,30 +750,11 @@ function terrain_reference_profiles(ref_spec::NamedTuple)
     return θᵣ, qᵛᵣ
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Fill the 3D fields `pᵣ`, `ρᵣ` and `πᵣ` with the hydrostatic reference pressure, density and Exner
-function, solving the discrete hydrostatic balance per column. On a terrain-following grid,
-different columns have different physical heights at the same computational index `k`, so the
-reference state varies horizontally even though the reference atmosphere is horizontally uniform.
-
-Each column is anchored at its own terrain surface with the *continuous* hydrostatic state at that
-physical height, and every face above it — starting with the surface-to-first-center half cell —
-is closed by the Newton solve of the discrete balance
-```math
-\\frac{p_{ref}[k] - p_{ref}[k-1]}{Δz} + g \\frac{ρ_{ref}[k] + ρ_{ref}[k-1]}{2} = 0
-```
-to near machine precision (the Exner integration provides only the Newton initial guess).
-The reference atmosphere uses level-local moist constants
-``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ``, ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``, ``κᵐ = Rᵐ/cᵖᵐ``, with the dry case
-recovered exactly when ``qᵛ ≡ 0``. Enforcing the discrete balance is essential for
-reducing the truncation error in the vertical momentum equation (``-∂p/∂z - gρ``), which
-would otherwise be dominated by the near-cancellation of two large terms.
-
-The reference pressure is also used for the perturbation horizontal pressure gradient,
-reducing the terrain-following PGF error.
-"""
+# Per-column hydrostatic reference (pᵣ, ρᵣ, πᵣ): each column is anchored at its own terrain surface
+# with the continuous hydrostatic state, and every face above it is closed by a Newton solve of the
+# discrete balance (pᵣ[k] - pᵣ[k-1]) / Δz + g (ρᵣ[k] + ρᵣ[k-1]) / 2 = 0 (the Exner integration is
+# only the initial guess), with level-local moist constants Rᵐ, cᵖᵐ. The discrete balance keeps the
+# vertical momentum truncation error (-∂p/∂z - gρ) from being dominated by near-cancellation.
 function compute_terrain_reference_state!(pᵣ, ρᵣ, πᵣ, pˢ, grid, p₀, ref_spec, pˢᵗ, constants)
     arch = architecture(grid)
     Nz = size(grid, 3)
@@ -868,22 +807,10 @@ end
     @inbounds zˢ[i, j, 1] = znode(i, j, 1, grid, Center(), Center(), Face())
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Fill `pˢ` with the reference pressure at the terrain surface — the bottom face of each column —
-and return the matching `(θˢ, qᵛˢ)` there as 2D fields. `pˢ` is the *continuous* hydrostatic
-pressure at the local terrain height, reduced from the ``z = 0`` datum `p₀` by
-[`moist_hydrostatic_pressure`](@ref); it anchors the column integration in
-[`compute_terrain_reference_state!`](@ref) and is retained on the reference state, because the
-cold start and the diagnostic hydrostatic pressure must anchor at the same per-column pressure
-or they disagree with the reference by ``O(ρgh)`` over terrain.
-
-The surface heights come from a kernel; the profiles and the hydrostatic integration are host
-callables (an arbitrary user `θ(z)` and, for moist references, an adaptive vertical integration), so
-they are evaluated in a single vectorized pass over those heights — one evaluation per column, not
-per cell — and transferred back. A dry reference returns `qᵛˢ::ZeroField`.
-"""
+# Continuous hydrostatic pressure pˢ at each column's terrain surface (from the z = 0 datum p₀) and
+# the matching 2D (θˢ, qᵛˢ). pˢ is kept on the reference state: the cold start and the diagnostic
+# hydrostatic pressure must anchor at the same per-column pressure or they disagree by O(ρgh).
+# The profiles are host callables, evaluated in one vectorized pass per column, not per cell.
 function terrain_surface_reference_fields!(pˢ, grid, p₀, θᵣ, qᵛᵣ, pˢᵗ, constants)
     arch = architecture(grid)
 
@@ -951,16 +878,9 @@ terrain_surface_field(host_values, grid) =
     integrate_exner_column!(πᵣ, pᵣ, ρᵣ, θ, qᵛ, i, j, grid, 2, Nz, pˢᵗ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, g, κ̂)
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Build the single 3D `ExnerReferenceState` for a terrain-following compressible model from an
-explicit reference profile `ref_spec` (a `reference_potential_temperature` — constant or `θ(z)` —
-optionally with `reference_vapor_mass_fraction`). Its `pressure`/`density`/`exner_function` are
-horizontally-varying `CenterField`s in per-column discrete hydrostatic balance
-(`compute_terrain_reference_state!`); only `pressure`/`density` are read by the terrain kernels,
-but `exner_function` is filled for consistency with the 1D-column form.
-"""
+# The 3D `ExnerReferenceState` of a terrain-following model: horizontally-varying `CenterField`s in
+# per-column discrete hydrostatic balance. Only `pressure`/`density` are read by the terrain
+# kernels; `exner_function` is filled for consistency with the 1D-column form.
 function terrain_exner_reference_state(grid, base_pressure, ref_spec, standard_pressure, constants)
     FT = eltype(grid)
     pᵣ = CenterField(grid)
@@ -985,14 +905,8 @@ end
 build_reference_state(grid, ::TerrainMetrics, ref_spec, base_pressure, standard_pressure, constants) =
     terrain_exner_reference_state(grid, base_pressure, ref_spec, standard_pressure, constants)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Build the reference specification (`reference_potential_temperature`,
-`reference_vapor_mass_fraction`) for a terrain-following compressible model from the
-horizontal means of its current `θˡⁱ` and `qᵛ`. The vapor profile is dropped (set to
-`nothing`, selecting the dry reference path) when the mean moisture is identically zero.
-"""
+# Reference specification from the constant-height horizontal means of the current θˡⁱ and qᵛ;
+# the vapor profile is dropped (dry reference path) when the mean moisture is identically zero.
 function terrain_reference_mean_profiles(model)
     θ̄ = horizontal_mean_profile(AtmosphereModels.liquid_ice_potential_temperature(model))
     qᵛ_profile = horizontal_mean_profile(AtmosphereModels.specific_humidity(model))
@@ -1001,16 +915,9 @@ function terrain_reference_mean_profiles(model)
               reference_vapor_mass_fraction=q̄ᵛ)
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Recompute the terrain-following model's 3D `ExnerReferenceState` in place from the height-resolved
-horizontal-mean state, via `compute_terrain_reference_state!`. Unlike the flat Exner / anelastic
-`set_to_mean!` reset, this specializes on the *model* (rather than the reference type) because the
-terrain mean must be taken at constant physical height (`horizontal_mean_profile`), not per
-computational level. No `update_state!` follows: the terrain reference feeds only the buoyancy and
-pressure-gradient tendencies, not any diagnostic field. A no-op if the dynamics carries no reference.
-"""
+# Specializes on the model rather than the reference type (unlike the flat `set_to_mean!` reset)
+# because the terrain mean must be taken at constant physical height. No `update_state!` follows:
+# the terrain reference feeds only the buoyancy and pressure-gradient tendencies, no diagnostic.
 function AtmosphereModels.reset_reference_state!(model::TerrainCompressibleModel)
     dynamics = model.dynamics
     ref = dynamics.reference_state
