@@ -31,15 +31,16 @@ using Oceananigans: Field, CenterField, XFaceField, YFaceField, ZFaceField, arch
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
-using Oceananigans.Grids: ZDirection, rnode, znode, node
+using Oceananigans.Grids: ZDirection, rnode, znode, node, Periodic, TwoSided, Closed
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Solvers: BatchedTridiagonalSolver, compute_factorization!, solve!
 using Oceananigans.TurbulenceClosures: vertically_implicit_closures, VerticallyImplicitDiffusionLowerDiagonal,
                                       VerticallyImplicitDiffusionDiagonal, VerticallyImplicitDiffusionUpperDiagonal
+using Oceananigans.Operators: Operators
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
-    δxTᶠᵃᵃ, δyTᵃᶠᵃ, δxTᶜᵃᵃ, δyTᵃᶜᵃ,
+    δxᶠᵃᵃ, δyᵃᶠᵃ,
     Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ,
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
     Δz⁻¹ᶜᶜᶜ, Δz⁻¹ᶜᶜᶠ,
@@ -185,13 +186,43 @@ fill_substep_halos!(fields, grid::AbstractGrid) = fill_architecture_halos!(field
 fill_architecture_halos!(fields, ::Union{CPU, GPU}) = nothing
 fill_architecture_halos!(fields, arch) = fill_halo_regions!(fields)
 
-# TODO: Oceananigans has no immersed-grid method for `δxTᶠᵃᵃ`, `δyTᵃᶠᵃ` (they fall back to
-# `δxᶠᵃᵃ`, which reads halos); it should provide immersed topology-aware operators. Until then
-# the substep kernels call these wrappers, which pass the underlying grid on an immersed grid.
-@inline topology_aware_δxᶠᵃᵃ(i, j, k, grid, args...) = δxTᶠᵃᵃ(i, j, k, grid, args...)
-@inline topology_aware_δyᵃᶠᵃ(i, j, k, grid, args...) = δyTᵃᶠᵃ(i, j, k, grid, args...)
-@inline topology_aware_δxᶠᵃᵃ(i, j, k, ibg::ImmersedBoundaryGrid, args...) = δxTᶠᵃᵃ(i, j, k, ibg.underlying_grid, args...)
-@inline topology_aware_δyᵃᶠᵃ(i, j, k, ibg::ImmersedBoundaryGrid, args...) = δyTᵃᶠᵃ(i, j, k, ibg.underlying_grid, args...)
+# TODO: remove this block once Oceananigans' topology-aware operators dispatch on
+# `ImmersedBoundaryGrid`, and import `δxTᶠᵃᵃ`, `δyTᵃᶠᵃ`, `δxTᶜᵃᵃ`, `δyTᵃᶜᵃ` from Oceananigans.Operators.
+# Oceananigans defines their Periodic and TwoSided methods only for underlying grids, so on an
+# immersed grid they fall back to the halo-reading `δx`, `δy`. These local copies add the
+# immersed-grid methods and evaluate `f` on the immersed grid itself.
+@inline δxTᶠᵃᵃ(i, j, k, grid, args...) = Operators.δxTᶠᵃᵃ(i, j, k, grid, args...)
+@inline δyTᵃᶠᵃ(i, j, k, grid, args...) = Operators.δyTᵃᶠᵃ(i, j, k, grid, args...)
+@inline δxTᶜᵃᵃ(i, j, k, grid, args...) = Operators.δxTᶜᵃᵃ(i, j, k, grid, args...)
+@inline δyTᵃᶜᵃ(i, j, k, grid, args...) = Operators.δyTᵃᶜᵃ(i, j, k, grid, args...)
+
+const IBGXP = ImmersedBoundaryGrid{<:Any, Periodic}
+const IBGYP = ImmersedBoundaryGrid{<:Any, <:Any, Periodic}
+const IBGXS = ImmersedBoundaryGrid{FT, TwoSided{L, R}} where {FT, L, R}
+const IBGYS = ImmersedBoundaryGrid{FT, <:Any, TwoSided{L, R}} where {FT, L, R}
+
+@inline value(i, j, k, grid, f::Function, args...) = f(i, j, k, grid, args...)
+@inline value(i, j, k, grid, c::AbstractArray) = @inbounds c[i, j, k]
+
+@inline δxTᶠᵃᵃ(i, j, k, ibg::IBGXP, f, args...) =
+    value(i, j, k, ibg, f, args...) - value(ifelse(i == 1, ibg.underlying_grid.Nx, i - 1), j, k, ibg, f, args...)
+@inline δyTᵃᶠᵃ(i, j, k, ibg::IBGYP, f, args...) =
+    value(i, j, k, ibg, f, args...) - value(i, ifelse(j == 1, ibg.underlying_grid.Ny, j - 1), k, ibg, f, args...)
+@inline δxTᶜᵃᵃ(i, j, k, ibg::IBGXP, f, args...) =
+    value(ifelse(i == ibg.underlying_grid.Nx, 1, i + 1), j, k, ibg, f, args...) - value(i, j, k, ibg, f, args...)
+@inline δyTᵃᶜᵃ(i, j, k, ibg::IBGYP, f, args...) =
+    value(i, ifelse(j == ibg.underlying_grid.Ny, 1, j + 1), k, ibg, f, args...) - value(i, j, k, ibg, f, args...)
+
+@inline δxTᶠᵃᵃ(i, j, k, ibg::IBGXS{FT, L}, f, args...) where {FT, L} =
+    ifelse((L === Closed) & (i == 1), zero(FT), δxᶠᵃᵃ(i, j, k, ibg, f, args...))
+@inline δyTᵃᶠᵃ(i, j, k, ibg::IBGYS{FT, L}, f, args...) where {FT, L} =
+    ifelse((L === Closed) & (j == 1), zero(FT), δyᵃᶠᵃ(i, j, k, ibg, f, args...))
+@inline δxTᶜᵃᵃ(i, j, k, ibg::IBGXS{FT, L, R}, f, args...) where {FT, L, R} =
+    Operators.impenetrable_difference(value(i + 1, j, k, ibg, f, args...), value(i, j, k, ibg, f, args...),
+                                      (L === Closed) & (i == 1), (R === Closed) & (i == ibg.underlying_grid.Nx))
+@inline δyTᵃᶜᵃ(i, j, k, ibg::IBGYS{FT, L, R}, f, args...) where {FT, L, R} =
+    Operators.impenetrable_difference(value(i, j + 1, k, ibg, f, args...), value(i, j, k, ibg, f, args...),
+                                      (L === Closed) & (j == 1), (R === Closed) & (j == ibg.underlying_grid.Ny))
 
 #####
 ##### Section 2 — Constructor
@@ -1016,8 +1047,8 @@ end
 
 @inline δpᴸ(i, j, k, grid, ρθ′, Cᴸ) = @inbounds Cᴸ[i, j, k] * ρθ′[i, j, k]
 
-@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = topology_aware_δxᶠᵃᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = topology_aware_δyᵃᶠᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = δxTᶠᵃᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = δyTᵃᶠᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 
 # The substeps run under `ReactantCore.@trace`: a plain loop on ordinary arrays, a single traced
@@ -1142,8 +1173,8 @@ end
 #####
 
 # Terrain grids specialize these gradients to retain the constant-height chain rule.
-@inline x_damping_gradient(i, j, k, grid, args...) = topology_aware_δxᶠᵃᵃ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-@inline y_damping_gradient(i, j, k, grid, args...) = topology_aware_δyᵃᶠᵃ(i, j, k, grid, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+@inline x_damping_gradient(i, j, k, grid, args...) = δxTᶠᵃᵃ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+@inline y_damping_gradient(i, j, k, grid, args...) = δyTᵃᶠᵃ(i, j, k, grid, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
 
 # No-op default
 @inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
