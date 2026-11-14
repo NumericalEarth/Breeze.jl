@@ -1128,14 +1128,14 @@ function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
     return nothing
 end
 
-# Apply the last substep's fused divergence damping, then fill the halos of (ρu)′, (ρv)′ and enforce
+# Apply the last substep's fused divergence damping, exchange the halos of (ρu)′, (ρv)′ on distributed grids, and enforce
 # impenetrability, as the loop does after its explicit horizontal step.
 function finish_horizontal_momentum_perturbations!(model, substepper, stage)
     grid = model.grid
     apply_divergence_damping!(fused_divergence_damping(substepper.damping), substepper, grid, stage.Δτ,
                               model.thermodynamic_constants)
-    fill_halo_regions!(substepper.momentum_perturbation.u)
-    fill_halo_regions!(substepper.momentum_perturbation.v)
+    fill_substep_halos!(substepper.momentum_perturbation.u, model)
+    fill_substep_halos!(substepper.momentum_perturbation.v, model)
     enforce_wall_impenetrability!(substepper, model, grid, architecture(grid))
     return nothing
 end
