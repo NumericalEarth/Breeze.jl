@@ -32,8 +32,7 @@ function solve_tridiagonal_columns_in_place!(ϕ::Tuple, solver::BatchedTridiagon
     return nothing
 end
 
-@kernel function _solve_tridiagonal_columns_in_place_z!(ϕ, t, sa, sb, sc, grid, p, arguments, shared, specific,
-                                                        direction)
+@kernel function _solve_tridiagonal_columns_in_place_z!(ϕ, t, sa, sb, sc, grid, p, arguments, shared, specific, direction)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
