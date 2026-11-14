@@ -150,7 +150,8 @@ end
 
 # The last Runge–Kutta stage of every step: across the vertically implicit solves the mean state
 # loses exactly the energy the TKE gains, and the dissipation the TKE loses heats the air
-function stage_energy_budget(model, Δt)
+# `ρe` is the column of the TKE density (within `update_state!` the tracer holds its specific value)
+function stage_energy_budget(model, Δt; ρe = budget_column(model.tracers.ρe))
     grid = model.grid
     Nz = size(grid, 3)
     cf = model.closure_fields
@@ -184,12 +185,13 @@ function stage_energy_budget(model, Δt)
     Δhᵈ = -sum(Δzᶜ .* sum(Z .* (after .- before), dims=2))
 
     # the TKE: explicit stage sources were added before its solve; the solve and the correction after
-    Δρe = sum(Δzᶜ .* (budget_column(model.tracers.ρe) .- budget_column(pre.ρe)))
+    Δρe = sum(Δzᶜ .* (ρe .- budget_column(pre.ρe)))
     given_explicitly = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.given))
     converted = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ) .+ budget_column(cl.stage_surface)))
     dissipated = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.ε))
     shortfall = sum(Δzᶜ .* budget_column(cl.shortfall)) # paid by the internal energy instead of the TKE
-    return (; ΔKE, Δhᵈ, Δρe, given_explicitly, converted, dissipated, shortfall,
+    combination = sum(Δzᶜ .* budget_column(cl.stage_combination)) # the kinetic energy the stage combination removed
+    return (; ΔKE, Δhᵈ, Δρe, given_explicitly, converted, dissipated, shortfall, combination,
             shear = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Pᵖ)), buoyancy = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Bᵖ)))
 end
 
@@ -209,8 +211,84 @@ end
         # With rain, the solve of ρqʳ also sediments it (implicit advection by its fall speed); the
         # loading change of that sedimentation (≈1e-6 of the conversion) is microphysics, not mixing
         @test -b.Δhᵈ ≈ b.buoyancy rtol=(rain ? 1e-5 : 1e-7) atol=1e-11 * scale
-        # the TKE receives what the solves converted, less what it dissipates (which heats the air)
-        @test b.Δρe + b.given_explicitly ≈ b.converted - b.dissipated + b.shortfall rtol=1e-9 atol=1e-11 * scale
+        # the TKE receives what the solves converted and what the stage combination removed from the
+        # mean flow, less what it dissipates (which heats the air)
+        @test b.Δρe + b.given_explicitly ≈ b.converted - b.dissipated + b.shortfall + b.combination rtol=1e-9 atol=1e-11 * scale
+    end
+end
+
+#####
+##### The whole time step. A step is three stages, u⁽ᵐ⁾ = S[(1 - α) u⁰ + α (u⁽ᵐ⁻¹⁾ + Δt G)], α = 1, 1/4, 2/3, with S
+##### the vertically implicit solves, so what a stage converts enters the step with the weights w = (1/6, 2/3, 1),
+##### and the convex combination itself removes the kinetic energy D = α (1 - α) Σ ρ Δz |u⁽ᵐ⁻¹⁾ + Δt G - u⁰|² / 2
+##### from the mean flow. With D given to the TKE, over the step
+#####
+#####   -[KE(uⁿ⁺¹) - KE(uⁿ)]     = Σₘ wₘ (shearₘ + Dₘ)
+#####   Σ ρe Δz |ⁿ⁺¹ - Σ ρe Δz |ⁿ = Σₘ wₘ (convertedₘ - dissipatedₘ + shortfallₘ + Dₘ)
+#####
+##### so the shear production the TKE receives over the step is exactly the kinetic energy the mean flow loses.
+##### Without surface fluxes the momentum has no explicit tendency, so u⁽ᵐ⁻¹⁾ + Δt G = u⁽ᵐ⁻¹⁾ and D is
+##### recomputed here from the stage states, independently of the closure.
+#####
+
+# Records the stage's energy budget within the `update_state!` that follows each stage
+struct StageRecorder{F}
+    callsite :: Oceananigans.UpdateStateCallsite
+    record :: F
+end
+
+StageRecorder(record) = StageRecorder(Oceananigans.UpdateStateCallsite(), record)
+(recorder::StageRecorder)(model) = recorder.record(model)
+
+@testset "TKE energy budget of the whole step ($path)" for path in keys(closure_paths)
+    model = moist_tke_column(; path)
+    Δt = 10
+    α = (model.timestepper.α¹, model.timestepper.α², model.timestepper.α³)
+    w = (α[2] * α[3], α[3], 1)
+    ρ = budget_column(model.dynamics.reference_state.density)
+    Δzᶜ = diff(znodes(model.grid, Face()))
+    KE(ρu, ρv) = sum(Δzᶜ .* (ρu .^ 2 .+ ρv .^ 2) ./ (2ρ))
+    combination_deficit(ρu⁰, ρv⁰, ρu, ρv, α) = α * (1 - α) * sum(Δzᶜ .* ((ρu .- ρu⁰) .^ 2 .+ (ρv .- ρv⁰) .^ 2) ./ (2ρ))
+    time_step!(model, Δt) # the first step's preparation runs `update_state!` once more
+    for n in 1:10
+        ρu⁰ = budget_column(model.momentum.ρu); ρv⁰ = budget_column(model.momentum.ρv)
+        KE⁰ = KE(ρu⁰, ρv⁰)
+        TKE⁰ = sum(Δzᶜ .* budget_column(model.tracers.ρe))
+        stages = []
+        recorder = StageRecorder(model -> begin
+            m = length(stages) + 1
+            # within `update_state!` the tracers hold their specific values
+            budget = stage_energy_budget(model, α[m] * Δt; ρe = budget_column(model.tracers.ρe) .* ρ)
+            push!(stages, merge(budget, (ρu = budget_column(model.momentum.ρu), ρv = budget_column(model.momentum.ρv))))
+        end)
+        time_step!(model, Δt; callbacks = [recorder])
+        @test length(stages) == 3
+
+        ΔKE = KE(budget_column(model.momentum.ρu), budget_column(model.momentum.ρv)) - KE⁰
+        ΔTKE = sum(Δzᶜ .* budget_column(model.tracers.ρe)) - TKE⁰
+        D = (0.0, combination_deficit(ρu⁰, ρv⁰, stages[1].ρu, stages[1].ρv, α[2]),
+                  combination_deficit(ρu⁰, ρv⁰, stages[2].ρu, stages[2].ρv, α[3]))
+        scale = abs(ΔKE) + sum(abs(s.Δhᵈ) + abs(s.dissipated) for s in stages)
+
+        for (m, s) in enumerate(stages)
+            sscale = abs(s.ΔKE) + abs(s.Δhᵈ) + abs(s.dissipated)
+            @test -s.ΔKE ≈ s.shear rtol=1e-8 atol=1e-12 * sscale
+            @test -s.Δhᵈ ≈ s.buoyancy rtol=1e-7 atol=1e-11 * sscale
+            @test s.Δρe + s.given_explicitly ≈ s.converted - s.dissipated + s.shortfall + s.combination rtol=1e-9 atol=1e-11 * sscale
+            # what the closure gave the TKE is the kinetic energy the combination removed
+            @test s.combination ≈ D[m] rtol=1e-10 atol=1e-14 * scale
+        end
+        @test D[3] > 0
+
+        # the mean flow's loss over the step: what the solves converted and what the combinations removed
+        shear = sum(w[m] * stages[m].shear for m in 1:3)
+        deficit = sum(w[m] * D[m] for m in 1:3)
+        @test -ΔKE ≈ shear + deficit rtol=1e-8 atol=1e-12 * scale
+        # the TKE over the step
+        received = sum(w[m] * (stages[m].converted - stages[m].dissipated + stages[m].shortfall + stages[m].combination) for m in 1:3)
+        @test ΔTKE ≈ received rtol=1e-8 atol=1e-11 * scale
+        # the shear production the TKE received over the step is the mean flow's loss
+        @test sum(w[m] * (stages[m].shear + stages[m].combination) for m in 1:3) ≈ -ΔKE rtol=1e-8 atol=1e-12 * scale
     end
 end
 

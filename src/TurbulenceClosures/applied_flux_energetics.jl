@@ -312,6 +312,40 @@ implicit_stage(closure, model) =
 
 implicit_stage(closure::TKEClosureArray, model) = implicit_stage(first(closure), model)
 
+# The kinetic energy the convex combination of a Runge–Kutta stage removes from the mean flow. The stage
+# forms u = (1 - α) u⁰ + α V, V = u⁽ᵐ⁻¹⁾ + Δt G, and per unit volume
+#
+#     (1 - α) ρ |u⁰|² / 2 + α ρ |V|² / 2 - ρ |(1 - α) u⁰ + α V|² / 2 = α (1 - α) ρ |V - u⁰|² / 2 ≥ 0,
+#
+# which reaches no budget unless it is given to the TKE: with it the TKE receives over a whole step exactly
+# the kinetic energy the mean flow loses. Of the horizontal momentum, its squares interpolated to the centers.
+@inline function squared_combination_increment(i, j, k, grid, ρu, Gρu, ρu⁰, Δt)
+    @inbounds δ = ρu[i, j, k] + Δt * Gρu[i, j, k] - ρu⁰[i, j, k]
+    return δ * δ
+end
+
+@kernel function _stage_combination_kinetic_energy!(K, grid, ρu, ρv, Gρu, Gρv, ρu⁰, ρv⁰, ρ, Δt, α)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        δ² = ℑxᶜᵃᵃ(i, j, k, grid, squared_combination_increment, ρu, Gρu, ρu⁰, Δt) +
+             ℑyᵃᶜᵃ(i, j, k, grid, squared_combination_increment, ρv, Gρv, ρv⁰, Δt)
+        K[i, j, k] = α * (1 - α) * δ² / (2 * ρ[i, j, k]) * !inactive_cell(i, j, k, grid)
+    end
+end
+
+function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
+                                                             closure::FlavorOfTKEClosure, model, Δt, α)
+    implicit_stage(closure, model) || return nothing
+    grid = model.grid
+    U⁰ = model.timestepper.U⁰
+    Gⁿ = model.timestepper.Gⁿ
+    ρu, ρv = model.momentum.ρu, model.momentum.ρv
+    fill_halo_regions!((ρu, ρv, Gⁿ.ρu, Gⁿ.ρv, U⁰.ρu, U⁰.ρv))
+    launch!(grid.architecture, grid, :xyz, _stage_combination_kinetic_energy!, closure_fields.subgrid_cloud.cloud.stage_combination,
+            grid, ρu, ρv, Gⁿ.ρu, Gⁿ.ρv, U⁰.ρu, U⁰.ρv, total_density(model.dynamics), Δt, α)
+    return nothing
+end
+
 function AtmosphereModels.closure_before_implicit_solve!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
                                                           closure::FlavorOfTKEClosure, model, name)
     implicit_stage(closure, model) || return nothing
@@ -374,9 +408,10 @@ end
         # Where the TKE cannot pay what the solved fluxes converted (e ≈ 0 while the diffusivities,
         # floored at `minimum_tke`, still mix), the shortfall is taken from the internal energy
         # instead of driving e negative: the mixing of that floor is powered by the heat of the air.
-        # Benefit: e stays non-negative and the total energy still closes.
+        # Benefit: e stays non-negative and the total energy still closes. The TKE also receives the
+        # kinetic energy the stage combination removed from the mean flow (`stage_combination`, per volume).
         active = !inactive_cell(i, j, k, grid)
-        ρe⁺ = ρe[i, j, k] + Δt * ρᵢ * (converted - given) * active
+        ρe⁺ = ρe[i, j, k] + (Δt * ρᵢ * (converted - given) + cl.stage_combination[i, j, k]) * active
         ρe⁺′ = ifelse(ρe⁺ < 0, min(ρe[i, j, k], zero(ρe⁺)), ρe⁺)
         shortfall = ρe⁺′ - ρe⁺ # ≥ 0: energy the TKE did not pay
         ρe[i, j, k] = ρe⁺′

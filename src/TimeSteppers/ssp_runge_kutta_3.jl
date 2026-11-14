@@ -16,8 +16,8 @@ using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, ma
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_scheme, implicit_sedimentation_step!,
                                 thermodynamic_density_name,
-                                closure_before_implicit_solve!, closure_before_thermodynamic_solve!,
-                                closure_after_implicit_solves!
+                                closure_before_stage_combination!, closure_before_implicit_solve!,
+                                closure_before_thermodynamic_solve!, closure_after_implicit_solves!
 using Oceananigans.Utils: launch!, time_difference_in_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -149,6 +149,8 @@ function ssp_rk3_substep!(model, Δt, α)
     names = keys(prognostic)
     thermodynamic_name = thermodynamic_density_name(model.formulation)
     rounding = model.timestepper.rounding
+
+    closure_before_stage_combination!(model.closure_fields, model.closure, model, kernel_Δt, α)
 
     for (field_number, (name, u, u⁰, G)) in enumerate(zip(names, prognostic, U⁰, Gⁿ))
         key = rounding_key(rounding, model.clock.iteration, model.clock.stage, field_number)

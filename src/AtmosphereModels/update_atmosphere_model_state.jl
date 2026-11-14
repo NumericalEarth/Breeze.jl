@@ -631,6 +631,8 @@ Hooks a closure may extend to act on the state around the vertically implicit so
 Runge–Kutta stage of length `Δt` (the stage's `α Δt`), so that what it adds is formed from the
 state the solves produce:
 
+* `closure_before_stage_combination!(closure_fields, closure, model, Δt, α)` — before the explicit
+  update ``u = (1 - α) u⁰ + α (u + Δt G)`` of the stage, with the step's `Δt` and the stage's `α`;
 * `closure_before_implicit_solve!(closure_fields, closure, model, name)` — just before the solve of
   the prognostic `name` (after its explicit stage update);
 * `closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt)` — after the solves of
@@ -639,6 +641,7 @@ state the solves produce:
 
 All are no-ops by default.
 """
+closure_before_stage_combination!(closure_fields, closure, model, Δt, α) = nothing
 closure_after_implicit_solves!(closure_fields, closure, model, Δt) = nothing
 closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt) = nothing
 closure_before_implicit_solve!(closure_fields, closure, model, name) = nothing
