@@ -416,7 +416,7 @@ and ``β^𝕎`` is the `terminal_velocity_exponent`.
     a𝕎 = microphysics.terminal_velocity_coefficient
     Cᵨ = microphysics.density_scale
     β𝕎 = microphysics.terminal_velocity_exponent
-    return a𝕎 * (rʳ * Cᵨ * ρ)^β𝕎 * sqrt(ρ₁ / ρ)
+    return a𝕎 * (max(0, rʳ) * Cᵨ * ρ)^β𝕎 * sqrt(ρ₁ / ρ)
 end
 
 """
@@ -441,9 +441,14 @@ The formula uses an implicit time integration for numerical stability.
     k₂   = microphysics.accretion_rate
     βᵃᶜᶜ = microphysics.accretion_exponent
 
-    Aʳ = max(0, k₁ * (rᶜˡ - rᶜˡ★))      # Autoconversion rate
-    denom = 1 + Δt * k₂ * rʳ^βᵃᶜᶜ       # Implicit accretion factor
-    Δrᴾ = rᶜˡ - (rᶜˡ - Δt * Aʳ) / denom
+    # Rates use the non-negative parts of the mixing ratios, so a negative value (left by
+    # advection, which the scheme does not clip) neither produces rain nor makes the power
+    # law undefined; the production never exceeds the available cloud water.
+    rᶜˡ⁺ = max(0, rᶜˡ)
+    rʳ⁺ = max(0, rʳ)
+    Aʳ = max(0, k₁ * (rᶜˡ⁺ - rᶜˡ★))     # Autoconversion rate
+    denom = 1 + Δt * k₂ * rʳ⁺^βᵃᶜᶜ      # Implicit accretion factor
+    Δrᴾ = rᶜˡ⁺ - (rᶜˡ⁺ - Δt * Aʳ) / denom
     return Δrᴾ
 end
 
@@ -563,8 +568,8 @@ Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
 
     # Autoconversion + Accretion: cloud → rain (KW eq. 2.13)
     Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
-    rᶜˡ = max(0, rᶜˡ - Δrᴾ)
-    rʳ = max(0, rʳ + Δrᴾ + Δr𝕎)
+    rᶜˡ = rᶜˡ - Δrᴾ
+    rʳ = rʳ + Δrᴾ + Δr𝕎
 
     # Saturation specific humidity, at the thermodynamic state density
     qᵛ⁺ = saturation_specific_humidity(T, ρᵗʰ, constants, surface)
@@ -575,17 +580,17 @@ Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
 
     # Rain evaporation (KW eq. 2.14)
     ρᵏ = Cᵨ * ρ
-    ρrʳ = ρᵏ * rʳ
+    ρrʳ = ρᵏ * max(0, rʳ)
     Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
     Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
     Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
     Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
-    Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ)
-    Δrᴱ = min(min(Δt * Ėʳ, Δrᴱmax), rʳ)
+    Δrᴱmax = max(0, -Δrˢᵃᵗ - max(0, rᶜˡ))
+    Δrᴱ = min(min(Δt * Ėʳ, Δrᴱmax), max(0, rʳ))
 
     # Condensation (limited by available cloud water)
-    Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ)
-    rᵛ = max(0, rᵛ - Δrᶜ + Δrᴱ)
+    Δrᶜ = max(Δrˢᵃᵗ, -max(0, rᶜˡ))
+    rᵛ = rᵛ - Δrᶜ + Δrᴱ
     rᶜˡ = rᶜˡ + Δrᶜ
     rʳ = rʳ - Δrᴱ
 
@@ -622,10 +627,10 @@ Convert from mass fractions to mixing ratios.
 Returns `(rᵛ, rᶜˡ, rʳ)` mixing ratios for use in Kessler physics.
 """
 @inline function mass_fractions_to_mixing_ratios(qᵛ, ρqᶜˡ, ρqʳ, ρ)
-    qᶜˡ = max(0, ρqᶜˡ / ρ)
-    qʳ  = max(0, ρqʳ / ρ)
+    # Negative values left by advection pass through unclipped, so the scheme conserves water.
+    qᶜˡ = ρqᶜˡ / ρ
+    qʳ  = ρqʳ / ρ
     qˡ_sum = qᶜˡ + qʳ
-    qᵛ = max(0, qᵛ)
 
     q = MoistureMassFractions(qᵛ, qˡ_sum)
     r = MoistureMixingRatio(q)
@@ -999,9 +1004,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Convert mass fractions → mixing ratios (shared helper).
     # Parcel model stores total moisture in qᵗ; compute vapor by subtracting condensate.
-    qᶜˡ_s = max(0, μ.ρqᶜˡ / ρᵉ)
-    qʳ_s = max(0, μ.ρqʳ / ρᵉ)
-    qᵛ_s = max(0, state.qᵗ - qᶜˡ_s - qʳ_s)
+    qᶜˡ_s = μ.ρqᶜˡ / ρᵉ
+    qʳ_s = μ.ρqʳ / ρᵉ
+    qᵛ_s = state.qᵗ - qᶜˡ_s - qʳ_s
     rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ_s, μ.ρqᶜˡ, μ.ρqʳ, ρᵉ)
 
     # Temperature from thermodynamic state

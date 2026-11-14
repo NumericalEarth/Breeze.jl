@@ -71,6 +71,9 @@ export
     dynamics_pressure,
     total_density,
 
+    # Advection
+    FrozenWeightsWENO,
+
     # Advective timescale control for the time-step wizard
     CellAdvectionTimescale,
     HorizontalFormulation,
@@ -182,6 +185,7 @@ export
     # TimeSteppers
     SSPRungeKutta3,
     AcousticRungeKutta3,
+    MultirateInfinitesimalStep,
     AcousticSubstepper,
     RoundToNearest,
     StochasticRounding,

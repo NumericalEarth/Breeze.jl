@@ -132,7 +132,18 @@ transport then advects the water with the preceding loop's mean velocity (the
 outer-step-start velocity in stage 1;
 [#1089](https://github.com/NumericalEarth/Breeze.jl/issues/1089)), so the water follows the
 loop-mean compression of the
-air, one stage late, but not the acoustic oscillation within a loop. The loop linearizes at
+air, one stage late, but not the acoustic oscillation within a loop. Because the preceding
+loop's mean differs from the one continuity applies, a uniform mass fraction does not stay
+uniform. With `timestepper_kwargs = (; post_loop_scalar_tendencies = true)` the water and
+tracer tendencies are instead rebuilt after each stage's own loop, from its mean mass flux, as
+WRF and MPAS do; their fluxes are then exactly ``q / (1 - q)`` times the dry-mass flux the stage
+applied, and a uniform mass fraction stays uniform to round-off with `AcousticRungeKutta3`. Under
+a multirate infinitesimal step the whole post-loop tendency, advection included, is recombined
+across stages with the tableau like any other slow tendency. Leaving the advective part at weight
+one from the current stage would keep the fluxes paired with continuity's, but it integrates
+advection with a first-order, anti-diffusive method that amplifies scalars at every Courant
+number; recombined, a uniform mass fraction stays uniform to the accuracy of the scheme rather
+than to round-off. The loop linearizes at
 fixed composition. This is exact for the slow, loop-mean compression, where it keeps the loop
 consistent with the re-diagnosed pressure in balanced flow, and it gives the moist adiabatic
 compressibility. For the oscillation itself the re-diagnosed state is closer to fixed water

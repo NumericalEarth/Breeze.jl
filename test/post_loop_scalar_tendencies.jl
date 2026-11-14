@@ -1,0 +1,306 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
+#####
+##### Post-loop scalar tendencies (issue #1089, cause 2): with `post_loop_scalar_tendencies = true`
+##### the moisture and tracer tendencies are built after each stage's own acoustic loop, with that
+##### loop's time-averaged transport velocity, so their mass fluxes are q/(1 − q) times the dry-mass
+##### flux continuity applied and a uniform mass fraction stays uniform to round-off.
+#####
+
+using Breeze
+using Breeze.AtmosphereModels: specific_prognostic_moisture, total_density, transport_velocities,
+                               compute_scalar_tendencies!, compute_scalar_tendency!, SplitScalarTendencies,
+                               tracer_density_to_specific!, tracer_specific_to_density!
+using Breeze.TimeSteppers: PreLoopScalarTendencies, PostLoopScalarTendencies, scalar_prognostic_names,
+                           fast_tendency_scratch
+using Oceananigans
+using Oceananigans: TendencyCallsite, fields
+using Statistics: mean
+using Test
+
+const q₀ = 0.01
+const c₀ = 1e-3
+θ_bubble(x, z) = 300 + 2 * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2
+
+# The issue's reproducer: a dry 2 K bubble, uniform vapor, no microphysics, plus a uniform tracer.
+function uniform_scalar_bubble(; timestepper, coefficients = nothing, post_loop_scalar_tendencies)
+    grid = RectilinearGrid(default_arch; size = (40, 48), halo = (5, 5), x = (-20e3, 20e3), z = (0, 12e3),
+                           topology = (Periodic, Flat, Bounded))
+    time_discretization = SplitExplicitTimeDiscretization(; damping = NoDivergenceDamping(), forward_weight = 0.65)
+    dynamics = CompressibleDynamics(time_discretization; base_pressure = 1e5, reference_potential_temperature = 300)
+    timestepper_kwargs = (; post_loop_scalar_tendencies)
+    isnothing(coefficients) || (timestepper_kwargs = merge(timestepper_kwargs, (; coefficients)))
+    model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
+                            timestepper, timestepper_kwargs)
+    set!(model; θ = θ_bubble, qᵛ = q₀, ρ = HydrostaticallyBalancedDensity())
+    parent(model.tracers.ρc) .= c₀ .* parent(total_density(model.dynamics))
+    return model
+end
+
+moisture_uniformity_error(model) = maximum(abs, interior(specific_prognostic_moisture(model)) .- q₀) / q₀
+
+function tracer_uniformity_error(model)
+    c = Array(interior(model.tracers.ρc)) ./ Array(interior(total_density(model.dynamics)))
+    return maximum(abs, c .- c₀) / c₀
+end
+
+const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep, :MIS3C), (:MultirateInfinitesimalStep, :TVDMISB))
+
+@testset "Post-loop scalar tendencies keep a uniform mass fraction uniform [$timestepper, $coefficients]" for (timestepper, coefficients) in steppers
+    Δt = 10
+    Nt = 60 # 10 minutes: the bubble reaches max|w| ≈ 10 m/s
+
+    pre_loop = uniform_scalar_bubble(; timestepper, coefficients, post_loop_scalar_tendencies = false)
+    @test pre_loop.timestepper.scalar_tendencies isa PreLoopScalarTendencies
+    for _ in 1:Nt
+        time_step!(pre_loop, Δt)
+    end
+    # Advecting the scalars with the preceding loop's mean velocity leaves a spurious gradient.
+    @test moisture_uniformity_error(pre_loop) > 1e-6
+    @test tracer_uniformity_error(pre_loop) > 1e-6
+
+    post_loop = uniform_scalar_bubble(; timestepper, coefficients, post_loop_scalar_tendencies = true)
+    @test post_loop.timestepper.scalar_tendencies isa PostLoopScalarTendencies
+    for _ in 1:Nt
+        time_step!(post_loop, Δt)
+    end
+    @test maximum(abs, interior(post_loop.velocities.w)) > 5
+
+    # Wicker–Skamarock applies each stage's flux alone, q/(1 − q) times the dry-mass flux continuity
+    # applied, and keeps a uniform mass fraction to round-off. A multirate infinitesimal step
+    # recombines the stages' fluxes with its tableau (leaving them at weight one would be unstable:
+    # see the passive-scalar test below), while continuity integrates the mass flux inside the
+    # loop, so the two no longer pair and the mass fraction stays uniform only to the accuracy of
+    # the scheme, about 1e-3 here, as with pre-loop tendencies.
+    # TODO: a mass-consistent multirate scalar update (the stage's own mass flux times a
+    # recombined mass fraction, instead of a recombined flux) would restore round-off uniformity.
+    if timestepper === :AcousticRungeKutta3
+        @test moisture_uniformity_error(post_loop) < 1e-12
+        @test tracer_uniformity_error(post_loop) < 1e-12
+    else
+        @test moisture_uniformity_error(post_loop) < 5e-3
+        @test tracer_uniformity_error(post_loop) < 5e-3
+    end
+end
+
+#####
+##### A passive scalar in a uniform wind
+#####
+##### Advection can only reduce the maximum of a blob. The post-loop advective tendency has to be
+##### recombined across the stages of a multirate infinitesimal step like any other slow tendency:
+##### applied at weight one from the current stage it is integrated with the tableau (α, diag(d), γ),
+##### first order with b̃·c < 1/2 for every non-diagonal set — an anti-diffusive scheme that
+##### amplifies the blob at every Courant number.
+#####
+
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.TimeSteppers: update_state!
+using Oceananigans: prognostic_fields
+
+function advected_blob_growth(; coefficients, advection, Δt, post_loop_scalar_tendencies = true, Nt = 200, U = 20)
+    Nx, Nz, Δx = 64, 8, 200
+    grid = RectilinearGrid(default_arch, Float64; size = (Nx, Nz), halo = (5, 5), x = (0, Nx * Δx), z = (0, Nz * Δx),
+                           topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, momentum_advection = advection, scalar_advection = advection,
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies))
+
+    # The discrete reference state, exactly, so that the wind stays uniform.
+    reference = model.dynamics.reference_state
+    Rᵈ = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
+    ρ = model.dynamics.dry_density
+    parent(ρ) .= parent(reference.density)
+    parent(Breeze.AtmosphereModels.thermodynamic_density(model.formulation)) .= parent(reference.pressure) ./ (Rᵈ .* parent(reference.exner_function))
+
+    qᵛ = CenterField(grid)
+    set!(qᵛ, (x, z) -> 1e-6 * cos(π * min(1, abs(x - Nx * Δx / 2) / (8Δx)) / 2)^2)
+    ρqᵛ = prognostic_fields(model).ρqᵛ
+    interior(ρqᵛ) .= interior(ρ) .* interior(qᵛ)
+    interior(model.momentum.ρu) .= interior(ρ) .* U
+    fill_halo_regions!((ρqᵛ, model.momentum.ρu))
+    update_state!(model)
+
+    mass_fraction() = Array(interior(ρqᵛ)) ./ Array(interior(ρ))
+    initial_maximum = maximum(mass_fraction())
+    for _ in 1:Nt
+        time_step!(model, Δt)
+    end
+    return maximum(mass_fraction()) / initial_maximum
+end
+
+@testset "Post-loop MIS advection does not amplify a passive scalar [$coefficients, Courant number $courant]" for
+        coefficients in (:SSPMIS43, :TVDMISB, :MIS3C, :MIS4a), courant in (0.5, 1.0)
+    for advection in (WENO(order = 5), WENO(order = 5, bounds = (0, 1)))
+        growth = advected_blob_growth(; coefficients, advection, Δt = courant * 200 / 20)
+        @test growth ≤ 1 + 1e-3
+    end
+end
+
+@testset "TendencyCallsite callbacks edit the post-loop scalar tendencies once per stage [$timestepper]" for (timestepper, coefficients) in steppers[1:2]
+    # A horizontally uniform rest state with a uniform tendency added by a callback: after one step
+    # ρu and ρc each equal c Δt. Momentum takes the callback's pre-loop edit; the post-loop build
+    # overwrites the scalar edit, so the callback fires again and ρc takes exactly one edit.
+    grid = RectilinearGrid(default_arch; size = (4, 4, 4), x = (0, 1000), y = (0, 1000), z = (0, 1000),
+                           topology = (Periodic, Periodic, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    timestepper_kwargs = (; post_loop_scalar_tendencies = true)
+    isnothing(coefficients) || (timestepper_kwargs = merge(timestepper_kwargs, (; coefficients)))
+    model = AtmosphereModel(grid; dynamics, tracers = :ρc, timestepper, timestepper_kwargs)
+    set!(model; ρ = model.dynamics.reference_state.density, θ = 300)
+
+    c = 1e-3
+    Δt = 1
+    function add_tendency!(m)
+        interior(m.timestepper.Gⁿ.ρu) .+= c
+        interior(m.timestepper.Gⁿ.ρc) .+= c
+        return nothing
+    end
+    callbacks = [Callback(add_tendency!, IterationInterval(1); callsite = TendencyCallsite())]
+    time_step!(model, Δt; callbacks)
+
+    @test isapprox(maximum(model.momentum.ρu), c * Δt)
+    @test isapprox(minimum(model.momentum.ρu), c * Δt)
+    @test isapprox(maximum(model.tracers.ρc), c * Δt)
+    @test isapprox(minimum(model.tracers.ρc), c * Δt)
+end
+
+@testset "Closure scalar sources survive the post-loop build" begin
+    # A neutral sheared column: TKE grows by shear production, a closure source evaluated at the
+    # stage-entry state before the loop. The post-loop build must add to it, not overwrite it, so
+    # the two modes agree to round-off in a column, where the scalars have no advective tendency.
+    grid = RectilinearGrid(default_arch; size = 16, z = (0, 1000), topology = (Flat, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    closure = TKEBasedTurbulenceClosure()
+    mean_tke = Dict{Bool, Float64}()
+    for post_loop_scalar_tendencies in (false, true)
+        model = AtmosphereModel(grid; dynamics, closure, timestepper = :AcousticRungeKutta3,
+                                timestepper_kwargs = (; post_loop_scalar_tendencies))
+        set!(model; ρ = model.dynamics.reference_state.density, θ = 300, u = z -> 0.02z, ρe = 1e-3)
+        for _ in 1:20
+            time_step!(model, 2)
+        end
+        mean_tke[post_loop_scalar_tendencies] = mean(interior(model.tracers.ρe))
+    end
+    @test mean_tke[false] > 2e-3 # production is active
+    @test isapprox(mean_tke[true], mean_tke[false]; rtol = 1e-10)
+end
+
+@testset "The split post-loop build sums to the full scalar tendency" begin
+    # A multirate infinitesimal step builds each post-loop scalar tendency in two parts from one
+    # evaluation — the advective part into its own scratch, the rest added to `Gⁿ` — instead of
+    # recomputing the advection to separate them. The parts must sum to the full tendency to
+    # round-off, with a closure, a forcing and a non-uniform tracer so that both parts are nonzero.
+    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-20e3, 20e3), z = (0, 8e3),
+                           topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    ρc_forcing = Forcing((x, z, t) -> 1e-6 * exp(-(x / 5e3)^2))
+    model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
+                            closure = ScalarDiffusivity(ν = 10, κ = 10), forcing = (; ρc = ρc_forcing),
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients = :MIS3C, post_loop_scalar_tendencies = true))
+    set!(model; θ = θ_bubble, qᵛ = (x, z) -> q₀ * exp(-((x / 4e3)^2 + (z / 2e3)^2)),
+         ρ = HydrostaticallyBalancedDensity(), u = 5)
+    set!(model.tracers.ρc, (x, z) -> c₀ * exp(-((x / 3e3)^2 + ((z - 2e3) / 2e3)^2)))
+    parent(model.tracers.ρc) .*= parent(total_density(model.dynamics))
+    time_step!(model, 1)
+
+    ts = model.timestepper
+    names = scalar_prognostic_names(model)
+    @test ts.fast_tendency isa NamedTuple
+    @test all(name -> haskey(ts.fast_tendency, name), names)
+    pre_loop = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep).timestepper
+    @test pre_loop.fast_tendency isa Field
+
+    tracer_density_to_specific!(model)
+    velocities = transport_velocities(model)
+    compute_scalar_tendencies!(model, fields(model), velocities, compute_scalar_tendency!)
+    full = Dict(name => Array(interior(ts.Gⁿ[name])) for name in names)
+
+    for name in names
+        fill!(parent(ts.Gⁿ[name]), 0)
+    end
+    compute_scalar_tendencies!(model, fields(model), velocities, SplitScalarTendencies(ts.fast_tendency))
+    tracer_specific_to_density!(model)
+
+    for name in names
+        slow = Array(interior(ts.Gⁿ[name]))
+        fast = Array(interior(fast_tendency_scratch(ts, name)))
+        scale = maximum(abs, full[name])
+        @test scale > 0
+        @test maximum(abs, fast) > 0
+        @test maximum(abs, slow) > 0
+        @test maximum(abs, slow .+ fast .- full[name]) < 1e-13 * scale
+    end
+end
+
+#####
+##### Stage increments of a multirate infinitesimal step with an active negative-moisture correction
+#####
+##### `update_state!` corrects negative moisture between stages, so an increment ΔYᵢ = Yᵢ − Uⁿ formed
+##### after it carries the correction into the forcing and start state of later stages. The increments
+##### of the moisture and microphysical fields are therefore stored when a stage completes, and only
+##### those of the acoustic prognostics, which nothing changes in between, are formed in the next
+##### stage's assembly. Either way the step must reproduce the one that stores every increment.
+#####
+
+using CloudMicrophysics
+using Breeze.AtmosphereModels: SpeciesBorrowing
+using Breeze.TimeSteppers: fold_stage_increments, stage_increment_source, acoustic_prognostic_names,
+                           IncrementFromState, StoredIncrement
+using Oceananigans: prognostic_fields
+
+const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt).OneMomentCloudMicrophysics
+
+# Sharp-edged rain in a sheared, overturning flow: unbounded WENO undershoots at its edges, so the
+# correction has negative rain to repair after every stage.
+function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correction = SpeciesBorrowing())
+    grid = RectilinearGrid(default_arch; size = (16, 16), halo = (5, 5), x = (-8e3, 8e3), z = (0, 8e3),
+                           topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
+                            microphysics = OneMomentCloudMicrophysics(; negative_moisture_correction),
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients = :MIS3C, post_loop_scalar_tendencies))
+    constants = model.thermodynamic_constants
+    set!(model; θ = θ_bubble, qᵗ = 0.018, ρ = (x, z) -> adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, constants),
+                u = (x, z) -> 15 * sin(2π * z / 8e3), w = (x, z) -> 4 * sin(2π * x / 16e3))
+    set!(model; ρqʳ = (x, z) -> ifelse(abs(x) < 2e3 && 2e3 < z < 5e3, 2e-3, 0.0),
+                ρc = (x, z) -> exp(-((z - 2e3) / 1e3)^2 - (x / 2e3)^2))
+    return model
+end
+
+function raining_bubble_state(Nt; fold, kw...)
+    fold_stage_increments[] = fold
+    model = raining_bubble(; kw...)
+    for _ in 1:Nt
+        time_step!(model, 6)
+    end
+    fold_stage_increments[] = true
+    return map(field -> Array(interior(field)), prognostic_fields(model))
+end
+
+@testset "MIS stage increments with an active negative-moisture correction [post_loop = $post_loop_scalar_tendencies]" for post_loop_scalar_tendencies in (false, true)
+    # The setup gives the correction something to do: uncorrected, a step leaves negative rain.
+    uncorrected = raining_bubble_state(1; fold = true, post_loop_scalar_tendencies, negative_moisture_correction = nothing)
+    @test minimum(uncorrected.ρqʳ) < 0
+
+    # Only the prognostics the acoustic loop advances form their increments in the assembly.
+    model = raining_bubble(; post_loop_scalar_tendencies)
+    for name in keys(prognostic_fields(model))
+        source = stage_increment_source(model, name)
+        @test source isa (name ∈ acoustic_prognostic_names(model) ? IncrementFromState : StoredIncrement)
+    end
+
+    for Nt in (1, 3)
+        folded = raining_bubble_state(Nt; fold = true, post_loop_scalar_tendencies)
+        stored = raining_bubble_state(Nt; fold = false, post_loop_scalar_tendencies)
+        @test minimum(folded.ρqʳ) ≥ 0
+        for name in keys(folded)
+            scale = maximum(abs, stored[name])
+            @test maximum(abs, folded[name] .- stored[name]) ≤ 100 * eps(scale)
+        end
+    end
+end

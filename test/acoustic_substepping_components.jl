@@ -19,6 +19,7 @@ using Breeze
 using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps, minimum_horizontal_spacing,
+                                    stage_substep_count_and_size, ProportionalSubsteps,
                                     sponge_term_diag, sponge_rhs, sponge_slow_tendency,
                                     materialize_sponge,
                                     assemble_slow_vertical_momentum_tendency!,
@@ -330,6 +331,26 @@ for arch in arches
             @test minimum_horizontal_spacing(flat_grid) == 1000
         end
         Oceananigans.defaults.FloatType = old_FT
+    end
+
+    @testset "Long stages take at least two adaptive substeps [$(arch)]" begin
+        constants = ThermodynamicConstants()
+        Δx_min = 5016.0 # the 5 km tropical-cyclone grid where a single 6.3 s substep went unstable
+        Δt = 11.25
+        distribution = ProportionalSubsteps()
+
+        # SSPMIS43's first stage covers 0.56 Δt: the CFL count alone gives one substep.
+        @test compute_acoustic_substeps(Δx_min, 0.56 * Δt, constants, 0.5) == 1
+        Nτ, Δτ = stage_substep_count_and_size(distribution, 0.56, Δt, Δx_min, constants, 0.5, nothing)
+        @test Nτ == 2
+        @test Δτ ≈ 0.56 * Δt / 2
+
+        # Stages covering at most half of Δt keep the CFL count.
+        @test first(stage_substep_count_and_size(distribution, 1/2, Δt, Δx_min, constants, 0.5, nothing)) == 1
+        @test first(stage_substep_count_and_size(distribution, 0.139, Δt, Δx_min, constants, 0.5, nothing)) == 1
+
+        # A fixed substep count is the user's choice and is not raised.
+        @test first(stage_substep_count_and_size(distribution, 0.56, Δt, Δx_min, constants, 0.5, 1)) == 1
     end
 
     @testset "acoustic_cfl plumbed to AcousticSubstepper [$(arch), $(FT)]" for FT in as_test_float_types(arch)

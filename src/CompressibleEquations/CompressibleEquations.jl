@@ -49,6 +49,11 @@ export
     GaussianRamp,
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
+    StageEntryForceRemainder,
+    stage_entry_force_remainder,
+    step_start_force_state,
+    store_step_start_force_state!,
+    compute_step_start_moisture_content!,
     freeze_linearization_state!,
     acoustic_rk3_substep_loop!,
     compute_transport_density_tendency!
@@ -79,6 +84,11 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
                              equilibrated_surface, saturation_vapor_pressure,
                              PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
                              LiquidIceDensityState
+
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
+                               base_pressure, standard_pressure, thermodynamic_density,
+                               thermodynamic_density_name, specific_prognostic_moisture
+using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using ReactantCore: @trace

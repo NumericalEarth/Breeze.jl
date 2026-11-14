@@ -89,6 +89,10 @@ fraction and the size is fitted so the substeps exactly tile each stage — exac
 coverage at the minimum substep count (no global quantization; Δτ may differ
 slightly by stage).
 
+When the substep count is adaptive (`substeps = nothing`), a stage covering more
+than half of ``Δt`` takes at least two substeps: a single acoustic substep over
+most of the outer step can be unstable even below the acoustic CFL target.
+
 This is the default.
 """
 struct ProportionalSubsteps <: AcousticSubstepDistribution end
