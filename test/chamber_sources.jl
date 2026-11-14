@@ -175,8 +175,11 @@ end
         t += FT(0.01)
     end
     xᵛ = Array(model.microphysics.droplets.properties.xᵛ)
-    @test length(model.microphysics.droplets) == Nd
-    @test xᵛ .- xᵛ₀ ≈ fill(u₀ * t, Nd) rtol = 1e-4
+    # Droplets whose virtual position reaches the 2 m wall are removed; compaction keeps the order of the others
+    expected_removed = xᵛ₀ .+ u₀ * t .≥ 2
+    @test model.microphysics.sources.bookkeeping.removed == count(expected_removed)
+    @test length(model.microphysics.droplets) == Nd - count(expected_removed)
+    @test xᵛ .- xᵛ₀[.!expected_removed] ≈ fill(u₀ * t, count(.!expected_removed)) rtol = 1e-4
     @test all(x -> 0 ≤ x ≤ L, Array(model.microphysics.droplets.properties.x))
 
     # The resampled rule of the reference code removes at the expected mean rate 𝕎 τ / Lz per interval
