@@ -45,6 +45,7 @@ examples = [
     Example("Diurnal cycle of radiative convection", "radiative_convection"; build_always=false, gpu=true),
     Example("Shallow cumulus convection (BOMEX)", "bomex"; build_always=true, gpu=true),
     Example("Precipitating shallow cumulus (RICO)", "rico"; build_always=false, gpu=true),
+    Example("Differentiating a stratocumulus forecast (ENA)", "ena_differentiability"; build_always=true, gpu=true),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature"; build_always=true, gpu=false),
     Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave"; build_always=true, gpu=false),
     Example("Neutral atmospheric boundary layer", "neutral_atmospheric_boundary_layer"; build_always=false, gpu=true),

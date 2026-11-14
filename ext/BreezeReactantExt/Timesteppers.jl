@@ -5,7 +5,7 @@ using Reactant: TracedRNumber, @trace
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!, reconcile_state!
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics: Microphysics, DCMIP2016KesslerMicrophysics
-using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel
+using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel, prepare_acoustic_first_time_step!
 
 const ReactantSSPRungeKutta3Model = AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}
 
@@ -32,6 +32,13 @@ end
 function OceananigansTimeSteppers.first_time_step!(model::ReactantSSPRungeKutta3Model, Δt)
     initialize!(model)
     TimeSteppers.prepare_first_time_step!(model, Δt)
+    time_step!(model, Δt)
+    return nothing
+end
+
+function OceananigansTimeSteppers.first_time_step!(model::CompressibleAcousticModel{<:ReactantState}, Δt)
+    initialize!(model)
+    prepare_acoustic_first_time_step!(model, Δt, ())
     time_step!(model, Δt)
     return nothing
 end
