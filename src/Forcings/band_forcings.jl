@@ -1,4 +1,5 @@
 using ..AtmosphereModels: AtmosphereModels
+using Oceananigans: prognostic_fields
 using Oceananigans.Architectures: architecture, on_architecture
 using Oceananigans.Grids: Periodic, RectilinearGrid, xnodes, ynodes, znodes
 using Oceananigans.Utils: launch!, prettysummary
@@ -334,12 +335,15 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Compute the Fourier coefficients of velocity component `c` (1, 2, 3 for `u`, `v`, `w`), stored in `φ`,
 for every wavevector in the box that contains the `band`, by summing over ``z``, then ``y``, then ``x``.
 """
-function compute_band_coefficients!(workspace, band, grid, c, φ)
+compute_band_coefficients!(workspace, band, grid, c, φ) =
+    compute_band_coefficients!(workspace, band, grid, c, φ, component_phases(band, c))
+
+# Coefficients of the field φ, sampled with the phase tables (X, Y, Z) of its location, stored in component slot c
+function compute_band_coefficients!(workspace, band, grid, c, φ, (X, Y, Z))
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
     Kx, Ky, Kz = band.maximum_wavevector
     Qx, Qy, Qz = Kx + 1, 2Ky + 1, 2Kz + 1
-    X, Y, Z = component_phases(band, c)
 
     launch!(arch, grid, (Nx, Ny), _sum_over_z!, workspace.z_sums, φ, Z, Nz, Val(Qz))
     launch!(arch, grid, (Nx, Qy, Qz), _sum_over_y!, workspace.yz_sums, workspace.z_sums, Y, Ny)
@@ -695,4 +699,141 @@ function projected_amplitudes(forcing::StochasticBandForcing)
     end
 
     return A
+end
+
+#####
+##### ScalarVarianceBandForcing
+#####
+
+# The forced scalar is identified at materialization, when the model's prognostic names are known
+mutable struct ForcedScalar
+    name :: Symbol
+end
+
+struct ScalarVarianceBandForcing{FT, G, B, W, A, YZ}
+    variance_injection_rate :: FT
+    inverse_square_weighting :: Bool
+    grid :: G
+    band :: B
+    workspace :: W
+    amplitudes :: A
+    yz_amplitudes :: YZ
+    scalar :: ForcedScalar
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return a deterministic forcing of the fluctuations of one prognostic scalar on the triply-periodic `grid`,
+the scalar analogue of [`ConstantPowerBandForcing`](@ref): the Fourier modes of the scalar in the band
+`minimum_wavenumber` ``≤ |k| ≤`` `maximum_wavenumber` are amplified without changing their phases, so that
+the band variance grows at the constant rate `variance_injection_rate` ``r``,
+
+```math
+F = \\frac{r}{2 E_f} \\, φ_f , \\qquad E_f = \\sum_m w_m |\\hat φ_m|^2 ,
+```
+
+where ``φ_f`` is the part of the scalar in the band, the sum runs over the half-space modes of the band,
+and the weights are ``w_m = 1`` (so that ``E_f = \\tfrac12 ⟨φ_f^2⟩`` and ``⟨φ_f F⟩ = r``) or, with
+`inverse_square_weighting = true`, ``w_m = 1 / |k̃_m|^2`` with ``k̃_m`` the modified wavenumber of the mode.
+The weighted form reproduces the scalar forcing of the NCAR cloud-chamber DNS (`force_tq` in
+`forcedim.F90` of the ICMW Pi-chamber code, Zenodo record 14957536), which rescales the band modes of
+``T'`` and ``q_v'`` after every step so that ``\\sum_m |\\hat φ_m|^2 / k^2`` grows by a prescribed rate
+times the time step; there the rate is ``σ_φ^2 × 0.012 \\, L^2`` for a target standard deviation ``σ_φ``.
+The forcing vanishes when the band is empty (``E_f = 0``), so the scalar needs an initial perturbation.
+
+The forcing acts on the prognostic (density-weighted) scalar it is supplied under, for example `ρθ` or `ρqᵛ`,
+and ``r`` is in the units of that variable squared per second. The band modes exclude the mean (``k = 0``),
+so the domain mean is not forced. A band forcing holds state that belongs to one model and one scalar, so
+construct one for each.
+
+Example
+=======
+
+```jldoctest
+using Breeze
+
+grid = RectilinearGrid(size=(16, 16, 16), extent=(2π, 2π, 2π), topology=(Periodic, Periodic, Periodic))
+forcing = ScalarVarianceBandForcing(grid; variance_injection_rate=1e-3)
+model = AtmosphereModel(grid; dynamics=BoussinesqDynamics(grid), forcing=(; ρθ=forcing))
+forcing
+
+# output
+ScalarVarianceBandForcing(r=0.001) with 9 modes with 0.0 ≤ |k| ≤ 1.5
+```
+"""
+function ScalarVarianceBandForcing(grid;
+                                   variance_injection_rate,
+                                   inverse_square_weighting = false,
+                                   minimum_wavenumber = 0,
+                                   maximum_wavenumber = default_maximum_wavenumber(grid))
+
+    FT = eltype(grid)
+    band = ForcedWavenumberBand(grid; minimum_wavenumber, maximum_wavenumber)
+    workspace = PartialTransformWorkspace(grid, band)
+    amplitudes = on_architecture(architecture(grid), zeros(Complex{FT}, number_of_modes(band), 1))
+    yz_amplitudes = on_architecture(architecture(grid), zeros(Complex{FT}, size(grid, 2), size(grid, 3),
+                                                                band.maximum_wavevector[1] + 1, 1))
+
+    return ScalarVarianceBandForcing(convert(FT, variance_injection_rate), inverse_square_weighting, grid, band,
+                                     workspace, amplitudes, yz_amplitudes, ForcedScalar(:unset))
+end
+
+Base.summary(forcing::ScalarVarianceBandForcing) =
+    string("ScalarVarianceBandForcing(r=", prettysummary(forcing.variance_injection_rate),
+           forcing.inverse_square_weighting ? ", 1/k² weighting" : "", ")")
+
+Base.show(io::IO, forcing::ScalarVarianceBandForcing) =
+    print(io, summary(forcing), " with ", band_summary(forcing.band))
+
+# The forcing is a tendency of the density-weighted scalar it is supplied under
+AtmosphereModels.is_density_tendency_forcing(::ScalarVarianceBandForcing) = true
+
+# Phase tables at cell centers, where scalars live
+center_phases(band) = (band.phases.xᶜ, band.phases.yᶜ, band.phases.zᶜ)
+
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::ScalarVarianceBandForcing, field, name,
+                                                               model_field_names, context::NamedTuple)
+    forcing.scalar.name == :unset || forcing.scalar.name == name ||
+        throw(ArgumentError("a ScalarVarianceBandForcing was built for $(forcing.scalar.name) and cannot also force $name; construct one for each scalar"))
+    forcing.scalar.name = name
+    X, Y, Z = center_phases(forcing.band)
+    return BandForcingComponent(forcing, 1, X, forcing.yz_amplitudes)
+end
+
+function compute_band_forcing!(forcing::ScalarVarianceBandForcing, c, model)
+    φ = prognostic_fields(model)[forcing.scalar.name]
+    grid = forcing.grid
+    band = forcing.band
+    compute_band_coefficients!(forcing.workspace, band, grid, 1, φ, center_phases(band))
+    launch!(architecture(grid), grid, (1,), _compute_scalar_variance_amplitudes!,
+            forcing.amplitudes, forcing.workspace.coefficients, band.mode_indices, band.modified_wavenumbers,
+            forcing.variance_injection_rate, forcing.inverse_square_weighting)
+    X, Y, Z = center_phases(band)
+    launch!(architecture(grid), grid, size(forcing.yz_amplitudes)[1:3], _compute_yz_amplitudes!,
+            forcing.yz_amplitudes, forcing.amplitudes, band.mode_indices, Y, Z, 1)
+    return nothing
+end
+
+# A single work item: the band contains few modes
+@kernel function _compute_scalar_variance_amplitudes!(A, φ̂, q, k̃, r, weighted)
+    _ = @index(Global)
+    E = zero(real(eltype(A)))
+
+    for m in 1:size(A, 1)
+        @inbounds begin
+            n = (q[m, 1], q[m, 2], q[m, 3])
+            φ̂ₘ = φ̂[n[1], n[2], n[3], 1]
+            k² = k̃[m, 1]^2 + k̃[m, 2]^2 + k̃[m, 3]^2
+            w = ifelse(weighted, 1 / k², one(k²))
+            A[m, 1] = φ̂ₘ
+        end
+        E += w * abs2(φ̂ₘ)
+    end
+
+    α = ifelse(E > 0, r / 2E, zero(E))
+
+    for m in 1:size(A, 1)
+        @inbounds A[m, 1] *= α
+    end
 end

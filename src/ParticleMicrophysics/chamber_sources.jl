@@ -42,13 +42,15 @@ uniform_deviate!(rng::SplitMix64) = (next_uint64!(rng) >> 11) * 2.0^-53
 
 """
     AerosolInjection(FT = Float64; rate, dry_radius, hygroscopicity, interval,
-                     wet_radius_factor = cbrt(2), start_time = 0, seed = 1)
+                     multiplicity = 1, wet_radius_factor = cbrt(2), start_time = 0, seed = 1)
 
 Inject aerosol particles into the domain at the prescribed number source `rate` (m⁻³ s⁻¹ of physical
 air volume), in batches at the times `start_time + n × interval`, at uniformly random positions. Each particle
 is dry aerosol of `dry_radius` and `hygroscopicity` κ, inserted as haze with wet radius `wet_radius_factor × dry_radius`
-(the reference inserts a wet volume of twice the dry volume) and zero terminal velocity. The batch size is
-`rate × V × interval`, carried fractionally between batches so that the long-run rate is exact.
+(the reference inserts a wet volume of twice the dry volume) and zero terminal velocity, and represents
+`multiplicity` physical particles. The batch size is `rate × V × interval / multiplicity` computational particles,
+carried fractionally between batches so that the long-run physical rate is exact (the reference's
+`chamber_inject`: `count = n_inj V Δt_inj / multi_inj`).
 
 The injected haze water appears without a vapor sink, as in the reference; it is recorded in the
 [`SourceSinkBookkeeping`](@ref) of the microphysics.
@@ -58,23 +60,25 @@ struct AerosolInjection{FT, R}
            dry_radius :: FT
        hygroscopicity :: FT
              interval :: FT
+         multiplicity :: FT
     wet_radius_factor :: FT
            start_time :: FT
                   rng :: R
 end
 
-function AerosolInjection(FT = Float64; rate, dry_radius, hygroscopicity, interval, wet_radius_factor = cbrt(2),
-                          start_time = 0, seed = 1)
+function AerosolInjection(FT = Float64; rate, dry_radius, hygroscopicity, interval, multiplicity = 1,
+                          wet_radius_factor = cbrt(2), start_time = 0, seed = 1)
     rate > 0 || throw(ArgumentError("the injection rate must be positive"))
     interval > 0 || throw(ArgumentError("the injection interval must be positive"))
+    multiplicity > 0 || throw(ArgumentError("the injection multiplicity must be positive"))
     return AerosolInjection{FT, SplitMix64}(convert(FT, rate), convert(FT, dry_radius), convert(FT, hygroscopicity),
-                                            convert(FT, interval), convert(FT, wet_radius_factor), convert(FT, start_time),
-                                            SplitMix64(seed))
+                                            convert(FT, interval), convert(FT, multiplicity), convert(FT, wet_radius_factor),
+                                            convert(FT, start_time), SplitMix64(seed))
 end
 
 Base.summary(s::AerosolInjection) = string("AerosolInjection(rate=", prettysummary(s.rate), " m⁻³ s⁻¹, rᵈ=",
                                            prettysummary(s.dry_radius), ", κ=", prettysummary(s.hygroscopicity),
-                                           ", interval=", prettysummary(s.interval), ")")
+                                           ", interval=", prettysummary(s.interval), ", ξ=", prettysummary(s.multiplicity), ")")
 
 #####
 ##### Removal at the walls of a virtual chamber
@@ -132,9 +136,10 @@ Base.summary(s::VirtualChamberRemoval) = string("VirtualChamberRemoval(size=", s
     SourceSinkBookkeeping
 
 Counts and masses exchanged by [`AerosolInjection`](@ref) and [`VirtualChamberRemoval`](@ref) since the start
-of the simulation: `injected` and `removed` particles, `injected_liquid_mass` (the haze water of injected
-particles, kg) and `removed_liquid_mass` (the liquid water of removed particles, kg), the times of the next
-injection and removal events, and the fractional batch carried to the next injection.
+of the simulation: `injected` and `removed` computational particles, `injected_physical` and `removed_physical`
+(multiplicity-weighted counts), `injected_liquid_mass` (the haze water of injected particles, kg) and
+`removed_liquid_mass` (the liquid water of removed particles, kg; both multiplicity-weighted), the times of the
+next injection and removal events, and the fractional batch carried to the next injection.
 """
 mutable struct SourceSinkBookkeeping{FT}
           next_injection :: FT
@@ -142,6 +147,8 @@ mutable struct SourceSinkBookkeeping{FT}
          injection_carry :: FT
                 injected :: Int
                  removed :: Int
+       injected_physical :: FT
+        removed_physical :: FT
     injected_liquid_mass :: FT
      removed_liquid_mass :: FT
 end
@@ -151,7 +158,7 @@ first_event(s::AerosolInjection, FT) = convert(FT, s.start_time + s.interval)
 first_event(s::VirtualChamberRemoval, FT) = s.interval
 
 SourceSinkBookkeeping(FT, injection, removal) =
-    SourceSinkBookkeeping{FT}(first_event(injection, FT), first_event(removal, FT), 0, 0, 0, 0, 0)
+    SourceSinkBookkeeping{FT}(first_event(injection, FT), first_event(removal, FT), 0, 0, 0, 0, 0, 0, 0)
 
 """
     ChamberSources(; injection = nothing, removal = nothing)
@@ -301,8 +308,9 @@ function remove_particles!(removal::VirtualChamberRemoval, s::ChamberSources, μ
     nremoved == 0 && return nothing
     constants = model.thermodynamic_constants
     book.removed += nremoved
-    book.removed_liquid_mass += mapreduce((f, r, rᵈ) -> f * droplet_water_mass(r, rᵈ, constants), +,
-                                          flags, properties.r, properties.rᵈ; init = zero(FT))
+    book.removed_physical += mapreduce((f, ξ) -> f * ξ, +, flags, properties.ξ; init = zero(FT))
+    book.removed_liquid_mass += mapreduce((f, r, rᵈ, ξ) -> f * ξ * droplet_water_mass(r, rᵈ, constants), +,
+                                          flags, properties.r, properties.rᵈ, properties.ξ; init = zero(FT))
     absorbed = s.workspace.removal.absorbed
     resize!(absorbed, Np)
     copyto!(absorbed, flags)
@@ -363,7 +371,7 @@ function inject_batch!(injection::AerosolInjection, s::ChamberSources, μ, model
     book = s.bookkeeping
     Nx, Ny, Nz = size(grid)
     V = Float64(Vᶜᶜᶜ(1, 1, 1, grid)) * Nx * Ny * Nz
-    batch = Float64(injection.rate) * V * Float64(injection.interval) + Float64(book.injection_carry)
+    batch = Float64(injection.rate) * V * Float64(injection.interval) / Float64(injection.multiplicity) + Float64(book.injection_carry)
     n = floor(Int, batch)
     book.injection_carry = convert(FT, batch - n)
     n == 0 && return nothing
@@ -387,7 +395,7 @@ function inject_batch!(injection::AerosolInjection, s::ChamberSources, μ, model
            y = [convert(FT, origin[2] + ξ[2][p]) for p in 1:n],
            z = [convert(FT, origin[3] + ξ[3][p]) for p in 1:n],
            r = fill(convert(FT, r), n), rᵈ = fill(rᵈ, n), κ = fill(injection.hygroscopicity, n), 𝕎 = zeros(FT, n),
-           xᵛ = virtual[1], yᵛ = virtual[2], zᵛ = virtual[3])
+           ξ = fill(injection.multiplicity, n), xᵛ = virtual[1], yᵛ = virtual[2], zᵛ = virtual[3])
 
     resize!(properties, Np + n)
     for name in propertynames(new)
@@ -395,7 +403,8 @@ function inject_batch!(injection::AerosolInjection, s::ChamberSources, μ, model
     end
 
     book.injected += n
-    book.injected_liquid_mass += n * droplet_water_mass(r, rᵈ, model.thermodynamic_constants)
+    book.injected_physical += n * injection.multiplicity
+    book.injected_liquid_mass += n * injection.multiplicity * droplet_water_mass(r, rᵈ, model.thermodynamic_constants)
     return nothing
 end
 

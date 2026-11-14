@@ -26,9 +26,15 @@
     Droplet{FT}
 
 A cloud droplet with position `(x, y, z)`, wet radius `r`, dry (solute) radius `rᵈ`,
-hygroscopicity `κ`, terminal velocity `𝕎` (positive downwards), and the virtual position
-`(xᵛ, yᵛ, zᵛ)` in a physical chamber that [`ChamberSources`](@ref) use to remove droplets
+hygroscopicity `κ`, terminal velocity `𝕎` (positive downwards), multiplicity `ξ` (the number of
+physical droplets the computational droplet represents; 1 for individual droplets), and the virtual
+position `(xᵛ, yᵛ, zᵛ)` in a physical chamber that [`ChamberSources`](@ref) use to remove droplets
 (zero when there are no sources).
+
+The multiplicity weights the condensed mass deposited in the air, the liquid mass fraction, and the
+masses and counts that [`ChamberSources`](@ref) bookkeep; each computational droplet grows, moves and
+is removed as one particle, and its own perturbation of its cell ([`DiffusiveSelfInteraction`](@ref))
+is ``ξ`` times that of one droplet.
 """
 struct Droplet{FT}
      x :: FT
@@ -38,6 +44,7 @@ struct Droplet{FT}
     rᵈ :: FT
      κ :: FT
      𝕎 :: FT
+     ξ :: FT
     xᵛ :: FT
     yᵛ :: FT
     zᵛ :: FT
@@ -110,8 +117,8 @@ Return Lagrangian microphysics in which every cloud droplet is a Lagrangian part
 and the terminal velocity of droplets. `self_interaction` corrects droplet growth for each droplet's own
 sink in the cell it samples ([`DiffusiveSelfInteraction`](@ref)), or is `nothing` for no correction.
 `droplets` is a `NamedTuple` of vectors with the initial
-positions `x`, `y`, `z`, wet radii `r`, dry radii `rᵈ`, and hygroscopicities `κ` of the droplets,
-or `nothing` for no droplets. `sorting` is an algorithm for sorting the droplets by grid cell once per
+positions `x`, `y`, `z`, wet radii `r`, dry radii `rᵈ`, hygroscopicities `κ` and, optionally,
+multiplicities `ξ` (default 1) of the droplets, or `nothing` for no droplets. `sorting` is an algorithm for sorting the droplets by grid cell once per
 time step (`CountingSort()` or `ComparisonSort()` from Oceananigans), which keeps the memory accesses of
 droplets in the same cell together, or `nothing` (the default) to keep the droplets in their initial order.
 The droplets are allocated on the architecture of the grid
@@ -173,6 +180,7 @@ function AtmosphereModels.materialize_microphysics(μ::LagrangianMicrophysics, g
 
     components = (x = initial.x, y = initial.y, z = initial.z,
                   r = initial.r, rᵈ = initial.rᵈ, κ = initial.κ, 𝕎 = zeros(FT, Nd),
+                  ξ = initial_multiplicities(initial, FT),
                   xᵛ = virtual.xᵛ, yᵛ = virtual.yᵛ, zᵛ = virtual.zᵛ)
 
     components = map(c -> on_architecture(arch, convert(Vector{FT}, c)), components)
@@ -325,6 +333,12 @@ update_translation_table!(::Nothing, κ, Δt, grid, schemes) = nothing
     w = ξ - i
     @inbounds return (1 - w) * table[i + 1, d, field] + w * table[i + 2, d, field]
 end
+
+# The self-interaction parameters of a computational droplet of multiplicity ξ: the cell perturbation of ξ
+# droplets at one point is ξ times that of one droplet
+@inline weighted_self_interaction(::Nothing, ξ) = nothing
+@inline weighted_self_interaction(s::NamedTuple, ξ) =
+    merge(s, (vapor_greens_function = ξ * s.vapor_greens_function, thermal_greens_function = ξ * s.thermal_greens_function))
 
 # The self-interaction parameters of a droplet that moves at velocity U relative to the grid
 @inline moving_self_interaction(s, U) = s # without grid translation
@@ -482,6 +496,12 @@ end
 initial_droplets(::Nothing, FT) = (x = FT[], y = FT[], z = FT[], r = FT[], rᵈ = FT[], κ = FT[])
 initial_droplets(droplets::NamedTuple, FT) = droplets
 
+function initial_multiplicities(initial, FT)
+    haskey(initial, :ξ) || return ones(FT, length(initial.x))
+    all(>(0), initial.ξ) || throw(ArgumentError("droplet multiplicities must be positive"))
+    return initial.ξ
+end
+
 AtmosphereModels.microphysics_particles(μ::LagrangianMicrophysics) = μ.droplets
 
 # Droplets fall relative to the air at their terminal velocity
@@ -548,11 +568,12 @@ end
         X = (droplets.x[p], droplets.y[p], droplets.z[p])
         r = droplets.r[p]
         rᵈ = droplets.rᵈ[p]
+        ξ = droplets.ξ[p]
     end
     i, j, k = droplet_cell(X, grid)
     m = droplet_water_mass(r, rᵈ, constants)
     @inbounds ρᵢ = ρ[i, j, k]
-    atomic_add!(qˡ, halo, i, j, k, m / (ρᵢ * Vᶜᶜᶜ(i, j, k, grid)))
+    atomic_add!(qˡ, halo, i, j, k, ξ * m / (ρᵢ * Vᶜᶜᶜ(i, j, k, grid)))
 end
 
 @kernel function _condense_droplets!(C, halo, droplets, grid, Δt, T, ρ, ρqᵛ, p, velocities, constants, physics,
@@ -564,6 +585,7 @@ end
         rᵈ = droplets.rᵈ[n]
         κ = droplets.κ[n]
         𝕎 = droplets.𝕎[n]
+        ξ = droplets.ξ[n]
     end
 
     i, j, k = droplet_cell(X, grid)
@@ -583,7 +605,7 @@ end
 
     # The droplet's velocity relative to the grid: the air velocity in its cell, less its terminal velocity
     U = (ℑxᶜᵃᵃ(i, j, k, grid, velocities.u), ℑyᵃᶜᵃ(i, j, k, grid, velocities.v), ℑzᵃᵃᶜ(i, j, k, grid, velocities.w) - 𝕎)
-    droplet_self_interaction = moving_self_interaction(self_interaction, U)
+    droplet_self_interaction = weighted_self_interaction(moving_self_interaction(self_interaction, U), ξ)
     step = condensational_growth_step(r, rᵈ, κ, 𝒮, fᵛ, Tᵢ, pᵢ, Δt, constants, physics, droplet_self_interaction)
     r⁺ = step.radius
 
@@ -592,7 +614,7 @@ end
         droplets.𝕎[n] = droplet_terminal_velocity(physics.terminal_velocity, r⁺, Tᵢ, pᵢ, constants, physics)
     end
 
-    atomic_add!(C, halo, i, j, k, step.condensed_mass / Vᶜᶜᶜ(i, j, k, grid))
+    atomic_add!(C, halo, i, j, k, ξ * step.condensed_mass / Vᶜᶜᶜ(i, j, k, grid))
 end
 
 # Remove the condensed mass density C from the vapor, and warm the air at constant pressure

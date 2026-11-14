@@ -30,7 +30,7 @@ function water_budget(model)
     vapor = sum(Array(interior(model.moisture_density))) * V / prod(size(grid))
     d = model.microphysics.droplets.properties
     constants = model.thermodynamic_constants
-    liquid = sum(droplet_water_mass.(Array(d.r), Array(d.rᵈ), Ref(constants)); init=zero(vapor))
+    liquid = sum(Array(d.ξ) .* droplet_water_mass.(Array(d.r), Array(d.rᵈ), Ref(constants)); init=zero(vapor))
     book = model.microphysics.sources.bookkeeping
     return (; vapor, liquid, removed=book.removed_liquid_mass, injected=book.injected_liquid_mass,
             total = vapor + liquid + book.removed_liquid_mass - book.injected_liquid_mass)
@@ -115,6 +115,34 @@ end
     @test model.microphysics.sources.bookkeeping.injected ≈ 2 * expected * 0.05 atol=1
     time_step!(model, FT(0.5)) # t = 1.1: ten more batches
     @test model.microphysics.sources.bookkeeping.injected ≈ 12 * expected * 0.05 atol=1
+end
+
+@testset "ChamberSources: injection with multiplicity [$FT]" for FT in test_float_types()
+    # Each computational particle represents ξ physical particles: the computational batch is rate V Δt / ξ, the
+    # physical count and the haze water are ξ-weighted, and the water budget closes with the weighted liquid
+    L = FT(0.02)
+    rate = FT(2e8) # 1600 physical particles per second in the box
+    ξ = FT(10)
+    injection = AerosolInjection(FT; rate, dry_radius=1e-7, hygroscopicity=1.2, interval=0.1, multiplicity=ξ, seed=13)
+    removal = VirtualChamberRemoval(FT; size=(0.05, 0.05, 0.05), interval=0.05, rule=ResampledVirtualPosition(), seed=14)
+    model = chamber_box(FT; L, S=1.002, sources=ChamberSources(; injection, removal)) # slightly supersaturated: haze grows
+    set!(model; u=(x, y, z) -> 0.05 * sin(2π * z / L), w=(x, y, z) -> 0.05 * sin(2π * x / L))
+    budget₀ = water_budget(model)
+    t = 0
+    for _ in 1:100
+        time_step!(model, FT(0.01))
+        t += 0.01
+    end
+    book = model.microphysics.sources.bookkeeping
+    @test abs(book.injected - rate * L^3 * t / ξ) ≤ 1 + 1e-5 * rate * L^3 * t / ξ
+    @test book.injected_physical ≈ ξ * book.injected
+    @test book.removed_physical ≈ ξ * book.removed
+    @test all(Array(model.microphysics.droplets.properties.ξ) .== ξ)
+    @test water_budget(model).total ≈ budget₀.total rtol = budget_rtol(model)
+    @test liquid_diagnostic(model) ≈ water_budget(model).liquid rtol = budget_rtol(model)
+    # The vapor lost equals ξ times the growth of the computational droplets (the budget above), and is nonzero
+    @test budget₀.vapor - water_budget(model).vapor > 0
+    @test_throws ArgumentError AerosolInjection(FT; rate, dry_radius=1e-7, hygroscopicity=1.2, interval=0.1, multiplicity=0)
 end
 
 @testset "ChamberSources: removal through a virtual chamber [$FT]" for FT in test_float_types()

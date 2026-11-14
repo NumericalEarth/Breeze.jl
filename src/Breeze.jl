@@ -203,6 +203,7 @@ export
     SubsidenceForcing,
     ConstantPowerBandForcing,
     StochasticBandForcing,
+    ScalarVarianceBandForcing,
     SpecificForcing,
     TemperatureForcing,
 

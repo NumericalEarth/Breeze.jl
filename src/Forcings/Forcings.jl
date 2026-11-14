@@ -7,7 +7,8 @@ export
     SpecificForcing,
     TemperatureForcing,
     ConstantPowerBandForcing,
-    StochasticBandForcing
+    StochasticBandForcing,
+    ScalarVarianceBandForcing
 
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
