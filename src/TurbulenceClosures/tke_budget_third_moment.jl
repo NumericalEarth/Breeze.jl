@@ -158,28 +158,39 @@ third_moment_fields(grid, third_moment) = NamedTuple()
 third_moment_fields(grid, ::TKEBudgetThirdMoment) =
     (Fᵉ = CenterField(grid), Fᵋ = CenterField(grid), uᵉ = CenterField(grid), uᵋ = CenterField(grid),
      w′³ᵇ = CenterField(grid), Tᵉ = CenterField(grid), budget_work = CenterField(grid),
-     NamedTuple(saved_name(name) => ZFaceField(grid) for name in SAVED_CLOSURE_FIELD_NAMES)...)
+     NamedTuple(pass_name(name) => ZFaceField(grid) for name in PASS_CLOSURE_FIELD_NAMES)...)
 
-# The closure fields of the prognostic state that the passes overwrite: kept before them and put back after
-const SAVED_CLOSURE_FIELD_NAMES = (:N², :ℓᵐ, :ℓˢ, :Kᵘ, :Kᶜ, :Kᵉ)
-saved_name(name) = Symbol(:saved_, name)
+# The closure fields that a pass recomputes (the stability, the mixing lengths and the diffusivities). A pass
+# writes them into fields of its own, so that those of the prognostic state are never overwritten and need not be
+# kept and put back.
+const PASS_CLOSURE_FIELD_NAMES = (:N², :ℓᵐ, :ℓˢ, :Kᵘ, :Kᶜ, :Kᵉ)
+pass_name(name) = Symbol(:pass_, name)
 
-function save_closure_fields!(cloud, closure_fields)
-    for name in SAVED_CLOSURE_FIELD_NAMES
-        parent(getproperty(cloud, saved_name(name))) .= parent(getproperty(closure_fields, name))
-    end
-    return nothing
+# The closure fields of a pass: those of the prognostic state with the stability, the mixing lengths and the
+# diffusivities replaced by the pass's own (the per-tracer lookup of the diffusivities included)
+function pass_closure_fields(closure_fields::TKEClosureFields, cl)
+    Kᵘ, Kᶜ, Kᵉ = cl.pass_Kᵘ, cl.pass_Kᶜ, cl.pass_Kᵉ
+    tracer_diffusivities = map(K -> K === closure_fields.Kᵉ ? Kᵉ : Kᶜ, closure_fields.tupled_tracer_diffusivities)
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, cl.pass_N², cl.pass_ℓᵐ, cl.pass_ℓˢ, closure_fields.Lᵉ, tracer_diffusivities,
+                            closure_fields.tupled_implicit_linear_coefficients, closure_fields.subgrid_cloud)
 end
 
-function restore_closure_fields!(closure_fields, cloud)
-    for name in SAVED_CLOSURE_FIELD_NAMES
-        parent(getproperty(closure_fields, name)) .= parent(getproperty(cloud, saved_name(name)))
-    end
+# The pass starts from the closure fields of the prognostic state, halos included: one kernel for the six copies
+@kernel function _copy_parents!(destinations, sources)
+    i, j, k = @index(Global, NTuple)
+    # `map` over the tuples unrolls the copies
+    map((destination, source) -> @inbounds(destination[i, j, k] = source[i, j, k]), destinations, sources)
+end
+
+function start_pass_closure_fields!(pass_fields, closure_fields, grid)
+    destinations = map(name -> parent(getproperty(pass_fields, name)), PASS_CLOSURE_FIELD_NAMES)
+    sources = map(name -> parent(getproperty(closure_fields, name)), PASS_CLOSURE_FIELD_NAMES)
+    launch!(grid.architecture, grid, size(first(sources)), _copy_parents!, destinations, sources)
     return nothing
 end
 
 #####
-##### The sink that balances the budget, in place: `u` holds the shape ω on entry and the sink on exit
+##### The sinks that balance the budget, in place: each `u` holds its shape ω on entry and its sink on exit
 #####
 
 # 2 ρ Λ² / Δz at the face k, between the centers k - 1 and k
@@ -188,67 +199,85 @@ end
     return 2 * ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Λ * Λ / Δzᶜᶜᶠ(i, j, k, grid)
 end
 
-@inline function balance_sink!(u, work, i, j, grid, ℂʷᴸ, cl, ρ, ℓᵐ)
+# The two sinks of the column at once, `uᵉ` and `uᵋ` holding their shapes on entry; the matrices share the exchange
+# coefficients and the right-hand side ρ Δz (P + B). `workᵉ` and `workᵋ` hold the eliminated upper diagonals.
+@inline function balance_sinks!(uᵉ, uᵋ, workᵉ, workᵋ, i, j, grid, ℂʷᴸ, cl, ρ, ℓᵐ)
     Nz = size(grid, 3)
     FT = eltype(grid)
     tiny = sqrt(floatmin(FT))
     @inbounds if isfinite(ℂʷᴸ)
-        # Thomas algorithm; the matrix is diagonally dominant by columns
-        ω⁻ = zero(FT)
-        c′ = zero(FT)
-        d′ = zero(FT)
+        # Thomas algorithm; each matrix is diagonally dominant by columns
+        ωᵉ⁻ = zero(FT)
+        ωᵋ⁻ = zero(FT)
+        c′ᵉ = zero(FT)
+        d′ᵉ = zero(FT)
+        c′ᵋ = zero(FT)
+        d′ᵋ = zero(FT)
+        a⁻ = zero(FT) # the exchange coefficient at the face below
         for k in 1:Nz
-            ω = u[i, j, k]
+            ωᵉ = uᵉ[i, j, k]
+            ωᵋ = uᵋ[i, j, k]
             m = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
-            diagonal = m
-            lower = zero(FT)
-            upper = zero(FT)
+            diagonalᵉ = m
+            diagonalᵋ = m
+            lowerᵉ = zero(FT)
+            lowerᵋ = zero(FT)
+            upperᵉ = zero(FT)
+            upperᵋ = zero(FT)
             if k > 1
-                a = sink_exchange_coefficientᶜᶜᶠ(i, j, k, grid, ℂʷᴸ, ρ, ℓᵐ)
-                s = ω + ω⁻ + tiny
-                diagonal += a * ω⁻ / s
-                lower = -a * ω / s
+                sᵉ = ωᵉ + ωᵉ⁻ + tiny
+                sᵋ = ωᵋ + ωᵋ⁻ + tiny
+                diagonalᵉ += a⁻ * ωᵉ⁻ / sᵉ
+                diagonalᵋ += a⁻ * ωᵋ⁻ / sᵋ
+                lowerᵉ = -a⁻ * ωᵉ / sᵉ
+                lowerᵋ = -a⁻ * ωᵋ / sᵋ
             end
             if k < Nz
-                ω⁺ = u[i, j, k+1]
                 a = sink_exchange_coefficientᶜᶜᶠ(i, j, k + 1, grid, ℂʷᴸ, ρ, ℓᵐ)
-                s = ω + ω⁺ + tiny
-                diagonal += a * ω⁺ / s
-                upper = -a * ω / s
+                ωᵉ⁺ = uᵉ[i, j, k+1]
+                ωᵋ⁺ = uᵋ[i, j, k+1]
+                sᵉ = ωᵉ + ωᵉ⁺ + tiny
+                sᵋ = ωᵋ + ωᵋ⁺ + tiny
+                diagonalᵉ += a * ωᵉ⁺ / sᵉ
+                diagonalᵋ += a * ωᵋ⁺ / sᵋ
+                upperᵉ = -a * ωᵉ / sᵉ
+                upperᵋ = -a * ωᵋ / sᵋ
+                a⁻ = a
             end
-            pivot = diagonal - lower * c′
-            d′ = (m * (cl.P[i, j, k] + cl.B[i, j, k]) - lower * d′) / pivot
-            c′ = upper / pivot
-            work[i, j, k] = c′
-            u[i, j, k] = d′
-            ω⁻ = ω
+            source = m * (cl.P[i, j, k] + cl.B[i, j, k])
+            pivotᵉ = diagonalᵉ - lowerᵉ * c′ᵉ
+            pivotᵋ = diagonalᵋ - lowerᵋ * c′ᵋ
+            d′ᵉ = (source - lowerᵉ * d′ᵉ) / pivotᵉ
+            d′ᵋ = (source - lowerᵋ * d′ᵋ) / pivotᵋ
+            c′ᵉ = upperᵉ / pivotᵉ
+            c′ᵋ = upperᵋ / pivotᵋ
+            workᵉ[i, j, k] = c′ᵉ
+            workᵋ[i, j, k] = c′ᵋ
+            uᵉ[i, j, k] = d′ᵉ
+            uᵋ[i, j, k] = d′ᵋ
+            ωᵉ⁻ = ωᵉ
+            ωᵋ⁻ = ωᵋ
         end
         for k in Nz-1:-1:1
-            u[i, j, k] -= work[i, j, k] * u[i, j, k+1]
+            uᵉ[i, j, k] -= workᵉ[i, j, k] * uᵉ[i, j, k+1]
+            uᵋ[i, j, k] -= workᵋ[i, j, k] * uᵋ[i, j, k+1]
         end
     else
         Π = zero(FT)
-        Ω = zero(FT)
+        Ωᵉ = zero(FT)
+        Ωᵋ = zero(FT)
         for k in 1:Nz
             m = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
             Π += m * (cl.P[i, j, k] + cl.B[i, j, k])
-            Ω += m * u[i, j, k]
+            Ωᵉ += m * uᵉ[i, j, k]
+            Ωᵋ += m * uᵋ[i, j, k]
         end
-        c = Π / (Ω + tiny)
+        cᵉ = Π / (Ωᵉ + tiny)
+        cᵋ = Π / (Ωᵋ + tiny)
         for k in 1:Nz
-            u[i, j, k] *= c
+            uᵉ[i, j, k] *= cᵉ
+            uᵋ[i, j, k] *= cᵋ
         end
-    end
-    return nothing
-end
-
-# F at the centers: the integral of ρ (P + B - u) from the ground, the cell of the center counted half
-@inline function budget_flux!(F, u, i, j, grid, cl, ρ)
-    below = zero(eltype(grid))
-    @inbounds for k in 1:size(grid, 3)
-        r = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid) * (cl.P[i, j, k] + cl.B[i, j, k] - u[i, j, k])
-        F[i, j, k] = (below + r / 2) / ρ[i, j, k]
-        below += r
     end
     return nothing
 end
@@ -284,7 +313,7 @@ end
 end
 
 #####
-##### The budget of one evaluation: sinks, fluxes, the transport of TKE and, with `diagnose`, the third moment
+##### The budget of one evaluation: sinks, fluxes, the transport of TKE and, with `diagnose = Val(true)`, the third moment
 #####
 
 @kernel function _compute_tke_budget_flux!(cl, grid, closure, closure_fields, e, velocities, ρ, diagnose)
@@ -296,25 +325,44 @@ end
         cl.uᵉ[i, j, k] = max(e[i, j, k], zero(eltype(grid)))
         cl.uᵋ[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
     end
-    balance_sink!(cl.uᵉ, cl.budget_work, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
-    balance_sink!(cl.uᵋ, cl.budget_work, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
-    budget_flux!(cl.Fᵉ, cl.uᵉ, i, j, grid, cl, ρ)
-    budget_flux!(cl.Fᵋ, cl.uᵋ, i, j, grid, cl, ρ)
+    # Fᵋ holds the eliminated upper diagonal of the second solve until the fluxes overwrite it
+    balance_sinks!(cl.uᵉ, cl.uᵋ, cl.budget_work, cl.Fᵋ, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
     N² = closure_fields.N²
+    # The fluxes F at the centers: the integral of ρ (P + B - u) from the ground, the cell of the center counted half
+    belowᵉ = zero(eltype(grid))
+    belowᵋ = zero(eltype(grid))
     @inbounds for k in 1:size(grid, 3)
+        ρΔz = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+        rᵉ = ρΔz * (cl.P[i, j, k] + cl.B[i, j, k] - cl.uᵉ[i, j, k])
+        rᵋ = ρΔz * (cl.P[i, j, k] + cl.B[i, j, k] - cl.uᵋ[i, j, k])
+        Fᵉ = (belowᵉ + rᵉ / 2) / ρ[i, j, k]
+        Fᵋ = (belowᵋ + rᵋ / 2) / ρ[i, j, k]
+        cl.Fᵉ[i, j, k] = Fᵉ
+        cl.Fᵋ[i, j, k] = Fᵋ
+        belowᵉ += rᵉ
+        belowᵋ += rᵋ
+
         cl.Tᵉ[i, j, k] = tm.ℂʷᵀ * (cl.uᵉ[i, j, k] - cl.P[i, j, k] - cl.B[i, j, k])
 
-        # The third moment at the center, with ℓ, √e and N² as the distribution forms them there; one
-        # stratification number αᴺ = τ₃² N² for the ratio and for the damping
+        diagnose_center_third_moment!(diagnose, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², Fᵉ, Fᵋ)
+    end
+end
+
+# The third moment at the center, with ℓ, √e and N² as the distribution forms them there; one stratification number
+# αᴺ = τ₃² N² for the ratio and for the damping. Only in the passes of `diagnose_third_moment!` (`Val(true)`).
+@inline diagnose_center_third_moment!(::Val{false}, args...) = nothing
+
+@inline function diagnose_center_third_moment!(::Val{true}, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², Fᵉ, Fᵋ)
+    @inbounds begin
         ℓ = (ℓᵐ[i, j, k] + ℓᵐ[i, j, k+1]) / 2
         u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure_ij, e)
         τ = ℓ / u
         αᴺ = τ * τ * (N²[i, j, k] + N²[i, j, k+1]) / 2
         r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
-        w′³ = r * (tm.ℂʷᵉ * cl.Fᵉ[i, j, k] + tm.ℂʷᵋ * cl.Fᵋ[i, j, k]) +
-              damped_local_third_moment(i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k])
-        cl.w′³ᵇ[i, j, k] = ifelse(diagnose, w′³, cl.w′³ᵇ[i, j, k])
+        cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * Fᵉ + tm.ℂʷᵋ * Fᵋ) +
+                           damped_local_third_moment(i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k])
     end
+    return nothing
 end
 
 function compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, diagnose)
@@ -334,28 +382,32 @@ compute_tke_budget!(fields, distribution, closure_fields, closure, model, tracer
 # Within `update_state!`, after the first static stability, mixing length and diffusivities (which read only the
 # prognostic state) and before the distribution the stage uses. Each pass: the distribution with the third moment of
 # the pass before (none in the first), its stability and diffusivities, the conversions of the applied fluxes, and the
-# third moment from their budget. The stability, mixing length and diffusivities of the prognostic state (whose
-# stability reads the distribution of the previous update) are saved before the passes, every pass after the first
-# starts from them, and they are put back after the last, so the final evaluation starts from them too.
+# third moment from their budget. The distribution reads the stability, mixing length and diffusivities of the
+# prognostic state (whose stability reads the distribution of the previous update); the pass computes its own into
+# `pass_closure_fields`, which every pass starts from those of the prognostic state, so the final evaluation starts
+# from them too. The buoyancy derivatives of the prognostic state computed here serve the final evaluation as well.
 function diagnose_third_moment!(fields::SubgridCloudFields, distribution::TKEBudgetDistribution, closure_fields, closure, model, tracers, parameters)
-    save_closure_fields!(fields.cloud, closure_fields)
-    fill!(parent(fields.cloud.w′³ᵇ), 0)
+    cl = fields.cloud
+    pass_fields = pass_closure_fields(closure_fields, cl)
+    fill!(parent(cl.w′³ᵇ), 0)
     compute_buoyancy_derivatives!(fields, model)
     passes = third_moment_passes(distribution.third_moment)
     for pass in 1:passes
-        pass > 1 && restore_closure_fields!(closure_fields, fields.cloud)
+        start_pass_closure_fields!(pass_fields, closure_fields, model.grid)
         compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
-        solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
-        compute_applied_flux_conversions!(fields, closure_fields, closure, model, tracers)
-        compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, true)
+        solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, pass_fields, closure, model, tracers, parameters)
+        compute_applied_flux_conversions!(fields, pass_fields, closure, model, tracers)
+        compute_tke_budget_flux!(fields, pass_fields, closure, model, tracers, Val(true))
     end
-    restore_closure_fields!(closure_fields, fields.cloud)
     return nothing
 end
 
+# The buoyancy derivatives depend on the prognostic state alone: those of `diagnose_third_moment!` stand
+compute_subgrid_cloud_buoyancy_derivatives!(fields, ::TKEBudgetDistribution, model) = nothing
+
 # After the conversions of the applied fluxes the stage uses: their budget, for the transport of TKE and as a diagnostic
 compute_tke_budget!(fields::SubgridCloudFields, ::TKEBudgetDistribution, closure_fields, closure, model, tracers) =
-    compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, false)
+    compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, Val(false))
 
 #####
 ##### The third moment at the center k: the one diagnosed from the budget
