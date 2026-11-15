@@ -59,7 +59,7 @@ Mixed integer and float arguments are promoted to a single float type.
 
 Defaults are calibrated to the Shen et al. (2022) LES library, as described in the turbulence-closure
 manual, with the paired mixing length `GradientLimitedMixingLength(ℂˢ = 0.7877315198717979, ℂⁱ = 1.777871783491512)`.
-[`StratificationNumberStabilityFunction`](@ref) is the default of `TKEBasedTurbulenceClosure`.
+[`TurbulentRichardsonStabilityFunction`](@ref) is the default of `TKEBasedTurbulenceClosure`.
 
 ```jldoctest
 using Breeze

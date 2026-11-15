@@ -4,8 +4,8 @@
 #####
 ##### `GridMeanShear` is the shear of the resolved wind, (∂z u)² + (∂z v)², with the floor S²ᵐⁱⁿ > 0 of
 ##### richardson_number_stability_functions.jl. (The response of the functions to stratification where
-##### there is no resolved shear is the role of the stratification number of
-##### `StratificationNumberStabilityFunction`.)
+##### there is no resolved shear is the role of the turbulent Richardson number of
+##### `TurbulentRichardsonStabilityFunction`.)
 #####
 
 """

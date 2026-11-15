@@ -2,7 +2,7 @@ include(joinpath(dirname(@__DIR__), "setup.jl"))
 
 #####
 ##### Reactant forward and gradient compilation of a column ensemble with `TKEBasedTurbulenceClosure`,
-##### its `StratificationNumberStabilityFunction`, a `SaturationWeightedStaticStability` whose weight (a dummy) reads the
+##### its `TurbulentRichardsonStabilityFunction`, a `SaturationWeightedStaticStability` whose weight (a dummy) reads the
 ##### stored mixing length, and a mixing length with a `HarmonicBlend`
 #####
 

@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 # The arguments of the stability functions of `TKEBasedTurbulenceClosure`: the `shear` (`GridMeanShear`),
-# the stratification and shear numbers of `StratificationNumberStabilityFunction`, and the
+# the turbulent Richardson number of `TurbulentRichardsonStabilityFunction`, and the
 # `static_stability` that blends the dry and the saturated buoyancy frequency with a weight from an
 # external subgrid cloud model (`SaturationWeightedStaticStability`).
 
@@ -11,8 +11,9 @@ using Breeze.TurbulenceClosures: TurbulenceClosures, TKE_NAME, Riᶜᶜᶠ, Ri�
                                  effective_shear_squaredᶜᶜᶠ, stratification_and_shear_numbersᶜᶜᶠ,
                                  tke_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, dissipation_stability_functionᶜᶜᶜ,
                                  momentum_stability_function, tracer_stability_function, tke_stability_function,
-                                 dissipation_stability_function, stability_endpoints, transition_stratification_numbers,
-                                 local_stability_functions,
+                                 dissipation_stability_function, local_stability_functions,
+                                 stability_coefficient_bounds, minimum_stratification_scale, within_bounds,
+                                 bounded_coefficient, unbounded_coefficient,
                                  with_minimum_shear_squared, MicrophysicsSaturatedFraction, microphysics_subgrid_model
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
@@ -154,133 +155,113 @@ const stability_function_kinds = (momentum_stability_function, tracer_stability_
 
 endpoint_triples(r) = ((r.ℂᵘ⁻, r.ℂᵘ⁰, r.ℂᵘ⁺), (r.ℂᶜ⁻, r.ℂᶜ⁰, r.ℂᶜ⁺), (r.ℂᵉ⁻, r.ℂᵉ⁰, r.ℂᵉ⁺), (r.ℂᴰ⁻, r.ℂᴰ⁰, r.ℂᴰ⁺))
 
-@testset "StratificationNumberStabilityFunction: construction [$(FT)]" for FT in test_float_types()
+const TRSF = TurbulentRichardsonStabilityFunction
+
+# The rational functions of the Richardson number with the values of `sf` and both transition scales ℂᴿⁱ
+same_values_rational(sf) = RationalStabilityFunction(; (name => getfield(sf, name) for name in fieldnames(RationalStabilityFunction)[1:12])...,
+                                                     Ri⁻ = sf.ℂᴿⁱ, Ri⁺ = sf.ℂᴿⁱ)
+
+# v = Riᵗ / √(1 + Riᵗ²) at which the functions are evaluated, from α_N at zero shear
+stratification_number_of(sf, v) = sf.ℂᵅ * v / sqrt(1 - v^2)
+
+@testset "TurbulentRichardsonStabilityFunction: construction [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    sf = StratificationNumberStabilityFunction()
-    @test sf isa StratificationNumberStabilityFunction{FT, LogarithmicInterpolation}
+    sf = TRSF()
+    @test sf isa TRSF{FT}
     @test isbits(sf)
     @test adapt(Array, sf) === sf
     @test TKEBasedTurbulenceClosure().stability_functions === sf
-    @test StratificationNumberStabilityFunction(interpolation = LinearInterpolation()).interpolation === LinearInterpolation()
-    @test all(transition_stratification_numbers(sf) .≈ (2, 1))
+    @test sf.ℂᵘ⁰ === FT(0.15900569445804447)
+    @test within_bounds(sf)
+    @test sf.ℂᵅ ≥ minimum_stratification_scale()
+    @test minimum_stratification_scale() ≈ 4.18637 rtol=1e-5
 
-    # The default maps the harness's coefficients and keeps those within the bounds
-    r = stability_endpoints(sf)
-    @test r isa RationalStabilityFunction{FT}
-    @test r.ℂᵘ⁰ === FT(0.15900569445804447)
-    @test r.ℂᶜ⁻ / r.ℂᶜ⁰ ≈ 0.41116 rtol=1e-4
-    @test r.ℂᴰ⁻ / r.ℂᴰ⁰ ≈ 0.18529 rtol=1e-4
-    @test r.ℂᵘ⁺ / r.ℂᵘ⁰ ≈ 0.068905 rtol=1e-4
-    @test r.Ri⁺ ≈ 0.11
+    @test_throws ArgumentError TRSF(ℂᵘ⁰ = 0)
+    @test_throws ArgumentError TRSF(ℂᵅ = -1)
+    @test_throws ArgumentError stability_coefficient_bounds(1e-3, 4)
+    @test startswith(sprint(show, sf), "TurbulentRichardsonStabilityFunction{$FT}\n├── Riᵗ → -∞")
 
-    # Mapping a set back gives it again where it is inside the bounds
-    inner = RationalStabilityFunction(ℂᵘ⁻ = 0.3, ℂᵘ⁰ = 0.15, ℂᵘ⁺ = 0.3, ℂᶜ⁻ = 0.3, ℂᶜ⁰ = 0.2, ℂᶜ⁺ = 0.3,
-                                      ℂᵉ⁻ = 0.1, ℂᵉ⁰ = 0.07, ℂᵉ⁺ = 0.1, ℂᴰ⁻ = 0.04, ℂᴰ⁰ = 0.05, ℂᴰ⁺ = 0.08, Ri⁻ = 5, Ri⁺ = 2)
-    for interpolation in (LogarithmicInterpolation(), LinearInterpolation())
-        mapped = stability_endpoints(StratificationNumberStabilityFunction(inner; ℂᴺ⁻ = 2, ℂᴺ⁺ = 1, interpolation))
-        for name in fieldnames(RationalStabilityFunction)
-            @test getfield(mapped, name) ≈ getfield(inner, name) rtol=1e-10
-        end
+    # The bounds: independent intervals, ℂᵅ above the width condition
+    bounds = stability_coefficient_bounds()
+    @test keys(bounds) == fieldnames(TRSF)[1:14]
+    @test bounds.ℂᵘ⁰ == (0.05, 20) && bounds.ℂᴿⁱ == (0.05, 20)
+    @test bounds.ℂᵅ[1] ≈ 0.6987 * log(400) rtol=1e-3
+    @test stability_coefficient_bounds(0.01, 100).ℂᵅ[1] ≈ 6.4355 rtol=1e-4
+    @test !within_bounds(TRSF(ℂᵅ = 1))
+    for θ in (-30.0, -1.0, 0.0, 2.5, 30.0)
+        C = bounded_coefficient(θ, 0.05, 20)
+        @test 0.05 ≤ C ≤ 20
+        abs(θ) < 10 && @test unbounded_coefficient(C, 0.05, 20) ≈ θ
     end
 
-    @test_throws ArgumentError StratificationNumberStabilityFunction(ℂᵘ⁰ = 0)
-    @test_throws ArgumentError StratificationNumberStabilityFunction(Ri⁻ = -1)
-    @test_throws ArgumentError StratificationNumberStabilityFunction(ϑᴰ⁺ = Inf)
-    @test_throws ArgumentError StratificationNumberStabilityFunction(RationalStabilityFunction(); interior_fraction = 1)
-    @test startswith(sprint(show, sf), "StratificationNumberStabilityFunction{$FT}\n├── ℂᴺ⁻ = 2.0, ℂᴺ⁺ = 1.0")
-
-    # The trainable scalars are the unconstrained ones
+    # The parameters are the fourteen values, and replacing them rebuilds the cached logarithms
     closure = TKEBasedTurbulenceClosure()
     names = keys(closure_parameters(closure))
-    @test (:ϑᵘ⁺, :ϑᶜ⁻, :ϑᶜ⁺, :ϑᵉ⁻, :ϑᵉ⁺, :ϑᴰ⁻, :ϑᴰ⁺, :ϑᴿⁱ⁺, :ϑᴺ⁻, :ϑᴺ⁺) ⊆ names
-    @test !any(name -> name ∈ names, (:ℂᶜ⁻, :ℂᴰ⁺, :Ri⁺, :ℂᴺ⁻, :maximum_logarithmic_slope))
-    changed = with_parameters(closure; ϑᴰ⁺ = 100.0, ϑᴺ⁻ = -100.0)
-    @test changed.stability_functions.ϑᴰ⁺ == 100
+    @test fieldnames(TRSF)[1:14] ⊆ names
+    @test :quadratic_coefficients ∉ names
+    changed = with_parameters(closure; ℂᶜ⁻ = 2.0, ℂᵅ = 6.0)
+    @test changed.stability_functions == TRSF(FT; ℂᶜ⁻ = 2, ℂᵅ = 6)
     @test closure_parameters(with_parameters(closure)) == closure_parameters(closure)
 end
 
-@testset "StratificationNumberStabilityFunction: the bounds hold for any scalars [$(FT)]" for FT in test_float_types()
-    # A deterministic low-discrepancy sequence on (0, 1)
+@testset "TurbulentRichardsonStabilityFunction: the three values, positivity, smoothness [$(FT)]" for FT in test_float_types()
     counter = Ref(0)
     uniform() = (counter[] += 1; mod(counter[] * 0.6180339887498949 + 0.1, 1))
-    for interpolation in (LogarithmicInterpolation(), LinearInterpolation()), trial in 1:200
-        # Moderate and extreme scalars, of either sign
-        ϑ() = FT((uniform() - 1/2) * (trial ≤ 100 ? 10 : 1e4))
-        C() = FT(exp(4 * (uniform() - 1/2)) / 10)
-        sf = StratificationNumberStabilityFunction(FT; ℂᵘ⁻ = C(), ℂᵘ⁰ = C(), ℂᶜ⁰ = C(), ℂᵉ⁰ = C(), ℂᴰ⁰ = C(), Ri⁻ = 10C(),
-                                                   ϑᵘ⁺ = ϑ(), ϑᶜ⁻ = ϑ(), ϑᶜ⁺ = ϑ(), ϑᵉ⁻ = ϑ(), ϑᵉ⁺ = ϑ(), ϑᴰ⁻ = ϑ(), ϑᴰ⁺ = ϑ(),
-                                                   ϑᴿⁱ⁺ = clamp(ϑ(), -30, 30), ϑᴺ⁻ = ϑ(), ϑᴺ⁺ = ϑ(), interpolation)
-        r = stability_endpoints(sf)
-        ℂᴺ⁻, ℂᴺ⁺ = transition_stratification_numbers(sf)
-        slack = 1 + 10 * eps(FT)
-        @test 0.3 / slack ≤ ℂᴺ⁻ ≤ 10 * slack
-        @test 0.1 / slack ≤ ℂᴺ⁺ ≤ 2 * slack
-        b⁻, b⁺ = ℂᴺ⁻, (ℂᴺ⁺^4 + ℂᴺ⁺^-4)^(-1/4)
-        measure(C, C⁰) = interpolation isa LogarithmicInterpolation ? abs(log(C / C⁰)) : abs(C / C⁰ - 1)
-        for (C⁻, C⁰, C⁺) in endpoint_triples(r)[2:4]
-            @test measure(C⁻, C⁰) ≤ b⁻ * slack
-            @test measure(C⁺, C⁰) ≤ b⁺ * slack
-        end
-        @test r.ℂᶜ⁺ ≤ slack
-        @test r.ℂᵘ⁺ / r.ℂᵘ⁰ ≤ (interpolation isa LogarithmicInterpolation ? 7.4 : 9) * slack
-        @test r.Ri⁺ ≥ 0.1
-        @test all(C -> C ≥ 0 && isfinite(C), endpoint_triples(r) |> Iterators.flatten) # ℂᵘ⁺ underflows at ϑᵘ⁺ → -∞
-        # and the functions are finite and between their endpoints everywhere
-        for αᴺ in FT.((-1e3, -1, -1e-3, 0, 1e-3, 0.5, 1)), αˢ in FT.((0, 1e-3, 1, 1e3)), (f, (C⁻, C⁰, C⁺)) in zip(stability_function_kinds, endpoint_triples(r))
-            𝕊 = f(sf, αᴺ, αˢ)
-            Cᵇ = αᴺ ≥ 0 ? C⁺ : C⁻
-            @test isfinite(𝕊)
-            # (a limit that underflows, ℂᵘ⁺ at ϑᵘ⁺ → -∞, leaves 𝕊 ≥ 0)
-            @test (min(C⁰, Cᵇ) / slack ≤ 𝕊 || (0 ≤ 𝕊 && min(C⁰, Cᵇ) < sqrt(floatmin(FT)))) && 𝕊 ≤ max(C⁰, Cᵇ) * slack
+    lower, upper = 0.05, 20
+    for trial in 1:200
+        C() = FT(bounded_coefficient(8 * (uniform() - 1/2), lower, upper))
+        sf = TRSF(FT; ℂᵘ⁻ = C(), ℂᵘ⁰ = C(), ℂᵘ⁺ = C(), ℂᶜ⁻ = C(), ℂᶜ⁰ = C(), ℂᶜ⁺ = C(), ℂᵉ⁻ = C(), ℂᵉ⁰ = C(), ℂᵉ⁺ = C(),
+                  ℂᴰ⁻ = C(), ℂᴰ⁰ = C(), ℂᴰ⁺ = C(), ℂᴿⁱ = C(), ℂᵅ = FT(bounded_coefficient(uniform(), 4.2, upper)))
+        for (f, (C⁻, C⁰, C⁺)) in zip(stability_function_kinds, endpoint_triples(sf))
+            # The values at v = -1, 0, 1: strongly unstable, neutral, strongly stable
+            @test f(sf, zero(FT), zero(FT)) ≈ C⁰ rtol=10eps(FT)
+            @test f(sf, FT(-1e9), zero(FT)) ≈ C⁻ rtol=100eps(FT)
+            @test f(sf, FT(1e9), zero(FT)) ≈ C⁺ rtol=100eps(FT)
+            # Positive and finite everywhere, within the box widened by the curvature
+            for αᴺ in FT.((-1e30, -1e3, -1, -1e-3, 0, 1e-3, 0.5, 1, 1e30)), αˢ in FT.((0, 1e-3, 1, 1e3, 1e30))
+                𝕊 = f(sf, αᴺ, αˢ)
+                @test isfinite(𝕊) && 𝕊 > 0
+            end
+            # Without shear the logarithmic slope in α_N is below the width condition, one
+            for αᴺ in FT.((-8, -2, -0.5, -1e-3, 0, 1e-3, 0.5, 1))
+                δ = FT(1e-3)
+                slope = (log(f(sf, αᴺ + δ, zero(FT))) - log(f(sf, αᴺ - δ, zero(FT)))) / 2δ
+                @test abs(slope) ≤ 1 + sqrt(eps(FT)) * 100
+            end
         end
     end
 end
 
-@testset "StratificationNumberStabilityFunction: continuous through neutral without shear, Ri form with strong shear [$(FT)]" for FT in test_float_types()
-    for interpolation in (LogarithmicInterpolation(), LinearInterpolation())
-        sf = StratificationNumberStabilityFunction(FT; interpolation)
-        r = stability_endpoints(sf)
-        ℂᴺ⁻, ℂᴺ⁺ = transition_stratification_numbers(sf)
-        for (f, (C⁻, C⁰, C⁺)) in zip(stability_function_kinds, endpoint_triples(r))
-            # Without shear the functions are continuous in N² through zero: Lipschitz with the bounded slope
-            for δ in FT.((1e-2, 1e-4, 1e-6))
-                @test abs(f(sf, δ, zero(FT)) - C⁰) ≤ C⁰ * 2 * δ / ℂᴺ⁺ * max(1, abs(log(C⁺ / C⁰)), abs(C⁺ / C⁰ - 1))
-                @test abs(f(sf, -δ, zero(FT)) - C⁰) ≤ C⁰ * 2 * δ / ℂᴺ⁻ * max(1, abs(log(C⁻ / C⁰)), abs(C⁻ / C⁰ - 1))
-            end
-            @test f(sf, zero(FT), zero(FT)) == C⁰
-            # halfway (in the shape) at α_N = -ℂᴺ⁻ and at α_N = ℂᴺ⁺ / (1 + ℂᴺ⁺)
-            half(Cᵇ) = interpolation isa LogarithmicInterpolation ? sqrt(C⁰ * Cᵇ) : (C⁰ + Cᵇ) / 2
-            @test f(sf, -ℂᴺ⁻, zero(FT)) ≈ half(C⁻) rtol=10eps(FT)
-            @test f(sf, ℂᴺ⁺ / (1 + ℂᴺ⁺), zero(FT)) ≈ half(C⁺) rtol=10eps(FT)
-            # the stable limit where ℓ = √e / N, at any shear
-            @test f(sf, one(FT), zero(FT)) ≈ C⁺ rtol=10eps(FT)
-
-            # With strong shear the functions are those of Ri = α_N / α_S
-            for Ri in FT.((-30, -1, -0.05, 0.02, 0.5, 5)), αˢ in FT.((1e4, 1e6))
-                αᴺ = Ri * αˢ
-                s = 1 / (1 + (Ri ≥ 0 ? r.Ri⁺ : r.Ri⁻) / abs(Ri))
-                Cᵇ = Ri ≥ 0 ? C⁺ : C⁻
-                expected = interpolation isa LogarithmicInterpolation ? C⁰ * (Cᵇ / C⁰)^s : C⁰ + (Cᵇ - C⁰) * s
-                @test f(sf, αᴺ, αˢ) ≈ expected rtol = 10 * max(ℂᴺ⁻, ℂᴺ⁺) / (r.Ri⁺ * αˢ) + 10eps(FT)
-            end
+@testset "TurbulentRichardsonStabilityFunction: smooth through N² = 0 without shear, Ri with strong shear [$(FT)]" for FT in test_float_types()
+    sf = TRSF(FT)
+    for (f, (C⁻, C⁰, C⁺)) in zip(stability_function_kinds, endpoint_triples(sf))
+        # The derivative at N² = 0 without shear is ½ ln(ℂ⁺/ℂ⁻) / ℂᵅ from either side
+        slope = log(C⁺ / C⁻) / 2 / sf.ℂᵅ
+        for δ in FT.((1e-2, 1e-3))
+            right = (log(f(sf, δ, zero(FT))) - log(C⁰)) / δ
+            left = (log(C⁰) - log(f(sf, -δ, zero(FT)))) / δ
+            @test right ≈ slope atol=10δ
+            @test left ≈ slope atol=10δ
         end
-
-        # With the linear interpolation, the rational functions of the Richardson number of the endpoints
-        if interpolation isa LinearInterpolation
-            αˢ = FT(1e6)
-            for Ri in FT.((-3, 0.3)), (f, g) in zip(stability_function_kinds, stability_function_kinds)
-                @test f(sf, Ri * αˢ, αˢ) ≈ g(r, Ri) rtol=1e-4
-            end
+        # With strong shear a function of Ri = α_N / α_S alone, with v = Riᵗ / √(1 + Riᵗ²), Riᵗ = Ri / ℂᴿⁱ
+        for Ri in FT.((-30, -1, -0.05, 0.02, 0.5, 5)), αˢ in FT.((1e4, 1e6))
+            u = Ri / sf.ℂᴿⁱ
+            v = u / sqrt(1 + u^2)
+            expected = exp(log(C⁰) + log(C⁺ / C⁻) / 2 * v + (log(C⁺ * C⁻) / 2 - log(C⁰)) * v^2)
+            @test f(sf, Ri * αˢ, αˢ) ≈ expected rtol = 10 * sf.ℂᵅ / (sf.ℂᴿⁱ * αˢ) + 100eps(FT)
         end
-
-        # The local form at a point: N², S², the floor and τ²
-        τ², N², S² = FT(400), FT(-2e-4), FT(1e-5)
-        @test collect(local_stability_functions(sf, N², S², FT(1e-10), τ²)) ≈
-              [f(sf, τ² * N², τ² * (S² + FT(1e-10))) for f in stability_function_kinds]
+        # The values are reached through v: halfway in ln 𝕊 between C⁰ and C⁺ (the linear part) at v = ½
+        @test f(sf, FT(stratification_number_of(sf, 1/2)), zero(FT)) ≈
+              exp(log(C⁰) + log(C⁺ / C⁻) / 4 + (log(C⁺ * C⁻) / 2 - log(C⁰)) / 4) rtol=100eps(FT)
     end
+
+    # The local form at a point: N², S², the floor and τ²
+    τ², N², S² = FT(400), FT(-2e-4), FT(1e-5)
+    @test collect(local_stability_functions(sf, N², S², FT(1e-10), τ²)) ≈
+          [f(sf, τ² * N², τ² * (S² + FT(1e-10))) for f in stability_function_kinds]
 end
 
-@testset "StratificationNumberStabilityFunction on the grid [$(FT)]" for FT in test_float_types()
+@testset "TurbulentRichardsonStabilityFunction on the grid [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     case = column_cases.bomex
     Nz = case.Nz
@@ -320,7 +301,7 @@ end
 # The spike test: a moist column without shear (a BOMEX-like sounding with a moist layer), with the
 # subgrid distribution and P3's subgrid condensation, 100 s at Δt = 2 s, then 60 s at Δt = 0.5 s. With
 # the functions of the Richardson number the diffusivity grows one-face spikes in the cloud layer, a
-# checkerboard measured by cb(K) = Σ |δ²K| / (4 Σ |K|); with the stratification number it stays smooth.
+# checkerboard measured by cb(K) = Σ |δ²K| / (4 Σ |K|); with the turbulent Richardson number it stays smooth.
 checkerboard(K) = sum(abs, diff(diff(K))) / (4 * sum(abs, K) + floatmin(eltype(K)))
 
 spike_θ(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4 + (z - 1480) * 5.8 / 520
@@ -351,18 +332,21 @@ end
 
 @testset "The spike test: cb(K) in the shear-free moist column" begin
     Oceananigans.defaults.FloatType = Float64
-    # The default and the functions of the Richardson number with its endpoints
-    default = StratificationNumberStabilityFunction()
-    cbᴺ, Kᴺ = spike_column(default)
-    cbᴿ, Kᴿ = spike_column(stability_endpoints(default))
-    @test all(isfinite, Kᴺ) && all(isfinite, Kᴿ)
-    @test cbᴺ < 0.8 * cbᴿ
-    # The rational functions' own coefficients, whose ratios are far from one
-    cbᴺ, Kᴺ = spike_column(StratificationNumberStabilityFunction(RationalStabilityFunction()))
-    cbᴿ, Kᴿ = spike_column(RationalStabilityFunction())
-    @test maximum(Kᴺ) > 100
-    @test cbᴺ < 0.1
-    @test cbᴺ < cbᴿ / 2
+    # The default and the functions of the Richardson number with its values
+    default = TRSF()
+    cbᵗ, Kᵗ = spike_column(default)
+    cbᴿ, Kᴿ = spike_column(same_values_rational(default))
+    @info "spike test, default values" cbᵗ cbᴿ
+    @test all(isfinite, Kᵗ) && all(isfinite, Kᴿ)
+    @test cbᵗ < 0.8 * cbᴿ
+    # The rational functions' own coefficients, whose ratios are far from one (outside the bounds)
+    rational = RationalStabilityFunction()
+    cbᵗ, Kᵗ = spike_column(TRSF(; (name => getfield(rational, name) for name in fieldnames(RationalStabilityFunction)[1:12])...))
+    cbᴿ, Kᴿ = spike_column(rational)
+    @info "spike test, the rational functions' values" cbᵗ cbᴿ maximum(Kᵗ)
+    @test maximum(Kᵗ) > 100
+    @test cbᵗ < 0.1
+    @test cbᵗ < cbᴿ / 2
 end
 
 #####
@@ -467,7 +451,7 @@ end
 @testset "Stability functions and static stability combine [$(FT), $name]" for FT in test_float_types(), name in (:bomex, :rico)
     Oceananigans.defaults.FloatType = FT
     case = column_cases[name]
-    functions = (StratificationNumberStabilityFunction(), RationalStabilityFunction())
+    functions = (TRSF(), RationalStabilityFunction())
     stabilities = (MoistStaticStability(), SaturationWeightedStaticStability(MixingLengthWeight(FT(100))))
     states = [state(run_steps!(column_model(TKEBasedTurbulenceClosure(; stability_functions, static_stability), case)))
               for stability_functions in functions, static_stability in stabilities]
@@ -488,7 +472,7 @@ reverse_gradient(f, x) = Enzyme.autodiff(Enzyme.set_runtime_activity(Enzyme.set_
 
 central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
 
-@testset "Enzyme against finite differences: the unconstrained scalars of the stability functions and a subgrid cloud weight" begin
+@testset "Enzyme against finite differences: the coefficients of the stability functions and a subgrid cloud weight" begin
     Oceananigans.defaults.FloatType = Float64
     case = column_cases.rico
     template = TKEBasedTurbulenceClosure(static_stability = SaturationWeightedStaticStability(MixingLengthWeight(100.0)))
@@ -498,20 +482,20 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
     Oceananigans.BoundaryConditions.fill_halo_regions!(e)
     buoyancy, tracers = buoyancy_force(model), buoyancy_tracers(model)
 
-    with_scalar(name, ϑ) = TKEBasedTurbulenceClosure(stability_functions = StratificationNumberStabilityFunction(; (name => ϑ,)...))
-    default = StratificationNumberStabilityFunction()
+    with_scalar(name, C) = TKEBasedTurbulenceClosure(stability_functions = TRSF(; (name => C,)...))
+    default = TRSF()
 
     for k in (3, 8, 14, 20, 30)
         # Stable and unstable interfaces, through the TKE diffusivity's stability function and, at
         # the cell center, the dissipation's
-        for name in (:ϑᴺ⁻, :ϑᴺ⁺, :ϑᵉ⁻, :ϑᵉ⁺, :ϑᴰ⁻, :ϑᴰ⁺, :ϑᴿⁱ⁺)
-            for f in (ϑ -> tke_stability_functionᶜᶜᶠ(1, 1, k, grid, with_scalar(name, ϑ), velocities, fields.N², e, fields.ℓᵐ),
-                      ϑ -> dissipation_stability_functionᶜᶜᶜ(1, 1, k, grid, with_scalar(name, ϑ), velocities, fields.N², e, fields.ℓᵐ))
-                ϑ₀ = getfield(default, name)
-                ad = reverse_gradient(f, ϑ₀)
-                fd = (f(ϑ₀ + 1e-6) - f(ϑ₀ - 1e-6)) / 2e-6
+        for name in (:ℂᴿⁱ, :ℂᵅ, :ℂᵉ⁻, :ℂᵉ⁰, :ℂᵉ⁺, :ℂᴰ⁻, :ℂᴰ⁰, :ℂᴰ⁺)
+            for f in (C -> tke_stability_functionᶜᶜᶠ(1, 1, k, grid, with_scalar(name, C), velocities, fields.N², e, fields.ℓᵐ),
+                      C -> dissipation_stability_functionᶜᶜᶜ(1, 1, k, grid, with_scalar(name, C), velocities, fields.N², e, fields.ℓᵐ))
+                C₀ = getfield(default, name)
+                ad = reverse_gradient(f, C₀)
+                fd = (f(C₀ + 1e-6) - f(C₀ - 1e-6)) / 2e-6
                 @test isfinite(ad)
-                @test ad ≈ fd rtol=1e-5 atol=1e-8 * abs(f(ϑ₀))
+                @test ad ≈ fd rtol=1e-5 atol=1e-8 * abs(f(C₀))
             end
         end
 
@@ -528,6 +512,6 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
     end
 
     # The surface interface, where ℓ = 0: neutral, so finite and zero
-    f = ϑ -> tke_stability_functionᶜᶜᶠ(1, 1, 1, grid, with_scalar(:ϑᴺ⁻, ϑ), velocities, fields.N², e, fields.ℓᵐ)
-    @test reverse_gradient(f, 0.1) == 0
+    f = C -> tke_stability_functionᶜᶜᶠ(1, 1, 1, grid, with_scalar(:ℂᵅ, C), velocities, fields.N², e, fields.ℓᵐ)
+    @test reverse_gradient(f, 4.2) == 0
 end
