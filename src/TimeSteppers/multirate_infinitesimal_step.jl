@@ -255,12 +255,10 @@ momentum_tendency_split(step_start, substepper, model, direction) =
 # Whether only the diagonal of `β` is nonzero: every stage then applies its own slow tendency alone.
 is_diagonal(β) = all(i == j || iszero(β[i, j]) for i in axes(β, 1), j in axes(β, 2))
 
-# `nothing` when the stage-entry force remainder is not recombined: with a diagonal `β`, with
-# `relinearize_stages`, or with terrain-following coordinates.
-# TODO: recombine the terrain-following remainder, with the metric terms of
-# `terrain_x_pressure_gradient` and the contravariant vertical force.
+# `nothing` when the stage-entry force remainder is not recombined: with a diagonal `β` or with
+# `relinearize_stages`.
 function step_start_storage(grid, dynamics, tableau, relinearize_stages)
-    recombined = !is_diagonal(tableau.β) && !relinearize_stages && !(dynamics isa TerrainCompressibleDynamics)
+    recombined = !is_diagonal(tableau.β) && !relinearize_stages
     return recombined ? step_start_force_state(grid) : nothing
 end
 

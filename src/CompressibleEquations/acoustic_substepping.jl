@@ -1586,8 +1586,9 @@ end
 
 # R(U) - R(Uⁿ), where R(U) = P(U) - 𝖫 U is the pressure gradient and buoyancy less the loop's linear
 # operator. Differencing from the step-start state Uⁿ cancels the hydrostatic parts exactly.
-struct StageEntryForceRemainder{D, P, PN, T, TN, C, R, RD, WN, WC, TC}
+struct StageEntryForceRemainder{D, S, P, PN, T, TN, C, R, RD, WN, WC, TC}
     direction :: D
+    pressure_gradient_stencil :: S          # of the horizontal gradients; `nothing` in height coordinates
     pressure :: P                           # p
     step_start_pressure :: PN               # pⁿ
     thermodynamic_density :: T              # ρθ
@@ -1603,7 +1604,7 @@ end
 const SEFR = StageEntryForceRemainder
 
 Adapt.adapt_structure(to, r::SEFR) =
-    StageEntryForceRemainder(r.direction,
+    StageEntryForceRemainder(r.direction, r.pressure_gradient_stencil,
                              adapt(to, r.pressure), adapt(to, r.step_start_pressure),
                              adapt(to, r.thermodynamic_density), adapt(to, r.step_start_thermodynamic_density),
                              adapt(to, r.pressure_coefficient),
@@ -1660,6 +1661,7 @@ function StageEntryForceRemainder(direction, substepper::AcousticSubstepper, mod
     Cᴸ = substepper.linearization_pressure_coefficient
 
     return StageEntryForceRemainder(direction,
+                                    pressure_gradient_stencil(dynamics),
                                     dynamics.pressure,
                                     step_start.pressure,
                                     ρᵡ,
@@ -1695,11 +1697,24 @@ end
     return (ρ - ρᵈ) - ρˣⁿ
 end
 
-@inline stage_entry_force_remainder(i, j, k, grid, r::SEFR{Val{:x}}) = ∂xᶠᶜᶜ(i, j, k, grid, linearized_pressure_remainder, r)
-@inline stage_entry_force_remainder(i, j, k, grid, r::SEFR{Val{:y}}) = ∂yᶜᶠᶜ(i, j, k, grid, linearized_pressure_remainder, r)
+# The horizontal gradients are those of the loop's own stage-entry pressure gradient: over terrain,
+# the constant-height gradient of the model's `pressure_gradient_stencil` (see
+# terrain_compressible_physics.jl), whose metric terms the remainder then carries. The vertical
+# component is the remainder of the Cartesian vertical force in either coordinate: the terrain
+# loop forms its contravariant force from the assembled Cartesian tendencies.
+pressure_gradient_stencil(dynamics) = nothing
+
+@inline remainder_x_gradient(i, j, k, grid, ::Nothing, args...) = ∂xᶠᶜᶜ(i, j, k, grid, args...)
+@inline remainder_y_gradient(i, j, k, grid, ::Nothing, args...) = ∂yᶜᶠᶜ(i, j, k, grid, args...)
+
+@inline stage_entry_force_remainder(i, j, k, grid, r::SEFR) = stage_entry_force_remainder(i, j, k, grid, r.pressure_gradient_stencil, r)
+@inline stage_entry_force_remainder(i, j, k, grid, ::Nothing, r::SEFR) = force_remainder(i, j, k, grid, r)
+
+@inline force_remainder(i, j, k, grid, r::SEFR{Val{:x}}) = remainder_x_gradient(i, j, k, grid, r.pressure_gradient_stencil, linearized_pressure_remainder, r)
+@inline force_remainder(i, j, k, grid, r::SEFR{Val{:y}}) = remainder_y_gradient(i, j, k, grid, r.pressure_gradient_stencil, linearized_pressure_remainder, r)
 
 # The bottom and top faces carry no vertical momentum tendency (see `_build_vertical_rhs!`).
-@inline function stage_entry_force_remainder(i, j, k, grid, r::SEFR{Val{:z}})
+@inline function force_remainder(i, j, k, grid, r::SEFR{Val{:z}})
     g = r.thermodynamic_constants.gravitational_acceleration
     ∂z_R = ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_remainder, r)
     δρˣ = ℑzᵃᵃᶠ(i, j, k, grid, water_density_change, r)
