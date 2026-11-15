@@ -5,7 +5,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation
+using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation, SubgridCondensation
 using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment, linear_interp,
                                                               FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
@@ -27,7 +27,8 @@ column(field) = Array(interior(field))[1, 1, :]
 matches(a, b) = default_arch isa CPU ? a == b : isapprox(a, b; rtol=1e-10, atol=1e-15)
 
 function tke_p3_column(distribution; condensation = GridMeanCondensation(), arch = default_arch, static_stability = MoistStaticStability(),
-                       stability_functions = TurbulentRichardsonStabilityFunction(), solver = SinglePass())
+                       stability_functions = TurbulentRichardsonStabilityFunction(), solver = SinglePass(),
+                       scalar_advection = implicit_transport(), model_kwargs...)
     grid = RectilinearGrid(arch; size=32, z=(0, 1600), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=290)
@@ -36,7 +37,7 @@ function tke_p3_column(distribution; condensation = GridMeanCondensation(), arch
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
     closure = TKEBasedTurbulenceClosure(; static_stability, stability_functions, subgrid_distribution = distribution, solver)
     model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics, closure,
-                            scalar_advection=implicit_transport())
+                            scalar_advection, model_kwargs...)
 
     # A well-mixed layer whose upper part is near saturation, under an inversion at 800 m, with shear
     θ₀(z) = ifelse(z < 800, 290.0, 290.0 + 8 * (1 - exp(-(z - 800) / 100)))
@@ -522,4 +523,48 @@ checkerboard(K) = sum(abs, K[1:end-2] .- 2 .* K[2:end-1] .+ K[3:end]) / (4 * sum
     @test all(isfinite, column(model.closure_fields.Kᶜ))
     aʷ = column(model.closure_fields.subgrid_cloud.cloud.aʷ)
     @test all(a -> 0 ≤ a ≤ 1, aʷ)
+end
+
+#####
+##### Rain that falls many cells per time step
+#####
+
+# Rain seeded in the cloud layer falls at about 6 m s⁻¹: a Courant number of 35 at Δt = 300 s on this grid.
+# Rain is transported by the adaptive vertically implicit discretization, which moves what exceeds its
+# Courant limit in the tridiagonal solve. With rain left to an explicit scheme (the default `Centered`
+# advection of `AtmosphereModel`) each stage removes many times the content of a cell: rain reaches
+# -3 × 10⁻² kg m⁻³ and below, the temperature diagnosed from θˡⁱ and the condensate follows it, and the saturation
+# vapor pressure of a component of the distribution throws a `DomainError` within the first two steps.
+rain_transport() = (ρqʳ = WENO(; order=5, bounds=(0.0, 1.0), time_discretization=AdaptiveVerticallyImplicitDiscretization(Float64; cfl=0.25)),
+                    ρnʳ = implicit_transport())
+
+@testset "Rain at a Courant number of 35 leaves the column with the closure intact [$timestepper]" for timestepper in
+        (:SSPRungeKutta3, :MultirateInfinitesimalStep)
+    model = tke_p3_column(DoubleGaussian(); condensation = SubgridCondensation(TurbulenceClosureStatistics()),
+                          static_stability = fraction_stability, scalar_advection = rain_transport(), timestepper)
+    set!(model; qʳ = z -> ifelse(500 < z < 800, 2e-4, 0.0), nʳ = z -> ifelse(500 < z < 800, 1e3, 0.0))
+    μ = model.microphysical_fields
+    Δt = 300
+    Δz = 1600 / 32
+    @test maximum(abs, column(μ.wʳ)) * Δt / Δz > 30
+
+    T⁰ = column(model.temperature)
+    ρqʳ⁰ = maximum(column(μ.ρqʳ))
+    minimum_rain = Inf
+    for _ in 1:12
+        time_step!(model, Δt)
+        minimum_rain = min(minimum_rain, minimum(column(μ.ρqʳ)))
+    end
+
+    T = column(model.temperature)
+    @test all(isfinite, T)
+    @test maximum(abs, T .- T⁰) < 5 # more than 10 K within two steps with rain transported explicitly
+    @test all(isfinite, column(model.closure_fields.Kᶜ))
+    @test all(e -> e ≥ 0, column(model.tracers.ρe))
+
+    # Every stage of SSP-RK3 is a convex combination of states, and the solves keep their sign. Stage 2 of
+    # `:SSPMIS43` extrapolates, V₂ = -0.05 Uⁿ + 1.05 Y₁ + ⋯, so where a solve empties a cell it leaves a
+    # twentieth of the rain the cell held with the opposite sign.
+    bound = timestepper === :SSPRungeKutta3 ? 1e-12 * ρqʳ⁰ : 0.1 * ρqʳ⁰
+    @test minimum_rain > -bound
 end
