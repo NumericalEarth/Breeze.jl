@@ -1036,6 +1036,29 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     grid = model.grid
     arch = grid.architecture
     tracers = Oceananigans.TurbulenceClosures.buoyancy_tracers(model)
+
+    compute_stability_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
+
+    # The third moment of the distribution from the TKE budget (`TKEBudgetThirdMoment`): a function of the
+    # prognostic state, diagnosed before the distribution the stage uses; it leaves the stability, the mixing
+    # length and the diffusivities as they are here
+    diagnose_third_moment!(closure_fields.subgrid_cloud, subgrid_distribution(closure), closure_fields, closure, model, tracers, parameters)
+
+    compute_subgrid_cloud!(closure_fields.subgrid_cloud, closure_fields, closure, model, tracers, parameters)
+    compute_applied_flux_conversions!(closure_fields.subgrid_cloud, closure_fields, closure, model, tracers)
+    compute_tke_budget!(closure_fields.subgrid_cloud, subgrid_distribution(closure), closure_fields, closure, model, tracers)
+
+    launch!(arch, grid, parameters, _compute_tke_implicit_linear_coefficient!,
+            closure_fields.Lᵉ, grid, closure, closure_fields, model.velocities, tracers)
+
+    return nothing
+end
+
+# The static stability of the prognostic state, then the mixing length column by column from it and the
+# diffusivities from both
+function compute_stability_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
+    grid = model.grid
+    arch = grid.architecture
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
 
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
@@ -1045,13 +1068,6 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers)
-
-    compute_subgrid_cloud!(closure_fields.subgrid_cloud, closure_fields, closure, model, tracers, parameters)
-    compute_applied_flux_conversions!(closure_fields.subgrid_cloud, closure_fields, closure, model, tracers)
-    compute_tke_budget_flux!(closure_fields.subgrid_cloud, subgrid_distribution(closure), closure_fields, closure, model, tracers)
-
-    launch!(arch, grid, parameters, _compute_tke_implicit_linear_coefficient!,
-            closure_fields.Lᵉ, grid, closure, closure_fields, model.velocities, tracers)
 
     return nothing
 end

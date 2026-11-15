@@ -23,15 +23,25 @@
 #####     solve whose coefficients are Λ² / Δz times the bounded shares ω / (ω + ω′); its columns sum
 #####     to ρ Δz, so Σ ρ Δz u = Σ ρ Δz (P + B) for any Λ, and it is an M-matrix.
 #####
-##### The budget is formed at the end of each evaluation of the closure fields, from the conversions
-##### of the applied fluxes of that evaluation (`cl.P`, `cl.B`: what the TKE equation receives), and the
-##### distribution of the next evaluation reads the stored third moment: w′³ lags the budget by one
-##### evaluation (one Runge–Kutta stage), because the buoyancy production needs the distribution.
-##### The stored third moment relaxes toward the diagnosed one on the time ℂʷᵗ ℓ / √e, the relaxation
-##### of the third-moment budget (∂t w′³ = ... - w′³ / τ₃, τ₃ ≈ 0.5 to 0.9 ℓ / √e in large-eddy
-##### simulations), by backward Euler over a third of the last time step per evaluation; ℂʷᵗ = 0
-##### stores the diagnosed value. The closure fields therefore carry memory: the stored w′³ is
-##### state that `update_state!` does not rebuild from the prognostic fields.
+##### The damped local third moment is added to the flux members: the two sources of the stationary
+##### budget of w′³, ∂t w′³ = 3 w′²b′ - 3 w′² ∂z w′² - w′³ / τ₃ + ..., relaxed over τ₃ = ℓ / √e,
+#####
+#####     w′³_local = τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,    D = 1 + ℂʷᴺ softplus(αᴺ),    αᴺ = τ₃² N².
+#####
+##### √e B⁺ stands for the buoyant source w′²b′ (the buoyancy flux carried at the turbulent velocity; it
+##### is not closed with w′³), and D ≥ 1 for the feedback of the stratification on the third moment:
+##### solving the coupled budgets of w′³, w′²θ′ and w′θ′² exactly gives a determinant that is 1 + c αᴺ to
+##### first order and vanishes at finite αᴺ (the poles of `AlgebraicThirdMoment`); D keeps the damping
+##### of stable air, αᴺ > 0, and neither amplifies nor vanishes in unstable air.
+#####
+##### The buoyancy production needs the distribution (through aᴺ, N² and the diffusivities), and the
+##### distribution needs w′³. The loop is not carried from one evaluation of the closure fields to the
+##### next: within each evaluation the third moment is first diagnosed from the budget of the
+##### distribution without skewness (a function of the prognostic state alone), and with `passes > 1`
+##### again from the budget of the distribution that has the third moment of the pass before, a
+##### fixed-point iteration from that start. The distribution, the stability and the conversions that the
+##### stage uses are then computed with that third moment. The closure fields are therefore functions
+##### of the prognostic state: nothing is stored between evaluations.
 #####
 ##### With ℂʷᵀ > 0 the same flux, with the sink shape e, is also a transport of TKE in the TKE
 ##### equation: ∂t e += ℂʷᵀ (uᵉ - (P + B)). It moves the share ℂʷᵀ of the production from where it is
@@ -43,81 +53,93 @@
 $(TYPEDEF)
 
 The third moment of vertical velocity at the cell centers from the vertical integral of the
-budget of turbulent kinetic energy,
+budget of turbulent kinetic energy, with a damped local third moment,
 
-    w′³ = r (ℂʷᵉ Fᵉ + ℂʷᵋ Fᵋ) + ℂʷᵇ ℓ B⁺ + ℂʷᵃ w′³ₐ,
+    w′³ = r (ℂʷᵉ Fᵉ + ℂʷᵋ Fᵋ) + τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,
     Fʸ(z) = (1 / ρ) ∫₀ᶻ ρ (P + B - uʸ) dz′,    uʸ = cʸ ωʸ,    ωᵉ = e,    ωᵋ = ε = 𝕊ᴰ e^{3/2} / ℓ,
+    τ₃ = ℓ / √e,    αᴺ = τ₃² N²,    D = 1 + ℂʷᴺ softplus(αᴺ),    r = 1 + ℂʷʳ αᴺ / (1 + |αᴺ|),
 
 where `P + B` is the shear and buoyancy production the TKE equation receives (the conversions of the
 fluxes the closure applies), `B⁺ = max(B, 0)` (a buoyancy sink makes no skewness of its own),
-`ℓ` the closure's mixing length, `r = 1 + ℂʷʳ αᴺ / (1 + |αᴺ|)` with
-`αᴺ = ℓ² N² / e` a bounded function of the stratification number (`|ℂʷʳ| < 1` keeps it positive),
-and `w′³ₐ` the third moment of `algebraic` ([`AlgebraicThirdMoment`](@ref), or `nothing` for none).
+`ℓ` the closure's mixing length and `αᴺ` the stratification number at the cell center (`|ℂʷʳ| < 1`
+keeps `r` positive).
+
 The amplitude `cʸ` of each sink is fixed by the budget so that `Fʸ` vanishes at the ground and at
 the top of the column: one number for the column with `ℂʷᴸ = Inf`, or a profile exchanged between
 neighbouring levels over the length `ℂʷᴸ ℓ` (one tridiagonal solve per sink shape and column). No
-depth of a turbulent layer enters. The limiter in the `skewness` slot of [`DoubleGaussian`](@ref)
-([`TanhSaturatedSkewness`](@ref), ...) keeps the result realizable.
+depth of a turbulent layer enters. `Fᵋ` is the flux the closure's own dissipation leaves over: where
+the TKE equation is steady it is the flux `-Kᵉ ∂z e` the closure applies to `e`. `Fᵉ` is the flux
+with one turnover rate for the column. `ℂʷᵀ > 0` adds `ℂʷᵀ Fᵉ` to the flux of TKE in the TKE equation.
 
-The first three terms are stored and relax toward their diagnosed value on the time `ℂʷᵗ ℓ / √e`
-(`ℂʷᵗ = 0`: no relaxation).
+The damped local third moment holds the two sources of the stationary budget of `w′³`, the buoyant
+one as `√e B⁺` and the gradient production `-w′² ∂z w′²`, relaxed over `τ₃`. The damping `D ≥ 1`
+stands for the suppression of the third moment in stably stratified air; it has no zero, so the
+member has no pole, and it tends to one in unstable air.
 
-`Fᵋ` is the flux the closure's own dissipation leaves over: where the TKE equation is steady it
-is the flux `-Kᵉ ∂z e` the closure applies to `e`. `Fᵉ` is the flux with one turnover rate for the
-column. `ℂʷᵀ > 0` adds `ℂʷᵀ Fᵉ` to the flux of TKE in the TKE equation.
+No third moment is stored between evaluations of the closure fields. Within one evaluation the
+third moment is diagnosed `passes` times: first from the budget of the distribution without
+skewness, then from the budget of the distribution with the third moment of the pass before.
+The limiter in the `skewness` slot of [`DoubleGaussian`](@ref) ([`TanhSaturatedSkewness`](@ref), ...)
+keeps the result realizable.
 
-The initial values of `ℂʷᵉ`, `ℂʷᵋ` and `ℂʷᵇ` are a joint least-squares fit to coarse-grained
-large-eddy simulations of BOMEX, ARM cumulus, ASTEX and DYCOMS (harness `notes/w3-proposal.md`).
+The initial values of the coefficients are a joint least-squares fit to coarse-grained large-eddy
+simulations of BOMEX, ARM cumulus, ASTEX and DYCOMS (harness `notes/w3-proposal.md`).
 
 $(TYPEDFIELDS)
 """
-struct TKEBudgetThirdMoment{FT, A} <: SimplifiedHigherOrderClosures.AbstractSHOCComponent
+struct TKEBudgetThirdMoment{N, FT} <: SimplifiedHigherOrderClosures.AbstractSHOCComponent
     "Coefficient of the budget flux with the sink shape `e`"
     ℂʷᵉ :: FT
     "Coefficient of the budget flux with the sink shape `ε`"
     ℂʷᵋ :: FT
-    "Coefficient of `ℓ B⁺`, the mixing length times the positive part of the buoyancy production"
-    ℂʷᵇ :: FT
     "Exchange length of the sink amplitude in mixing lengths, `Λ = ℂʷᴸ ℓ`; `Inf` for one amplitude per column"
     ℂʷᴸ :: FT
     "Amplitude of the dependence of the ratio `r` on the stratification number, in (-1, 1)"
     ℂʷʳ :: FT
-    "Relaxation time of the stored third moment in turnover times, `ℂʷᵗ ℓ / √e`; 0 for none"
-    ℂʷᵗ :: FT
-    "Coefficient of the third moment of `algebraic`"
-    ℂʷᵃ :: FT
+    "Coefficient of the buoyant source `√e B⁺` of the damped local third moment"
+    ℂʷᵇ :: FT
+    "Coefficient of the gradient production `-w′² ∂z w′²` of the damped local third moment"
+    ℂʷᵍ :: FT
+    "Coefficient of the stratification number in the damping `D = 1 + ℂʷᴺ softplus(αᴺ)` of the local third moment; not negative"
+    ℂʷᴺ :: FT
     "Share of the production that the budget flux with the sink shape `e` transports in the TKE equation, in [0, 1]"
     ℂʷᵀ :: FT
-    "A local algebraic third moment ([`AlgebraicThirdMoment`](@ref)) added with the coefficient `ℂʷᵃ`, or `nothing`"
-    algebraic :: A
+
+    TKEBudgetThirdMoment{N}(ℂʷᵉ::FT, ℂʷᵋ::FT, ℂʷᴸ::FT, ℂʷʳ::FT, ℂʷᵇ::FT, ℂʷᵍ::FT, ℂʷᴺ::FT, ℂʷᵀ::FT) where {N, FT} =
+        new{N, FT}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ)
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`TKEBudgetThirdMoment`](@ref). The defaults exchange the sink amplitude over eight mixing
-lengths and have a constant ratio, no algebraic member and no transport of TKE.
+lengths, have a constant ratio and no transport of TKE, and diagnose the third moment once per
+evaluation of the closure fields, from the budget of the distribution without skewness.
 """
 function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
-                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᵇ = 0.6, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵗ = 0.6, ℂʷᵃ = 0, ℂʷᵀ = 0,
-                              algebraic = nothing)
+                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0.6, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0, passes = 1)
     abs(ℂʷʳ) < 1 || throw(ArgumentError("ℂʷʳ must lie in (-1, 1) for a positive ratio, got $(ℂʷʳ)."))
     0 <= ℂʷᵀ <= 1 || throw(ArgumentError("ℂʷᵀ must lie in [0, 1], got $(ℂʷᵀ)."))
-    ℂʷᵗ >= 0 || throw(ArgumentError("ℂʷᵗ must not be negative, got $(ℂʷᵗ)."))
+    ℂʷᴺ >= 0 || throw(ArgumentError("ℂʷᴺ must not be negative (the damping must not vanish), got $(ℂʷᴺ)."))
     ℂʷᴸ > 0 || throw(ArgumentError("ℂʷᴸ must be positive (Inf for one sink amplitude per column), got $(ℂʷᴸ)."))
-    algebraic = isnothing(algebraic) ? nothing : convert_eltype(FT, algebraic)
-    return TKEBudgetThirdMoment(map(c -> convert(FT, c), (ℂʷᵉ, ℂʷᵋ, ℂʷᵇ, ℂʷᴸ, ℂʷʳ, ℂʷᵗ, ℂʷᵃ, ℂʷᵀ))..., algebraic)
+    passes isa Integer && passes >= 1 || throw(ArgumentError("passes must be a positive integer, got $(passes)."))
+    return TKEBudgetThirdMoment{Int(passes)}(map(c -> convert(FT, c), (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ))...)
 end
 
-Adapt.@adapt_structure TKEBudgetThirdMoment
+# The number of passes is a type parameter, so that the loop over them is unrolled when traced
+third_moment_passes(::TKEBudgetThirdMoment{N}) where N = N
 
-# `nothing` holds no scalars (the generic component functions would try to construct it)
-SimplifiedHigherOrderClosures.map_scalars(f, ::Nothing) = nothing
+SimplifiedHigherOrderClosures.component_constructor(::Type{<:TKEBudgetThirdMoment{N}}) where N = TKEBudgetThirdMoment{N}
+
+Adapt.adapt_structure(to, tm::TKEBudgetThirdMoment{N}) where N =
+    TKEBudgetThirdMoment{N}(map(name -> adapt(to, getfield(tm, name)), fieldnames(typeof(tm)))...)
+
+SimplifiedHigherOrderClosures.type_parameter_summary(tm::TKEBudgetThirdMoment{N, FT}) where {N, FT} = string("{", N, ", ", FT, "}")
 
 const TKEBudgetDistribution = DoubleGaussian{<:Any, <:Any, <:TKEBudgetThirdMoment}
 
 #####
-##### Fields: the two sinks, the two fluxes, the stored third moment, the transport tendency of TKE and a work array
+##### Fields: the two sinks, the two fluxes, the third moment before its limiter, the transport tendency of TKE and a work array
 #####
 
 third_moment_fields(grid, third_moment) = NamedTuple()
@@ -201,7 +223,35 @@ end
     return nothing
 end
 
-@kernel function _compute_tke_budget_flux!(cl, grid, closure, closure_fields, e, velocities, ρ, Δt)
+#####
+##### The damped local third moment
+#####
+
+# softplus(x) = log(1 + eˣ) without overflow: smooth, increasing, positive, x for large x, with slope in (0, 1)
+@inline softplus(x) = max(x, zero(x)) + log1p(exp(-abs(x)))
+
+# D = 1 + ℂʷᴺ softplus(αᴺ) ≥ 1
+@inline stratification_damping(ℂʷᴺ, αᴺ) = 1 + ℂʷᴺ * softplus(αᴺ)
+
+# τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D at the center k; w′² ∂z w′² = ∂z (w′²)² / 2 is differenced across the
+# neighbouring centers (one-sided at the two ends of the column)
+@inline function damped_local_third_moment(i, j, k, grid, tm, w′², τ, u, αᴺ, B)
+    Nz = size(grid, 3)
+    kᵘ = min(k + 1, Nz)
+    kˡ = max(k - 1, 1)
+    ccc = (Center(), Center(), Center())
+    Δz = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
+    w′²ᵘ = @inbounds w′²[i, j, kᵘ]
+    w′²ˡ = @inbounds w′²[i, j, kˡ]
+    w′²∂zw′² = ifelse(kᵘ > kˡ, (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δz), zero(Δz))
+    return τ * (tm.ℂʷᵇ * u * max(0, B) - tm.ℂʷᵍ * w′²∂zw′²) / stratification_damping(tm.ℂʷᴺ, αᴺ)
+end
+
+#####
+##### The budget of one evaluation: sinks, fluxes, the transport of TKE and, with `diagnose`, the third moment
+#####
+
+@kernel function _compute_tke_budget_flux!(cl, grid, closure, closure_fields, e, velocities, ρ, diagnose)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     tm = closure_ij.subgrid_distribution.third_moment
@@ -218,37 +268,59 @@ end
     @inbounds for k in 1:size(grid, 3)
         cl.Tᵉ[i, j, k] = tm.ℂʷᵀ * (cl.uᵉ[i, j, k] - cl.P[i, j, k] - cl.B[i, j, k])
 
-        # The third moment of the budget at the center, with ℓ, √e and N² as the distribution forms them there,
-        # relaxed from its stored value on the time ℂʷᵗ ℓ / √e (backward Euler over Δt)
+        # The third moment at the center, with ℓ, √e and N² as the distribution forms them there; one
+        # stratification number αᴺ = τ₃² N² for the ratio and for the damping
         ℓ = (ℓᵐ[i, j, k] + ℓᵐ[i, j, k+1]) / 2
-        τ = ℓ / turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure_ij, e)
+        u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure_ij, e)
+        τ = ℓ / u
         αᴺ = τ * τ * (N²[i, j, k] + N²[i, j, k+1]) / 2
         r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
-        w′³ = r * (tm.ℂʷᵉ * cl.Fᵉ[i, j, k] + tm.ℂʷᵋ * cl.Fᵋ[i, j, k]) + tm.ℂʷᵇ * ℓ * max(0, cl.B[i, j, k])
-        γ = ifelse(isfinite(Δt), Δt / (tm.ℂʷᵗ * τ + Δt), one(Δt))
-        cl.w′³ᵇ[i, j, k] += γ * (w′³ - cl.w′³ᵇ[i, j, k])
+        w′³ = r * (tm.ℂʷᵉ * cl.Fᵉ[i, j, k] + tm.ℂʷᵋ * cl.Fᵋ[i, j, k]) +
+              damped_local_third_moment(i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k])
+        cl.w′³ᵇ[i, j, k] = ifelse(diagnose, w′³, cl.w′³ᵇ[i, j, k])
     end
 end
 
-compute_tke_budget_flux!(fields, distribution, closure_fields, closure, model, tracers) = nothing
-
-# Within `update_state!`, after the conversions of the applied fluxes; the tracers hold their specific values
-function compute_tke_budget_flux!(fields::SubgridCloudFields, ::TKEBudgetDistribution, closure_fields, closure, model, tracers)
+function compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, diagnose)
     grid = model.grid
-    # Three evaluations per time step; before the first step the stored third moment is the diagnosed one
-    Δt = model.clock.last_Δt
-    Δt = convert(eltype(grid), ifelse(isfinite(Δt) & (Δt > 0), Δt / 3, Inf))
     launch!(grid.architecture, grid, :xy, _compute_tke_budget_flux!, fields.cloud, grid, closure, closure_fields,
-            tracers[TKE_NAME], model.velocities, total_density(model.dynamics), Δt)
+            tracers[TKE_NAME], model.velocities, total_density(model.dynamics), diagnose)
     return nothing
 end
 
 #####
-##### The third moment at the center k from the stored third moment of the budget
+##### The third moment of one evaluation of the closure fields
+#####
+
+diagnose_third_moment!(fields, distribution, closure_fields, closure, model, tracers, parameters) = nothing
+compute_tke_budget!(fields, distribution, closure_fields, closure, model, tracers) = nothing
+
+# Within `update_state!`, after the first static stability, mixing length and diffusivities (which read only the
+# prognostic state) and before the distribution the stage uses. Each pass: the distribution with the third moment of
+# the pass before (none in the first), its stability and diffusivities, the conversions of the applied fluxes, and the
+# third moment from their budget; then the stability, mixing length and diffusivities are put back to those of the
+# prognostic state, from which every pass and the final evaluation start.
+function diagnose_third_moment!(fields::SubgridCloudFields, distribution::TKEBudgetDistribution, closure_fields, closure, model, tracers, parameters)
+    fill!(parent(fields.cloud.w′³ᵇ), 0)
+    for _ in 1:third_moment_passes(distribution.third_moment)
+        compute_subgrid_cloud!(fields, closure_fields, closure, model, tracers, parameters)
+        compute_applied_flux_conversions!(fields, closure_fields, closure, model, tracers)
+        compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, true)
+        compute_stability_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
+    end
+    return nothing
+end
+
+# After the conversions of the applied fluxes the stage uses: their budget, for the transport of TKE and as a diagnostic
+compute_tke_budget!(fields::SubgridCloudFields, ::TKEBudgetDistribution, closure_fields, closure, model, tracers) =
+    compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, false)
+
+#####
+##### The third moment at the center k: the one diagnosed from the budget
 #####
 
 @inline center_third_moment_diagnosis(tm::TKEBudgetThirdMoment, i, j, k, d, cl, c³, ℓ, u, algebraic_arguments) =
-    @inbounds(cl.w′³ᵇ[i, j, k]) + tm.ℂʷᵃ * subgrid_third_moment(tm.algebraic, d, c³, algebraic_arguments...)
+    @inbounds cl.w′³ᵇ[i, j, k]
 
 #####
 ##### The transport of TKE by the budget flux, in the stage tendency of ρe
