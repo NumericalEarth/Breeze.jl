@@ -163,7 +163,9 @@ using Oceananigans.TimeSteppers: update_state!
             AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
                             thermodynamic_constants = constants, microphysics = p3)
         else
-            AtmosphereModel(grid; advection = WENO(), dynamics, microphysics = p3)
+            # Wicker–Skamarock RK3, whose last stage restarts from the step-start state (below)
+            AtmosphereModel(grid; advection = WENO(), dynamics, microphysics = p3,
+                            timestepper = :AcousticRungeKutta3)
         end
 
         if isnothing(dynamics)
