@@ -34,7 +34,8 @@ const CPD_BS = 1005.0
 
 # Production-style compressible model: split-explicit WITH an upper sponge and (default) divergence
 # damping — exactly the ingredients the twin must strip for a reversible adiabatic excursion.
-function _build_production(arch; microphysics = nothing, Nx = 8, Ny = 8, Nz = 16, Lz = 10e3, Lh = 100e3)
+function _build_production(arch; microphysics = nothing, Nx = 8, Ny = 8, Nz = 16, Lz = 10e3, Lh = 100e3,
+                           timestepper = :AcousticRungeKutta3)
     grid = RectilinearGrid(arch; size = (Nx, Ny, Nz), halo = (5, 5, 5),
                            x = (0, Lh), y = (0, Lh), z = (0, Lz),
                            topology = (Periodic, Periodic, Bounded))
@@ -43,7 +44,7 @@ function _build_production(arch; microphysics = nothing, Nx = 8, Ny = 8, Nz = 16
     dyn = CompressibleDynamics(td; reference_potential_temperature = θ_iso_bs,
                                base_pressure = 1e5, standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn, thermodynamic_constants = constants,
-                           microphysics, coriolis = nothing, timestepper = :AcousticRungeKutta3)
+                           microphysics, coriolis = nothing, timestepper)
 end
 
 function _set_discrete_rest!(model)
@@ -99,17 +100,27 @@ end
         @test (@allocated adiabatic_balance_twin(model)) < one_field_bytes
     end
 
-    @testset "native time stepping (time_stepping = nothing) reuses the split-explicit scheme" begin
-        model = _build_production(default_arch)
+    @testset "native time stepping (time_stepping = nothing) reuses the split-explicit scheme [$timestepper]" for
+            timestepper in (:AcousticRungeKutta3, :MultirateInfinitesimalStep)
+
+        model = _build_production(default_arch; timestepper)
         twin  = adiabatic_balance_twin(model, AdiabaticBalancer(time_stepping = nothing))
 
         # Native scheme reused, but the (irreversible) sponge is stripped.
         @test twin.dynamics.time_discretization isa SplitExplicitTimeDiscretization
         @test twin.dynamics.time_discretization.sponge === nothing
         @test model.dynamics.time_discretization.sponge !== nothing
-        # Tendency storage is still aliased (the rebuilt acoustic substepper is the only new memory).
+        @test nameof(typeof(twin.timestepper)) === timestepper
+        @test nameof(typeof(model.timestepper)) === timestepper
+        # Tendency storage is still aliased. The rebuilt acoustic substepper is new memory, and so
+        # is the stage storage of `MultirateInfinitesimalStep` other than Gⁿ and U⁰.
         @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
+        @test twin.timestepper.U⁰.ρθ === model.timestepper.U⁰.ρθ
         @test twin.momentum.ρw.data === model.momentum.ρw.data
+
+        if timestepper === :MultirateInfinitesimalStep
+            @test twin.timestepper.tableau.β == model.timestepper.tableau.β
+        end
 
         # Fixed point holds with the native scheme too.
         _set_discrete_rest!(model)
@@ -118,6 +129,29 @@ end
         @test continuity_density(model.dynamics) ≈ ρ₀ rtol=1e-8
         @test isapprox(maximum(abs, model.momentum.ρw), 0; atol=1e-7)
         @test model.clock.iteration == 0
+    end
+
+    @testset "MultirateInfinitesimalStep twin keeps the production coefficients" begin
+        grid = RectilinearGrid(default_arch; size = (8, 8, 16), halo = (5, 5, 5),
+                               x = (0, 100e3), y = (0, 100e3), z = (0, 10e3),
+                               topology = (Periodic, Periodic, Bounded))
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                        reference_potential_temperature = θ_iso_bs,
+                                        base_pressure = 1e5, standard_pressure = 1e5)
+        model = AtmosphereModel(grid; dynamics, coriolis = nothing,
+                                timestepper = :MultirateInfinitesimalStep,
+                                timestepper_kwargs = (; coefficients = :MIS4a))
+        twin = adiabatic_balance_twin(model, AdiabaticBalancer(time_stepping = nothing))
+        @test twin.timestepper isa Breeze.TimeSteppers.MultirateInfinitesimalStep
+        @test twin.timestepper.tableau.β == model.timestepper.tableau.β
+        @test twin.timestepper.tableau.γ == model.timestepper.tableau.γ
+
+        # The default twin is fully explicit whatever the production time stepper.
+        twin = adiabatic_balance_twin(model)
+        @test twin.dynamics.time_discretization isa ExplicitTimeStepping
+        @test twin.timestepper isa Breeze.TimeSteppers.SSPRungeKutta3
+        @test twin.timestepper.Gⁿ.ρu === model.timestepper.Gⁿ.ρu
+        @test twin.timestepper.U⁰.ρθ === model.timestepper.U⁰.ρθ
     end
 
     @testset "moisture-key remap (SaturationAdjustment :ρqᵉ → twin :ρqᵛ)" begin

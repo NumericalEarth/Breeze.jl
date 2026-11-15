@@ -17,6 +17,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, 
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
+    SplitExplicitTimeDiscretization,
     TerrainCompressibleDynamics,
     AcousticSubstepper,
     WickerSkamarock3,
@@ -469,6 +470,13 @@ AtmosphereModels.slow_dynamics(::AcousticTimeStepper, dynamics) = SlowDynamics(d
 AtmosphereModels.scalar_tendencies_in_update_state(ts::AcousticTimeStepper) =
     scalar_tendencies_in_update_state(ts.scalar_tendencies)
 AtmosphereModels.thermodynamic_transport_velocities(model::CompressibleAcousticModel) = slow_thermodynamic_velocities(model)
+
+# An adiabatic-balance twin that keeps split-explicit dynamics is stepped by the production
+# model's own scheme.
+const SplitExplicitCompressibleDynamics = CompressibleDynamics{<:SplitExplicitTimeDiscretization}
+
+AtmosphereModels.adiabatic_twin_timestepper(::AcousticRungeKutta3, ::SplitExplicitCompressibleDynamics) =
+    :AcousticRungeKutta3, NamedTuple()
 
 Oceananigans.prognostic_state(timestepper::AcousticTimeStepper) =
     (substepper = Oceananigans.prognostic_state(timestepper.substepper),)
