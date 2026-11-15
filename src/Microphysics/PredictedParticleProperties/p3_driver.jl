@@ -219,6 +219,7 @@ struct P3SinkFractions{FT}
     condensation :: FT       # implicit vapor sinks, drawn first: condensation on cloud and rain, activation
     cloud_evaporation :: FT  # drawn first from cloud liquid
     rain_evaporation :: FT   # drawn first from rain
+    rain_number_evaporation :: FT  # drawn first from rain number, with the rain mass
 end
 
 @inline function p3_sink_fractions(i, j, k, G, stage, p3::P3, ρ, rates::P3ProcessRates)
@@ -239,7 +240,10 @@ end
     rain_loss = rates.rain_riming + rates.rain_freezing_mass +
                 rates.rain_homogeneous_mass + rates.rain_warm_collection + rates.wet_growth_rain
 
-    rain_number_loss = rates.rain_evaporation_number + rates.rain_self_collection +
+    # Evaporation removes drops in proportion to mass (`rain_evaporation_number = nʳ/qʳ ×
+    # rain_evaporation`), so it is drawn first from rain number as from rain mass, and both lose
+    # the same fraction of what they hold.
+    rain_number_loss = rates.rain_self_collection +
                        rates.rain_riming_number + rates.rain_freezing_number +
                        rates.rain_homogeneous_number + rates.rain_warm_collection_number
 
@@ -255,15 +259,16 @@ end
     κᵛ, φᵛ = sequential_sink_fractions(i, j, k, G.ρqᵛ, stage, Val(:ρqᵛ), ρ * liquid_condensation, ρ * vapor_loss)
     κᶜˡ, φᶜˡ = sequential_sink_fractions(i, j, k, G.ρqᶜˡ, stage, Val(:ρqᶜˡ), ρ * cloud_evaporation, ρ * cloud_loss)
     κʳ, φʳ = sequential_sink_fractions(i, j, k, G.ρqʳ, stage, Val(:ρqʳ), ρ * rates.rain_evaporation, ρ * rain_loss)
+    κⁿʳ, φⁿʳ = sequential_sink_fractions(i, j, k, G.ρnʳ, stage, Val(:ρnʳ),
+                                         ρ * rates.rain_evaporation_number, ρ * rain_number_loss)
 
     return P3SinkFractions(
-        φᵛ, φᶜˡ, φʳ,
-        patankar_sink_fraction(i, j, k, G.ρnʳ, stage, Val(:ρnʳ), ρ * rain_number_loss),
+        φᵛ, φᶜˡ, φʳ, φⁿʳ,
         patankar_sink_fraction(i, j, k, G.ρqⁱ, stage, Val(:ρqⁱ), ρ * ice_loss),
         patankar_sink_fraction(i, j, k, G.ρnⁱ, stage, Val(:ρnⁱ), ρ * ice_number_loss),
         patankar_sink_fraction(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ), ρ * coating_loss),
         aerosol_sink_fraction(i, j, k, G, stage, p3.aerosol, ρ * rates.ccn_activation_number),
-        κᵛ, κᶜˡ, κʳ)
+        κᵛ, κᶜˡ, κʳ, κⁿʳ)
 end
 
 # Activation draws on the aerosol reservoir only where that reservoir is prognostic. It is the
@@ -297,7 +302,7 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
         rates.accretion * c,
         rates.cloud_self_collection * c,
         rates.rain_evaporation * evaporation,
-        rates.rain_evaporation_number * min(evaporation, φ.rain_number),
+        rates.rain_evaporation_number * min(evaporation, φ.rain_number_evaporation),
         rates.rain_self_collection * φ.rain_number,
         rates.rain_breakup,
         rates.deposition * ifelse(rates.deposition > 0, v, i),

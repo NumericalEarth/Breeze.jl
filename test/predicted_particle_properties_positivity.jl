@@ -264,6 +264,39 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
         end
     end
 
+    @testset "Rain evaporation removes number and mass in proportion" begin
+        # Drizzle in dry air evaporates faster than `sink_limiting_timescale` (10 s) allows, so a
+        # number limited over that timescale would lag the mass and shrink the mean drop mass.
+        p3 = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = nothing)
+        qʳ, nʳ = FT(1e-6), FT(1e5)
+        qᵛ = saturation(z) / 4
+        𝒰 = thermodynamic_state(qᵛ, z)
+        ρ = density(𝒰, constants)
+        ℳ = P3MicrophysicalState(z, FT(p3.cloud.number_concentration), qʳ, nʳ, ntuple(_ -> z, 8)...)
+        properties = PPP.p3_process_properties(p3, ρ, ℳ)
+
+        c⁰ = (ρ * qᵛ, z, ρ * qʳ, ρ * nʳ, z, z, z, z, z)
+        fields = one_cell_fields(c⁰)
+        G = one_cell_fields(map(zero, c⁰))
+
+        τ = p3.process_rates.sink_limiting_timescale
+        for Δt in FT.((0.5, 2, 50, 2000))
+            stage = StageStart(fields, fields, false, Δt)
+            rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z,
+                                             nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, rates)
+            limited_rates = PPP.patankar_limited_rates(rates, φ)
+
+            # Evaporation is faster than the timescale budget would let the number follow...
+            @test rates.rain_evaporation * τ > qʳ
+            # ...and number and mass keep the same fraction of what they hold.
+            remaining_mass = 1 - Δt * limited_rates.rain_evaporation / qʳ
+            remaining_number = 1 - Δt * limited_rates.rain_evaporation_number / nʳ
+            @test -10 * eps(FT) ≤ remaining_mass < 1
+            @test remaining_number ≈ remaining_mass atol = 100 * eps(FT)
+        end
+    end
+
     @testset "Aerosol activation from a small reservoir" begin
         aerosol = PPP.AerosolActivation(PPP.AerosolMode(FT); prognostic = true)
         p3 = PredictedParticlePropertiesMicrophysics(FT; aerosol, negative_moisture_correction = nothing)

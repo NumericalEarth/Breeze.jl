@@ -1070,10 +1070,13 @@ end
     rain_number_available = max(0, nʳ) + rain_number_source_total * dt_safety
     rain_number_available_after_freezing =
         max(0, rain_number_available - rain_frz_n * dt_safety)
-    rain_number_sink_total = rain_evap_n + rain_self + rain_rim_n + rain_warm_n
+    # With the implicit relaxation active, rain evaporation of number follows its mass exactly,
+    # as `nʳ/qʳ` times the implicit mass rate, and is left out of this budget as the mass is.
+    rain_number_sink_total = ifelse(implicit_evaporation, zero(FT), rain_evap_n) +
+                             rain_self + rain_rim_n + rain_warm_n
     f_rain_number = sink_limiting_factor(
         rain_number_sink_total, rain_number_available_after_freezing, dt_safety)
-    rain_evap_n = rain_evap_n * f_rain_number
+    rain_evap_n = rain_evap_n * ifelse(implicit_evaporation, one(FT), f_rain_number)
     rain_self = rain_self * f_rain_number
     rain_rim_n = rain_rim_n * f_rain_number
     rain_warm_n = rain_warm_n * f_rain_number
