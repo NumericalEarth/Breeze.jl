@@ -239,10 +239,11 @@ end
 #####
 
 # smooth_positive_part(x) = (x + √(x² + 1)) / 2 = 1 / (2 (√(x² + 1) - x)): smooth, increasing, positive, x + 1/(4x) for
-# large x and 1/(4|x|) for large negative x, with slope in (0, 1); one square root and one division, written in
-# the form without cancellation on each side of zero
+# large x and 1/(4|x|) for large negative x, with slope in (0, 1); one square root and three divisions, written in
+# the form without cancellation on each side of zero; √(x² + 1) is scaled by max(|x|, 1) so that it does not overflow
 @inline function smooth_positive_part(x)
-    s = sqrt(x * x + 1)
+    a = max(abs(x), one(x))
+    s = a * sqrt((x / a)^2 + (1 / a)^2)
     return ifelse(x >= 0, (x + s) / 2, 1 / (2 * (s - x)))
 end
 

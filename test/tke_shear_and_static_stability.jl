@@ -526,14 +526,15 @@ using Breeze.Microphysics.PredictedParticleProperties: CloudDroplets, Condensati
 using Breeze.TurbulenceClosures: applied_flux_state, cell_phase_relaxation_rate, condensing_fraction,
                                  saturated_response_shareᶜᶜᶠ, saturated_fraction_fields, with_saturated_fraction_fields
 
-function closure_statistics_column(static_stability; Nz = 40, H = 2400, microphysics_kw = (;), steps = 25)
+function closure_statistics_column(static_stability; Nz = 40, H = 2400, microphysics_kw = (;), steps = 25,
+                                   subgrid_distribution = DoubleGaussian())
     grid = RectilinearGrid(default_arch; size = Nz, z = (0, H), topology = (Flat, Flat, Bounded))
     reference_state = ReferenceState(grid; base_pressure = 101500, potential_temperature = 299)
     microphysics = PredictedParticlePropertiesMicrophysics(; condensation = SubgridCondensation(TurbulenceClosureStatistics()),
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition(),
                                                            process_rates = ProcessRate(Float64; sink_limiting_timescale = 10.0),
                                                            microphysics_kw...)
-    closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4, subgrid_distribution = DoubleGaussian(), static_stability)
+    closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4, subgrid_distribution, static_stability)
     ρ₀ = surface_density(reference_state)
     boundary_conditions = (ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(ρ₀ * 8e-3)),
                            ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(ρ₀ * 5.2e-5)))
@@ -547,7 +548,11 @@ end
 
 @testset "MicrophysicsSaturatedFraction: f⁺ of the supersaturation statistics" begin
     Oceananigans.defaults.FloatType = Float64
-    model = closure_statistics_column(SaturationWeightedStaticStability())
+    # With AlgebraicThirdMoment the distribution is formed once per update, after the stability, so the
+    # stability of the next update reads exactly the distribution this one leaves. TKEBudgetThirdMoment
+    # (the default) forms the distribution again within the update, to diagnose its third moment.
+    distribution = DoubleGaussian(; third_moment = AlgebraicThirdMoment())
+    model = closure_statistics_column(SaturationWeightedStaticStability(); subgrid_distribution = distribution)
     grid, closure, fields = model.grid, model.closure, model.closure_fields
     Nz = size(grid, 3)
     model_fields = supersaturation_statistics_model_fields(model)

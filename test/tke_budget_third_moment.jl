@@ -123,8 +123,9 @@ end
         @test stratification_damping(ℂʷᴺ, δ, 40.0) ≈ 1 + 40ℂʷᴺ rtol = 1e-3
     end
     @test smooth_positive_part(0.0) == 1 / 2
-    @test smooth_positive_part(50.0) ≈ 50 + 1 / 200 rtol = 1e-10
-    @test 0 < smooth_positive_part(-800.0) ≈ 1 / 3200 rtol = 1e-5
+    @test smooth_positive_part(50.0) ≈ (50 + sqrt(2501)) / 2 rtol = 1e-14
+    @test smooth_positive_part(-800.0) > 0
+    @test smooth_positive_part(-800.0) ≈ 1 / 3200 rtol = 1e-5
 
     # On a column with w′² rising and then falling: bounded by the undamped member at every stratification
     # number, of the sign of the buoyant source where w′² is uniform, and of the sign opposite to ∂z w′² without one
