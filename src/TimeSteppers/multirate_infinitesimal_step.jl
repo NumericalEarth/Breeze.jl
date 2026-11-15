@@ -2,7 +2,8 @@ using Breeze.AtmosphereModels: thermodynamic_density_name, dynamics_prognostic_f
 using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_divergence!,
                                     StageEntryForceRemainder, stage_entry_force_remainder,
                                     step_start_force_state, store_step_start_force_state!,
-                                    compute_step_start_moisture_content!
+                                    compute_step_start_moisture_content!,
+                                    CompressibleEquations, ForwardBackwardSubsteps, SymmetricSubsteps
 
 using Oceananigans: prognostic_fields, CenterField, architecture
 using Oceananigans.Utils: launch!, KernelParameters
@@ -107,6 +108,13 @@ moisture's pressure effect in the acoustic loop to stay robust in moist convecti
 stage-entry pressure remainder recombined across stages, the part of that remainder the loop does
 not carry is integrated explicitly. `:MIS4a` is third order, without the positivity bound.
 
+The stages of every set but `:WickerSkamarock3` start from and are forced with the increments of
+earlier stages, so their acoustic substeps are symmetric in the horizontal momentum and the
+pressure (see `SymmetricSubsteps`). Without divergence damping, `:TVDMISB` and `:MIS4a` then leave
+the acoustic modes neutral at the default `acoustic_cfl = 0.5`, and `:SSPMIS43` does except for
+horizontal acoustic Courant numbers ``c Δt / Δx`` between 1.5 and 1.8 (amplified by up to 1.1 per
+step) and between 3.3 and 3.6 (1.02), which `acoustic_cfl = 0.4` or the default damping removes.
+
 `post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
 between stages with the preceding loop's (see `PostLoopScalarTendencies`).
@@ -191,6 +199,15 @@ refresh_stage_linearization!(ts::MultirateInfinitesimalStep, substepper, model) 
     Δt = ifelse(isfinite(ts.current_Δt[]), ts.current_Δt[], clock.last_Δt)
     return ts.tableau.d[ts.next_stage[]] * Δt
 end
+
+# Whether a stage starts from, or is forced with, the increments of earlier stages.
+recombines_stage_increments(tableau) = any(!iszero, tableau.α) || any(!iszero, tableau.γ)
+
+# Stages that recombine earlier increments need the acoustic substeps to return the state they
+# were given without a skew between momentum and pressure (see `SymmetricSubsteps`). The others
+# (`:WickerSkamarock3`) keep the forward–backward substeps of `AcousticRungeKutta3`.
+CompressibleEquations.horizontal_substep_form(ts::MultirateInfinitesimalStep) =
+    recombines_stage_increments(ts.tableau) ? SymmetricSubsteps() : ForwardBackwardSubsteps()
 
 # Whether the next `update_state!` builds the tendencies of the first stage of an outer step.
 tendencies_feed_first_stage(timestepper) = true

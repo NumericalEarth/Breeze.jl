@@ -15,8 +15,9 @@
 ##### Wicker–Skamarock RK3 is the special case α = γ = 0, β = diag(1/3, 1/2, 1).
 #####
 ##### Order and stability of these sets with *this* fast integrator (linearized,
-##### off-centered Crank–Nicolson vertically, forward–backward horizontally) are not
-##### established by their published slow tableaux; see the MIS analysis scripts.
+##### off-centered Crank–Nicolson vertically; horizontally, symmetric substeps for the sets that
+##### recombine stage increments and forward–backward ones otherwise, see `SymmetricSubsteps`) are
+##### not established by their published slow tableaux; see the MIS analysis scripts.
 #####
 
 """

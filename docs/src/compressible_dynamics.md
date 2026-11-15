@@ -280,6 +280,15 @@ result; ``U^{n+1} = Y_s``. The acoustic substep loop is the integrator of each s
 (see [`MultirateInfinitesimalStep`](@ref)). Wicker–Skamarock RK3 is the special case
 ``α = γ = 0``, ``β = \mathrm{diag}(1/3, 1/2, 1)``.
 
+A substep advances the horizontal momentum with the old pressure and then the pressure with the
+new momentum, which leaves the momentum half a substep behind the pressure. Stages that start from
+or are forced with the increments of earlier stages (``α ≠ 0`` or ``γ ≠ 0``) cannot tolerate that
+skew: it amplifies the acoustic modes. Their first substep therefore advances the horizontal
+momentum over ``Δτ / 2`` and the stage closes with another ``Δτ / 2``, so that each stage is a
+sequence of symmetric substeps (momentum over ``Δτ / 2``, pressure over ``Δτ``, momentum over
+``Δτ / 2``). The stages of Wicker–Skamarock RK3 all start from ``U^n`` and keep the plain
+forward–backward substeps.
+
 The [`AcousticRungeKutta3`](@ref) time stepper is the three-stage Wicker–Skamarock RK3
 ([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) with stage fractions
 ``β = (1/3, 1/2, 1)``:

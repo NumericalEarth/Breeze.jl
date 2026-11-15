@@ -56,6 +56,9 @@ export
     compute_step_start_moisture_content!,
     freeze_linearization_state!,
     acoustic_substep_loop!,
+    horizontal_substep_form,
+    ForwardBackwardSubsteps,
+    SymmetricSubsteps,
     compute_transport_density_tendency!
 
 using DocStringExtensions: TYPEDEF

@@ -1495,7 +1495,7 @@ end
 #
 # `Gⁿρu` (SlowDynamics) carries non-pressure slow terms with PGF zeroed;
 # we reinstate the frozen large-step PGF here (MPAS keeps it in `tend_u_euler`).
-@kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Cᴸ, Gⁿρu, Gⁿρv)
+@kernel function _explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτᵐ, ρθ′, Cᴸ, Gⁿρu, Gⁿρv)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -1507,8 +1507,8 @@ end
         ∂x_p = ∂x_pᴸ + ∂x_p′
         ∂y_p = ∂y_pᴸ + ∂y_p′
 
-        ρu′[i, j, k] += Δτ * (Gⁿρu[i, j, k] - ∂x_p)
-        ρv′[i, j, k] += Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+        ρu′[i, j, k] += Δτᵐ * (Gⁿρu[i, j, k] - ∂x_p)
+        ρv′[i, j, k] += Δτᵐ * (Gⁿρv[i, j, k] - ∂y_p)
     end
 end
 
@@ -1520,8 +1520,9 @@ end
 # (ρu)′, (ρv)′ between that damping and this step, and (ρθ)′, (ρθ)′ˢ⁻ and θᴸ do not change in
 # between, so the damping can wait for this kernel, which already reads and writes (ρu)′, (ρv)′.
 # The first substep of a stage finds D = 0 (`initialize_stage_perturbations!`); the damping of
-# the last is applied by `finish_horizontal_momentum_perturbations!`.
-@kernel function _damped_explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Cᴸ, Gⁿρu, Gⁿρv,
+# the last is applied by `finish_horizontal_momentum_perturbations!`. The damping is that of a
+# substep Δτ, whatever interval Δτᵐ the momentum is advanced over (`momentum_substep`).
+@kernel function _damped_explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, Δτᵐ, ρθ′, Cᴸ, Gⁿρu, Gⁿρv,
                                                    ρθ′ˢ⁻, θᴸ, x_damping_scale, y_damping_scale)
     i, j, k = @index(Global, NTuple)
 
@@ -1537,34 +1538,34 @@ end
         ρu′ᵈ = ρu′[i, j, k] - x_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, x_damping_scale)
         ρv′ᵈ = ρv′[i, j, k] - y_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, y_damping_scale)
 
-        ρu′[i, j, k] = ρu′ᵈ + Δτ * (Gⁿρu[i, j, k] - ∂x_p)
-        ρv′[i, j, k] = ρv′ᵈ + Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+        ρu′[i, j, k] = ρu′ᵈ + Δτᵐ * (Gⁿρu[i, j, k] - ∂x_p)
+        ρv′[i, j, k] = ρv′ᵈ + Δτᵐ * (Gⁿρv[i, j, k] - ∂y_p)
     end
 end
 
 # Step A of a substep, with the damping of the substep before fused in
-# (`fused_divergence_damping`).
-function explicit_horizontal_step!(::NoDivergenceDamping, substepper, model, Δτ)
+# (`fused_divergence_damping`). The momentum is advanced over Δτᵐ, the damping is that of a substep Δτ.
+function explicit_horizontal_step!(::NoDivergenceDamping, substepper, model, Δτ, Δτᵐ=Δτ)
     grid = model.grid
     Gⁿ = model.timestepper.Gⁿ
     launch!(architecture(grid), grid, :xyz, _explicit_horizontal_step!,
             substepper.momentum_perturbation.u,
             substepper.momentum_perturbation.v,
-            grid, model.dynamics, Δτ,
+            grid, model.dynamics, Δτᵐ,
             substepper.density_potential_temperature_perturbation,
             substepper.linearization_pressure_coefficient,
             Gⁿ.ρu, Gⁿ.ρv)
     return nothing
 end
 
-function explicit_horizontal_step!(damping::ThermalDivergenceDamping, substepper, model, Δτ)
+function explicit_horizontal_step!(damping::ThermalDivergenceDamping, substepper, model, Δτ, Δτᵐ=Δτ)
     grid = model.grid
     Gⁿ = model.timestepper.Gⁿ
     x_damping_scale, y_damping_scale = horizontal_damping_scales(damping, grid)
     launch!(architecture(grid), grid, :xyz, _damped_explicit_horizontal_step!,
             substepper.momentum_perturbation.u,
             substepper.momentum_perturbation.v,
-            grid, model.dynamics, Δτ,
+            grid, model.dynamics, Δτ, Δτᵐ,
             substepper.density_potential_temperature_perturbation,
             substepper.linearization_pressure_coefficient,
             Gⁿ.ρu, Gⁿ.ρv,
@@ -1573,6 +1574,32 @@ function explicit_horizontal_step!(damping::ThermalDivergenceDamping, substepper
             x_damping_scale, y_damping_scale)
     return nothing
 end
+
+# How the substeps of a stage order the horizontal momentum and the pressure it is coupled to.
+#
+# `ForwardBackwardSubsteps` advance the momentum over Δτ with the old pressure, then the pressure
+# with the new momentum. `N` of them are `N` centered (leapfrog) substeps of a state whose momentum
+# lags its pressure by Δτ/2, so the state a stage starts from and the one it returns are read
+# half a substep askew, an error of first order in the acoustic Courant number of the substep.
+# A stage that starts from Uⁿ and is used through its tendency alone (Wicker–Skamarock) tolerates it.
+# A multirate infinitesimal step whose stages start from, and are forced with, combinations of
+# earlier stages' increments does not: the pure acoustic mode, which the exact fast integration
+# leaves neutral or damped, is amplified at almost every Courant number c Δt / Δx above 0.7 (by up
+# to 1.4 per step for `:SSPMIS43`), unless the divergence damping removes it.
+#
+# `SymmetricSubsteps` remove the skew: the first substep of a stage advances the momentum over
+# Δτ/2 and the stage ends with another Δτ/2 (`finish_horizontal_momentum_perturbations!`), so the
+# stage is `N` substeps of momentum over Δτ/2, pressure over Δτ, momentum over Δτ/2. The momentum
+# the pressure and the time-averaged velocities see inside the loop is the same in both forms.
+struct ForwardBackwardSubsteps end
+struct SymmetricSubsteps end
+
+# The form the substeps of `timestepper`'s stages take.
+horizontal_substep_form(timestepper) = ForwardBackwardSubsteps()
+
+# The interval substep `n` of a stage advances the horizontal momentum over.
+@inline momentum_substep(::ForwardBackwardSubsteps, Δτ, n) = Δτ
+@inline momentum_substep(::SymmetricSubsteps, Δτ, n) = ifelse(n == 1, Δτ / 2, Δτ)
 
 @inline δpᴸ(i, j, k, grid, ρθ′, Cᴸ) = @inbounds Cᴸ[i, j, k] * ρθ′[i, j, k]
 
@@ -1733,17 +1760,24 @@ function run_acoustic_substeps!(Nτ, model, substepper, stage, advection)
     return nothing
 end
 
-# Apply the last substep's fused divergence damping, exchange the halos of (ρu)′, (ρv)′ on distributed grids, and enforce
-# impenetrability, as the loop does after its explicit horizontal step.
+# Apply the last substep's fused divergence damping and, for `SymmetricSubsteps`, the half substep
+# of the momentum that closes the stage; exchange the halos of (ρu)′, (ρv)′ on distributed grids, and
+# enforce impenetrability, as the loop does after its explicit horizontal step.
 function finish_horizontal_momentum_perturbations!(model, substepper, stage)
     grid = model.grid
-    apply_divergence_damping!(fused_divergence_damping(substepper.damping), substepper, grid, stage.Δτ,
-                              model.thermodynamic_constants)
+    close_horizontal_momentum_substeps!(horizontal_substep_form(model.timestepper), substepper, model, stage.Δτ)
     fill_substep_halos!(substepper.momentum_perturbation.u, model)
     fill_substep_halos!(substepper.momentum_perturbation.v, model)
     enforce_wall_impenetrability!(substepper, model, grid, architecture(grid))
     return nothing
 end
+
+close_horizontal_momentum_substeps!(::ForwardBackwardSubsteps, substepper, model, Δτ) =
+    apply_divergence_damping!(fused_divergence_damping(substepper.damping), substepper, model.grid, Δτ,
+                              model.thermodynamic_constants)
+
+close_horizontal_momentum_substeps!(::SymmetricSubsteps, substepper, model, Δτ) =
+    explicit_horizontal_step!(fused_divergence_damping(substepper.damping), substepper, model, Δτ, Δτ / 2)
 
 # Build per-column predictors `ρ′★`, `ρθ′★` (cell centers) AND
 # the explicit RHS for the tridiagonal `(ρw)′ᵐ⁺` solve at z-faces.
@@ -2485,8 +2519,9 @@ function acoustic_substep!(model, substepper, stage, advection, n)
     (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰) = stage
 
     # Step A: explicit horizontal forward of (ρu)′, (ρv)′, after the divergence damping of the
-    # substep before when that is fused into this step.
-    explicit_horizontal_step!(fused_divergence_damping(substepper.damping), substepper, model, Δτ)
+    # substep before when that is fused into this step. `SymmetricSubsteps` halve the first.
+    Δτᵐ = momentum_substep(horizontal_substep_form(model.timestepper), Δτ, n)
+    explicit_horizontal_step!(fused_divergence_damping(substepper.damping), substepper, model, Δτ, Δτᵐ)
 
     # Distributed exchanges only (`fill_substep_halos!`), here and below: the kernels read no halos.
     fill_substep_halos!(substepper.momentum_perturbation.u, model)

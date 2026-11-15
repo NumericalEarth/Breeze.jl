@@ -345,7 +345,10 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 # A small vapor anomaly carried by a sheared wind over a resting, exactly balanced neutral
 # atmosphere: linear, so the reference of any consistent scheme is the same, and the only thing
 # that moves the air is the pressure the vapor adds. The substep size is the same for every Δt,
-# no damping and a centered vertical solve, so the acoustic loop's own error does not scale with Δt.
+# with no damping and a centered vertical solve, so the acoustic loop's own error does not scale
+# with Δt, and that error is of second order in the substep for the symmetric substeps of these
+# tableaux: negligible here. The forward–backward substeps of the reference are of first order, so
+# its substep is sixteen times shorter.
 function vapor_anomaly_density(; timestepper, coefficients = nothing, Δt, stop_time = 8, substep = 1/1024, N = 16)
     L = 200N
     grid = RectilinearGrid(default_arch, Float64; size = (N, N), halo = (5, 5), x = (0, L), z = (0, L),
@@ -382,15 +385,54 @@ function vapor_anomaly_density(; timestepper, coefficients = nothing, Δt, stop_
     return Array(interior(ρ))
 end
 
+const vapor_anomaly_reference = vapor_anomaly_density(; timestepper = :AcousticRungeKutta3, Δt = 1/256, substep = 1/16384)
+
 @testset "MIS order of accuracy with moisture [$coefficients]" for (coefficients, Δts, order) in
         ((:TVDMISB, (1/16, 1/32, 1/64), 1.8), (:SSPMIS43, (1/8, 1/16, 1/32), 1.8), (:MIS4a, (1/2, 1/4, 1/8), 2.7))
-    reference = vapor_anomaly_density(; timestepper = :AcousticRungeKutta3, Δt = 1/256)
+    reference = vapor_anomaly_reference
     errors = map(Δts) do Δt
         ρ = vapor_anomaly_density(; timestepper = :MultirateInfinitesimalStep, coefficients, Δt)
         maximum(abs, ρ .- reference)
     end
     @test all(isfinite, errors)
     @test log2(errors[1] / errors[3]) / log2(Δts[1] / Δts[3]) ≥ order
+end
+
+# The pure acoustic mode has no slow tendency: a stage only rotates the state it starts from, and
+# stages that start from combinations of earlier increments need the substeps to return that state
+# without a skew between momentum and pressure. Forward–backward substeps, with the momentum half
+# a substep behind the pressure, amplified the 3Δx acoustic mode by 1.2 per step in this bubble
+# (the reproducer of `post_loop_scalar_tendencies.jl`, c Δt / Δx = 3.5 and 1.7) without
+# divergence damping: max|u| passed 100 m/s within 46 steps at Δt = 10 s and 62 at Δt = 5 s.
+using Breeze.CompressibleEquations: horizontal_substep_form, ForwardBackwardSubsteps, SymmetricSubsteps
+
+@testset "MIS substep form [$coefficients]" for coefficients in mis_coefficient_sets
+    model = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients)
+    form = coefficients === :WickerSkamarock3 ? ForwardBackwardSubsteps() : SymmetricSubsteps()
+    @test horizontal_substep_form(model.timestepper) === form
+    reference = mis_bubble_model(; timestepper = :AcousticRungeKutta3)
+    @test horizontal_substep_form(reference.timestepper) === ForwardBackwardSubsteps()
+end
+
+@testset "MIS leaves acoustic modes bounded without divergence damping [$coefficients, Δt = $Δt]" for
+        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a), Δt in (5, 10)
+
+    grid = RectilinearGrid(default_arch; size = (40, 48), halo = (5, 5), x = (-20e3, 20e3), z = (0, 12e3),
+                           topology = (Periodic, Flat, Bounded))
+    td = SplitExplicitTimeDiscretization(; damping = NoDivergenceDamping())
+    dynamics = CompressibleDynamics(td; base_pressure = 1e5, reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5),
+                            timestepper = :MultirateInfinitesimalStep, timestepper_kwargs = (; coefficients))
+    θᵢ(x, z) = 300 + 2 * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2
+    set!(model; θ = θᵢ, qᵛ = 0.01, ρ = Breeze.HydrostaticallyBalancedDensity())
+
+    for _ in 1:(600 ÷ Δt)
+        time_step!(model, Δt)
+    end
+
+    # The bubble's own circulation after 10 minutes
+    @test 9 < maximum(abs, interior(model.velocities.w)) < 12
+    @test maximum(abs, interior(model.velocities.u)) < 8
 end
 
 @testset "MIS falls back where the stage-entry force remainder cannot be recombined" begin
