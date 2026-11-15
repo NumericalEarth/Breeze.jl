@@ -45,18 +45,40 @@ closure_paths = (distribution = (static_stability = SaturationWeightedStaticStab
                                                                               skewness = TanhSaturatedSkewness())),
                  budget_third_moment_one_amplitude = (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
                                                       subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷᴸ = Inf, ℂʷᵀ = 0.3))))
+# A cooling of 5 K h⁻¹ over the top 100 m of the moist layer of `moist_tke_column` and a warming of 1 K h⁻¹ below
+# 300 m, as the prescribed heating of a `HeatingBudgetFlux` (the tendency of θˡⁱ, K s⁻¹)
+function cloud_top_cooling(grid)
+    tendency = CenterField(grid)
+    set!(tendency, z -> 1000 < z < 1100 ? -5 / 3600 : z < 300 ? 1 / 3600 : 0)
+    return tendency
+end
+
+# The paths with the heating budget flux: built on the grid, which holds the prescribed heating. With the
+# distribution and the budget third moment (whose local member the cooling signs), and without a distribution
+heating_paths = (heating_budget_flux = grid -> (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                               subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷᵇ = 0.6, ℂʷᵀ = 0.3)),
+                                               heating_budget_flux = HeatingBudgetFlux(ℂʷᑫ = 0.6, heating = PrescribedHeating(cloud_top_cooling(grid)))),
+                 heating_budget_flux_no_distribution = grid -> (static_stability = SaturationWeightedStaticStability(HalfSaturatedFraction()),
+                                                               subgrid_distribution = nothing,
+                                                               heating_budget_flux = HeatingBudgetFlux(ℂᑫ = 0.7, ℂᑫᴸ = 4, heating = PrescribedHeating(cloud_top_cooling(grid)))))
+all_paths = (keys(closure_paths)..., keys(heating_paths)...)
+path_keywords(path, grid) = haskey(closure_paths, path) ? closure_paths[path] : heating_paths[path](grid)
+
+# The fields of the heating budget flux, zero without one
+heating_column(cl, name, n) = hasproperty(cl, name) ? budget_column(getproperty(cl, name)) : zeros(n)
+
 budget_column(f::ZeroField, Nz) = zeros(Nz)
 budget_column(f, Nz) = budget_column(f)
 
 function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2400, path = :distribution, FT = Float64,
-                          e₀ = z -> 0.6 * exp(-z / 500))
+                          e₀ = z -> 0.6 * exp(-z / 500), closure_keywords = NamedTuple())
     grid = RectilinearGrid(CPU(), FT; size=Nz, z=(0, H), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)
     microphysics = PredictedParticlePropertiesMicrophysics(FT; thermodynamic_constants = constants,
                                                            negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
-    closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4, closure_paths[path]...)
+    closure = TKEBasedTurbulenceClosure(FT; minimum_tke = 4e-4, path_keywords(path, grid)..., closure_keywords...)
     boundary_conditions = surface_fluxes ?
         (ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 8e-3)),
          ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 5.2e-5)),
@@ -116,7 +138,10 @@ function closure_energy_conversions(model)
         x⁺[s] += h[s]; x⁻[s] -= h[s]
         β[k, s] = (buoyancy(x⁺..., k) - buoyancy(x⁻..., k)) / 2h[s]
     end
-    Bᶠ = [-Kᶜ[f] * sum((β[f, s] + β[f-1, s]) / 2 * (φ[f, s] - φ[f-1, s]) for s in 1:4) / Δzᶠ[f-1] for f in 2:Nz]
+    # the fluxes down the gradient and the heating budget flux of θˡⁱ (zero without one)
+    Jᑫ = heating_column(cl, :Jᑫ, Nz + 1)
+    Bᶠ = [-Kᶜ[f] * sum((β[f, s] + β[f-1, s]) / 2 * (φ[f, s] - φ[f-1, s]) for s in 1:4) / Δzᶠ[f-1] +
+          (β[f, 1] + β[f-1, 1]) / 2 * Jᑫ[f] for f in 2:Nz]
     Pᶠ = [Kᵘ[f] * ((u[f] - u[f-1])^2 + (v[f] - v[f-1])^2) / Δzᶠ[f-1]^2 for f in 2:Nz]
 
     # What the TKE equation receives: P and B⁺ explicitly, the buoyancy sink ωᴮ e and the
@@ -129,7 +154,7 @@ function closure_energy_conversions(model)
     return (mean_kinetic_energy_loss = sum(ρᶠ .* Δzᶠ .* Pᶠ),
             shear_production = sum(ρ .* Δzᶜ .* budget_column(cl.P)),
             buoyancy_conversion = sum(ρᶠ .* Δzᶠ .* Bᶠ),
-            buoyancy_production = sum(ρ .* Δzᶜ .* (B .- budget_column(cl.Bᴸ))),
+            buoyancy_production = sum(ρ .* Δzᶜ .* (B .- budget_column(cl.Bᴸ) .- heating_column(cl, :Gᑫᴸ, Nz))),
             latent_production = sum(ρ .* Δzᶜ .* budget_column(cl.Bᴸ)),
             latent_conversion = sum(ρᶠ .* Δzᶠ .* Kᶜ[2:Nz] .* budget_column(cl.ΔN²ᴸ)[2:Nz]),
             dissipation = sum(ρ .* Δzᶜ .* ε),
@@ -137,7 +162,7 @@ function closure_energy_conversions(model)
 end
 
 # The rates at the state of an update: the stage conversions equal the energy the fluxes take
-@testset "TKE conversions of the applied fluxes (rain = $rain, $path)" for rain in (false, true), path in keys(closure_paths)
+@testset "TKE conversions of the applied fluxes (rain = $rain, $path)" for rain in (false, true), path in all_paths
     model = moist_tke_column(; rain, path)
     Oceananigans.TimeSteppers.update_state!(model)
     for n in 1:5
@@ -201,7 +226,7 @@ function stage_energy_budget(model, Δt; ρe = budget_column(model.tracers.ρe))
             shear = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Pᵖ)), buoyancy = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Bᵖ)))
 end
 
-@testset "TKE energy budget across the implicit solves (rain = $rain, surface fluxes = $surface_fluxes, $path)" for rain in (false, true), surface_fluxes in (false, true), path in keys(closure_paths)
+@testset "TKE energy budget across the implicit solves (rain = $rain, surface fluxes = $surface_fluxes, $path)" for rain in (false, true), surface_fluxes in (false, true), path in all_paths
     model = moist_tke_column(; rain, surface_fluxes, path)
     Δt = 10
     Δtₛ = model.timestepper.α³ * Δt # the last stage
@@ -246,7 +271,7 @@ end
 StageRecorder(record) = StageRecorder(Oceananigans.UpdateStateCallsite(), record)
 (recorder::StageRecorder)(model) = recorder.record(model)
 
-@testset "TKE energy budget of the whole step ($path)" for path in keys(closure_paths)
+@testset "TKE energy budget of the whole step ($path)" for path in all_paths
     model = moist_tke_column(; path)
     Δt = 10
     α = (model.timestepper.α¹, model.timestepper.α², model.timestepper.α³)
@@ -301,7 +326,7 @@ end
 # A Float32 grid with the closure's parameters in Float64 (the default float type): where e = 0
 # under a negative buoyancy conversion the buoyancy sink rate -B⁻ / max(e, floor) must stay finite
 # in Float32, so its floor has to be representable there. Here e = 0 above 1500 m, in the inversion.
-@testset "Float32 BOMEX-like column with the distribution stays finite ($path)" for path in keys(closure_paths)
+@testset "Float32 BOMEX-like column with the distribution stays finite ($path)" for path in all_paths
     model = moist_tke_column(; surface_fluxes = true, path, FT = Float32, e₀ = z -> z < 1500 ? 0.6 * exp(-z / 500) : 0.0)
     @test eltype(model.grid) == Float32
     Oceananigans.TimeSteppers.update_state!(model)
@@ -312,4 +337,121 @@ end
     for field in (Oceananigans.prognostic_fields(model)..., model.closure_fields.Kᶜ, model.closure_fields.Lᵉ)
         @test all(isfinite, interior(field))
     end
+end
+
+#####
+##### The heating budget flux: a flux of θˡⁱ in flux form, zero at the boundaries and in still air, whose conversion the
+##### TKE equation receives. The dynamic enthalpy the flux takes from the mean state is recomputed here from the tendency
+##### of ρθ, with the derivatives of the buoyancy by central differences.
+#####
+
+heating_tendencies(model) = (ρθ = budget_column(model.timestepper.Gⁿ.ρθ), ρe = budget_column(model.timestepper.Gⁿ.ρe))
+
+@testset "Heating budget flux: flux form, boundaries and still air ($path, $FT)" for path in keys(heating_paths), FT in (Float64, Float32)
+    model = moist_tke_column(; path, FT)
+    Oceananigans.TimeSteppers.update_state!(model)
+    Nz = size(model.grid, 3)
+    cl = model.closure_fields.subgrid_cloud.cloud
+    hb = model.closure.heating_budget_flux
+    ρ = Float64.(budget_column(model.dynamics.reference_state.density))
+    Δzᶜ = diff(znodes(model.grid, Face()))
+    𝒬 = Float64.(budget_column(cl.𝒬)); s = Float64.(budget_column(cl.sᑫ)); J = Float64.(budget_column(cl.Jᑫ)); Jᶜ = Float64.(budget_column(cl.Jᑫᶜ))
+    ϵ = eps(FT)
+
+    # the heating is the prescribed one; the redistribution conserves it, so the flux vanishes at the top
+    @test 𝒬 ≈ Float64.(budget_column(hb.heating.tendency))
+    @test minimum(𝒬) < 0 < maximum(𝒬)
+    @test abs(sum(ρ .* Δzᶜ .* (𝒬 .- s))) ≤ 100ϵ * sum(ρ .* Δzᶜ .* abs.(𝒬))
+    @test J[1] == 0 && J[Nz+1] == 0 && Jᶜ[1] == 0 && Jᶜ[Nz+1] == 0
+    @test all(≥(0), J) && all(≥(0), Jᶜ)
+
+    # cooling above and warming below both drive an upward flux; it is the share ℂᑫ of the positive part of the
+    # integral of ρ (𝒬 - s), and it is applied below the cooled cells, which export their cooling
+    ρᶠ = [(ρ[k] + ρ[k-1]) / 2 for k in 2:Nz]
+    ρJ = cumsum(ρ .* Δzᶜ .* (𝒬 .- s))[1:Nz-1]
+    @test J[2:Nz] ≈ hb.ℂᑫ .* max.(ρJ, 0) ./ ρᶠ rtol=1e4ϵ atol=1e4ϵ * maximum(J)
+    @test maximum(J) > 1e-3 # K m s⁻¹: a tenth of the 100 m × 5 K h⁻¹ of the cooling is 1.4e-2
+    zᶠ = znodes(model.grid, Face())
+    @test 300 < zᶠ[argmax(J)] ≤ 1000
+
+    # the conversion the TKE equation receives is positive and reduced by its latent part
+    Gᑫ = budget_column(cl.Gᑫ); Gᑫᴸ = budget_column(cl.Gᑫᴸ); Gᑫᶜ = budget_column(cl.Gᑫᶜ)
+    @test all(≥(0), Gᑫ) && maximum(Gᑫ) > 0
+    @test all(≤(0), Gᑫᴸ) && minimum(Gᑫᴸ) < 0
+    @test all(≥(0), Gᑫᶜ) && maximum(Gᑫᶜ) > 0
+
+    # still air: no turbulent kinetic energy where the heating acts and around it, and no flux at all
+    still = moist_tke_column(; path, FT, e₀ = z -> z < 200 ? 0.5 : 0.0, closure_keywords = (; minimum_tke = 0))
+    Oceananigans.TimeSteppers.update_state!(still)
+    cl = still.closure_fields.subgrid_cloud.cloud
+    Jˢ = budget_column(cl.Jᑫ); zᶠ = znodes(still.grid, Face())
+    @test all(k -> Jˢ[k] == 0, findall(>(300), zᶠ))
+    @test all(k -> budget_column(cl.sᑫ)[k] == budget_column(cl.𝒬)[k], findall(>(300), znodes(still.grid, Center())))
+end
+
+# The flux applied to the mean state and its conversion, against the same column without the flux (ℂᑫ = 0). Without a
+# distribution the saturated fraction does not read the flux, so the two columns differ by the flux alone.
+@testset "Heating budget flux: the energy the flux takes from the mean state is what the TKE receives" begin
+    path = :heating_budget_flux_no_distribution
+    with_flux = moist_tke_column(; path, e₀ = z -> 0.6)
+    hb = with_flux.closure.heating_budget_flux
+    diagnostic = HeatingBudgetFlux(ℂᑫ = 0, ℂᑫᴸ = hb.ℂᑫᴸ, heating = PrescribedHeating(cloud_top_cooling(with_flux.grid)))
+    without_flux = moist_tke_column(; path, e₀ = z -> 0.6, closure_keywords = (; heating_budget_flux = diagnostic))
+    Oceananigans.TimeSteppers.update_state!(with_flux)
+    Oceananigans.TimeSteppers.update_state!(without_flux)
+
+    grid = with_flux.grid
+    Nz = size(grid, 3)
+    ρ = budget_column(with_flux.dynamics.reference_state.density)
+    zᶜ = znodes(grid, Center()); zᶠ = znodes(grid, Face())
+    Δzᶜ = diff(zᶠ); Δzᶠ = diff(zᶜ)
+    cl = with_flux.closure_fields.subgrid_cloud.cloud
+    cl⁰ = without_flux.closure_fields.subgrid_cloud.cloud
+    G = heating_tendencies(with_flux); G⁰ = heating_tendencies(without_flux)
+
+    # with ℂᑫ = 0 the flux is a diagnostic: nothing is applied or converted, and the flux of the cooling is still diagnosed
+    @test all(==(0), budget_column(cl⁰.Jᑫ)) && all(==(0), budget_column(cl⁰.Gᑫ)) && all(==(0), budget_column(cl⁰.Gᑫᴸ))
+    @test budget_column(cl⁰.Jᑫᶜ) == budget_column(cl.Jᑫᶜ) && maximum(budget_column(cl⁰.Gᑫᶜ)) > 0
+    @test budget_column(cl⁰.B) .+ budget_column(cl.Gᑫ) ≈ budget_column(cl.B) rtol=1e-12
+
+    # the tendency of ρθ: the divergence of ρᶠ Jᑫ, and the draw of the latent part of the conversion
+    Jᑫ = budget_column(cl.Jᑫ); Gᑫ = budget_column(cl.Gᑫ); Gᑫᴸ = budget_column(cl.Gᑫᴸ)
+    ρᶠ = vcat(0.0, [(ρ[k] + ρ[k-1]) / 2 for k in 2:Nz], 0.0)
+    divergence = [(ρᶠ[k+1] * Jᑫ[k+1] - ρᶠ[k] * Jᑫ[k]) / Δzᶜ[k] for k in 1:Nz]
+    latent_draw = ρ .* Gᑫᴸ ./ budget_column(cl.ĉᵖΠ)
+    scale = maximum(abs, divergence)
+    @test G.ρθ .- G⁰.ρθ ≈ -divergence .- latent_draw rtol=1e-9 atol=1e-9 * scale
+    flux_tendency = G.ρθ .- G⁰.ρθ .+ latent_draw
+    @test abs(sum(Δzᶜ .* flux_tendency)) ≤ 1e-10 * sum(Δzᶜ .* abs.(flux_tendency)) # flux form: θˡⁱ is conserved
+
+    # the dynamic enthalpy the flux takes from the mean state, -d/dt Σ ρ Δz h‡ = Σ Δz Z ∂t(ρθ), with Z from the
+    # derivatives of the buoyancy by central differences, is the dry part of the conversion
+    c = closure_energy_conversions(with_flux)
+    Z = zeros(Nz)
+    Z[1] = c.β[1, 1] * (zᶜ[1] - zᶠ[1])
+    for k in 2:Nz
+        Z[k] = Z[k-1] + (c.β[k, 1] + c.β[k-1, 1]) / 2 * Δzᶠ[k-1]
+    end
+    dynamic_enthalpy_loss = sum(Δzᶜ .* Z .* flux_tendency)
+    @test dynamic_enthalpy_loss > 0
+    @test dynamic_enthalpy_loss ≈ sum(ρ .* Δzᶜ .* (Gᑫ .- Gᑫᴸ)) rtol=1e-7
+
+    # the TKE equation receives the conversion (here B > 0 with and without it wherever the flux is)
+    B = budget_column(cl.B); B⁰ = budget_column(cl⁰.B)
+    @test G.ρe .- G⁰.ρe ≈ ρ .* (max.(B, 0) .- max.(B⁰, 0)) rtol=1e-9 atol=1e-12 * maximum(abs, G.ρe)
+    # and the internal energy pays the latent part: Σ Δz ĉᵖΠ (draw) = -Σ ρ Δz Gᑫᴸ
+    @test sum(Δzᶜ .* budget_column(cl.ĉᵖΠ) .* latent_draw) ≈ sum(ρ .* Δzᶜ .* Gᑫᴸ) rtol=1e-12
+end
+
+# The coefficients are parameters of the closure, within their bounds
+@testset "Heating budget flux: coefficients" begin
+    closure = TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian(), heating_budget_flux = HeatingBudgetFlux())
+    parameters = closure_parameters(closure)
+    bounds = heating_budget_flux_bounds()
+    @test all(name -> bounds[name][1] ≤ parameters[name] ≤ bounds[name][2], keys(bounds))
+    @test with_parameters(closure; ℂᑫ = 0.25, ℂᑫᴸ = 4).heating_budget_flux.ℂᑫ == 0.25
+    @test with_parameters(closure; ℂᑫ = 0.25).heating_budget_flux.heating isa RadiativeHeating
+    @test_throws ArgumentError HeatingBudgetFlux(ℂᑫ = 1.5)
+    @test_throws ArgumentError HeatingBudgetFlux(ℂᑫᴸ = Inf)
+    @test_throws ArgumentError TKEBasedTurbulenceClosure(; heating_budget_flux = HeatingBudgetFlux())
 end

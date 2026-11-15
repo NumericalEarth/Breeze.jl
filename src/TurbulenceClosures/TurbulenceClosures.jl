@@ -23,6 +23,7 @@ export TKEBasedTurbulenceClosure,
        PDFBuoyancyFlux, DowngradientBuoyancyFlux,
        DowngradientSecondMoments,
        AlgebraicThirdMoment, TKEBudgetThirdMoment,
+       HeatingBudgetFlux, RadiativeHeating, PrescribedHeating, heating_budget_flux_bounds,
        UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
        ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
@@ -285,6 +286,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
 include("subgrid_distribution.jl")
 include("applied_flux_energetics.jl")
 include("tke_budget_third_moment.jl")
+include("heating_budget_flux.jl")
 include("bracketed_fraction_solve.jl")
 
 end # module TurbulenceClosures

@@ -188,7 +188,11 @@ end
     return 2 * ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Λ * Λ / Δzᶜᶜᶠ(i, j, k, grid)
 end
 
-@inline function balance_sink!(u, work, i, j, grid, ℂʷᴸ, cl, ρ, ℓᵐ)
+# The right-hand side of the balance at the center k: the production P + B of the conversion fields `cl`, or that
+# of another source (heating_budget_flux.jl)
+@inline budget_source(cl::NamedTuple, i, j, k) = @inbounds cl.P[i, j, k] + cl.B[i, j, k]
+
+@inline function balance_sink!(u, work, i, j, grid, ℂʷᴸ, source, ρ, ℓᵐ)
     Nz = size(grid, 3)
     FT = eltype(grid)
     tiny = sqrt(floatmin(FT))
@@ -217,7 +221,7 @@ end
                 upper = -a * ω / s
             end
             pivot = diagonal - lower * c′
-            d′ = (m * (cl.P[i, j, k] + cl.B[i, j, k]) - lower * d′) / pivot
+            d′ = (m * budget_source(source, i, j, k) - lower * d′) / pivot
             c′ = upper / pivot
             work[i, j, k] = c′
             u[i, j, k] = d′
@@ -231,7 +235,7 @@ end
         Ω = zero(FT)
         for k in 1:Nz
             m = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
-            Π += m * (cl.P[i, j, k] + cl.B[i, j, k])
+            Π += m * budget_source(source, i, j, k)
             Ω += m * u[i, j, k]
         end
         c = Π / (Ω + tiny)
@@ -270,8 +274,10 @@ end
 @inline stratification_damping(ℂʷᴺ, δ, αᴺ) = 1 + ℂʷᴺ * δ * smooth_positive_part(αᴺ / δ)
 
 # τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D at the center k; w′² ∂z w′² = ∂z (w′²)² / 2 is differenced across the
-# neighbouring centers (one-sided at the two ends of the column)
-@inline function damped_local_third_moment(i, j, k, grid, tm, w′², τ, u, αᴺ, B)
+# neighbouring centers (one-sided at the two ends of the column). With a `HeatingBudgetFlux` the buoyant source is
+# signed by origin: of B⁺, the part Gᶜ = min(Gᑫᶜ, B⁺) that the flux driven by cooling converts is carried by
+# downdrafts, and the source is ℂʷᵇ (B⁺ - Gᶜ) - ℂʷᑫ Gᶜ.
+@inline function damped_local_third_moment(i, j, k, grid, tm, w′², τ, u, αᴺ, B, Gᑫᶜ = zero(B), ℂʷᑫ = zero(B))
     Nz = size(grid, 3)
     kᵘ = min(k + 1, Nz)
     kˡ = max(k - 1, 1)
@@ -280,7 +286,10 @@ end
     w′²ᵘ = @inbounds w′²[i, j, kᵘ]
     w′²ˡ = @inbounds w′²[i, j, kˡ]
     w′²∂zw′² = ifelse(kᵘ > kˡ, (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δz), zero(Δz))
-    return τ * (tm.ℂʷᵇ * u * max(0, B) - tm.ℂʷᵍ * w′²∂zw′²) / stratification_damping(tm.ℂʷᴺ, tm.stratification_damping_width, αᴺ)
+    B⁺ = max(0, B)
+    Gᶜ = min(Gᑫᶜ, B⁺)
+    buoyant_source = tm.ℂʷᵇ * (B⁺ - Gᶜ) - ℂʷᑫ * Gᶜ
+    return τ * (u * buoyant_source - tm.ℂʷᵍ * w′²∂zw′²) / stratification_damping(tm.ℂʷᴺ, tm.stratification_damping_width, αᴺ)
 end
 
 #####
@@ -301,6 +310,7 @@ end
     budget_flux!(cl.Fᵉ, cl.uᵉ, i, j, grid, cl, ρ)
     budget_flux!(cl.Fᵋ, cl.uᵋ, i, j, grid, cl, ρ)
     N² = closure_fields.N²
+    ℂʷᑫ = cooling_third_moment_coefficient(closure_ij.heating_budget_flux, eltype(grid))
     @inbounds for k in 1:size(grid, 3)
         cl.Tᵉ[i, j, k] = tm.ℂʷᵀ * (cl.uᵉ[i, j, k] - cl.P[i, j, k] - cl.B[i, j, k])
 
@@ -312,7 +322,8 @@ end
         αᴺ = τ * τ * (N²[i, j, k] + N²[i, j, k+1]) / 2
         r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
         w′³ = r * (tm.ℂʷᵉ * cl.Fᵉ[i, j, k] + tm.ℂʷᵋ * cl.Fᵋ[i, j, k]) +
-              damped_local_third_moment(i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k])
+              damped_local_third_moment(i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k],
+                                        cooling_flux_conversion(cl, i, j, k), ℂʷᑫ)
         cl.w′³ᵇ[i, j, k] = ifelse(diagnose, w′³, cl.w′³ᵇ[i, j, k])
     end
 end
@@ -344,6 +355,7 @@ function diagnose_third_moment!(fields::SubgridCloudFields, distribution::TKEBud
     passes = third_moment_passes(distribution.third_moment)
     for pass in 1:passes
         pass > 1 && restore_closure_fields!(closure_fields, fields.cloud)
+        compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
         compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
         solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
         compute_applied_flux_conversions!(fields, closure_fields, closure, model, tracers)

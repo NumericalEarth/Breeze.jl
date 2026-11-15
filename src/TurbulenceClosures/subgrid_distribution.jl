@@ -563,15 +563,15 @@ Adapt.adapt_structure(to, f::SubgridCloudFields) =
 # Without a distribution: the plain closure, or, with a saturated fraction from the microphysics
 # (or any fraction other than the distribution's), the energetics of the applied fluxes with the
 # latent conversion of the condensate flux that the fraction implies
-build_subgrid_cloud_fields(grid, ::Nothing, solver, static_stability, tracer_names) = nothing
+build_subgrid_cloud_fields(grid, ::Nothing, solver, static_stability, tracer_names, heating_budget_flux = nothing) = nothing
 
-function build_subgrid_cloud_fields(grid, ::Nothing, solver, ::SaturationWeightedStaticStability, tracer_names)
+function build_subgrid_cloud_fields(grid, ::Nothing, solver, ::SaturationWeightedStaticStability, tracer_names, heating_budget_flux = nothing)
     energetics = AppliedFluxEnergetics(solver)
-    cloud = applied_flux_conversion_fields(grid, energetics, tracer_names)
+    cloud = merge(applied_flux_conversion_fields(grid, energetics, tracer_names), heating_budget_flux_fields(grid, heating_budget_flux))
     return SubgridCloudFields(energetics, nothing, cloud, nothing, build_presolve_fields(grid, energetics, tracer_names))
 end
 
-function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names)
+function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names, heating_budget_flux = nothing)
     energetics = AppliedFluxEnergetics(solver)
     moments = (τ = ZFaceField(grid), θˡ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡ′qᵗ′ = ZFaceField(grid),
                w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid))
@@ -580,6 +580,7 @@ function build_subgrid_cloud_fields(grid, distribution, solver, static_stability
              vapor_excess_component_fields(grid)...,
              applied_flux_conversion_fields(grid, energetics, tracer_names)...,
              third_moment_fields(grid, distribution.third_moment)...,
+             heating_budget_flux_fields(grid, heating_budget_flux)...,
              gθ = CenterField(grid), gA = CenterField(grid))
     return SubgridCloudFields(energetics, moments, cloud, build_solver_state(grid, energetics),
                               build_presolve_fields(grid, energetics, tracer_names))
@@ -591,7 +592,7 @@ end
 # conversions of the solved state and the dissipation of the last stage (diagnostics)
 function applied_flux_conversion_fields(grid, ::AppliedFluxEnergetics, tracer_names)
     centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :P, :Bˢ, :Pˢ, :ωᴮ, :b_θ, :b_qᵛ, :b_qˡ, :b_qⁱ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_b_θ, :stage_b_qᵛ, :stage_b_qˡ, :stage_b_qⁱ, :stage_surface, :shortfall, :shortfall_ρθ, :stage_combination))
-    faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid))
+    faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid), c_θ = ZFaceField(grid))
     return merge(centers, faces, (ρu⁻ = XFaceField(grid), ρv⁻ = YFaceField(grid)))
 end
 
@@ -774,6 +775,9 @@ end
                 interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / Δz, θ[i, j, k] - θ[i, j, k-1], qᵗ[i, j, k] - qᵗ[i, j, k-1],
                                          zero(FT), zero(FT), zero(FT))
 
+            # The flux of θˡⁱ that the turbulence carries includes the heating budget flux (zero without one)
+            w′θˡ′ += applied_heating_flux(cl, i, j, k)
+
             # The variances no smaller than the fluxes allow at the largest correlation with w
             w′²ᶠ = (vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ)) +
                     vertical_velocity_variance(sm, max(e[i, j, k-1], eᵐⁱⁿ))) / 2
@@ -890,6 +894,7 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergeti
     arch = grid.architecture
     N²₋ = fields.solver_state.N²₋
     compute_buoyancy_derivatives!(fields, model)
+    compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
     launch!(arch, grid, parameters, _set_lagged_stability!, closure_fields.N², N²₋)
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
     launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
@@ -902,6 +907,7 @@ end
 # Within `update_state!`, after the diffusivities and before the implicit coefficient
 function compute_subgrid_cloud!(fields::SubgridCloudFields, closure_fields, closure, model, tracers, parameters)
     compute_buoyancy_derivatives!(fields, model)
+    compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
     solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
     return nothing
@@ -1079,7 +1085,8 @@ end
 #####
 
 SimplifiedHigherOrderClosures.closure_components(closure::TKEBasedTurbulenceClosure) =
-    (closure.mixing_length, closure.stability_functions, closure.static_stability, closure.shear, closure.subgrid_distribution)
+    (closure.mixing_length, closure.stability_functions, closure.static_stability, closure.shear, closure.subgrid_distribution,
+     closure.heating_budget_flux)
 
 SimplifiedHigherOrderClosures.rebuild_component(::Nothing, scalars, n) = nothing, n
 
@@ -1092,7 +1099,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a copy of the [`TKEBasedTurbulenceClosure`](@ref) `closure` in which the scalars named by the
 keyword arguments are replaced, whichever component (mixing length, stability functions, static
-stability, shear, subgrid distribution) holds them. [`closure_parameters`](@ref) lists the
+stability, shear, subgrid distribution, heating budget flux) holds them. [`closure_parameters`](@ref) lists the
 coefficients. The non-integer scalars are promoted with the replacements, so that traced scalars
 give a closure whose components all have the promoted scalar type.
 """
@@ -1113,12 +1120,13 @@ function SimplifiedHigherOrderClosures.with_parameters(closure::TKEBasedTurbulen
         component, n = SimplifiedHigherOrderClosures.rebuild_component(component, promoted, n)
         components = (components..., component)
     end
-    mixing_length, stability_functions, static_stability, shear, subgrid_distribution = components
+    mixing_length, stability_functions, static_stability, shear, subgrid_distribution, heating_budget_flux = components
 
     return TKEBasedTurbulenceClosure{TD}(mixing_length, stability_functions, static_stability,
                                          closure.maximum_viscosity, closure.maximum_tracer_diffusivity,
                                          closure.maximum_tke_diffusivity, closure.minimum_tke, shear,
-                                         closure.negative_tke_damping_time_scale, subgrid_distribution, closure.solver)
+                                         closure.negative_tke_damping_time_scale, subgrid_distribution, closure.solver,
+                                         heating_budget_flux)
 end
 
 #####

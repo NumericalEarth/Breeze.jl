@@ -408,8 +408,12 @@ distribution of θˡ, qᵗ and w from the closure's ``ℓ``, ``e`` and ``Kᶜ``;
 buoyancy production of the TKE equation are the energy conversions of the fluxes the closure
 applies to the mean state, and the dissipated energy heats the air. `solver` solves the coupling of
 the static stability with the saturated fraction of the distribution.
+
+`heating_budget_flux` is `nothing` by default. A [`HeatingBudgetFlux`](@ref) adds a flux of θˡⁱ that
+carries diabatic heating (radiation, ...) from where it acts to where the turbulence is, and its
+energy conversion ``G`` to the TKE equation, ``P + B + G - ε``.
 """
-struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
+struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV, HB} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
     mixing_length :: ML                   # the primary mixing length ℓ
     stability_functions :: SF             # 𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ
     static_stability :: SS                # how N² is diagnosed
@@ -421,6 +425,7 @@ struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV} <: AbstractScal
     negative_tke_damping_time_scale :: FT # time scale on which negative e is damped, s
     subgrid_distribution :: SD            # `nothing`, or a `DoubleGaussian`
     solver :: SV                          # solver of the coupling of N² and the saturated fraction
+    heating_budget_flux :: HB             # `nothing`, or a `HeatingBudgetFlux`
 end
 
 const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where TD
@@ -436,7 +441,8 @@ function Adapt.adapt_structure(to, closure::TKEBasedTurbulenceClosure{TD}) where
                                          adapt(to, closure.shear),
                                          adapt(to, closure.negative_tke_damping_time_scale),
                                          adapt(to, closure.subgrid_distribution),
-                                         closure.solver)
+                                         closure.solver,
+                                         adapt(to, closure.heating_budget_flux))
 end
 
 """Either a single `TKEBasedTurbulenceClosure` or an ensemble array of them."""
@@ -448,13 +454,14 @@ function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::S
                                        shear::SH,
                                        negative_tke_damping_time_scale::FT,
                                        subgrid_distribution::SD = nothing,
-                                       solver::SV = SinglePass()) where {TD, ML, SF, SS, FT, SH, SD, SV}
-    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV}(mixing_length, stability_functions, static_stability,
-                                                                 maximum_viscosity, maximum_tracer_diffusivity,
-                                                                 maximum_tke_diffusivity, minimum_tke,
-                                                                 shear,
-                                                                 negative_tke_damping_time_scale,
-                                                                 subgrid_distribution, solver)
+                                       solver::SV = SinglePass(),
+                                       heating_budget_flux::HB = nothing) where {TD, ML, SF, SS, FT, SH, SD, SV, HB}
+    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV, HB}(mixing_length, stability_functions, static_stability,
+                                                                     maximum_viscosity, maximum_tracer_diffusivity,
+                                                                     maximum_tke_diffusivity, minimum_tke,
+                                                                     shear,
+                                                                     negative_tke_damping_time_scale,
+                                                                     subgrid_distribution, solver, heating_budget_flux)
 end
 
 """
@@ -484,6 +491,11 @@ saturated static stability by the condensate flux fraction of the distribution; 
 ([`SinglePass`](@ref) by default, [`DampedFixedPoint`](@ref), [`BracketedFractionSolve`](@ref), ...)
 solves that coupling.
 
+`heating_budget_flux` (default `nothing`) is a [`HeatingBudgetFlux`](@ref): the turbulent flux of θˡⁱ
+that redistributes diabatic heating over the turbulent layer, with its conversion in the TKE equation.
+It needs the energetics of the applied fluxes, that is, a `subgrid_distribution` or a
+[`SaturationWeightedStaticStability`](@ref).
+
 ```jldoctest
 using Breeze
 
@@ -508,7 +520,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    # ocean's, so a shorter time scale may be more appropriate here.
                                    negative_tke_damping_time_scale = 1minute,
                                    subgrid_distribution = nothing,
-                                   solver = SinglePass()) where TD
+                                   solver = SinglePass(),
+                                   heating_budget_flux = nothing) where TD
 
     shear = with_minimum_shear_squared(shear, minimum_shear_squared)
     validate_shear(shear)
@@ -519,6 +532,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
     subgrid_distribution = convert_eltype(FT, subgrid_distribution)
     solver = convert_eltype(FT, solver)
     validate_subgrid_coupling(static_stability, subgrid_distribution, solver)
+    heating_budget_flux = convert_eltype(FT, heating_budget_flux)
+    validate_heating_budget_flux(heating_budget_flux, static_stability, subgrid_distribution)
 
     return TKEBasedTurbulenceClosure{TD}(mixing_length,
                                          stability_functions,
@@ -530,7 +545,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                          convert_eltype(FT, shear),
                                          convert(FT, negative_tke_damping_time_scale),
                                          subgrid_distribution,
-                                         solver)
+                                         solver,
+                                         heating_budget_flux)
 end
 
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
@@ -661,7 +677,8 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
     implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Lᵉ : ZeroField() for name in tracer_names)
 
-    subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_distribution(closure), closure_solver(closure), closure_static_stability(closure), tracer_names)
+    subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_distribution(closure), closure_solver(closure), closure_static_stability(closure), tracer_names,
+                                               heating_budget_flux(closure))
 
     return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients, subgrid_cloud)
 end
@@ -1138,6 +1155,7 @@ function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, clos
 
     add_dissipative_heating!(Gⁿ, closure_fields.subgrid_cloud, closure_fields, closure, model)
     draw_latent_conversion!(Gⁿ, closure_fields.subgrid_cloud, model)
+    add_heating_budget_flux_tendency!(Gⁿ, closure_fields.subgrid_cloud, heating_budget_flux(closure), model)
 
     return nothing
 end
@@ -1166,8 +1184,9 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
     show(io, closure.shear)
     print(io, '\n',
               "├── negative_tke_damping_time_scale: ", prettysummary(closure.negative_tke_damping_time_scale), '\n',
-              "├── subgrid_distribution: ", summary(closure.subgrid_distribution), "\n",
-              "└── solver: ", summary(closure.solver))
+              "├── subgrid_distribution: ", summary(closure.subgrid_distribution), "\n")
+    isnothing(closure.heating_budget_flux) || print(io, "├── heating_budget_flux: ", summary(closure.heating_budget_flux), "\n")
+    print(io, "└── solver: ", summary(closure.solver))
 end
 
 # All closure fields are recomputed by update_state! from the prognostic state alone.

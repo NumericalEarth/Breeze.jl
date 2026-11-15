@@ -181,7 +181,7 @@ end
     return (wˡᵒʷ * Bˡᵒʷ + wᵘᵖ * Bᵘᵖ) / ρΔz, (wˡᵒʷ * Pˡᵒʷ + wᵘᵖ * Pᵘᵖ) / ρΔz, (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
 end
 
-# The latent part of the buoyancy production at a face, Kᶜ aᴺ (N²ᵇ - N²ˢ) (see `_latent_corrected_stability!`)
+# The latent part of the buoyancy production at a face, Kᶜ ΔN²ᴸ (see `_latent_corrected_stability!`)
 @inline latent_conversionᶜᶜᶠ(i, j, k, grid, cl, Kᶜ) = @inbounds Kᶜ[i, j, k] * cl.ΔN²ᴸ[i, j, k]
 
 # The conversions of the surface fluxes within the bottom half-cell: the work of the surface
@@ -209,7 +209,9 @@ end
     closure_ij = getclosure(i, j, closure)
     B, P, Bᴸ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     Bˢ, Pˢ = surface_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, u, v, bottom_bcs, bc_args)
-    B = B + Bˢ + Bᴸ
+    # The conversion of the heating budget flux (zero without one); its latent part is drawn from the internal energy with Bᴸ
+    Gᑫ = store_heating_flux_conversions!(cl, i, j, k, grid, s.ρ)
+    B = B + Bˢ + Bᴸ + Gᑫ
     @inbounds begin
         cl.B[i, j, k] = B
         cl.Bᴸ[i, j, k] = Bᴸ
@@ -395,7 +397,9 @@ end
         # Pᵖ + Dᵘ + Pˢ and Bᵖ + Bˢ
         given = cl.P[i, j, k] + max(B, 0) - cl.ωᴮ[i, j, k] * e
         # the latent part was drawn from the internal energy in the stage tendency (stage value)
-        converted = Pᵖ + Dᵘ + cl.Pˢ[i, j, k] + Bᵖ + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k]
+        # (so was the conversion of the heating budget flux, an explicit flux of the stage state)
+        Gᑫ = heating_flux_conversion(cl, i, j, k)
+        converted = Pᵖ + Dᵘ + cl.Pˢ[i, j, k] + Bᵖ + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k] + Gᑫ
         cl.Pᵖ[i, j, k] = Pᵖ + Dᵘ
         cl.Bᵖ[i, j, k] = Bᵖ
         # the stage's values, kept for the energy budget after `update_state!` recomputes the others
@@ -404,7 +408,7 @@ end
         cl.stage_b_qᵛ[i, j, k] = cl.b_qᵛ[i, j, k]
         cl.stage_b_qˡ[i, j, k] = cl.b_qˡ[i, j, k]
         cl.stage_b_qⁱ[i, j, k] = cl.b_qⁱ[i, j, k]
-        cl.stage_surface[i, j, k] = cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k]
+        cl.stage_surface[i, j, k] = cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k] + Gᑫ
         # Where the TKE cannot pay what the solved fluxes converted (e ≈ 0 while the diffusivities,
         # floored at `minimum_tke`, still mix), the shortfall is taken from the internal energy
         # instead of driving e negative: the mixing of that floor is powered by the heat of the air.
@@ -477,16 +481,30 @@ end
 #####   N²ˢ - N²ᵇ = (b̄ˡ - b̄ᵛ) (∂z s̄ - ∂z qᶜ),   ∂z s̄ = c̄_q ∂z qʷ - c̄_θ ∂z θˡⁱ
 #####
 ##### (c_q, c_θ: the linearized saturation excess of the level with the model's thermodynamics).
-##### The static stability and the buoyancy production use
+##### The turbulence carries the condensate flux
 #####
-#####   N² = N²ᵇ - aᴺ (N²ᵇ - N²ˢ),    aᴺ = η(tₑ ωᶜ) aʷ,    η(x) = 1 - (1 - e⁻ˣ) / x,
+#####   w′qᶜ′ = η aʷ w′s′ + (1 - η) (-Kᶜ ∂z qᶜ),    w′s′ = -Kᶜ ∂z s̄,    η(x) = 1 - (1 - e⁻ˣ) / x,
 #####
 ##### aʷ the share of the flux of the saturation excess carried by the supersaturated part of the
 ##### distribution, w′qˡ′ / w′s′ of the double Gaussian (its fluxes share one Kᶜ, which cancels),
 ##### and η the fraction of the excess that condenses over an eddy time tₑ = e / ε when it relaxes at
-##### the rate ωᶜ (η = 1 for instantaneous condensation). The buoyancy production gains
-##### Bᴸ = Kᶜ aᴺ (N²ᵇ - N²ˢ) over the conversion of the applied fluxes; that energy is the work of
-##### the latent heat of the subgrid condensation and is taken from the internal energy.
+##### the rate ωᶜ (η = 1 for instantaneous condensation): the share η of the condensate follows the
+##### saturation excess of the air that carries it, and only the share 1 - η, which does not change
+##### phase within an eddy time, is mixed as a passive scalar. The closure applies -Kᶜ ∂z qᶜ to the
+##### prognostic condensate, so the static stability and the buoyancy production use
+#####
+#####   N² = N²ᵇ - ΔN²ᴸ,    ΔN²ᴸ = η (b̄ˡ - b̄ᵛ) (∂z qᶜ - aʷ ∂z s̄)
+#####      = N²ᶜ + (b̄ˡ - b̄ᵛ) [η aʷ ∂z s̄ + (1 - η) ∂z qᶜ],    N²ᶜ = N²ᵇ - (b̄ˡ - b̄ᵛ) ∂z qᶜ,
+#####
+##### N²ᶜ the stratification of the conserved variables (θˡⁱ, qʷ). With instantaneous condensation this
+##### is (1 - aʷ) N²ᶜ + aʷ N²ˢ: the unsaturated share of the distribution holds no condensate and feels
+##### the stratification of the conserved variables, not that of the mean condensate. (Weighting N²ᵇ
+##### and N²ˢ instead, N²ᵇ - η aʷ (N²ᵇ - N²ˢ), leaves (1 - aʷ)(b̄ˡ - b̄ᵛ) ∂z qᶜ > 0 wherever the mean
+##### condensate rises with height in partly cloudy air: a stable stratification at the base of a
+##### well-mixed cloud layer and a buoyancy flux of the wrong sign there; harness notes/total-energy-design.md §11.)
+##### The buoyancy production gains Bᴸ = Kᶜ ΔN²ᴸ over the conversion of the applied fluxes; that energy
+##### is the work of the latent heat of the subgrid condensation and is taken from the internal energy.
+##### aᴺ = η aʷ is stored: the share of the flux of the saturation excess that condenses.
 #####
 
 # The rate ωᶜ (s⁻¹) at which the condensate of the cell absorbs vapor excess, from the microphysics
@@ -563,7 +581,6 @@ end
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
         bˡᵛ = (cl.b_qˡ[i, j, kₛ] + cl.b_qˡ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
         N²ᵇ = applied_stratificationᶜᶜᶠ(i, j, kₛ, grid, s, cl)
-        N²ˢ = N²ᵇ + bˡᵛ * (∂z_s - ∂z_qᶜ)
 
         # aʷ = w′qˡ′ / w′s′ formed at the centers above and below, where numerator and denominator come
         # from the same moments, and averaged to the face
@@ -579,11 +596,12 @@ end
         η = saturated_response_shareᶜᶜᶠ(instantaneous, tₑ, i, j, kₛ, grid, s)
         aᴺ = η * aʷ
 
-        ΔN²ᴸ = aᴺ * (N²ᵇ - N²ˢ)
+        ΔN²ᴸ = η * bˡᵛ * (∂z_qᶜ - aʷ * ∂z_s)
         N²ᵉ = N²ᵇ - ΔN²ᴸ
         interior = k > 1
         cl.aʷ[i, j, k] = ifelse(interior, aʷ, zero(FT))
         cl.aᴺ[i, j, k] = ifelse(interior, aᴺ, zero(FT))
+        cl.c_θ[i, j, k] = ifelse(interior, c_θ, zero(FT))
         cl.ΔN²ᴸ[i, j, k] = ifelse(interior, ΔN²ᴸ, zero(FT))
         N²[i, j, k] = ifelse(interior, relax_stability(N²[i, j, k], N²ᵉ, ω), N²[i, j, k])
     end
@@ -629,9 +647,9 @@ end
 ##### flux w′qᶜ′ = a w′s′, w′s′ = -Kᶜ ∂z s̄, where the closure applies -Kᶜ ∂z qᶜ. Its buoyancy
 ##### conversion beyond that of the applied fluxes is the latent part
 #####
-#####   Bᴸ = (b̄ˡ - b̄ᵛ) (a w′s′ + Kᶜ ∂z qᶜ) = Kᶜ a (N²ᵇ - N²ˢ),
+#####   Bᴸ = (b̄ˡ - b̄ᵛ) (a w′s′ + Kᶜ ∂z qᶜ) = Kᶜ (b̄ˡ - b̄ᵛ) (∂z qᶜ - a ∂z s̄),
 #####
-##### the same as with the distribution's aᴺ: it enters the buoyancy production, its energy is drawn
+##### the same as with the distribution's aʷ and instantaneous condensation: it enters the buoyancy production, its energy is drawn
 ##### from the internal energy, and the energy budget of the stage covers it. The static stability
 ##### the fraction gives (for Ri and ℓ) and the buoyancy production then use one saturated fraction.
 #####
@@ -653,20 +671,23 @@ end
         Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
         c_q⁺, c_θ⁺, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁺, qʷ⁺, s.p[i, j, kₛ])
         c_q⁻, c_θ⁻, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
-        ∂z_s = ((c_q⁺ + c_q⁻) / 2 * (qʷ⁺ - qʷ⁻) - (c_θ⁺ + c_θ⁻) / 2 * (θ⁺ - θ⁻)) / Δz
+        c_θ = (c_θ⁺ + c_θ⁻) / 2
+        ∂z_s = ((c_q⁺ + c_q⁻) / 2 * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
         bˡᵛ = (cl.b_qˡ[i, j, kₛ] + cl.b_qˡ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
         a = saturated_stability_weightᶜᶜᶠ(i, j, kₛ, grid, closure_ij.static_stability.fraction, buoyancy, tracers, closure_fields)
-        ΔN²ᴸ = -a * bˡᵛ * (∂z_s - ∂z_qᶜ)
+        ΔN²ᴸ = bˡᵛ * (∂z_qᶜ - a * ∂z_s)
         interior = k > 1
         cl.aʷ[i, j, k] = ifelse(interior, a, zero(FT))
         cl.aᴺ[i, j, k] = ifelse(interior, a, zero(FT))
+        cl.c_θ[i, j, k] = ifelse(interior, c_θ, zero(FT))
         cl.ΔN²ᴸ[i, j, k] = ifelse(interior, ΔN²ᴸ, zero(FT))
     end
 end
 
 function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergetics, Nothing}, closure_fields, closure, model, tracers, parameters)
     compute_buoyancy_derivatives!(fields, model)
+    compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
     grid = model.grid
     d = distribution_state(model, nothing)
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
