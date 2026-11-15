@@ -379,6 +379,76 @@ The value at `(i, j, k)` of the field `name` at the state the coming stage start
     return ifelse(s.from_initial, initial, current)
 end
 
+#####
+##### Patankar-limited sinks
+#####
+#
+# A scheme's process rates are evaluated at one state and applied by the time stepper to the
+# state the coming stage starts from, over the stage interval `Δt`, alongside transport.
+# Neither the state nor the interval need match those a rate was budgeted against, so the
+# rates alone cannot keep a species non-negative.
+#
+# A sink can instead be advanced in Patankar form. With `c̃ = c⁰ + Δt Gᵒ` what the stage start
+# `c⁰` and every other tendency `Gᵒ` leave of a species, and `L` its total microphysical loss
+# rate, the loss is weighted by the ratio of the updated to the available content,
+# `L c⁺ / c̃`, so that
+#
+#     c⁺ = c̃ / (1 + Δt L / c̃)
+#
+# is non-negative for any `Δt`. That is the explicit loss scaled by `φ = c̃ / (c̃ + Δt L)`.
+# Where each process is one transfer between species, scaling a transfer by the `φ` of the
+# species it draws on (the smallest, where it draws on several) scales the recipient's gain
+# by the same factor and conserves the exchange exactly. Gains are left out of `c̃`, which
+# makes each `φ` a function of the explicit rates alone and avoids a coupled solve; the
+# cost is that a species cannot spend, within a stage, what it gains in that stage.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether the interval of the coming stage is known. It is not before the first time step.
+"""
+@inline stage_interval_is_known(stage::StageStart) = isfinite(stage.Δt) & (stage.Δt > 0)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+What the state the coming stage starts from and the tendency `G` accumulated so far leave
+of the field `name` at `(i, j, k)`: `c̃ = c⁰ + Δt G`. Not clamped, so it is negative where
+transport has left a negative value.
+"""
+@inline function stage_remainder(i, j, k, G, stage::StageStart, name)
+    c⁰ = stage_start_value(i, j, k, stage, name)
+    @inbounds Gᵒ = G[i, j, k]
+    return c⁰ + stage.Δt * Gᵒ
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The Patankar weight `φ = c̃ / (c̃ + Δt L)` on a loss rate `L` drawn over `Δt` from the
+content `c̃`. `φ = 0` where nothing is left to give, and `φ = 1` where nothing is asked.
+"""
+@inline function patankar_fraction(c̃, Δt, L)
+    available = max(0, c̃)
+    demand = Δt * max(0, L)
+    φ = available / (available + demand)
+    return ifelse(available + demand > 0, φ, one(φ))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The Patankar weight `φ = c̃ / (c̃ + Δt L)` on the sinks of a species with loss rate `L`
+(a density tendency), where `c̃ = c⁰ + Δt Gᵒ` is what the state the coming stage starts
+from and every other tendency leave of it. `φ = 0` where nothing is left, and `φ = 1`
+before the first time step, when the stage interval is not known.
+"""
+@inline function patankar_sink_fraction(i, j, k, G, stage::StageStart, name, L)
+    c̃ = stage_remainder(i, j, k, G, stage, name)
+    φ = patankar_fraction(c̃, stage.Δt, L)
+    return ifelse(stage_interval_is_known(stage), φ, one(φ))
+end
+
 # No microphysics: nothing to add.
 compute_microphysical_tendencies!(::Nothing, model) = nothing
 
