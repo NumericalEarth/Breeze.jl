@@ -253,7 +253,7 @@ export
     SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
     TKEBasedTurbulenceClosure, AbstractMixingLength, LocalMinimumMixingLength, IntegralMixingLength,
     GradientLimitedMixingLength, HardMinimum, HarmonicBlend, ConstantStabilityFunctions,
-    RationalStabilityFunction, SurfaceLayerSimilarity, StratificationNumberStabilityFunction, LinearInterpolation, LogarithmicInterpolation,
+    RationalStabilityFunction, SurfaceLayerSimilarity, TurbulentRichardsonStabilityFunction,
     DryStaticStability, MoistStaticStability, SaturationWeightedStaticStability, MicrophysicsSaturatedFraction,
     GridMeanShear,
     SimplifiedHigherOrderClosure, SHOC, smooth_shoc_components,

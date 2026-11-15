@@ -217,10 +217,10 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
 | ``p`` | `p` | `exponent` | Exponent of the `HarmonicBlend` of the lengths that bound the mixing length, ``(ℓ₁^{-p} + ℓ₂^{-p})^{-1/p}`` (elsewhere ``p`` is pressure) |
-| ``α_N, α_S`` | `αᴺ`, `αˢ` | | Stratification number ``τ² N²`` and shear number ``τ² (S² + S²ᵐⁱⁿ)`` of turbulence with the time scale ``τ = ℓ / \sqrt{e}`` (`StratificationNumberStabilityFunction`) |
-| ``ℂᴺ⁻, ℂᴺ⁺`` | `ℂᴺ⁻`, `ℂᴺ⁺` | `transition_stratification_numbers(sf)` | Stratification numbers of the transitions of `StratificationNumberStabilityFunction` to the unstable and stable limits where the shear vanishes, ``0.3 < ℂᴺ⁻ < 10``, ``0.1 < ℂᴺ⁺ < 2`` |
-| ``ϑ`` | `ϑᶜ⁻`, `ϑᴰ⁺`, `ϑᴺ⁻`, … | `ϑᶜ⁻`, … | Unconstrained scalar of a bounded coefficient of `StratificationNumberStabilityFunction`, named after the coefficient: e.g. ``\ln(ℂᶜ⁻ / ℂᶜ⁰) = s ℂᴺ⁻ \tanh ϑᶜ⁻`` |
-| ``s`` | `s` | `maximum_logarithmic_slope` | Bound of the logarithmic slope ``\lvert\ln(C^± / C⁰)\rvert / ℂᴺ^±`` of `StratificationNumberStabilityFunction` (elsewhere ``s`` is the shape ``x / (1 + x)`` of the stability functions or a saturation excess) |
+| ``α_N, α_S`` | `αᴺ`, `αˢ` | | Stratification number ``τ² N²`` and shear number ``τ² (S² + S²ᵐⁱⁿ)`` of turbulence with the time scale ``τ = ℓ / \sqrt{e}`` (`TurbulentRichardsonStabilityFunction`) |
+| ``Riᵗ`` | `Riᵗ` | `turbulent_richardson_number(sf, αᴺ, αˢ)` | Turbulent Richardson number ``α_N / (ℂᴿⁱ α_S + ℂᵅ)`` of `TurbulentRichardsonStabilityFunction`: ``Ri / ℂᴿⁱ`` under strong shear, ``α_N / ℂᵅ`` without shear |
+| ``ℂᴿⁱ, ℂᵅ`` | `ℂᴿⁱ`, `ℂᵅ` | `ℂᴿⁱ`, `ℂᵅ` | Richardson number and stratification number at which ``Riᵗ = 1`` under strong shear and without shear |
+| ``v`` | `v` | | ``Riᵗ / \sqrt{1 + Riᵗ²} ∈ (-1, 1)``, the argument of the quadratic in ``\ln 𝕊`` of `TurbulentRichardsonStabilityFunction` |
 | ``N²ᵈ, N²ˢ`` | `N²ᵈ`, `N²ˢ` | | Dry and saturated squared buoyancy frequencies, which `SaturationWeightedStaticStability` blends with the weight ``aᴺ`` |
 | ``aᴺ`` | `aᴺ` | `saturated_stability_weightᶜᶜᶠ` | Effective saturated fraction: the weight of ``N²ˢ`` in `SaturationWeightedStaticStability`, ``N² = (1 - aᴺ) N²ᵈ + aᴺ N²ˢ``, from its `fraction`; for `CondensateFluxFraction`, ``aᴺ = w′qᶜ′ / w′s′`` of the subgrid distribution |
 | ``a^{\uparrow}, a^{\downarrow}`` | `a↑`, `a↓` | | Weights of the updraft and downdraft components of the `DoubleGaussian` subgrid distribution, ``a↓ = 1 - a↑`` ("plume" is reserved for the EDMF updraft) |

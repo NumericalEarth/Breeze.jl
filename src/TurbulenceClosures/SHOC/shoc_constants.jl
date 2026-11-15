@@ -70,6 +70,17 @@ const MixingLengthBlending = Union{HardMinimum, HarmonicBlend}
 component_scalar_names(::MixingLengthBlending, name) = ()
 @inline rebuild_component(blending::MixingLengthBlending, scalars, n) = blending, n
 
+# The coefficients of the stability functions of the turbulent Richardson number are its fourteen
+# values; the cached logarithms are rebuilt from them
+const TRSF = TurbulentRichardsonStabilityFunction
+@inline component_scalars(sf::TRSF) = TurbulenceClosures.stability_coefficients(sf)
+component_scalar_names(::TRSF, name) = TurbulenceClosures.TURBULENT_RICHARDSON_COEFFICIENTS
+@inline function rebuild_component(::TRSF, scalars, n)
+    m = length(TurbulenceClosures.TURBULENT_RICHARDSON_COEFFICIENTS)
+    return TRSF(ntuple(i -> scalars[n + i - 1], Val(m))...), n + m
+end
+@inline map_scalars(f, sf::TRSF) = TRSF(map(f, TurbulenceClosures.stability_coefficients(sf))...)
+
 TurbulenceClosures.convert_eltype(::Type{FT}, component::AbstractSHOCComponent) where FT =
     map_scalars(scalar -> convert(FT, scalar), component)
 

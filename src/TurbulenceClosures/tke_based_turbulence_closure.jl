@@ -21,8 +21,8 @@
 ##### which bounds ℓ by the stratified air above and below an elevated neutral or unstable layer, where
 ##### the local minimum lets it grow to the distance to the ground.
 #####
-##### The stability functions 𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ are functions of the stratification and shear numbers
-##### (`StratificationNumberStabilityFunction`, the default, in stratification_number_stability_functions.jl),
+##### The stability functions 𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ are functions of the turbulent Richardson number
+##### (`TurbulentRichardsonStabilityFunction`, the default, in turbulent_richardson_stability_functions.jl),
 ##### rational functions of the Richardson number (`RationalStabilityFunction`, in
 ##### richardson_number_stability_functions.jl), or constants (`ConstantStabilityFunctions`).
 #####
@@ -384,7 +384,7 @@ where ``Kᵘ``, ``Kᶜ`` and ``Kᵉ`` are the eddy diffusivities of momentum, sc
 kinetic energy, ``S²`` the squared vertical shear, ``N²`` the squared buoyancy frequency, ``ℓ`` the
 primary mixing length ([`AbstractMixingLength`](@ref): [`GradientLimitedMixingLength`](@ref) by default,
 [`LocalMinimumMixingLength`](@ref) or [`IntegralMixingLength`](@ref)), and ``𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ`` stability functions
-([`StratificationNumberStabilityFunction`](@ref) by default, [`RationalStabilityFunction`](@ref) or
+([`TurbulentRichardsonStabilityFunction`](@ref) by default, [`RationalStabilityFunction`](@ref) or
 [`ConstantStabilityFunctions`](@ref)). ``N²`` is
 diagnosed once per time-step stage at the cell
 interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default,
@@ -399,8 +399,9 @@ scale, and negative ``e`` — which advection can produce — is damped on
 the diffusivities, `Inf` by default. The squared shear ``S²`` and its floor ``S²ᵐⁱⁿ`` come from
 the `shear` component, [`GridMeanShear`](@ref), the shear of the resolved wind. They enter the
 Richardson number ``Ri = N² / (S² + S²ᵐⁱⁿ)`` of [`RationalStabilityFunction`](@ref) and the shear
-number ``τ² (S² + S²ᵐⁱⁿ)`` of [`StratificationNumberStabilityFunction`](@ref), whose functions are
-continuous in ``N²`` through neutral where the shear vanishes.
+number ``τ² (S² + S²ᵐⁱⁿ)`` in the turbulent Richardson number of
+[`TurbulentRichardsonStabilityFunction`](@ref), whose functions are smooth in ``N²`` through neutral
+where the shear vanishes.
 
 `subgrid_distribution` is `nothing` by default. A [`DoubleGaussian`](@ref) adds the subgrid
 distribution of θˡ, qᵗ and w from the closure's ``ℓ``, ``e`` and ``Kᶜ``; with it the shear and
@@ -462,11 +463,12 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Construct a [`TKEBasedTurbulenceClosure`](@ref) with the given time discretization (default
 `VerticallyImplicitTimeDiscretization()`), float type, mixing length, stability functions, static
 stability and numerical parameters. The default stability functions are
-[`StratificationNumberStabilityFunction()`](@ref StratificationNumberStabilityFunction), the provisional
+[`TurbulentRichardsonStabilityFunction()`](@ref TurbulentRichardsonStabilityFunction), the provisional
 calibration of the closure to the Shen et al. (2022) LES library in the calibration harness, mapped onto
-the stratification-number form and clipped into its bounds; the default mixing length is that
-calibration's, with the wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} = 0.6565692899592015`` of its
-neutral coefficients and the interior slope 1.5609936948461662.
+the turbulent-Richardson-number form and clipped into its bounds. The default mixing length has the
+wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} = 0.7511782141838061`` of the neutral values of the
+default stability functions (von Kármán's constant 0.4 in the surface layer) and that calibration's
+interior slope 1.5609936948461662.
 
 `shear` is the squared shear ``S²`` of the stability functions, [`GridMeanShear`](@ref). It carries the floor ``S²ᵐⁱⁿ > 0`` (default `1e-10` s⁻²) as
 `shear.minimum_shear_squared`; the keyword `minimum_shear_squared`, if given, replaces the floor
@@ -493,8 +495,8 @@ GridMeanShear(minimum_shear_squared = 1.0e-12)
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;
-                                   mixing_length = GradientLimitedMixingLength(ℂˢ = 0.6565692899592015, ℂⁱ = 1.5609936948461662),
-                                   stability_functions = StratificationNumberStabilityFunction(),
+                                   mixing_length = GradientLimitedMixingLength(ℂˢ = 0.7511782141838061, ℂⁱ = 1.5609936948461662),
+                                   stability_functions = TurbulentRichardsonStabilityFunction(),
                                    static_stability = MoistStaticStability(),
                                    maximum_viscosity = Inf,
                                    maximum_tracer_diffusivity = Inf,

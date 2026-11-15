@@ -157,9 +157,9 @@ Eddy diffusivities and dissipation from stability functions of the local gradien
 
     Kᶜ = 𝕊ᶜ(Ri) ℓ √e,    Kᵘ = 𝕊ᵘ(Ri) ℓ √e,    ε = 𝕊ᴰ(Ri) e^{3/2} / ℓ,    Ri = N² / (S² + S²ᵐⁱⁿ)
 
-or [`StratificationNumberStabilityFunction`](@ref), whose functions are of the stratification and
-shear numbers ``τ² N²`` and ``τ² (S² + S²ᵐⁱⁿ)`` with ``τ = ℓ / √e`` (``e`` floored at `mintke`; for the
-dissipation, the ``e`` before the TKE update of the level), and continuous in ``N²`` where the shear
+or [`TurbulentRichardsonStabilityFunction`](@ref), whose functions are of the turbulent Richardson
+number ``τ² N² / (ℂᴿⁱ τ² (S² + S²ᵐⁱⁿ) + ℂᵅ)`` with ``τ = ℓ / √e`` (``e`` floored at `mintke`; for the
+dissipation, the ``e`` before the TKE update of the level), and smooth in ``N²`` where the shear
 vanishes.
 
 in place of the damping by the stability of the whole column of

@@ -655,8 +655,8 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test isapprox(run.θ, original.θ; rtol = 2e-3)
         end
 
-        # The functions of the stratification and shear numbers, with τ = ℓ / √e
-        stratification = RichardsonStabilityFunctions(StratificationNumberStabilityFunction(), FT)
+        # The functions of the turbulent Richardson number, with τ = ℓ / √e
+        stratification = RichardsonStabilityFunctions(TurbulentRichardsonStabilityFunction(), FT)
         @test isbits(stratification)
         sf = stratification.functions
         τ² = ℓ^2 / e
@@ -669,8 +669,9 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test Kᵘ ≈ Breeze.TurbulenceClosures.momentum_stability_function(sf, αᴺ, αˢ) * ℓ * sqrt(e)
         closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = stratification,
                                                tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...)
-        @test (:ϑᴺ⁻, :ϑᴰ⁺) ⊆ keys(closure_parameters(closure))
-        @test with_parameters(closure; ϑᴺ⁻ = FT(1)).turbulence_time_scale.functions.ϑᴺ⁻ == FT(1)
+        @test (:ℂᵅ, :ℂᴿⁱ, :ℂᴰ⁺) ⊆ keys(closure_parameters(closure))
+        changed = with_parameters(closure; ℂᵅ = FT(6)).turbulence_time_scale.functions
+        @test changed == TurbulentRichardsonStabilityFunction(FT; ℂᵅ = 6)
         run = run_shoc_column(closure)
         @test all_finite(run)
         @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)

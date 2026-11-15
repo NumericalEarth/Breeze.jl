@@ -119,40 +119,43 @@ the closure's `solver` ([`SinglePass`](@ref), [`DampedFixedPoint`](@ref) or
 
 ### Stability functions
 
-The default is [`StratificationNumberStabilityFunction`](@ref). Each function passes from its
-neutral value ``C⁰`` to its unstable limit ``C⁻`` or its stable limit ``C⁺`` through the shape
-``s = x / (1 + x)`` of the distance from neutral, a function of the stratification number
-``α_N = τ² N²`` and the shear number ``α_S = τ² (S² + S²ᵐⁱⁿ)`` of turbulence with the time scale
-``τ = ℓ / \sqrt{e}``:
+The default is [`TurbulentRichardsonStabilityFunction`](@ref). Its argument is the turbulent
+Richardson number, formed from the stratification number ``α_N = τ² N²`` and the shear number
+``α_S = τ² (S² + S²ᵐⁱⁿ)`` of turbulence with the time scale ``τ = ℓ / \sqrt{e}``:
 
 ```math
-x = \frac{|α_N|}{ℂᴺ⁻ + Ri⁻ α_S} \quad (α_N < 0), \qquad
-x = \frac{α_N}{ℂᴺ⁺ (1 - α_N)⁺ + Ri⁺ α_S} \quad (α_N ≥ 0),
+Riᵗ = \frac{α_N}{ℂᴿⁱ α_S + ℂᵅ} = \frac{N²}{ℂᴿⁱ (S² + S²ᵐⁱⁿ) + ℂᵅ e / ℓ²}.
 ```
 
-and ``𝕊 = C⁰ (C^± / C⁰)^s`` ([`LogarithmicInterpolation`](@ref), the default) or
-``𝕊 = C⁰ + (C^± - C⁰) s`` ([`LinearInterpolation`](@ref)). Where the shear is strong
-``x = |Ri| / Ri^±`` with ``Ri = N² / (S² + S²ᵐⁱⁿ)``, the argument of the rational functions; where the
-shear vanishes the functions stay continuous in ``N²`` through neutral, with a transition of width
-``ℂᴺ^± e / ℓ²`` rather than the step of a function of ``Ri``. The squared shear ``S²`` and its floor
-``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` come from the closure's `shear`, [`GridMeanShear`](@ref).
+It is ``Ri / ℂᴿⁱ`` where the shear is strong, with ``Ri = N² / (S² + S²ᵐⁱⁿ)``, ``α_N / ℂᵅ`` where the
+shear vanishes, and smooth through ``N² = 0``. Each of the four functions takes its strongly unstable,
+neutral and strongly stable values ``ℂ⁻, ℂ⁰, ℂ⁺`` at ``v = -1, 0, 1``, with
+``v = Riᵗ / \sqrt{1 + Riᵗ²}``, through a quadratic in ``v`` of its logarithm:
 
-The coefficients are held unconstrained: each endpoint ratio is a smooth bijection of a real scalar
-``ϑ`` onto the bounds within which the functions are well posed (``|\ln(C⁻ / C⁰)| < ℂᴺ⁻`` and ``|\ln(C⁺ / C⁰)| < (ℂᴺ⁺⁻⁴ + ℂᴺ⁺⁴)^{-1/4}`` for
-``𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ``, ``ℂᶜ⁺ < 1``, ``ℂᵘ⁺ / ℂᵘ⁰ < 7.4``, ``Ri⁺ > 0.1``, ``0.3 < ℂᴺ⁻ < 10``,
-``0.1 < ℂᴺ⁺ < 2``), so that a calibration of the scalars [`closure_parameters`](@ref) lists cannot
-leave that region. The defaults are the provisional calibration of the closure in the calibration
-harness, mapped onto this form with ``ℂᴺ⁻ = 2``, ``ℂᴺ⁺ = 1`` and clipped into the bounds:
+```math
+\ln 𝕊 = \ln ℂ⁰ + \tfrac{1}{2} \ln(ℂ⁺ / ℂ⁻) \, v + \left[\tfrac{1}{2} \ln(ℂ⁺ ℂ⁻) - \ln ℂ⁰\right] v².
+```
 
-| Function | Unstable limit | Neutral | Stable limit |
+The functions are positive, smooth and without branches for any positive coefficients. The squared
+shear ``S²`` and its floor ``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` come from the closure's `shear`,
+[`GridMeanShear`](@ref).
+
+The fourteen coefficients are what [`closure_parameters`](@ref) lists. For a calibration,
+`Breeze.TurbulenceClosures.stability_coefficient_bounds` gives each an independent interval,
+``[0.05, 20]`` by default, except ``ℂᵅ ≥ 4.19``: where the shear vanishes the logarithmic slope of a
+function in ``α_N`` is at most ``0.699 \ln(20 / 0.05) / ℂᵅ``, and this bound keeps it below one, the
+width condition of the stability functions. The defaults are the provisional calibration of the
+closure in the calibration harness, clipped into ``[0.05, 20]``:
+
+| Function | Strongly unstable | Neutral | Strongly stable |
 |:--|--:|--:|--:|
-| momentum | 0.361 | 0.159 | 0.0110 |
+| momentum | 0.361 | 0.159 | 0.05 |
 | scalars | 0.0817 | 0.199 | 0.424 |
-| TKE | 0.0442 | 0.00731 | 0.0156 |
-| dissipation | 0.00541 | 0.0292 | 0.0622 |
+| TKE | 0.05 | 0.05 | 0.05 |
+| dissipation | 0.05 | 0.05 | 0.0622 |
 
-with ``Ri⁻ ≈ 12.7`` and ``Ri⁺ = 0.11``, and the mixing length's wall coefficient
-``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 0.657`` and interior slope ``ℂⁱ ≈ 1.56``.
+with ``ℂᴿⁱ = 8.7`` and ``ℂᵅ = 4.2``, and the mixing length's wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 0.751`` and
+interior slope ``ℂⁱ ≈ 1.56``.
 
 [`RationalStabilityFunction`](@ref) is
 ``S(Ri) = C⁰ + (C^± - C⁰) x / (1 + x)`` with ``x = |Ri| / Ri^±``, which is continuous but kinked at
