@@ -249,6 +249,10 @@ fields to ``U^n - U^L``.
 
 ### Outer scheme: Wicker–Skamarock RK3
 
+The default outer scheme for [`SplitExplicitTimeDiscretization`](@ref) is
+[`MultirateInfinitesimalStep`](@ref) with its `:SSPMIS43` coefficients. Select Wicker–Skamarock RK3 with
+`timestepper = :AcousticRungeKutta3`.
+
 The [`AcousticRungeKutta3`](@ref) time stepper is the three-stage Wicker–Skamarock RK3
 ([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) with stage fractions
 ``β = (1/3, 1/2, 1)``:

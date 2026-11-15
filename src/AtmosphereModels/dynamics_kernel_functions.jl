@@ -159,29 +159,20 @@ end
              + c_forcing(i, j, k, grid, clock, model_fields))
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The advective part of `scalar_tendency`: the flux divergence ``-∇·(ρ 𝐔ᵗ c)`` of the specific
-scalar `c`, weighted by the total density, by the transport velocity plus the species' sedimentation
-velocity (`microphysical_velocities`), ``𝐔ᵗ = 𝐔 + 𝐔ᵖ``.
-"""
-@inline function scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities,
-                                           microphysics, microphysical_fields)
+# The advective part of `scalar_tendency`: -∇·(ρ 𝐔ᵗ c), with 𝐔ᵗ the transport plus sedimentation velocity.
+@inline function scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities, microphysics, microphysical_fields)
     Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
     return - div_ρUc(i, j, k, grid, advection, total_density(dynamics), Uᵗ, c)
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
+# The same, taking the argument list of `scalar_tendency`, which a kernel can pass through whole.
+@inline scalar_advective_tendency(i, j, k, grid, c, id, name, c_forcing, advection, dynamics, formulation, constants,
+                                  specific_prognostic_moisture, velocities, microphysics, microphysical_fields, args...) =
+    scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities, microphysics, microphysical_fields)
 
-The non-advective part of `scalar_tendency`, with its signature: closure diffusion, forcing and
-the flux-form correction of prescribed dynamics — everything but [`scalar_advective_tendency`](@ref).
-The microphysical sources are added separately (`compute_microphysical_tendencies!`). A time stepper
-that treats a scalar's advection differently from its sources builds the two parts with one evaluation
-of each (`SplitScalarTendencies`) instead of recomputing the advection to separate them.
-"""
+# The rest of `scalar_tendency`, with its signature: closure diffusion, forcing and the flux-form
+# correction of prescribed dynamics. Microphysical sources are added separately.
 @inline function nonadvective_scalar_tendency(i, j, k, grid,
                                               c,
                                               id,

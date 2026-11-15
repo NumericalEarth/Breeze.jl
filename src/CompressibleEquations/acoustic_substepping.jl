@@ -1584,32 +1584,10 @@ end
 ##### The part of the stage-entry momentum force that the loop's linear operator does not carry
 #####
 
-"""
-$(TYPEDEF)
-
-The remainder ``R(U) = P(U) - 𝖫 U`` of the momentum force that the acoustic loop applies frozen
-from the stage-entry state ``U`` — the full pressure gradient and buoyancy ``P(U) = -∇p - g ρ`` —
-after subtracting the loop's linear operator applied to the same state,
-``𝖫 U = -∇(Cᴸ ρθ) - g ρᵈ``. It is what the loop does *not* integrate as fast: the curvature of
-the equation of state in ``ρθ``, the dependence of pressure on moisture and condensate at fixed
-``ρθ``, and the water loading ``-g (ρ - ρᵈ)``. A multirate stepper has to recombine it across
-stages like any other slow tendency; left at weight one from the stage-entry state it is
-integrated with the tableau ``(α, diag(d), γ)``, which is first-order accurate.
-
-The remainder is evaluated relative to the outer-step-start state ``Uⁿ``, ``R(U) - R(Uⁿ)``: a
-constant shift of the slow tendency leaves the stage forcing unchanged, since the weights it is
-recombined with sum to zero, and every term is then a difference of nearby states,
-
-    R(U) - R(Uⁿ) = ∇[Cᴸ (ρθ - ρθⁿ) - (p - pⁿ)] - g [(ρ - ρᵈ) - (ρ - ρᵈ)ⁿ],
-
-so the hydrostatic parts of ``∂z p`` and ``∂z(Cᴸ ρθ)``, five orders of magnitude larger, are
-subtracted exactly before any product or gradient is formed (which matters in `Float32`).
-
-`direction` is `Val(:x)`, `Val(:y)` or `Val(:z)`.
-"""
-struct StageEntryForceRemainder{D, G, P, PN, T, TN, C, R, RD, WN, WC, FT}
+# R(U) - R(Uⁿ), where R(U) = P(U) - 𝖫 U is the pressure gradient and buoyancy less the loop's linear
+# operator. Differencing from the step-start state Uⁿ cancels the hydrostatic parts exactly.
+struct StageEntryForceRemainder{D, P, PN, T, TN, C, R, RD, WN, WC, TC}
     direction :: D
-    grid :: G
     pressure :: P                           # p
     step_start_pressure :: PN               # pⁿ
     thermodynamic_density :: T              # ρθ
@@ -1619,36 +1597,28 @@ struct StageEntryForceRemainder{D, G, P, PN, T, TN, C, R, RD, WN, WC, FT}
     dry_density :: RD                       # ρᵈ
     step_start_water_density :: WN          # (ρ - ρᵈ)ⁿ
     step_start_moisture_content :: WC       # Wⁿ = W(Uⁿ) − W(Yᵢ₋₁), scaled; see `compute_step_start_moisture_content!`
-    gravitational_acceleration :: FT
+    thermodynamic_constants :: TC
 end
 
-Adapt.adapt_structure(to, r::StageEntryForceRemainder) =
-    StageEntryForceRemainder(r.direction, adapt(to, r.grid),
+const SEFR = StageEntryForceRemainder
+
+Adapt.adapt_structure(to, r::SEFR) =
+    StageEntryForceRemainder(r.direction,
                              adapt(to, r.pressure), adapt(to, r.step_start_pressure),
                              adapt(to, r.thermodynamic_density), adapt(to, r.step_start_thermodynamic_density),
                              adapt(to, r.pressure_coefficient),
                              adapt(to, r.total_density), adapt(to, r.dry_density),
                              adapt(to, r.step_start_water_density),
                              adapt(to, r.step_start_moisture_content),
-                             r.gravitational_acceleration)
+                             r.thermodynamic_constants)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The fields that hold the outer-step-start state a [`StageEntryForceRemainder`](@ref) is measured
-from: the pressure, the thermodynamic density and the water density ``ρ - ρᵈ``, halos included.
-"""
+# Fields holding the outer-step-start state that a `StageEntryForceRemainder` is measured from.
 step_start_force_state(grid) = (pressure = CenterField(grid),
                                 thermodynamic_density = CenterField(grid),
                                 water_density = CenterField(grid),
                                 moisture_content = CenterField(grid))
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Copy the current pressure, thermodynamic density and water density of `model` into `step_start`
-(see `step_start_force_state`), halos included: the remainder differences them across cells.
-"""
+# Copies the halos too: the remainder differences these fields across cells.
 function store_step_start_force_state!(step_start, model)
     parent(step_start.pressure) .= parent(model.dynamics.pressure)
     parent(step_start.thermodynamic_density) .= parent(thermodynamic_density(model.formulation))
@@ -1657,26 +1627,8 @@ function store_step_start_force_state!(step_start, model)
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Compute, at the stage-entry state, the moisture content `Wⁿ = W(Uⁿ) − W(Yᵢ₋₁)` of the outer-step-start
-state `Uⁿ` relative to the stage-entry state, with the stage-entry sensitivities the loop uses
-(Section 3b), into `step_start.moisture_content`, halos filled.
-
-The loop's linear pressure is ``Cᴸ ϖ``, with ``ϖ = (ρθ)′ + W`` and the content ``W`` of the
-moisture and dry density measured from the stage-entry state at that state's sensitivities. So
-the part of the stage-entry pressure that the loop's linear operator accounts for, relative to
-the step start, is ``Cᴸ [(ρθ − ρθⁿ) + W(Yᵢ₋₁) − W(Uⁿ)] = Cᴸ [(ρθ − ρθⁿ) − Wⁿ]``. The remainder
-[`StageEntryForceRemainder`](@ref) subtracts exactly that, so that what is recombined as slow is
-only what the loop does not carry: equation-of-state curvature and the part of the composition
-dependence the first-order content misses. Without moisture ``Wⁿ = 0`` exactly.
-
-Where the microphysics adjusts the partition of its moisture, a difference of states enters the
-loop's pressure scaled by ``ς`` (Section 3b), so the loop accounts for
-``Cᴸ ς [(ρθ − ρθⁿ) − Wⁿ]``. What is stored there is ``(1 − ς) (ρθ − ρθⁿ) + ς Wⁿ``, which the
-remainder subtracts from ``ρθ − ρθⁿ`` like ``Wⁿ``; elsewhere ``ς = 1`` and it is ``Wⁿ``.
-"""
+# Stores (1 − ς) (ρθ − ρθⁿ) + ς Wⁿ, with Wⁿ = W(Uⁿ) − W(Yᵢ₋₁) the moisture content of the step-start
+# state relative to the stage-entry state. ς = 1 where microphysics does not adjust the moisture partition.
 function compute_step_start_moisture_content!(step_start, substepper, model, Uⁿ)
     grid = model.grid
     state, _ = moisture_content_arguments(substepper, model, Uⁿ)
@@ -1701,55 +1653,64 @@ compute_step_start_moisture_content!(::Nothing, substepper, model, Uⁿ) = nothi
     @inbounds Wⁿ[i, j, k] = (1 - ς) * (ρᵡ[i, j, k] - ρᵡⁿ[i, j, k]) + ς * W
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The [`StageEntryForceRemainder`](@ref) of the momentum component along `direction`, read from the
-live (stage-entry) model state, the outer-step-start state `step_start` and the substepper's
-cached pressure coefficient, which must be the one frozen at the outer-step start.
-"""
+# The substepper's cached pressure coefficient must be the one frozen at the outer-step start.
 function StageEntryForceRemainder(direction, substepper::AcousticSubstepper, model, step_start)
-    FT = eltype(model.grid)
-    g = convert(FT, model.thermodynamic_constants.gravitational_acceleration)
-    return StageEntryForceRemainder(direction, model.grid,
-                                    model.dynamics.pressure, step_start.pressure,
-                                    thermodynamic_density(model.formulation), step_start.thermodynamic_density,
-                                    substepper.linearization_pressure_coefficient,
-                                    model.dynamics.total_density, model.dynamics.dry_density,
-                                    step_start.water_density, step_start.moisture_content, g)
+    dynamics = model.dynamics
+    ρᵡ = thermodynamic_density(model.formulation)
+    Cᴸ = substepper.linearization_pressure_coefficient
+
+    return StageEntryForceRemainder(direction,
+                                    dynamics.pressure,
+                                    step_start.pressure,
+                                    ρᵡ,
+                                    step_start.thermodynamic_density,
+                                    Cᴸ,
+                                    dynamics.total_density,
+                                    dynamics.dry_density,
+                                    step_start.water_density,
+                                    step_start.moisture_content,
+                                    model.thermodynamic_constants)
 end
 
 # Cᴸ [(ρθ − ρθⁿ) − Wⁿ] − (p − pⁿ): its gradient is the pressure-gradient remainder, relative to the
 # step start. Cᴸ [(ρθ − ρθⁿ) − Wⁿ] is the change of the loop's own linear pressure Cᴸ ϖ, which
 # carries the moisture content W (see `compute_step_start_moisture_content!`).
-@inline linearized_pressure_remainder(i, j, k, grid, r) =
-    @inbounds r.pressure_coefficient[i, j, k] * (r.thermodynamic_density[i, j, k] - r.step_start_thermodynamic_density[i, j, k] -
-                                                 r.step_start_moisture_content[i, j, k]) -
-              (r.pressure[i, j, k] - r.step_start_pressure[i, j, k])
+@inline function linearized_pressure_remainder(i, j, k, grid, r)
+    @inbounds begin
+        Cᴸ = r.pressure_coefficient[i, j, k]
+        δρᵡ = r.thermodynamic_density[i, j, k] - r.step_start_thermodynamic_density[i, j, k]
+        Wⁿ = r.step_start_moisture_content[i, j, k]
+        δp = r.pressure[i, j, k] - r.step_start_pressure[i, j, k]
+    end
+    return Cᴸ * (δρᵡ - Wⁿ) - δp
+end
 
 # (ρ − ρᵈ) − (ρ − ρᵈ)ⁿ: the change of the water loading since the step start.
-@inline water_density_change(i, j, k, grid, r) =
-    @inbounds (r.total_density[i, j, k] - r.dry_density[i, j, k]) - r.step_start_water_density[i, j, k]
+@inline function water_density_change(i, j, k, grid, r)
+    @inbounds begin
+        ρ = r.total_density[i, j, k]
+        ρᵈ = r.dry_density[i, j, k]
+        ρˣⁿ = r.step_start_water_density[i, j, k]
+    end
+    return (ρ - ρᵈ) - ρˣⁿ
+end
 
-@inline stage_entry_force_remainder(i, j, k, r::StageEntryForceRemainder{Val{:x}}) =
-    ∂xᶠᶜᶜ(i, j, k, r.grid, linearized_pressure_remainder, r)
-
-@inline stage_entry_force_remainder(i, j, k, r::StageEntryForceRemainder{Val{:y}}) =
-    ∂yᶜᶠᶜ(i, j, k, r.grid, linearized_pressure_remainder, r)
+@inline stage_entry_force_remainder(i, j, k, grid, r::SEFR{Val{:x}}) = ∂xᶠᶜᶜ(i, j, k, grid, linearized_pressure_remainder, r)
+@inline stage_entry_force_remainder(i, j, k, grid, r::SEFR{Val{:y}}) = ∂yᶜᶠᶜ(i, j, k, grid, linearized_pressure_remainder, r)
 
 # The bottom and top faces carry no vertical momentum tendency (see `_build_vertical_rhs!`).
-@inline function stage_entry_force_remainder(i, j, k, r::StageEntryForceRemainder{Val{:z}})
-    grid = r.grid
+@inline function stage_entry_force_remainder(i, j, k, grid, r::SEFR{Val{:z}})
+    g = r.thermodynamic_constants.gravitational_acceleration
     ∂z_R = ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_remainder, r)
     δρˣ = ℑzᵃᵃᶠ(i, j, k, grid, water_density_change, r)
     interior_face = (k > 1) & (k < size(grid, 3) + 1)
-    return ifelse(interior_face, ∂z_R - r.gravitational_acceleration * δρˣ, zero(grid))
+    return ifelse(interior_face, ∂z_R - g * δρˣ, zero(grid))
 end
 
 # The substeps run under `ReactantCore.@trace`: a plain loop on ordinary arrays, a single traced
 # `while` loop under Reactant, so the compiled program holds one copy of the substep body rather
 # than `Nτ`. Reverse-mode differentiation of that loop caches a minimal cut of its values (`mincut`).
-function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
+function run_acoustic_substeps!(Nτ, model, substepper, stage, advection)
     @trace mincut=true track_numbers=false for n in 1:Nτ
         acoustic_substep!(model, substepper, stage, advection, n)
     end
@@ -2606,13 +2567,13 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Execute one Wicker–Skamarock RK3 stage of the linearized acoustic
-substep loop. Number and size of substeps in this stage depend on
-`substepper.substep_distribution`. The recovery of the full state from the stage-entry state and
+Execute the linearized acoustic substep loop of one stage of the outer scheme, over the
+interval `β_stage * Δt` and starting from the state `Uᴸ`. Number and size of substeps in this
+stage depend on `substepper.substep_distribution`. `advection` is the advection scheme of the
+thermodynamic density. The recovery of the full state from the stage-entry state and
 the accumulated perturbations is rounded with the round-off treatment `rounding`.
 """
-function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection = nothing;
-                                    rounding = RoundToNearest())
+function acoustic_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection, rounding)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -2651,7 +2612,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰ = Uᴸ, forcing_interval)
     factor_implicit_advection!(model, substepper, advection, Δτ)
     factor_vertical_solver!(substepper, grid, constants, δτᵐ⁺)
-    acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
+    run_acoustic_substeps!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
     # time-averaged velocity field. Read by `update_state!` through
@@ -2693,16 +2654,8 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Compute into `C` the stage-entry thermodynamic flux divergence in the discretization of the
-substep loop, ``C = -∇·(θᴸ (ρu)ᴸ)`` with ``θᴸ`` the substepper's cached linearization potential
-temperature (so [`prepare_acoustic_cache!`](@ref) must have run for this stage). This is the
-part of the thermodynamic tendency that the acoustic loop integrates as fast: its perturbation
-about the stage-entry state is ``-∇·(θᴸ (ρu)′)``. Multirate steppers subtract it from the full
-tendency to isolate the slow remainder.
-"""
+# C = -∇·(θᴸ (ρu)ᴸ), the part of the thermodynamic tendency that the acoustic loop integrates as fast.
+# `prepare_acoustic_cache!` must have run for this stage.
 function compute_linearized_thermodynamic_flux_divergence!(C, substepper::AcousticSubstepper, model)
     grid = model.grid
     launch!(architecture(grid), grid, :xyz, _linearized_thermodynamic_flux_divergence!,

@@ -55,7 +55,7 @@ export
     store_step_start_force_state!,
     compute_step_start_moisture_content!,
     freeze_linearization_state!,
-    acoustic_rk3_substep_loop!,
+    acoustic_substep_loop!,
     compute_transport_density_tendency!
 
 using DocStringExtensions: TYPEDEF

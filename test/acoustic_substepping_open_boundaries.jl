@@ -19,7 +19,7 @@ using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: SplitExplicitTimeDiscretization,
                                     explicit_horizontal_step!, enforce_wall_impenetrability!,
                                     _build_predictors!, prepare_acoustic_cache!,
-                                    factor_vertical_solver!, acoustic_substep_loop!
+                                    factor_vertical_solver!, run_acoustic_substeps!
 using Breeze.AtmosphereModels: thermodynamic_density
 using Breeze.Microphysics: SaturationAdjustment, WarmPhaseEquilibrium
 using Breeze.Thermodynamics: ExnerReferenceState
@@ -184,7 +184,7 @@ for arch in arches
             stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ, U⁰ = model.timestepper.U⁰,
                      forcing_interval = 3Δτ)
             factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
-            acoustic_substep_loop!(3, model, substepper, stage, nothing)
+            run_acoustic_substeps!(3, model, substepper, stage, nothing)
 
             # Check momentum increments and the raw transport sum.
             for momentum in (substepper.momentum_perturbation, substepper.time_averaged_velocities)

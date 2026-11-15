@@ -23,7 +23,7 @@ evaluated at ``Yⱼ₋₁``. The fast tendency is linearized once per step, abou
 The slow tendency excludes everything the acoustic loop integrates: momentum tendencies never
 contain the pressure gradient or buoyancy; the continuity tendency ``-∇·(ρu)`` is entirely fast;
 and the thermodynamic slow tendency is the full tendency minus ``-∇·(θ (ρu))`` in the loop's
-discretization (see [`compute_linearized_thermodynamic_flux_divergence!`](@ref)). With
+discretization (see `compute_linearized_thermodynamic_flux_divergence!`). With
 the `:WickerSkamarock3` coefficients the scheme reduces to `AcousticRungeKutta3`.
 
 Fields
@@ -34,14 +34,16 @@ Fields
   (see `stage_start_state`).
 - `Gⁿ`: tendency storage; holds the combined slow forcing during each acoustic loop.
 - `implicit_solver`, `substepper`: as for `AcousticRungeKutta3`.
+- `rounding`: Round-off treatment of the final stage's update, [`RoundToNearest`](@ref)
+  or [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding).
 - `Uⁿ`: the outer-step-start state.
 - `accumulators`: for each stage ``k = 3, …, s``, the parts of its forcing and start state known so far,
   `forcing` ``= (1/dₖ) Σⱼ (βₖⱼ Sⱼ + γₖⱼ ΔYⱼ / Δt)`` and `offset` ``= Σⱼ αₖⱼ ΔYⱼ``, accumulated as each
   ``Sⱼ`` and ``ΔYⱼ = Yⱼ - Uⁿ`` becomes available, so no ``Sⱼ`` or ``ΔYⱼ`` is stored. Until stage 2
   consumes them, stage 3's pair holds the raw ``S₁`` and, for the moisture, microphysical and tracer
   fields, the raw ``ΔY₁`` (see `stage_increment_source`).
-- `fast_tendency`: scratch for the fast parts of the tendencies: with [`PreLoopScalarTendencies`](@ref)
-  one field, for the stage-entry fast thermodynamic tendency; with [`PostLoopScalarTendencies`](@ref)
+- `fast_tendency`: scratch for the fast parts of the tendencies: with `PreLoopScalarTendencies`
+  one field, for the stage-entry fast thermodynamic tendency; with `PostLoopScalarTendencies`
   one per prognostic the acoustic loop does not advance by continuity or momentum — the
   thermodynamic variable's, used as before the loop, and each scalar's, which the post-loop build
   fills with its advective tendency (see `fast_tendency_scratch`).
@@ -57,18 +59,19 @@ Fields
   slow remainder of the stage-entry pressure gradient and buoyancy is measured from, or `nothing`
   where that remainder is not recombined (see `step_start_storage`).
 - `scalar_tendencies`: when the moisture and tracer tendencies are built,
-  [`PreLoopScalarTendencies`](@ref) (between stages, the default) or
-  [`PostLoopScalarTendencies`](@ref) (after each stage's own acoustic loop). With the latter, the
+  `PreLoopScalarTendencies` (between stages, the default) or
+  `PostLoopScalarTendencies` (after each stage's own acoustic loop). With the latter, the
   scalars' slow tendency ``Sᵢ`` stored for stage ``i`` is the post-loop one, and their stage forcing
   and start state are assembled after the loop.
 """
-struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC, ST, SS, TA} <: AcousticTimeStepper
+struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, R, UN, AC, FC, ST, SS, TA} <: AcousticTimeStepper
     relinearize_stages :: Bool
     tableau :: TB
     U⁰ :: U0
     Gⁿ :: TG
     implicit_solver :: TI
     substepper :: AS
+    rounding :: R
     Uⁿ :: UN
     accumulators :: AC
     fast_tendency :: FC
@@ -109,7 +112,15 @@ unstable beyond a Courant number of about 0.2 with fifth-order schemes.
 
 `post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
-between stages with the preceding loop's (see [`PostLoopScalarTendencies`](@ref)).
+between stages with the preceding loop's (see `PostLoopScalarTendencies`).
+
+`rounding` sets the round-off treatment of the step's final update (default:
+[`RoundToNearest`](@ref)), as for `AcousticRungeKutta3`: with
+[`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding), the last stage's
+recovery of the acoustic prognostics from their stage-start values plus the accumulated
+perturbations, and its update ``u⁰ + Δt G`` of the other scalars, are rounded stochastically.
+The perturbations themselves, the earlier stages, and the vertically-implicit solves stay
+round-to-nearest.
 """
 function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
@@ -117,9 +128,11 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     implicit_solver = nothing,
                                     cache_advecting_state = false,
                                     relinearize_stages = false,
-                                    post_loop_scalar_tendencies = false)
+                                    post_loop_scalar_tendencies = false,
+                                    rounding = RoundToNearest())
 
     FT = eltype(grid)
+    rounding = materialize_rounding(rounding, grid.architecture)
     tableau = multirate_infinitesimal_step_tableau(coefficients, FT)
     s = number_of_stages(tableau)
     s ≥ 3 || throw(ArgumentError("MultirateInfinitesimalStep needs at least three stages; got $s."))
@@ -142,7 +155,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     end
 
     return MultirateInfinitesimalStep(relinearize_stages, tableau, U⁰, Gⁿ, implicit_solver, substepper,
-                                      Uⁿ, accumulators, fast_tendency, scalar_tendencies, step_start,
+                                      rounding, Uⁿ, accumulators, fast_tendency, scalar_tendencies, step_start,
                                       ntuple(_ -> CenterField(grid), s - 1),
                                       Ref(1), Ref(1), Ref(NaN))
 end
@@ -173,29 +186,14 @@ fast_tendency_scratch(scratch, name) = scratch
 refresh_stage_linearization!(ts::MultirateInfinitesimalStep, substepper, model) =
     ts.relinearize_stages ? prepare_acoustic_cache!(substepper, model) : nothing
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The adaptive-implicit split time step for the MIS stage that the tendencies about to be built will
-drive: its fast interval ``dᵢ Δt``, so the explicit fraction frozen into those tendencies pairs with the
-implicit remainder that stage applies (`implicit_substep!` over ``dᵢ Δt``). Tendencies built at the end of
-a step feed stage 1 of the next, whose ``Δt`` is not yet known; the current one is used, as
-`AcousticRungeKutta3` does. Stage ``i``'s forcing also recombines earlier stages' explicit tendencies
-with weights ``βᵢⱼ/dᵢ``, so the explicit/implicit pairing is exact only for the diagonal term.
-"""
+# The fast interval dᵢ Δt of the stage that the tendencies about to be built will drive. Tendencies
+# built at the end of a step feed stage 1 of the next, whose Δt is not yet known; the current one is used.
 @inline function Oceananigans.Advection.adaptive_advection_timestep(ts::MultirateInfinitesimalStep, clock)
     Δt = ifelse(isfinite(ts.current_Δt[]), ts.current_Δt[], clock.last_Δt)
     return ts.tableau.d[ts.next_stage[]] * Δt
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Whether the tendencies the next `update_state!` builds feed the first stage of an outer step, so that
-state an advection scheme freezes for the whole step (see `Breeze.Advection.FrozenWeightsWENO`) is
-to be refreshed from the current fields. `true` for every time stepper but MIS, which raises
-`next_stage` past 1 while its stages run.
-"""
+# Whether the next `update_state!` builds the tendencies of the first stage of an outer step.
 tendencies_feed_first_stage(timestepper) = true
 tendencies_feed_first_stage(ts::MultirateInfinitesimalStep) = ts.next_stage[] == 1
 
@@ -230,33 +228,20 @@ Adapt.adapt_structure(to, s::FastSlowTendencySplit) = FastSlowTendencySplit(adap
 Adapt.adapt_structure(to, s::PartitionedTendencySplit) = PartitionedTendencySplit(adapt(to, s.advective_tendency))
 Adapt.adapt_structure(to, s::StageEntryForceSplit) = StageEntryForceSplit(adapt(to, s.remainder))
 
-@inline slow_part(::SlowTendencySplit, G, i, j, k) = @inbounds G[i, j, k]
-@inline slow_part(::ContinuityTendencySplit, G, i, j, k) = zero(eltype(G))
-@inline slow_part(s::FastSlowTendencySplit, G, i, j, k) = @inbounds G[i, j, k] - s.fast_tendency[i, j, k]
-@inline slow_part(s::PartitionedTendencySplit, G, i, j, k) = @inbounds G[i, j, k] + s.advective_tendency[i, j, k]
-@inline slow_part(s::StageEntryForceSplit, G, i, j, k) = @inbounds G[i, j, k] + stage_entry_force_remainder(i, j, k, s.remainder)
+@inline slow_part(i, j, k, grid, ::SlowTendencySplit, G) = @inbounds G[i, j, k]
+@inline slow_part(i, j, k, grid, ::ContinuityTendencySplit, G) = zero(eltype(G))
+@inline slow_part(i, j, k, grid, s::FastSlowTendencySplit, G) = @inbounds G[i, j, k] - s.fast_tendency[i, j, k]
+@inline slow_part(i, j, k, grid, s::PartitionedTendencySplit, G) = @inbounds G[i, j, k] + s.advective_tendency[i, j, k]
+@inline slow_part(i, j, k, grid, s::StageEntryForceSplit, G) = @inbounds G[i, j, k] + stage_entry_force_remainder(i, j, k, grid, s.remainder)
 
-@inline full_tendency(split, G, i, j, k) = @inbounds G[i, j, k]
-@inline full_tendency(s::PartitionedTendencySplit, G, i, j, k) = @inbounds G[i, j, k] + s.advective_tendency[i, j, k]
+@inline full_tendency(i, j, k, grid, split, G) = @inbounds G[i, j, k]
+@inline full_tendency(i, j, k, grid, s::PartitionedTendencySplit, G) = @inbounds G[i, j, k] + s.advective_tendency[i, j, k]
 
 tendency_split(name, θ_name, C) = name === :ρᵈ ? ContinuityTendencySplit() :
                                   name === θ_name ? FastSlowTendencySplit(C) : SlowTendencySplit()
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-How the tendency of prognostic `name` splits into fast and slow parts for the stage assembly.
-
-The acoustic loop adds the stage-entry pressure gradient and buoyancy ``P(Yᵢ₋₁)`` to the momentum
-forcing at weight one. Only its linear part ``𝖫 Yᵢ₋₁`` belongs to the fast operator; the remainder
-``R = P - 𝖫`` (see [`StageEntryForceRemainder`](@ref)) is slow, so the momentum's slow part is
-``Sᵢ = Gᵢ + R(Yᵢ₋₁)`` and the forcing ``Gᵢ + (βᵢᵢ/dᵢ - 1) Sᵢ + Fᵢ`` sums with ``P(Yᵢ₋₁)`` to
-``𝖫 Yᵢ₋₁ + (1/dᵢ) Σⱼ βᵢⱼ Sⱼ + …``.
-
-The remainder is recombined whenever the stepper holds the outer-step-start state it is measured
-from (`ts.step_start`, see `step_start_storage`); otherwise the momentum tendency alone is slow
-and the remainder stays at weight one from the stage-entry state.
-"""
+# The momentum's slow part includes the stage-entry force remainder when the stepper holds the
+# step-start state it is measured from (`ts.step_start`). Otherwise the momentum tendency alone is slow.
 function stage_tendency_split(ts, model, name, θ_name, C)
     direction = name === :ρu ? Val(:x) : name === :ρv ? Val(:y) : name === :ρw ? Val(:z) : nothing
     isnothing(direction) && return tendency_split(name, θ_name, C)
@@ -270,23 +255,10 @@ momentum_tendency_split(step_start, substepper, model, direction) =
 # Whether only the diagonal of `β` is nonzero: every stage then applies its own slow tendency alone.
 is_diagonal(β) = all(i == j || iszero(β[i, j]) for i in axes(β, 1), j in axes(β, 2))
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The outer-step-start fields that the stage-entry force remainder is measured from, or `nothing`
-when the remainder is not recombined:
-
-- with a diagonal `β` (Wicker–Skamarock), whose recombination weights all vanish;
-- with `relinearize_stages`: the remainder is defined against one linear operator for the whole
-  step, and a stage-dependent operator leaves nothing consistent to recombine;
-- with terrain-following coordinates, whose loop applies the stage-entry force through the
-  contravariant vertical momentum.
-  TODO: recombine the terrain-following remainder, with the metric terms of
-  `terrain_x_pressure_gradient` and the contravariant vertical force.
-
-In the last two cases a non-diagonal tableau integrates the remainder (the moisture dependence of
-the pressure gradient and the water loading) at first order in time.
-"""
+# `nothing` when the stage-entry force remainder is not recombined: with a diagonal `β`, with
+# `relinearize_stages`, or with terrain-following coordinates.
+# TODO: recombine the terrain-following remainder, with the metric terms of
+# `terrain_x_pressure_gradient` and the contravariant vertical force.
 function step_start_storage(grid, dynamics, tableau, relinearize_stages)
     recombined = !is_diagonal(tableau.β) && !relinearize_stages && !(dynamics isa TerrainCompressibleDynamics)
     return recombined ? step_start_force_state(grid) : nothing
@@ -331,12 +303,12 @@ end
 
 # Stage 1: F₁ = Z₁ = 0, so the start state is Uⁿ itself (`stage_start_state`) and nothing is
 # written to U⁰. Keep S₁ (in stage 3's forcing accumulator) for later stages.
-@kernel function _first_multirate_stage!(G, split, wᵢ, S₁)
+@kernel function _first_multirate_stage!(G, grid, split, wᵢ, S₁)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        slow = slow_part(split, G, i, j, k)
+        slow = slow_part(i, j, k, grid, split, G)
         S₁[i, j, k] = slow
-        G[i, j, k] = full_tendency(split, G, i, j, k) + wᵢ * slow
+        G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * slow
     end
 end
 
@@ -378,14 +350,14 @@ end
 
 # Stage 2 reads the raw S₁ and turns it, with ΔY₁ and S₂, into the accumulators of stages k ≥ 3
 # (whose first pair is where S₁ and a stored ΔY₁ were kept: they are read before being overwritten).
-@kernel function _second_multirate_stage!(G, U⁰, Uⁿ, source, split, wᵢ, wβ₁, wγ₁, α₁, F, Z, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, α₁ᵏ)
+@kernel function _second_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, wβ₁, wγ₁, α₁, F, Z, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, α₁ᵏ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         S₁ = F[1][i, j, k]
         uⁿ = Uⁿ[i, j, k]
         ΔY₁ = first_increment(source, Z, uⁿ, i, j, k)
-        S₂ = slow_part(split, G, i, j, k)
-        G[i, j, k] = full_tendency(split, G, i, j, k) + wᵢ * S₂ + wβ₁ * S₁ + wγ₁ * ΔY₁
+        S₂ = slow_part(i, j, k, grid, split, G)
+        G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * S₂ + wβ₁ * S₁ + wγ₁ * ΔY₁
         U⁰[i, j, k] = uⁿ + α₁ * ΔY₁
         combine!(i, j, k, F, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, S₁, ΔY₁, S₂)
         assign!(i, j, k, Z, α₁ᵏ, ΔY₁)
@@ -393,13 +365,13 @@ end
 end
 
 # Stage i ≥ 3 uses its completed accumulators and adds Sᵢ to those of later stages.
-@kernel function _later_multirate_stage!(G, U⁰, Uⁿ, source, split, wᵢ, Fᵢ, Zᵢ, wγᵢ, αᵢ, F, Z, wγᵏ, wβᵏ, αᵏ)
+@kernel function _later_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, Fᵢ, Zᵢ, wγᵢ, αᵢ, F, Z, wγᵏ, wβᵏ, αᵏ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         uⁿ = Uⁿ[i, j, k]
-        slow = slow_part(split, G, i, j, k)
+        slow = slow_part(i, j, k, grid, split, G)
         forcing, offset = completed_accumulators(source, Fᵢ, Zᵢ, wγᵢ, αᵢ, uⁿ, i, j, k)
-        G[i, j, k] = full_tendency(split, G, i, j, k) + wᵢ * slow + forcing
+        G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * slow + forcing
         U⁰[i, j, k] = uⁿ + offset
         accumulate_later_stages!(source, F, Z, wγᵏ, wβᵏ, αᵏ, slow, uⁿ, i, j, k)
     end
@@ -426,31 +398,14 @@ end
     @inbounds Uⁿ[i, j, k] = u[i, j, k]
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The indices of `field` that the stage assembly, the stage increments and the outer-step-start
-copy cover: the interior, boundary faces included. No kernel reads the halos of `Uⁿ`, `U⁰`,
-`Gⁿ` or the accumulators — the acoustic loop fills the halos of everything it derives from
-them — and the halos are a large part of an array (43% more points than the interior on a
-168 × 168 × 40 grid with halos of 6, 6 and 5).
-
-With terrain-following coordinates the acoustic loop does read halos of the start state and of
-the momentum tendencies, to interpolate the horizontal momentum that the contravariant vertical
-momentum combines, so the whole array is covered there, halos included.
-"""
+# The interior, boundary faces included: no kernel reads the halos of the fields assembled. The
+# terrain-following acoustic loop does read them, so the whole array is covered there.
 stage_assembly_parameters(model, field) = KernelParameters(size(field), (0, 0, 0))
 
 stage_assembly_parameters(::TerrainCompressibleAcousticModel, field) =
-    KernelParameters(size(parent(field)), field.data.offsets)
+    KernelParameters(axes(field.data)...)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The state the acoustic integration of the current stage starts from, and the scalars update
-from: `Uⁿ` in stage 1, whose start state has no offset, and `U⁰ = Uⁿ + Zᵢ` after that. Both
-are read-only during a stage, so stage 1 needs no copy of `Uⁿ`.
-"""
+# `Uⁿ` in stage 1 and `U⁰ = Uⁿ + Zᵢ` after that. Both are read-only during a stage.
 stage_start_state(ts::MultirateInfinitesimalStep) = ts.stage[] == 1 ? ts.Uⁿ : ts.U⁰
 
 # Weights of stage j's contributions to the stages k = i+1, …, s that still need them.
@@ -462,21 +417,12 @@ offset_weights(α, j, ks) = map(k -> α[k, j], ks)
 # Accumulators of stages ks (k ≥ 3) of field `name`.
 accumulator_fields(ts, name, ks, part) = map(k -> getproperty(ts.accumulators[k - 2], part)[name], ks)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Assemble the start state (see `stage_start_state`) and slow forcing `Gⁿ` of MIS stage ``i = `` `ts.stage[]`. On
-entry `Gⁿ` holds the full tendency at ``Yᵢ₋₁``. The continuity forcing keeps the current (fast)
-mass-flux divergence, and the thermodynamic forcing keeps the current fast flux divergence at
-weight one, so only slow parts are recombined across stages; the slow part ``Sᵢ`` is folded into
-the accumulators of the later stages, with the increment ``ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ`` of the stage before
-where `store_stage_increment!` has not folded it in already (see `stage_increment_source`).
-
-Before the acoustic loop this assembles every prognostic, or, with
-[`PostLoopScalarTendencies`](@ref), only the ones the loop advances; the scalars are then
-assembled after the loop by `assemble_post_loop_stage_forcing!`, from their post-loop tendencies.
-"""
+# Assemble the start state and slow forcing of the current stage. On entry `Gⁿ` holds the full
+# tendency at Yᵢ₋₁. With `PostLoopScalarTendencies` the scalars are assembled after the loop instead.
 function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
+    # The stage weights divide by Δt, so Δt takes the grid's float type: a Float64 weight in a
+    # Float32 kernel fails to compile on GPUs without Float64 (Metal).
+    Δt = convert(eltype(model.grid), Δt)
     # The fast thermodynamic tendency is linearized about the stage-entry state, so it must be
     # evaluated here, before the loop.
     θ_name = thermodynamic_density_name(model.formulation)
@@ -491,17 +437,8 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Give the substepper's transport density tendency, which the moisture's part of the loop's pressure
-pairs with the moisture forcing, the stage combination that forcing has. On entry it holds
-``Gᵗᵢ``, the dry air's share of the divergence of the mass flux the moisture tendencies at
-``Yᵢ₋₁`` were built with; on exit ``(1/dᵢ) [Σⱼ βᵢⱼ Gᵗⱼ + Σⱼ γᵢⱼ ΔYⱼ / Δt]`` with ``ΔYⱼ`` the
-increments of the dry density, as `assemble_stage_forcing!` combines the moisture's slow
-tendencies and increments. With post-loop scalar tendencies the moisture's advective part is
-not recombined, and this pairing is not exact.
-"""
+# Give the transport density tendency the stage combination that the moisture forcing has:
+# (1/dᵢ) [Σⱼ βᵢⱼ Gᵗⱼ + Σⱼ γᵢⱼ ΔYⱼ / Δt], with ΔYⱼ the increments of the dry density.
 function assemble_transport_density_tendency!(ts::MultirateInfinitesimalStep, model, Δt)
     i = ts.stage[]
     (; β, γ, d) = ts.tableau
@@ -534,18 +471,8 @@ end
     end
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-With [`PostLoopScalarTendencies`](@ref), write the start states ``U⁰ = Uⁿ + Zᵢ`` of the moisture,
-the microphysical prognostics and the tracers before the acoustic loop of stages 2 to ``s``. Their
-stage forcing is assembled after the loop, but the loop's pressure reads the start state of the
-moisture and the condensate (`moisture_content_arguments`). Left to
-`assemble_post_loop_stage_forcing!`, which writes the same values again, the loop would read the
-start state of the stage before (in stage 2, of the last stage of the step before, which a
-checkpoint does not hold). The offsets are complete at stage entry, because the increments of
-these fields are stored when a stage completes (see `stage_increment_source`).
-"""
+# The loop's pressure reads the start state of the moisture and condensate, so with
+# `PostLoopScalarTendencies` the scalars' start states U⁰ = Uⁿ + Zᵢ are written before the loop.
 assemble_scalar_start_states!(::PreLoopScalarTendencies, ts, model) = nothing
 
 function assemble_scalar_start_states!(::PostLoopScalarTendencies, ts::MultirateInfinitesimalStep, model)
@@ -575,28 +502,10 @@ end
 pre_loop_assembly_names(::PreLoopScalarTendencies, model) = keys(prognostic_fields(model))
 pre_loop_assembly_names(::PostLoopScalarTendencies, model) = acoustic_prognostic_names(model)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-With [`PostLoopScalarTendencies`](@ref), assemble the moisture and tracer stage forcing after the
-acoustic loop, from the tendencies just built with the loop's time-averaged transport velocity.
-The whole tendency — the flux divergence by that velocity, sedimentation included, plus closure
-diffusion and sources, forcing, microphysical sources and boundary fluxes — is the slow ``Sᵢ``
-that the tableau recombines. A no-op for Wicker–Skamarock RK3.
-
-The advective part cannot be left at weight one from the current stage, although that would make
-the scalars' flux exactly ``q/(1 - q)`` times the dry-mass flux the stage applied: it would be
-integrated with the tableau ``(α, diag(d), γ)``, which for every non-diagonal set is first order
-with ``b̃·c < 1/2``, an anti-diffusive scheme that amplifies advected scalars at every Courant
-number. Recombined, a uniform mass fraction stays uniform only to the accuracy of the scheme, not
-to round-off, because the stages' loop means differ; Wicker–Skamarock keeps it to round-off.
-
-The post-loop build keeps the two parts apart (`post_loop_scalar_tendency_kernel`): the
-non-advective part is in `Gⁿ`, on top of the stage-entry sources, and the advective part in the
-scalar's `fast_tendency` scratch, and the assembly sums them.
-"""
+# Assemble the scalars' stage forcing after the loop. Their whole tendency is slow: the
+# non-advective part in `Gⁿ` plus the advective part in the scalar's `fast_tendency` scratch.
 assemble_post_loop_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt) =
-    assemble_post_loop_stage_forcing!(ts.scalar_tendencies, ts, model, Δt)
+    assemble_post_loop_stage_forcing!(ts.scalar_tendencies, ts, model, convert(eltype(model.grid), Δt))
 
 assemble_post_loop_stage_forcing!(::PreLoopScalarTendencies, ts, model, Δt) = nothing
 
@@ -631,11 +540,11 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
     parameters = stage_assembly_parameters(model, G)
 
     if i == 1
-        launch!(arch, grid, parameters, _first_multirate_stage!, G, split, wᵢ,
+        launch!(arch, grid, parameters, _first_multirate_stage!, G, grid, split, wᵢ,
                 ts.accumulators[1].forcing[name])
     elseif i == 2
         Z = accumulator_fields(ts, name, ks, :offset)
-        launch!(arch, grid, parameters, _second_multirate_stage!, G, U⁰, Uⁿ, source, split, wᵢ,
+        launch!(arch, grid, parameters, _second_multirate_stage!, G, grid, U⁰, Uⁿ, source, split, wᵢ,
                 β[2, 1] / d[2], γ[2, 1] / (d[2] * Δt), α[2, 1], F, Z,
                 forcing_weights(β, d, 1, ks), increment_weights(γ, d, Δt, 1, ks),
                 forcing_weights(β, d, 2, ks), offset_weights(α, 1, ks))
@@ -643,7 +552,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
         Fᵢ = ts.accumulators[i - 2].forcing[name]
         Zᵢ = ts.accumulators[i - 2].offset[name]
         Z = accumulator_fields(ts, name, ks, :offset)
-        launch!(arch, grid, parameters, _later_multirate_stage!, G, U⁰, Uⁿ, source, split, wᵢ,
+        launch!(arch, grid, parameters, _later_multirate_stage!, G, grid, U⁰, Uⁿ, source, split, wᵢ,
                 Fᵢ, Zᵢ, γ[i, i - 1] / (d[i] * Δt), α[i, i - 1], F, Z,
                 increment_weights(γ, d, Δt, i - 1, ks), forcing_weights(β, d, i, ks),
                 offset_weights(α, i - 1, ks))
@@ -656,38 +565,17 @@ end
 # anyway, instead of storing them when a stage completes. Off, every field's increment is stored.
 const fold_stage_increments = Ref(true)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Where the assembly of a stage finds the increment ``ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ`` of prognostic `name`.
-
-``Yᵢ₋₁`` is the state a stage ends with. For the prognostics the acoustic loop advances (the dry
-density, momentum and the thermodynamic variable), that is still what the prognostic field holds
-when the next stage is assembled, so the assembly forms the increment itself (`IncrementFromState`)
-and no kernel stores it.
-
-Not so for moisture, the microphysical prognostics and tracers: `update_state!` runs in between,
-and its negative-moisture correction (`fix_negative_moisture!`) moves mass between species and
-resets number concentrations, while tracers make a round trip through specific values. An
-increment formed afterwards would carry that correction, which is a jump, not part of the stage's
-tendency, into the forcing ``γᵢⱼ ΔYⱼ / Δt`` and the start state ``Uⁿ + αᵢⱼ ΔYⱼ`` of later stages.
-Their increments are stored when the stage completes (`store_stage_increment!`), before
-`update_state!`.
-"""
+# The acoustic prognostics still hold Yᵢ₋₁ when the next stage is assembled, so the assembly forms
+# their increment. `update_state!` changes the other scalars in between, so theirs is stored.
 function stage_increment_source(model, name)
     folded = fold_stage_increments[] && name ∈ acoustic_prognostic_names(model)
     return folded ? IncrementFromState(prognostic_fields(model)[name]) : StoredIncrement()
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Fold the increment ``ΔYᵢ = Yᵢ - Uⁿ`` of the stage just completed into the accumulators of the
-stages after it (after stage 1, keep it raw for stage 2), for the prognostics whose increment the
-next assembly cannot form itself (see `stage_increment_source`).
-"""
+# Fold the increment ΔYᵢ = Yᵢ - Uⁿ of the stage just completed into the later stages' accumulators.
 function store_stage_increment!(ts::MultirateInfinitesimalStep, model, i, Δt)
     (; α, γ, d) = ts.tableau
+    Δt = convert(eltype(model.grid), Δt)
     s = length(d)
     grid = model.grid
     arch = architecture(grid)
@@ -724,12 +612,6 @@ end
 ##### Time stepping
 #####
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Step forward `model` one time step `Δt` with a multirate infinitesimal step method and
-linearized acoustic substepping.
-"""
 function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt; callbacks=[])
 
     ts = model.timestepper
@@ -747,7 +629,10 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
 
     for i in 1:s
         ts.stage[] = i
-        acoustic_rk3_substep!(model, Δt, d[i]; callbacks)
+        # Only the last stage's rounding reaches Uⁿ⁺¹ directly, and only that stage takes the
+        # time stepper's round-off treatment (as in `AcousticRungeKutta3`).
+        rounding = i == s ? ts.rounding : RoundToNearest()
+        acoustic_stage!(model, Δt, d[i], rounding, callbacks)
 
         if i < s
             store_stage_increment!(ts, model, i, Δt)
