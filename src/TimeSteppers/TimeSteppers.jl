@@ -59,6 +59,7 @@ include("acoustic_substep_helpers.jl")
 include("acoustic_runge_kutta_3.jl")
 include("multirate_infinitesimal_step_coefficients.jl")
 include("multirate_infinitesimal_step.jl")
+include("single_column_multirate_infinitesimal_step.jl")
 
 # Extend TimeStepper to support time steppers via Symbol
 OceananigansTimeSteppers.TimeStepper(::Val{:SSPRungeKutta3}, args...; kwargs...) =

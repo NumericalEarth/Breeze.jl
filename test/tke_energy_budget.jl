@@ -71,7 +71,7 @@ budget_column(f::ZeroField, Nz) = zeros(Nz)
 budget_column(f, Nz) = budget_column(f)
 
 function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2400, path = :distribution, FT = Float64,
-                          e₀ = z -> 0.6 * exp(-z / 500), closure_keywords = NamedTuple())
+                          e₀ = z -> 0.6 * exp(-z / 500), timestepper = :SSPRungeKutta3, closure_keywords = NamedTuple())
     grid = RectilinearGrid(CPU(), FT; size=Nz, z=(0, H), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)
@@ -84,7 +84,7 @@ function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2
          ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 5.2e-5)),
          ρu = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 0.08)),
          ρv = FieldBoundaryConditions(bottom = FluxBoundaryCondition(-1.17 * 0.02))) : NamedTuple()
-    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants, microphysics, closure, boundary_conditions)
+    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants, microphysics, closure, boundary_conditions, timestepper)
 
     # BOMEX-like: a mixed layer, a conditionally unstable cloud layer moistened to saturation, an inversion
     θ₀(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4 + (z - 1480) * 5.8 / 520
@@ -222,7 +222,12 @@ function stage_energy_budget(model, Δt; ρe = budget_column(model.tracers.ρe))
     dissipated = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.ε))
     shortfall = sum(Δzᶜ .* budget_column(cl.shortfall)) # paid by the internal energy instead of the TKE
     combination = sum(Δzᶜ .* budget_column(cl.stage_combination)) # the kinetic energy the stage combination removed
-    return (; ΔKE, Δhᵈ, Δρe, given_explicitly, converted, dissipated, shortfall, combination,
+    # what the solves alone converted, and the rates of the stage state: given to the TKE by its
+    # tendency, and converted by the surface fluxes and the latent heat
+    solved = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ)))
+    given_rate = sum(ρ .* Δzᶜ .* budget_column(cl.given))
+    stage_state_rate = sum(ρ .* Δzᶜ .* budget_column(cl.stage_surface))
+    return (; ΔKE, Δhᵈ, Δρe, given_explicitly, converted, dissipated, shortfall, combination, solved, given_rate, stage_state_rate,
             shear = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Pᵖ)), buoyancy = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Bᵖ)))
 end
 
@@ -338,6 +343,119 @@ end
         @test all(isfinite, interior(field))
     end
 end
+
+#####
+##### The whole step of a multirate infinitesimal step on a single column. Stage i of s forms
+#####
+#####   Vᵢ = Σⱼ wᵢⱼ Yⱼ + Δt Σⱼ βᵢⱼ Sⱼ,   wᵢⱼ = αᵢⱼ + γᵢⱼ (j ≥ 1),   wᵢ₀ = 1 - Σⱼ wᵢⱼ,   Y₀ = Uⁿ,   Sⱼ = S(Yⱼ₋₁),
+#####
+##### and Yᵢ follows from the vertically implicit solves over dᵢ Δt, dᵢ = Σⱼ βᵢⱼ. Every quantity X that is linear in
+##### the prognostics obeys Xᵢ - Xⁿ = Σⱼ wᵢⱼ (Xⱼ - Xⁿ) + (what stage i adds), so what stage i adds reaches the end of the
+##### step with the weight ωᵢ, ωₛ = 1, ωⱼ = Σ_{i>j} ωᵢ wᵢⱼ (Σᵢ ωᵢ dᵢ = 1). The kinetic energy is quadratic: the
+##### recombination of the states removes Dᵢ = Σ_{p<q} wᵢₚ wᵢq Σ ρ Δz |uₚ - u_q|² / 2 from the mean flow (of either sign:
+##### the weights are not all positive). With Dᵢ given to the TKE and the stage-state conversions recombined with
+##### βᵢⱼ like the tendencies that carry them,
+#####
+#####   -[KE(uⁿ⁺¹) - KE(uⁿ)]      = Σᵢ ωᵢ (shearᵢ + Dᵢ)
+#####   Σ ρe Δz |ⁿ⁺¹ - Σ ρe Δz |ⁿ = Σᵢ ωᵢ (solvedᵢ + Δt Σⱼ βᵢⱼ stage_stateⱼ - dissipatedᵢ + shortfallᵢ + Dᵢ)
+#####
+##### Dᵢ is recomputed here from the stage states, independently of the closure.
+#####
+
+multirate_state_weights(tableau, i) = (w = [tableau.α[i, j] + tableau.γ[i, j] for j in 1:i-1]; vcat(1 - sum(w), w))
+
+function multirate_step_weights(tableau)
+    s = length(tableau.d)
+    ω = zeros(s)
+    ω[s] = 1
+    for j in s-1:-1:1
+        ω[j] = sum(ω[i] * (tableau.α[i, j] + tableau.γ[i, j]) for i in j+1:s)
+    end
+    return ω
+end
+
+@testset "TKE energy budget of the whole multirate infinitesimal step ($path, $FT, surface fluxes = $surface_fluxes)" for path in all_paths, FT in (Float64, Float32), surface_fluxes in (false, true)
+    model = moist_tke_column(; path, FT, surface_fluxes, timestepper = :MultirateInfinitesimalStep)
+    @test model.timestepper isa MultirateInfinitesimalStep
+    @test isnothing(model.timestepper.substepper)
+    Δt = 10
+    tableau = Breeze.TimeSteppers.multirate_infinitesimal_step_tableau(:SSPMIS43) # the default, in Float64
+    (; β, d) = tableau
+    s = length(d)
+    ω = multirate_step_weights(tableau)
+    @test sum(ω .* d) ≈ 1
+    storage = model.timestepper.closure_storage
+    ρ = Float64.(budget_column(model.dynamics.reference_state.density))
+    Δzᶜ = diff(znodes(model.grid, Face()))
+    KE(ρu, ρv) = sum(Δzᶜ .* (ρu .^ 2 .+ ρv .^ 2) ./ (2ρ))
+    column(f) = Float64.(budget_column(f))
+    # The sums are formed here in Float64 from the model's fields. In Float64 the budgets close to the tolerances
+    # of the SSP-RK3 tests above; in Float32 to the round-off of the model's own arithmetic, a few ϵ of the summed
+    # kinetic energy and TKE.
+    ϵ = eps(FT)
+    tight = FT == Float64
+    time_step!(model, Δt) # the first step's preparation runs `update_state!` once more
+    for n in 1:10
+        states = [(ρu = column(model.momentum.ρu), ρv = column(model.momentum.ρv))]
+        KE⁰ = KE(states[1].ρu, states[1].ρv)
+        TKE⁰ = sum(Δzᶜ .* column(model.tracers.ρe))
+        stages = []
+        recorder = StageRecorder(model -> begin
+            i = length(stages) + 1
+            budget = stage_energy_budget(model, d[i] * Δt; ρe = budget_column(model.tracers.ρe) .* budget_column(model.dynamics.reference_state.density))
+            exchange = d[i] * Δt * sum(ρ .* Δzᶜ .* column(storage.recombined_exchange))
+            push!(stages, merge(budget, (; exchange)))
+            push!(states, (ρu = column(model.momentum.ρu), ρv = column(model.momentum.ρv)))
+        end)
+        time_step!(model, Δt; callbacks = [recorder])
+        @test length(stages) == s
+
+        ΔKE = KE(column(model.momentum.ρu), column(model.momentum.ρv)) - KE⁰
+        ΔTKE = sum(Δzᶜ .* column(model.tracers.ρe)) - TKE⁰
+        D = map(1:s) do i
+            w = multirate_state_weights(tableau, i)
+            sum(w[p] * w[q] * sum(Δzᶜ .* ((states[p].ρu .- states[q].ρu) .^ 2 .+ (states[p].ρv .- states[q].ρv) .^ 2) ./ (2ρ))
+                for p in 1:i for q in p+1:i; init = 0.0)
+        end
+        scale = abs(ΔKE) + sum(abs(b.Δhᵈ) + abs(b.dissipated) for b in stages)
+        # In Float32 the residuals are those of rounding the prognostics: measured up to 1.5 ϵ KE⁰ in the kinetic
+        # energy (0.014 J m⁻², where the mean flow loses 0.4 to 0.6 J m⁻² in a step) and 0.4 ϵ TKE⁰ in the TKE
+        roundoff_KE = 8ϵ * KE⁰
+        roundoff_TKE = 8ϵ * TKE⁰
+
+        for (i, b) in enumerate(stages)
+            sscale = abs(b.ΔKE) + abs(b.Δhᵈ) + abs(b.dissipated)
+            @test -b.ΔKE ≈ b.shear rtol=1e-8 atol=(tight ? 1e-12 * sscale : roundoff_KE)
+            tight && @test -b.Δhᵈ ≈ b.buoyancy rtol=1e-7 atol=1e-11 * sscale
+            # the TKE receives what the solves converted, the recombined exchange of the stage states, and
+            # what the recombination removed from the mean flow, less what it dissipates
+            @test b.Δρe ≈ b.solved + b.exchange - b.dissipated + b.shortfall + b.combination rtol=1e-9 atol=(tight ? 1e-11 * sscale : roundoff_TKE)
+            # the recombined exchange is that of the stage states, with the weights of the slow tendencies
+            recombined = Δt * sum(β[i, j] * (stages[j].stage_state_rate - stages[j].given_rate) for j in 1:i)
+            @test b.exchange ≈ recombined rtol=(tight ? 1e-10 : 1e-4) atol=(tight ? 1e-13 * scale : roundoff_TKE)
+            # without explicit momentum tendencies, what the closure gave the TKE is the kinetic energy the
+            # recombination of the stage states removed
+            surface_fluxes || @test b.combination ≈ D[i] rtol=(tight ? 1e-9 : 1e-3) atol=(tight ? 1e-14 * scale : roundoff_KE)
+        end
+        @test stages[1].combination == 0
+
+        # the TKE over the step: every stage's solves and correction, and the sources its tendencies gave
+        received = sum(ω[i] * (stages[i].Δρe + Δt * sum(β[i, j] * stages[j].given_rate for j in 1:i)) for i in 1:s)
+        @test ΔTKE ≈ received rtol=1e-8 atol=(tight ? 1e-11 * scale : roundoff_TKE)
+        accounted = sum(ω[i] * (stages[i].solved + Δt * sum(β[i, j] * stages[j].stage_state_rate for j in 1:i) -
+                                stages[i].dissipated + stages[i].shortfall + stages[i].combination) for i in 1:s)
+        @test ΔTKE ≈ accounted rtol=1e-8 atol=(tight ? 1e-11 * scale : roundoff_TKE)
+
+        if !surface_fluxes
+            # the mean flow's loss over the step: what the solves converted and what the recombinations removed
+            @test -ΔKE ≈ sum(ω[i] * (stages[i].shear + D[i]) for i in 1:s) rtol=1e-8 atol=(tight ? 1e-12 * scale : roundoff_KE)
+            # the shear production the TKE received over the step is the mean flow's loss
+            @test sum(ω[i] * (stages[i].shear + stages[i].combination) for i in 1:s) ≈ -ΔKE rtol=1e-8 atol=(tight ? 1e-12 * scale : roundoff_KE)
+            # stage 2 of SSPMIS43 extrapolates beyond the first stage's state, which adds kinetic energy
+            @test D[2] < 0
+            @info "multirate step $n ($FT)" ΔKE shear=sum(ω[i] * stages[i].shear for i in 1:s) recombination=sum(ω .* D) D
+        end
+    end
 
 #####
 ##### The heating budget flux: a flux of θˡⁱ in flux form, zero at the boundaries and in still air, whose conversion the

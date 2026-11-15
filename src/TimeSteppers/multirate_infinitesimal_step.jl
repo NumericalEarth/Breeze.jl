@@ -1,4 +1,5 @@
-using Breeze.AtmosphereModels: thermodynamic_density_name, dynamics_prognostic_fields, SplitScalarTendencies
+using Breeze.AtmosphereModels: thermodynamic_density_name, dynamics_prognostic_fields, SplitScalarTendencies,
+                               StageRecombination, build_closure_stage_storage
 using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_divergence!,
                                     StageEntryForceRemainder, stage_entry_force_remainder,
                                     step_start_force_state, store_step_start_force_state!,
@@ -61,8 +62,10 @@ Fields
   [`PostLoopScalarTendencies`](@ref) (after each stage's own acoustic loop). With the latter, the
   scalars' slow tendency ``Sᵢ`` stored for stage ``i`` is the post-loop one, and their stage forcing
   and start state are assembled after the loop.
+- `closure_storage`: what a turbulence closure keeps from stage to stage for its energy budget
+  (see [`StageRecombination`](@ref Breeze.AtmosphereModels.StageRecombination)), or `nothing`.
 """
-struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC, ST, SS, TA} <: AcousticTimeStepper
+struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC, ST, SS, TA, CS} <: AcousticTimeStepper
     relinearize_stages :: Bool
     tableau :: TB
     U⁰ :: U0
@@ -78,6 +81,7 @@ struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, UN, AC, FC, ST, SS, TA} <:
     stage :: Base.RefValue{Int}
     next_stage :: Base.RefValue{Int}
     current_Δt :: Base.RefValue{Float64}
+    closure_storage :: CS
 end
 
 """
@@ -110,6 +114,11 @@ unstable beyond a Courant number of about 0.2 with fifth-order schemes.
 `post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
 between stages with the preceding loop's (see [`PostLoopScalarTendencies`](@ref)).
+
+With `AnelasticDynamics` on a single-column grid (`topology = (Flat, Flat, Bounded)`) there is no
+fast tendency: no substepper is built and every stage is the slow method's stage alone, with the
+start states, forcing weights, stage intervals and vertically implicit solves of the method with
+acoustic substepping (see `single_column_multirate_infinitesimal_step.jl`).
 """
 function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
@@ -124,7 +133,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     s = number_of_stages(tableau)
     s ≥ 3 || throw(ArgumentError("MultirateInfinitesimalStep needs at least three stages; got $s."))
 
-    substepper = build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_state)
+    substepper = multirate_substepper(grid, dynamics, prognostic_fields; cache_advecting_state)
 
     U⁰ = map(similar, prognostic_fields)
     Gⁿ = map(similar, prognostic_fields)
@@ -144,8 +153,13 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     return MultirateInfinitesimalStep(relinearize_stages, tableau, U⁰, Gⁿ, implicit_solver, substepper,
                                       Uⁿ, accumulators, fast_tendency, scalar_tendencies, step_start,
                                       ntuple(_ -> CenterField(grid), s - 1),
-                                      Ref(1), Ref(1), Ref(NaN))
+                                      Ref(1), Ref(1), Ref(NaN), nothing)
 end
+
+# The substepper of the fast tendency (see `single_column_multirate_infinitesimal_step.jl` for
+# the dynamics that have none).
+multirate_substepper(grid, dynamics, prognostic_fields; kw...) =
+    build_acoustic_substepper(grid, dynamics, prognostic_fields; kw...)
 
 # Scratch for the fast parts of the tendencies (see the `fast_tendency` field). Post-loop
 # scalars each need their own: their advective tendencies are all in hand when the
@@ -219,6 +233,42 @@ tendencies_feed_first_stage(timestepper) = true
 tendencies_feed_first_stage(ts::MultirateInfinitesimalStep) = ts.next_stage[] == 1
 
 const MultirateAcousticModel = AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep}
+
+#####
+##### What the closure is told about the stage
+#####
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The [`StageRecombination`](@ref Breeze.AtmosphereModels.StageRecombination) of the stage being
+integrated: the weights ``wᵢⱼ = αᵢⱼ + γᵢⱼ`` of the earlier stages' states (and
+``wᵢ₀ = 1 - Σⱼ wᵢⱼ`` of ``Uⁿ``) in the state the stage's slow forcing produces, and the weights
+``βᵢⱼ / dᵢ`` of the slow tendencies in that forcing.
+"""
+function stage_recombination(ts::MultirateInfinitesimalStep)
+    i = ts.stage[]
+    (; α, β, γ, d) = ts.tableau
+    w = ntuple(j -> α[i, j] + γ[i, j], i - 1)
+    state_weights = (1 - sum(w; init = zero(eltype(d))), w...)
+    tendency_weights = ntuple(j -> β[i, j] / d[i], i)
+    return StageRecombination(i, length(d), state_weights, tendency_weights, ts.Uⁿ, ts.closure_storage)
+end
+
+function AtmosphereModels.materialize_closure_stage_storage(ts::MultirateInfinitesimalStep, closure_fields, closure, grid)
+    storage = build_closure_stage_storage(closure_fields, closure, grid, number_of_stages(ts.tableau))
+    return MultirateInfinitesimalStep(ts.relinearize_stages, ts.tableau, ts.U⁰, ts.Gⁿ, ts.implicit_solver,
+                                      ts.substepper, ts.Uⁿ, ts.accumulators, ts.fast_tendency,
+                                      ts.scalar_tendencies, ts.step_start, ts.transport_density_accumulators,
+                                      ts.stage, ts.next_stage, ts.current_Δt, storage)
+end
+
+# Before the stage's forcing is assembled, with the momentum of Yᵢ₋₁ still in the prognostic
+# fields and the closure's conversions those of Yᵢ₋₁ (see `closure_before_stage_combination!`).
+closure_before_stage_recombination!(ts::MultirateInfinitesimalStep, model, Δt_stage) =
+    closure_before_stage_combination!(model.closure_fields, model.closure, model, Δt_stage, stage_recombination(ts))
+
+AtmosphereModels.closure_stage_storage(ts::MultirateInfinitesimalStep) = ts.closure_storage
 
 @inline function final_stage_increment(ts::MultirateInfinitesimalStep)
     c = ts.tableau.c

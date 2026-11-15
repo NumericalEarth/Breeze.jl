@@ -14,7 +14,7 @@ using Oceananigans.TimeSteppers: time_step!
 using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure
 using Test
 
-using Breeze.AtmosphereModels: AtmosphereModels, dynamics_density, total_density
+using Breeze.AtmosphereModels: AtmosphereModels, continuity_density, total_density
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
@@ -57,7 +57,7 @@ function count_differences(model)
     K = model.closure_fields
     clock = model.clock
     fields = Oceananigans.fields(model)
-    ρᵈ = dynamics_density(model.dynamics)
+    ρᵈ = continuity_density(model.dynamics)
     ρ = total_density(model.dynamics)
     Nx, Ny, Nz = size(grid)
     differences = 0
@@ -86,7 +86,7 @@ end
         time_step!(model, 1)
     end
     # the grid-specific methods are the ones selected (the generic method's grid argument is untyped)
-    argtypes = typeof((1, 1, 1, model.grid, dynamics_density(model.dynamics), model.closure, model.closure_fields,
+    argtypes = typeof((1, 1, 1, model.grid, continuity_density(model.dynamics), model.closure, model.closure_fields,
                        model.clock, Oceananigans.fields(model), nothing))
     @test which(AtmosphereModels.∂ⱼ_𝒯₁ⱼ, argtypes).sig.parameters[5] !== Any
     differences, zeros_compared = count_differences(model)
