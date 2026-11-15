@@ -113,14 +113,22 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a [`HeatingBudgetFlux`](@ref). By default the whole destabilizing flux is applied (`ℂᑫ = 1`),
+Return a [`HeatingBudgetFlux`](@ref). By default half of the destabilizing flux is applied (`ℂᑫ = 0.5`),
 the heating is exchanged over eight mixing lengths, the local third moment is not changed (`ℂʷᑫ = 0`),
 and the heating is the radiative heating of the model.
+
+The initial values are not calibrated. In a stratocumulus layer the entrainment flux of θˡⁱ nearly cancels
+the flux that the radiative cooling drives, and the gradient closure carries the entrainment flux: with
+`ℂᑫ = 1` the single column of DYCOMS-II RF01 becomes stably stratified in θˡⁱ by 0.4 K over the layer
+(0.12 K without the flux, 0.27 K with `ℂᑫ = 0.5`). `ℂʷᑫ > 0` gives the cloud layer of a stratocumulus
+column the negative skewness of its large-eddy simulation, and gives the same sign to cumulus layers
+below a radiatively cooled anvil, where the large-eddy simulations have positive skewness (harness
+`notes/total-energy-design.md` §11).
 
 [`heating_budget_flux_bounds`](@ref) gives an interval for each coefficient for a calibration.
 """
 function HeatingBudgetFlux(FT::DataType = Oceananigans.defaults.FloatType;
-                           ℂᑫ = 1, ℂᑫᴸ = 8, ℂʷᑫ = 0, heating = RadiativeHeating())
+                           ℂᑫ = 0.5, ℂᑫᴸ = 8, ℂʷᑫ = 0, heating = RadiativeHeating())
     0 <= ℂᑫ <= 1 || throw(ArgumentError("ℂᑫ must lie in [0, 1], got $(ℂᑫ)."))
     0 < ℂᑫᴸ < Inf || throw(ArgumentError("ℂᑫᴸ must be positive and finite (the levels of still air must not exchange), got $(ℂᑫᴸ)."))
     ℂʷᑫ >= 0 || throw(ArgumentError("ℂʷᑫ must not be negative, got $(ℂʷᑫ)."))
@@ -169,7 +177,7 @@ end
 @inline SimplifiedHigherOrderClosures.component_scalars(hb::HeatingBudgetFlux) = (hb.ℂᑫ, hb.ℂᑫᴸ, hb.ℂʷᑫ)
 SimplifiedHigherOrderClosures.component_scalar_names(::HeatingBudgetFlux, name) = (:ℂᑫ, :ℂᑫᴸ, :ℂʷᑫ)
 @inline SimplifiedHigherOrderClosures.rebuild_component(hb::HeatingBudgetFlux, scalars, n) =
-    HeatingBudgetFlux(scalars[n], scalars[n+1], scalars[n+2], hb.heating), n + 3
+    HeatingBudgetFlux(promote(scalars[n], scalars[n+1], scalars[n+2])..., hb.heating), n + 3
 @inline SimplifiedHigherOrderClosures.map_scalars(f, hb::HeatingBudgetFlux) =
     HeatingBudgetFlux(f(hb.ℂᑫ), f(hb.ℂᑫᴸ), f(hb.ℂʷᑫ), hb.heating)
 
