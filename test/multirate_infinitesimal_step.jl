@@ -14,9 +14,9 @@ using Oceananigans.TimeSteppers: update_state!
 using LinearAlgebra: istril
 using Test
 
-const mis_coefficient_sets = (:WickerSkamarock3, :MIS2, :MIS3C, :MIS4, :MIS4a, :TVDMISA, :TVDMISB, :MIS3opt, :SSPMIS43, :SSPMIS42, :MIS54, :MISF53, :MISR33, :MISR43)
+const mis_coefficient_sets = (:WickerSkamarock3, :TVDMISB, :MIS4a, :SSPMIS43)
 
-function mis_bubble_model(; timestepper, coefficients = :MIS2, moist = false, Δθ = 2, qᵗ = 0.012,
+function mis_bubble_model(; timestepper, coefficients = :SSPMIS43, moist = false, Δθ = 2, qᵗ = 0.012,
                           scalar_advection = WENO(order=5))
     grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5),
                            x = (-10e3, 10e3), z = (0, 10e3),
@@ -223,7 +223,7 @@ end
                                     reference_potential_temperature = 300)
     advection = WENO(order = 5, time_discretization = AdaptiveVerticallyImplicitDiscretization(; cfl = 0.5))
     model = AtmosphereModel(grid; dynamics, advection, timestepper = :MultirateInfinitesimalStep,
-                            timestepper_kwargs = (; coefficients = :MIS3C))
+                            timestepper_kwargs = (; coefficients = :TVDMISB))
     set!(model; ρ = model.dynamics.reference_state.density,
          θ = (x, z) -> 300 + 2 * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2)
     for _ in 1:10
@@ -306,8 +306,8 @@ end
     # Under MIS the stage-1 tendencies are those of WENO, the copy holds the step-start tracer for
     # the whole step (so later stages see frozen weights and the trajectory departs from WENO), and
     # it is refreshed by the tendency evaluation that ends the step.
-    reference = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :MIS3C, moist = true, qᵗ = qᵗᵢ)
-    frozen = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :MIS3C, moist = true, qᵗ = qᵗᵢ,
+    reference = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :TVDMISB, moist = true, qᵗ = qᵗᵢ)
+    frozen = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :TVDMISB, moist = true, qᵗ = qᵗᵢ,
                               scalar_advection = FrozenWeightsWENO(order=5))
     update_state!(reference; compute_tendencies = true)
     update_state!(frozen; compute_tendencies = true)

@@ -96,9 +96,8 @@ timestepper_kwargs = (; coefficients = :SSPMIS43))`.
 The default, `:SSPMIS43`, is chosen for positivity: its slow method is strong-stability preserving
 with coefficient ``r = 1.79``, so the moisture and tracer stages are convex combinations of
 forward-Euler steps for an advective Courant number up to ``1.79`` times the forward-Euler bound of
-the advection operator. Of the other sets, `:TVDMISA` and `:TVDMISB` have ``r = 0.75``, `:MIS3C`
-``r = 0.23``, and `:MIS4a`, `:MIS4`, `:MIS2` and `:WickerSkamarock3` have ``r = 0``: no such bound
-at any Courant number. The bound is on the time stepping alone. Positive moisture also needs an
+the advection operator. Of the other sets, `:TVDMISB` has ``r = 0.75``, and `:MIS4a` and
+`:WickerSkamarock3` have ``r = 0``: no such bound at any Courant number. The bound is on the time stepping alone. Positive moisture also needs an
 advection operator that is positive under forward Euler, which the clamp of bounded WENO
 reconstructions does not provide by itself; a flux limiter would (Oceananigans.jl#6475).
 
@@ -106,9 +105,7 @@ reconstructions does not provide by itself; a flux limiter would (Oceananigans.j
 first stage covers 0.56 of the step, which takes at least two acoustic substeps. It needs the
 moisture's pressure effect in the acoustic loop to stay robust in moist convection: with the
 stage-entry pressure remainder recombined across stages, the part of that remainder the loop does
-not carry is integrated explicitly. `:MIS4a` is third order and stable to a larger Courant number,
-without the positivity bound. `:MIS2` relies on the dissipation of third-order upwinding and is
-unstable beyond a Courant number of about 0.2 with fifth-order schemes.
+not carry is integrated explicitly. `:MIS4a` is third order, without the positivity bound.
 
 `post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of

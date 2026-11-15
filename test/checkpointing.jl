@@ -147,13 +147,13 @@ end
         @testset "split-explicit, multirate infinitesimal step" begin
             test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
                                                           timestepper=:MultirateInfinitesimalStep,
-                                                          timestepper_kwargs=(; coefficients=:MIS3C)))
+                                                          timestepper_kwargs=(; coefficients=:TVDMISB)))
         end
 
         @testset "split-explicit, multirate infinitesimal step, post-loop scalar tendencies" begin
             test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
                                                           timestepper=:MultirateInfinitesimalStep,
-                                                          timestepper_kwargs=(; coefficients=:MIS3C,
+                                                          timestepper_kwargs=(; coefficients=:TVDMISB,
                                                                                 post_loop_scalar_tendencies=true)))
         end
 
