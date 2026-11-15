@@ -548,11 +548,7 @@ end
 
 @testset "MicrophysicsSaturatedFraction: f⁺ of the supersaturation statistics" begin
     Oceananigans.defaults.FloatType = Float64
-    # With AlgebraicThirdMoment the distribution is formed once per update, after the stability, so the
-    # stability of the next update reads exactly the distribution this one leaves. TKEBudgetThirdMoment
-    # (the default) forms the distribution again within the update, to diagnose its third moment.
-    distribution = DoubleGaussian(; third_moment = AlgebraicThirdMoment())
-    model = closure_statistics_column(SaturationWeightedStaticStability(); subgrid_distribution = distribution)
+    model = closure_statistics_column(SaturationWeightedStaticStability())
     grid, closure, fields = model.grid, model.closure, model.closure_fields
     Nz = size(grid, 3)
     model_fields = supersaturation_statistics_model_fields(model)

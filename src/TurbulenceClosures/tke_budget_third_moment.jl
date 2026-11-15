@@ -157,7 +157,26 @@ third_moment_fields(grid, third_moment) = NamedTuple()
 
 third_moment_fields(grid, ::TKEBudgetThirdMoment) =
     (Fᵉ = CenterField(grid), Fᵋ = CenterField(grid), uᵉ = CenterField(grid), uᵋ = CenterField(grid),
-     w′³ᵇ = CenterField(grid), Tᵉ = CenterField(grid), budget_work = CenterField(grid))
+     w′³ᵇ = CenterField(grid), Tᵉ = CenterField(grid), budget_work = CenterField(grid),
+     NamedTuple(saved_name(name) => ZFaceField(grid) for name in SAVED_CLOSURE_FIELD_NAMES)...)
+
+# The closure fields of the prognostic state that the passes overwrite: kept before them and put back after
+const SAVED_CLOSURE_FIELD_NAMES = (:N², :ℓᵐ, :ℓˢ, :Kᵘ, :Kᶜ, :Kᵉ)
+saved_name(name) = Symbol(:saved_, name)
+
+function save_closure_fields!(cloud, closure_fields)
+    for name in SAVED_CLOSURE_FIELD_NAMES
+        parent(getproperty(cloud, saved_name(name))) .= parent(getproperty(closure_fields, name))
+    end
+    return nothing
+end
+
+function restore_closure_fields!(closure_fields, cloud)
+    for name in SAVED_CLOSURE_FIELD_NAMES
+        parent(getproperty(closure_fields, name)) .= parent(getproperty(cloud, saved_name(name)))
+    end
+    return nothing
+end
 
 #####
 ##### The sink that balances the budget, in place: `u` holds the shape ω on entry and the sink on exit
@@ -315,18 +334,22 @@ compute_tke_budget!(fields, distribution, closure_fields, closure, model, tracer
 # Within `update_state!`, after the first static stability, mixing length and diffusivities (which read only the
 # prognostic state) and before the distribution the stage uses. Each pass: the distribution with the third moment of
 # the pass before (none in the first), its stability and diffusivities, the conversions of the applied fluxes, and the
-# third moment from their budget; then the stability, mixing length and diffusivities are put back to those of the
-# prognostic state, from which every pass and the final evaluation start.
+# third moment from their budget. The stability, mixing length and diffusivities of the prognostic state (whose
+# stability reads the distribution of the previous update) are saved before the passes, every pass after the first
+# starts from them, and they are put back after the last, so the final evaluation starts from them too.
 function diagnose_third_moment!(fields::SubgridCloudFields, distribution::TKEBudgetDistribution, closure_fields, closure, model, tracers, parameters)
+    save_closure_fields!(fields.cloud, closure_fields)
     fill!(parent(fields.cloud.w′³ᵇ), 0)
     compute_buoyancy_derivatives!(fields, model)
-    for _ in 1:third_moment_passes(distribution.third_moment)
+    passes = third_moment_passes(distribution.third_moment)
+    for pass in 1:passes
+        pass > 1 && restore_closure_fields!(closure_fields, fields.cloud)
         compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
         solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
         compute_applied_flux_conversions!(fields, closure_fields, closure, model, tracers)
         compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, true)
-        compute_stability_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     end
+    restore_closure_fields!(closure_fields, fields.cloud)
     return nothing
 end
 
