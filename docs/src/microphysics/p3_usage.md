@@ -108,7 +108,12 @@ excess drives that rate.
   ``ωˡ ξˡ qᶜˡ``). A mixture of plumes (weights ``aᵢ``, means ``μᵢ``, spreads ``σᵢ``) sums the
   per-plume terms with their weights, about P3's own grid mean. Use `PrescribedStatistics(σ)`
   or `PrescribedPlumeStatistics(a, μ, σ)` for a fixed distribution; a turbulence closure may
-  supply its own source of statistics.
+  supply its own source of statistics. A source whose distribution is not Gaussian supplies its
+  own ``Γ`` by extending
+  `PredictedParticleProperties.vapor_excess_correlation(statistics, distribution, cell)` for its
+  type; the condensation rate and the target of the implicit relaxation, ``\max(0, s̄ + Γ) / ξˡ``,
+  both use it. `AtmosphereModels.saturated_fraction` returns the saturated fraction ``f⁺`` of the
+  statistics, which `SaturationWeightedStaticStability()` of the TKE closure uses as its weight.
 
 The rate coefficient is the phase relaxation rate of the cloud droplets,
 
@@ -121,6 +126,11 @@ gamma size distribution, ``Dᵛ`` the vapor diffusivity and ``ξˡ`` the psychro
 100 droplets per cm³ of radius near 10 µm, ``1/ωˡ`` is about 8 s. With the ice deposition rate
 ``ωⁱ`` it forms ``ωᶜ = ωˡ + ωⁱ``, which `AtmosphereModels.phase_relaxation_rate` returns to a
 turbulence closure. The same ``ωˡ`` drives P3's coupled diffusional growth.
+
+With `cloud_relaxation = CondensationTimescaleRelaxation()` the rate is instead fixed,
+``ωˡ = 1 / τ`` with ``τ`` the `condensation_timescale` of `CloudDroplets`, for the condensation
+rate, the implicit relaxation and `phase_relaxation_rate` alike. The default,
+`DiffusionalGrowthRelaxation()`, is the size-dependent rate above.
 
 ## [P3 Examples and Visualization](@id p3_examples)
 

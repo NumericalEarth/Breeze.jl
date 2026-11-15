@@ -224,8 +224,9 @@ Cloud droplets are converted to rain via collision-coalescence following
 # Keyword Arguments
 
 - `number_concentration`: Nᶜˡ [1/m³], default 200×10⁶
-- `condensation_timescale`: Saturation relaxation [s], default 1.0. The coupled
-  adjustment uses `ProcessRate.sink_limiting_timescale` instead.
+- `condensation_timescale`: τ [s], default 1.0: the fixed relaxation time of cloud liquid
+  with `cloud_relaxation = CondensationTimescaleRelaxation()` in P3, ``ωˡ = 1/τ``. Not read
+  with the default `DiffusionalGrowthRelaxation()`.
 - `shape`: [`CloudShape`](@ref) holding the coefficients and bounds
   of the Liu-Daum relation, default `CloudShape(FT)`. Read by every path that
   diagnoses μᶜˡ from a local droplet number.
@@ -389,3 +390,53 @@ cloud number together with the shape and slope parameters `μᶜˡ` and `λᶜˡ
             μᶜˡ,
             λᶜˡ)
 end
+
+#####
+##### The phase relaxation rate of cloud liquid
+#####
+
+"""
+$(TYPEDEF)
+
+The phase relaxation rate of cloud liquid is that of the diffusional growth of the droplets,
+``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ``, which depends on the droplet number and size (the default
+`cloud_relaxation` of [`PredictedParticlePropertiesMicrophysics`](@ref)).
+
+```jldoctest
+julia> using Breeze.Microphysics.PredictedParticleProperties: DiffusionalGrowthRelaxation
+
+julia> DiffusionalGrowthRelaxation()
+DiffusionalGrowthRelaxation()
+```
+"""
+struct DiffusionalGrowthRelaxation end
+
+"""
+$(TYPEDEF)
+
+The phase relaxation rate of cloud liquid is fixed, ``ωˡ = 1 / τ``, with ``τ`` the
+`condensation_timescale` of the [`CloudDroplets`](@ref Breeze.Microphysics.PredictedParticleProperties.CloudDroplets)
+of P3, whatever the droplet number and size, and also where there is no cloud liquid. Cloud
+liquid then condenses at ``(δqᵛ⁺ˡ + Γ) / τ`` (before the coupling with rain and ice), its
+implicit relaxation uses the same rate, and `AtmosphereModels.phase_relaxation_rate` returns
+``ωᶜ = 1/τ + ωⁱ`` (``1/τ`` without ice).
+
+```jldoctest
+julia> using Breeze
+
+julia> using Breeze.Microphysics.PredictedParticleProperties: CondensationTimescaleRelaxation, CloudDroplets
+
+julia> p3 = PredictedParticlePropertiesMicrophysics(; cloud = CloudDroplets(; condensation_timescale = 5),
+                                                      cloud_relaxation = CondensationTimescaleRelaxation());
+
+julia> p3.cloud_relaxation
+CondensationTimescaleRelaxation()
+```
+"""
+struct CondensationTimescaleRelaxation end
+
+validate_p3_cloud_relaxation(relaxation::DiffusionalGrowthRelaxation) = relaxation
+validate_p3_cloud_relaxation(relaxation::CondensationTimescaleRelaxation) = relaxation
+validate_p3_cloud_relaxation(relaxation) =
+    throw(ArgumentError("The `cloud_relaxation` of P3 must be `DiffusionalGrowthRelaxation()` or " *
+                        "`CondensationTimescaleRelaxation()`; got $(summary(relaxation))."))

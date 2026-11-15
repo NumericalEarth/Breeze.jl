@@ -8,7 +8,10 @@ using Breeze
 using Breeze.AtmosphereModels: DiracStatistics, NoSubgridCorrelation,
                                MicrophysicalProcessRate, subgrid_correlation, subgrid_statisticsᶜᶜᶜ
 
-using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation
+using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation, SubgridCondensation
+using Breeze.AtmosphereModels: supersaturation_statistics, supersaturation_statistics_model_fields, saturated_fraction
+using Breeze.TurbulenceClosures: TurbulenceClosureStatistics
+using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
@@ -84,4 +87,15 @@ end
     # Total water is mixed as SHOC mixes it when all of it is vapor
     @test non_precipitating_water(model) ≈ non_precipitating_water(all_vapor) rtol=1e-12
     @test sum(non_precipitating_water(model)) ≈ sum(water) rtol=1e-12
+end
+
+@testset "TurbulenceClosureStatistics: the saturated fraction is SHOC's cloud fraction" begin
+    model = shoc_p3_column(SubgridCondensation(TurbulenceClosureStatistics()))
+    time_step!(model, 10)
+    grid, fields = model.grid, model.closure_fields
+    model_fields = supersaturation_statistics_model_fields(model)
+    f⁺ = @allowscalar [saturated_fraction(supersaturation_statistics(TurbulenceClosureStatistics(), 1, 1, k, grid,
+                                                                       model.closure, fields, model_fields)) for k in 1:size(grid, 3)]
+    @test f⁺ == column(fields.diagnostics.shoc_cldfrac)
+    @test maximum(f⁺) > 0
 end

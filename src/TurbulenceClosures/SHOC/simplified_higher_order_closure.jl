@@ -701,11 +701,13 @@ Oceananigans.restore_prognostic_state!(fields::SHOCFields, ::Nothing) = fields
     end
 end
 
+# The saturated fraction `f⁺` is SHOC's own cloud fraction `shoc_cldfrac`
 @inline function AtmosphereModels.supersaturation_statistics(::TurbulenceClosureStatistics, i, j, k, grid,
                                                              ::FlavorOfSHOC, fields::SHOCFields, model_fields)
     v = fields.diagnostics
     @inbounds begin
         a = v.a₁[i, j, k]
-        return (; a = (a, 1 - a), μ = (v.μ₁[i, j, k], v.μ₂[i, j, k]), σ = (v.σ₁[i, j, k], v.σ₂[i, j, k]))
+        return (; a = (a, 1 - a), μ = (v.μ₁[i, j, k], v.μ₂[i, j, k]), σ = (v.σ₁[i, j, k], v.σ₂[i, j, k]),
+                  f⁺ = v.shoc_cldfrac[i, j, k])
     end
 end

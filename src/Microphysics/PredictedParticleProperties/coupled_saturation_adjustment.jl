@@ -159,6 +159,21 @@ end
     return ifelse(active, 2 * FT(π) * ρ * Dᵛ * integrated_diameter, zero(FT))
 end
 
+# The vapor relaxation coefficient εˡ of cloud liquid for the `cloud_relaxation` option of P3:
+# that of the droplets' diffusional growth, or εˡ = ξˡ / τ so that ωˡ = εˡ / ξˡ = 1 / τ.
+@inline cloud_relaxation_coefficient(::DiffusionalGrowthRelaxation, p3, ξˡ, args...) =
+    cloud_vapor_relaxation_coefficient(p3, args...)
+
+@inline cloud_relaxation_coefficient(::CondensationTimescaleRelaxation, p3, ξˡ, args...) =
+    ξˡ / convert(typeof(ξˡ), p3.cloud.condensation_timescale)
+
+# The phase relaxation rate ωˡ of cloud liquid from its relaxation coefficient
+@inline cloud_phase_relaxation_rate(::DiffusionalGrowthRelaxation, p3, coefficients) =
+    coefficients.cloud_relaxation / coefficients.ξˡ
+
+@inline cloud_phase_relaxation_rate(::CondensationTimescaleRelaxation, p3, coefficients) =
+    1 / convert(typeof(coefficients.ξˡ), p3.cloud.condensation_timescale)
+
 @inline function rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
     FT = typeof(qʳ)
     qʳ₊ = max(0, qʳ)
@@ -233,8 +248,8 @@ end
     ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
     ξⁱ = 1 + ℒⁱ * dqᵛ⁺ⁱ_dT / cᵖᵈ
 
-    cloud_relaxation = cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, transport.Dᵛ,
-                                                          μᶜˡ, λᶜˡ, nᶜˡ_bounded)
+    cloud_relaxation = cloud_relaxation_coefficient(p3.cloud_relaxation, p3, ξˡ, qᶜˡ, ρ, transport.Dᵛ,
+                                                    μᶜˡ, λᶜˡ, nᶜˡ_bounded)
     rain_relaxation = rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
     # `qⁱ` is the dry ice mass; `qⁱ_total` and `Fˡ` gate the relaxation and tiny-mass overrides.
     qⁱ_total = total_ice_mass(qⁱ, qʷⁱ)
@@ -418,7 +433,7 @@ end
 
 @inline function phase_relaxation_rates(p3, coefficients)
     ℂᵈⁱᶠᶠ₁ = p3.process_rates.calibration_factor_deposition
-    ωˡ = coefficients.cloud_relaxation / coefficients.ξˡ
+    ωˡ = cloud_phase_relaxation_rate(p3.cloud_relaxation, p3, coefficients)
     ωⁱ = ℂᵈⁱᶠᶠ₁ * coefficients.dry_ice_relaxation / coefficients.ξⁱ +
          coefficients.coating_relaxation / coefficients.ξˡ
     return (; ωˡ, ωⁱ, ωᶜ = ωˡ + ωⁱ)

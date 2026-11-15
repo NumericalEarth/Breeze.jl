@@ -96,8 +96,8 @@ so the relaxation keeps its bounds.
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
-    cloud_relaxation = cloud_vapor_relaxation_coefficient(p3, ℳ.qᶜˡ, ρ, state.Dᵛ,
-                                                          state.μᶜˡ, state.λᶜˡ, state.nᶜˡ)
+    cloud_relaxation = cloud_relaxation_coefficient(p3.cloud_relaxation, p3, ξˡ, ℳ.qᶜˡ, ρ, state.Dᵛ,
+                                                    state.μᶜˡ, state.λᶜˡ, state.nᶜˡ)
     rain_relaxation = rain_vapor_relaxation_coefficient(p3, ℳ.qʳ, state.nʳ, ρ, transport)
 
     # The saturation excess of total water and the cloud's equilibrium condensate. No model of

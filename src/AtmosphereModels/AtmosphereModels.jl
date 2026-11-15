@@ -62,6 +62,7 @@ export
     PrescribedPlumeStatistics,
     supersaturation_statistics,
     supersaturation_statistics_model_fields,
+    saturated_fraction,
     phase_relaxation_rate,
     instantaneous_phase_relaxation,
 
@@ -170,6 +171,7 @@ using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
+using SpecialFunctions: erfc
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, Center, Face, CenterField, fields

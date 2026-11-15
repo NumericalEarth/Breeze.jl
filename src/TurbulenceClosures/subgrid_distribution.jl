@@ -1118,7 +1118,8 @@ end
 #####
 
 # The double Gaussian at the centers as the distribution of the vapor excess over liquid: the
-# weight `a` of the updraft component, and each component's mean `μ₁`, `μ₂` and spread `σ₁`, `σ₂`
+# weight `a` of the updraft component, and each component's mean `μ₁`, `μ₂` and spread `σ₁`, `σ₂`.
+# The saturated fraction `f⁺` is the distribution's own cloud fraction `aᶜ`.
 vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
                                        σ₁ = CenterField(grid), σ₂ = CenterField(grid))
 
@@ -1137,7 +1138,7 @@ end
     @inbounds begin
         a = components.a₁[i, j, k]
         return (; a = (a, 1 - a), μ = (components.μ₁[i, j, k], components.μ₂[i, j, k]),
-                  σ = (components.σ₁[i, j, k], components.σ₂[i, j, k]))
+                  σ = (components.σ₁[i, j, k], components.σ₂[i, j, k]), f⁺ = components.aᶜ[i, j, k])
     end
 end
 

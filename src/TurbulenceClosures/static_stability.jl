@@ -103,6 +103,15 @@ $(TYPEDEF)
 The `fraction` of a [`SaturationWeightedStaticStability`](@ref) constructed without one: the weight
 is that of the subgrid model the microphysics holds, found by
 [`microphysics_subgrid_model`](@ref Breeze.TurbulenceClosures.microphysics_subgrid_model).
+
+When that model is a source of supersaturation statistics (an
+`AtmosphereModels.AbstractSupersaturationStatistics`, as in
+`SubgridCondensation(statistics)` of P3), the weight is its saturated fraction ``f⁺``,
+`AtmosphereModels.saturated_fraction(supersaturation_statistics(statistics, ...))`, the
+probability that the vapor excess is positive, averaged from the two adjacent centers to the
+interface. For `TurbulenceClosureStatistics` it is the cloud fraction of the closure's
+distribution, of the previous update. Another model supplies the weight through
+[`saturated_stability_weightᶜᶜᶠ`](@ref Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ).
 """
 struct MicrophysicsSaturatedFraction end
 
@@ -150,6 +159,56 @@ function saturated_stability_weightᶜᶜᶠ end
 
 @inline saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ::MicrophysicsSaturatedFraction, buoyancy, tracers, closure_fields) =
     saturated_stability_weightᶜᶜᶠ(i, j, k, grid, microphysics_subgrid_model(buoyancy.microphysics), buoyancy, tracers, closure_fields)
+
+#####
+##### The saturated fraction of the microphysics' supersaturation statistics
+#####
+#
+# When the subgrid model of the microphysics is a source of supersaturation statistics
+# (`AtmosphereModels.AbstractSupersaturationStatistics`), `MicrophysicsSaturatedFraction` takes the
+# weight from the statistics P3 condenses with: aᴺ is the saturated fraction f⁺ of
+# `AtmosphereModels.saturated_fraction(supersaturation_statistics(...))`, averaged from the two
+# adjacent centers to the interface. The statistics need the closure and the model fields, which the
+# static stability does not receive; they are gathered when the static stability is launched
+# (`saturated_fraction_fields`) and attached to the fraction in the kernel
+# (`with_saturated_fraction_fields`). A statistics source of the closure's own distribution reads
+# the distribution of the previous update, as a weight that reads the mixing length does.
+
+# The fraction attached to the arguments of `supersaturation_statistics`
+struct StatisticsSaturatedFraction{S, F}
+    statistics :: S
+    fields :: F
+end
+
+Adapt.adapt_structure(to, f::StatisticsSaturatedFraction) =
+    StatisticsSaturatedFraction(adapt(to, f.statistics), adapt(to, f.fields))
+
+# The arguments `(closure, closure_fields, model_fields)` of `supersaturation_statistics` for the
+# subgrid model of the microphysics, or `nothing`
+saturated_fraction_fields(model) = saturated_fraction_fields(microphysics_subgrid_model(model.microphysics), model)
+saturated_fraction_fields(subgrid_model, model) = nothing
+saturated_fraction_fields(::AtmosphereModels.AbstractSupersaturationStatistics, model) =
+    (model.closure, model.closure_fields, AtmosphereModels.supersaturation_statistics_model_fields(model))
+
+const MicrophysicsSaturatedFractionStability = SaturationWeightedStaticStability{MicrophysicsSaturatedFraction}
+
+@inline with_saturated_fraction_fields(static_stability, buoyancy, fields) = static_stability
+@inline with_saturated_fraction_fields(static_stability::MicrophysicsSaturatedFractionStability, buoyancy, ::Nothing) = static_stability
+
+@inline with_saturated_fraction_fields(::MicrophysicsSaturatedFractionStability, buoyancy, fields) =
+    SaturationWeightedStaticStability(StatisticsSaturatedFraction(microphysics_subgrid_model(buoyancy.microphysics), fields))
+
+@inline function cell_saturated_fraction(i, j, k, grid, fraction::StatisticsSaturatedFraction)
+    statistics = AtmosphereModels.supersaturation_statistics(fraction.statistics, i, j, k, grid, fraction.fields...)
+    return convert(eltype(grid), AtmosphereModels.saturated_fraction(statistics))
+end
+
+@inline function saturated_stability_weightᶜᶜᶠ(i, j, k, grid, fraction::StatisticsSaturatedFraction, buoyancy, tracers, closure_fields)
+    Nz = size(grid, 3)
+    f⁺ᵇ = cell_saturated_fraction(i, j, max(k - 1, 1), grid, fraction)
+    f⁺ᵗ = cell_saturated_fraction(i, j, min(k, Nz), grid, fraction)
+    return (f⁺ᵇ + f⁺ᵗ) / 2
+end
 
 @inline function static_stabilityᶜᶜᶠ(i, j, k, grid, ss::SaturationWeightedStaticStability, buoyancy, tracers, closure_fields)
     N²ᵈ = ∂z_b(i, j, k, grid, buoyancy, tracers)
