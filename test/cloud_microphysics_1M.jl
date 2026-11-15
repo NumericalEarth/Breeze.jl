@@ -653,7 +653,8 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
     microphysics = OneMomentCloudMicrophysics(FT)
     adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
-    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
+    model = AtmosphereModel(grid; dynamics, microphysics, timestepper=:AcousticRungeKutta3,
+                            scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
     @test model.timestepper isa Breeze.TimeSteppers.AcousticRungeKutta3
 
     Δt = FT(10)
