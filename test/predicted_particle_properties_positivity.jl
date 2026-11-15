@@ -6,7 +6,7 @@ using Breeze
 using Breeze.AtmosphereModels: StageStart, patankar_fraction, patankar_sink_fraction,
                                 sequential_sink_fractions, stage_interval_is_known, stage_remainder
 using Breeze.Thermodynamics: ThermodynamicConstants, MoistureMassFractions,
-                             LiquidIcePotentialTemperatureState, PlanarLiquidSurface,
+                             LiquidIcePotentialTemperatureState, PlanarLiquidSurface, PlanarIceSurface,
                              saturation_specific_humidity, density, temperature, with_temperature,
                              air_pressure
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics,
@@ -106,7 +106,7 @@ one_cell_fields(values) = NamedTuple{p3_density_names}(map(v -> fill(v, 1, 1, 1)
                                              temperature(𝒰, constants), zero(FT), zero(FT),
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
 
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
             result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited_rates)
             relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates)
@@ -239,7 +239,7 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
             stage = StageStart(fields, fields, false, Δt)
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z,
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # Evaporation is drawn in full: the air is dry enough that the equilibrium condensate
@@ -284,7 +284,7 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
             stage = StageStart(fields, fields, false, Δt)
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z,
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # Evaporation is faster than the timescale budget would let the number follow...
@@ -316,7 +316,7 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
             stage = StageStart(fields, fields, false, Δt)
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z,
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # The activated number exceeds the reservoir, so the droplet number relaxes toward
@@ -379,7 +379,7 @@ end
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                              temperature(𝒰, constants), zero(FT), zero(FT),
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # Everything drawn from a donor, implicit and explicit, fits in what the stage leaves of it.
@@ -410,6 +410,241 @@ end
         @test evaporating > 100
         @test condensing > 20
         @test activating > 20
+    end
+end
+
+#####
+##### Number-only sinks stop at the size bound of the mass that is left
+#####
+##### Rain self-collection and ice aggregation remove number and no mass. Limited against the
+##### whole number, they carry it below what the remaining mass needs for the largest particles
+##### the scheme admits, and the size bounds then give that mass the largest, fastest-falling
+##### particles. Limited against the number above that minimum, they approach it and stop.
+#####
+
+# The specific number that the limited sinks of `rates` leave of `n` over `Δt`.
+rain_number_after_sinks(n, Δt, rates) =
+    n - Δt * (rates.rain_evaporation_number + rates.rain_self_collection + rates.rain_riming_number +
+              rates.rain_freezing_number + rates.rain_homogeneous_number + rates.rain_warm_collection_number)
+
+ice_number_after_sinks(n, Δt, rates) =
+    n - Δt * (rates.melting_number + rates.sublimation_number + rates.aggregation)
+
+@testset "P3 number-only sinks stop at the size bound [$FT]" for FT in (Float32, Float64)
+    p3 = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = nothing)
+    constants = ThermodynamicConstants(FT)
+    z = zero(FT)
+    p = FT(8e4)
+
+    # Saturated air, so that neither rain nor ice exchanges mass with vapor.
+    function saturated_state(T, qʳ, qⁱ, surface)
+        thermodynamic_state(qᵛ) = with_temperature(
+            LiquidIcePotentialTemperatureState(z, MoistureMassFractions(qᵛ, qʳ, qⁱ), FT(1e5), p), T, constants)
+        qᵛ = FT(1e-3)
+        for _ in 1:10
+            qᵛ = saturation_specific_humidity(T, density(thermodynamic_state(qᵛ), constants), constants, surface)
+        end
+        return thermodynamic_state(qᵛ), qᵛ
+    end
+
+    # The limited rates and the tendencies over a stage of `Δt` that starts from `c⁰`.
+    function limited_stage(ρ, 𝒰, ℳ, c⁰, Δt)
+        properties = PPP.p3_process_properties(p3, ρ, ℳ)
+        fields = one_cell_fields(c⁰)
+        G = one_cell_fields(map(zero, c⁰))
+        stage = StageStart(fields, fields, false, Δt)
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, temperature(𝒰, constants), z, z,
+                                         nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
+        φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+        limited_rates = PPP.patankar_limited_rates(rates, φ)
+        result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited_rates)
+        relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates)
+        return (; properties, rates, φ, limited_rates, result, relaxations)
+    end
+
+    @testset "Rain self-collection" begin
+        # Heavy rain of 250 μm drops, below the breakup threshold, so that self-collection is the
+        # only process acting on the rain. The slope bound admits drops of 2 mm, 512 times fewer.
+        parameters = p3.process_rates
+        qʳ = FT(1e-2)
+        nʳ = qʳ / (FT(π) * parameters.liquid_water_density * FT(250e-6)^3)
+        nʳ_min = PPP.rain_number_from_slope(qʳ, parameters.minimum_rain_slope, parameters)
+        @test nʳ ≈ 512 * nʳ_min
+
+        𝒰, qᵛ = saturated_state(FT(285), qʳ, z, PlanarLiquidSurface())
+        ρ = density(𝒰, constants)
+        ℳ = P3MicrophysicalState(z, FT(p3.cloud.number_concentration), qʳ, nʳ, ntuple(_ -> z, 8)...)
+        c⁰ = (ρ * qᵛ, z, ρ * qʳ, ρ * nʳ, z, z, z, z, z)
+        τ = parameters.sink_limiting_timescale
+
+        for Δt in FT.((1e4, 1e5, 1e6))
+            stage = limited_stage(ρ, 𝒰, ℳ, c⁰, Δt)
+            rates, limited_rates = stage.rates, stage.limited_rates
+
+            # Self-collection alone acts on the rain, and asks for far more than the number holds
+            # above the bound...
+            @test rates.rain_self_collection > 0
+            @test rates.rain_breakup == 0
+            @test abs(rates.rain_number_correction) * τ ≤ 10 * eps(FT) * nʳ
+            @test Δt * rates.rain_self_collection > 10 * (nʳ - nʳ_min)
+            # ...so the Patankar fraction against the whole number carries it past the bound...
+            @test nʳ - Δt * stage.φ.rain_number * rates.rain_self_collection < nʳ_min
+            # ...and the floored fraction lands on it, from above, the closer the longer the stage.
+            nʳ⁺ = rain_number_after_sinks(nʳ, Δt, limited_rates)
+            @test limited_rates.rain_self_collection == stage.φ.rain_self_collection * rates.rain_self_collection
+            @test stage.result.tendency_ρnʳ ≈ ρ * (rates.rain_number_correction - limited_rates.rain_self_collection)
+            @test nʳ⁺ ≥ nʳ_min * (1 - 10 * eps(FT))
+            @test nʳ⁺ - nʳ_min ≤ (nʳ - nʳ_min)^2 / (Δt * rates.rain_self_collection) + 10 * eps(FT) * nʳ
+            Δt == FT(1e6) && @test nʳ⁺ ≈ nʳ_min rtol = 0.02
+            # The mass is untouched, but for the round-off of the saturated vapor exchange.
+            vapor_exchange = limited_rates.rain_condensation - limited_rates.rain_evaporation
+            @test stage.result.tendency_ρqʳ ≈ ρ * vapor_exchange atol = 100 * eps(FT) * ρ * qʳ / Δt
+            @test abs(vapor_exchange) * τ ≤ 100 * eps(FT) * qʳ
+        end
+
+        # A stage that starts with fewer drops than its mass needs: self-collection is switched
+        # off and the number is left where it is.
+        stage = limited_stage(ρ, 𝒰, ℳ, (ρ * qᵛ, z, ρ * qʳ, ρ * nʳ_min / 2, z, z, z, z, z), FT(100))
+        @test stage.φ.rain_self_collection == 0
+        @test stage.limited_rates.rain_self_collection == 0
+
+        # Before the first time step the stage interval is not known and nothing is limited.
+        stage = limited_stage(ρ, 𝒰, ℳ, c⁰, FT(Inf))
+        @test stage.φ.rain_self_collection == 1
+    end
+
+    @testset "Ice aggregation" begin
+        # Unrimed ice at -15 ᵒC and ice saturation, with three times the number its mass needs
+        # at the tabulated lower λ bound, so that aggregation is the only process acting on it.
+        T = FT(258)
+        qⁱ = FT(1e-3)
+        𝒰, qᵛ = saturated_state(T, z, qⁱ, PlanarIceSurface())
+        ρ = density(𝒰, constants)
+        state(nⁱ) = P3MicrophysicalState(z, FT(p3.cloud.number_concentration), z, z, qⁱ, nⁱ, ntuple(_ -> z, 6)...)
+
+        nⁱ_minimum_per_mass = PPP.p3_process_properties(p3, ρ, state(FT(1e4))).nⁱ_minimum_per_mass
+        nⁱ_min = nⁱ_minimum_per_mass * qⁱ
+        @test nⁱ_min > 0
+        nⁱ = 3 * nⁱ_min
+        ℳ = state(nⁱ)
+        c⁰ = (ρ * qᵛ, z, z, z, ρ * qⁱ, ρ * nⁱ, z, z, z)
+        τ = p3.process_rates.sink_limiting_timescale
+
+        # The bound is the one the scheme reads its ice number through.
+        @test PPP.p3_process_properties(p3, ρ, state(nⁱ_min / 10)).nⁱ ≈ nⁱ_min rtol = 1e-3
+
+        for Δt in FT.((1e5, 1e6, 1e7))
+            stage = limited_stage(ρ, 𝒰, ℳ, c⁰, Δt)
+            rates, limited_rates = stage.rates, stage.limited_rates
+            @test stage.properties.nⁱ_minimum_per_mass ≈ nⁱ_minimum_per_mass rtol = 1e-3
+
+            @test rates.aggregation > 0
+            @test rates.melting_number == 0
+            @test rates.sublimation_number == 0
+            @test abs(rates.ice_number_correction - rates.ni_limit) * τ ≤ 10 * eps(FT) * nⁱ
+            @test Δt * rates.aggregation > 10 * (nⁱ - nⁱ_min)
+            @test nⁱ - Δt * stage.φ.ice_number * rates.aggregation < nⁱ_min
+
+            nⁱ⁺ = ice_number_after_sinks(nⁱ, Δt, limited_rates)
+            @test limited_rates.aggregation == stage.φ.aggregation * rates.aggregation
+            @test stage.result.tendency_ρnⁱ ≈ ρ * (rates.ice_number_correction - rates.ni_limit - limited_rates.aggregation)
+            @test nⁱ⁺ ≥ nⁱ_min * (1 - 10 * eps(FT))
+            @test nⁱ⁺ - nⁱ_min ≤ (nⁱ - nⁱ_min)^2 / (Δt * rates.aggregation) + 10 * eps(FT) * nⁱ
+            Δt == FT(1e7) && @test nⁱ⁺ ≈ nⁱ_min rtol = 0.02
+            # The mass is untouched, but for the round-off of the saturated vapor exchange.
+            @test stage.result.tendency_ρqⁱ ≈ ρ * limited_rates.deposition atol = 100 * eps(FT) * ρ * qⁱ / Δt
+            @test abs(rates.deposition) * τ ≤ 100 * eps(FT) * qⁱ
+        end
+
+        stage = limited_stage(ρ, 𝒰, ℳ, (ρ * qᵛ, z, z, z, ρ * qⁱ, ρ * nⁱ_min / 2, z, z, z), FT(100))
+        @test stage.φ.aggregation == 0
+
+        stage = limited_stage(ρ, 𝒰, ℳ, c⁰, FT(Inf))
+        @test stage.φ.aggregation == 1
+    end
+end
+
+@testset "P3 number-only sinks never pass the size bound [$FT]" for FT in (Float32, Float64)
+    p3 = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = nothing)
+    parameters = p3.process_rates
+    constants = ThermodynamicConstants(FT)
+    rng = LinearCongruentialGenerator(2468)
+    roundoff = 100 * eps(FT)
+    liquid_on_ice = PPP.tracks_liquid_on_ice(parameters)
+
+    @testset "Δt = $Δt s" for Δt in (5, 45, 200, 5000)
+        Δt = FT(Δt)
+        below_bound = zeros(Int, 2)   # rain, ice: number-only sinks carried the number below the bound
+        negative = zeros(Int, 2)
+        larger = zeros(Int, 2)        # a floored fraction above the Patankar fraction of all the sinks
+        floored = zeros(Int, 2)       # the floor reduced the sink
+        switched_off = zeros(Int, 2)
+
+        for _ in 1:4000
+            ρ, 𝒰, ℳ, specific = random_p3_state(rng, p3, constants, FT)
+            properties = PPP.p3_process_properties(p3, ρ, ℳ)
+
+            # A stage that starts from a state unrelated to the one the rates saw, as above. A
+            # fifth of the stages start with about as many drops as their rain needs at the bound.
+            c⁰ = map(q -> uniform!(rng) < 0.3 ? zero(FT) : ρ * q * FT(2 * uniform!(rng)), specific)
+            if uniform!(rng) < 0.2
+                ρnʳ⁰ = FT(4 * uniform!(rng)) * PPP.rain_number_from_slope(c⁰[3], parameters.minimum_rain_slope, parameters)
+                c⁰ = (c⁰[1:3]..., ρnʳ⁰, c⁰[5:end]...)
+            end
+            Gᵒ = map((c, q) -> (-FT(uniform!(rng)) * c + (uniform!(rng) < 0.5 ? FT(uniform!(rng)) * ρ * q : zero(FT))) / Δt,
+                     c⁰, specific)
+            c̃ = NamedTuple{p3_density_names}(max.(0, c⁰ .+ Δt .* Gᵒ))
+
+            fields = one_cell_fields(c⁰)
+            G = one_cell_fields(Gᵒ)
+            stage = StageStart(fields, fields, false, Δt)
+            rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                                             temperature(𝒰, constants), zero(FT), zero(FT),
+                                             nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+            limited = PPP.patankar_limited_rates(rates, φ)
+
+            # Rain: the mass that the limited mass sinks leave, the number it needs, and the
+            # number that the sinks which remove number with mass leave.
+            rain_mass_loss = last(p3_donor_losses(limited))
+            ρqʳ_left = max(0, c̃.ρqʳ - Δt * ρ * rain_mass_loss)
+            ρnʳ_min = PPP.rain_number_from_slope(ρqʳ_left, parameters.minimum_rain_slope, parameters)
+            ρnʳ⁺ = rain_number_after_sinks(c̃.ρnʳ, Δt * ρ, limited)
+            ρnʳ_with_mass = ρnʳ⁺ + Δt * ρ * limited.rain_self_collection
+            rain_scale = 2 * c̃.ρnʳ - ρnʳ⁺ + ρnʳ_min
+
+            # Ice, whose mass includes the liquid coating where it is tracked
+            ice_mass_loss = max(0, -limited.deposition) + limited.partial_melting + limited.complete_melting
+            coating_loss = limited.shedding + limited.refreezing + limited.coating_evaporation +
+                           ifelse(liquid_on_ice, limited.wet_growth_shedding, zero(FT))
+            ρqⁱ_left = max(0, c̃.ρqⁱ - Δt * ρ * ice_mass_loss) +
+                       ifelse(liquid_on_ice, max(0, c̃.ρqʷⁱ - Δt * ρ * coating_loss), zero(FT))
+            ρnⁱ_min = properties.nⁱ_minimum_per_mass * ρqⁱ_left
+            ρnⁱ⁺ = ice_number_after_sinks(c̃.ρnⁱ, Δt * ρ, limited)
+            ρnⁱ_with_mass = ρnⁱ⁺ + Δt * ρ * limited.aggregation
+            ice_scale = 2 * c̃.ρnⁱ - ρnⁱ⁺ + ρnⁱ_min
+
+            after = (ρnʳ⁺, ρnⁱ⁺)
+            with_mass = (ρnʳ_with_mass, ρnⁱ_with_mass)
+            minimum_number = (ρnʳ_min, ρnⁱ_min)
+            tolerance = roundoff .* (rain_scale, ice_scale)
+            number_only = (φ.rain_self_collection, φ.aggregation)
+            all_sinks = (φ.rain_number, φ.ice_number)
+            active = (rates.rain_self_collection > 0, rates.aggregation > 0)
+
+            below_bound .+= after .< min.(with_mass, minimum_number) .- tolerance
+            negative .+= after .< .-tolerance
+            larger .+= number_only .> all_sinks
+            floored .+= active .& (0 .< number_only .< all_sinks .* (1 - roundoff))
+            switched_off .+= active .& (number_only .== 0) .& (all_sinks .> 0)
+        end
+
+        @test all(below_bound .== 0)
+        @test all(negative .== 0)
+        @test all(larger .== 0)
+        # The sample exercises the floor, for rain and for ice.
+        @test all(floored .> 10)
+        @test all(switched_off .> 10)
     end
 end
 

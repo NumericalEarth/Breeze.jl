@@ -409,11 +409,19 @@ end
     bounded_ice_number(limiter, diagnostic_ice_bracket(limiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, floors),
                        qⁱ_total, nⁱ, floors)
 
+# The fewest particles a unit of ice mass can be carried by: the inverse mean particle mass at
+# the tabulated lower λ bound, where the particles are the largest the scheme admits.
+@inline minimum_ice_number_per_mass(limiter::IceLambdaLimiter, prep, qⁱ_total) =
+    evaluate_at(limiter.large_q, prep)
+
+# Un-materialized scheme: no size bound.
+@inline minimum_ice_number_per_mass(::IceLambdaLimiter{Nothing, Nothing}, prep, qⁱ_total) = zero(qⁱ_total)
+
 @inline function bounded_ice_number(limiter::IceLambdaLimiter, prep, qⁱ_total, nⁱ, floors)
     FT = typeof(qⁱ_total)
     qⁱ₊ = max(0, qⁱ_total)
     nⁱ₊ = max(0, nⁱ)
-    nⁱ_min = evaluate_at(limiter.large_q, prep) * qⁱ₊
+    nⁱ_min = minimum_ice_number_per_mass(limiter, prep, qⁱ_total) * qⁱ₊
     nⁱ_max = evaluate_at(limiter.small_q, prep) * qⁱ₊
     bounded = clamp(nⁱ₊, nⁱ_min, nⁱ_max)
     return ifelse(qⁱ₊ > FT(floors.mass_scale), bounded, zero(FT))

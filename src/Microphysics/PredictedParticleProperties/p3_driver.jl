@@ -5,7 +5,8 @@ using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Utils: Utils, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
-using Breeze.AtmosphereModels: AbstractMicrophysicalState, patankar_sink_fraction, sequential_sink_fractions
+using Breeze.AtmosphereModels: AbstractMicrophysicalState, patankar_fraction, patankar_sink_fraction,
+                                sequential_sink_fractions
 
 using Breeze: Microphysics
 
@@ -129,7 +130,7 @@ end
                                      GridLiquidRelaxationStage(i, j, k, G, stage))
 
     # Scale every transfer to what the coming stage leaves of the species it draws on.
-    φ = p3_sink_fractions(i, j, k, G, stage, p3, inputs.ρ, rates)
+    φ = p3_sink_fractions(i, j, k, G, stage, p3, inputs.ρ, inputs.properties, rates)
     rates = patankar_limited_rates(rates, φ)
 
     result = p3_tendencies(p3, inputs.ρ, inputs.ℳ, inputs.properties, rates)
@@ -205,6 +206,18 @@ end
 #
 # Each first draw is limited to what the stage leaves of its donor, which is what keeps the
 # donor non-negative where the stage starts from a state other than the one the rates saw.
+#
+# A number sink that removes no mass (rain self-collection, ice aggregation) is budgeted
+# against less than the number the stage leaves. The mass that the stage leaves of rain or ice
+# needs a minimum number `n_min` to be carried by the largest particles the scheme admits
+# (`minimum_rain_slope` for rain, the tabulated lower λ bound for ice), and such a sink is
+# advanced in Patankar form against what the number holds above it, `max(0, ñ - n_min)`, with
+# `ñ` what the sinks that remove number with mass leave. It therefore approaches `n_min` and
+# never passes it, for any `Δt`. Where `ñ` is already below `n_min` the sink is switched off.
+# The sinks that remove number with mass keep the fraction of the mass they remove and are not
+# floored. Limited against the whole number, a number-only sink can leave mass with almost no
+# number, which the size bounds then give the largest, fastest-falling particles.
+#
 # Before the first time step the rates are the explicit ones and every fraction is one.
 
 struct P3SinkFractions{FT}
@@ -220,9 +233,27 @@ struct P3SinkFractions{FT}
     cloud_evaporation :: FT  # drawn first from cloud liquid
     rain_evaporation :: FT   # drawn first from rain
     rain_number_evaporation :: FT  # drawn first from rain number, with the rain mass
+    rain_self_collection :: FT  # number-only rain sink, floored at the size bound of the rain left
+    aggregation :: FT           # number-only ice sink, floored at the size bound of the ice left
 end
 
-@inline function p3_sink_fractions(i, j, k, G, stage, p3::P3, ρ, rates::P3ProcessRates)
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The fraction on a number-only loss rate `number_only_loss` of a number density of which the
+stage and the sinks that remove number with mass leave `ñ`, where the mass left needs at
+least `n_min`. The loss is weighted by the Patankar fraction against `max(0, ñ - n_min)`, so
+the number approaches `n_min` and does not pass it for any `Δt`, and is zero where `ñ` is
+below `n_min`. It is no larger than `φ`, the Patankar fraction of all the explicit number
+sinks together, to which it reduces where `n_min` is zero. One where the stage interval is
+not `known`.
+"""
+@inline function floored_sink_fraction(φ, ñ, n_min, Δt, number_only_loss, known)
+    φᶠ = min(φ, patankar_fraction(ñ - n_min, Δt, number_only_loss))
+    return ifelse(known, φᶠ, one(φ))
+end
+
+@inline function p3_sink_fractions(i, j, k, G, stage, p3::P3, ρ, properties, rates::P3ProcessRates)
     liquid_on_ice = liquid_fraction_routing_active(p3.process_rates)
     condensation = max(0, rates.condensation)
     cloud_evaporation = max(0, -rates.condensation)
@@ -243,18 +274,19 @@ end
     # Evaporation removes drops in proportion to mass (`rain_evaporation_number = nʳ/qʳ ×
     # rain_evaporation`), so it is drawn first from rain number as from rain mass, and both lose
     # the same fraction of what they hold.
-    rain_number_loss = rates.rain_self_collection +
-                       rates.rain_riming_number + rates.rain_freezing_number +
-                       rates.rain_homogeneous_number + rates.rain_warm_collection_number
+    # The other rain number sinks accompany a mass transfer, except self-collection.
+    rain_number_loss_with_mass = rates.rain_riming_number + rates.rain_freezing_number +
+                                 rates.rain_homogeneous_number + rates.rain_warm_collection_number
+    rain_number_loss = rates.rain_self_collection + rain_number_loss_with_mass
 
     ice_loss = sublimation + rates.partial_melting + rates.complete_melting
 
     # `ni_limit` is a relaxation, advanced implicitly with the number corrections.
-    ice_number_loss = rates.melting_number + rates.sublimation_number + rates.aggregation +
-                      rates.homogeneous_number_excess
+    ice_number_loss_with_mass = rates.melting_number + rates.sublimation_number
+    ice_number_loss = ice_number_loss_with_mass + rates.aggregation + rates.homogeneous_number_excess
 
-    coating_loss = rates.shedding + rates.refreezing + rates.coating_evaporation +
-                   ifelse(liquid_on_ice, rates.wet_growth_shedding, zero(ρ))
+    coating_shedding = ifelse(liquid_on_ice, rates.wet_growth_shedding, zero(ρ))
+    coating_loss = rates.shedding + rates.refreezing + rates.coating_evaporation + coating_shedding
 
     κᵛ, φᵛ = sequential_sink_fractions(i, j, k, G.ρqᵛ, stage, Val(:ρqᵛ), ρ * liquid_condensation, ρ * vapor_loss)
     κᶜˡ, φᶜˡ = sequential_sink_fractions(i, j, k, G.ρqᶜˡ, stage, Val(:ρqᶜˡ), ρ * cloud_evaporation, ρ * cloud_loss)
@@ -262,13 +294,39 @@ end
     κⁿʳ, φⁿʳ = sequential_sink_fractions(i, j, k, G.ρnʳ, stage, Val(:ρnʳ),
                                          ρ * rates.rain_evaporation_number, ρ * rain_number_loss)
 
+    φⁱ = patankar_sink_fraction(i, j, k, G.ρqⁱ, stage, Val(:ρqⁱ), ρ * ice_loss)
+    φⁿⁱ = patankar_sink_fraction(i, j, k, G.ρnⁱ, stage, Val(:ρnⁱ), ρ * ice_number_loss)
+    φʷⁱ = patankar_sink_fraction(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ), ρ * coating_loss)
+
+    # The number-only sinks, floored at the fewest particles that can carry the mass the stage
+    # and the mass sinks leave. A Patankar-limited loss leaves the fraction `φ` of what it is
+    # drawn from. The sinks that are scaled by the smaller of two fractions are counted as
+    # `patankar_limited_rates` scales them.
+    Δt = stage.Δt
+    known = AM.stage_interval_is_known(stage)
+
+    ρqʳ_left = φʳ * max(0, max(0, AM.stage_remainder(i, j, k, G.ρqʳ, stage, Val(:ρqʳ))) -
+                           Δt * κʳ * ρ * rates.rain_evaporation)
+    ρnʳ_min = rain_number_from_slope(ρqʳ_left, p3.process_rates.minimum_rain_slope, p3.process_rates)
+    ρnʳ_left = max(0, AM.stage_remainder(i, j, k, G.ρnʳ, stage, Val(:ρnʳ))) -
+               Δt * ρ * (min(κʳ, κⁿʳ) * rates.rain_evaporation_number +
+                         min(φʳ, φⁿʳ) * rain_number_loss_with_mass)
+    φˢᶜ = floored_sink_fraction(φⁿʳ, ρnʳ_left, ρnʳ_min, Δt, ρ * rates.rain_self_collection, known)
+
+    # The ice mass that sets the size bound includes the liquid coating where it is tracked.
+    ρqʷⁱ_left = max(0, AM.stage_remainder(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ))) -
+                Δt * ρ * (φʷⁱ * (coating_loss - coating_shedding) + min(φᶜˡ, φʷⁱ) * coating_shedding)
+    ρqⁱ_left = φⁱ * max(0, AM.stage_remainder(i, j, k, G.ρqⁱ, stage, Val(:ρqⁱ))) +
+               ifelse(liquid_on_ice, max(0, ρqʷⁱ_left), zero(ρ))
+    ρnⁱ_min = properties.nⁱ_minimum_per_mass * ρqⁱ_left
+    ρnⁱ_left = max(0, AM.stage_remainder(i, j, k, G.ρnⁱ, stage, Val(:ρnⁱ))) -
+               Δt * ρ * min(φⁱ, φⁿⁱ) * ice_number_loss_with_mass
+    φᵃᵍᵍ = floored_sink_fraction(φⁿⁱ, ρnⁱ_left, ρnⁱ_min, Δt, ρ * rates.aggregation, known)
+
     return P3SinkFractions(
-        φᵛ, φᶜˡ, φʳ, φⁿʳ,
-        patankar_sink_fraction(i, j, k, G.ρqⁱ, stage, Val(:ρqⁱ), ρ * ice_loss),
-        patankar_sink_fraction(i, j, k, G.ρnⁱ, stage, Val(:ρnⁱ), ρ * ice_number_loss),
-        patankar_sink_fraction(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ), ρ * coating_loss),
+        φᵛ, φᶜˡ, φʳ, φⁿʳ, φⁱ, φⁿⁱ, φʷⁱ,
         aerosol_sink_fraction(i, j, k, G, stage, p3.aerosol, ρ * rates.ccn_activation_number),
-        κᵛ, κᶜˡ, κʳ, κⁿʳ)
+        κᵛ, κᶜˡ, κʳ, κⁿʳ, φˢᶜ, φᵃᵍᵍ)
 end
 
 # Activation draws on the aerosol reservoir only where that reservoir is prognostic. It is the
@@ -285,6 +343,8 @@ species it draws on: the Patankar fraction for an explicit transfer, and the fra
 implicitly relaxed transfer that the stage leaves of its donor, which is one wherever the
 transfer fits. A number rate that accompanies a mass transfer takes the smaller of
 the mass and number fractions, so it never removes more particles than its mass does mass.
+A number rate that removes no mass (rain self-collection, ice aggregation) takes the
+fraction floored at the size bound of the mass that is left.
 Sources that draw on no prognostic, and the number relaxations, are unchanged.
 """
 @inline function patankar_limited_rates(rates::P3ProcessRates, φ::P3SinkFractions)
@@ -303,7 +363,7 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
         rates.cloud_self_collection * c,
         rates.rain_evaporation * evaporation,
         rates.rain_evaporation_number * min(evaporation, φ.rain_number_evaporation),
-        rates.rain_self_collection * φ.rain_number,
+        rates.rain_self_collection * φ.rain_self_collection,
         rates.rain_breakup,
         rates.deposition * ifelse(rates.deposition > 0, v, i),
         rates.partial_melting * i,
@@ -314,7 +374,7 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
         rates.clipping_rime_volume * i,
         rates.post_process_clipping,
         rates.sublimation_number * in,
-        rates.aggregation * φ.ice_number,
+        rates.aggregation * φ.aggregation,
         rates.ni_limit,
         rates.cloud_riming * c,
         rates.cloud_riming_number * c,

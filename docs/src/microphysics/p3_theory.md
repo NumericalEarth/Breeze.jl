@@ -2979,6 +2979,25 @@ interval that need not match that timescale:
   it within the rain present. Cloud and rain evaporation are likewise left out of the
   cloud and rain budgets over `sink_limiting_timescale`, which would otherwise cap them
   when a stage is shorter than that timescale;
+- a number sink that removes no mass, which is self-collection for rain and aggregation
+  for ice, is limited against less than the number present. Limited against the whole
+  number, it can remove nearly all of it while the mass stays ("mass without number"),
+  and the size bounds then give that mass the largest particles the scheme admits, which
+  fall fastest. The mass ``m̃`` that the stage and the limited mass sinks leave needs at
+  least ``n_{\min}`` particles: ``m̃ \, \mathbb{C}_{r,1}^3 / (π ρ_w)`` for rain, with
+  ``\mathbb{C}_{r,1}`` = `minimum_rain_slope`, and ``m̃`` times the inverse mean particle
+  mass at the tabulated lower ``λ`` bound for ice, whose mass includes the liquid
+  coating where it is tracked. With ``ñ`` what the stage and the sinks that remove number
+  with mass leave of the number, the number-only loss ``L`` is advanced in Patankar form
+  against ``b = \max(0, ñ - n_{\min})`` and becomes ``L b / (b + Δt L)``. The number
+  then approaches ``n_{\min}`` over a long stage and does not pass it for any ``Δt``,
+  and the sink is switched off where ``ñ`` is already below ``n_{\min}``. The fraction is
+  no larger than the Patankar fraction of all the explicit number sinks together, and
+  equals it where ``n_{\min} = 0``. The sinks that remove number with mass (evaporation,
+  melting, sublimation, and the riming, freezing and collection of rain) keep the
+  fraction of their mass transfer and are not floored, and nothing is added to a number
+  that is below ``n_{\min}``: the floor limits a rate and repairs no state. It is adapted
+  from [Breeze PR 1078](https://github.com/NumericalEarth/Breeze.jl/pull/1078);
 - the relaxations of number towards its size-distribution bounds and of ice number
   towards its cap are advanced by backward Euler over the stage;
 - rime mass and volume loss is bounded by what the stage leaves of each.
