@@ -231,8 +231,11 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
         fields = one_cell_fields(c⁰)
         G = one_cell_fields(map(zero, c⁰))
 
-        for Δt in FT.((50, 200, 2000))
-            @test εˡ * Δt > 10
+        # Stages shorter and far longer than `sink_limiting_timescale` (10 s) and than 1 / εˡ
+        @test FT(0.1) < εˡ * FT(0.5) < 1
+        for Δt in FT.((0.5, 2, 50, 200, 2000))
+            long_stage = εˡ * Δt > 10
+            @test long_stage == (Δt ≥ 50)
             stage = StageStart(fields, fields, false, Δt)
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z,
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
@@ -240,18 +243,20 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # Evaporation is drawn in full: the air is dry enough that the equilibrium condensate
-            # is zero, and backward Euler leaves 1 / (1 + εˡ Δt) of the cloud...
+            # is zero, and backward Euler leaves 1 / (1 + εˡ Δt) of the cloud, whether the stage
+            # is shorter or longer than `sink_limiting_timescale`...
             @test rates.condensation < 0
             @test φ.cloud_evaporation == 1
             @test limited_rates.condensation == rates.condensation
             remaining = (qᶜˡ + Δt * limited_rates.condensation) / qᶜˡ
             @test remaining ≈ 1 / (1 + εˡ * Δt) rtol = 100 * eps(FT) * (1 + εˡ * Δt)
             # ...which a second, Patankar, factor would have left at more than half of it.
-            @test remaining < FT(0.1)
+            long_stage && @test remaining < FT(0.1)
 
             # The explicit cloud sinks are limited against what evaporation leaves.
             @test rates.autoconversion > 0
-            @test 0 < φ.cloud < 1
+            @test 0 < φ.cloud ≤ 1
+            long_stage && @test φ.cloud < 1
             explicit_loss = rates.autoconversion + rates.accretion
             @test φ.cloud ≈ patankar_fraction(ρ * qᶜˡ * remaining, Δt, ρ * explicit_loss)
             result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited_rates)

@@ -2976,7 +2976,9 @@ interval that need not match that timescale:
   wherever the draw fits: always for cloud evaporation and activation where the stage
   starts from the state the rates saw, since both relax their own donor. Rain
   evaporation relaxes the vapor deficit and not the rain, so this limit is what keeps
-  it within the rain present;
+  it within the rain present. Cloud and rain evaporation are likewise left out of the
+  cloud and rain budgets over `sink_limiting_timescale`, which would otherwise cap them
+  when a stage is shorter than that timescale;
 - the relaxations of number towards its size-distribution bounds and of ice number
   towards its cap are advanced by backward Euler over the stage;
 - rime mass and volume loss is bounded by what the stage leaves of each.

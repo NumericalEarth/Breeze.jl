@@ -172,6 +172,9 @@ end
     return LiquidRelaxationStage(Δt, ifelse(active, qᶜˡ, zero(qᶜˡ)), ifelse(active, nᶜˡ, zero(nᶜˡ)), active)
 end
 
+@inline liquid_relaxation_is_active(grid_stage::GridLiquidRelaxationStage) =
+    AM.stage_interval_is_known(grid_stage.stage)
+
 @inline p3_cloud_number_remainder(i, j, k, G, stage, ::Nothing) = zero(stage.Δt)
 @inline p3_cloud_number_remainder(i, j, k, G, stage, ::AerosolActivation) =
     AM.stage_remainder(i, j, k, G.ρnᶜˡ, stage, Val(:ρnᶜˡ))

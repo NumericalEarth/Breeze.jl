@@ -22,7 +22,9 @@
 # would limit them twice: it draws them first, and advances the explicit sinks of the donor in
 # Patankar form against what they leave (`p3_sink_fractions`). Cloud evaporation is bounded by the
 # cloud the stage leaves by construction. Rain evaporation relaxes the vapor deficit, not the
-# rain, so it is limited there to the rain the stage leaves.
+# rain, so it is limited there to the rain the stage leaves. Neither is budgeted against the
+# cloud and rain of the state the rates see over `sink_limiting_timescale`, as the explicit
+# rates are (`compute_p3_process_rates`): that budget would cap them again.
 #
 # Activation relaxes the droplet number toward the activated number over the activation time
 # scale in the same way, with the seed mass of the activated droplets. Its target is capped by
@@ -53,6 +55,11 @@ end
 # A stage that is already evaluated (single-cell tests). The grid kernel passes one that reads
 # the tendencies where the relaxation needs them; see `GridLiquidRelaxationStage`.
 @inline liquid_relaxation_stage(stage::LiquidRelaxationStage, aerosol, ρ) = stage
+
+# Whether the liquid vapor exchange is relaxed implicitly over the coming stage: not for the
+# gridless rates, and not before the first time step.
+@inline liquid_relaxation_is_active(::Nothing) = false
+@inline liquid_relaxation_is_active(stage::LiquidRelaxationStage) = stage.active
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

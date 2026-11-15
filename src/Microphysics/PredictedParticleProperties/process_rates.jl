@@ -794,7 +794,14 @@ end
     # the cloud sink total. Track the negative part of `cond` as a sink magnitude here
     # so it gets rescaled alongside the other cloud sinks when the budget would
     # over-deplete `qᶜˡ`.
-    cloud_evap = max(0, -cond)
+    #
+    # Where the liquid vapor exchange is relaxed implicitly over the coming stage, cloud and rain
+    # evaporation are already advanced over that stage, and are bounded by what it leaves of
+    # cloud and rain in the tendency kernel (`p3_sink_fractions`). They are left out of the
+    # budgets over `sink_limiting_timescale` here, which would cap them a second time when the
+    # stage is shorter than that timescale or starts from more cloud than the rates see.
+    implicit_evaporation = liquid_relaxation_is_active(liquid_stage)
+    cloud_evap = ifelse(implicit_evaporation, zero(FT), max(0, -cond))
     cloud_source_total = max(0, cond) + ccn_activation_mass
     # Homogeneous freezing is applied after all ordinary process budgets below,
     # consistent with its place in the process ordering. Do not reserve liquid here:
@@ -813,7 +820,7 @@ end
     cloud_warm_n  = cloud_warm_n * f_cloud
     wg_cloud      = wg_cloud * f_cloud
     wg_shed       = wg_shed * f_cloud
-    cond          = ifelse(cond < 0, cond * f_cloud, cond)
+    cond          = ifelse((cond < 0) & !implicit_evaporation, cond * f_cloud, cond)
 
     cloud_warm_to_ice = ifelse(tracks_liquid_on_ice(parameters), cloud_warm_q, zero(FT))
     cloud_warm_to_rain = ifelse(tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q)
@@ -861,7 +868,8 @@ end
         rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
                             cloud_warm_to_rain + rain_cond
         rain_available = max(0, qʳ) + rain_source_total * dt_safety
-        rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
+        rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain +
+                          ifelse(implicit_evaporation, zero(FT), rain_evap)
         f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
         rain_rim = rain_rim * f_rain
         rain_rim_n = rain_rim_n * f_rain
@@ -870,7 +878,7 @@ end
         rain_warm_q = rain_warm_q * f_rain
         rain_warm_n = rain_warm_n * f_rain
         wg_rain = wg_rain * f_rain
-        rain_evap = rain_evap * f_rain
+        rain_evap = ifelse(implicit_evaporation, rain_evap, rain_evap * f_rain)
         wg_excess_rain = wg_excess_rain * f_rain
         wg_shed_n = (wg_shed + wg_excess_rain) / parameters.shed_drop_mass
 
