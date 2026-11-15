@@ -68,6 +68,8 @@ Available:
 - `:SSPMIS43`: four stages, second order with the fast and slow parts coupled, with a
   strong-stability-preserving slow method. The default of [`MultirateInfinitesimalStep`](@ref).
 - `:MIS4a`: four stages, third order.
+- `:ConvexMIS52`, `:ConvexMIS52r20`, `:ConvexMIS42`: five, five and four stages, second order, with convex stage start states and
+  non-negative slow-tendency weights (experimental).
 - `:TVDMISB`: three stages, second order.
 - `:WickerSkamarock3`: the diagonal tableau ``β = \text{diag}(1/3, 1/2, 1)``, ``α = γ = 0``, which
   reproduces [`AcousticRungeKutta3`](@ref) when the linearization is refreshed every stage
@@ -136,5 +138,69 @@ function multirate_infinitesimal_step_tableau(::Val{:SSPMIS43}, FT)
          0.42598752307186377 0 0 0
          -0.033886544164628218 -0.7094153778115867 0 0
          -0.33319589552418832 0.35581112503939216 0.19062097801779304 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Five stages, second order coupled. Every stage is a convex combination of the step-start state and earlier
+# stage states plus non-negative multiples of the slow tendencies (implemented Shu–Osher coefficient 1.5), and the
+# acoustic start states are convex as well. Found by constrained optimization of the linear stable step per cost
+# (see the tableau-search scripts): stable to the upwind-5 advective limit of its slow polynomial (Courant 2.58) with
+# symmetric substeps, with or without divergence damping.
+function multirate_infinitesimal_step_tableau(::Val{:ConvexMIS52}, FT)
+    α = [0 0 0 0 0
+         0.027106156402681904 0 0 0 0
+         0.067188878295825205 0.4736160730706519 0 0 0
+         0.10311015215841544 0.64300400308661487 0.089851869962699837 0 0
+         0.11663370286563961 0.23755057105835853 0.39110290048156215 0.079322189256211553 0]
+    β = [0.60607365591531326 0 0 0 0
+         0.0011868576990268209 0.23448522942442709 0 0 0
+         0.0026173419314852804 0.0010473060378833245 0.29326962675565887 0 0
+         0.0077634771856887668 0.031197390806889932 0.0016270376445233087 0.41175884844844118 0
+         0.00053430848625262263 0.0037687546924390033 0.0020199480954774299 0.0010348064840297487 0.22679464582518061]
+    γ = [0 0 0 0 0
+         0.32783161147279133 0 0 0 0
+         0.16384341387368889 -0.026147391782588597 0 0 0
+         0.091716600603941725 -0.48551267875773957 0.53306774740651985 0 0
+         -0.051396848878430532 -0.20540193543937066 0.16529167970049155 0.2636743706302378 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Five stages (N = 5), second order coupled (M = 2); as `:ConvexMIS52`, with a larger implemented Shu–Osher
+# coefficient: r = 2.01, stage-scaled r_d = 0.49, Σdᵢ = 1.671, linear advective Courant limit 2.36 with or
+# without divergence damping. From the same constrained search (the tableau-search scripts).
+function multirate_infinitesimal_step_tableau(::Val{:ConvexMIS52r20}, FT)
+    α = [0 0 0 0 0
+         0.047988146509683409 0 0 0 0
+         0.13369993983380479 0.53721386623251022 0 0 0
+         0.3493364187910199 0.31211339542705741 0.1996477869781465 0 0
+         0.14979036652619998 0.24545838486793631 0.43405237801609098 0.038902421614832164 0]
+    β = [0.48611226255839973 0 0 0 0
+         0.0025905961767336075 0.23993248738022652 0 0 0
+         0.0043468748180844471 0.0021636972143530427 0.31421106667277793 0 0
+         0.0037052042456514832 0.030009085520365322 0.0023610806857223216 0.33513153656185607 0
+         0.00032250633695096791 0.0027917652677077187 0.0021270072293294519 0.0012672479402294492 0.24428009326671793]
+    γ = [0 0 0 0 0
+         0.43489186114856199 0 0 0 0
+         -0.11832286498947768 0.096064055497295103 0 0 0
+         -0.11983704105423366 -0.25237341584340556 0.47613648418612381 0 0
+         -0.036045052866620381 -0.15166826926182883 -0.1355224350239439 0.45287690506363104 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Four stages, second order coupled; as `:ConvexMIS52` (implemented Shu–Osher coefficient 1.5, linear advective
+# Courant limit 1.87 with or without divergence damping).
+function multirate_infinitesimal_step_tableau(::Val{:ConvexMIS42}, FT)
+    α = [0 0 0 0
+         0.0071760873686080922 0 0 0
+         0.30422746030087555 0.4613122625663546 0 0
+         0.33017426269827777 0.3386730509152 0.13158351927546355 0]
+    β = [0.57869390801943088 0 0 0
+         0.0051603819152294377 0.32856028743996452 0 0
+         0.0018549407443330876 0.0016866408008596651 0.4386866481107613 0
+         0.0011885024303392199 0.0016901415107267457 0.0013995714078297583 0.28211143350099843]
+    γ = [0 0 0 0
+         0.48732955960831836 0 0 0
+         -0.26878121392634668 0.19955071648410094 0 0
+         -0.20321594150197009 0.095588515604954211 0.29361821951576456 0]
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end
