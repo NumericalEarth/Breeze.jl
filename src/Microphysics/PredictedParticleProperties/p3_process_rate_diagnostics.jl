@@ -127,8 +127,8 @@ Number rates (for example `:rain_self_collection`) are in kg⁻¹ s⁻¹.
 The rates are the instantaneous, sink-limited rates that P3 evaluates from the current model
 state: P3 has no operator-split or substepped update. The tendency kernel forms its tendencies
 from these rates, after relaxing the vapor exchange of cloud liquid and rain and droplet
-activation implicitly over the coming stage and scaling every transfer by the Patankar fraction
-of the species it draws on, both of which depend on the stage and are not part of this
+activation implicitly over the coming stage and scaling every other transfer by the Patankar
+fraction of the species it draws on, both of which depend on the stage and are not part of this
 diagnostic. As in the tendency evaluation, the diffusional-growth driver uses the adiabatic temperature and
 pressure tendency of the local vertical velocity, and the surface temperature that gates
 rime splintering is the one stored by the most recent tendency evaluation.

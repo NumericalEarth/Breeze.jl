@@ -74,6 +74,7 @@ export
     stage_remainder,
     patankar_fraction,
     patankar_sink_fraction,
+    sequential_sink_fractions,
     implicit_relaxation,
     implicit_relaxation_rate,
     shared_excess_relaxation_rates,

@@ -18,11 +18,15 @@
 # (`AtmosphereModels.shared_excess_relaxation_rates`): the excess decays as
 # `x⁺ = x / (1 + Δt (εˡ + εʳ))`, split between them by `εᵢ / Σε`. Each rate is a fraction
 # `εᵢ Δt / (1 + Δt Σε) < 1` of its own excess, so neither overshoots its target at any `ε Δt`.
-# Evaporation is bounded by the cloud and rain present through the Patankar sink fractions of
-# the grid kernel, which scale these transfers as they scale every other.
+# The grid kernel does not weight these transfers by the Patankar fraction of their donor, which
+# would limit them twice: it draws them first, and advances the explicit sinks of the donor in
+# Patankar form against what they leave (`p3_sink_fractions`). Cloud evaporation is bounded by the
+# cloud the stage leaves by construction. Rain evaporation relaxes the vapor deficit, not the
+# rain, so it is limited there to the rain the stage leaves.
 #
 # Activation relaxes the droplet number toward the activated number over the activation time
-# scale in the same way, with the seed mass of the activated droplets.
+# scale in the same way, with the seed mass of the activated droplets. Its target is capped by
+# the aerosol available, so it asks for no more than the reservoir holds.
 #
 # Ice deposition, the liquid coating of ice and ice nucleation are left to the explicit rates and
 # their caps in `limit_ice_vapor_rates`. Where ice shares the vapor, the liquid and ice exchange

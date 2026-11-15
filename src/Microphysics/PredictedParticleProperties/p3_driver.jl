@@ -5,7 +5,7 @@ using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Utils: Utils, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels as AM
-using Breeze.AtmosphereModels: AbstractMicrophysicalState, patankar_sink_fraction
+using Breeze.AtmosphereModels: AbstractMicrophysicalState, patankar_sink_fraction, sequential_sink_fractions
 
 using Breeze: Microphysics
 
@@ -182,19 +182,40 @@ end
 #
 # The process rates budget each sink against the state they are evaluated at, over
 # `sink_limiting_timescale`. The time stepper applies them to the state the coming stage
-# starts from, over the stage interval `Δt`, alongside transport. On the grid every sink is
-# therefore advanced in Patankar form: each transfer is scaled by the
+# starts from, over the stage interval `Δt`, alongside transport. On the grid every explicit
+# sink is therefore advanced in Patankar form: each transfer is scaled by the
 # `AtmosphereModels.patankar_sink_fraction` of the species it draws on.
+#
+# The transfers that are relaxed implicitly over the stage (`implicit_liquid_relaxation.jl`:
+# the vapor exchange of cloud liquid and rain, and droplet activation) are already advanced
+# over `Δt`, and the Patankar fraction would limit them a second time. They are drawn first
+# from their donor, in full, and the explicit sinks of that donor are advanced in Patankar
+# form against what they leave (`AtmosphereModels.sequential_sink_fractions`):
+#
+#   * cloud evaporation from cloud liquid, a relaxation of the cloud itself, which asks for no
+#     more than the stage leaves of it;
+#   * condensation on cloud and rain and the seed mass of activation from vapor, which they
+#     relax toward saturation and so leave positive;
+#   * rain evaporation from rain. It relaxes the vapor deficit, not the rain, so it can ask for
+#     more rain than there is, and is then limited to the rain the stage leaves;
+#   * activation from the aerosol reservoir, whose only sink it is.
+#
+# Each first draw is limited to what the stage leaves of its donor, which is what keeps the
+# donor non-negative where the stage starts from a state other than the one the rates saw.
+# Before the first time step the rates are the explicit ones and every fraction is one.
 
 struct P3SinkFractions{FT}
-    vapor :: FT
-    cloud :: FT
-    rain :: FT
+    vapor :: FT              # explicit vapor sinks: deposition, nucleation, coating condensation
+    cloud :: FT              # explicit cloud sinks
+    rain :: FT               # explicit rain sinks
     rain_number :: FT
     ice :: FT
     ice_number :: FT
     coating :: FT
-    aerosol :: FT
+    aerosol :: FT            # activation, drawn from the aerosol reservoir
+    condensation :: FT       # implicit vapor sinks, drawn first: condensation on cloud and rain, activation
+    cloud_evaporation :: FT  # drawn first from cloud liquid
+    rain_evaporation :: FT   # drawn first from rain
 end
 
 @inline function p3_sink_fractions(i, j, k, G, stage, p3::P3, ρ, rates::P3ProcessRates)
@@ -204,14 +225,15 @@ end
     deposition = max(0, rates.deposition)
     sublimation = max(0, -rates.deposition)
 
-    vapor_loss = condensation + deposition + rates.nucleation_mass + rates.ccn_activation_mass +
-                 rates.rain_condensation + rates.coating_condensation
+    # Vapor: the implicit condensation and activation first, then the explicit sinks
+    liquid_condensation = condensation + rates.ccn_activation_mass + rates.rain_condensation
+    vapor_loss = deposition + rates.nucleation_mass + rates.coating_condensation
 
-    cloud_loss = cloud_evaporation + rates.autoconversion + rates.accretion + rates.cloud_riming +
+    cloud_loss = rates.autoconversion + rates.accretion + rates.cloud_riming +
                  rates.cloud_freezing_mass + rates.cloud_homogeneous_mass +
                  rates.cloud_warm_collection + rates.wet_growth_cloud + rates.wet_growth_shedding
 
-    rain_loss = rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass +
+    rain_loss = rates.rain_riming + rates.rain_freezing_mass +
                 rates.rain_homogeneous_mass + rates.rain_warm_collection + rates.wet_growth_rain
 
     rain_number_loss = rates.rain_evaporation_number + rates.rain_self_collection +
@@ -227,27 +249,33 @@ end
     coating_loss = rates.shedding + rates.refreezing + rates.coating_evaporation +
                    ifelse(liquid_on_ice, rates.wet_growth_shedding, zero(ρ))
 
+    κᵛ, φᵛ = sequential_sink_fractions(i, j, k, G.ρqᵛ, stage, Val(:ρqᵛ), ρ * liquid_condensation, ρ * vapor_loss)
+    κᶜˡ, φᶜˡ = sequential_sink_fractions(i, j, k, G.ρqᶜˡ, stage, Val(:ρqᶜˡ), ρ * cloud_evaporation, ρ * cloud_loss)
+    κʳ, φʳ = sequential_sink_fractions(i, j, k, G.ρqʳ, stage, Val(:ρqʳ), ρ * rates.rain_evaporation, ρ * rain_loss)
+
     return P3SinkFractions(
-        patankar_sink_fraction(i, j, k, G.ρqᵛ, stage, Val(:ρqᵛ), ρ * vapor_loss),
-        patankar_sink_fraction(i, j, k, G.ρqᶜˡ, stage, Val(:ρqᶜˡ), ρ * cloud_loss),
-        patankar_sink_fraction(i, j, k, G.ρqʳ, stage, Val(:ρqʳ), ρ * rain_loss),
+        φᵛ, φᶜˡ, φʳ,
         patankar_sink_fraction(i, j, k, G.ρnʳ, stage, Val(:ρnʳ), ρ * rain_number_loss),
         patankar_sink_fraction(i, j, k, G.ρqⁱ, stage, Val(:ρqⁱ), ρ * ice_loss),
         patankar_sink_fraction(i, j, k, G.ρnⁱ, stage, Val(:ρnⁱ), ρ * ice_number_loss),
         patankar_sink_fraction(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ), ρ * coating_loss),
-        aerosol_sink_fraction(i, j, k, G, stage, p3.aerosol, ρ * rates.ccn_activation_number))
+        aerosol_sink_fraction(i, j, k, G, stage, p3.aerosol, ρ * rates.ccn_activation_number),
+        κᵛ, κᶜˡ, κʳ)
 end
 
-# Activation draws on the aerosol reservoir only where that reservoir is prognostic.
+# Activation draws on the aerosol reservoir only where that reservoir is prognostic. It is the
+# reservoir's only sink, so it is limited to what the stage leaves of the reservoir and no further.
 @inline aerosol_sink_fraction(i, j, k, G, stage, aerosol, L) = one(L)
 @inline aerosol_sink_fraction(i, j, k, G, stage, ::AerosolActivation{<:Any, true}, L) =
-    patankar_sink_fraction(i, j, k, G.ρnᵃ, stage, Val(:ρnᵃ), L)
+    first(sequential_sink_fractions(i, j, k, G.ρnᵃ, stage, Val(:ρnᵃ), L, zero(L)))
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The process `rates` with each transfer scaled by the [`P3SinkFractions`](@ref) `φ` of the
-species it draws on. A number rate that accompanies a mass transfer takes the smaller of
+species it draws on: the Patankar fraction for an explicit transfer, and the fraction of an
+implicitly relaxed transfer that the stage leaves of its donor, which is one wherever the
+transfer fits. A number rate that accompanies a mass transfer takes the smaller of
 the mass and number fractions, so it never removes more particles than its mass does mass.
 Sources that draw on no prognostic, and the number relaxations, are unchanged.
 """
@@ -256,15 +284,17 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
     rn = min(r, φ.rain_number)
     in = min(i, φ.ice_number)
     cw = min(c, w)
-    va = min(v, φ.aerosol)
+    condensation = φ.condensation
+    activation = min(condensation, φ.aerosol)
+    evaporation = φ.rain_evaporation
 
     return P3ProcessRates(
-        rates.condensation * ifelse(rates.condensation > 0, v, c),
+        rates.condensation * ifelse(rates.condensation > 0, condensation, φ.cloud_evaporation),
         rates.autoconversion * c,
         rates.accretion * c,
         rates.cloud_self_collection * c,
-        rates.rain_evaporation * r,
-        rates.rain_evaporation_number * rn,
+        rates.rain_evaporation * evaporation,
+        rates.rain_evaporation_number * min(evaporation, φ.rain_number),
         rates.rain_self_collection * φ.rain_number,
         rates.rain_breakup,
         rates.deposition * ifelse(rates.deposition > 0, v, i),
@@ -307,9 +337,9 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
         rates.wet_growth_rain * r,
         rates.wet_growth_shedding * cw,
         rates.wet_growth_shedding_number * cw,
-        rates.ccn_activation_mass * va,
-        rates.ccn_activation_number * va,
-        rates.rain_condensation * v,
+        rates.ccn_activation_mass * activation,
+        rates.ccn_activation_number * activation,
+        rates.rain_condensation * condensation,
         rates.coating_condensation * v,
         rates.coating_evaporation * w,
         rates.wet_growth_densification_mass,

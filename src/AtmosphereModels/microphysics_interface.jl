@@ -449,6 +449,37 @@ before the first time step, when the stage interval is not known.
     return ifelse(stage_interval_is_known(stage), φ, one(φ))
 end
 
+# A sink that is already advanced implicitly against the species it draws on (a relaxation of
+# that species toward a non-negative target, see below) asks for no more than `c̃` leaves, and
+# weighting it by `φ` as well would limit it twice: a reservoir relaxed at rate `ω` would keep
+# `(1 + ωΔt) / (1 + 2ωΔt)` of itself over a stage rather than `1 / (1 + ωΔt)`. Such a sink is
+# split from the others and drawn first, in full, and the others are advanced in Patankar form
+# against what it leaves, `c̃ - Δt L¹`. The draw is still limited to `c̃`, which matters only
+# where the rate was budgeted against a state other than the one the stage starts from.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The fractions `(κ, φ)` on the sinks of a species that are split in sequence. The loss rate
+`first_loss` is drawn first and limited only by what the state the coming stage starts from
+and every other tendency leave of the species, `c̃ = c⁰ + Δt Gᵒ`: `κ = min(1, c̃ / (Δt L¹))`,
+which is exactly one where the draw fits. The loss rate `other_loss` is then weighted by the
+Patankar fraction `φ = c̃′ / (c̃′ + Δt L)` against the rest, `c̃′ = c̃ - Δt κ L¹`. Together they
+remove no more than `c̃` for any `Δt`. Both are one before the first time step, when the stage
+interval is not known.
+"""
+@inline function sequential_sink_fractions(i, j, k, G, stage::StageStart, name, first_loss, other_loss)
+    Δt = stage.Δt
+    c̃ = max(0, stage_remainder(i, j, k, G, stage, name))
+    demand = Δt * max(0, first_loss)
+    exhausted = demand > c̃
+    κ = ifelse(exhausted, c̃ / demand, one(c̃))
+    rest = ifelse(exhausted, zero(c̃), c̃ - demand)
+    φ = patankar_fraction(rest, Δt, other_loss)
+    known = stage_interval_is_known(stage)
+    return ifelse(known, κ, one(κ)), ifelse(known, φ, one(φ))
+end
+
 #####
 ##### Implicit relaxation toward a target
 #####
