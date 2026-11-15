@@ -128,6 +128,9 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
             w = implicit_advection_velocities(model.dynamics, velocities, name,
                                               model.microphysics, model.microphysical_fields)
             push!(implicit_requests, (u, field_index, implicit_step_scheme(advection), w))
+
+            # The closure keeps what it needs of the state its solve starts from.
+            closure_before_implicit_solve!(model.closure_fields, model.closure, model, name)
         end
     end
 
@@ -410,9 +413,19 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
                 (prognostic.ρw, nothing, momentum_scheme, (; w)),
                 (prognostic[θ_name], closure_scalar_index(model, θ_name), θ_scheme, θ_velocities)]
 
+    # The closure's work around the solves (see `closure_before_implicit_solve!`): the scalars,
+    # the closure's own prognostics among them, were solved in `scalar_substep!`, so what the
+    # closure adds to the thermodynamic variable from their solved state is added here, before
+    # that variable's solve.
+    closure_before_implicit_solve!(model.closure_fields, model.closure, model, :ρu)
+    closure_before_implicit_solve!(model.closure_fields, model.closure, model, :ρv)
+    closure_before_thermodynamic_solve!(model.closure_fields, model.closure, model, Δt_stage)
+
     scratch = implicit_step_scratch(model.timestepper.substepper, implicit_solver)
     implicit_steps_in_place!(requests, implicit_solver, scratch, model.closure, model.closure_fields,
                              model.clock, fields(model), Δt, ρᵈ)
+
+    closure_after_implicit_solves!(model.closure_fields, model.closure, model, Δt_stage)
 
     return nothing
 end

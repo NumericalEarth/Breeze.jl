@@ -201,6 +201,10 @@ With [`PostLoopScalarTendencies`](@ref) the scalar tendencies are rebuilt betwee
 scalar update, and `callbacks` with a `TendencyCallsite` fire again on them.
 """
 assemble_stage_forcing!(::AcousticRungeKutta3, model, Δt) = nothing
+
+# Every Wicker–Skamarock stage restarts from Uⁿ and applies its own tendency alone: the stage
+# recombines nothing, so the closure has nothing to account for before the stage.
+closure_before_stage_recombination!(::AcousticRungeKutta3, model, Δt_stage) = nothing
 assemble_post_loop_stage_forcing!(::AcousticRungeKutta3, model, Δt) = nothing
 
 # Wicker–Skamarock re-linearizes the fast operator about each stage's entry state.
@@ -226,6 +230,11 @@ function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = Round
     prepare_scalar_tendencies!(ts.scalar_tendencies, model)
     compute_flux_bc_tendencies!(model)
     compute_closure_tendencies!(model)
+
+    # What the stage's recombination of earlier stages does to the closure's energy budget
+    # (the kinetic energy it removes from the mean flow, and the stage-state conversions it
+    # reapplies), before the forcing overwrites what that needs.
+    closure_before_stage_recombination!(ts, model, β * Δt)
 
     # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
