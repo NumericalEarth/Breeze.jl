@@ -812,7 +812,9 @@ end
         # The assumed PDF at the centers, from moments co-located there: the second moments are
         # interpolated from the faces to the center, and w′³ is diagnosed at the center, so that the
         # skewness w′³ / (w′²)^{3/2} the PDF forms is a ratio of quantities at one location
-        interface_moments(k) = (m.θˡ′²[i, j, k], m.w′θˡ′[i, j, k], m.θˡ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
+        # (`@inbounds` does not reach into the body of a closure: a bounds check there is an early exit of the column
+        # loop, which Reactant raises to a loop of unknown trip count that Enzyme cannot differentiate)
+        interface_moments(k) = @inbounds (m.θˡ′²[i, j, k], m.w′θˡ′[i, j, k], m.θˡ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
         largeneg = convert(FT, -99999999.99)
         floors = (zero(FT), largeneg, largeneg, largeneg, zero(FT))
         for k in 1:Nz

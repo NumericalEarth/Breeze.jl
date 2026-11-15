@@ -173,7 +173,7 @@ end
         # w′³ of each center is the stored one (it is diagnosed at the centers from the moments of the
         # distribution's own evaluation and held fixed across the trials of the face)
         trial = (θˡ′², w′θˡ′, θˡ′qᵗ′, w′qᵗ′, qᵗ′²)
-        stored(n) = (m.θˡ′²[i, j, n], m.w′θˡ′[i, j, n], m.θˡ′qᵗ′[i, j, n], m.w′qᵗ′[i, j, n], m.qᵗ′²[i, j, n])
+        stored(n) = @inbounds (m.θˡ′²[i, j, n], m.w′θˡ′[i, j, n], m.θˡ′qᵗ′[i, j, n], m.w′qᵗ′[i, j, n], m.qᵗ′²[i, j, n])
 
         # The assumed PDF at the center below (face k is its upper face) and above (its lower face)
         Bˡ⁻, C⁻ = center_liquid_buoyancy(i, j, k-1, grid, d, cp, c, cl, w, θ, qᵗ, p, thermodynamics, stored(k-1), trial)
