@@ -517,8 +517,10 @@ end
 
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, Gⁿρu)
-    Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, Gⁿρv)
+    # Nothing fills the halos of the tendencies, so the horizontal interpolations wrap periodic
+    # indices themselves (the face past the last cell is the first one).
+    Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxTᶜᵃᵃ, Gⁿρu)
+    Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyTᵃᶜᵃ, Gⁿρv)
 
     ∂z_p′ = terrain_vertical_pressure_gradient(i, j, k, grid, pᴸ, pᵣ)
     ρ′ᶜᶜᶠ = terrain_vertical_buoyancy_density(i, j, k, grid, ρᴸ, ρᵣ)
