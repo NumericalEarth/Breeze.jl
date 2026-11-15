@@ -354,6 +354,9 @@ function AtmosphereModel(grid;
     closure = materialize_closure(closure, scalar_names, arch)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
 
+    # What the closure keeps from stage to stage of a time stepper that recombines its stages.
+    timestepper = materialize_closure_stage_storage(timestepper, closure_fields, closure, grid)
+
     model = AtmosphereModel(arch,
                             grid,
                             clock,

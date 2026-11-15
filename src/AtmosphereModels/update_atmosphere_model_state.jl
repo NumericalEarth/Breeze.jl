@@ -632,7 +632,9 @@ Runge–Kutta stage of length `Δt` (the stage's `α Δt`), so that what it adds
 state the solves produce:
 
 * `closure_before_stage_combination!(closure_fields, closure, model, Δt, α)` — before the explicit
-  update ``u = (1 - α) u⁰ + α (u + Δt G)`` of the stage, with the step's `Δt` and the stage's `α`;
+  update ``u = (1 - α) u⁰ + α (u + Δt G)`` of the stage, with the step's `Δt` and the stage's `α`.
+  A multirate infinitesimal step passes the stage's `Δt` (its ``dᵢ Δt``) and a
+  [`StageRecombination`](@ref) in place of `α`;
 * `closure_before_implicit_solve!(closure_fields, closure, model, name)` — just before the solve of
   the prognostic `name` (after its explicit stage update);
 * `closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt)` — after the solves of
@@ -645,4 +647,61 @@ closure_before_stage_combination!(closure_fields, closure, model, Δt, α) = not
 closure_after_implicit_solves!(closure_fields, closure, model, Δt) = nothing
 closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt) = nothing
 closure_before_implicit_solve!(closure_fields, closure, model, name) = nothing
+
+"""
+$(TYPEDEF)
+
+How stage ``i`` of a multirate infinitesimal step recombines the states and the slow tendencies of
+the stages before it. Without the fast tendency, the state its vertically implicit solves start
+from is
+
+```math
+Vᵢ = Σⱼ₌₀^{i-1} wᵢⱼ Yⱼ + dᵢ Δt Σⱼ₌₁^{i} bᵢⱼ Sⱼ , \\qquad Y₀ = Uⁿ , \\quad Sⱼ = S(Yⱼ₋₁) ,
+```
+
+with ``wᵢⱼ = αᵢⱼ + γᵢⱼ`` for ``j ≥ 1``, ``wᵢ₀ = 1 - Σⱼ wᵢⱼ`` and ``bᵢⱼ = βᵢⱼ / dᵢ`` (``Σⱼ bᵢⱼ = 1``).
+The weights of the states sum to one but need not be positive.
+
+Fields
+======
+
+- `stage`, `stages`: ``i`` and the number of stages ``s``.
+- `state_weights`: ``(wᵢ₀, …, wᵢ,ᵢ₋₁)``.
+- `tendency_weights`: ``(bᵢ₁, …, bᵢᵢ)``.
+- `step_start_state`: the prognostic fields of ``Uⁿ``.
+- `storage`: what the closure keeps from stage to stage (see [`closure_stage_storage`](@ref)).
+"""
+struct StageRecombination{W, B, U, S}
+    stage :: Int
+    stages :: Int
+    state_weights :: W
+    tendency_weights :: B
+    step_start_state :: U
+    storage :: S
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+What a closure keeps from stage to stage of `timestepper` (see [`StageRecombination`](@ref)), or
+`nothing` for a time stepper whose stages recombine nothing the closure accounts for.
+"""
+closure_stage_storage(timestepper) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The fields a closure with `closure_fields` keeps from stage to stage of a time stepper with
+`stages` stages that recombines them (see [`StageRecombination`](@ref)). `nothing` by default.
+"""
+build_closure_stage_storage(closure_fields, closure, grid, stages) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `timestepper` holding the stage storage of the closure (see
+[`build_closure_stage_storage`](@ref)). The time stepper is built before the closure fields, so
+`AtmosphereModel` calls this once both exist. The default returns `timestepper` unchanged.
+"""
+materialize_closure_stage_storage(timestepper, closure_fields, closure, grid) = timestepper
 

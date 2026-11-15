@@ -346,6 +346,120 @@ function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEC
     return nothing
 end
 
+#####
+##### The stages of a multirate infinitesimal step
+#####
+##### Stage i recombines the states and the slow tendencies of the stages before it (see
+##### `AtmosphereModels.StageRecombination`): the state its solves start from is
+#####
+#####     Vᵢ = Σⱼ wᵢⱼ Yⱼ + dᵢ Δt Σⱼ bᵢⱼ Sⱼ,     Σⱼ wᵢⱼ = 1,   Σⱼ bᵢⱼ = 1,   Sⱼ = S(Yⱼ₋₁),
+#####
+##### and the solves over dᵢ Δt give Yᵢ. Two things differ from a Shu–Osher stage.
+#####
+##### The kinetic energy the recombination of the states removes from the mean flow, per unit volume,
+#####
+#####     Σⱼ wᵢⱼ ρ |uⱼ|² / 2 - ρ |Σⱼ wᵢⱼ uⱼ|² / 2 = Σ_{p<q} wᵢₚ wᵢq ρ |uₚ - u_q|² / 2,
+#####
+##### is given to the TKE (`stage_combination`). The identity holds for any weights that sum to
+##### one. It is the Shu–Osher α (1 - α) ρ |V - u⁰|² / 2 for the weights (1 - α, α). The weights of
+##### a multirate infinitesimal step need not be positive (stage 2 of `:SSPMIS43` extrapolates,
+##### w = (-0.05, 1.05)), and then the recombination adds kinetic energy to the mean flow, which
+##### the TKE pays (or, where it has none, the internal energy: the shortfall).
+#####
+##### The stage-state conversions are in the slow tendencies, so the stage reapplies those of the
+##### stages before it: over the stage the TKE tendency gives Δt Σⱼ βᵢⱼ ρ (Pⱼ + B⁺ⱼ) and the
+##### tendency of θˡⁱ draws Δt Σⱼ βᵢⱼ ρ Bᴸⱼ. The correction after the solves therefore uses
+#####
+#####     Xᵢ = Σⱼ bᵢⱼ xⱼ,     xⱼ = (Pˢ + Bˢ + Bᴸ - P - B⁺)ⱼ,
+#####
+##### the recombined difference between what the stage-state fluxes converted and what the TKE
+##### tendency gave, in place of the stage's own xᵢ: ρe gains dᵢ Δt ρ (Pᵖ + Dᵘ + Bᵖ + ωᴮ e + Xᵢ)
+##### and the kinetic energy of the recombination. Over the stage the TKE then receives exactly
+##### what the solves converted, what the recombined tendencies of the surface fluxes and the
+##### latent conversion carry, and what the recombination removed from the mean flow.
+#####
+
+function AtmosphereModels.build_closure_stage_storage(::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
+                                                      closure, grid, stages)
+    exchange = ntuple(_ -> CenterField(grid), stages)
+    momentum = ntuple(_ -> (ρu = XFaceField(grid), ρv = YFaceField(grid)), stages - 1)
+    return (; exchange, recombined_exchange = CenterField(grid), momentum)
+end
+
+@kernel function _store_stage_exchange!(x, cl)
+    i, j, k = @index(Global, NTuple)
+    @inbounds x[i, j, k] = cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k] - cl.P[i, j, k] - max(cl.B[i, j, k], 0)
+end
+
+@inline weighted_sum(i, j, k, x::Tuple{Any}, b::Tuple{Any}) = @inbounds b[1] * x[1][i, j, k]
+@inline weighted_sum(i, j, k, x::Tuple, b::Tuple) =
+    @inbounds b[1] * x[1][i, j, k] + weighted_sum(i, j, k, Base.tail(x), Base.tail(b))
+
+@kernel function _recombine_stage_exchange!(X, x, b)
+    i, j, k = @index(Global, NTuple)
+    @inbounds X[i, j, k] = weighted_sum(i, j, k, x, b)
+end
+
+# Σ_{q} w_q |u - u_q|² over the states `U` and Σ_{p<q} w_p w_q |u_p - u_q|², at the location of the momentum
+@inline weighted_squared_differences(i, j, k, u, ::Tuple{}, ::Tuple{}) = zero(eltype(u))
+@inline function weighted_squared_differences(i, j, k, u, U::Tuple, w::Tuple)
+    @inbounds δ = u[i, j, k] - U[1][i, j, k]
+    return w[1] * δ * δ + weighted_squared_differences(i, j, k, u, Base.tail(U), Base.tail(w))
+end
+
+@inline pairwise_squared_differences(i, j, k, grid, U::Tuple{Any}, w::Tuple{Any}) = zero(grid)
+@inline pairwise_squared_differences(i, j, k, grid, U::Tuple, w::Tuple) =
+    w[1] * weighted_squared_differences(i, j, k, U[1], Base.tail(U), Base.tail(w)) +
+    pairwise_squared_differences(i, j, k, grid, Base.tail(U), Base.tail(w))
+
+@kernel function _stage_recombination_kinetic_energy!(K, grid, ρu, ρv, w, ρ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        δ² = ℑxᶜᵃᵃ(i, j, k, grid, pairwise_squared_differences, ρu, w) +
+             ℑyᵃᶜᵃ(i, j, k, grid, pairwise_squared_differences, ρv, w)
+        K[i, j, k] = δ² / (2 * ρ[i, j, k]) * !inactive_cell(i, j, k, grid)
+    end
+end
+
+function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
+                                                             closure::FlavorOfTKEClosure, model, Δt,
+                                                             recombination::AtmosphereModels.StageRecombination)
+    implicit_stage(closure, model) || return nothing
+    grid = model.grid
+    arch = grid.architecture
+    cl = closure_fields.subgrid_cloud.cloud
+    storage = recombination.storage
+    i = recombination.stage
+
+    # The conversions of the stage state Yᵢ₋₁ are in hand: keep their exchange, and recombine
+    launch!(arch, grid, :xyz, _store_stage_exchange!, storage.exchange[i], cl)
+    launch!(arch, grid, :xyz, _recombine_stage_exchange!, storage.recombined_exchange,
+            storage.exchange[1:i], recombination.tendency_weights)
+
+    # The momentum is that of Yᵢ₋₁: keep it for the stages after this one
+    ρu, ρv = model.momentum.ρu, model.momentum.ρv
+    ρuⁿ, ρvⁿ = recombination.step_start_state.ρu, recombination.step_start_state.ρv
+    fill_halo_regions!((ρu, ρv, ρuⁿ, ρvⁿ))
+    if i > 1
+        parent(storage.momentum[i-1].ρu) .= parent(ρu)
+        parent(storage.momentum[i-1].ρv) .= parent(ρv)
+    end
+    ρus = (ρuⁿ, ntuple(j -> storage.momentum[j].ρu, i - 1)...)
+    ρvs = (ρvⁿ, ntuple(j -> storage.momentum[j].ρv, i - 1)...)
+    launch!(arch, grid, :xyz, _stage_recombination_kinetic_energy!, cl.stage_combination, grid, ρus, ρvs,
+            recombination.state_weights, total_density(model.dynamics))
+    return nothing
+end
+
+# What the correction after the solves adds to the stage tendency's conversions, per unit mass and
+# time: with no recombination, what the solves and the stage-state fluxes converted less what the
+# stage gave; with one, the solves' part and the recombined exchange of the stage states.
+@inline net_stage_conversion(::Nothing, i, j, k, converted, given, solved) = converted - given
+@inline net_stage_conversion(X, i, j, k, converted, given, solved) = @inbounds solved + X[i, j, k]
+
+recombined_stage_exchange(::Nothing) = nothing
+recombined_stage_exchange(storage) = storage.recombined_exchange
+
 function AtmosphereModels.closure_before_implicit_solve!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
                                                           closure::FlavorOfTKEClosure, model, name)
     implicit_stage(closure, model) || return nothing
@@ -381,7 +495,7 @@ function AtmosphereModels.closure_before_thermodynamic_solve!(closure_fields::TK
     return nothing
 end
 
-@kernel function _correct_tke_to_solved_conversions!(ρe, ρθ, cl, grid, s, Kᶜ, Kᵘ, u, v, Δt)
+@kernel function _correct_tke_to_solved_conversions!(ρe, ρθ, cl, grid, s, Kᶜ, Kᵘ, u, v, Δt, X)
     i, j, k = @index(Global, NTuple)
     Bᵖ, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     @inbounds begin
@@ -411,7 +525,8 @@ end
         # Benefit: e stays non-negative and the total energy still closes. The TKE also receives the
         # kinetic energy the stage combination removed from the mean flow (`stage_combination`, per volume).
         active = !inactive_cell(i, j, k, grid)
-        ρe⁺ = ρe[i, j, k] + (Δt * ρᵢ * (converted - given) + cl.stage_combination[i, j, k]) * active
+        net = net_stage_conversion(X, i, j, k, converted, given, Pᵖ + Dᵘ + Bᵖ + cl.ωᴮ[i, j, k] * e)
+        ρe⁺ = ρe[i, j, k] + (Δt * ρᵢ * net + cl.stage_combination[i, j, k]) * active
         ρe⁺′ = ifelse(ρe⁺ < 0, min(ρe[i, j, k], zero(ρe⁺)), ρe⁺)
         shortfall = ρe⁺′ - ρe⁺ # ≥ 0: energy the TKE did not pay
         ρe[i, j, k] = ρe⁺′
@@ -438,7 +553,8 @@ function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClos
     u = SpecificValue(model.momentum.ρu, ρ)
     v = SpecificValue(model.momentum.ρv, ρ)
     launch!(grid.architecture, grid, :xyz, _correct_tke_to_solved_conversions!, model.tracers[TKE_NAME], s.ρθ, cl, grid, s,
-            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, Δt)
+            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, Δt,
+            recombined_stage_exchange(AtmosphereModels.closure_stage_storage(model.timestepper)))
     launch!(grid.architecture, grid, :xyz, _cool_by_shortfall!, s.ρθ, cl)
     return nothing
 end
