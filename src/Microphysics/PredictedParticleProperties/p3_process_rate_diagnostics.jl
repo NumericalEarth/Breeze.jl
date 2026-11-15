@@ -69,7 +69,7 @@ Adapt.adapt_structure(to, k::P3ProcessRateKernelFunction{names}) where names =
     rates = compute_p3_process_rates(p3, inputs.ρ, inputs.ℳ, inputs.𝒰, constants,
                                      inputs.properties, inputs.surface_temperature,
                                      inputs.temperature_tendency, inputs.pressure_tendency,
-                                     statistics, inputs.𝒮)
+                                     statistics)
 
     return sum_process_rates(rates, names)
 end
@@ -125,9 +125,11 @@ Return a `KernelFunctionOperation` for the P3 process rate `name`, which may be 
 Number rates (for example `:rain_self_collection`) are in kg⁻¹ s⁻¹.
 
 The rates are the instantaneous, sink-limited rates that P3 evaluates from the current model
-state to form its tendencies: P3 has no operator-split or substepped update, so these are
-exactly the rates the time stepper integrates at the start of the next stage. As in the
-tendency evaluation, the diffusional-growth driver uses the adiabatic temperature and
+state: P3 has no operator-split or substepped update. The tendency kernel forms its tendencies
+from these rates, after relaxing the vapor exchange of cloud liquid and rain and droplet
+activation implicitly over the coming stage and scaling every other transfer by the Patankar
+fraction of the species it draws on, both of which depend on the stage and are not part of this
+diagnostic. As in the tendency evaluation, the diffusional-growth driver uses the adiabatic temperature and
 pressure tendency of the local vertical velocity, and the surface temperature that gates
 rime splintering is the one stored by the most recent tendency evaluation.
 """

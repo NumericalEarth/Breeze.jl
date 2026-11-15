@@ -63,7 +63,6 @@ export
     supersaturation_statistics,
     supersaturation_statistics_model_fields,
     phase_relaxation_rate,
-    TurbulenceClosureStatistics,
     instantaneous_phase_relaxation,
 
     # Microphysics interface
@@ -83,6 +82,10 @@ export
     stage_remainder,
     patankar_fraction,
     patankar_sink_fraction,
+    sequential_sink_fractions,
+    implicit_relaxation,
+    implicit_relaxation_rate,
+    shared_excess_relaxation_rates,
     moisture_fractions,
     grid_moisture_fractions,
     update_microphysical_fields!,

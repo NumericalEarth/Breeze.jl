@@ -701,7 +701,7 @@ Oceananigans.restore_prognostic_state!(fields::SHOCFields, ::Nothing) = fields
     end
 end
 
-@inline function AtmosphereModels.supersaturation_statistics(::AtmosphereModels.TurbulenceClosureStatistics, i, j, k, grid,
+@inline function AtmosphereModels.supersaturation_statistics(::TurbulenceClosureStatistics, i, j, k, grid,
                                                              ::FlavorOfSHOC, fields::SHOCFields, model_fields)
     v = fields.diagnostics
     @inbounds begin

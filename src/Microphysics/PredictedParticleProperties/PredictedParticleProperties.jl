@@ -123,10 +123,7 @@ using SpecialFunctions: erf, erfc
 using Adapt: Adapt
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU, on_architecture
-using Breeze.AtmosphereModels: prognostic_field_names,
-                                DiracStatistics,
-                                AbstractSubgridCorrelation,
-                                NoSubgridCorrelation
+using Breeze.AtmosphereModels: prognostic_field_names
 using Breeze.Microphysics: thermodynamic_adjustment_factor
 using Breeze.Thermodynamics: MoistureMassFractions,
                              PlanarIceSurface,
@@ -248,6 +245,7 @@ include("process_rate_helpers.jl")
 include("tabulated_kernels.jl")
 include("cloud_droplet_activation_rates.jl")
 include("coupled_saturation_adjustment.jl")
+include("implicit_liquid_relaxation.jl")
 
 #####
 ##### P3ProcessRates struct + constructor and the per-process rate calculations
@@ -255,7 +253,6 @@ include("coupled_saturation_adjustment.jl")
 
 include("process_rates.jl")
 include("rain_process_rates.jl")
-include("subgrid_process_rates.jl")
 include("melting_rates.jl")
 include("ice_nucleation_rates.jl")
 include("ice_aggregation_rates.jl")

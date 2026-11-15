@@ -93,19 +93,22 @@ excess drives that rate.
 - `GridMeanCondensation()` (default) uses the grid-mean vapor excess over liquid,
   ``μ = δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ``: the rate is ``ωˡ μ``, with evaporation limited by the cloud liquid present.
 - `SubgridCondensation(statistics)` averages the local rate over a subgrid distribution of the
-  vapor excess, whose spread ``σ`` comes from `supersaturation_statistics(statistics, i, j, k, grid,
-  closure, closure_fields, model_fields)`. For a Gaussian,
+  saturation excess of total water, whose spread ``σ`` comes from
+  `supersaturation_statistics(statistics, i, j, k, grid, closure, closure_fields, model_fields)`.
+  With ``s̄ = μ + ξˡ qᶜˡ`` the grid-mean saturation excess, for a Gaussian
 
 ```math
-⟨\max(0, δqᵛ⁺ˡ)⟩ = μ + Γ, \qquad Γ = σ G(μ / σ) - μ ≥ 0, \qquad G(Q) = φ(Q) + Q Φ(Q),
+⟨\max(0, s)⟩ = s̄ + Γ, \qquad Γ = σ G(s̄ / σ) - s̄ ≥ 0, \qquad G(Q) = φ(Q) + Q Φ(Q),
 ```
 
-  and the rate is ``ωˡ (μ + Γ)``. Locally, cloud liquid evaporates no faster than ``qᶜˡ / τ``, so
-  the truncation is taken about ``μ + e`` with ``e = qᶜˡ / (τ ωˡ)``: without cloud liquid only the
-  supersaturated part of the cell condenses, and as ``σ → 0`` the grid-mean rate is recovered.
-  A mixture of plumes (weights ``aᵢ``, means ``μᵢ``, spreads ``σᵢ``) sums the per-plume terms with
-  their weights, about P3's own grid mean. Use `PrescribedStatistics(σ)` for a fixed spread, or a
-  turbulence closure's statistics (`TurbulenceClosureStatistics()`).
+  and the rate is ``ωˡ (μ + Γ) = ωˡ (⟨s⁺⟩ - ξˡ qᶜˡ)``: cloud liquid is taken to sit where
+  ``s > 0``, so the rate vanishes when the cloud liquid is the distribution's equilibrium
+  condensate ``⟨s⁺⟩ / ξˡ``. Without cloud liquid only the supersaturated part of the cell
+  condenses, and as ``σ → 0`` the grid-mean rate is recovered (with evaporation no faster than
+  ``ωˡ ξˡ qᶜˡ``). A mixture of plumes (weights ``aᵢ``, means ``μᵢ``, spreads ``σᵢ``) sums the
+  per-plume terms with their weights, about P3's own grid mean. Use `PrescribedStatistics(σ)`
+  or `PrescribedPlumeStatistics(a, μ, σ)` for a fixed distribution; a turbulence closure may
+  supply its own source of statistics.
 
 The rate coefficient is the phase relaxation rate of the cloud droplets,
 
@@ -118,9 +121,6 @@ gamma size distribution, ``Dᵛ`` the vapor diffusivity and ``ξˡ`` the psychro
 100 droplets per cm³ of radius near 10 µm, ``1/ωˡ`` is about 8 s. With the ice deposition rate
 ``ωⁱ`` it forms ``ωᶜ = ωˡ + ωⁱ``, which `AtmosphereModels.phase_relaxation_rate` returns to a
 turbulence closure. The same ``ωˡ`` drives P3's coupled diffusional growth.
-
-`ClosureCloud`, under which a turbulence closure overwrote P3's cloud liquid, is retired, and the
-`subgrid` keyword is deprecated in favor of `condensation`.
 
 ## [P3 Examples and Visualization](@id p3_examples)
 

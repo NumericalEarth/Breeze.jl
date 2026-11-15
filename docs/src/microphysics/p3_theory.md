@@ -2945,12 +2945,40 @@ gridless P3 rates against the donor reservoirs available over
 multi-stage time stepper applies rates evaluated at one state to another, over an
 interval that need not match that timescale:
 
-- every sink is advanced in Patankar form against what the state the coming stage
+- every explicit sink is advanced in Patankar form against what the state the coming stage
   starts from, and every other tendency, leave of its donor, ``c̃``: the loss ``L``
   becomes ``L c̃ / (c̃ + Δt L)``, so ``c̃ / (1 + Δt L / c̃) ≥ 0`` for any stage
   interval ``Δt``. Each transfer is scaled by the fraction of the species it draws
   on, which scales the recipient's gain by the same factor and conserves the
   exchange;
+- the vapor exchange of liquid is a relaxation, and is advanced by backward Euler over
+  the stage in place of the saturation-adjustment caps: cloud liquid relaxes towards
+  its equilibrium condensate ``\max(0, s̄) / ξ^l`` at the droplets' vapor relaxation rate
+  ``ε^l``, with ``s̄ = q^v - q^{v+l} + ξ^l q^{cl}`` the saturation excess of total water,
+  which condensation leaves unchanged. Rain condenses and evaporates on the same vapor
+  excess at its rate ``ε^r``, so the two are relaxed together, the excess decaying by
+  ``1 / (1 + Δt (ε^l + ε^r))`` and split between them by ``ε / (ε^l + ε^r)``. Droplet
+  activation relaxes towards the activated number (or seed mass) in the same way.
+  Each update is a convex combination of what the stage leaves of the cloud and a
+  non-negative target, applied as the tendency ``(c^+ - c̃) / Δt``, so it neither
+  overshoots the target nor depends on `sink_limiting_timescale`, and it reduces to
+  the explicit rate as ``ε Δt → 0``. Ice deposition, the liquid coating of ice
+  and ice nucleation keep the explicit caps;
+- the implicit transfers are not weighted by the Patankar fraction as well, which would
+  limit them twice: a reservoir relaxed at rate ``ω`` would keep
+  ``(1 + ω Δt) / (1 + 2 ω Δt)`` of itself over a stage in place of ``1 / (1 + ω Δt)``.
+  Each is drawn from its donor first, in full, and the explicit sinks of that donor are
+  advanced in Patankar form against what it leaves, ``c̃ - Δt L^1``: cloud evaporation
+  before the other sinks of cloud liquid, rain evaporation before the other sinks of
+  rain, and condensation on cloud and rain and the seed mass of activation before the
+  other sinks of vapor. Activation is the only sink of the aerosol reservoir. A first
+  draw is limited to ``c̃``, by the factor ``\min(1, c̃ / (Δt L^1))``, which is one
+  wherever the draw fits: always for cloud evaporation and activation where the stage
+  starts from the state the rates saw, since both relax their own donor. Rain
+  evaporation relaxes the vapor deficit and not the rain, so this limit is what keeps
+  it within the rain present. Cloud and rain evaporation are likewise left out of the
+  cloud and rain budgets over `sink_limiting_timescale`, which would otherwise cap them
+  when a stage is shorter than that timescale;
 - the relaxations of number towards its size-distribution bounds and of ice number
   towards its cap are advanced by backward Euler over the stage;
 - rime mass and volume loss is bounded by what the stage leaves of each.

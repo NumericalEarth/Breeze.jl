@@ -9,8 +9,8 @@
 #     the subgrid distribution of the vapor excess over liquid, δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ, in one cell.
 #     A microphysics that condenses over the subgrid distribution (P3 with
 #     `SubgridCondensation(statistics)`) calls it. The `statistics` object selects the source:
-#     `PrescribedStatistics` here, and a closure-side type (`TurbulenceClosureStatistics`) that
-#     the turbulence closure implements.
+#     `PrescribedStatistics` and `PrescribedPlumeStatistics` here; a turbulence closure may add
+#     its own source type.
 #
 #   * `phase_relaxation_rate(i, j, k, grid, microphysics, microphysical_fields, 𝒰, constants)`:
 #     ωᶜ, the rate [s⁻¹] at which the condensate converts vapor excess into condensate,
@@ -106,30 +106,6 @@ end
 @inline supersaturation_statistics(statistics::PrescribedPlumeStatistics, i, j, k, grid,
                                    closure, closure_fields, model_fields) =
     (; a = statistics.a, μ = statistics.μ, σ = statistics.σ)
-
-"""
-$(TYPEDEF)
-
-The statistics of the vapor excess over liquid from the model's turbulence closure (see
-[`supersaturation_statistics`](@ref)): the components of the double-Gaussian subgrid distribution
-of a `TKEBasedTurbulenceClosure` with a `subgrid_distribution`, or of a
-`SimplifiedHigherOrderClosure`, as Gaussian components `(; a, μ, σ)` of the vapor excess. A
-closure without a subgrid distribution supplies no spread (`σ = 0`): the grid-mean rate.
-
-```jldoctest
-julia> using Breeze
-
-julia> TurbulenceClosureStatistics()
-TurbulenceClosureStatistics()
-```
-"""
-struct TurbulenceClosureStatistics <: AbstractSupersaturationStatistics end
-
-# A closure without subgrid statistics: no spread
-@inline function supersaturation_statistics(::TurbulenceClosureStatistics, i, j, k, grid, closure, closure_fields, model_fields)
-    FT = eltype(grid)
-    return (; μ = zero(FT), σ = zero(FT), skewness = zero(FT), f⁺ = zero(FT))
-end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

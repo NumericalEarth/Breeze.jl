@@ -46,7 +46,7 @@ using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure, getclosure
 using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using Breeze.AtmosphereModels: AtmosphereModels
-using Breeze.TurbulenceClosures: TurbulenceClosures, convert_eltype,
+using Breeze.TurbulenceClosures: TurbulenceClosures, TurbulenceClosureStatistics, convert_eltype,
                                  GradientLimitedMixingLength, HardMinimum, HarmonicBlend, fill_mixing_length!, mixing_lengthᶜᶜᶜ,
                                  RationalStabilityFunction, local_stability_functions
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS

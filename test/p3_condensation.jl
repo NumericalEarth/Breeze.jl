@@ -6,7 +6,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: AtmosphereModels, NoSubgridCorrelation, PrescribedStatistics,
+using Breeze.AtmosphereModels: AtmosphereModels, PrescribedStatistics,
                                PrescribedPlumeStatistics, supersaturation_statistics, phase_relaxation_rate,
                                instantaneous_phase_relaxation
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticleProperties, GridMeanCondensation,
@@ -74,10 +74,7 @@ end
     subgrid = SubgridCondensation(PrescribedStatistics(1e-4))
     @test P3Microphysics(Float64; condensation = subgrid).condensation === subgrid
 
-    @test P3Microphysics(Float64; condensation = NoSubgridCorrelation()).condensation === GridMeanCondensation()
-
-    # P3 owns its cloud: a closure is never asked to set it
-    @test AtmosphereModels.subgrid_correlation(P3Microphysics(Float64; condensation = subgrid)) === NoSubgridCorrelation()
+    @test_throws ArgumentError P3Microphysics(Float64; condensation = :subgrid)
 end
 
 # One P3 cell at temperature T and 900 hPa
@@ -157,7 +154,7 @@ end
         qᶜˡ = λ * FT(positive_excess) / ξˡ
         qᵛ = qᵛ⁺ˡ + s̄ - ξˡ * qᶜˡ
         Γ = PPP.cloud_condensation_correlation(condensation, gaussian(zero(FT), σ), qᵛ, qᵛ⁺ˡ, qᶜˡ,
-                                               T, FT(9e4), one(FT), constants, nothing, nothing)
+                                               T, FT(9e4), one(FT), constants)
         @test qᵛ - qᵛ⁺ˡ + Γ ≈ (1 - λ) * positive_excess atol = sqrt(eps(FT)) * σ
     end
 end

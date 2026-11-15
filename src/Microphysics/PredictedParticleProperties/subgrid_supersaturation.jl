@@ -17,12 +17,6 @@
 # caps on those two rates. Rain, ice, aerosol activation and every collection process keep
 # their grid-mean form. Evaporation stays limited by the cloud liquid present (the clamp
 # -qᶜˡ / τ in `coupled_saturation_adjustment_rates`).
-#
-# An object of any other type in the `condensation` slot is an external model of Γ (the former
-# `subgrid` slot; Squall's `SupersaturationCorrelation`). It extends the three functions
-# `subgrid_supersaturation_fields`, `subgrid_supersaturation_statistics` and
-# `subgrid_supersaturation`. That path is deprecated: such a model should become a source of
-# `supersaturation_statistics` used through `SubgridCondensation`.
 
 """
 $(TYPEDEF)
@@ -135,7 +129,7 @@ true
 end
 
 #####
-##### The three hook functions read by the P3 kernels
+##### What the P3 kernels read of the `condensation` option
 #####
 
 """
@@ -147,7 +141,6 @@ kernels and then to [`subgrid_supersaturation_statistics`](@ref Breeze.Microphys
 `supersaturation_statistics_model_fields(model)` for [`SubgridCondensation`](@ref).
 """
 subgrid_supersaturation_fields(::GridMeanCondensation, model) = nothing
-subgrid_supersaturation_fields(::AbstractSubgridCorrelation, model) = nothing
 
 subgrid_supersaturation_fields(::SubgridCondensation, model) =
     (model.closure, model.closure_fields, AM.supersaturation_statistics_model_fields(model))
@@ -160,39 +153,9 @@ Return the subgrid statistics of cell `(i, j, k)` that the `condensation` option
 `nothing` for [`GridMeanCondensation`](@ref).
 """
 @inline subgrid_supersaturation_statistics(i, j, k, grid, ::GridMeanCondensation, fields) = nothing
-@inline subgrid_supersaturation_statistics(i, j, k, grid, ::AbstractSubgridCorrelation, fields) = nothing
 
 @inline subgrid_supersaturation_statistics(i, j, k, grid, condensation::SubgridCondensation, fields) =
     AM.supersaturation_statistics(condensation.statistics, i, j, k, grid, fields...)
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return the subgrid supersaturation correlation Γ [kg kg⁻¹] of a cell: the amount added to the
-grid-mean vapor excess `qᵛ - qᵛ⁺ˡ` in the condensation and evaporation of cloud liquid. The
-arguments are the vapor, saturation and cloud liquid mass fractions, the temperature `T`,
-pressure `P` and density `ρ` that P3 evaluates its rates with, and the thermodynamic
-`constants`. For [`GridMeanCondensation`](@ref) the result is `nothing` and P3 uses the grid-mean
-vapor excess unchanged; for [`SubgridCondensation`](@ref) it is
-[`subgrid_vapor_excess_correlation`](@ref Breeze.Microphysics.PredictedParticleProperties.subgrid_vapor_excess_correlation).
-
-```jldoctest
-julia> using Breeze.Microphysics.PredictedParticleProperties: subgrid_supersaturation, cloud_vapor_excess, GridMeanCondensation
-
-julia> Γ = subgrid_supersaturation(GridMeanCondensation(), nothing, 1e-2, 1.1e-2, 0.0, 285.0, 9e4, 1.1, nothing)
-
-julia> cloud_vapor_excess(Γ, -1e-3)
--0.001
-
-julia> cloud_vapor_excess(0.5, -1.0)
--0.5
-```
-"""
-@inline subgrid_supersaturation(::GridMeanCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) = nothing
-@inline subgrid_supersaturation(::AbstractSubgridCorrelation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) = nothing
-
-@inline subgrid_supersaturation(::SubgridCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) =
-    subgrid_vapor_excess_correlation(statistics, qᵛ - qᵛ⁺ˡ)
 
 # The vapor excess, and the vapor, that cloud liquid sees
 @inline cloud_vapor_excess(::Nothing, vapor_excess) = vapor_excess
@@ -208,26 +171,41 @@ julia> cloud_vapor_excess(0.5, -1.0)
 ##### The `condensation` keyword of P3
 #####
 
-validate_p3_condensation(::NoSubgridCorrelation) = GridMeanCondensation()
 validate_p3_condensation(condensation::GridMeanCondensation) = condensation
 validate_p3_condensation(condensation::SubgridCondensation) = condensation
 
-# An external model of Γ (deprecated path)
-function validate_p3_condensation(external_correlation)
-    Base.depwarn("An external subgrid supersaturation model in the `condensation` slot of P3 " *
-                 "(extending `subgrid_supersaturation`) is deprecated; provide its statistics through " *
-                 "`AtmosphereModels.supersaturation_statistics` and use `SubgridCondensation(statistics)`.",
-                 :PredictedParticlePropertiesMicrophysics)
-    return external_correlation
-end
+validate_p3_condensation(condensation) =
+    throw(ArgumentError("The `condensation` of P3 must be `GridMeanCondensation()` or " *
+                        "`SubgridCondensation(statistics)`; got $(summary(condensation))."))
 
 #####
 ##### Γ in the P3 rates
 #####
 
-# The grid-mean and external paths: the hook above.
-@inline cloud_condensation_correlation(condensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants, p3, state) =
-    subgrid_supersaturation(condensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants)
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the subgrid supersaturation correlation Γ [kg kg⁻¹] of a cell: the amount added to the
+grid-mean vapor excess `qᵛ - qᵛ⁺ˡ` in the condensation and evaporation of cloud liquid. The
+arguments are the `condensation` option of P3 and the `statistics` it formed for the cell, the
+vapor, saturation and cloud liquid mass fractions, the temperature `T`, pressure `P` and density
+`ρ` that P3 evaluates its rates with, and the thermodynamic `constants`. For
+[`GridMeanCondensation`](@ref) the result is `nothing` and P3 uses the grid-mean vapor excess
+unchanged.
+
+```jldoctest
+julia> using Breeze.Microphysics.PredictedParticleProperties: cloud_condensation_correlation, cloud_vapor_excess, GridMeanCondensation
+
+julia> Γ = cloud_condensation_correlation(GridMeanCondensation(), nothing, 1e-2, 1.1e-2, 0.0, 285.0, 9e4, 1.1, nothing)
+
+julia> cloud_vapor_excess(Γ, -1e-3)
+-0.001
+
+julia> cloud_vapor_excess(0.5, -1.0)
+-0.5
+```
+"""
+@inline cloud_condensation_correlation(::GridMeanCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) = nothing
 
 # Subgrid condensation. The statistics are those of the saturation excess of total water,
 # s = qᵗ - qᵛ⁺ˡ(Tˡ), which in P3's linearization is s = δqᵛ⁺ˡ + ξˡ qᶜˡ: the vapor excess plus the
@@ -246,7 +224,7 @@ end
 # the grid-mean rate, with evaporation no faster than ωˡ ξˡ q̄ᶜˡ (all the liquid relaxing at
 # the droplets' rate εˡ = ωˡ ξˡ).
 @inline function cloud_condensation_correlation(::SubgridCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ,
-                                                T, P, ρ, constants, p3, state)
+                                                T, P, ρ, constants)
     ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
     μ = qᵛ - qᵛ⁺ˡ
     s̄ = μ + ξˡ * max(0, qᶜˡ)

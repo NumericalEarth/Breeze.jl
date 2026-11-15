@@ -20,7 +20,7 @@ using Oceananigans.TurbulenceClosures: buoyancy_tracers, buoyancy_force
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: shearᶜᶜᶠ
 using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
-using Breeze.AtmosphereModels: TurbulenceClosureStatistics
+using Breeze.TurbulenceClosures: TurbulenceClosureStatistics
 using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, ProcessRate
 using Adapt: adapt
 using Enzyme: Enzyme
@@ -30,17 +30,15 @@ using Test
 ##### Dummy subgrid cloud models: a constant weight, and one that reads the stored mixing length
 #####
 
-struct ConstantWeight{FT}
+struct ConstantWeight{FT} <: Breeze.AtmosphereModels.AbstractSupersaturationStatistics
     w :: FT
 end
 
 @inline TurbulenceClosures.saturated_stability_weightᶜᶜᶠ(i, j, k, grid, model::ConstantWeight, buoyancy, tracers, closure_fields) = model.w
 
-# In P3's subgrid supersaturation hook the constant weight is a model without a correlation
-const PPP = Breeze.Microphysics.PredictedParticleProperties
-PPP.subgrid_supersaturation_fields(::ConstantWeight, model) = nothing
-@inline PPP.subgrid_supersaturation_statistics(i, j, k, grid, ::ConstantWeight, fields) = nothing
-@inline PPP.subgrid_supersaturation(::ConstantWeight, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) = zero(qᵛ)
+# As the statistics of P3's `SubgridCondensation`, the constant weight supplies no spread
+@inline Breeze.AtmosphereModels.supersaturation_statistics(::ConstantWeight, i, j, k, grid, closure, closure_fields, model_fields) =
+    (; μ = zero(eltype(grid)), σ = zero(eltype(grid)))
 
 struct MixingLengthWeight{FT}
     ℓ⁰ :: FT
@@ -398,9 +396,9 @@ end
         @test SaturationWeightedStaticStability() === SaturationWeightedStaticStability(MicrophysicsSaturatedFraction())
         @test microphysics_subgrid_model(nothing) === nothing
         @test microphysics_subgrid_model(warm_adjustment()) === nothing
-        # P3 hands over the model in its subgrid supersaturation hook: here a constant weight
+        # P3 hands over the statistics of its `SubgridCondensation`: here a constant weight
         w = FT(0.3)
-        p3_case = merge(case, (; microphysics = P3Microphysics(FT; condensation = ConstantWeight(w))))
+        p3_case = merge(case, (; microphysics = P3Microphysics(FT; condensation = SubgridCondensation(ConstantWeight(w)))))
         from_microphysics = column_model(TKEBasedTurbulenceClosure(static_stability = SaturationWeightedStaticStability()), p3_case)
         own = column_model(with_weight(ConstantWeight(w)), p3_case)
         @test microphysics_subgrid_model(from_microphysics.microphysics) === ConstantWeight(w)

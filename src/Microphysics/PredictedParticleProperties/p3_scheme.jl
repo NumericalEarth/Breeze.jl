@@ -33,7 +33,6 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
     warm_rain_scheme :: WRS
     # Condensation of cloud liquid: `GridMeanCondensation()` or `SubgridCondensation(statistics)`
-    # (or, deprecated, an external subgrid supersaturation model)
     condensation :: SG
 end
 
@@ -148,16 +147,12 @@ condenses its own cloud liquid; a turbulence closure supplies at most statistics
   vapor excess over liquid.
 - `SubgridCondensation(statistics)`: at ``ωˡ (δqᵛ⁺ˡ + Γ)``, the rate averaged over the subgrid
   distribution of the vapor excess that `supersaturation_statistics(statistics, ...)` supplies
-  (for example `SubgridCondensation(TurbulenceClosureStatistics())`, or `PrescribedStatistics(σ)`);
+  (for example `SubgridCondensation(PrescribedStatistics(σ))`);
   see [`SubgridCondensation`](@ref Breeze.Microphysics.PredictedParticleProperties.SubgridCondensation).
 
 Here ``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ`` is the phase relaxation rate of the cloud droplets
 (`AtmosphereModels.phase_relaxation_rate`). Rain, ice, activation and collection keep their
 grid-mean form.
-
-Deprecated: an external model of Γ in the
-`condensation` slot that extends [`subgrid_supersaturation`](@ref Breeze.Microphysics.PredictedParticleProperties.subgrid_supersaturation)
-and its two companion functions. `ClosureCloud` is retired.
 
 # Configuring the empirical warm-phase parameters
 

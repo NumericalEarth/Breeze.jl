@@ -565,16 +565,16 @@ end
                                   surface_temperature, temperature_tendency, pressure_tendency) =
     compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                              surface_temperature, temperature_tendency, pressure_tendency,
-                             nothing, DiracStatistics())
+                             nothing)
 
 # `subgrid_statistics` are the statistics that the `condensation` option of P3 reads (`nothing` for
-# `GridMeanCondensation`); `𝒮` is `DiracStatistics()`, the grid-mean form of the warm-phase rates.
+# `GridMeanCondensation`).
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
                                           pressure_tendency,
                                           subgrid_statistics,
-                                          𝒮 = DiracStatistics())
+                                          liquid_stage = nothing)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -629,8 +629,8 @@ end
     ρᵗʰ = density(𝒰, constants)
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρᵗʰ, constants, PlanarLiquidSurface())
 
-    vapor_excess_adjustment = subgrid_vapor_excess_adjustment(
-        𝒮, p3, qᶜˡ, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
+    vapor_excess_adjustment = prognostic_vapor_excess_adjustment(
+        p3, qᶜˡ, qᵛ⁺ˡ, ℳ.δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
     saturation_alignment_rate = vapor_excess_adjustment.rate
     qᶜˡ = vapor_excess_adjustment.qᶜˡ
     qᵛ = vapor_excess_adjustment.qᵛ
@@ -663,14 +663,12 @@ end
                                                            lookups)
 
     # === PHASE 1 & 2 RATES ===
-    # Subgrid supersaturation correlation of cloud condensation; `nothing` without an external model
+    # Subgrid supersaturation correlation of cloud condensation; `nothing` for `GridMeanCondensation`
     Γ = cloud_condensation_correlation(p3.condensation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
-                                       ℳ_adjusted.qᶜˡ, T, P, ρ, constants, p3, state)
+                                       ℳ_adjusted.qᶜˡ, T, P, ρ, constants)
 
-    phase1_grid_mean = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
-                                       temperature_tendency, pressure_tendency, Γ)
-    # Subgrid information from the turbulence closure; the identity for `DiracStatistics`.
-    phase1 = p3_subgrid_phase1_rates(𝒮, phase1_grid_mean, p3, ρ, ℳ_adjusted, constants, state)
+    phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
+                             temperature_tendency, pressure_tendency, Γ)
     phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===
@@ -772,6 +770,13 @@ end
                                     rain_cond, rain_evap, dep, coat_cond, coat_evap,
                                     nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
                                     dt_safety, T₀, temperature_tendency, pressure_tendency, Γ)
+    # On the grid, the liquid vapor exchange and activation are instead advanced implicitly over
+    # the coming stage (see `implicit_liquid_relaxation.jl`); the explicit caps above stay the
+    # gridless path and the fallback before the first time step.
+    vapor_rates = implicit_liquid_vapor_rates(liquid_stage, vapor_rates, p3, ρ, ℳ_adjusted, state,
+                                              qᵗ, constants, vapor_excess_adjustment.cloud_water_adjustment,
+                                              dep, nuc_q, nuc_n,
+                                              temperature_tendency, pressure_tendency, Γ)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number
@@ -789,7 +794,14 @@ end
     # the cloud sink total. Track the negative part of `cond` as a sink magnitude here
     # so it gets rescaled alongside the other cloud sinks when the budget would
     # over-deplete `qᶜˡ`.
-    cloud_evap = max(0, -cond)
+    #
+    # Where the liquid vapor exchange is relaxed implicitly over the coming stage, cloud and rain
+    # evaporation are already advanced over that stage, and are bounded by what it leaves of
+    # cloud and rain in the tendency kernel (`p3_sink_fractions`). They are left out of the
+    # budgets over `sink_limiting_timescale` here, which would cap them a second time when the
+    # stage is shorter than that timescale or starts from more cloud than the rates see.
+    implicit_evaporation = liquid_relaxation_is_active(liquid_stage)
+    cloud_evap = ifelse(implicit_evaporation, zero(FT), max(0, -cond))
     cloud_source_total = max(0, cond) + ccn_activation_mass
     # Homogeneous freezing is applied after all ordinary process budgets below,
     # consistent with its place in the process ordering. Do not reserve liquid here:
@@ -808,7 +820,7 @@ end
     cloud_warm_n  = cloud_warm_n * f_cloud
     wg_cloud      = wg_cloud * f_cloud
     wg_shed       = wg_shed * f_cloud
-    cond          = ifelse(cond < 0, cond * f_cloud, cond)
+    cond          = ifelse((cond < 0) & !implicit_evaporation, cond * f_cloud, cond)
 
     cloud_warm_to_ice = ifelse(tracks_liquid_on_ice(parameters), cloud_warm_q, zero(FT))
     cloud_warm_to_rain = ifelse(tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q)
@@ -856,7 +868,8 @@ end
         rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
                             cloud_warm_to_rain + rain_cond
         rain_available = max(0, qʳ) + rain_source_total * dt_safety
-        rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
+        rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain +
+                          ifelse(implicit_evaporation, zero(FT), rain_evap)
         f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
         rain_rim = rain_rim * f_rain
         rain_rim_n = rain_rim_n * f_rain
@@ -865,7 +878,7 @@ end
         rain_warm_q = rain_warm_q * f_rain
         rain_warm_n = rain_warm_n * f_rain
         wg_rain = wg_rain * f_rain
-        rain_evap = rain_evap * f_rain
+        rain_evap = ifelse(implicit_evaporation, rain_evap, rain_evap * f_rain)
         wg_excess_rain = wg_excess_rain * f_rain
         wg_shed_n = (wg_shed + wg_excess_rain) / parameters.shed_drop_mass
 

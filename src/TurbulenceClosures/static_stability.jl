@@ -114,12 +114,14 @@ Base.show(io::IO, ::MicrophysicsSaturatedFraction) = print(io, "MicrophysicsSatu
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The subgrid model that `microphysics` holds, whose weight
-[`SaturationWeightedStaticStability`](@ref)`()` uses: for P3, the model in its `subgrid` slot (for
-example an external subgrid supersaturation model). `nothing` for a microphysics scheme without
-one, for which there is no weight.
+[`SaturationWeightedStaticStability`](@ref)`()` uses: for P3 with
+`SubgridCondensation(statistics)`, its `statistics`. `nothing` for a microphysics scheme without
+one (including P3 with `GridMeanCondensation()`), for which there is no weight.
 """
 @inline microphysics_subgrid_model(microphysics) = nothing
-@inline microphysics_subgrid_model(p3::PredictedParticlePropertiesMicrophysics) = p3.condensation
+@inline microphysics_subgrid_model(p3::PredictedParticlePropertiesMicrophysics) = condensation_statistics(p3.condensation)
+@inline condensation_statistics(condensation) = nothing
+@inline condensation_statistics(condensation::SubgridCondensation) = condensation.statistics
 
 # The cloud model may hold traced coefficients when the closure is differentiated.
 Adapt.adapt_structure(to, ss::SaturationWeightedStaticStability) = SaturationWeightedStaticStability(adapt(to, ss.fraction))
