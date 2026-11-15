@@ -34,7 +34,7 @@ Fields
   (see `stage_start_state`).
 - `Gⁿ`: tendency storage; holds the combined slow forcing during each acoustic loop.
 - `implicit_solver`, `substepper`: as for `AcousticRungeKutta3`.
-- `rounding`: Round-off treatment of the final stage's update, [`RoundToNearest`](@ref)
+- `rounding`: Round-off treatment of the state updates that reach ``Uⁿ⁺¹``, [`RoundToNearest`](@ref)
   or [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding).
 - `Uⁿ`: the outer-step-start state.
 - `accumulators`: for each stage ``k = 3, …, s``, the parts of its forcing and start state known so far,
@@ -114,13 +114,15 @@ unstable beyond a Courant number of about 0.2 with fifth-order schemes.
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
 between stages with the preceding loop's (see `PostLoopScalarTendencies`).
 
-`rounding` sets the round-off treatment of the step's final update (default:
-[`RoundToNearest`](@ref)), as for `AcousticRungeKutta3`: with
-[`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding), the last stage's
-recovery of the acoustic prognostics from their stage-start values plus the accumulated
-perturbations, and its update ``u⁰ + Δt G`` of the other scalars, are rounded stochastically.
-The perturbations themselves, the earlier stages, and the vertically-implicit solves stay
-round-to-nearest.
+`rounding` sets the round-off treatment of the state updates that reach ``Uⁿ⁺¹`` (default:
+[`RoundToNearest`](@ref)). With [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding),
+three sums are rounded stochastically: the recovery of the acoustic prognostics from their
+stage-entry values plus the accumulated perturbations, the update ``u⁰ + Δt G`` of the other
+scalars, and the start state ``U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ`` of each stage. This holds for the last stage
+and for every stage whose increment ``ΔYⱼ`` a later stage reuses: what round to nearest loses
+from such an increment is lost from ``Uⁿ⁺¹`` as well. Stages that enter later ones through their
+tendency alone (the first two of `:WickerSkamarock3`), the perturbations themselves, and the
+vertically-implicit solves stay round-to-nearest.
 """
 function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
@@ -348,7 +350,7 @@ end
 
 # Stage 2 reads the raw S₁ and turns it, with ΔY₁ and S₂, into the accumulators of stages k ≥ 3
 # (whose first pair is where S₁ and a stored ΔY₁ were kept: they are read before being overwritten).
-@kernel function _second_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, wβ₁, wγ₁, α₁, F, Z, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, α₁ᵏ)
+@kernel function _second_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, wβ₁, wγ₁, α₁, F, Z, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, α₁ᵏ, rounding, key)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         S₁ = F[1][i, j, k]
@@ -356,21 +358,21 @@ end
         ΔY₁ = first_increment(source, Z, uⁿ, i, j, k)
         S₂ = slow_part(i, j, k, grid, split, G)
         G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * S₂ + wβ₁ * S₁ + wγ₁ * ΔY₁
-        U⁰[i, j, k] = uⁿ + α₁ * ΔY₁
+        U⁰[i, j, k] = rounded_add(rounding, uⁿ, α₁ * ΔY₁, i, j, k, key)
         combine!(i, j, k, F, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, S₁, ΔY₁, S₂)
         assign!(i, j, k, Z, α₁ᵏ, ΔY₁)
     end
 end
 
 # Stage i ≥ 3 uses its completed accumulators and adds Sᵢ to those of later stages.
-@kernel function _later_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, Fᵢ, Zᵢ, wγᵢ, αᵢ, F, Z, wγᵏ, wβᵏ, αᵏ)
+@kernel function _later_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, Fᵢ, Zᵢ, wγᵢ, αᵢ, F, Z, wγᵏ, wβᵏ, αᵏ, rounding, key)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         uⁿ = Uⁿ[i, j, k]
         slow = slow_part(i, j, k, grid, split, G)
         forcing, offset = completed_accumulators(source, Fᵢ, Zᵢ, wγᵢ, αᵢ, uⁿ, i, j, k)
         G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * slow + forcing
-        U⁰[i, j, k] = uⁿ + offset
+        U⁰[i, j, k] = rounded_add(rounding, uⁿ, offset, i, j, k, key)
         accumulate_later_stages!(source, F, Z, wγᵏ, wβᵏ, αᵏ, slow, uⁿ, i, j, k)
     end
 end
@@ -486,15 +488,38 @@ function assemble_scalar_start_states!(::PostLoopScalarTendencies, ts::Multirate
         stage_increment_source(model, name) isa StoredIncrement || continue
         U⁰ = ts.U⁰[name]
         launch!(architecture(grid), grid, stage_assembly_parameters(model, U⁰), _assemble_start_state!,
-                U⁰, ts.Uⁿ[name], offsets[name], αᵢ)
+                U⁰, ts.Uⁿ[name], offsets[name], αᵢ, ts.rounding, start_state_rounding_key(ts, model, name))
     end
 
     return nothing
 end
 
-@kernel function _assemble_start_state!(U⁰, Uⁿ, Z, α)
+@kernel function _assemble_start_state!(U⁰, Uⁿ, Z, α, rounding, key)
     i, j, k = @index(Global, NTuple)
-    @inbounds U⁰[i, j, k] = Uⁿ[i, j, k] + α * Z[i, j, k]
+    @inbounds U⁰[i, j, k] = rounded_add(rounding, Uⁿ[i, j, k], α * Z[i, j, k], i, j, k, key)
+end
+
+# The start state U⁰ = Uⁿ + Zᵢ adds the small Zᵢ to the state, as a stage update does, so it takes
+# the time stepper's round-off treatment. Its field numbers follow those of the stage updates
+# (`scalar_substep!`), so the two draw different random numbers in the same stage.
+function start_state_rounding_key(ts::MultirateInfinitesimalStep, model, name)
+    names = keys(prognostic_fields(model))
+    field_number = length(names) + findfirst(==(name), names)
+    return rounding_key(ts.rounding, model.clock.iteration, model.clock.stage, field_number)
+end
+
+# Whether a later stage reuses the increment ΔYᵢ = Yᵢ - Uⁿ of stage i.
+reuses_stage_increment(tableau, i) =
+    any(!iszero(tableau.α[k, i]) || !iszero(tableau.γ[k, i]) for k in i+1:number_of_stages(tableau))
+
+# The round-off treatment of stage i's updates: the time stepper's for the last stage, whose
+# result is Uⁿ⁺¹, and for every stage whose increment a later stage reuses, since what round to
+# nearest loses from that increment is lost from Uⁿ⁺¹ too. A stage that later stages use only
+# through its tendency (every stage but the last of Wicker–Skamarock RK3) rounds to nearest.
+function stage_rounding(ts::MultirateInfinitesimalStep, i)
+    s = number_of_stages(ts.tableau)
+    rounded = i == s || reuses_stage_increment(ts.tableau, i)
+    return rounded ? ts.rounding : RoundToNearest()
 end
 
 pre_loop_assembly_names(::PreLoopScalarTendencies, model) = keys(prognostic_fields(model))
@@ -536,6 +561,8 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
     source = stage_increment_source(model, name)
     F = accumulator_fields(ts, name, ks, :forcing)
     parameters = stage_assembly_parameters(model, G)
+    rounding = ts.rounding
+    key = start_state_rounding_key(ts, model, name)
 
     if i == 1
         launch!(arch, grid, parameters, _first_multirate_stage!, G, grid, split, wᵢ,
@@ -545,7 +572,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
         launch!(arch, grid, parameters, _second_multirate_stage!, G, grid, U⁰, Uⁿ, source, split, wᵢ,
                 β[2, 1] / d[2], γ[2, 1] / (d[2] * Δt), α[2, 1], F, Z,
                 forcing_weights(β, d, 1, ks), increment_weights(γ, d, Δt, 1, ks),
-                forcing_weights(β, d, 2, ks), offset_weights(α, 1, ks))
+                forcing_weights(β, d, 2, ks), offset_weights(α, 1, ks), rounding, key)
     else
         Fᵢ = ts.accumulators[i - 2].forcing[name]
         Zᵢ = ts.accumulators[i - 2].offset[name]
@@ -553,7 +580,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
         launch!(arch, grid, parameters, _later_multirate_stage!, G, grid, U⁰, Uⁿ, source, split, wᵢ,
                 Fᵢ, Zᵢ, γ[i, i - 1] / (d[i] * Δt), α[i, i - 1], F, Z,
                 increment_weights(γ, d, Δt, i - 1, ks), forcing_weights(β, d, i, ks),
-                offset_weights(α, i - 1, ks))
+                offset_weights(α, i - 1, ks), rounding, key)
     end
 
     return nothing
@@ -627,10 +654,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
 
     for i in 1:s
         ts.stage[] = i
-        # Only the last stage's rounding reaches Uⁿ⁺¹ directly, and only that stage takes the
-        # time stepper's round-off treatment (as in `AcousticRungeKutta3`).
-        rounding = i == s ? ts.rounding : RoundToNearest()
-        acoustic_stage!(model, Δt, d[i], rounding, callbacks)
+        acoustic_stage!(model, Δt, d[i], stage_rounding(ts, i), callbacks)
 
         if i < s
             store_stage_increment!(ts, model, i, Δt)
