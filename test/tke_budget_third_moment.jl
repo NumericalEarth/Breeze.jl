@@ -112,13 +112,15 @@ end
 
     # The damping is at least one, increases with the stratification number with a slope of at most ℂʷᴺ, and
     # is finite at any stratification number: the member has no pole
-    for ℂʷᴺ in (0.0, 1.0, 16.0)
+    @test_throws ArgumentError TKEBudgetThirdMoment(stratification_damping_width = 0)
+    for ℂʷᴺ in (0.0, 1.0, 16.0), δ in (1.0, 0.1)
         αs = (-1e300, -1e6, -30.0, -1.0, 0.0, 0.5, 1.0, 30.0, 1e6, 1e300)
-        D = map(α -> stratification_damping(ℂʷᴺ, α), αs)
+        D = map(α -> stratification_damping(ℂʷᴺ, δ, α), αs)
         @test all(isfinite, D)
         @test all(>=(1), D)
         @test issorted(D)
-        @test all(abs(stratification_damping(ℂʷᴺ, α + 1e-3) - stratification_damping(ℂʷᴺ, α)) <= ℂʷᴺ * 1e-3 * (1 + 1e-8) for α in -5:0.1:5)
+        @test all(abs(stratification_damping(ℂʷᴺ, δ, α + 1e-3) - stratification_damping(ℂʷᴺ, δ, α)) <= ℂʷᴺ * 1e-3 * (1 + 1e-8) for α in -5:0.1:5)
+        @test stratification_damping(ℂʷᴺ, δ, 40.0) ≈ 1 + 40ℂʷᴺ
     end
     @test softplus(0.0) ≈ log(2)
     @test softplus(50.0) ≈ 50

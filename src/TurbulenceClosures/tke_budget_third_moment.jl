@@ -26,13 +26,14 @@
 ##### The damped local third moment is added to the flux members: the two sources of the stationary
 ##### budget of w′³, ∂t w′³ = 3 w′²b′ - 3 w′² ∂z w′² - w′³ / τ₃ + ..., relaxed over τ₃ = ℓ / √e,
 #####
-#####     w′³_local = τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,    D = 1 + ℂʷᴺ softplus(αᴺ),    αᴺ = τ₃² N².
+#####     w′³_local = τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,    D = 1 + ℂʷᴺ δ softplus(αᴺ / δ),    αᴺ = τ₃² N².
 #####
 ##### √e B⁺ stands for the buoyant source w′²b′ (the buoyancy flux carried at the turbulent velocity; it
 ##### is not closed with w′³), and D ≥ 1 for the feedback of the stratification on the third moment:
 ##### solving the coupled budgets of w′³, w′²θ′ and w′θ′² exactly gives a determinant that is 1 + c αᴺ to
 ##### first order and vanishes at finite αᴺ (the poles of `AlgebraicThirdMoment`); D keeps the damping
-##### of stable air, αᴺ > 0, and neither amplifies nor vanishes in unstable air.
+##### of stable air, αᴺ > 0, and neither amplifies nor vanishes in unstable air. δ is the width in αᴺ over
+##### which D passes from one to 1 + ℂʷᴺ αᴺ.
 #####
 ##### The buoyancy production needs the distribution (through aᴺ, N² and the diffusivities), and the
 ##### distribution needs w′³. The loop is not carried from one evaluation of the closure fields to the
@@ -57,7 +58,7 @@ budget of turbulent kinetic energy, with a damped local third moment,
 
     w′³ = r (ℂʷᵉ Fᵉ + ℂʷᵋ Fᵋ) + τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,
     Fʸ(z) = (1 / ρ) ∫₀ᶻ ρ (P + B - uʸ) dz′,    uʸ = cʸ ωʸ,    ωᵉ = e,    ωᵋ = ε = 𝕊ᴰ e^{3/2} / ℓ,
-    τ₃ = ℓ / √e,    αᴺ = τ₃² N²,    D = 1 + ℂʷᴺ softplus(αᴺ),    r = 1 + ℂʷʳ αᴺ / (1 + |αᴺ|),
+    τ₃ = ℓ / √e,    αᴺ = τ₃² N²,    D = 1 + ℂʷᴺ δ softplus(αᴺ / δ),    r = 1 + ℂʷʳ αᴺ / (1 + |αᴺ|),
 
 where `P + B` is the shear and buoyancy production the TKE equation receives (the conversions of the
 fluxes the closure applies), `B⁺ = max(B, 0)` (a buoyancy sink makes no skewness of its own),
@@ -74,7 +75,8 @@ with one turnover rate for the column. `ℂʷᵀ > 0` adds `ℂʷᵀ Fᵉ` to th
 The damped local third moment holds the two sources of the stationary budget of `w′³`, the buoyant
 one as `√e B⁺` and the gradient production `-w′² ∂z w′²`, relaxed over `τ₃`. The damping `D ≥ 1`
 stands for the suppression of the third moment in stably stratified air; it has no zero, so the
-member has no pole, and it tends to one in unstable air.
+member has no pole. It tends to one in unstable air and to `1 + ℂʷᴺ αᴺ` in stable air, over the width
+`δ = stratification_damping_width` in `αᴺ`.
 
 No third moment is stored between evaluations of the closure fields. Within one evaluation the
 third moment is diagnosed `passes` times: first from the budget of the distribution without
@@ -100,13 +102,16 @@ struct TKEBudgetThirdMoment{N, FT} <: SimplifiedHigherOrderClosures.AbstractSHOC
     ℂʷᵇ :: FT
     "Coefficient of the gradient production `-w′² ∂z w′²` of the damped local third moment"
     ℂʷᵍ :: FT
-    "Coefficient of the stratification number in the damping `D = 1 + ℂʷᴺ softplus(αᴺ)` of the local third moment; not negative"
+    "Coefficient of the stratification number in the damping `D = 1 + ℂʷᴺ δ softplus(αᴺ / δ)` of the local third moment; not negative"
     ℂʷᴺ :: FT
     "Share of the production that the budget flux with the sink shape `e` transports in the TKE equation, in [0, 1]"
     ℂʷᵀ :: FT
+    "Width `δ` in the stratification number over which the damping passes from one to `1 + ℂʷᴺ αᴺ`; positive"
+    stratification_damping_width :: FT
 
-    TKEBudgetThirdMoment{N}(ℂʷᵉ::FT, ℂʷᵋ::FT, ℂʷᴸ::FT, ℂʷʳ::FT, ℂʷᵇ::FT, ℂʷᵍ::FT, ℂʷᴺ::FT, ℂʷᵀ::FT) where {N, FT} =
-        new{N, FT}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ)
+    TKEBudgetThirdMoment{N}(ℂʷᵉ::FT, ℂʷᵋ::FT, ℂʷᴸ::FT, ℂʷʳ::FT, ℂʷᵇ::FT, ℂʷᵍ::FT, ℂʷᴺ::FT, ℂʷᵀ::FT,
+                            stratification_damping_width::FT) where {N, FT} =
+        new{N, FT}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width)
 end
 
 """
@@ -117,13 +122,17 @@ lengths, have a constant ratio and no transport of TKE, and diagnose the third m
 evaluation of the closure fields, from the budget of the distribution without skewness.
 """
 function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
-                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0.6, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0, passes = 1)
+                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0.6, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,
+                              stratification_damping_width = 1, passes = 1)
     abs(ℂʷʳ) < 1 || throw(ArgumentError("ℂʷʳ must lie in (-1, 1) for a positive ratio, got $(ℂʷʳ)."))
     0 <= ℂʷᵀ <= 1 || throw(ArgumentError("ℂʷᵀ must lie in [0, 1], got $(ℂʷᵀ)."))
     ℂʷᴺ >= 0 || throw(ArgumentError("ℂʷᴺ must not be negative (the damping must not vanish), got $(ℂʷᴺ)."))
     ℂʷᴸ > 0 || throw(ArgumentError("ℂʷᴸ must be positive (Inf for one sink amplitude per column), got $(ℂʷᴸ)."))
+    stratification_damping_width > 0 ||
+        throw(ArgumentError("stratification_damping_width must be positive, got $(stratification_damping_width)."))
     passes isa Integer && passes >= 1 || throw(ArgumentError("passes must be a positive integer, got $(passes)."))
-    return TKEBudgetThirdMoment{Int(passes)}(map(c -> convert(FT, c), (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ))...)
+    scalars = (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width)
+    return TKEBudgetThirdMoment{Int(passes)}(map(c -> convert(FT, c), scalars)...)
 end
 
 # The number of passes is a type parameter, so that the loop over them is unrolled when traced
@@ -230,8 +239,8 @@ end
 # softplus(x) = log(1 + eˣ) without overflow: smooth, increasing, positive, x for large x, with slope in (0, 1)
 @inline softplus(x) = max(x, zero(x)) + log1p(exp(-abs(x)))
 
-# D = 1 + ℂʷᴺ softplus(αᴺ) ≥ 1
-@inline stratification_damping(ℂʷᴺ, αᴺ) = 1 + ℂʷᴺ * softplus(αᴺ)
+# D = 1 + ℂʷᴺ δ softplus(αᴺ / δ) ≥ 1: one in unstable air, 1 + ℂʷᴺ αᴺ in stable air, with slope in (0, ℂʷᴺ)
+@inline stratification_damping(ℂʷᴺ, δ, αᴺ) = 1 + ℂʷᴺ * δ * softplus(αᴺ / δ)
 
 # τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D at the center k; w′² ∂z w′² = ∂z (w′²)² / 2 is differenced across the
 # neighbouring centers (one-sided at the two ends of the column)
@@ -244,7 +253,7 @@ end
     w′²ᵘ = @inbounds w′²[i, j, kᵘ]
     w′²ˡ = @inbounds w′²[i, j, kˡ]
     w′²∂zw′² = ifelse(kᵘ > kˡ, (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δz), zero(Δz))
-    return τ * (tm.ℂʷᵇ * u * max(0, B) - tm.ℂʷᵍ * w′²∂zw′²) / stratification_damping(tm.ℂʷᴺ, αᴺ)
+    return τ * (tm.ℂʷᵇ * u * max(0, B) - tm.ℂʷᵍ * w′²∂zw′²) / stratification_damping(tm.ℂʷᴺ, tm.stratification_damping_width, αᴺ)
 end
 
 #####
@@ -302,8 +311,10 @@ compute_tke_budget!(fields, distribution, closure_fields, closure, model, tracer
 # prognostic state, from which every pass and the final evaluation start.
 function diagnose_third_moment!(fields::SubgridCloudFields, distribution::TKEBudgetDistribution, closure_fields, closure, model, tracers, parameters)
     fill!(parent(fields.cloud.w′³ᵇ), 0)
+    compute_buoyancy_derivatives!(fields, model)
     for _ in 1:third_moment_passes(distribution.third_moment)
-        compute_subgrid_cloud!(fields, closure_fields, closure, model, tracers, parameters)
+        compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
+        solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
         compute_applied_flux_conversions!(fields, closure_fields, closure, model, tracers)
         compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, true)
         compute_stability_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
