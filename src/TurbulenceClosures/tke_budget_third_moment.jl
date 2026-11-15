@@ -26,7 +26,7 @@
 ##### The damped local third moment is added to the flux members: the two sources of the stationary
 ##### budget of w′³, ∂t w′³ = 3 w′²b′ - 3 w′² ∂z w′² - w′³ / τ₃ + ..., relaxed over τ₃ = ℓ / √e,
 #####
-#####     w′³_local = τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,    D = 1 + ℂʷᴺ δ softplus(αᴺ / δ),    αᴺ = τ₃² N².
+#####     w′³_local = τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,    D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ),    αᴺ = τ₃² N².
 #####
 ##### √e B⁺ stands for the buoyant source w′²b′ (the buoyancy flux carried at the turbulent velocity; it
 ##### is not closed with w′³), and D ≥ 1 for the feedback of the stratification on the third moment:
@@ -58,7 +58,7 @@ budget of turbulent kinetic energy, with a damped local third moment,
 
     w′³ = r (ℂʷᵉ Fᵉ + ℂʷᵋ Fᵋ) + τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,
     Fʸ(z) = (1 / ρ) ∫₀ᶻ ρ (P + B - uʸ) dz′,    uʸ = cʸ ωʸ,    ωᵉ = e,    ωᵋ = ε = 𝕊ᴰ e^{3/2} / ℓ,
-    τ₃ = ℓ / √e,    αᴺ = τ₃² N²,    D = 1 + ℂʷᴺ δ softplus(αᴺ / δ),    r = 1 + ℂʷʳ αᴺ / (1 + |αᴺ|),
+    τ₃ = ℓ / √e,    αᴺ = τ₃² N²,    D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ),    r = 1 + ℂʷʳ αᴺ / (1 + |αᴺ|),
 
 where `P + B` is the shear and buoyancy production the TKE equation receives (the conversions of the
 fluxes the closure applies), `B⁺ = max(B, 0)` (a buoyancy sink makes no skewness of its own),
@@ -102,7 +102,7 @@ struct TKEBudgetThirdMoment{N, FT} <: SimplifiedHigherOrderClosures.AbstractSHOC
     ℂʷᵇ :: FT
     "Coefficient of the gradient production `-w′² ∂z w′²` of the damped local third moment"
     ℂʷᵍ :: FT
-    "Coefficient of the stratification number in the damping `D = 1 + ℂʷᴺ δ softplus(αᴺ / δ)` of the local third moment; not negative"
+    "Coefficient of the stratification number in the damping `D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ)` of the local third moment; not negative"
     ℂʷᴺ :: FT
     "Share of the production that the budget flux with the sink shape `e` transports in the TKE equation, in [0, 1]"
     ℂʷᵀ :: FT
@@ -118,11 +118,13 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`TKEBudgetThirdMoment`](@ref). The defaults exchange the sink amplitude over eight mixing
-lengths, have a constant ratio and no transport of TKE, and diagnose the third moment once per
+lengths, have a constant ratio, no transport of TKE and no damped local third moment
+(`ℂʷᵇ = ℂʷᵍ = 0`: the buoyant source `B⁺` cannot tell heating from below, carried by updrafts, from
+cooling from above, carried by downdrafts, so the budget fluxes carry the third moment), and diagnose the third moment once per
 evaluation of the closure fields, from the budget of the distribution without skewness.
 """
 function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
-                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0.6, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,
+                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,
                               stratification_damping_width = 1, passes = 1)
     abs(ℂʷʳ) < 1 || throw(ArgumentError("ℂʷʳ must lie in (-1, 1) for a positive ratio, got $(ℂʷʳ)."))
     0 <= ℂʷᵀ <= 1 || throw(ArgumentError("ℂʷᵀ must lie in [0, 1], got $(ℂʷᵀ)."))
@@ -236,11 +238,16 @@ end
 ##### The damped local third moment
 #####
 
-# softplus(x) = log(1 + eˣ) without overflow: smooth, increasing, positive, x for large x, with slope in (0, 1)
-@inline softplus(x) = max(x, zero(x)) + log1p(exp(-abs(x)))
+# smooth_positive_part(x) = (x + √(x² + 1)) / 2 = 1 / (2 (√(x² + 1) - x)): smooth, increasing, positive, x + 1/(4x) for
+# large x and 1/(4|x|) for large negative x, with slope in (0, 1); one square root and one division, written in
+# the form without cancellation on each side of zero
+@inline function smooth_positive_part(x)
+    s = sqrt(x * x + 1)
+    return ifelse(x >= 0, (x + s) / 2, 1 / (2 * (s - x)))
+end
 
-# D = 1 + ℂʷᴺ δ softplus(αᴺ / δ) ≥ 1: one in unstable air, 1 + ℂʷᴺ αᴺ in stable air, with slope in (0, ℂʷᴺ)
-@inline stratification_damping(ℂʷᴺ, δ, αᴺ) = 1 + ℂʷᴺ * δ * softplus(αᴺ / δ)
+# D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ) ≥ 1: one in unstable air, 1 + ℂʷᴺ αᴺ in stable air, with slope in (0, ℂʷᴺ)
+@inline stratification_damping(ℂʷᴺ, δ, αᴺ) = 1 + ℂʷᴺ * δ * smooth_positive_part(αᴺ / δ)
 
 # τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D at the center k; w′² ∂z w′² = ∂z (w′²)² / 2 is differenced across the
 # neighbouring centers (one-sided at the two ends of the column)

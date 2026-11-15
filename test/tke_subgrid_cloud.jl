@@ -72,7 +72,7 @@ shoc_time_scale() = DoubleGaussian(; time_scale = StratificationLimitedMomentTim
     closure = TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian(), static_stability = fraction_stability)
     ℂ = closure_parameters(closure)
     @test all(name -> startswith(string(name), "ℂ") || startswith(string(name), "ϑ") || name ∈ (:Ri⁻, :Ri⁺), keys(ℂ))
-    @test (:ℂˢ, :ℂⁱ, :ℂᵘ⁰, :ℂᵠ, :ℂᵛ₁, :ℂʷ₁, :ℂʷ₂, :ℂᵍ₀) ⊆ keys(ℂ)
+    @test (:ℂˢ, :ℂⁱ, :ℂᵘ⁰, :ℂᵠ, :ℂᵛ₁, :ℂʷ₁, :ℂʷᵉ, :ℂʷᵋ, :ℂʷᵇ, :ℂᵍ₀) ⊆ keys(ℂ)
     changed = with_parameters(closure; ℂᵍ₀ = 0.35, ℂᵠ = 1.1, ℂᵘ⁰ = 0.2)
     @test changed.subgrid_distribution.assumed_pdf.ℂᵍ₀ == 0.35
     @test changed.subgrid_distribution.time_scale.ℂᵠ == 1.1

@@ -8,7 +8,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.TurbulenceClosures: closure_parameters, with_parameters, damped_local_third_moment, stratification_damping, softplus
+using Breeze.TurbulenceClosures: closure_parameters, with_parameters, damped_local_third_moment, stratification_damping, smooth_positive_part
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: limit_third_moment
 
 using Oceananigans
@@ -120,11 +120,11 @@ end
         @test all(>=(1), D)
         @test issorted(D)
         @test all(abs(stratification_damping(ℂʷᴺ, δ, α + 1e-3) - stratification_damping(ℂʷᴺ, δ, α)) <= ℂʷᴺ * 1e-3 * (1 + 1e-8) for α in -5:0.1:5)
-        @test stratification_damping(ℂʷᴺ, δ, 40.0) ≈ 1 + 40ℂʷᴺ
+        @test stratification_damping(ℂʷᴺ, δ, 40.0) ≈ 1 + 40ℂʷᴺ rtol = 1e-3
     end
-    @test softplus(0.0) ≈ log(2)
-    @test softplus(50.0) ≈ 50
-    @test softplus(-800.0) == 0
+    @test smooth_positive_part(0.0) == 1 / 2
+    @test smooth_positive_part(50.0) ≈ 50 + 1 / 200 rtol = 1e-10
+    @test 0 < smooth_positive_part(-800.0) ≈ 1 / 3200 rtol = 1e-5
 
     # On a column with w′² rising and then falling: bounded by the undamped member at every stratification
     # number, of the sign of the buoyant source where w′² is uniform, and of the sign opposite to ∂z w′² without one
