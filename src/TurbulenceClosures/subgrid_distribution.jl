@@ -232,7 +232,7 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R}
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
     second_moments :: SM
-    "Third moment of vertical velocity ([`AlgebraicThirdMoment`](@ref)), or `nothing` for none (unskewed)"
+    "Third moment of vertical velocity ([`AlgebraicThirdMoment`](@ref) or [`TKEBudgetThirdMoment`](@ref)), or `nothing` for none (unskewed)"
     third_moment :: TM
     "Bound of the stratification number of the third-moment diagnosis"
     stratification_number_bound :: SB
@@ -578,6 +578,7 @@ function build_subgrid_cloud_fields(grid, distribution, solver, static_stability
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
              vapor_excess_component_fields(grid)...,
              applied_flux_conversion_fields(grid, energetics, tracer_names)...,
+             third_moment_fields(grid, distribution.third_moment)...,
              gθ = CenterField(grid), gA = CenterField(grid))
     return SubgridCloudFields(energetics, moments, cloud, build_solver_state(grid, energetics),
                               build_presolve_fields(grid, energetics, tracer_names))
@@ -666,6 +667,11 @@ end
 @inline subgrid_third_moment(::Nothing, d, c, args...) = zero(eltype(args[1]))
 @inline subgrid_third_moment(tm, d, c, args...) = third_moment(tm, d.stratification_number_bound, c, args...)
 
+# The third moment at the center k before its limiter: from the local arguments of the algebraic
+# diagnosis, or from fields stored at the center (`TKEBudgetThirdMoment`, tke_budget_third_moment.jl)
+@inline center_third_moment_diagnosis(tm, i, j, k, d, cl, c³, ℓ, u, algebraic_arguments) =
+    subgrid_third_moment(tm, d, c³, algebraic_arguments...)
+
 # Raise θˡ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
 # small for the down-gradient fluxes (|correlation with w| > ℂʳ), and scale θˡ′qᵗ′ with them so that
 # the θˡ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
@@ -724,13 +730,14 @@ end
         w′² = cl.w′²[i, j, k]
         Δzʷ = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
         thedz = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
-        w′³ = subgrid_third_moment(d.third_moment, d, c³, τ³, N², clip_below(cp, w′², w′²ᵐⁱⁿ, c.mintke), θ[i, j, k],
-                                   thedz, 1 / Δzᶜᶜᶜ(i, j, k, grid),
-                                   θˡ′²ᵘ - θˡ′²ˡ,
-                                   w′θˡ′ᵘ - w′θˡ′ˡ,
-                                   cl.w′²[i, j, kᵘ] - cl.w′²[i, j, kˡ],
-                                   max(e[i, j, kᵘ], eᵐⁱⁿ) - max(e[i, j, kˡ], eᵐⁱⁿ),
-                                   w′θˡ′ᶜ)
+        algebraic_arguments = (τ³, N², clip_below(cp, w′², w′²ᵐⁱⁿ, c.mintke), θ[i, j, k],
+                               thedz, 1 / Δzᶜᶜᶜ(i, j, k, grid),
+                               θˡ′²ᵘ - θˡ′²ˡ,
+                               w′θˡ′ᵘ - w′θˡ′ˡ,
+                               cl.w′²[i, j, kᵘ] - cl.w′²[i, j, kˡ],
+                               max(e[i, j, kᵘ], eᵐⁱⁿ) - max(e[i, j, kˡ], eᵐⁱⁿ),
+                               w′θˡ′ᶜ)
+        w′³ = center_third_moment_diagnosis(d.third_moment, i, j, k, d, cl, c³, ℓ, u, algebraic_arguments)
     end
     return limit_third_moment(d.skewness, cp, w′², w′³)
 end

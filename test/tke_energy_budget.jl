@@ -38,7 +38,13 @@ struct HalfSaturatedFraction end
 closure_paths = (distribution = (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
                                  subgrid_distribution = DoubleGaussian()),
                  no_distribution = (static_stability = SaturationWeightedStaticStability(HalfSaturatedFraction()),
-                                    subgrid_distribution = nothing))
+                                    subgrid_distribution = nothing),
+                 # the third moment from the TKE budget, whose flux also transports TKE (ℂʷᵀ > 0)
+                 budget_third_moment = (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                        subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷᴸ = 8, ℂʷᵀ = 0.3),
+                                                                              skewness = TanhSaturatedSkewness())),
+                 budget_third_moment_one_amplitude = (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                                      subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷᴸ = Inf, ℂʷᵀ = 0.3))))
 budget_column(f::ZeroField, Nz) = zeros(Nz)
 budget_column(f, Nz) = budget_column(f)
 

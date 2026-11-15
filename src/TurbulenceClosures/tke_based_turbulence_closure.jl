@@ -1048,6 +1048,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
 
     compute_subgrid_cloud!(closure_fields.subgrid_cloud, closure_fields, closure, model, tracers, parameters)
     compute_applied_flux_conversions!(closure_fields.subgrid_cloud, closure_fields, closure, model, tracers)
+    compute_tke_budget_flux!(closure_fields.subgrid_cloud, subgrid_distribution(closure), closure_fields, closure, model, tracers)
 
     launch!(arch, grid, parameters, _compute_tke_implicit_linear_coefficient!,
             closure_fields.Lᵉ, grid, closure, closure_fields, model.velocities, tracers)
@@ -1097,7 +1098,10 @@ centers — to the tendency of the `ρe` tracer. Under an explicit time discreti
     e = @inbounds ρe[i, j, k] / ρᵢ
     sinks = explicit_tke_sinks(i, j, k, grid, closure_ij, closure_fields, e)
 
-    @inbounds Gρe[i, j, k] += ρᵢ * (P + B⁺ + sinks)
+    # The transport of TKE by the flux of its budget (`TKEBudgetThirdMoment` with ℂʷᵀ > 0); zero otherwise
+    T = tke_budget_transportᶜᶜᶜ(i, j, k, grid, closure_ij.subgrid_distribution, closure_fields.subgrid_cloud)
+
+    @inbounds Gρe[i, j, k] += ρᵢ * (P + B⁺ + T + sinks)
 end
 
 # Called by the time steppers at the start of every stage, after the flux boundary conditions have

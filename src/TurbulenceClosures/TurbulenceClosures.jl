@@ -21,9 +21,9 @@ export TKEBasedTurbulenceClosure,
        ForwardEulerTKE, ImplicitSinkTKE,
        PDFBuoyancyFlux, DowngradientBuoyancyFlux,
        DowngradientSecondMoments,
-       AlgebraicThirdMoment,
+       AlgebraicThirdMoment, TKEBudgetThirdMoment,
        UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
-       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness,
+       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
        HardClipping, SmoothClipping,
        BulkRichardsonBoundaryLayerDepth,
@@ -272,7 +272,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
                                       DowngradientSecondMoments,
                                       AlgebraicThirdMoment,
                                       UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
-                                      ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, ClampedSkewness,
+                                      ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
                                       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
                                       HardClipping, SmoothClipping,
                                       BulkRichardsonBoundaryLayerDepth,
@@ -281,6 +281,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
 
 include("subgrid_distribution.jl")
 include("applied_flux_energetics.jl")
+include("tke_budget_third_moment.jl")
 include("bracketed_fraction_solve.jl")
 
 end # module TurbulenceClosures

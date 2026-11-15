@@ -363,6 +363,49 @@ end
 """
 $(TYPEDEF)
 
+The third moment saturates toward `±w'³ᵐᵃˣ = ±maximum_skewness (w'w')^{3/2}` along a hyperbolic tangent,
+
+    w'³ ← w'³ᵐᵃˣ tanh(w'³ / w'³ᵐᵃˣ)
+
+so that the skewness `w'³ / (w'w')^{3/2}` lies strictly inside `±maximum_skewness` for every input. The map
+
+- is odd and increasing, with slope `sech²(w'³ / w'³ᵐᵃˣ)`: one at zero, positive everywhere (unlike
+  [`PolynomialSaturatedSkewness`](@ref), whose slope is zero beyond 15/8 of the bound), at most one;
+- has bounded sensitivity to the variance too: `∂w'³/∂w'³ᵐᵃˣ = tanh(y) - y sech²(y) ∈ [0, 1)`, `y = w'³ / w'³ᵐᵃˣ`;
+- changes a third moment at a tenth of the bound by 0.3 %, at half the bound by 7.6 %, at the bound by 24 %;
+- is zero, with zero slope in the variance, where the variance is not positive.
+
+The default `maximum_skewness = 2.5` is above the skewness of the large-eddy simulations the third-moment
+models were compared with (|Sk| ≲ 2 in cumulus), so the map is a guard and not a fitted part of the model.
+
+$(TYPEDFIELDS)
+"""
+struct TanhSaturatedSkewness{FT} <: AbstractSkewnessLimiter
+    "Supremum of the magnitude of the skewness `w'³ / (w'w')^{3/2}`"
+    maximum_skewness :: FT
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `TanhSaturatedSkewness{FT}` with `maximum_skewness = 2.5`.
+"""
+TanhSaturatedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+    component_from_keywords(TanhSaturatedSkewness, FT, (; maximum_skewness = 2.5), kw)
+
+Adapt.@adapt_structure TanhSaturatedSkewness
+
+@inline function limit_third_moment(skewness::TanhSaturatedSkewness, cp, variance, w3)
+    FT = typeof(w3)
+    variance = max(variance, zero(variance))
+    bound = skewness.maximum_skewness * (variance * zero_safe_sqrt(variance))
+    bounded = bound > 0
+    return ifelse(bounded, bound * tanh(w3 / ifelse(bounded, bound, one(FT))), zero(FT))
+end
+
+"""
+$(TYPEDEF)
+
 A third moment beyond the bound `b = maximum_skewness (w'w')^{3/2}` is set to the bound of its
 sign: `w'³ ← clip_between(w'³, -b, b)` through the clipping policy. Continuous, with a kink at the
 bound under [`HardClipping`](@ref); under [`SmoothClipping`](@ref) the kink is rounded over its
