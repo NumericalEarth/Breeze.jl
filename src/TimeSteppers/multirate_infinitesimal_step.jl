@@ -2,10 +2,12 @@ using Breeze.AtmosphereModels: thermodynamic_density_name, dynamics_prognostic_f
 using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_divergence!,
                                     StageEntryForceRemainder, stage_entry_force_remainder,
                                     step_start_force_state, store_step_start_force_state!,
-                                    compute_step_start_moisture_content!,
-                                    CompressibleEquations, ForwardBackwardSubsteps, SymmetricSubsteps
+                                    compute_pressure_remainder!,
+                                    CompressibleEquations, ForwardBackwardSubsteps, SymmetricSubsteps,
+                                    with_residual
+using Breeze.RoundingTreatments: rounding_error
 
-using Oceananigans: prognostic_fields, CenterField, architecture
+using Oceananigans: prognostic_fields, CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Utils: launch!, KernelParameters
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
@@ -59,13 +61,16 @@ Fields
 - `step_start`: the outer-step-start pressure, thermodynamic density and water density that the
   slow remainder of the stage-entry pressure gradient and buoyancy is measured from, or `nothing`
   where that remainder is not recombined (see `step_start_storage`).
+- `residual`: what the rounded stage states and start states of the acoustic prognostics lack of
+  the exact sums, kept from one sum to the next small quantity formed from it, or `nothing` for a
+  tableau that recombines no increments (see `start_state_residual` in the acoustic substepper).
 - `scalar_tendencies`: when the moisture and tracer tendencies are built,
   `PreLoopScalarTendencies` (between stages, the default) or
   `PostLoopScalarTendencies` (after each stage's own acoustic loop). With the latter, the
   scalars' slow tendency ``Sᵢ`` stored for stage ``i`` is the post-loop one, and their stage forcing
   and start state are assembled after the loop.
 """
-struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, R, UN, AC, FC, ST, SS, TA} <: AcousticTimeStepper
+struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, R, UN, AC, FC, ST, SS, TA, RS} <: AcousticTimeStepper
     relinearize_stages :: Bool
     tableau :: TB
     U⁰ :: U0
@@ -79,6 +84,7 @@ struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, R, UN, AC, FC, ST, SS, TA}
     scalar_tendencies :: ST
     step_start :: SS
     transport_density_accumulators :: TA # stages 2 to s: the parts known so far of the transport density tendency's stage combination
+    residual :: RS # what the rounded stage states of the acoustic prognostics lack of the exact ones; `nothing` when no stage recombines increments
     stage :: Base.RefValue{Int}
     next_stage :: Base.RefValue{Int}
     current_Δt :: Base.RefValue{Float64}
@@ -120,14 +126,17 @@ stage's own acoustic loop, with that loop's time-averaged transport velocity, in
 between stages with the preceding loop's (see `PostLoopScalarTendencies`).
 
 `rounding` sets the round-off treatment of the state updates that reach ``Uⁿ⁺¹`` (default:
-[`RoundToNearest`](@ref)). With [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding),
-three sums are rounded stochastically: the recovery of the acoustic prognostics from their
-stage-entry values plus the accumulated perturbations, the update ``u⁰ + Δt G`` of the other
-scalars, and the start state ``U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ`` of each stage. This holds for the last stage
-and for every stage whose increment ``ΔYⱼ`` a later stage reuses: what round to nearest loses
-from such an increment is lost from ``Uⁿ⁺¹`` as well. Stages that enter later ones through their
-tendency alone (the first two of `:WickerSkamarock3`), the perturbations themselves, and the
-vertically-implicit solves stay round-to-nearest.
+[`RoundToNearest`](@ref)). For the acoustic prognostics that is the last stage's recovery of the
+state from its stage-entry value plus the accumulated perturbation, alone: the earlier stages'
+recoveries and the start states ``U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ`` round to nearest and keep their rounding
+errors, which are added back to the increments ``ΔYⱼ`` and to the perturbation the next loop
+starts from, so that no intermediate sum loses anything or perturbs the step. For the moisture,
+microphysical and tracer fields, [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding)
+rounds the update ``u⁰ + Δt G`` and the start state stochastically in the last stage and in every
+stage whose increment a later stage reuses: what round to nearest loses from such an increment
+is lost from ``Uⁿ⁺¹`` as well. Stages that enter later ones through their tendency alone (the
+first two of `:WickerSkamarock3`), the perturbations themselves, and the vertically-implicit
+solves stay round-to-nearest.
 """
 function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
@@ -161,11 +170,37 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
               "the slow tendencies of earlier stages were split against a different fast operator."
     end
 
+    residual = recombines_stage_increments(tableau) ? stage_residual_storage(grid) : nothing
+
     return MultirateInfinitesimalStep(relinearize_stages, tableau, U⁰, Gⁿ, implicit_solver, substepper,
                                       rounding, Uⁿ, accumulators, fast_tendency, scalar_tendencies, step_start,
-                                      ntuple(_ -> CenterField(grid), s - 1),
+                                      ntuple(_ -> CenterField(grid), s - 1), residual,
                                       Ref(1), Ref(1), Ref(NaN))
 end
+
+# One field per acoustic prognostic for the rounding errors of its stage states (see
+# `start_state_residual` in the acoustic substepper), with default boundary conditions: the
+# errors have no boundary values of their own. The thermodynamic density is a cell-centered field.
+stage_residual_storage(grid) =
+    (ρ = CenterField(grid), ρᵡ = CenterField(grid),
+     ρu = XFaceField(grid), ρv = YFaceField(grid), ρw = ZFaceField(grid))
+
+# The residual field of prognostic `name`, or `nothing` for a field that carries none: the moisture,
+# microphysical and tracer fields, and every field of a tableau that recombines no increments.
+stage_residual(::Nothing, model, name) = nothing
+
+function stage_residual(residual, model, name)
+    name === :ρᵈ && return residual.ρ
+    name === thermodynamic_density_name(model.formulation) && return residual.ρᵡ
+    return get(residual, name, nothing)
+end
+
+# Stage 1 starts from Uⁿ itself, and nothing recombines the last stage's result within the step.
+CompressibleEquations.start_state_residual(ts::MultirateInfinitesimalStep) =
+    ts.stage[] == 1 ? nothing : ts.residual
+
+CompressibleEquations.recovered_state_residual(ts::MultirateInfinitesimalStep) =
+    ts.stage[] == number_of_stages(ts.tableau) ? nothing : ts.residual
 
 # Scratch for the fast parts of the tendencies (see the `fast_tendency` field). Post-loop
 # scalars each need their own: their advective tendencies are all in hand when the
@@ -338,70 +373,89 @@ struct StoredIncrement end
 
 Adapt.adapt_structure(to, source::IncrementFromState) = IncrementFromState(adapt(to, source.u))
 
+# The increment ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ formed from the state, with the rounding error of the recovery
+# of Yᵢ₋₁ where it was kept (`residual`): the difference of the two states is exact, so the
+# increment is the exact one to its own precision. A stored increment is read where it is needed.
+@inline state_increment(source::IncrementFromState, residual, uⁿ, i, j, k) =
+    with_residual(@inbounds(source.u[i, j, k] - uⁿ), residual, i, j, k)
+
+@inline state_increment(::StoredIncrement, residual, uⁿ, i, j, k) = zero(uⁿ)
+
 # ΔY₁, for stage 2: `Z[1]` is where `store_stage_increment!` keeps it raw.
-@inline first_increment(source::IncrementFromState, Z, uⁿ, i, j, k) = @inbounds source.u[i, j, k] - uⁿ
-@inline first_increment(::StoredIncrement, Z, uⁿ, i, j, k) = @inbounds Z[1][i, j, k]
+@inline first_increment(::IncrementFromState, Z, ΔY, i, j, k) = ΔY
+@inline first_increment(::StoredIncrement, Z, ΔY, i, j, k) = @inbounds Z[1][i, j, k]
 
 # Stage i's own accumulators, completed with ΔYᵢ₋₁ in registers (they are not needed again) when
 # it has not been folded in already.
-@inline function completed_accumulators(source::IncrementFromState, Fᵢ, Zᵢ, wγᵢ, αᵢ, uⁿ, i, j, k)
-    ΔY = @inbounds source.u[i, j, k] - uⁿ
-    return @inbounds (Fᵢ[i, j, k] + wγᵢ * ΔY, Zᵢ[i, j, k] + αᵢ * ΔY)
-end
+@inline completed_accumulators(::IncrementFromState, Fᵢ, Zᵢ, wγᵢ, αᵢ, ΔY, i, j, k) =
+    @inbounds (Fᵢ[i, j, k] + wγᵢ * ΔY, Zᵢ[i, j, k] + αᵢ * ΔY)
 
-@inline completed_accumulators(::StoredIncrement, Fᵢ, Zᵢ, wγᵢ, αᵢ, uⁿ, i, j, k) = @inbounds (Fᵢ[i, j, k], Zᵢ[i, j, k])
+@inline completed_accumulators(::StoredIncrement, Fᵢ, Zᵢ, wγᵢ, αᵢ, ΔY, i, j, k) = @inbounds (Fᵢ[i, j, k], Zᵢ[i, j, k])
 
 # Add Sᵢ, and ΔYᵢ₋₁ when it has not been folded in already, to the accumulators of later stages.
-@inline function accumulate_later_stages!(source::IncrementFromState, F, Z, wγᵏ, wβᵏ, αᵏ, slow, uⁿ, i, j, k)
-    ΔY = @inbounds source.u[i, j, k] - uⁿ
+@inline function accumulate_later_stages!(::IncrementFromState, F, Z, wγᵏ, wβᵏ, αᵏ, slow, ΔY, i, j, k)
     accumulate!(i, j, k, F, wγᵏ, ΔY, wβᵏ, slow)
     accumulate!(i, j, k, Z, αᵏ, ΔY)
     return nothing
 end
 
-@inline accumulate_later_stages!(::StoredIncrement, F, Z, wγᵏ, wβᵏ, αᵏ, slow, uⁿ, i, j, k) =
+@inline accumulate_later_stages!(::StoredIncrement, F, Z, wγᵏ, wβᵏ, αᵏ, slow, ΔY, i, j, k) =
     accumulate!(i, j, k, F, wβᵏ, slow)
+
+# The start state U⁰ = Uⁿ + Zᵢ. A field that carries a residual rounds the sum to nearest and keeps
+# its rounding error, which the loop adds to the perturbation it starts from; the others round it
+# with the time stepper's round-off treatment.
+@inline start_state(::Nothing, rounding, uⁿ, offset, i, j, k, key) = rounded_add(rounding, uⁿ, offset, i, j, k, key)
+
+@inline function start_state(residual, rounding, uⁿ, offset, i, j, k, key)
+    u⁰ = uⁿ + offset
+    @inbounds residual[i, j, k] = rounding_error(uⁿ, offset, u⁰)
+    return u⁰
+end
 
 # Stage 2 reads the raw S₁ and turns it, with ΔY₁ and S₂, into the accumulators of stages k ≥ 3
 # (whose first pair is where S₁ and a stored ΔY₁ were kept: they are read before being overwritten).
-@kernel function _second_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, wβ₁, wγ₁, α₁, F, Z, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, α₁ᵏ, rounding, key)
+@kernel function _second_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, wβ₁, wγ₁, α₁, F, Z, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, α₁ᵏ,
+                                          rounding, key, residual)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         S₁ = F[1][i, j, k]
         uⁿ = Uⁿ[i, j, k]
-        ΔY₁ = first_increment(source, Z, uⁿ, i, j, k)
+        ΔY₁ = first_increment(source, Z, state_increment(source, residual, uⁿ, i, j, k), i, j, k)
         S₂ = slow_part(i, j, k, grid, split, G)
         G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * S₂ + wβ₁ * S₁ + wγ₁ * ΔY₁
-        U⁰[i, j, k] = rounded_add(rounding, uⁿ, α₁ * ΔY₁, i, j, k, key)
+        U⁰[i, j, k] = start_state(residual, rounding, uⁿ, α₁ * ΔY₁, i, j, k, key)
         combine!(i, j, k, F, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, S₁, ΔY₁, S₂)
         assign!(i, j, k, Z, α₁ᵏ, ΔY₁)
     end
 end
 
 # Stage i ≥ 3 uses its completed accumulators and adds Sᵢ to those of later stages.
-@kernel function _later_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, Fᵢ, Zᵢ, wγᵢ, αᵢ, F, Z, wγᵏ, wβᵏ, αᵏ, rounding, key)
+@kernel function _later_multirate_stage!(G, grid, U⁰, Uⁿ, source, split, wᵢ, Fᵢ, Zᵢ, wγᵢ, αᵢ, F, Z, wγᵏ, wβᵏ, αᵏ,
+                                         rounding, key, residual)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         uⁿ = Uⁿ[i, j, k]
+        ΔY = state_increment(source, residual, uⁿ, i, j, k)
         slow = slow_part(i, j, k, grid, split, G)
-        forcing, offset = completed_accumulators(source, Fᵢ, Zᵢ, wγᵢ, αᵢ, uⁿ, i, j, k)
+        forcing, offset = completed_accumulators(source, Fᵢ, Zᵢ, wγᵢ, αᵢ, ΔY, i, j, k)
         G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * slow + forcing
-        U⁰[i, j, k] = rounded_add(rounding, uⁿ, offset, i, j, k, key)
-        accumulate_later_stages!(source, F, Z, wγᵏ, wβᵏ, αᵏ, slow, uⁿ, i, j, k)
+        U⁰[i, j, k] = start_state(residual, rounding, uⁿ, offset, i, j, k, key)
+        accumulate_later_stages!(source, F, Z, wγᵏ, wβᵏ, αᵏ, slow, ΔY, i, j, k)
     end
 end
 
 # After stage i, for the fields whose increment is stored: ΔYᵢ = Yᵢ - Uⁿ, kept raw after stage 1
 # and accumulated after later stages.
-@kernel function _store_first_increment!(ΔY₁, u, Uⁿ)
+@kernel function _store_first_increment!(ΔY₁, u, Uⁿ, residual)
     i, j, k = @index(Global, NTuple)
-    @inbounds ΔY₁[i, j, k] = u[i, j, k] - Uⁿ[i, j, k]
+    @inbounds ΔY₁[i, j, k] = with_residual(u[i, j, k] - Uⁿ[i, j, k], residual, i, j, k)
 end
 
-@kernel function _accumulate_increment!(F, Z, u, Uⁿ, wγᵏ, αᵏ)
+@kernel function _accumulate_increment!(F, Z, u, Uⁿ, wγᵏ, αᵏ, residual)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ΔY = u[i, j, k] - Uⁿ[i, j, k]
+        ΔY = with_residual(u[i, j, k] - Uⁿ[i, j, k], residual, i, j, k)
         accumulate!(i, j, k, F, wγᵏ, ΔY)
         accumulate!(i, j, k, Z, αᵏ, ΔY)
     end
@@ -443,7 +497,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
     C = fast_tendency_scratch(ts, θ_name)
     compute_linearized_thermodynamic_flux_divergence!(C, ts.substepper, model)
     assemble_scalar_start_states!(ts.scalar_tendencies, ts, model)
-    compute_step_start_moisture_content!(ts.step_start, ts.substepper, model, ts.Uⁿ)
+    compute_pressure_remainder!(ts.step_start, ts.substepper, model, ts.Uⁿ)
     assemble_transport_density_tendency!(ts, model, Δt)
     for name in pre_loop_assembly_names(ts.scalar_tendencies, model)
         assemble_stage_forcing!(ts, model, Δt, name, stage_tendency_split(ts, model, name, θ_name, C))
@@ -526,15 +580,21 @@ end
 reuses_stage_increment(tableau, i) =
     any(!iszero(tableau.α[k, i]) || !iszero(tableau.γ[k, i]) for k in i+1:number_of_stages(tableau))
 
-# The round-off treatment of stage i's updates: the time stepper's for the last stage, whose
-# result is Uⁿ⁺¹, and for every stage whose increment a later stage reuses, since what round to
-# nearest loses from that increment is lost from Uⁿ⁺¹ too. A stage that later stages use only
-# through its tendency (every stage but the last of Wicker–Skamarock RK3) rounds to nearest.
+# The round-off treatment of stage i's updates of the moisture, microphysical and tracer fields:
+# the time stepper's for the last stage, whose result is Uⁿ⁺¹, and for every stage whose increment
+# a later stage reuses, since what round to nearest loses from that increment is lost from Uⁿ⁺¹
+# too. A stage that later stages use only through its tendency (every stage but the last of
+# Wicker–Skamarock RK3) rounds to nearest.
 function stage_rounding(ts::MultirateInfinitesimalStep, i)
     s = number_of_stages(ts.tableau)
     rounded = i == s || reuses_stage_increment(ts.tableau, i)
     return rounded ? ts.rounding : RoundToNearest()
 end
+
+# The acoustic prognostics keep the rounding errors of their intermediate stage states instead
+# (`residual`), so the loop rounds to nearest in every stage but the last.
+acoustic_loop_rounding(ts::MultirateInfinitesimalStep, rounding) =
+    ts.stage[] == number_of_stages(ts.tableau) ? ts.rounding : RoundToNearest()
 
 pre_loop_assembly_names(::PreLoopScalarTendencies, model) = keys(prognostic_fields(model))
 pre_loop_assembly_names(::PostLoopScalarTendencies, model) = acoustic_prognostic_names(model)
@@ -577,6 +637,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
     parameters = stage_assembly_parameters(model, G)
     rounding = ts.rounding
     key = start_state_rounding_key(ts, model, name)
+    residual = stage_residual(ts.residual, model, name)
 
     if i == 1
         launch!(arch, grid, parameters, _first_multirate_stage!, G, grid, split, wᵢ,
@@ -586,7 +647,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
         launch!(arch, grid, parameters, _second_multirate_stage!, G, grid, U⁰, Uⁿ, source, split, wᵢ,
                 β[2, 1] / d[2], γ[2, 1] / (d[2] * Δt), α[2, 1], F, Z,
                 forcing_weights(β, d, 1, ks), increment_weights(γ, d, Δt, 1, ks),
-                forcing_weights(β, d, 2, ks), offset_weights(α, 1, ks), rounding, key)
+                forcing_weights(β, d, 2, ks), offset_weights(α, 1, ks), rounding, key, residual)
     else
         Fᵢ = ts.accumulators[i - 2].forcing[name]
         Zᵢ = ts.accumulators[i - 2].offset[name]
@@ -594,7 +655,7 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, nam
         launch!(arch, grid, parameters, _later_multirate_stage!, G, grid, U⁰, Uⁿ, source, split, wᵢ,
                 Fᵢ, Zᵢ, γ[i, i - 1] / (d[i] * Δt), α[i, i - 1], F, Z,
                 increment_weights(γ, d, Δt, i - 1, ks), forcing_weights(β, d, i, ks),
-                offset_weights(α, i - 1, ks), rounding, key)
+                offset_weights(α, i - 1, ks), rounding, key, residual)
     end
 
     return nothing
@@ -624,13 +685,14 @@ function store_stage_increment!(ts::MultirateInfinitesimalStep, model, i, Δt)
         stage_increment_source(model, name) isa StoredIncrement || continue
         Uⁿ = ts.Uⁿ[name]
         parameters = stage_assembly_parameters(model, u)
+        residual = stage_residual(ts.residual, model, name)
         if i == 1
             launch!(arch, grid, parameters, _store_first_increment!,
-                    ts.accumulators[1].offset[name], u, Uⁿ)
+                    ts.accumulators[1].offset[name], u, Uⁿ, residual)
         else
             launch!(arch, grid, parameters, _accumulate_increment!,
                     accumulator_fields(ts, name, ks, :forcing), accumulator_fields(ts, name, ks, :offset),
-                    u, Uⁿ, increment_weights(γ, d, Δt, i, ks), offset_weights(α, i, ks))
+                    u, Uⁿ, increment_weights(γ, d, Δt, i, ks), offset_weights(α, i, ks), residual)
         end
     end
 

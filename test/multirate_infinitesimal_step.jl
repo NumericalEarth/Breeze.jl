@@ -140,7 +140,7 @@ end
     @test minimum(qˡ[:, 1, 8:15]) > 0
 end
 
-using Breeze.CompressibleEquations: freeze_linearization_state!, compute_step_start_moisture_content!,
+using Breeze.CompressibleEquations: freeze_linearization_state!, compute_pressure_remainder!,
                                     StageEntryForceRemainder, linearized_pressure_remainder
 using Breeze.TimeSteppers: store_step_start_state!
 using Breeze.AtmosphereModels: moisture_prognostic_name
@@ -205,12 +205,60 @@ const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrop
         end
 
         update_state!(model)
-        compute_step_start_moisture_content!(timestepper.step_start, substepper, model, timestepper.Uⁿ)
+        compute_pressure_remainder!(timestepper.step_start, substepper, model, timestepper.Uⁿ)
         remainder = StageEntryForceRemainder(Val(:z), substepper, model, timestepper.step_start)
         δp = Array(interior(model.dynamics.pressure)) .- pⁿ
 
         for k in 1:6
             @test abs(@allowscalar linearized_pressure_remainder(1, 1, k, grid, remainder)) < 1e-4 * abs(δp[1, 1, k])
+        end
+    end
+end
+
+# In air without condensate the pressure change since the step start is evaluated from the changes
+# of the densities (`clear_air_pressure_change`), not as the difference of two diagnosed pressures,
+# each rounded at its own size. It must be that difference up to its rounding, for either Exner
+# exponent, for changes of every density large enough for its curvature to matter.
+using Breeze.CompressibleEquations: pressure_change, moisture_content_arguments
+
+@testset "The clear-air pressure change is the change of the diagnosed pressure [$(nameof(typeof(exner_exponent)))]" for
+        exner_exponent in (VaporEquivalentExponent(), DryExponent())
+
+    FT = Float64
+    grid = RectilinearGrid(default_arch, FT; size=6, z=(0, 600), topology=(Flat, Flat, Bounded))
+    formulation = LiquidIcePotentialTemperatureFormulation(; exner_exponent)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); standard_pressure=1e5)
+
+    for perturbed in ((:ρθ,), (:ρqᵛ,), (:ρᵈ,), (:ρθ, :ρqᵛ, :ρᵈ))
+        model = AtmosphereModel(grid; formulation, dynamics, timestepper = :MultirateInfinitesimalStep)
+        set!(model; ρᵈ = z -> 1.1 - z / 3000, ρθ = z -> 330 - z / 20, ρqᵛ = z -> 0.012 - z / 1e5)
+        update_state!(model)
+
+        timestepper = model.timestepper
+        step_start = timestepper.step_start
+        U = prognostic_fields(model)
+
+        for name in keys(U)
+            parent(timestepper.Uⁿ[name]) .= parent(U[name])
+        end
+
+        store_step_start_state!(step_start, model)
+        pⁿ = Array(interior(model.dynamics.pressure))
+
+        for (n, name) in enumerate(perturbed)
+            parent(U[name]) .*= 1 + n * 1e-3
+        end
+
+        update_state!(model)
+        δp = Array(interior(model.dynamics.pressure)) .- pⁿ
+        state, _ = moisture_content_arguments(timestepper.substepper, model, timestepper.Uⁿ)
+
+        for k in 1:6
+            δpᶜ = @allowscalar pressure_change(1, 1, k, grid, state, model.dynamics.pressure, step_start.pressure,
+                                               step_start.condensate_mass_fraction, timestepper.Uⁿ.ρθ, U.ρθ,
+                                               timestepper.Uⁿ.ρᵈ, timestepper.Uⁿ.ρqᵛ, U.ρqᵛ)
+            @test abs(δp[1, 1, k]) > 1
+            @test isapprox(δpᶜ, δp[1, 1, k]; rtol = 1e-10)
         end
     end
 end

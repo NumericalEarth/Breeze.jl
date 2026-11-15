@@ -262,28 +262,37 @@ end
 @inline x_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂xTᶠᶜᶜ(i, j, k, grid, args...)
 @inline y_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂yTᶜᶠᶜ(i, j, k, grid, args...)
 
-function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer)
+function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer,
+                                                    residual = nothing)
     grid = model.grid
     arch = architecture(grid)
     launch!(arch, grid, :xyz, _initialize_terrain_vertical_momentum_perturbation!,
             substepper.momentum_perturbation.w,
             Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
-            grid)
+            grid, residual)
     return nothing
 end
 
 @kernel function _initialize_terrain_vertical_momentum_perturbation!(ρw̃′,
                                                                      ρu_outer, ρv_outer, ρw_outer,
                                                                      ρu_stage, ρv_stage, ρw_stage,
-                                                                     grid)
+                                                                     grid, residual)
     i, j, k = @index(Global, NTuple)
     ρw̃_outer = terrain_vertical_transport_momentum(i, j, k, grid,
                                                     ρu_outer, ρv_outer, ρw_outer)
     ρw̃_stage = terrain_vertical_transport_momentum(i, j, k, grid,
                                                     ρu_stage, ρv_stage, ρw_stage)
-    @inbounds ρw̃′[i, j, k] = ρw̃_outer - ρw̃_stage
+    @inbounds ρw̃′[i, j, k] = with_terrain_residual(ρw̃_outer - ρw̃_stage, i, j, k, grid, residual)
 end
+
+# What the rounded start state lacks of the exact one (see `start_state_residual`), as a
+# contravariant momentum: the transform is linear.
+@inline with_terrain_residual(ρw̃′, i, j, k, grid, ::Nothing) = ρw̃′
+@inline with_terrain_residual(ρw̃′, i, j, k, grid, residual) =
+    ρw̃′ + terrain_vertical_transport_momentum(i, j, k, grid, residual.ρu, residual.ρv, residual.ρw)
+
+fill_residual_halos!(residual::NamedTuple, model::TerrainCompressibleModel) = foreach(fill_halo_regions!, residual)
 
 @inline function ∇ˣp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,

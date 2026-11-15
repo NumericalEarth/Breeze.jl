@@ -186,6 +186,9 @@ assemble_post_loop_stage_forcing!(::AcousticRungeKutta3, model, Δt) = nothing
 # Wicker–Skamarock re-linearizes the fast operator about each stage's entry state.
 refresh_stage_linearization!(::AcousticRungeKutta3, substepper, model) = prepare_acoustic_cache!(substepper, model)
 
+# The round-off treatment of the acoustic loop's recovery of the full state, given the stage's.
+acoustic_loop_rounding(timestepper, rounding) = rounding
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -229,7 +232,7 @@ function acoustic_stage!(model::AtmosphereModel, Δt, β, rounding, callbacks)
 
     # Linearized acoustic substep loop: Nτ substeps of size Δτ = Δt/N.
     θ_advection = field_advection_scheme(model.advection, thermodynamic_density_name(model.formulation))
-    acoustic_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection, rounding)
+    acoustic_substep_loop!(model, substepper, Δt, β, U⁰, θ_advection, acoustic_loop_rounding(ts, rounding))
 
     # With `PostLoopScalarTendencies`, build the scalar tendencies now, with the transport
     # velocity this loop just averaged, and assemble the scalars' stage forcing from them

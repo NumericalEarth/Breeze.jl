@@ -53,10 +53,13 @@ export
     stage_entry_force_remainder,
     step_start_force_state,
     store_step_start_force_state!,
-    compute_step_start_moisture_content!,
+    compute_pressure_remainder!,
     freeze_linearization_state!,
     acoustic_substep_loop!,
     horizontal_substep_form,
+    start_state_residual,
+    recovered_state_residual,
+    with_residual,
     ForwardBackwardSubsteps,
     SymmetricSubsteps,
     compute_transport_density_tendency!
@@ -79,9 +82,10 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_
                                prognostic_moisture_phase_fractions, saturation_adjusted_equilibrium
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Solvers: NewtonSolver
-using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key
+using Breeze.RoundingTreatments: RoundToNearest, rounded_add, rounding_key, rounding_error
 using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, mixture_gas_constant, dry_air_gas_constant, MoistureMassFractions,
                              vapor_equivalent_heat_capacity, condensate_latent_energy, exner_exponent,
+                             VaporEquivalentExponent, DryExponent,
                              reject_renamed_surface_pressure,
                              vapor_gas_constant, ExnerReferenceState, temperature, temperature_and_sensitivity,
                              equilibrated_surface, saturation_vapor_pressure,
