@@ -54,22 +54,24 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The cloud liquid mass per unit mass that cloud liquid relaxes toward, given the
-`saturation_excess` of total water `qᵛ - qᵛ⁺ˡ + ξˡ qᶜˡ` and the psychrometric correction `ξˡ`.
+`saturation_excess` `s̄ = qᵛ - qᵛ⁺ˡ + ξˡ qᶜˡ` of total water, the psychrometric correction `ξˡ`,
+and the subgrid condensation correlation `Γ = ⟨s⁺⟩ - s̄` of the `condensation` option
+(see `cloud_condensation_correlation`).
 
-This is where a model of condensation enters the implicit relaxation. With no model
-(`condensation = nothing`, the grid mean), a cell holds condensate where it is saturated on the
-mean, `max(0, saturation_excess) / ξˡ`. A model of the subgrid distribution of saturation excess
-extends this function with the equilibrium condensate of its distribution, which is non-negative
-too, so the relaxation keeps its bounds.
+On the grid mean (`Γ = nothing`) a cell holds condensate where it is saturated on the mean,
+`max(0, s̄) / ξˡ`. With subgrid condensation it holds the equilibrium condensate of its
+distribution of saturation excess, `⟨s⁺⟩ / ξˡ = max(0, s̄ + Γ) / ξˡ`, which is non-negative too,
+so the relaxation keeps its bounds.
 """
-@inline liquid_equilibrium_condensate(condensation, saturation_excess, ξˡ) = max(0, saturation_excess) / ξˡ
+@inline liquid_equilibrium_condensate(::Nothing, saturation_excess, ξˡ) = max(0, saturation_excess) / ξˡ
+@inline liquid_equilibrium_condensate(Γ, saturation_excess, ξˡ) = max(0, saturation_excess + Γ) / ξˡ
 
 # Gridless rates (parcels, tests): the explicit caps of `limit_vapor_rates`.
 @inline implicit_liquid_vapor_rates(::Nothing, vapor_rates, args...) = vapor_rates
 
 @inline function implicit_liquid_vapor_rates(liquid_stage, vapor_rates, p3, ρ, ℳ, state, qᵗ, constants,
                                              cloud_water_adjustment, dep, nuc_q, nuc_n,
-                                             temperature_tendency, pressure_tendency)
+                                             temperature_tendency, pressure_tendency, Γ)
     FT = typeof(ρ)
     parameters = p3.process_rates
     τ = parameters.sink_limiting_timescale
@@ -91,7 +93,7 @@ too, so the relaxation keeps its bounds.
     # condensation is attached to P3 here, so the hook is called with `nothing`.
     vapor_excess = qᵛ - qᵛ⁺ˡ
     saturation_excess = vapor_excess + ξˡ * max(0, ℳ.qᶜˡ)
-    equilibrium_condensate = liquid_equilibrium_condensate(nothing, saturation_excess, ξˡ)
+    equilibrium_condensate = liquid_equilibrium_condensate(Γ, saturation_excess, ξˡ)
 
     # Tiny cloud in subsaturated air evaporates no slower than over `sink_limiting_timescale`
     subsaturated = vapor_excess / max(qᵛ⁺ˡ, FT(parameters.floors.divisor)) <

@@ -68,6 +68,9 @@ end
     # Without a model of condensation the equilibrium condensate is that of the grid mean
     @test liquid_equilibrium_condensate(nothing, FT(3e-4), FT(1.5)) ≈ FT(2e-4)
     @test liquid_equilibrium_condensate(nothing, FT(-3e-4), FT(1.5)) == 0
+    # Subgrid condensation: the equilibrium condensate ⟨s⁺⟩ / ξˡ of the distribution, ⟨s⁺⟩ = s̄ + Γ
+    @test liquid_equilibrium_condensate(FT(1.5e-4), FT(-3e-4 / 2), FT(1.5)) == 0
+    @test liquid_equilibrium_condensate(FT(4.5e-4), FT(-1.5e-4), FT(1.5)) ≈ FT(2e-4)
 end
 
 # March one cell by backward-Euler stages: c ← c + Δt × rate. Water is conserved and the vapor
@@ -158,8 +161,8 @@ end
     @test stage.active
     @test stage.Δt == 20
     @test stage.qᶜˡ ≈ 3e-4 - 20 * 1e-6
-    implicit = compute_p3_process_rates(arguments..., known)
-    @test implicit == compute_p3_process_rates(arguments..., stage)
+    implicit = compute_p3_process_rates(arguments..., nothing, known)
+    @test implicit == compute_p3_process_rates(arguments..., nothing, stage)
     @test 0 < implicit.condensation < explicit.condensation
 end
 
@@ -203,7 +206,7 @@ end
         ℳ = P3MicrophysicalState(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, nᵃ, 0.0)
         stage = LiquidRelaxationStage(Δt, 0.0, 0.0, true)
         r = compute_p3_process_rates(p3, 1.0, ℳ, 𝒰, constants, nothing, temperature(𝒰, constants),
-                                     0.0, 0.0, stage)
+                                     0.0, 0.0, nothing, stage)
         # backward Euler toward a target capped by the reservoir: never more than nᵃ in one stage
         @test 0 ≤ Δt * r.ccn_activation_number ≤ nᵃ * (1 + 1e-12)
     end

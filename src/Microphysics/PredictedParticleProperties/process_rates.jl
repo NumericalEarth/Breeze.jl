@@ -776,7 +776,7 @@ end
     vapor_rates = implicit_liquid_vapor_rates(liquid_stage, vapor_rates, p3, ρ, ℳ_adjusted, state,
                                               qᵗ, constants, vapor_excess_adjustment.cloud_water_adjustment,
                                               dep, nuc_q, nuc_n,
-                                              temperature_tendency, pressure_tendency)
+                                              temperature_tendency, pressure_tendency, Γ)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number
