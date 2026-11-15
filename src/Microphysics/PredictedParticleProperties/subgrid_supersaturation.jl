@@ -223,13 +223,46 @@ julia> cloud_vapor_excess(0.5, -1.0)
 # cloud liquid s̄ = μ and only supersaturated air condenses. As σ → 0, μ + Γ → max(μ, -ξˡ q̄ᶜˡ):
 # the grid-mean rate, with evaporation no faster than ωˡ ξˡ q̄ᶜˡ (all the liquid relaxing at
 # the droplets' rate εˡ = ωˡ ξˡ).
-@inline function cloud_condensation_correlation(::SubgridCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ,
+@inline function cloud_condensation_correlation(condensation::SubgridCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ,
                                                 T, P, ρ, constants)
     ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
     μ = qᵛ - qᵛ⁺ˡ
     s̄ = μ + ξˡ * max(0, qᶜˡ)
-    return subgrid_vapor_excess_correlation(statistics, s̄)
+    cell = (; vapor_excess = μ, saturation_excess = s̄, ξˡ, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ)
+    return vapor_excess_correlation(condensation.statistics, statistics, cell)
 end
+
+"""
+    vapor_excess_correlation(source, statistics, cell)
+
+Return the subgrid vapor excess correlation ``Γ`` [kg kg⁻¹] of [`SubgridCondensation`](@ref):
+cloud liquid condenses at ``ωˡ (δqᵛ⁺ˡ + Γ)`` and relaxes implicitly toward
+``\\max(0, s̄ + Γ) / ξˡ``. `source` is the `statistics` of `SubgridCondensation(statistics)`,
+`statistics` what `supersaturation_statistics(source, ...)` returned for the cell, and `cell` the
+named tuple `(; vapor_excess, saturation_excess, ξˡ, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ)`: the grid-mean vapor
+excess over liquid ``μ = qᵛ - qᵛ⁺ˡ``, the saturation excess of total water ``s̄ = μ + ξˡ qᶜˡ``,
+the psychrometric correction, the vapor, saturation and cloud liquid mass fractions, and the
+temperature, pressure and density P3 evaluates its rates with.
+
+The default is the truncation of a Gaussian (or a mixture of Gaussian plumes) about ``s̄``,
+`subgrid_vapor_excess_correlation(statistics, s̄)`. A source of statistics with a different
+distribution extends this function for its type to supply its own ``Γ``; the method must be
+pure and type-stable in the element type of `cell`.
+
+```jldoctest
+julia> using Breeze.Microphysics.PredictedParticleProperties: vapor_excess_correlation
+
+julia> using Breeze.AtmosphereModels: PrescribedStatistics
+
+julia> cell = (; vapor_excess = 0.0, saturation_excess = 0.0, ξˡ = 1.0, qᵛ = 1e-2, qᵛ⁺ˡ = 1e-2,
+               qᶜˡ = 0.0, T = 285.0, P = 9e4, ρ = 1.1);
+
+julia> vapor_excess_correlation(PrescribedStatistics(1.0), (; μ = 0.0, σ = 1.0, skewness = 0.0, f⁺ = 0.5), cell) ≈ 1 / sqrt(2π)
+true
+```
+"""
+@inline vapor_excess_correlation(source, statistics, cell) =
+    subgrid_vapor_excess_correlation(statistics, cell.saturation_excess)
 
 # ξˡ = 1 + ℒˡ ∂qᵛ⁺ˡ/∂T / cᵖᵈ, with P3's dry-air heat capacity convention
 @inline function p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)

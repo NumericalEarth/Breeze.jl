@@ -41,10 +41,17 @@ The result is an isbits `NamedTuple` in one of two forms:
    - `σ ≥ 0`: standard deviation of ``δqᵛ⁺ˡ`` [kg kg⁻¹];
    - `skewness`: skewness of ``δqᵛ⁺ˡ`` (dimensionless; informational);
    - `f⁺ ∈ [0, 1]`: supersaturated fraction of the cell.
-2. A mixture of Gaussian plumes, `(; a, μ, σ)`, each a tuple with one entry per plume:
+2. A mixture of Gaussian plumes, `(; a, μ, σ)` or `(; a, μ, σ, f⁺)`, `a`, `μ` and `σ` each a
+   tuple with one entry per plume:
    - `a`: plume weights, ``Σ aᵢ = 1``;
    - `μ`: plume means ``μᵢ`` of ``δqᵛ⁺ˡ`` [kg kg⁻¹];
-   - `σ`: within-plume standard deviations ``σᵢ ≥ 0`` [kg kg⁻¹].
+   - `σ`: within-plume standard deviations ``σᵢ ≥ 0`` [kg kg⁻¹];
+   - `f⁺` (optional): the saturated fraction, when the source holds its own (for instance the
+     cloud fraction of a closure's distribution). Without it [`saturated_fraction`](@ref)
+     forms ``Σᵢ aᵢ Φ(μᵢ / σᵢ)``.
+
+[`saturated_fraction`](@ref) returns ``f⁺`` from either form; a turbulence closure reads it as
+the saturated fraction of its static stability (`MicrophysicsSaturatedFraction`).
 
 The microphysics uses its own grid-mean vapor excess ``\\bar{μ}`` as the mean of the
 distribution: it reads only `σ` from the first form, and only the offsets ``μᵢ - Σⱼ aⱼ μⱼ``
@@ -58,7 +65,8 @@ $(TYPEDEF)
 
 A prescribed, spatially uniform standard deviation `σ` [kg kg⁻¹] of the vapor excess over liquid
 (see [`supersaturation_statistics`](@ref)). Its mean is unknown to it, so it returns `μ = 0`,
-`skewness = 0` and `f⁺ = 1/2`, which the microphysics does not read.
+`skewness = 0` and `f⁺ = 1/2` (a distribution centered on saturation). The microphysics reads only
+`σ`; [`saturated_fraction`](@ref) returns that `f⁺`.
 
 ```jldoctest
 julia> using Breeze.AtmosphereModels: PrescribedStatistics, supersaturation_statistics
@@ -106,6 +114,38 @@ end
 @inline supersaturation_statistics(statistics::PrescribedPlumeStatistics, i, j, k, grid,
                                    closure, closure_fields, model_fields) =
     (; a = statistics.a, μ = statistics.μ, σ = statistics.σ)
+
+"""
+    saturated_fraction(statistics)
+
+Return the saturated fraction ``f⁺ ∈ [0, 1]``, the probability that the vapor excess over liquid
+is positive, from `statistics`, a result of [`supersaturation_statistics`](@ref): its `f⁺` when
+it has one, otherwise, for a mixture of Gaussian plumes, ``Σᵢ aᵢ Φ(μᵢ / σᵢ)`` with ``Φ`` the
+standard normal distribution function (a step where ``σᵢ = 0``).
+
+```jldoctest
+julia> using Breeze.AtmosphereModels: saturated_fraction
+
+julia> saturated_fraction((; μ = 0.0, σ = 1e-4, skewness = 0.0, f⁺ = 0.3))
+0.3
+
+julia> saturated_fraction((; a = (0.5, 0.5), μ = (1e-3, -1e-3), σ = (0.0, 0.0)))
+0.5
+```
+"""
+@inline saturated_fraction(statistics::NamedTuple{names}) where names =
+    saturated_fraction(Val(:f⁺ ∈ names), statistics)
+
+@inline saturated_fraction(::Val{true}, statistics) = statistics.f⁺
+
+@inline function saturated_fraction(::Val{false}, statistics)
+    terms = map(statistics.a, statistics.μ, statistics.σ) do aᵢ, μᵢ, σᵢ
+        FT = typeof(μᵢ / one(σᵢ))
+        Q = μᵢ / max(σᵢ, floatmin(FT))
+        aᵢ * erfc(-Q / sqrt(FT(2))) / 2
+    end
+    return sum(terms)
+end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

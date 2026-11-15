@@ -49,6 +49,8 @@ export
     PredictedParticlePropertiesMicrophysics,
     GridMeanCondensation,
     SubgridCondensation,
+    DiffusionalGrowthRelaxation,
+    CondensationTimescaleRelaxation,
     P3Microphysics,
     P3MicrophysicalState,
     ProcessRate,

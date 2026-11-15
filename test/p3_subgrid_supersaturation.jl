@@ -242,3 +242,141 @@ end
     @test all(isfinite, liquid(subgrid))
     @test sum(liquid(subgrid)) > sum(liquid(plain))
 end
+
+#####
+##### A statistics source that supplies its own Γ: a uniform distribution of the saturation excess
+#####
+
+# The saturation excess s is uniform on [s̄ - h, s̄ + h]: ⟨s⁺⟩ = (s̄ + h)² / 4h inside the spread,
+# so Γ = ⟨s⁺⟩ - s̄ = (h - s̄)² / 4h there, max(0, -s̄) outside.
+struct UniformStatistics{FT} <: AtmosphereModels.AbstractSupersaturationStatistics
+    h :: FT
+end
+
+@inline function AtmosphereModels.supersaturation_statistics(statistics::UniformStatistics, i, j, k, grid,
+                                                             closure, closure_fields, model_fields)
+    h = statistics.h
+    return (; μ = zero(h), σ = h / sqrt(3 * one(h)), skewness = zero(h), f⁺ = one(h) / 2)
+end
+
+@inline function PPP.vapor_excess_correlation(statistics::UniformStatistics, distribution, cell)
+    s̄ = cell.saturation_excess
+    h = convert(typeof(s̄), statistics.h)
+    inside = (h - s̄)^2 / (4h)
+    return ifelse(abs(s̄) < h, inside, max(zero(s̄), -s̄))
+end
+
+uniform_p3(h) = P3Microphysics(Float64; condensation = SubgridCondensation(UniformStatistics(h)))
+
+function uniform_rates(h, qᵛ, qᶜˡ, constants; kw...)
+    statistics = AtmosphereModels.supersaturation_statistics(UniformStatistics(h), 1, 1, 1, nothing, nothing, nothing, nothing)
+    return cell_rates(uniform_p3(h), qᵛ, qᶜˡ, constants; statistics, kw...)
+end
+
+@testset "P3 subgrid supersaturation: a statistics source supplies Γ" begin
+    constants = ThermodynamicConstants(Float64)
+    T, P, ρ = 285.0, 9e4, 1.0
+    qᵛ⁺ = cell_saturation(9.5e-3, 0.0, constants; T)
+    qᵛ, qᶜˡ = qᵛ⁺ - 3e-4, 2e-4
+    qᵛ⁺ˡ = cell_saturation(qᵛ, qᶜˡ, constants; T)
+    ξˡ = PPP.p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+    s̄ = qᵛ - qᵛ⁺ˡ + ξˡ * qᶜˡ
+
+    # The Gaussian default is the truncation about s̄, bitwise
+    for σ in (0.0, 1e-4, 3e-3)
+        g = gaussian(σ)
+        @test cloud_condensation_correlation(SubgridCondensation(PrescribedStatistics(σ)), g, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) ===
+              PPP.subgrid_vapor_excess_correlation(g, s̄)
+    end
+
+    # The supplied Γ reaches the condensation rate
+    h = 3e-3
+    distribution = AtmosphereModels.supersaturation_statistics(UniformStatistics(h), 1, 1, 1, nothing, nothing, nothing, nothing)
+    Γᵘ = cloud_condensation_correlation(SubgridCondensation(UniformStatistics(h)), distribution, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants)
+    @test Γᵘ ≈ (h - s̄)^2 / 4h
+    @test Γᵘ != PPP.subgrid_vapor_excess_correlation(distribution, s̄)
+    uniform = uniform_rates(h, qᵛ, qᶜˡ, constants; T)
+    same_spread = subgrid_rates(distribution.σ, qᵛ, qᶜˡ, constants; T)
+    plain = cell_rates(P3Microphysics(Float64), qᵛ, qᶜˡ, constants; T)
+    @test uniform.condensation != same_spread.condensation
+    @test uniform.condensation > plain.condensation
+    @test uniform.rain_evaporation === plain.rain_evaporation
+    # A narrow spread is the grid mean, s̄ outside the spread
+    @test uniform_rates(1e-6, qᵛ, qᶜˡ, constants; T).condensation < 0
+
+    # Enzyme differentiates through the supplied Γ (the scheme is rebuilt around the statistics
+    # without reading the lookup tables)
+    base = uniform_p3(h)
+    function in_width(x)
+        p3 = PredictedParticlePropertiesMicrophysics(ntuple(n -> getfield(base, n), Val(10))...,
+                                                     SubgridCondensation(UniformStatistics(x)))
+        statistics = AtmosphereModels.supersaturation_statistics(UniformStatistics(x), 1, 1, 1, nothing, nothing, nothing, nothing)
+        return cell_rates(p3, qᵛ, qᶜˡ, constants; T, statistics).condensation
+    end
+    ad = reverse_gradient(in_width, h)
+    fd = central_difference(in_width, h, 1e-6)
+    @test isfinite(ad) && ad != 0
+    @test ad ≈ fd rtol = 1e-4
+end
+
+@testset "P3 subgrid supersaturation: the implicit relaxation targets the supplied Γ" begin
+    constants = ThermodynamicConstants(Float64)
+    T = 285.0
+    qᵛ⁺ = cell_saturation(9.5e-3, 0.0, constants; T)
+    qᵛ, qᶜˡ = qᵛ⁺ - 3e-4, 2e-4
+    qᵛ⁺ˡ = cell_saturation(qᵛ, qᶜˡ, constants; T)
+    h = 3e-3
+    p3 = uniform_p3(h)
+    distribution = AtmosphereModels.supersaturation_statistics(UniformStatistics(h), 1, 1, 1, nothing, nothing, nothing, nothing)
+    ρ = 1.0
+    𝒰 = cell_state(qᵛ, qᶜˡ, constants; T)
+    ℳ = P3MicrophysicalState(qᶜˡ, 2e8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    Δt = 1e4  # ωˡ Δt ≫ 1: one stage reaches the target
+    stage = PPP.LiquidRelaxationStage(Δt, qᶜˡ, 2e8, true)
+    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, nothing, T, 0.0, 0.0, distribution, stage)
+    Γ = cloud_condensation_correlation(p3.condensation, distribution, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, 9e4, ρ, constants)
+    ξˡ = PPP.p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+    s̄ = qᵛ - qᵛ⁺ˡ + ξˡ * qᶜˡ
+    target = PPP.liquid_equilibrium_condensate(Γ, s̄, ξˡ)
+    @test target ≈ (s̄ + h)^2 / (4h) / ξˡ
+    @test qᶜˡ + Δt * (rates.condensation + rates.ccn_activation_mass) ≈ target rtol = 1e-3
+end
+
+#####
+##### The fixed condensation timescale
+#####
+
+@testset "P3 cloud relaxation: fixed condensation timescale" begin
+    constants = ThermodynamicConstants(Float64)
+    T = 285.0
+    @test P3Microphysics(Float64).cloud_relaxation === PPP.DiffusionalGrowthRelaxation()
+    @test_throws ArgumentError P3Microphysics(Float64; cloud_relaxation = 5.0)
+    rebuilt = PredictedParticlePropertiesMicrophysics(ntuple(n -> getfield(subgrid_p3, n), Val(11))...)
+    @test rebuilt.cloud_relaxation === PPP.DiffusionalGrowthRelaxation()
+
+    τ = 7.0
+    cloud = PPP.CloudDroplets(Float64; condensation_timescale = τ)
+    fixed = P3Microphysics(Float64; cloud, cloud_relaxation = PPP.CondensationTimescaleRelaxation())
+    physical = P3Microphysics(Float64; cloud)
+
+    qᵛ⁺ = cell_saturation(9.5e-3, 0.0, constants; T)
+    for (qᵛ, qᶜˡ) in ((qᵛ⁺ + 1e-4, 2e-4), (qᵛ⁺ - 1e-4, 2e-4), (qᵛ⁺ + 1e-4, 0.0))
+        𝒰 = cell_state(qᵛ, qᶜˡ, constants; T)
+        ℳ = P3MicrophysicalState(qᶜˡ, 2e8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        ω = PPP.p3_phase_relaxation_rates(fixed, 1.0, ℳ, 𝒰, constants)
+        @test ω.ωˡ === 1 / τ
+        @test ω.ωᶜ === 1 / τ
+        @test PPP.p3_phase_relaxation_rates(physical, 1.0, ℳ, 𝒰, constants).ωˡ != 1 / τ
+    end
+
+    # The condensation rate relaxes the vapor excess at 1/τ (no rain or ice; a short sink-limiting
+    # time, over which the coupled solver's transient response is the relaxation rate itself)
+    short = PPP.ProcessRate(Float64; sink_limiting_timescale = 1e-3)
+    fixed = P3Microphysics(Float64; cloud, process_rates = short, cloud_relaxation = PPP.CondensationTimescaleRelaxation())
+    qᵛ, qᶜˡ = qᵛ⁺ + 1e-5, 2e-4
+    qᵛ⁺ˡ = cell_saturation(qᵛ, qᶜˡ, constants; T)
+    rates = cell_rates(fixed, qᵛ, qᶜˡ, constants; T)
+    @test rates.condensation ≈ (qᵛ - qᵛ⁺ˡ) / τ rtol = 1e-3
+    # Without cloud liquid the fixed rate still condenses supersaturated vapor
+    @test cell_rates(fixed, qᵛ, 0.0, constants; T).condensation > 0
+end

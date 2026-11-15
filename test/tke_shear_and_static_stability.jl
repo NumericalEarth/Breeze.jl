@@ -24,6 +24,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Breeze.TurbulenceClosures: TurbulenceClosureStatistics
 using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, ProcessRate
 using Adapt: adapt
+using GPUArraysCore: @allowscalar
 using Enzyme: Enzyme
 using Test
 
@@ -37,9 +38,10 @@ end
 
 @inline TurbulenceClosures.saturated_stability_weightᶜᶜᶠ(i, j, k, grid, model::ConstantWeight, buoyancy, tracers, closure_fields) = model.w
 
-# As the statistics of P3's `SubgridCondensation`, the constant weight supplies no spread
-@inline Breeze.AtmosphereModels.supersaturation_statistics(::ConstantWeight, i, j, k, grid, closure, closure_fields, model_fields) =
-    (; μ = zero(eltype(grid)), σ = zero(eltype(grid)))
+# As the statistics of P3's `SubgridCondensation`, the constant weight supplies no spread,
+# whose saturated fraction is the weight
+@inline Breeze.AtmosphereModels.supersaturation_statistics(model::ConstantWeight, i, j, k, grid, closure, closure_fields, model_fields) =
+    (; μ = zero(eltype(grid)), σ = zero(eltype(grid)), skewness = zero(eltype(grid)), f⁺ = convert(eltype(grid), model.w))
 
 struct MixingLengthWeight{FT}
     ℓ⁰ :: FT
@@ -512,4 +514,79 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
     # The surface interface, where ℓ = 0: neutral, so finite and zero
     f = C -> tke_stability_functionᶜᶜᶠ(1, 1, 1, grid, with_scalar(:ℂᵅ, C), velocities, fields.N², e, fields.ℓᵐ)
     @test reverse_gradient(f, 4.2) == 0
+end
+
+#####
+##### The saturated fraction and the phase relaxation rate of the microphysics
+#####
+
+using Breeze.AtmosphereModels: AtmosphereModels, supersaturation_statistics, supersaturation_statistics_model_fields,
+                               saturated_fraction
+using Breeze.Microphysics.PredictedParticleProperties: CloudDroplets, CondensationTimescaleRelaxation
+using Breeze.TurbulenceClosures: applied_flux_state, cell_phase_relaxation_rate, condensing_fraction,
+                                 saturated_response_shareᶜᶜᶠ, saturated_fraction_fields, with_saturated_fraction_fields
+
+function closure_statistics_column(static_stability; Nz = 40, H = 2400, microphysics_kw = (;), steps = 25)
+    grid = RectilinearGrid(default_arch; size = Nz, z = (0, H), topology = (Flat, Flat, Bounded))
+    reference_state = ReferenceState(grid; base_pressure = 101500, potential_temperature = 299)
+    microphysics = PredictedParticlePropertiesMicrophysics(; condensation = SubgridCondensation(TurbulenceClosureStatistics()),
+                                                           precipitation_boundary_condition = ImpenetrableBoundaryCondition(),
+                                                           process_rates = ProcessRate(Float64; sink_limiting_timescale = 10.0),
+                                                           microphysics_kw...)
+    closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4, subgrid_distribution = DoubleGaussian(), static_stability)
+    ρ₀ = surface_density(reference_state)
+    boundary_conditions = (ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(ρ₀ * 8e-3)),
+                           ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(ρ₀ * 5.2e-5)))
+    model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), microphysics, closure, boundary_conditions)
+    set!(model; θ = spike_θ, qᵗ = spike_q, ρe = z -> max(0.6 * exp(-z / 500), 1e-3))
+    for _ in 1:steps
+        time_step!(model, 2)
+    end
+    return model
+end
+
+@testset "MicrophysicsSaturatedFraction: f⁺ of the supersaturation statistics" begin
+    Oceananigans.defaults.FloatType = Float64
+    model = closure_statistics_column(SaturationWeightedStaticStability())
+    grid, closure, fields = model.grid, model.closure, model.closure_fields
+    Nz = size(grid, 3)
+    model_fields = supersaturation_statistics_model_fields(model)
+    aᶜ = column(fields.subgrid_cloud.cloud.aᶜ)
+    f⁺ = @allowscalar [saturated_fraction(supersaturation_statistics(TurbulenceClosureStatistics(), 1, 1, k, grid,
+                                                                       closure, fields, model_fields)) for k in 1:Nz]
+    # The saturated fraction is the distribution's own cloud fraction, and there is cloud
+    @test f⁺ == aᶜ
+    @test maximum(f⁺) > 0.05
+
+    # The static stability blends with f⁺ averaged to the interfaces. N² of the next update reads
+    # the distribution this update leaves.
+    buoyancy, tracers = buoyancy_force(model), buoyancy_tracers(model)
+    static_stability = with_saturated_fraction_fields(closure.static_stability, buoyancy, saturated_fraction_fields(model))
+    operation = KernelFunctionOperation{Center, Center, Face}(static_stabilityᶜᶜᶠ, grid, static_stability, buoyancy, tracers, fields)
+    N² = column(Field(operation))
+    N²ᵈ = face_field(model, ∂z_b, buoyancy, tracers)
+    N²ˢ = face_field(model, saturated_static_stabilityᶜᶜᶠ, buoyancy, tracers.T, tracers.qᵛᵉ)
+    aᴺ = [(f⁺[max(k - 1, 1)] + f⁺[min(k, Nz)]) / 2 for k in 1:Nz+1]
+    @test N²[2:Nz] ≈ (N²ᵈ .+ aᴺ .* (N²ˢ .- N²ᵈ))[2:Nz]
+    @test N²[2:Nz] != N²ᵈ[2:Nz]
+    update_state!(model)
+    @test column(fields.N²) == N²
+    @test all(isfinite, column(fields.Kᶜ))
+end
+
+@testset "The closure's η sees P3's fixed condensation timescale" begin
+    Oceananigans.defaults.FloatType = Float64
+    τ = 4.0
+    cloud = CloudDroplets(Float64; condensation_timescale = τ)
+    model = closure_statistics_column(SaturationWeightedStaticStability(CondensateFluxFraction());
+                                      microphysics_kw = (; cloud, cloud_relaxation = CondensationTimescaleRelaxation()), steps = 2)
+    s = applied_flux_state(model)
+    Nz = size(model.grid, 3)
+    @allowscalar begin
+        @test all(k -> cell_phase_relaxation_rate(1, 1, k, model.grid, s) == 1 / τ, 1:Nz)
+        tₑ = 30.0
+        @test saturated_response_shareᶜᶜᶠ(Val(false), tₑ, 1, 1, 5, model.grid, s) == condensing_fraction(tₑ / τ)
+    end
+    physical = closure_statistics_column(SaturationWeightedStaticStability(CondensateFluxFraction()); microphysics_kw = (; cloud), steps = 2)
+    @test @allowscalar cell_phase_relaxation_rate(1, 1, 5, physical.grid, applied_flux_state(physical)) != 1 / τ
 end

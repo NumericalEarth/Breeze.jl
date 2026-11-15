@@ -903,10 +903,11 @@ end
 #####
 
 # The static stability at the faces, diagnosed once per stage and read by everything downstream
-@kernel function _compute_tke_static_stability!(N², grid, closure, tracers, buoyancy, closure_fields)
+@kernel function _compute_tke_static_stability!(N², grid, closure, tracers, buoyancy, closure_fields, fraction_fields)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
-    @inbounds N²[i, j, k] = static_stabilityᶜᶜᶠ(i, j, k, grid, closure_ij.static_stability, buoyancy, tracers, closure_fields)
+    static_stability = with_saturated_fraction_fields(closure_ij.static_stability, buoyancy, fraction_fields)
+    @inbounds N²[i, j, k] = static_stabilityᶜᶜᶠ(i, j, k, grid, static_stability, buoyancy, tracers, closure_fields)
 end
 
 @kernel function _compute_tke_closure_fields!(closure_fields, grid, closure, velocities, tracers)
@@ -1066,7 +1067,7 @@ function compute_stability_and_diffusivities!(closure_fields, closure, model, tr
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
 
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
-            closure_fields.N², grid, closure, tracers, buoyancy, closure_fields)
+            closure_fields.N², grid, closure, tracers, buoyancy, closure_fields, saturated_fraction_fields(model))
 
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
 
