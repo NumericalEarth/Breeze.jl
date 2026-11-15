@@ -9,11 +9,11 @@ export TKEBasedTurbulenceClosure,
        HarmonicBlend,
        ConstantStabilityFunctions,
        RationalStabilityFunction, SurfaceLayerSimilarity,
+       StratificationNumberStabilityFunction, LinearInterpolation, LogarithmicInterpolation,
        DryStaticStability,
        MoistStaticStability,
        SaturationWeightedStaticStability, MicrophysicsSaturatedFraction,
        GridMeanShear,
-       TurbulenceAugmentedShear,
        SimplifiedHigherOrderClosure, SHOC,
        smooth_shoc_components,
        BlendedMixingLength,
@@ -260,6 +260,7 @@ include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
 include("shear.jl")
 include("richardson_number_stability_functions.jl")
+include("stratification_number_stability_functions.jl")
 include("surface_layer_similarity.jl")
 
 include("SHOC/SimplifiedHigherOrderClosures.jl")

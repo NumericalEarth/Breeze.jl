@@ -131,11 +131,11 @@ column(field) = Array(interior(field, 1, 1, :))
     @test adapt(identity, closure) === closure
     @test adapt(identity, closure.mixing_length) === closure.mixing_length
     @test adapt(identity, sf) === sf
-    @test sf isa RationalStabilityFunction{FT}
-    @test closure.mixing_length.ℂˢ === FT(0.7877315198717979)
-    @test closure.mixing_length.ℂⁱ === FT(1.777871783491512)
+    @test sf isa StratificationNumberStabilityFunction{FT}
+    @test closure.mixing_length.ℂˢ === FT(0.6565692899592015)
+    @test closure.mixing_length.ℂⁱ === FT(1.5609936948461662)
     @test closure.mixing_length.ℂˢ * (sf.ℂᵘ⁰^3 / sf.ℂᴰ⁰)^(1/4) ≈ 0.4 rtol=1e-6
-    @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.7999974525668859
+    @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.15900569445804447 / 0.19872163735761372
     @test GradientLimitedMixingLength(2).ℂⁱ == 2
     @test GradientLimitedMixingLength{FT}(2).ℂⁱ === FT(2)
     @test GradientLimitedMixingLength(ℂˢ=2, ℂⁱ=0.5).ℂⁱ === 0.5
@@ -764,7 +764,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
     @testset "a windless column with stable and unstable layers stays finite" begin
         # No shear, so Ri = N² / S²ᵐⁱⁿ at every interface, large and finite, and the sign changes
         # at mid-depth. At the cell center there Ri is formed from the reconstructed N² and S².
-        closure = TKEBasedTurbulenceClosure()
+        closure = TKEBasedTurbulenceClosure(stability_functions = RationalStabilityFunction())
         sf = closure.stability_functions
         model = AtmosphereModel(grid; closure, advection = nothing)
         θᵢ(z) = 300 - 0.005 * min(z, Lz / 2) + 0.01 * max(0, z - Lz / 2)
@@ -791,7 +791,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
     end
 
     @testset "with the moist static stability" begin
-        closure = TKEBasedTurbulenceClosure(; static_stability = MoistStaticStability())
+        closure = TKEBasedTurbulenceClosure(; static_stability = MoistStaticStability(), stability_functions = RationalStabilityFunction())
         microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
         model = AtmosphereModel(grid; closure, microphysics, advection = nothing)
         set!(model; θ = 288, qᵗ = z -> ifelse(z < Lz / 2, 4e-3, 13e-3), u = z -> 0.005 * z)
@@ -894,7 +894,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
     end
 
     @testset "the shear floor makes the Richardson number continuous" begin
-        closure = TKEBasedTurbulenceClosure(FT)
+        closure = TKEBasedTurbulenceClosure(FT; stability_functions = RationalStabilityFunction())
         sf = closure.stability_functions
         S²ᵐⁱⁿ = closure.shear.minimum_shear_squared
         functions = (momentum_stability_function, tracer_stability_function,
@@ -959,7 +959,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         # Uniform wind, so S² = 0 at every interface. One-ulp changes of ρθ at alternate levels give
         # N² of either sign at the rounding level, which Ri = N² / (S² + S²ᵐⁱⁿ) maps to nearly
         # neutral, where N² / S² sent every interface to the stable or the unstable limit
-        closure = TKEBasedTurbulenceClosure()
+        closure = TKEBasedTurbulenceClosure(stability_functions = RationalStabilityFunction())
         function closure_fields(perturb)
             model = AtmosphereModel(grid; closure, advection = nothing)
             set!(model; θ = 300, u = 5)

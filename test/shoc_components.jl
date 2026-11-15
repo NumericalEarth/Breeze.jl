@@ -611,7 +611,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         Ri = N² / (S² + richardson.minimum_shear_squared)
         functions = richardson.functions
         @test time_scale_column(richardson, hard, constants, FT(0.01)) === nothing
-        @test dissipation_coefficient(richardson, nothing, N², tke_update.ℂᴾ * S², tke_update) ≈
+        @test dissipation_coefficient(richardson, nothing, N², tke_update.ℂᴾ * S², tke_update, ℓ^2 / e) ≈
               Breeze.TurbulenceClosures.dissipation_stability_function(functions, Ri)
         τ, Kᶜ, Kᵘ = time_scale_and_diffusivities(richardson, hard, constants, nothing, e, FT(1e-3), ℓ, N², tke_update.ℂᴾ * S²,
                                                  tke_update, false)
@@ -654,6 +654,26 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test all(≥(0), run.cloud_liquid)
             @test isapprox(run.θ, original.θ; rtol = 2e-3)
         end
+
+        # The functions of the stratification and shear numbers, with τ = ℓ / √e
+        stratification = RichardsonStabilityFunctions(StratificationNumberStabilityFunction(), FT)
+        @test isbits(stratification)
+        sf = stratification.functions
+        τ² = ℓ^2 / e
+        αᴺ, αˢ = τ² * N², τ² * (S² + stratification.minimum_shear_squared)
+        @test dissipation_coefficient(stratification, nothing, N², tke_update.ℂᴾ * S², tke_update, τ²) ≈
+              Breeze.TurbulenceClosures.dissipation_stability_function(sf, αᴺ, αˢ)
+        _, Kᶜ, Kᵘ = time_scale_and_diffusivities(stratification, hard, constants, nothing, e, FT(1e-3), ℓ, N², tke_update.ℂᴾ * S²,
+                                                 tke_update, false)
+        @test Kᶜ ≈ Breeze.TurbulenceClosures.tracer_stability_function(sf, αᴺ, αˢ) * ℓ * sqrt(e)
+        @test Kᵘ ≈ Breeze.TurbulenceClosures.momentum_stability_function(sf, αᴺ, αˢ) * ℓ * sqrt(e)
+        closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = stratification,
+                                               tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...)
+        @test (:ϑᴺ⁻, :ϑᴰ⁺) ⊆ keys(closure_parameters(closure))
+        @test with_parameters(closure; ϑᴺ⁻ = FT(1)).turbulence_time_scale.functions.ϑᴺ⁻ == FT(1)
+        run = run_shoc_column(closure)
+        @test all_finite(run)
+        @test all(x -> 0 ≤ x ≤ 1, run.cloud_fraction)
     end
 
     @testset "StratificationLimitedTimeScale" begin
@@ -691,8 +711,8 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         # The column quantities, dissipation, fallback and diffusivities are those of the wrapped component
         column = time_scale_column(damping, hard, constants, FT(0.05))
         @test time_scale_column(limited, hard, constants, FT(0.05)) === column
-        @test dissipation_coefficient(limited, column, FT(1e-4), FT(1e-5), ForwardEulerTKE(FT)) ===
-              dissipation_coefficient(damping, column, FT(1e-4), FT(1e-5), ForwardEulerTKE(FT))
+        @test dissipation_coefficient(limited, column, FT(1e-4), FT(1e-5), ForwardEulerTKE(FT), FT(100)) ===
+              dissipation_coefficient(damping, column, FT(1e-4), FT(1e-5), ForwardEulerTKE(FT), FT(100))
         @test cold_surface_fallback(limited, FT(170), FT(10), FT(100)) && !cold_surface_fallback(limited, FT(290), FT(10), FT(100))
 
         # The limit: 1/τ = 1/τ₀ + N⁺/ℂᴺ, so τ ≤ τ₀ and τ N⁺ < ℂᴺ for every τ₀ and N²; the identity where N² ≤ 0
@@ -1071,11 +1091,12 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
             @test isapprox(run.θ, original.θ; rtol = 5e-3)
         end
 
-        # The set has the mixing length and the stability functions that the TKE closure also
-        # uses, starting from its published coefficients, and no dimensional coefficient
-        published = TKEBasedTurbulenceClosure()
-        @test smooth_closure.mixing_length == published.mixing_length
-        @test smooth_closure.turbulence_time_scale.functions == published.stability_functions
+        # The set has the formulations of the mixing length and the stability functions that the
+        # TKE closure also uses (with coefficients of its own), and no dimensional coefficient
+        @test smooth_closure.mixing_length isa GradientLimitedMixingLength
+        @test smooth_closure.turbulence_time_scale.functions isa RationalStabilityFunction
+        published = (mixing_length = smooth_closure.mixing_length,
+                     stability_functions = smooth_closure.turbulence_time_scale.functions)
         @test smooth_closure.tke_update.ℂᴾ == 1
         ℂ = closure_parameters(smooth_closure)
         @test !haskey(ℂ, :ℂˡ₅)
@@ -1101,7 +1122,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test all(name -> closure_parameters(doubled)[name] == 2 * ℂ[name], shared)
         @test doubled.mixing_length.ℂˢ == 2 * published.mixing_length.ℂˢ
         @test doubled.turbulence_time_scale.functions.Ri⁺ == 2 * published.stability_functions.Ri⁺
-        @test TKEBasedTurbulenceClosure().mixing_length == published.mixing_length
+        @test smooth_closure.mixing_length == published.mixing_length
         # and the column responds to each (but to ℂⁱ: in this column the envelope of the stable
         # layer is nowhere below the wall length)
         unchanged = run_shoc_column(SimplifiedHigherOrderClosure(FT; components..., surface_forcing...))

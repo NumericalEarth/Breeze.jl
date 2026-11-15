@@ -6,7 +6,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation
-using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
+using Breeze.TurbulenceClosures: SpecificValue, stability_endpoints, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment, linear_interp,
                                                               FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
                                                               shoc_saturation_thermodynamics
@@ -27,14 +27,14 @@ column(field) = Array(interior(field))[1, 1, :]
 matches(a, b) = default_arch isa CPU ? a == b : isapprox(a, b; rtol=1e-10, atol=1e-15)
 
 function tke_p3_column(distribution; condensation = GridMeanCondensation(), arch = default_arch, static_stability = MoistStaticStability(),
-                       shear = GridMeanShear(), solver = SinglePass())
+                       stability_functions = StratificationNumberStabilityFunction(), solver = SinglePass())
     grid = RectilinearGrid(arch; size=32, z=(0, 1600), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=290)
     microphysics = PredictedParticlePropertiesMicrophysics(; condensation,
                                                            negative_moisture_correction = nothing,
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition())
-    closure = TKEBasedTurbulenceClosure(; static_stability, shear, subgrid_distribution = distribution, solver)
+    closure = TKEBasedTurbulenceClosure(; static_stability, stability_functions, subgrid_distribution = distribution, solver)
     model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), microphysics, closure,
                             scalar_advection=implicit_transport())
 
@@ -71,7 +71,7 @@ shoc_time_scale() = DoubleGaussian(; time_scale = StratificationLimitedMomentTim
     # The coefficients of the closure, as one flat view
     closure = TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian(), static_stability = fraction_stability)
     ℂ = closure_parameters(closure)
-    @test all(name -> startswith(string(name), "ℂ") || name ∈ (:Ri⁻, :Ri⁺), keys(ℂ))
+    @test all(name -> startswith(string(name), "ℂ") || startswith(string(name), "ϑ") || name ∈ (:Ri⁻, :Ri⁺), keys(ℂ))
     @test (:ℂˢ, :ℂⁱ, :ℂᵘ⁰, :ℂᵠ, :ℂᵛ₁, :ℂʷ₁, :ℂʷ₂, :ℂᵍ₀) ⊆ keys(ℂ)
     changed = with_parameters(closure; ℂᵍ₀ = 0.35, ℂᵠ = 1.1, ℂᵘ⁰ = 0.2)
     @test changed.subgrid_distribution.assumed_pdf.ℂᵍ₀ == 0.35
@@ -148,20 +148,21 @@ end
         cf = model.closure_fields
         m = cf.subgrid_cloud.moments
         closure = model.closure
-        sf = closure.stability_functions
+        sf = stability_endpoints(closure.stability_functions)
         ℂᵠ = time_scale.ℂᵠ
         dissipation = time_scale isa DissipationTimeScale
         ρ = column(model.dynamics.reference_state.density)
         e = column(model.tracers.ρe) ./ ρ
         ℓ = column(cf.ℓᵐ)
+        eᶠ = SpecificValue(model.tracers.ρe, model.dynamics.reference_state.density)
         Nz = size(grid, 3)
         eᵐⁱⁿ = closure.minimum_tke
         max_S = dissipation ? max(sf.ℂᶜ⁻ * sf.ℂᴰ⁻, sf.ℂᶜ⁰ * sf.ℂᴰ⁰, sf.ℂᶜ⁺ * sf.ℂᴰ⁺) : max(sf.ℂᶜ⁻, sf.ℂᶜ⁰, sf.ℂᶜ⁺)
         n = 0
         for k in 2:Nz
             u = (sqrt(max(e[k], eᵐⁱⁿ)) + sqrt(max(e[k-1], eᵐⁱⁿ))) / 2
-            𝕊ᴰ = dissipation ? @allowscalar(dissipation_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N²)) : 1
-            𝕊ᶜ = @allowscalar tracer_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N², nothing, nothing)
+            𝕊ᴰ = dissipation ? @allowscalar(dissipation_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N², eᶠ, cf.ℓᵐ)) : 1
+            𝕊ᶜ = @allowscalar tracer_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N², eᶠ, cf.ℓᵐ)
             @test column(m.τ)[k] ≈ 2 * ℓ[k] / (ℂᵠ * 𝕊ᴰ * u) rtol=1e-12
             θ² = column(m.θˡ′²)[k]
             if θ² > 0
@@ -384,11 +385,11 @@ end
     @test_throws ArgumentError TKEBasedTurbulenceClosure(; static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()))
 end
 
-@testset "DissipationTimeScale reads the Richardson number of the closure's shear" begin
+@testset "DissipationTimeScale reads the stability functions of the closure" begin
     time_scale = DissipationTimeScale(; ℂᵠ = 0.14)
     τ = Dict()
-    for ℂˢᵗ in (0, 0.3)
-        model = tke_p3_column(DoubleGaussian(; time_scale); shear = TurbulenceAugmentedShear(; turbulence_shear_coefficient = ℂˢᵗ))
+    for (name, stability_functions) in ((:stratification, StratificationNumberStabilityFunction()), (:richardson, RationalStabilityFunction()))
+        model = tke_p3_column(DoubleGaussian(; time_scale); stability_functions)
         update_state!(model)
         grid = model.grid
         cf = model.closure_fields
@@ -397,22 +398,25 @@ end
         ρ = column(model.dynamics.reference_state.density)
         eᶜ = column(model.tracers.ρe) ./ ρ
         ℓ = column(cf.ℓᵐ)
-        τ[ℂˢᵗ] = column(cf.subgrid_cloud.moments.τ)
+        τ[name] = column(cf.subgrid_cloud.moments.τ)
         for k in 2:size(grid, 3)
             u = (sqrt(max(eᶜ[k], closure.minimum_tke)) + sqrt(max(eᶜ[k-1], closure.minimum_tke))) / 2
             𝕊ᴰ = @allowscalar dissipation_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N², e, cf.ℓᵐ)
-            @test τ[ℂˢᵗ][k] ≈ 2 * ℓ[k] / (time_scale.ℂᵠ * 𝕊ᴰ * u) rtol=1e-10
+            @test τ[name][k] ≈ 2 * ℓ[k] / (time_scale.ℂᵠ * 𝕊ᴰ * u) rtol=1e-10
         end
     end
-    @test τ[0] != τ[0.3]
+    @test τ[:stratification] != τ[:richardson]
 end
 
 @testset "Bracketed solve of the effective saturated fraction aᴺ" begin
     @test summary(BracketedFractionSolve(2)) == "BracketedFractionSolve(2)"
     @test_throws ArgumentError BracketedFractionSolve(-1)
     @test summary(BracketedFractionSolve(1; lagged_envelope = true)) == "BracketedFractionSolve(1, lagged_envelope = true)"
-    for (n, lagged_envelope) in ((0, false), (2, false), (2, true))
-        model = tke_p3_column(DoubleGaussian(); static_stability = fraction_stability,
+    for (n, lagged_envelope, stability_functions) in ((0, false, StratificationNumberStabilityFunction()),
+                                                     (2, false, StratificationNumberStabilityFunction()),
+                                                     (2, true, StratificationNumberStabilityFunction()),
+                                                     (2, false, RationalStabilityFunction()))
+        model = tke_p3_column(DoubleGaussian(); static_stability = fraction_stability, stability_functions,
                               solver = BracketedFractionSolve(n; lagged_envelope))
         @test model.closure.static_stability isa SaturationWeightedStaticStability{<:CondensateFluxFraction}
         state = model.closure_fields.subgrid_cloud.solver_state

@@ -11,7 +11,7 @@
 @inline richardson_number(N², S², S²ᵐⁱⁿ) = N² / (S² + S²ᵐⁱⁿ)
 
 # `e` is the specific turbulent kinetic energy and `ℓ` the stored mixing length, which the shear of
-# the closure may read (`TurbulenceAugmentedShear`).
+# the closure may read.
 @inline function Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N², e, ℓ)
     S² = effective_shear_squaredᶜᶜᶠ(i, j, k, grid, closure, velocities, e, ℓ)
     N²ᵢ = @inbounds N²[i, j, k]
@@ -58,7 +58,8 @@ The functions are continuous, with a kink at neutral.
 Mixed integer and float arguments are promoted to a single float type.
 
 Defaults are calibrated to the Shen et al. (2022) LES library, as described in the turbulence-closure
-manual; use `TKEBasedTurbulenceClosure()` for its paired mixing-length coefficients.
+manual, with the paired mixing length `GradientLimitedMixingLength(ℂˢ = 0.7877315198717979, ℂⁱ = 1.777871783491512)`.
+[`StratificationNumberStabilityFunction`](@ref) is the default of `TKEBasedTurbulenceClosure`.
 
 ```jldoctest
 using Breeze

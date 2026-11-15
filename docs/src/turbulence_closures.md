@@ -119,19 +119,45 @@ the closure's `solver` ([`SinglePass`](@ref), [`DampedFixedPoint`](@ref) or
 
 ### Stability functions
 
-The default is [`RationalStabilityFunction`](@ref),
+The default is [`StratificationNumberStabilityFunction`](@ref). Each function passes from its
+neutral value ``C⁰`` to its unstable limit ``C⁻`` or its stable limit ``C⁺`` through the shape
+``s = x / (1 + x)`` of the distance from neutral, a function of the stratification number
+``α_N = τ² N²`` and the shear number ``α_S = τ² (S² + S²ᵐⁱⁿ)`` of turbulence with the time scale
+``τ = ℓ / \sqrt{e}``:
+
+```math
+x = \frac{|α_N|}{ℂᴺ⁻ + Ri⁻ α_S} \quad (α_N < 0), \qquad
+x = \frac{α_N}{ℂᴺ⁺ (1 - α_N)⁺ + Ri⁺ α_S} \quad (α_N ≥ 0),
+```
+
+and ``𝕊 = C⁰ (C^± / C⁰)^s`` ([`LogarithmicInterpolation`](@ref), the default) or
+``𝕊 = C⁰ + (C^± - C⁰) s`` ([`LinearInterpolation`](@ref)). Where the shear is strong
+``x = |Ri| / Ri^±`` with ``Ri = N² / (S² + S²ᵐⁱⁿ)``, the argument of the rational functions; where the
+shear vanishes the functions stay continuous in ``N²`` through neutral, with a transition of width
+``ℂᴺ^± e / ℓ²`` rather than the step of a function of ``Ri``. The squared shear ``S²`` and its floor
+``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` come from the closure's `shear`, [`GridMeanShear`](@ref).
+
+The coefficients are held unconstrained: each endpoint ratio is a smooth bijection of a real scalar
+``ϑ`` onto the bounds within which the functions are well posed (``|\ln(C⁻ / C⁰)| < ℂᴺ⁻`` and ``|\ln(C⁺ / C⁰)| < (ℂᴺ⁺⁻⁴ + ℂᴺ⁺⁴)^{-1/4}`` for
+``𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ``, ``ℂᶜ⁺ < 1``, ``ℂᵘ⁺ / ℂᵘ⁰ < 7.4``, ``Ri⁺ > 0.1``, ``0.3 < ℂᴺ⁻ < 10``,
+``0.1 < ℂᴺ⁺ < 2``), so that a calibration of the scalars [`closure_parameters`](@ref) lists cannot
+leave that region. The defaults are the provisional calibration of the closure in the calibration
+harness, mapped onto this form with ``ℂᴺ⁻ = 2``, ``ℂᴺ⁺ = 1`` and clipped into the bounds:
+
+| Function | Unstable limit | Neutral | Stable limit |
+|:--|--:|--:|--:|
+| momentum | 0.361 | 0.159 | 0.0110 |
+| scalars | 0.0817 | 0.199 | 0.424 |
+| TKE | 0.0442 | 0.00731 | 0.0156 |
+| dissipation | 0.00541 | 0.0292 | 0.0622 |
+
+with ``Ri⁻ ≈ 12.7`` and ``Ri⁺ = 0.11``, and the mixing length's wall coefficient
+``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 0.657`` and interior slope ``ℂⁱ ≈ 1.56``.
+
+[`RationalStabilityFunction`](@ref) is
 ``S(Ri) = C⁰ + (C^± - C⁰) x / (1 + x)`` with ``x = |Ri| / Ri^±``, which is continuous but kinked at
-neutral. The Richardson number is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, where the squared shear ``S²`` and
-its floor come from the closure's `shear`. [`GridMeanShear`](@ref), the default, is the shear of
-the resolved wind, ``S² = (∂_z u)² + (∂_z v)²``. [`TurbulenceAugmentedShear`](@ref) adds the squared
-turnover rate of the subgrid eddies, ``S² + ℂˢᵗ e / ℓ²``, with ``e`` floored as in the
-diffusivities and ``ℓ`` the stored mixing length, so that a turbulent layer without resolved shear
-has ``Ri ∼ N² ℓ² / (ℂˢᵗ e)``; ``ℂˢᵗ = 0`` recovers the grid-mean shear exactly. Both carry the
-`minimum_shear_squared` ``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` by default. The floor keeps ``Ri`` finite and
-continuous where the shear vanishes, as in uniform or absent wind: there ``N² / S²`` would jump
-between the stable and unstable limits with the sign of a rounding-level ``N²``. With the floor the
-functions pass from neutral to their limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``, and where ``S² ≫ S²ᵐⁱⁿ``
-``Ri`` differs from ``N² / S²`` by the relative amount ``S²ᵐⁱⁿ / S²`` at most.
+neutral. The floor ``S²ᵐⁱⁿ`` keeps ``Ri`` finite where the shear vanishes, but there the functions
+pass from neutral to their limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``, a step in ``N²``.
 Its calibrated coefficients (rounded) are
 
 | Function | Unstable limit | Neutral | Stable limit |
@@ -141,8 +167,8 @@ Its calibrated coefficients (rounded) are
 | TKE | 312 | 0.0735 | 16.4 |
 | dissipation | 2.59 | 0.0554 | 0.0507 |
 
-with ``Ri⁻ ≈ 6.56`` and ``Ri⁺ ≈ 15.1``. The wall coefficient follows from
-``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4}``. The coefficients, with ``ℂⁱ``, are calibrated to the
+with ``Ri⁻ ≈ 6.56`` and ``Ri⁺ ≈ 15.1``, paired with ``ℂˢ ≈ 0.788`` (``= 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4}``)
+and ``ℂⁱ ≈ 1.78``. These coefficients are calibrated to the
 [Shen et al. (2022)](@cite Shen2022) LES library of low clouds using stochastic gradient descent.
 
 [`ConstantStabilityFunctions`](@ref) give ``Pr = ℂᵘ / ℂᶜ``, a log layer with

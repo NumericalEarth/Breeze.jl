@@ -196,7 +196,7 @@ end
 
 # The time scale of the second moments at face k, from the closure's ℓ, √e (u), N² and Ri there.
 # `e` and `ℓᵐ` (the specific TKE and the stored mixing length) are those the closure's shear reads,
-# so that `𝕊ᴰ` sees the same Richardson number as the diffusivities (`TurbulenceAugmentedShear`).
+# so that `𝕊ᴰ` sees the same stratification and shear numbers as the diffusivities.
 @inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts, closure, velocities, N², e, ℓᵐ, ℓ, u) =
     moment_time_scale(ts, ℓ, u, @inbounds N²[i, j, k])
 

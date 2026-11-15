@@ -87,20 +87,9 @@ end
 ##### Pieces of the closure at one face, for a given N²
 #####
 
-@inline local_stability_functions(sf::ConstantStabilityFunctions, Ri) = (sf.ℂᵘ, sf.ℂᶜ, sf.ℂᴰ)
-@inline local_stability_functions(sf::RationalStabilityFunction, Ri) =
-    (momentum_stability_function(sf, Ri), tracer_stability_function(sf, Ri), dissipation_stability_function(sf, Ri))
-
-# The squared shear of the Richardson number with the local mixing length `ℓ` (not the stored one)
-@inline local_shear_squaredᶜᶜᶠ(i, j, k, grid, ::GridMeanShear, closure, velocities, u, ℓ) =
+# The squared shear of the stability functions at the face
+@inline local_shear_squaredᶜᶜᶠ(i, j, k, grid, ::GridMeanShear, closure, velocities) =
     shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v)
-
-@inline function local_shear_squaredᶜᶜᶠ(i, j, k, grid, shear::TurbulenceAugmentedShear, closure, velocities, u, ℓ)
-    turbulent = ℓ > 0
-    ℓ⁺ = ifelse(turbulent, ℓ, one(ℓ))
-    S²ᵗ = shear.turbulence_shear_coefficient * (u / ℓ⁺)^2
-    return shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v) + ifelse(turbulent, S²ᵗ, zero(S²ᵗ))
-end
 
 @inline local_moment_time_scale(ts, ℓ, u, N², 𝕊ᴰ) = moment_time_scale(ts, ℓ, u, N²)
 @inline local_moment_time_scale(ts::EddyTurnoverTimeScale, ℓ, u, N², 𝕊ᴰ) = 2 * ℓ / (ts.ℂᵠ * u)
@@ -163,9 +152,10 @@ end
     ℓ = blend(length_blending(closure.mixing_length), ℓ, ℓᵉ) # ℓᵉ = Inf without the lagged envelope
 
     # The stability functions and diffusivities of that N² and ℓ
-    S² = local_shear_squaredᶜᶜᶠ(i, j, k, grid, closure.shear, closure, velocities, u, ℓ)
-    Ri = richardson_number(N², S², closure.shear.minimum_shear_squared)
-    𝕊ᵘ, 𝕊ᶜ, 𝕊ᴰ = local_stability_functions(closure.stability_functions, Ri)
+    # with the time scale τ² = ℓ² / e of the local mixing length (not the stored one)
+    S² = local_shear_squaredᶜᶜᶠ(i, j, k, grid, closure.shear, closure, velocities)
+    τ² = (ℓ / u)^2
+    𝕊ᵘ, 𝕊ᶜ, _, 𝕊ᴰ = local_stability_functions(closure.stability_functions, N², S², closure.shear.minimum_shear_squared, τ²)
     K = ℓ * u
     Kᵘ = min(𝕊ᵘ * K, closure.maximum_viscosity)
     Kᶜ = min(𝕊ᶜ * K, closure.maximum_tracer_diffusivity)

@@ -4,10 +4,11 @@
 ##### A time scale component implements
 #####
 #####     time_scale_column(ts, cp, c, brunt_int)                -> column
-#####     dissipation_coefficient(ts, column, N², shear_term, tke_update) -> 𝕊ᴰ, with ε = 𝕊ᴰ e^{3/2} / ℓ
+#####     dissipation_coefficient(ts, column, N², shear_term, tke_update, τ²) -> 𝕊ᴰ, with ε = 𝕊ᴰ e^{3/2} / ℓ
 #####     cold_surface_fallback(ts, tabs_sfc, z, pblh)           -> runaway
 #####     time_scale_and_diffusivities(ts, cp, c, column, e, ε, ℓ, N², shear_term, tke_update, runaway) -> (τ, Kᶜ, Kᵘ)
 #####
+##### `τ²` is the squared eddy time scale ℓ² / e of the level before the TKE update (e floored at mintke).
 ##### `brunt_int` is the stability integrated over the lower troposphere, `shear_term` the shear
 ##### production term of the TKE update (the squared shear times its `ℂᴾ`), `e` the turbulent
 ##### kinetic energy after the TKE update and `ε` the dissipation the update used. `τ` is the
@@ -120,7 +121,7 @@ Adapt.@adapt_structure ColumnStabilityDamping
     return (; lambda_column, Cee)
 end
 
-@inline dissipation_coefficient(::ColumnStabilityDamping, column, brunt_k, shear_term, tke_update) = column.Cee
+@inline dissipation_coefficient(::ColumnStabilityDamping, column, brunt_k, shear_term, tke_update, τ²) = column.Cee
 
 # The fallback applies over a surface colder than `temp_crit`, up to `pbl_trans` above the boundary layer top
 @inline cold_surface_fallback(ts::ColumnStabilityDamping, tabs_sfc, zt_k, pblh) =
@@ -150,11 +151,16 @@ end
 """
 $(TYPEDEF)
 
-Eddy diffusivities and dissipation from stability functions of the local gradient Richardson
-number, as in [`TKEBasedTurbulenceClosure`](@ref) and with its functions (by default
+Eddy diffusivities and dissipation from stability functions of the local gradients, as in
+[`TKEBasedTurbulenceClosure`](@ref) and with its functions (by default
 [`RationalStabilityFunction`](@ref), reused as it is):
 
     Kᶜ = 𝕊ᶜ(Ri) ℓ √e,    Kᵘ = 𝕊ᵘ(Ri) ℓ √e,    ε = 𝕊ᴰ(Ri) e^{3/2} / ℓ,    Ri = N² / (S² + S²ᵐⁱⁿ)
+
+or [`StratificationNumberStabilityFunction`](@ref), whose functions are of the stratification and
+shear numbers ``τ² N²`` and ``τ² (S² + S²ᵐⁱⁿ)`` with ``τ = ℓ / √e`` (``e`` floored at `mintke`; for the
+dissipation, the ``e`` before the TKE update of the level), and continuous in ``N²`` where the shear
+vanishes.
 
 in place of the damping by the stability of the whole column of
 [`ColumnStabilityDamping`](@ref), which is one number per column and jumps to zero where the
@@ -215,24 +221,26 @@ Adapt.@adapt_structure RichardsonStabilityFunctions
 
 Base.summary(ts::RichardsonStabilityFunctions) = string("RichardsonStabilityFunctions with ", summary(ts.functions))
 
-# The Richardson number of a level: the shear term of the TKE update is its ℂᴾ times S²
-@inline level_richardson_number(ts::RichardsonStabilityFunctions, brunt_k, shear_term, tke_update) =
-    richardson_number(brunt_k, shear_term / tke_update.ℂᴾ, ts.minimum_shear_squared)
+# The stability functions of a level: the shear term of the TKE update is its ℂᴾ times S², and τ² = ℓ² / e
+# is the squared eddy time scale (which the functions of the Richardson number do not use)
+@inline level_stability_functions(ts::RichardsonStabilityFunctions, brunt_k, shear_term, tke_update, τ²) =
+    local_stability_functions(ts.functions, brunt_k, shear_term / tke_update.ℂᴾ, ts.minimum_shear_squared, τ²)
 
 @inline time_scale_column(::RichardsonStabilityFunctions, cp, c, brunt_int) = nothing
 
-@inline dissipation_coefficient(ts::RichardsonStabilityFunctions, column, brunt_k, shear_term, tke_update) =
-    dissipation_stability_function(ts.functions, level_richardson_number(ts, brunt_k, shear_term, tke_update))
+@inline dissipation_coefficient(ts::RichardsonStabilityFunctions, column, brunt_k, shear_term, tke_update, τ²) =
+    level_stability_functions(ts, brunt_k, shear_term, tke_update, τ²)[4]
 
 @inline function time_scale_and_diffusivities(ts::RichardsonStabilityFunctions, cp, c, column, tke_k, a_diss, mix,
                                               brunt_k, shear_term, tke_update, runaway)
     brunt_scale = c.brunt_scale # scale of the squared buoyancy frequency for the clipping policy [s⁻²]
 
-    Ri = level_richardson_number(ts, brunt_k, shear_term, tke_update)
     turbulent_velocity = sqrt(clip_max(cp, c.mintke, tke_k, c.mintke))
+    τ² = (mix / turbulent_velocity)^2
+    𝕊ᵘ, 𝕊ᶜ, _, _ = level_stability_functions(ts, brunt_k, shear_term, tke_update, τ²)
 
-    tkh_k = tracer_stability_function(ts.functions, Ri) * mix * turbulent_velocity
-    tk_k = momentum_stability_function(ts.functions, Ri) * mix * turbulent_velocity
+    tkh_k = 𝕊ᶜ * mix * turbulent_velocity
+    tk_k = 𝕊ᵘ * mix * turbulent_velocity
 
     iso_scale = ts.ℂᵗ * mix / turbulent_velocity
     iso = iso_scale / sqrt(1 + iso_scale * iso_scale * clip_negative(cp, brunt_k, brunt_scale))
@@ -387,8 +395,8 @@ end
 
 @inline time_scale_column(ts::SLTS, cp, c, brunt_int) = time_scale_column(ts.time_scale, cp, c, brunt_int)
 
-@inline dissipation_coefficient(ts::SLTS, column, brunt_k, shear_term, tke_update) =
-    dissipation_coefficient(ts.time_scale, column, brunt_k, shear_term, tke_update)
+@inline dissipation_coefficient(ts::SLTS, column, brunt_k, shear_term, tke_update, τ²) =
+    dissipation_coefficient(ts.time_scale, column, brunt_k, shear_term, tke_update, τ²)
 
 @inline cold_surface_fallback(ts::SLTS, tabs_sfc, zt_k, pblh) =
     cold_surface_fallback(ts.time_scale, tabs_sfc, zt_k, pblh)

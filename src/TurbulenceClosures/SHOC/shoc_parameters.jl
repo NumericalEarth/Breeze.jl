@@ -17,8 +17,9 @@ const COMPONENT_SLOTS = (:mixing_length, :turbulence_time_scale, :tke_update, :b
 closure_components(closure) = map(slot -> getfield(closure, slot), COMPONENT_SLOTS)
 
 # Empirical coefficients are written ℂ; the transition scales of the Richardson number of
-# `RationalStabilityFunction` are coefficients too.
-is_calibratable(name::Symbol) = startswith(string(name), "ℂ") || name === :Ri⁻ || name === :Ri⁺
+# `RationalStabilityFunction` are coefficients too, and so are the unconstrained scalars ϑ from which
+# `StratificationNumberStabilityFunction` maps its bounded coefficients.
+is_calibratable(name::Symbol) = startswith(string(name), "ℂ") || startswith(string(name), "ϑ") || name === :Ri⁻ || name === :Ri⁺
 
 function closure_scalar_fields(components)
     names = ()
