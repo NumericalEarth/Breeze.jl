@@ -391,14 +391,8 @@ AtmosphereModels.validate_momentum_advection(::FrozenWeightsWENO, grid) =
 @inline OceananigansAdvection._biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme::FrozenWeightsWENO, bias, ψ) =
     _biased_interpolate_zᵃᵃᶠ(i, j, k, grid, scheme.weno, bias, ψ, scheme.smoothness_stencil)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Refresh the step-start copy of `tracer` that `scheme` computes its smoothness weights from, when the
-tendencies about to be built feed the first stage of an outer step; between the stages of a
-[`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep) the copy is left as it is. The halos are copied with the
-interior, so no halo fill follows.
-"""
+# Refresh the step-start tracer copy only when the tendencies about to be built feed the first stage
+# of an outer step. Halos are copied with the interior, so no halo fill follows.
 function OceananigansAdvection.update_advection!(scheme::FrozenWeightsWENO, model, tracer)
     update_adaptive_timestep!(scheme, model)
     if tendencies_feed_first_stage(model.timestepper)

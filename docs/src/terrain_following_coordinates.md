@@ -462,16 +462,15 @@ derivative *first*, on the cell-centered/face-centered grid where the slope
 lives, then interpolates the product:
 
 ```julia
-@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, pᵣ)
-    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, pᵣ) *
-            Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, slope_x_times_∂z_p′,
-                       d.terrain_metrics, d.pressure, pᵣ)
-    return ∂x_p′ - correction
+@inline function terrain_x_gradient(i, j, k, grid, ::SlopeInsideInterpolation, args...)
+    ∂x_at_r = δxᶠᶜᶜ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, slope_x_times_∂z, args...)
+    return ∂x_at_r - correction
 end
 ```
 
-where `slope_x_times_∂z_p′(i, j, k, grid, metrics, p, pᵣ) = slope_x_ccf * ∂zᶜᶜᶠ(p − pᵣ)`.
+where `args...` is the field or kernel function differentiated (the perturbation pressure
+``p - p_r``) and `slope_x_times_∂z(i, j, k, grid, args...) = terrain_slope_x_ccf * ∂zᶜᶜᶠ(args...)`.
 
 The two are mathematically equivalent in the continuum limit but differ at
 ``O(\Delta x^2, \Delta z^2)`` for a non-uniform topographic slope. SlopeOutside
@@ -625,9 +624,10 @@ With the reference state available, the slow horizontal PGF subtracts
 ``p_r`` before taking the generalised derivative:
 
 ```julia
-@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, pᵣ)
-    return ∂xᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, pᵣ)
-end
+@inline terrain_x_pressure_gradient(i, j, k, grid, d, stencil, pᵣ) =
+    terrain_x_gradient(i, j, k, grid, stencil, perturbation_pressure, d.pressure, pᵣ)
+
+@inline terrain_x_gradient(i, j, k, grid, ::SlopeOutsideInterpolation, args...) = ∂xᶠᶜᶜ(i, j, k, grid, args...)
 
 @inline perturbation_pressure(i, j, k, grid, p, pᵣ) = @inbounds p[i, j, k] - pᵣ[i, j, k]
 ```

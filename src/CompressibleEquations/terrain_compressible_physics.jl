@@ -262,28 +262,37 @@ end
 @inline x_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂xTᶠᶜᶜ(i, j, k, grid, args...)
 @inline y_damping_gradient(i, j, k, grid::TerrainFollowingGrid, args...) = ∂yTᶜᶠᶜ(i, j, k, grid, args...)
 
-function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer)
+function initialize_vertical_momentum_perturbation!(substepper, model::TerrainCompressibleModel, Uᴸ_outer,
+                                                    residual = nothing)
     grid = model.grid
     arch = architecture(grid)
     launch!(arch, grid, :xyz, _initialize_terrain_vertical_momentum_perturbation!,
             substepper.momentum_perturbation.w,
             Uᴸ_outer.ρu, Uᴸ_outer.ρv, Uᴸ_outer.ρw,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
-            grid)
+            grid, residual)
     return nothing
 end
 
 @kernel function _initialize_terrain_vertical_momentum_perturbation!(ρw̃′,
                                                                      ρu_outer, ρv_outer, ρw_outer,
                                                                      ρu_stage, ρv_stage, ρw_stage,
-                                                                     grid)
+                                                                     grid, residual)
     i, j, k = @index(Global, NTuple)
     ρw̃_outer = terrain_vertical_transport_momentum(i, j, k, grid,
                                                     ρu_outer, ρv_outer, ρw_outer)
     ρw̃_stage = terrain_vertical_transport_momentum(i, j, k, grid,
                                                     ρu_stage, ρv_stage, ρw_stage)
-    @inbounds ρw̃′[i, j, k] = ρw̃_outer - ρw̃_stage
+    @inbounds ρw̃′[i, j, k] = with_terrain_residual(ρw̃_outer - ρw̃_stage, i, j, k, grid, residual)
 end
+
+# What the rounded start state lacks of the exact one (see `start_state_residual`), as a
+# contravariant momentum: the transform is linear.
+@inline with_terrain_residual(ρw̃′, i, j, k, grid, ::Nothing) = ρw̃′
+@inline with_terrain_residual(ρw̃′, i, j, k, grid, residual) =
+    ρw̃′ + terrain_vertical_transport_momentum(i, j, k, grid, residual.ρu, residual.ρv, residual.ρw)
+
+fill_residual_halos!(residual::NamedTuple, model::TerrainCompressibleModel) = foreach(fill_halo_regions!, residual)
 
 @inline function ∇ˣp′(i, j, k, grid,
                                                 dynamics::TerrainCompressibleDynamics,
@@ -508,8 +517,10 @@ end
 
     slope_x = terrain_slope_x_ccf(i, j, k, grid)
     slope_y = terrain_slope_y_ccf(i, j, k, grid)
-    Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, Gⁿρu)
-    Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, Gⁿρv)
+    # Nothing fills the halos of the tendencies, so the horizontal interpolations wrap periodic
+    # indices themselves (the face past the last cell is the first one).
+    Gⁿρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxTᶜᵃᵃ, Gⁿρu)
+    Gⁿρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyTᵃᶜᵃ, Gⁿρv)
 
     ∂z_p′ = terrain_vertical_pressure_gradient(i, j, k, grid, pᴸ, pᵣ)
     ρ′ᶜᶜᶠ = terrain_vertical_buoyancy_density(i, j, k, grid, ρᴸ, ρᵣ)
@@ -580,48 +591,45 @@ end
     return terrain_x_pressure_gradient(i, j, k, grid, d, stencil, reference_pressure_field(d.reference_state))
 end
 
-##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂xᶠᶜᶜ
-##### which applies the chain-rule correction (∂p/∂x)_z = (∂p/∂x)_r - (∂z/∂x)_r · (∂p/∂z)
-
-@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, ::Nothing)
-    return ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
-end
-
-@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, pᵣ)
-    return ∂xᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, pᵣ)
-end
-
-##### Slope-inside-interpolation: ℑz(ℑx(slope * ∂z(p')))
+##### The constant-height gradient of a field or kernel function (`args...`), by stencil.
 #####
-##### The slope is evaluated at each (Center, Center, Face) stencil point
-##### and multiplied by ∂z(p') before the 4-point average to (Face, Center, Center).
+##### Slope-outside-interpolation (default): Oceananigans' generalized ∂xᶠᶜᶜ, which applies the
+##### chain-rule correction (∂p/∂x)_z = (∂p/∂x)_r - (∂z/∂x)_r · (∂p/∂z).
 #####
-##### Note: both SlopeOutsideInterpolation and SlopeInsideInterpolation derive
-##### the slope from the grid `∂z∂x`/`∂z∂y` operator (the formulation decay) via
-##### `terrain_slope_{x,y}_ccf`; they differ only in whether the slope multiplies
-##### inside or outside the interpolation stencil.
+##### Slope-inside-interpolation: (∂p/∂x)_r - ℑz(ℑx(slope * ∂z(p))). The slope is evaluated at each
+##### (Center, Center, Face) stencil point and multiplied by ∂z(p) before the 4-point average to
+##### (Face, Center, Center).
+#####
+##### Both derive the slope from the grid `∂z∂x`/`∂z∂y` operator (the formulation decay) via
+##### `terrain_slope_{x,y}_ccf`; they differ only in whether the slope multiplies inside or outside
+##### the interpolation stencil.
 
-@inline function slope_x_times_∂z(i, j, k, grid::TerrainFollowingGrid, p)
-    slope = terrain_slope_x_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
+@inline terrain_x_gradient(i, j, k, grid, ::SlopeOutsideInterpolation, args...) = ∂xᶠᶜᶜ(i, j, k, grid, args...)
+@inline terrain_y_gradient(i, j, k, grid, ::SlopeOutsideInterpolation, args...) = ∂yᶜᶠᶜ(i, j, k, grid, args...)
+
+@inline slope_x_times_∂z(i, j, k, grid::TerrainFollowingGrid, args...) =
+    terrain_slope_x_ccf(i, j, k, grid) * ∂zᶜᶜᶠ(i, j, k, grid, args...)
+
+@inline slope_y_times_∂z(i, j, k, grid::TerrainFollowingGrid, args...) =
+    terrain_slope_y_ccf(i, j, k, grid) * ∂zᶜᶜᶠ(i, j, k, grid, args...)
+
+@inline function terrain_x_gradient(i, j, k, grid, ::SlopeInsideInterpolation, args...)
+    ∂x_at_r = δxᶠᶜᶜ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, slope_x_times_∂z, args...)
+    return ∂x_at_r - correction
 end
 
-@inline function slope_x_times_∂z_p′(i, j, k, grid::TerrainFollowingGrid, p, pᵣ)
-    slope = terrain_slope_x_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, pᵣ)
+@inline function terrain_y_gradient(i, j, k, grid, ::SlopeInsideInterpolation, args...)
+    ∂y_at_r = δyᶜᶠᶜ(i, j, k, grid, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, slope_y_times_∂z, args...)
+    return ∂y_at_r - correction
 end
 
-@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, ::Nothing)
-    ∂x_p = δxᶠᶜᶜ(i, j, k, grid, d.pressure) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, slope_x_times_∂z, d.pressure)
-    return ∂x_p - correction
-end
+@inline terrain_x_pressure_gradient(i, j, k, grid, d, stencil, ::Nothing) =
+    terrain_x_gradient(i, j, k, grid, stencil, d.pressure)
 
-@inline function terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, pᵣ)
-    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, perturbation_pressure, d.pressure, pᵣ) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, slope_x_times_∂z_p′, d.pressure, pᵣ)
-    return ∂x_p′ - correction
-end
+@inline terrain_x_pressure_gradient(i, j, k, grid, d, stencil, pᵣ) =
+    terrain_x_gradient(i, j, k, grid, stencil, perturbation_pressure, d.pressure, pᵣ)
 
 ##### Y-direction pressure gradient
 
@@ -630,38 +638,36 @@ end
     return terrain_y_pressure_gradient(i, j, k, grid, d, stencil, reference_pressure_field(d.reference_state))
 end
 
-##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂yᶜᶠᶜ
+@inline terrain_y_pressure_gradient(i, j, k, grid, d, stencil, ::Nothing) =
+    terrain_y_gradient(i, j, k, grid, stencil, d.pressure)
 
-@inline function terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, ::Nothing)
-    return ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
-end
+@inline terrain_y_pressure_gradient(i, j, k, grid, d, stencil, pᵣ) =
+    terrain_y_gradient(i, j, k, grid, stencil, perturbation_pressure, d.pressure, pᵣ)
 
-@inline function terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, pᵣ)
-    return ∂yᶜᶠᶜ(i, j, k, grid, perturbation_pressure, d.pressure, pᵣ)
-end
+#####
+##### The stage-entry force remainder over terrain
+#####
 
-##### Slope-inside-interpolation: ℑz(ℑy(slope * ∂z(p')))
+@inline remainder_x_gradient(i, j, k, grid, stencil, args...) = terrain_x_gradient(i, j, k, grid, stencil, args...)
+@inline remainder_y_gradient(i, j, k, grid, stencil, args...) = terrain_y_gradient(i, j, k, grid, stencil, args...)
 
-@inline function slope_y_times_∂z(i, j, k, grid::TerrainFollowingGrid, p)
-    slope = terrain_slope_y_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, p)
-end
+pressure_gradient_stencil(dynamics::TerrainCompressibleDynamics) = dynamics.terrain_metrics.pressure_gradient_stencil
 
-@inline function slope_y_times_∂z_p′(i, j, k, grid::TerrainFollowingGrid, p, pᵣ)
-    slope = terrain_slope_y_ccf(i, j, k, grid)
-    return slope * ∂zᶜᶜᶠ(i, j, k, grid, perturbation_pressure, p, pᵣ)
-end
+@inline remainder_location(::SEFR{Val{:x}}) = (Face(), Center(), Center())
+@inline remainder_location(::SEFR{Val{:y}}) = (Center(), Face(), Center())
+@inline remainder_location(::SEFR{Val{:z}}) = (Center(), Center(), Face())
 
-@inline function terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, ::Nothing)
-    ∂y_p = δyᶜᶠᶜ(i, j, k, grid, d.pressure) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
-    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, slope_y_times_∂z, d.pressure)
-    return ∂y_p - correction
-end
-
-@inline function terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, pᵣ)
-    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, perturbation_pressure, d.pressure, pᵣ) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
-    correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, slope_y_times_∂z_p′, d.pressure, pᵣ)
-    return ∂y_p′ - correction
+# The multirate stage assembly covers the halos of a terrain-following model
+# (`stage_assembly_parameters`), where the remainder's stencil would leave the arrays: there it is
+# evaluated at the nearest interior point and discarded, which leaves the halos of the tendencies
+# as the tendency kernels do, at zero.
+@inline function stage_entry_force_remainder(i, j, k, grid, stencil, r::SEFR)
+    Nx, Ny, Nz = size(grid, remainder_location(r))
+    i′ = clamp(i, 1, Nx)
+    j′ = clamp(j, 1, Ny)
+    k′ = clamp(k, 1, Nz)
+    interior_point = (i′ == i) & (j′ == j) & (k′ == k)
+    return ifelse(interior_point, force_remainder(i′, j′, k′, grid, r), zero(grid))
 end
 
 #####
