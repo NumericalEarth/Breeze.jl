@@ -275,7 +275,7 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The process `rates` with each transfer scaled by the [`P3SinkFractions`](@ref) `φ` of the
+The process `rates` with each transfer scaled by the `P3SinkFractions` `φ` of the
 species it draws on: the Patankar fraction for an explicit transfer, and the fraction of an
 implicitly relaxed transfer that the stage leaves of its donor, which is one wherever the
 transfer fits. A number rate that accompanies a mass transfer takes the smaller of
