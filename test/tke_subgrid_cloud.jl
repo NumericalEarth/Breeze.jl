@@ -560,7 +560,11 @@ rain_transport() = (ρqʳ = WENO(; order=5, bounds=(0.0, 1.0), time_discretizati
     @test all(isfinite, T)
     @test maximum(abs, T .- T⁰) < 5 # more than 10 K within two steps with rain transported explicitly
     @test all(isfinite, column(model.closure_fields.Kᶜ))
-    @test all(e -> e ≥ 0, column(model.tracers.ρe))
+    # The TKE stays non-negative under SSP-RK3. Under `:SSPMIS43` the extrapolating stage leaves a decaying TKE
+    # with the opposite sign at the level of the underflow (-1.3 × 10⁻¹⁵⁶ J m⁻³ here, at one cell above the
+    # turbulent layer): bounded by the floor of e in the buoyancy sink rate, √floatmin.
+    tke_bound = timestepper === :SSPRungeKutta3 ? 0.0 : sqrt(floatmin(Float64))
+    @test all(e -> e ≥ -tke_bound, column(model.tracers.ρe))
 
     # Every stage of SSP-RK3 is a convex combination of states, and the solves keep their sign. Stage 2 of
     # `:SSPMIS43` extrapolates, V₂ = -0.05 Uⁿ + 1.05 Y₁ + ⋯, so where a solve empties a cell it leaves a
