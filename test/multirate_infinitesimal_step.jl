@@ -16,7 +16,7 @@ using Oceananigans.TimeSteppers: update_state!
 using LinearAlgebra: istril
 using Test
 
-const mis_coefficient_sets = (:WickerSkamarock3, :TVDMISB, :MIS4a, :SSPMIS43)
+const mis_coefficient_sets = (:WickerSkamarock3, :TVDMISB, :MIS4a, :SSPMIS43, :ConvexMIS52, :ConvexMIS52r20, :ConvexMIS42)
 
 function mis_bubble_model(; timestepper, coefficients = :SSPMIS43, moist = false, Δθ = 2, qᵗ = 0.012,
                           scalar_advection = WENO(order=5))
@@ -509,7 +509,9 @@ end
 const vapor_anomaly_reference = vapor_anomaly_density(; timestepper = :AcousticRungeKutta3, Δt = 1/256, substep = 1/16384)
 
 @testset "MIS order of accuracy with moisture [$coefficients]" for (coefficients, Δts, order) in
-        ((:TVDMISB, (1/16, 1/32, 1/64), 1.8), (:SSPMIS43, (1/8, 1/16, 1/32), 1.8), (:MIS4a, (1/2, 1/4, 1/8), 2.7))
+        ((:TVDMISB, (1/16, 1/32, 1/64), 1.8), (:SSPMIS43, (1/8, 1/16, 1/32), 1.8), (:MIS4a, (1/2, 1/4, 1/8), 2.7),
+         (:ConvexMIS52, (1/8, 1/16, 1/32), 1.8), (:ConvexMIS52r20, (1/8, 1/16, 1/32), 1.8),
+         (:ConvexMIS42, (1/8, 1/16, 1/32), 1.8))
     reference = vapor_anomaly_reference
     errors = map(Δts) do Δt
         ρ = vapor_anomaly_density(; timestepper = :MultirateInfinitesimalStep, coefficients, Δt)
@@ -536,7 +538,7 @@ using Breeze.CompressibleEquations: horizontal_substep_form, ForwardBackwardSubs
 end
 
 @testset "MIS leaves acoustic modes bounded without divergence damping [$coefficients, Δt = $Δt]" for
-        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a), Δt in (5, 10)
+        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a, :ConvexMIS52, :ConvexMIS52r20, :ConvexMIS42), Δt in (5, 10)
 
     grid = RectilinearGrid(default_arch; size = (40, 48), halo = (5, 5), x = (-20e3, 20e3), z = (0, 12e3),
                            topology = (Periodic, Flat, Bounded))
