@@ -147,13 +147,23 @@ loop's mean differs from the one continuity applies, a uniform mass fraction doe
 uniform. With `timestepper_kwargs = (; post_loop_scalar_tendencies = true)` the water and
 tracer tendencies are instead rebuilt after each stage's own loop, from its mean mass flux, as
 WRF and MPAS do; their fluxes are then exactly ``q / (1 - q)`` times the dry-mass flux the stage
-applied, and a uniform mass fraction stays uniform to round-off with `AcousticRungeKutta3`. Under
+applied, and a uniform mass fraction stays uniform to round-off. Under
 a multirate infinitesimal step the whole post-loop tendency, advection included, is recombined
 across stages with the tableau like any other slow tendency. Leaving the advective part at weight
 one from the current stage would keep the fluxes paired with continuity's, but it integrates
 advection with a first-order, anti-diffusive method that amplifies scalars at every Courant
-number; recombined, a uniform mass fraction stays uniform to the accuracy of the scheme rather
-than to round-off. The loop linearizes at
+number. Recombined, the tendencies of earlier stages carry the mass fluxes ``F_j`` of those stages'
+loops, while stage ``i`` moves the dry air with ``d_i F_i``. Each stage's advective tendency
+therefore includes a first-order upwind flux of the stage-entry mass fraction with the mass flux
+``R_j = \sum_{k \le j} W_{jk} F_k``, ``W = β^{-1} \mathrm{diag}(d) - I``, for which the recombined
+fluxes carry the stage's own: ``\sum_j β_{ij} (F_j + R_j) = d_i F_i``. With it the stage applies
+exactly its own mass flux to a uniform mass fraction, which stays uniform to round-off with every
+coefficient set. The correction is recombined with the rest of the tendency, so a
+strong-stability-preserving coefficient set still advances the scalars by convex combinations of
+forward-Euler steps, and its flux out of a cell is limited to what such a step leaves there,
+which keeps the water species non-negative. Under adaptive implicit vertical advection the implicit remainder
+forms the mass fraction it transports with the density the loop has compressed the cell to,
+for the same reason. The loop linearizes at
 fixed composition. This is exact for the slow, loop-mean compression, where it keeps the loop
 consistent with the re-diagnosed pressure in balanced flow, and it gives the moist adiabatic
 compressibility. For the oscillation itself the re-diagnosed state is closer to fixed water

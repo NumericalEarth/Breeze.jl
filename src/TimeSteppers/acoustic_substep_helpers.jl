@@ -10,6 +10,7 @@ using Breeze.AtmosphereModels:
     AtmosphereModel,
     advecting_vertical_velocity,
     continuity_density,
+    StageEndDensity,
     total_density,
     thermodynamic_density_name,
     transport_velocities,
@@ -99,10 +100,12 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     # Water species and tracers advect as mass fractions of the total density ρ = ρᵈ + Σρˣ
     # (see `scalar_tendency`), so the implicit solve is weighted with the same density; only
     # `update_state!` refreshes `total_density`, so it still holds the value the tendencies were
-    # built with. The vertical velocity is frozen for the same reason (`cache_transport_velocity!`):
-    # the acoustic loop has already overwritten the live time-averaged field with this stage's
-    # average, while `Gⁿ` was scaled by the previous one.
-    ρ = total_density(model.dynamics)
+    # built with, which is the density of the mass flux through the faces. The cells have been
+    # compressed by the acoustic loop since (see `scalar_implicit_density`). The vertical velocity
+    # is frozen for the same reason (`cache_transport_velocity!`): the acoustic loop has already
+    # overwritten the live time-averaged field with this stage's average, while `Gⁿ` was scaled
+    # by the previous one.
+    ρ = scalar_implicit_density(model)
     velocities = tendency_transport_velocities(model)
     implicit_solver = model.timestepper.implicit_solver
     implicit_requests = []
@@ -149,6 +152,21 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
 
     return nothing
 end
+
+# The density that weights the scalars' implicit solves: the stage-entry total density at the
+# faces and, in the cells, that density compressed as the acoustic loop compressed the dry air
+# (`StageEndDensity`), so that the solve sees the mass fraction the explicit update produced.
+# The stage-entry dry density is only kept under adaptive implicit vertical advection
+# (`cache_advecting_state!`); without it the solves are weighted with the stage-entry density.
+# TODO: weight the closure-diffusion-only solves with the stage-end density too, which needs the
+# stage-entry dry density kept whenever the scalars take an implicit solve.
+scalar_implicit_density(model) =
+    scalar_implicit_density(model.timestepper.substepper.density_cache, model.dynamics)
+
+scalar_implicit_density(::Nothing, dynamics) = total_density(dynamics)
+
+scalar_implicit_density(stage_entry_dry_density, dynamics) =
+    StageEndDensity(total_density(dynamics), continuity_density(dynamics), stage_entry_dry_density)
 
 # The prognostics the acoustic substep loop advances, which `scalar_substep!` therefore skips.
 acoustic_prognostic_names(model) = tuple(keys(dynamics_prognostic_fields(model.dynamics))...,
@@ -228,7 +246,8 @@ compute_post_loop_scalar_tendencies!(::PreLoopScalarTendencies, model, Δt, call
 
 function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model, Δt, callbacks)
     tracer_density_to_specific!(model)
-    kernel = post_loop_scalar_tendency_kernel(model.timestepper)
+    prepare_post_loop_scalar_tendencies!(model.timestepper, model)
+    kernel = post_loop_scalar_tendency_kernel(model.timestepper, model)
     compute_scalar_tendencies!(model, fields(model), transport_velocities(model), kernel)
 
     for callback in callbacks
@@ -241,8 +260,11 @@ function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model,
     return nothing
 end
 
+# What a time stepper needs in hand before the post-loop build. Nothing by default.
+prepare_post_loop_scalar_tendencies!(timestepper, model) = nothing
+
 # The kernel of the post-loop build. By default the full tendency is added to what `Gⁿ` holds.
-post_loop_scalar_tendency_kernel(timestepper) = add_scalar_tendency!
+post_loop_scalar_tendency_kernel(timestepper, model) = add_scalar_tendency!
 
 #####
 ##### Implicit vertical solve for the acoustic prognostics
