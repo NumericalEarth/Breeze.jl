@@ -582,7 +582,9 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
 #####     Gᵗρᵈ, the dry air's share of the divergence of the mass flux the moisture tendencies
 #####     were built with (`compute_transport_density_tendency!`): the two cancel only if they
 #####     are built from one flux, and the moisture is advected with the transport velocity, the
-#####     average over the preceding loop, not with the stage-entry momentum.
+#####     average over the preceding loop, not with the stage-entry momentum. A time stepper
+#####     that builds the moisture tendencies after the loop gives the loop those of the stage
+#####     before, with the divergence of their mass flux (`moisture_forcing`).
 #####   - The stage starts from ϖ = (ρθ)′ + W⁰, W⁰ the content of the start state relative to
 #####     the stage-entry state, and ends by taking the content off: W⁰, the ramp of Gᵂ, and
 #####     − ∇·(Λᴴ M), the content the loop's flux M built. The thermodynamic density is left

@@ -215,9 +215,14 @@ scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_nam
 #####     first-order splitting difference, of the same order as the existing split between the
 #####     explicit sedimentation term and `implicit_sedimentation_step!`, and only arises with
 #####     sedimenting condensate.
-#####   - The transport velocity is frozen (`cache_transport_velocity!`) after the post-loop
+#####   - The transport velocity is frozen (`cache_post_loop_transport!`) after the post-loop
 #####     build, so the implicit remainder of the scalar update splits the velocity the explicit
 #####     fraction was scaled by.
+#####   - The loop's pressure ramps with the moisture and condensate tendencies (Section 3b of the
+#####     acoustic substepper), which the stage has not built when its loop starts. The loop takes
+#####     those of the stage before, with the divergence of the mass flux they were built with
+#####     (see `PostLoopScalarTendencies`). Without them the dilution of the moisture, which the
+#####     advective part of its tendency balances, would force the pressure alone.
 #####
 
 # Scalar tendencies are built in `update_state!`, between stages.

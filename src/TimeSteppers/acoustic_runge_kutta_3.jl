@@ -104,7 +104,9 @@ round-to-nearest.
 
 `post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
-between stages with the preceding loop's (see `PostLoopScalarTendencies`).
+between stages with the preceding loop's (see `PostLoopScalarTendencies`). The loop's pressure
+then takes the moisture tendencies of the stage before, which are kept in a field for each
+prognostic that the loop does not advance.
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
