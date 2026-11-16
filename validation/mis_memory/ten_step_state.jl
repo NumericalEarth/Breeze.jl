@@ -61,7 +61,8 @@ end
 
 mis(coefficients; kwargs...) = (:MultirateInfinitesimalStep, (; coefficients, kwargs...))
 
-const coefficient_sets = (:SSPMIS43, :MIS4a, :TVDMISB, :WickerSkamarock3, :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52)
+const coefficient_sets = (:SSPMIS43, :MIS4a, :TVDMISB, :WickerSkamarock3, :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52,
+                          :ConvexLinearMIS3, :ConvexLinearMIS4, :ConvexLinearMIS5, :ConvexLinearMIS6)
 
 configurations = []
 for FT in (Float32, Float64), case in (:dry, :OneMoment, :P3)

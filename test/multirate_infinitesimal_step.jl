@@ -16,7 +16,8 @@ using LinearAlgebra: isdiag, istril, istriu
 using Test
 
 const mis_coefficient_sets = (:WickerSkamarock3, :TVDMISB, :MIS4a, :SSPMIS43,
-                              :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52)
+                              :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52,
+                              :ConvexLinearMIS3, :ConvexLinearMIS4, :ConvexLinearMIS5, :ConvexLinearMIS6)
 
 function mis_bubble_model(; timestepper, coefficients = :SSPMIS43, moist = false, Δθ = 2, qᵗ = 0.012,
                           scalar_advection = WENO(order=5), post_loop_scalar_tendencies = nothing)
@@ -477,7 +478,9 @@ const vapor_anomaly_reference = vapor_anomaly_density(; timestepper = :AcousticR
 @testset "MIS order of accuracy with moisture [$coefficients]" for (coefficients, Δts, order) in
         ((:TVDMISB, (1/16, 1/32, 1/64), 1.8), (:SSPMIS43, (1/8, 1/16, 1/32), 1.8), (:MIS4a, (1/2, 1/4, 1/8), 2.7),
          (:DiagonalMIS42, (1/8, 1/16, 1/32), 1.8), (:DiagonalMIS52, (1/8, 1/16, 1/32), 1.8),
-         (:LowStorageMIS52, (1/8, 1/16, 1/32), 1.8))
+         (:LowStorageMIS52, (1/8, 1/16, 1/32), 1.8),
+         (:ConvexLinearMIS3, (1/8, 1/16, 1/32), 1.8), (:ConvexLinearMIS4, (1/8, 1/16, 1/32), 1.8),
+         (:ConvexLinearMIS5, (1/8, 1/16, 1/32), 1.8), (:ConvexLinearMIS6, (1/8, 1/16, 1/32), 1.8))
     reference = vapor_anomaly_reference
     errors = map(Δts) do Δt
         ρ = vapor_anomaly_density(; timestepper = :MultirateInfinitesimalStep, coefficients, Δt)
@@ -504,7 +507,8 @@ using Breeze.CompressibleEquations: horizontal_substep_form, ForwardBackwardSubs
 end
 
 @testset "MIS leaves acoustic modes bounded without divergence damping [$coefficients, Δt = $Δt]" for
-        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a, :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52), Δt in (5, 10)
+        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a, :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52,
+                         :ConvexLinearMIS3, :ConvexLinearMIS4, :ConvexLinearMIS5, :ConvexLinearMIS6), Δt in (5, 10)
 
     grid = RectilinearGrid(default_arch; size = (40, 48), halo = (5, 5), x = (-20e3, 20e3), z = (0, 12e3),
                            topology = (Periodic, Flat, Bounded))
@@ -569,6 +573,37 @@ end
     @test isnothing(model.timestepper.transport_mass_fluxes)
 end
 
+# The sets for flux-limited transport combine the stage states convexly, each stage with the outer-step-start state,
+# the stage before it and its own slow tendency alone, so that each stage is a convex combination of the
+# outer-step-start state and one forward-Euler step of length Δt / C from the stage before, with C the
+# strong-stability coefficient. The stage start states of the fast integration need not be convex.
+@testset "MIS coefficient sets for flux-limited transport [$coefficients]" for (coefficients, C) in
+        ((:ConvexLinearMIS3, 0.6056), (:ConvexLinearMIS4, 1.2957), (:ConvexLinearMIS5, 1.4282), (:ConvexLinearMIS6, 1.7656))
+
+    tableau = multirate_infinitesimal_step_tableau(coefficients)
+    @test isdiag(tableau.β)
+    @test all(tableau.β .≥ 0)
+    @test istriu(tableau.α, -1)
+    @test istriu(tableau.γ, -1)
+
+    stage_weights = tableau.α .+ tableau.γ
+    @test all(stage_weights .≥ 0)
+    @test all(sum(stage_weights, dims = 2) .≤ 1)
+
+    s = number_of_stages(tableau)
+    forward_euler_steps = [tableau.β[1, 1]; [tableau.β[i, i] / stage_weights[i, i-1] for i in 2:s]]
+    @test maximum(forward_euler_steps) ≈ 1 / C atol = 1e-3
+    @test tableau.strong_stability_coefficient ≈ C atol = 1e-3
+
+    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
+                           topology = (Bounded, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies = true)
+    model = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep, timestepper_kwargs)
+    @test isnothing(model.timestepper.step_start)
+    @test isnothing(model.timestepper.transport_mass_fluxes)
+end
+
 @testset "The default MIS coefficients" begin
     grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
                            topology = (Bounded, Flat, Bounded))
@@ -593,6 +628,9 @@ using Breeze.TimeSteppers: stage_storage, structured_stage_storage, fold_stage_i
     for FT in (Float32, Float64)
         @test layout(:WickerSkamarock3, FT) isa TwoRegisterStorage
         @test layout(:LowStorageMIS52, FT) isa TwoRegisterStorage
+        for coefficients in (:ConvexLinearMIS3, :ConvexLinearMIS4, :ConvexLinearMIS5, :ConvexLinearMIS6)
+            @test layout(coefficients, FT) isa TwoRegisterStorage
+        end
         @test layout(:DiagonalMIS42, FT) isa IncrementStorage
         @test layout(:DiagonalMIS52, FT) isa IncrementStorage
         @test layout(:SSPMIS43, FT) isa AccumulatorStorage

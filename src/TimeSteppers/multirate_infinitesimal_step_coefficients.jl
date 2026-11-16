@@ -156,6 +156,9 @@ Available:
   slow-tendency weights and a diagonal `β`: no slow tendency of an earlier stage is recombined (experimental).
 - `:LowStorageMIS52`: five stages, second order, convex, with a diagonal `β` and stages that start from and are forced with
   the preceding stage's increment alone (experimental).
+- `:ConvexLinearMIS3`, `:ConvexLinearMIS4`, `:ConvexLinearMIS5`, `:ConvexLinearMIS6`: three to six stages, second
+  order, with the structure of `:LowStorageMIS52` and stage states that are convex combinations of the outer-step-start
+  state and one forward-Euler step from the preceding stage, for transport with a flux limiter (experimental).
 - `:TVDMISB`: three stages, second order.
 - `:WickerSkamarock3`: the diagonal tableau ``β = \text{diag}(1/3, 1/2, 1)``, ``α = γ = 0``, which
   reproduces [`AcousticRungeKutta3`](@ref) when the linearization is refreshed every stage
@@ -294,5 +297,96 @@ function multirate_infinitesimal_step_tableau(::Val{:LowStorageMIS52}, FT)
          0 0.17946174723584538 0 0 0
          0 0 0.28969456837427493 0 0
          0 0 0 0.26410464601131539 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# The `:ConvexLinearMIS` sets, for transport whose positivity a flux limiter provides per forward-Euler update. Second
+# order coupled, `β` diagonal and `α`, `γ` on the first subdiagonal only, as `:LowStorageMIS52`: for a variable with no
+# fast tendency, stage i is
+#
+#     Yᵢ = (1 - wᵢ) Uⁿ + wᵢ [Yᵢ₋₁ + (βᵢᵢ / wᵢ) Δt S(Yᵢ₋₁)],   wᵢ = αᵢ,ᵢ₋₁ + γᵢ,ᵢ₋₁ ∈ [0, 1],
+#
+# a convex combination of Uⁿ and one forward-Euler step of length (βᵢᵢ / wᵢ) Δt ≤ Δt / r from the stage before, with r
+# the strong-stability coefficient. Two registers (Uⁿ and the tendency) suffice, as for Wicker–Skamarock RK3 (see
+# `TwoRegisterStorage`). The start states of the fast integration are not constrained to be convex: the
+# sets with four and more stages start stage 2 from Uⁿ - |α₂₁| ΔY₁.
+#
+# From the third tableau search, which maximizes the linear advective Courant limit Ĉ (fifth-order upwind advection
+# coupled to acoustics, symmetric substeps; the smallest of the limits without damping, with thermal divergence damping
+# 0.1 and with momentum damping 0.1) per cost, subject to that convexity, to r ≥ 0.6 Ĉ (a forward-Euler Courant number
+# of at most one at an operational Courant number of 0.6 Ĉ) and to a pure acoustic response bounded by one.
+# Three stages: Ĉ = 1.00, r = 0.606, Σdᵢ = 1.493. Convex start states.
+function multirate_infinitesimal_step_tableau(::Val{:ConvexLinearMIS3}, FT)
+    α = [0 0 0
+         0.16425066756800452 0 0
+         0 0.5779053498780512 0]
+    β = [0.53697027710005463 0 0
+         0 0.44600079802097709 0
+         0 0 0.51012152271107825]
+    γ = [0 0 0
+         0.10584748318697976 0 0
+         0 0.25094248828923638 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Four stages: Ĉ = 1.61, r = 1.296, Σdᵢ = 1.657.
+function multirate_infinitesimal_step_tableau(::Val{:ConvexLinearMIS4}, FT)
+    α = [0 0 0 0
+         -0.23561796464209589 0 0 0
+         0 0.36555602517304447 0 0
+         0 0 0.44122891850097196 0]
+    β = [0.56440354705502405 0 0 0
+         0 0.15937074022761633 0 0
+         0 0 0.38154551570837414 0
+         0 0 0 0.55174285510773424]
+    γ = [0 0 0 0
+         0.71552167337095685 0 0 0
+         0 0.2050266856629725 0 0
+         0 0 0.27366355087175587 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Five stages: Ĉ = 2.36, r = 1.428, Σdᵢ = 1.664. The linear analysis finds it stable with thermal or momentum damping
+# up to 0.12 as well.
+function multirate_infinitesimal_step_tableau(::Val{:ConvexLinearMIS5}, FT)
+    α = [0 0 0 0 0
+         -0.34738265449496974 0 0 0 0
+         0 0.42754741753914488 0 0 0
+         0 0 0.43388344450594291 0 0
+         0 0 0 0.60815615670062917 0]
+    β = [0.39310456011920114 0 0 0 0
+         0 0.1438676941792312 0 0 0
+         0 0 0.32938819204454312 0 0
+         0 0 0 0.39280650258950611 0
+         0 0 0 0 0.40518234159345851]
+    γ = [0 0 0 0 0
+         0.69482221493291174 0 0 0 0
+         0 0.042888455597287226 0 0 0
+         0 0 0.19705625665562709 0 0
+         0 0 0 0.26162286141340491 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Six stages: Ĉ = 2.91, r = 1.766, Σdᵢ = 1.703. The linear analysis finds it unstable with momentum damping of 0.12
+# (stable up to 0.1, and with thermal damping up to 0.12).
+function multirate_infinitesimal_step_tableau(::Val{:ConvexLinearMIS6}, FT)
+    α = [0 0 0 0 0 0
+         -0.49414852987630531 0 0 0 0 0
+         0 0.50600109567807228 0 0 0 0
+         0 0 0.41477758221556105 0 0 0
+         0 0 0 0.50055317910029518 0 0
+         0 0 0 0 0.66706048686987929 0]
+    β = [0.32388410628517567 0 0 0 0 0
+         0 0.1069817871491099 0 0 0 0
+         0 0 0.2347346264792626 0 0 0
+         0 0 0 0.32398443946971067 0 0
+         0 0 0 0 0.36509247402736411 0
+         0 0 0 0 0 0.34844396529154159]
+    γ = [0 0 0 0 0 0
+         0.79317206264657658 0 0 0 0 0
+         0 -0.089723138178645814 0 0 0 0
+         0 0 0.15862871680657281 0 0 0
+         0 0 0 0.14405498752978635 0 0
+         0 0 0 0 0.27441119491092125 0]
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end

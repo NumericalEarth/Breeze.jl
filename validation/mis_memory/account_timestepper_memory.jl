@@ -17,7 +17,8 @@ const FT = Float32
 const N = isempty(ARGS) ? 32 : parse(Int, ARGS[1])
 const H = 5
 const requested = length(ARGS) > 1 ? Symbol.(ARGS[2:end]) :
-                  [:WickerSkamarock3, :LowStorageMIS52, :DiagonalMIS42, :DiagonalMIS52, :TVDMISB, :MIS4a, :SSPMIS43]
+                  [:WickerSkamarock3, :LowStorageMIS52, :ConvexLinearMIS3, :ConvexLinearMIS4, :ConvexLinearMIS5, :ConvexLinearMIS6,
+                   :DiagonalMIS42, :DiagonalMIS52, :TVDMISB, :MIS4a, :SSPMIS43]
 
 const CMExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 

@@ -60,7 +60,11 @@ const uniform_mass_fraction_steppers = ((:AcousticRungeKutta3, nothing),
                                         (:MultirateInfinitesimalStep, :TVDMISB),
                                         (:MultirateInfinitesimalStep, :DiagonalMIS42),
                                         (:MultirateInfinitesimalStep, :DiagonalMIS52),
-                                        (:MultirateInfinitesimalStep, :LowStorageMIS52))
+                                        (:MultirateInfinitesimalStep, :LowStorageMIS52),
+                                        (:MultirateInfinitesimalStep, :ConvexLinearMIS3),
+                                        (:MultirateInfinitesimalStep, :ConvexLinearMIS4),
+                                        (:MultirateInfinitesimalStep, :ConvexLinearMIS5),
+                                        (:MultirateInfinitesimalStep, :ConvexLinearMIS6))
 
 @testset "A uniform mass fraction stays uniform to round-off [$timestepper, $coefficients]" for
         (timestepper, coefficients) in uniform_mass_fraction_steppers
