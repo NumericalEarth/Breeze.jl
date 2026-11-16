@@ -639,6 +639,16 @@ end
 # advective part to the scalar's `fast_tendency` scratch (see `assemble_post_loop_stage_forcing!`).
 post_loop_scalar_tendency_kernel(ts::MultirateInfinitesimalStep) = SplitScalarTendencies(ts.fast_tendency)
 
+# The microphysical sources are added between that build and the assembly, when `Gⁿ` holds no
+# advection. Sinks are budgeted against what the stage start and every other tendency leave of a
+# species, advection and sedimentation included, so the scalars' advective tendencies are handed
+# to the microphysics alongside `Gⁿ`. Pre-loop, `Gⁿ` already holds them.
+AtmosphereModels.separate_stage_tendencies(ts::MultirateInfinitesimalStep, model) =
+    separate_stage_tendencies(ts.scalar_tendencies, ts)
+
+separate_stage_tendencies(::PreLoopScalarTendencies, ts) = nothing
+separate_stage_tendencies(::PostLoopScalarTendencies, ts) = ts.fast_tendency
+
 # Assemble one field's start state and forcing, its tendency split into fast and slow parts by `split`.
 function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, name, split)
     i = ts.stage[]

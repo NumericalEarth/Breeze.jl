@@ -335,22 +335,36 @@ finite before the first time step.
     Oceananigans.Advection.adaptive_advection_timestep(timestepper, clock)
 
 """
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The tendencies that the coming stage applies along with `Gⁿ` but that `timestepper` holds
+apart from it while the microphysical tendencies are built, keyed by prognostic name, or
+`nothing` (the default) where `Gⁿ` holds every other tendency by then.
+"""
+@inline separate_stage_tendencies(timestepper, model) = nothing
+
+"""
 $(TYPEDEF)
 
-The state that the coming stage starts from, and the interval `Δt` it advances over, for
-kernels that build tendencies. See [`stage_start_value`](@ref).
+The state that the coming stage starts from, the interval `Δt` it advances over, and the
+tendencies it applies that are held apart from `Gⁿ`, for kernels that build tendencies. See
+[`stage_start_value`](@ref) and [`accumulated_tendency`](@ref).
 """
-struct StageStart{I, C, B, T}
+struct StageStart{I, C, B, T, S}
     initial :: I       # fields at the start of the time step
     current :: C       # fields now
     from_initial :: B  # whether the coming stage starts from `initial`
     Δt :: T            # interval of the coming stage
+    separate_tendencies :: S  # tendencies the coming stage applies that `Gⁿ` does not hold, or `nothing`
 end
+
+StageStart(initial, current, from_initial, Δt) = StageStart(initial, current, from_initial, Δt, nothing)
 
 # `from_initial` and `Δt` are adapted too: under Reactant both are traced numbers
 # that the kernel adaptor must convert.
 Adapt.adapt_structure(to, s::StageStart) =
-    StageStart(adapt(to, s.initial), adapt(to, s.current), adapt(to, s.from_initial), adapt(to, s.Δt))
+    StageStart(adapt(to, s.initial), adapt(to, s.current), adapt(to, s.from_initial), adapt(to, s.Δt),
+               adapt(to, s.separate_tendencies))
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -365,8 +379,12 @@ function StageStart(model, select)
     return StageStart(select(initial_state_fields(timestepper, model)),
                       select(prognostic_fields(model)),
                       stage_starts_from_initial_state(timestepper, model.clock),
-                      Δt)
+                      Δt,
+                      select_separate_tendencies(select, separate_stage_tendencies(timestepper, model)))
 end
+
+select_separate_tendencies(select, ::Nothing) = nothing
+select_separate_tendencies(select, tendencies) = select(tendencies)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -378,6 +396,23 @@ The value at `(i, j, k)` of the field `name` at the state the coming stage start
     @inbounds current = getproperty(s.current, name)[i, j, k]
     return ifelse(s.from_initial, initial, current)
 end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Every tendency of the field `name` at `(i, j, k)` that the coming stage applies and that is
+known when the microphysical tendencies are built: `G`, the field's entry of `Gⁿ`, plus the
+field's entry of the tendencies held apart from it (see [`separate_stage_tendencies`](@ref)).
+A microphysics kernel that budgets a sink reads the other tendencies through this function,
+before it adds its own to `G`.
+"""
+@inline accumulated_tendency(i, j, k, G, stage::StageStart, name) =
+    with_separate_tendency(i, j, k, G, stage.separate_tendencies, name)
+
+@inline with_separate_tendency(i, j, k, G, ::Nothing, ::Val) = @inbounds G[i, j, k]
+
+@inline with_separate_tendency(i, j, k, G, separate_tendencies, ::Val{name}) where name =
+    @inbounds G[i, j, k] + getproperty(separate_tendencies, name)[i, j, k]
 
 #####
 ##### Patankar-limited sinks
@@ -401,6 +436,12 @@ end
 # by the same factor and conserves the exchange exactly. Gains are left out of `c̃`, which
 # makes each `φ` a function of the explicit rates alone and avoids a coupled solve; the
 # cost is that a species cannot spend, within a stage, what it gains in that stage.
+#
+# `Gᵒ` has to hold everything else the stage applies, transport above all: a sink budgeted
+# against `c⁰` alone can remove what advection removes too. A time stepper that keeps part of
+# a stage's tendency apart from `Gⁿ` (the multirate infinitesimal step with post-loop scalar
+# tendencies keeps the advective part apart) hands it over through
+# `separate_stage_tendencies`, and `accumulated_tendency` adds it to `Gⁿ`.
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -412,13 +453,14 @@ Whether the interval of the coming stage is known. It is not before the first ti
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-What the state the coming stage starts from and the tendency `G` accumulated so far leave
-of the field `name` at `(i, j, k)`: `c̃ = c⁰ + Δt G`. Not clamped, so it is negative where
-transport has left a negative value.
+What the state the coming stage starts from and the tendencies accumulated so far (`G` and
+any held apart from it, see [`accumulated_tendency`](@ref)) leave of the field `name` at
+`(i, j, k)`: `c̃ = c⁰ + Δt Gᵒ`. Not clamped, so it is negative where transport has left a
+negative value.
 """
 @inline function stage_remainder(i, j, k, G, stage::StageStart, name)
     c⁰ = stage_start_value(i, j, k, stage, name)
-    @inbounds Gᵒ = G[i, j, k]
+    Gᵒ = accumulated_tendency(i, j, k, G, stage, name)
     return c⁰ + stage.Δt * Gᵒ
 end
 

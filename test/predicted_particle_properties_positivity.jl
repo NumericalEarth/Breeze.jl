@@ -3,7 +3,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Test
 
 using Breeze
-using Breeze.AtmosphereModels: StageStart, patankar_fraction, patankar_sink_fraction,
+using Breeze.AtmosphereModels: StageStart, accumulated_tendency, patankar_fraction, patankar_sink_fraction,
                                 sequential_sink_fractions, stage_interval_is_known, stage_remainder
 using Breeze.Thermodynamics: ThermodynamicConstants, MoistureMassFractions,
                              LiquidIcePotentialTemperatureState, PlanarLiquidSurface, PlanarIceSurface,
@@ -162,6 +162,20 @@ end
     from_initial = StageStart(initial, fields, true, Δt)
     @test stage_remainder(1, 1, 1, G, from_initial, Val(:c)) ≈ 3
     @test patankar_sink_fraction(1, 1, 1, G, from_initial, Val(:c), FT(0.3)) ≈ FT(1 / 2)
+
+    # A tendency that the stage applies but that is held apart from `G` (post-loop advection)
+    # counts against the budget like `G`: c̃ = 2 - 10 × (0.1 + 0.05) = 0.5.
+    separate = (; c = fill(FT(-0.05), 1, 1, 1))
+    with_separate = StageStart(fields, fields, false, Δt, separate)
+    @test accumulated_tendency(1, 1, 1, G, stage, Val(:c)) == FT(-0.1)
+    @test accumulated_tendency(1, 1, 1, G, with_separate, Val(:c)) ≈ FT(-0.15)
+    @test stage_remainder(1, 1, 1, G, with_separate, Val(:c)) ≈ FT(0.5)
+    φ = patankar_sink_fraction(1, 1, 1, G, with_separate, Val(:c), FT(0.3))
+    @test φ ≈ FT(1 / 7)
+    @test FT(0.5) - Δt * φ * FT(0.3) > 0
+    κ, φ = sequential_sink_fractions(1, 1, 1, G, with_separate, Val(:c), FT(0.1), FT(0.1))
+    @test κ ≈ FT(1 / 2)
+    @test φ == 0
 end
 
 @testset "Sequential sink fractions [$FT]" for FT in (Float32, Float64)
