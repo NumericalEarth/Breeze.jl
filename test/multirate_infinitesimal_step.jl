@@ -17,7 +17,7 @@ using Test
 const mis_coefficient_sets = (:WickerSkamarock3, :TVDMISB, :MIS4a, :SSPMIS43)
 
 function mis_bubble_model(; timestepper, coefficients = :SSPMIS43, moist = false, Δθ = 2, qᵗ = 0.012,
-                          scalar_advection = WENO(order=5))
+                          scalar_advection = WENO(order=5), post_loop_scalar_tendencies = nothing)
     grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5),
                            x = (-10e3, 10e3), z = (0, 10e3),
                            topology = (Bounded, Flat, Bounded))
@@ -28,6 +28,9 @@ function mis_bubble_model(; timestepper, coefficients = :SSPMIS43, moist = false
                                     reference_potential_temperature = θ₀)
     microphysics = moist ? SaturationAdjustment(; equilibrium = WarmPhaseEquilibrium()) : nothing
     timestepper_kwargs = timestepper === :MultirateInfinitesimalStep ? (; coefficients) : NamedTuple()
+    if !isnothing(post_loop_scalar_tendencies)
+        timestepper_kwargs = merge(timestepper_kwargs, (; post_loop_scalar_tendencies))
+    end
     model = AtmosphereModel(grid; dynamics, microphysics, momentum_advection = WENO(order=5), scalar_advection,
                             timestepper, timestepper_kwargs)
     constants = model.thermodynamic_constants
@@ -51,9 +54,12 @@ end
 end
 
 @testset "MIS with the Wicker–Skamarock tableau tracks AcousticRungeKutta3 [$FT]" for FT in (Float64,)
-    for moist in (false, true)
-        reference = mis_bubble_model(; timestepper = :AcousticRungeKutta3, moist)
-        mis = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :WickerSkamarock3, moist)
+    # The two build their scalar tendencies at different times by default, so each timing is
+    # requested of both.
+    for moist in (false, true), post_loop_scalar_tendencies in (false, true)
+        reference = mis_bubble_model(; timestepper = :AcousticRungeKutta3, moist, post_loop_scalar_tendencies)
+        mis = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :WickerSkamarock3, moist,
+                               post_loop_scalar_tendencies)
         @test mis.timestepper isa MultirateInfinitesimalStep
         for _ in 1:5
             time_step!(reference, 5)

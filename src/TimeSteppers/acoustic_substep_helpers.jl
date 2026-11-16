@@ -179,12 +179,13 @@ scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_nam
 #####
 ##### When the moisture and tracer tendencies are built: before or after the stage's acoustic loop
 #####
-##### By default (`PreLoopScalarTendencies`) `update_state!` builds them between stages, so a stage
-##### advects its scalars with the mean velocity of the *preceding* loop (stage 1 with the
-##### outer-step-start velocity), while continuity applies the stage's own loop mean: the
-##### moisture mass flux is then not q/(1 − q) times the dry mass flux, and a uniform q does not
-##### stay uniform (issue #1089). `PostLoopScalarTendencies` rebuilds them right after the stage's
-##### own loop, as WRF (`rk_scalar_tend` with `ru_m, rv_m, ww_m`) and MPAS do, from that loop's
+##### With `PreLoopScalarTendencies` (the default of `AcousticRungeKutta3`) `update_state!` builds
+##### them between stages, so a stage advects its scalars with the mean velocity of the *preceding*
+##### loop (stage 1 with the outer-step-start velocity), while continuity applies the stage's own
+##### loop mean: the moisture mass flux is then not q/(1 − q) times the dry mass flux, and a
+##### uniform q does not stay uniform (issue #1089). `PostLoopScalarTendencies` (the default of
+##### `MultirateInfinitesimalStep`) rebuilds them right after the stage's own loop, as WRF
+##### (`rk_scalar_tend` with `ru_m, rv_m, ww_m`) and MPAS do, from that loop's
 ##### time-averaged mass flux. Both densities of the flux (ρ/ρᵈ)⟨ρᵈu⟩q are then stage-entry values
 ##### — `total_density` is refreshed only by `update_state!`, and the average divides by the
 ##### stage-entry ρᵈ — so their ratio is the uniform 1/(1 − qᵗ) and the flux is exactly
@@ -215,7 +216,7 @@ scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_nam
 #####     fraction was scaled by.
 #####
 
-# Scalar tendencies are built in `update_state!`, between stages (the default).
+# Scalar tendencies are built in `update_state!`, between stages.
 struct PreLoopScalarTendencies end
 
 # Scalar tendencies are rebuilt after each stage's own acoustic loop.

@@ -66,8 +66,8 @@ for FT in (Float32, Float64), case in (:dry, :OneMoment, :P3)
         push!(configurations, (FT, case, mis(coefficients)..., nothing))
     end
     if FT === Float32
-        push!(configurations, (FT, case, mis(:SSPMIS43; post_loop_scalar_tendencies = true)..., nothing))
-        push!(configurations, (FT, case, mis(:MIS4a; post_loop_scalar_tendencies = true)..., nothing))
+        push!(configurations, (FT, case, mis(:SSPMIS43; post_loop_scalar_tendencies = false)..., nothing))
+        push!(configurations, (FT, case, mis(:MIS4a; post_loop_scalar_tendencies = false)..., nothing))
         push!(configurations, (FT, case, mis(:SSPMIS43; rounding = StochasticRounding(seed = 3))..., nothing))
         push!(configurations, (FT, case, mis(:TVDMISB; rounding = StochasticRounding(seed = 3))..., nothing))
         push!(configurations, (FT, case, mis(:SSPMIS43; relinearize_stages = true)..., nothing))

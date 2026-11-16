@@ -210,7 +210,8 @@ end
     names = scalar_prognostic_names(model)
     @test ts.fast_tendency isa NamedTuple
     @test all(name -> haskey(ts.fast_tendency, name), names)
-    pre_loop = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep).timestepper
+    pre_loop = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep,
+                               timestepper_kwargs = (; post_loop_scalar_tendencies = false)).timestepper
     @test pre_loop.fast_tendency isa Field
 
     tracer_density_to_specific!(model)

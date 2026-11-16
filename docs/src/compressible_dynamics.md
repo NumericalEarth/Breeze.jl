@@ -137,17 +137,18 @@ Without condensate all give ``γ^e = 1 / (1 - \hat κ)``, which is
 ``γ^m = c^p_m / c^v_m`` with the vapor-equivalent exponent and ``γ^d`` with the dry one; condensate
 lowers it. In dry air ``C^L = γ^d R^d (p^L / p^{st})^{κ^d}``.
 
-The substep loop also moves the dry density and holds the water densities fixed. Scalar
-transport then advects the water with the preceding loop's mean velocity (the
-outer-step-start velocity in stage 1;
+The substep loop also moves the dry density and holds the water densities fixed. The water and
+tracer tendencies are built either between stages or after each stage's own loop
+(`post_loop_scalar_tendencies` in `timestepper_kwargs`). Built between stages, they advect the
+water with the preceding loop's mean velocity (the outer-step-start velocity in stage 1;
 [#1089](https://github.com/NumericalEarth/Breeze.jl/issues/1089)), so the water follows the
-loop-mean compression of the
-air, one stage late, but not the acoustic oscillation within a loop. Because the preceding
-loop's mean differs from the one continuity applies, a uniform mass fraction does not stay
-uniform. With `timestepper_kwargs = (; post_loop_scalar_tendencies = true)` the water and
-tracer tendencies are instead rebuilt after each stage's own loop, from its mean mass flux, as
-WRF and MPAS do; their fluxes are then exactly ``q / (1 - q)`` times the dry-mass flux the stage
-applied, and a uniform mass fraction stays uniform to round-off. Under
+loop-mean compression of the air, one stage late, but not the acoustic oscillation within a loop.
+Because the preceding loop's mean differs from the one continuity applies, a uniform mass fraction
+does not stay uniform. Built after each stage's own loop, from its mean mass flux, as WRF and MPAS
+do, their fluxes are exactly ``q / (1 - q)`` times the dry-mass flux the stage applied, and a
+uniform mass fraction stays uniform to round-off. This is the default of
+[`MultirateInfinitesimalStep`](@ref); [`AcousticRungeKutta3`](@ref) builds them between stages
+unless `post_loop_scalar_tendencies = true`. Under
 a multirate infinitesimal step the whole post-loop tendency, advection included, is recombined
 across stages with the tableau like any other slow tendency. Leaving the advective part at weight
 one from the current stage would keep the fluxes paired with continuity's, but it integrates

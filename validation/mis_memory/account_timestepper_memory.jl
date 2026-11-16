@@ -108,7 +108,8 @@ available(name) = hasmethod(Breeze.TimeSteppers.multirate_infinitesimal_step_tab
 steppers = Any[("WSRK3", :AcousticRungeKutta3, NamedTuple())]
 for name in requested
     available(name) || (@warn "coefficient set $name is not defined on this branch"; continue)
-    push!(steppers, (string(name), :MultirateInfinitesimalStep, (; coefficients = name)))
+    push!(steppers, (string(name), :MultirateInfinitesimalStep,
+                     (; coefficients = name, post_loop_scalar_tendencies = false)))
     push!(steppers, (string(name, " post-loop"), :MultirateInfinitesimalStep,
                      (; coefficients = name, post_loop_scalar_tendencies = true)))
 end

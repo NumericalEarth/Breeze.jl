@@ -80,8 +80,8 @@ Fields
   recombined post-loop scalar fluxes carry each stage's own mass flux, or `nothing` where the
   stages' fluxes need no correction (see `ScalarMassFluxCorrection`).
 - `scalar_tendencies`: when the moisture and tracer tendencies are built,
-  `PreLoopScalarTendencies` (between stages, the default) or
-  `PostLoopScalarTendencies` (after each stage's own acoustic loop). With the latter, the
+  `PostLoopScalarTendencies` (after each stage's own acoustic loop, the default) or
+  `PreLoopScalarTendencies` (between stages). With the former, the
   scalars' slow tendency ``Sᵢ`` stored for stage ``i`` is the post-loop one, and their stage forcing
   and start state are assembled after the loop.
 """
@@ -138,16 +138,20 @@ the acoustic modes neutral at the default `acoustic_cfl = 0.5`, and `:SSPMIS43` 
 horizontal acoustic Courant numbers ``c Δt / Δx`` between 1.5 and 1.8 (amplified by up to 1.1 per
 step) and between 3.3 and 3.6 (1.02), which `acoustic_cfl = 0.4` or the default damping removes.
 
-`post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
-stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
-between stages with the preceding loop's (see `PostLoopScalarTendencies`).
+By default (`post_loop_scalar_tendencies = true`) the moisture and tracer tendencies are built
+after each stage's own acoustic loop, with that loop's time-averaged transport velocity (see
+`PostLoopScalarTendencies`). Every stage then transports the scalars with the mass flux its own
+loop applied to the dry air, so a uniform mass fraction stays uniform to round-off with every
+coefficient set: the recombined tendencies of earlier stages carry those stages' mass fluxes, and
+each stage's tendency takes a first-order upwind flux of the stage-entry mass fraction that makes
+up the difference once the stages are recombined (see `ScalarMassFluxCorrection`). That needs a
+coefficient set whose `β` is diagonal or has no zero on its diagonal.
 
-With `post_loop_scalar_tendencies = true` every stage also transports the scalars with the mass
-flux its own loop applied to the dry air, so a uniform mass fraction stays uniform to round-off
-with every coefficient set: the recombined tendencies of earlier stages carry those stages' mass
-fluxes, and each stage's tendency takes a first-order upwind flux of the stage-entry mass fraction
-that makes up the difference once the stages are recombined (see `ScalarMassFluxCorrection`). That
-needs a coefficient set whose `β` is diagonal or has no zero on its diagonal.
+`post_loop_scalar_tendencies = false` builds the scalar tendencies between stages instead, with
+the preceding loop's transport velocity, which does not keep a uniform mass fraction uniform. It
+needs less storage: the post-loop tendencies take a field for each moisture, microphysical and
+tracer variable and one for the thermodynamic variable, and, for every coefficient set but
+`:WickerSkamarock3`, three face fields for each stage after the second and one more field.
 
 `Gⁿ` and `U⁰` are the tendency storage and the storage the first start states are formed from,
 allocated by default. Passing them shares the storage of another time stepper, as the
@@ -172,7 +176,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     implicit_solver = nothing,
                                     cache_advecting_state = false,
                                     relinearize_stages = false,
-                                    post_loop_scalar_tendencies = false,
+                                    post_loop_scalar_tendencies = true,
                                     Gⁿ = map(similar, prognostic_fields),
                                     U⁰ = map(similar, prognostic_fields),
                                     rounding = RoundToNearest())
@@ -382,9 +386,10 @@ CompressibleEquations.horizontal_substep_form(ts::MultirateInfinitesimalStep) =
 tendencies_feed_first_stage(timestepper) = true
 tendencies_feed_first_stage(ts::MultirateInfinitesimalStep) = ts.next_stage[] == 1
 
-# With the production model's coefficients (see the `AcousticRungeKutta3` method).
+# With the production model's coefficients and scalar tendency timing (see the `AcousticRungeKutta3` method).
 AtmosphereModels.adiabatic_twin_timestepper(ts::MultirateInfinitesimalStep, ::SplitExplicitCompressibleDynamics) =
-    :MultirateInfinitesimalStep, (; coefficients = ts.tableau)
+    :MultirateInfinitesimalStep, (; coefficients = ts.tableau,
+                                    post_loop_scalar_tendencies = ts.scalar_tendencies isa PostLoopScalarTendencies)
 
 const MultirateAcousticModel = AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep}
 
