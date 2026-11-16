@@ -141,3 +141,103 @@ for name in names
     println("    effective slow Runge–Kutta matrix A = (I − α − γ)⁻¹ β:")
     foreach(i -> println("      ", round.(A[i, 1:i], sigdigits = 6)), 1:s)
 end
+
+#####
+##### Numerical check of the explicit count: integrate y′ = L y with one step of each form
+#####
+
+# The implemented form: start state Uⁿ + Σ α ΔY, forcing (1/d)[Σ γ ΔY / Δt + Σ β S], update over d Δt.
+function implemented_step(t, f, Uⁿ::Vector{T}, Δt) where T
+    α, β, γ, d = T.(t.α), T.(t.β), T.(t.γ), T.(t.d)
+    s = length(d)
+    ΔY = Vector{Vector{T}}()
+    S = Vector{Vector{T}}()
+    Y = Uⁿ
+    for i in 1:s
+        push!(S, f(Y))
+        U⁰ = copy(Uⁿ)
+        G = zero(Uⁿ)
+        for j in 1:i-1
+            U⁰ .+= α[i, j] .* ΔY[j]
+            G .+= (γ[i, j] / (d[i] * Δt)) .* ΔY[j]
+        end
+        for j in 1:i
+            G .+= (β[i, j] / d[i]) .* S[j]
+        end
+        Y = U⁰ .+ (d[i] * Δt) .* G
+        push!(ΔY, Y .- Uⁿ)
+    end
+    return Y
+end
+
+# The same step with the state, the tendency G and `m` more registers, each a linear combination
+# of Uⁿ and the tendencies so far. Rows are coefficients on (Uⁿ, Δt S₁, …, Δt S_s). Returns the
+# state and the largest residual of the recombinations, which vanishes if `m` registers suffice.
+function low_storage_step(t, f, Uⁿ::Vector{T}, Δt, m) where T
+    A = effective_runge_kutta(t)
+    s = size(A, 1)
+    target(k) = vcat(1.0, A[k, :])
+    known(row, i) = vcat(row[1:i+1], zeros(s - i))
+
+    state_row = vcat(1.0, zeros(s))
+    register_rows = [zeros(s + 1) for _ in 1:m]
+    state = copy(Uⁿ)
+    registers = [zero(Uⁿ) for _ in 1:m]
+    defect = 0.0
+
+    for i in 1:s
+        G = Δt .* f(state)
+        G_row = zeros(s + 1); G_row[i + 1] = 1
+        basis = hcat(state_row, register_rows..., G_row) # columns: what is in memory
+
+        new_state_row = target(i)
+        # What later stages need of the symbols known now, beyond the new state.
+        later = [known(target(k), i) for k in i+1:s]
+        new_register_rows = [zeros(s + 1) for _ in 1:m]
+        if !isempty(later)
+            M = rows(later)
+            M = M .- (M * new_state_row) * new_state_row' ./ dot(new_state_row, new_state_row)
+            F = svd(M)
+            for q in 1:min(m, length(F.S))
+                new_register_rows[q] = F.Vt[q, :]
+            end
+            defect = max(defect, length(F.S) > m ? F.S[m + 1] / max(F.S[1], eps()) : 0.0)
+        end
+
+        coefficients(row) = pinv(basis) * row
+        c_state = coefficients(new_state_row)
+        defect = max(defect, norm(basis * c_state - new_state_row))
+        c_registers = map(coefficients, new_register_rows)
+        foreach(q -> (defect = max(defect, norm(basis * c_registers[q] - new_register_rows[q]))), 1:m)
+
+        memory = (state, registers..., G)
+        combine(c) = sum(T(c[q]) .* memory[q] for q in eachindex(c))
+        new_state = combine(c_state)
+        registers = map(combine, c_registers)
+        state = new_state
+        state_row, register_rows = new_state_row, new_register_rows
+    end
+
+    return state, defect
+end
+
+println("\nOne step of y′ = L y (40 unknowns, |Δt L| ≈ 1): the low-storage form against the implemented one")
+println(rpad("set", 18), "registers besides G | recombination defect | Float64 difference | Float32 difference (units of eps)")
+let
+    n = 40
+    L = [((i * 7 + j * 13) % 11 - 5) / 20 for i in 1:n, j in 1:n] - 1.5I
+    y₀ = [1 + ((3i) % 7) / 7 for i in 1:n]
+    for name in names
+        t = tableau(name)
+        for m in 0:2
+            results = map((Float64, Float32)) do T
+                f(y) = T.(L) * y
+                reference = implemented_step(t, f, T.(y₀), T(0.3))
+                y, defect = low_storage_step(t, f, T.(y₀), T(0.3), m)
+                maximum(abs, y .- reference) / (eps(T) * maximum(abs, reference)), defect
+            end
+            println(rpad(string(name), 18), lpad(m, 19), " | ", lpad(round(results[1][2], sigdigits = 2), 20), " | ",
+                    lpad(round(results[1][1], sigdigits = 3), 18), " | ", lpad(round(results[2][1], sigdigits = 3), 18))
+        end
+    end
+end
