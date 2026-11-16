@@ -687,8 +687,8 @@ Oceananigans.restore_prognostic_state!(fields::SHOCFields, ::Nothing) = fields
     state, host, d = fields.state, fields.host, fields.diagnostics
     v = d
     @inbounds begin
-        moments(k) = (d.w3[i, j, k], d.thl_sec[i, j, k], d.wthl_sec[i, j, k],
-                      d.qwthl_sec[i, j, k], d.wqw_sec[i, j, k], d.qw_sec[i, j, k])
+        moments(k) = @inbounds (d.w3[i, j, k], d.thl_sec[i, j, k], d.wthl_sec[i, j, k],
+                                d.qwthl_sec[i, j, k], d.wqw_sec[i, j, k], d.qw_sec[i, j, k])
         a, μ₁, μ₂, σ₁, σ₂ = component_vapor_excess(closure_ij.assumed_pdf, thermodynamics, closure_ij.clipping,
                                                    host.zi_grid[i, j, k+1], host.zi_grid[i, j, k], host.zt_grid[i, j, k],
                                                    host.pres[i, j, k], state.thetal[i, j, k], host.w_field[i, j, k],
