@@ -74,6 +74,16 @@ compute_forcing!(forcing) = nothing # Fallback - do nothing
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
+Compute any fields or quantities needed by `forcing` before it is applied, given the `model`.
+This is the method called by `compute_forcings!` at every Runge-Kutta stage. Forcings that
+need the model state or clock, such as [`AdiabaticExpansion`](@ref Breeze.AnelasticEquations.AdiabaticExpansion), extend
+this method; the fallback calls `compute_forcing!(forcing)`.
+"""
+compute_forcing!(forcing, model) = compute_forcing!(forcing)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
 Return `true` if `forcing` produces a density-weighted tendency `F_{ρϕ}` directly
 (i.e., already includes the multiplication by `ρ`).
 

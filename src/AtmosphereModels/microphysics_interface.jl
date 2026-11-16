@@ -499,6 +499,23 @@ materialize_microphysical_fields(microphysics::Nothing, grid, boundary_condition
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
+Return `microphysics` with any state that depends on the `grid` and the model's `timestepper`
+allocated, such as the Lagrangian particles of particle-based microphysics.
+Called by the `AtmosphereModel` constructor after the time stepper is built. Returns `microphysics` by default.
+"""
+materialize_microphysics(microphysics, grid, timestepper) = microphysics
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the Lagrangian particles of particle-based `microphysics`, which are advanced with the
+time-stepping scheme of the model, or `nothing` (the default).
+"""
+microphysics_particles(microphysics) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
 Return the aerosol population stored in a microphysics scheme's native units.
 
 The units are the scheme's own: a volumetric distribution returns [m⁻³], while a
@@ -1304,6 +1321,16 @@ read the incoming tendencies. The time stepper may omit the preceding tendency p
 only when no tendency callbacks would be lost. Defaults to `false`.
 """
 refreshes_state_after_update(microphysics) = false
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `true` if [`microphysics_model_update!`](@ref) for `microphysics` always ends by refreshing the
+model state with `update_state!`, including the tendencies. Time-steppers then skip computing
+tendencies in the `update_state!` that precedes `microphysics_model_update!`, because they would be
+overwritten. Defaults to `false`.
+"""
+microphysics_model_update_refreshes_state(microphysics) = false
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

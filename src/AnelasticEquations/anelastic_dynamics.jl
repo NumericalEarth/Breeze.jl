@@ -2,10 +2,12 @@
 ##### AnelasticDynamics definition
 #####
 
-struct AnelasticDynamics{R, P, FT}
+struct AnelasticDynamics{R, P, FT, A}
     reference_state :: R
     pressure_anomaly :: P
     pressure_solver_float_type :: FT
+    adiabatic_expansion :: A
+    buoyancy :: Bool
 end
 
 """
@@ -21,15 +23,20 @@ Keyword arguments
   horizontal waves under a tall, strongly stratified column, and can be unstable in `Float32` on
   large domains. When it differs from the grid's type, the solver is built on a copy of the grid in
   this type, and the pressure is returned in the model's precision.
+- `buoyancy`: whether the buoyancy force ``-g ρ′`` acts on the momentum. Default: `true`. Set `buoyancy = false`
+  to suppress buoyancy while keeping the gravitational acceleration of the thermodynamic constants, which
+  also sets the terminal velocity of Lagrangian droplets and the adiabatic lapse rate of a moving frame.
 """
-AnelasticDynamics(reference_state; pressure_solver_float_type=Float64) =
-    AnelasticDynamics(reference_state, nothing, pressure_solver_float_type)
+AnelasticDynamics(reference_state; pressure_solver_float_type=Float64, buoyancy=true) =
+    AnelasticDynamics(reference_state, nothing, pressure_solver_float_type, nothing, buoyancy)
 
 # Kernels never need the solver's float type, and a `DataType` is not a valid GPU kernel argument.
 Adapt.adapt_structure(to, dynamics::AnelasticDynamics) =
     AnelasticDynamics(adapt(to, dynamics.reference_state),
                       adapt(to, dynamics.pressure_anomaly),
-                      nothing)
+                      nothing,
+                      nothing,
+                      dynamics.buoyancy)
 
 #####
 ##### Default dynamics and materialization
@@ -53,7 +60,9 @@ Materialize a stub `AnelasticDynamics` into a full dynamics object with the pres
 """
 function AtmosphereModels.materialize_dynamics(dynamics::AnelasticDynamics, grid, boundary_conditions, thermodynamic_constants)
     pressure_anomaly = CenterField(grid)
-    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly, dynamics.pressure_solver_float_type)
+    adiabatic_expansion = materialize_adiabatic_expansion(dynamics.adiabatic_expansion, eltype(grid))
+    return AnelasticDynamics(dynamics.reference_state, pressure_anomaly, dynamics.pressure_solver_float_type,
+                             adiabatic_expansion, dynamics.buoyancy)
 end
 
 #####

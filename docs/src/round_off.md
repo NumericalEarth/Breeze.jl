@@ -30,7 +30,8 @@ stepper of the compressible core:
 using Oceananigans, Breeze
 
 grid = RectilinearGrid(Float32; size=(8, 8, 8), extent=(1000, 1000, 1000))
-model = AtmosphereModel(grid; timestepper_kwargs = (; rounding = StochasticRounding(seed = 1)))
+model = AtmosphereModel(grid; thermodynamic_float_type = Float32,
+                        timestepper_kwargs = (; rounding = StochasticRounding(seed = 1)))
 model.timestepper.rounding
 
 # output

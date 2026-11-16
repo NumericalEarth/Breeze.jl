@@ -8,7 +8,7 @@ using Oceananigans.TimeSteppers:
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
-    step_lagrangian_particles!
+    substep_lagrangian_particles!
 
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -97,7 +97,7 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                              implicit_solver::TI = nothing,
                              cache_advecting_state = false,
                              Gⁿ::TG = map(similar, prognostic_fields),
-                             U⁰::U0 = map(similar, prognostic_fields),
+                             U⁰::U0 = map(initial_state_storage, prognostic_fields),
                              rounding = RoundToNearest()) where {TI, TG, U0}
 
     FT = eltype(grid)
@@ -293,6 +293,8 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     freeze_linearization_state!(ts.substepper, model)
 
     # Stage 1: U* = Uⁿ + (Δt/3) R(Uⁿ)
+    # Particles are advanced with the velocity at the beginning of each stage
+    substep_lagrangian_particles!(model, Δt, 1)
     acoustic_rk3_substep!(model, Δt, β₁)
 
     tick_stage!(model.clock, β₁ * Δt)
@@ -302,6 +304,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     cache_transport_velocity!(model)
 
     # Stage 2: U** = Uⁿ + (Δt/2) R(U*)
+    substep_lagrangian_particles!(model, Δt, 2)
     acoustic_rk3_substep!(model, Δt, β₂)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
@@ -310,6 +313,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**). Every stage restarts from Uⁿ, so only this stage's
     # rounding reaches Uⁿ⁺¹, and only this stage takes the time stepper's round-off treatment.
+    substep_lagrangian_particles!(model, Δt, 3)
     acoustic_rk3_substep!(model, Δt, β₃, ts.rounding)
 
     corrected_Δt = time_difference_in_seconds(tⁿ⁺¹, model.clock.time)
@@ -338,14 +342,6 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     # density included. These tendencies are consumed by stage 1 of the next step, after
     # `freeze_linearization_state!` has reseeded the live field.
     cache_transport_velocity!(model)
-
-    # Advect particles once per step, over the full Δt, with the velocity of the state
-    # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,
-    # and so lower order than the dycore. A stage-wise update is possible in principle
-    # (X obeys dX/dt = u like any prognostic), but would need Xⁿ stored alongside the
-    # current position, since every Wicker–Skamarock stage restarts from Uⁿ. Pushing
-    # with the stage fractions alone would be wrong: β₁ + β₂ + β₃ = 11/6, not 1.
-    step_lagrangian_particles!(model, Δt)
 
     return nothing
 end
