@@ -5,9 +5,10 @@ using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_diverg
                                     compute_pressure_remainder!,
                                     CompressibleEquations, ForwardBackwardSubsteps, SymmetricSubsteps,
                                     with_residual
-using Breeze.RoundingTreatments: rounding_error, rounded_add
+using Breeze.RoundingTreatments: rounding_error
 
 using Oceananigans: prognostic_fields, CenterField, XFaceField, YFaceField, ZFaceField, architecture
+using Oceananigans.Grids: topology, Periodic, Flat
 using Oceananigans.Utils: launch!, KernelParameters
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
@@ -65,8 +66,9 @@ Fields
   slow remainder of the stage-entry pressure gradient and buoyancy is measured from, or `nothing`
   where that remainder is not recombined (see `step_start_storage`).
 - `residual`: what the rounded stage states of the acoustic prognostics lack of the exact sums,
-  kept from the end of a stage to the assembly of the next, or `nothing` for a tableau that
-  recombines no increments. What the rounded start states lack is evaluated where it is read
+  kept from the end of a stage to the assembly of the next, in the substepper's perturbation fields
+  where it can be (see `stage_residual_storage`), or `nothing` for a tableau that recombines no
+  increments. What the rounded start states lack is evaluated where it is read
   (see `start_state_residual` in the acoustic substepper).
 - `fold_stage_increments`: whether the acoustic prognostics form their increments in the assembly
   of the next stage (see `stage_increment_source`).
@@ -182,7 +184,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
               "the slow tendencies of earlier stages were split against a different fast operator."
     end
 
-    residual = recombines_stage_increments(tableau) ? stage_residual_storage(grid) : nothing
+    residual = recombines_stage_increments(tableau) ? stage_residual_storage(grid, dynamics, substepper) : nothing
 
     return MultirateInfinitesimalStep(relinearize_stages, fold, tableau, U⁰, Gⁿ, implicit_solver, substepper,
                                       rounding, Uⁿ, accumulators, fast_tendency, scalar_tendencies, step_start,
@@ -214,9 +216,33 @@ end
 # One field per acoustic prognostic for the rounding errors of its stage states (see
 # `start_state_residual` in the acoustic substepper), with default boundary conditions: the
 # errors have no boundary values of their own. The thermodynamic density is a cell-centered field.
-stage_residual_storage(grid) =
-    (ρ = CenterField(grid), ρᵡ = CenterField(grid),
-     ρu = XFaceField(grid), ρv = YFaceField(grid), ρw = ZFaceField(grid))
+#
+# The errors are written by the kernel that recovers the state from the loop's perturbations,
+# point by point after it has read them, and are read when the next stage is assembled, before the
+# next loop rewrites the perturbations. So they are kept in the perturbation fields themselves,
+# where that kernel covers every point the assembly reads and reads no perturbation off its own
+# point (`residuals_share_perturbation_storage`).
+function stage_residual_storage(grid, dynamics, substepper)
+    shared = residuals_share_perturbation_storage(grid, dynamics)
+    storage(perturbation, field) = shared && eltype(perturbation) === eltype(grid) ? perturbation : field(grid)
+    momentum = substepper.momentum_perturbation
+
+    return (ρ = storage(substepper.density_perturbation, CenterField),
+            ρᵡ = storage(substepper.density_potential_temperature_perturbation, CenterField),
+            ρu = storage(momentum.u, XFaceField),
+            ρv = storage(momentum.v, YFaceField),
+            ρw = storage(momentum.w, ZFaceField))
+end
+
+# The recovery covers the cells of the grid. In a bounded horizontal direction the assembly also
+# reads the face on the far boundary, where the momentum perturbation of an open boundary is not
+# a rounding error; and over terrain the recovery of the vertical momentum reads the horizontal
+# momentum perturbations of neighboring points, and the assembly reads the halos. The top face of
+# the vertical momentum perturbation is held at zero, as a residual never written is.
+residuals_share_perturbation_storage(grid, dynamics) =
+    all(T -> T === Periodic || T === Flat, topology(grid)[1:2])
+
+residuals_share_perturbation_storage(grid, ::TerrainCompressibleDynamics) = false
 
 # The residual field of prognostic `name`, or `nothing` for a field that carries none: the moisture,
 # microphysical and tracer fields, and every field of a tableau that recombines no increments.
