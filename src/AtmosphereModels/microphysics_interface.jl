@@ -299,6 +299,15 @@ override this method directly to compute the bundle once per cell.
 compute_microphysical_tendencies!(model) =
     compute_microphysical_tendencies!(model.microphysics, model)
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The interval over which the coming stage applies the tendencies being built. It is not
+finite before the first time step.
+"""
+@inline stage_time_step(timestepper, clock) =
+    Oceananigans.Advection.adaptive_advection_timestep(timestepper, clock)
+
 # No microphysics: nothing to add.
 compute_microphysical_tendencies!(::Nothing, model) = nothing
 

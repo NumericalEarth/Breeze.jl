@@ -56,6 +56,7 @@ export
     microphysical_tendency,
     microphysical_tendencies,
     compute_microphysical_tendencies!,
+    stage_time_step,
     moisture_fractions,
     grid_moisture_fractions,
     update_microphysical_fields!,

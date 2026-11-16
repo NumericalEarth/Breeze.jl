@@ -376,6 +376,19 @@ end
 # Whether a stage starts from, or is forced with, the increments of earlier stages.
 recombines_stage_increments(tableau) = any(!iszero, tableau.α) || any(!iszero, tableau.γ)
 
+# The interval over which microphysical sinks are budgeted so that they leave every species
+# non-negative: `Δt / C`, with `C` the strong-stability coefficient of the coefficient set (see
+# `strong_stability_coefficient`). Every MIS stage of a slow variable is then a convex combination
+# of forward-Euler steps no longer than this, each from the state its tendency was evaluated at,
+# which is the state `AtmosphereModels.StageStart` budgets against by default. A coefficient set
+# with `C = 0` has no such decomposition; the full step `Δt` is used, which bounds the drain of the
+# final stage's own tendency but guarantees nothing.
+@inline function AtmosphereModels.stage_time_step(ts::MultirateInfinitesimalStep, clock)
+    Δt = ifelse(isfinite(ts.current_Δt[]), ts.current_Δt[], clock.last_Δt)
+    C = ts.tableau.strong_stability_coefficient
+    return ifelse(C > 0, Δt / C, Δt)
+end
+
 # Stages that recombine earlier increments need the acoustic substeps to return the state they
 # were given without a skew between momentum and pressure (see `SymmetricSubsteps`). The others
 # (`:WickerSkamarock3`) keep the forward–backward substeps of `AcousticRungeKutta3`.
@@ -870,18 +883,19 @@ end
 ##### The correction is part of the slow tendency Sⱼ that the stages recombine, rather than an
 ##### addition to one stage's forcing, so that the scalars are still advanced by the slow method
 ##### alone: with a strong-stability-preserving coefficient set every stage remains a convex
-##### combination of forward-Euler steps. Added to a stage at weight one it would enter later
-##### stages through their increments with weights of either sign, and a species that a
-##### microphysical sink has emptied would go negative. It is in the advective tendency when the
-##### microphysical sources are built.
+##### combination of forward-Euler steps (see `strong_stability_coefficient`). Added to a stage at
+##### weight one it would enter later stages through their increments with weights of either
+##### sign, and a species that a microphysical sink has emptied would go negative. It is in the
+##### advective tendency when the microphysical sources are built.
 #####
 ##### A forward-Euler step of the bounded advection can leave a cell empty, so the correction's
 ##### flux out of each cell is limited to what that step leaves there: scaled by
 #####
 #####   φ = min(1, max(0, c⁰ + Δτ (G + C)) / (Δτ V⁻¹ c Σ R⁺)),
 #####
-##### with Δτ the outer time step, G and C the scalar's other tendencies and Σ R⁺ the correction's
-##### mass flux out of the cell. φ = 1 wherever the mass fraction is uniform, so that stays exact.
+##### with Δτ the forward-Euler interval the sinks are budgeted over (`stage_time_step`), G and C
+##### the scalar's other tendencies and Σ R⁺ the correction's mass flux out of the cell. φ = 1
+##### wherever the mass fraction is uniform, so that stays exact.
 #####
 ##### Fⱼ is the flux the tendencies were built with: the stage-entry total density times the loop's
 ##### transport velocity, of which adaptive implicit vertical advection leaves a fraction to the
@@ -1111,7 +1125,7 @@ function post_loop_scalar_tendency_kernel(correction, ts, model)
     split = SplitScalarTendencies(ts.fast_tendency)
     ts.stage[] == 1 && return split # R₁ = 0
     grid = model.grid
-    Δτ = kernel_time_step(grid.architecture, grid, ts.current_Δt[])
+    Δτ = kernel_time_step(grid.architecture, grid, AtmosphereModels.stage_time_step(ts, model.clock))
     return MassConsistentScalarTendencies(split, correction_mass_fluxes(correction, ts, model), correction.limiter,
                                           total_density(model.dynamics), Δτ)
 end

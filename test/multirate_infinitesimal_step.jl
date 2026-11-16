@@ -7,7 +7,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.TimeSteppers: multirate_infinitesimal_step_tableau, number_of_stages
+using Breeze.AtmosphereModels: stage_time_step
+using Breeze.TimeSteppers: MultirateInfinitesimalStepTableau, multirate_infinitesimal_step_tableau, number_of_stages
 using Oceananigans
 using Oceananigans: prognostic_fields
 using Oceananigans.TimeSteppers: update_state!
@@ -383,6 +384,37 @@ end
     b = Array(interior(prognostic_fields(reference)[moist_name]))
     @test all(isfinite, a)
     @test maximum(abs, a .- b) > 0
+end
+
+@testset "MIS strong-stability coefficients" begin
+    coefficient(name) = multirate_infinitesimal_step_tableau(name).strong_stability_coefficient
+
+    # Wicker–Skamarock RK3 is not a convex combination of forward-Euler steps.
+    @test coefficient(:WickerSkamarock3) == 0
+    @test coefficient(:MIS4a) == 0
+
+    # TVDMISB reduces to a method with the coefficient of its design, and SSPMIS43 to the
+    # coefficient it was optimized for.
+    @test coefficient(:TVDMISB) ≈ 0.75 atol = 1e-6
+    @test coefficient(:SSPMIS43) ≈ 1.79 atol = 1e-2
+
+    # Forward Euler has coefficient one, and the three-stage Shu–Osher method too.
+    forward_euler = MultirateInfinitesimalStepTableau(Float64, zeros(1, 1), ones(1, 1), zeros(1, 1))
+    @test forward_euler.strong_stability_coefficient ≈ 1 atol = 1e-6
+
+    α = [0 0 0; 0 0 0; 0 0 0]
+    β = [1 0 0; 1//4 1//4 0; 1//6 1//6 2//3]
+    shu_osher = MultirateInfinitesimalStepTableau(Float64, α, β, zeros(3, 3))
+    @test shu_osher.strong_stability_coefficient ≈ 1 atol = 1e-6
+end
+
+@testset "MIS forward-Euler interval [$coefficients]" for coefficients in mis_coefficient_sets
+    # Δt / C, and the whole step where there is no strong-stability coefficient to divide by.
+    model = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients)
+    Δt = 2
+    time_step!(model, Δt)
+    C = model.timestepper.tableau.strong_stability_coefficient
+    @test stage_time_step(model.timestepper, model.clock) ≈ (C > 0 ? Δt / C : Δt)
 end
 
 #####
