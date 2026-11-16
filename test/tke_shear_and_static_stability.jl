@@ -157,9 +157,9 @@ endpoint_triples(r) = ((r.ℂᵘ⁻, r.ℂᵘ⁰, r.ℂᵘ⁺), (r.ℂᶜ⁻, r.
 
 const TRSF = TurbulentRichardsonStabilityFunction
 
-# The rational functions of the Richardson number with the values of `sf` and both transition scales ℂᴿⁱ
+# The rational functions of the Richardson number with the values of `sf` and its two transition scales ℂᴿⁱ±
 same_values_rational(sf) = RationalStabilityFunction(; (name => getfield(sf, name) for name in fieldnames(RationalStabilityFunction)[1:12])...,
-                                                     Ri⁻ = sf.ℂᴿⁱ, Ri⁺ = sf.ℂᴿⁱ)
+                                                     Ri⁻ = sf.ℂᴿⁱ⁻, Ri⁺ = sf.ℂᴿⁱ⁺)
 
 # v = Riᵗ / √(1 + Riᵗ²) at which the functions are evaluated, from α_N at zero shear
 stratification_number_of(sf, v) = sf.ℂᵅ * v / sqrt(1 - v^2)
@@ -174,7 +174,8 @@ stratification_number_of(sf, v) = sf.ℂᵅ * v / sqrt(1 - v^2)
     @test sf.ℂᵘ⁰ === FT(0.15900569445804447)
     @test within_bounds(sf)
     @test sf.ℂᵅ ≥ minimum_stratification_scale()
-    @test minimum_stratification_scale() ≈ 4.18637 rtol=1e-5
+    @test minimum_stratification_scale() ≈ 4.18637 * (1 / 2 + 2 * sqrt(6) / 9) rtol=1e-5
+    @test sf.ℂᴿⁱ⁻ === FT(16) && sf.ℂᴿⁱ⁺ === FT(0.33)
 
     @test_throws ArgumentError TRSF(ℂᵘ⁰ = 0)
     @test_throws ArgumentError TRSF(ℂᵅ = -1)
@@ -183,10 +184,10 @@ stratification_number_of(sf, v) = sf.ℂᵅ * v / sqrt(1 - v^2)
 
     # The bounds: independent intervals, ℂᵅ above the width condition
     bounds = stability_coefficient_bounds()
-    @test keys(bounds) == fieldnames(TRSF)[1:14]
-    @test bounds.ℂᵘ⁰ == (0.05, 20) && bounds.ℂᴿⁱ == (0.05, 20)
-    @test bounds.ℂᵅ[1] ≈ 0.6987 * log(400) rtol=1e-3
-    @test stability_coefficient_bounds(0.01, 100).ℂᵅ[1] ≈ 6.4355 rtol=1e-4
+    @test keys(bounds) == fieldnames(TRSF)[1:15]
+    @test bounds.ℂᵘ⁰ == (0.05, 20) && bounds.ℂᴿⁱ⁻ == (0.05, 20) && bounds.ℂᴿⁱ⁺ == (0.05, 20)
+    @test bounds.ℂᵅ[1] ≈ 0.6987 * 1.04433 * log(400) rtol=1e-3
+    @test stability_coefficient_bounds(0.01, 100).ℂᵅ[1] ≈ 6.4355 * 1.044331 rtol=1e-4
     @test !within_bounds(TRSF(ℂᵅ = 1))
     for θ in (-30.0, -1.0, 0.0, 2.5, 30.0)
         C = bounded_coefficient(θ, 0.05, 20)
@@ -194,13 +195,14 @@ stratification_number_of(sf, v) = sf.ℂᵅ * v / sqrt(1 - v^2)
         abs(θ) < 10 && @test unbounded_coefficient(C, 0.05, 20) ≈ θ
     end
 
-    # The parameters are the fourteen values, and replacing them rebuilds the cached logarithms
+    # The parameters are the fifteen values, and replacing them rebuilds the cached logarithms
     closure = TKEBasedTurbulenceClosure()
     names = keys(closure_parameters(closure))
-    @test fieldnames(TRSF)[1:14] ⊆ names
+    @test fieldnames(TRSF)[1:15] ⊆ names
     @test :quadratic_coefficients ∉ names
-    changed = with_parameters(closure; ℂᶜ⁻ = 2.0, ℂᵅ = 6.0)
-    @test changed.stability_functions == TRSF(FT; ℂᶜ⁻ = 2, ℂᵅ = 6)
+    changed = with_parameters(closure; ℂᶜ⁻ = 2.0, ℂᴿⁱ⁺ = 0.2, ℂᵅ = 6.0)
+    @test changed.stability_functions == TRSF(FT; ℂᶜ⁻ = 2, ℂᴿⁱ⁺ = 0.2, ℂᵅ = 6)
+    @test changed.stability_functions.quadratic_coefficients == TRSF(FT; ℂᶜ⁻ = 2).quadratic_coefficients
     @test closure_parameters(with_parameters(closure)) == closure_parameters(closure)
 end
 
@@ -211,7 +213,8 @@ end
     for trial in 1:200
         C() = FT(bounded_coefficient(8 * (uniform() - 1/2), lower, upper))
         sf = TRSF(FT; ℂᵘ⁻ = C(), ℂᵘ⁰ = C(), ℂᵘ⁺ = C(), ℂᶜ⁻ = C(), ℂᶜ⁰ = C(), ℂᶜ⁺ = C(), ℂᵉ⁻ = C(), ℂᵉ⁰ = C(), ℂᵉ⁺ = C(),
-                  ℂᴰ⁻ = C(), ℂᴰ⁰ = C(), ℂᴰ⁺ = C(), ℂᴿⁱ = C(), ℂᵅ = FT(bounded_coefficient(uniform(), 4.2, upper)))
+                  ℂᴰ⁻ = C(), ℂᴰ⁰ = C(), ℂᴰ⁺ = C(), ℂᴿⁱ⁻ = C(), ℂᴿⁱ⁺ = C(),
+                  ℂᵅ = FT(bounded_coefficient(uniform(), minimum_stratification_scale(), upper)))
         for (f, (C⁻, C⁰, C⁺)) in zip(stability_function_kinds, endpoint_triples(sf))
             # The values at v = -1, 0, 1: strongly unstable, neutral, strongly stable
             @test f(sf, zero(FT), zero(FT)) ≈ C⁰ rtol=10eps(FT)
@@ -222,10 +225,10 @@ end
                 𝕊 = f(sf, αᴺ, αˢ)
                 @test isfinite(𝕊) && 𝕊 > 0
             end
-            # Without shear the logarithmic slope in α_N is below the width condition, one
-            for αᴺ in FT.((-8, -2, -0.5, -1e-3, 0, 1e-3, 0.5, 1))
+            # At any shear the logarithmic slope in α_N is below the width condition, one
+            for αᴺ in FT.((-8, -2, -0.5, -0.1, -1e-3, 0, 1e-3, 0.03, 0.1, 0.5, 1)), αˢ in FT.((0, 0.01, 0.1, 1, 10))
                 δ = FT(1e-3)
-                slope = (log(f(sf, αᴺ + δ, zero(FT))) - log(f(sf, αᴺ - δ, zero(FT)))) / 2δ
+                slope = (log(f(sf, αᴺ + δ, αˢ)) - log(f(sf, αᴺ - δ, αˢ))) / 2δ
                 @test abs(slope) ≤ 1 + sqrt(eps(FT)) * 100
             end
         end
@@ -243,16 +246,50 @@ end
             @test right ≈ slope atol=10δ
             @test left ≈ slope atol=10δ
         end
-        # With strong shear a function of Ri = α_N / α_S alone, with v = Riᵗ / √(1 + Riᵗ²), Riᵗ = Ri / ℂᴿⁱ
-        for Ri in FT.((-30, -1, -0.05, 0.02, 0.5, 5)), αˢ in FT.((1e4, 1e6))
-            u = Ri / sf.ℂᴿⁱ
+        # The derivative at N² = 0 with shear is the mean of the slopes of the two sides, from either side
+        for αˢ in FT.((0.1, 10))
+            mean_slope = (1 / (sf.ℂᴿⁱ⁻ * αˢ + sf.ℂᵅ) + 1 / (sf.ℂᴿⁱ⁺ * αˢ + sf.ℂᵅ)) / 2 * log(C⁺ / C⁻) / 2
+            for δ in FT.((1e-4, 1e-5))
+                right = (log(f(sf, δ, αˢ)) - log(C⁰)) / δ
+                left = (log(C⁰) - log(f(sf, -δ, αˢ))) / δ
+                @test right ≈ mean_slope atol = 200δ + sqrt(eps(FT))
+                @test left ≈ mean_slope atol = 200δ + sqrt(eps(FT))
+            end
+        end
+        # With strong shear a function of Ri = α_N / α_S alone, with v = Riᵗ / √(1 + Riᵗ²), Riᵗ = Ri / ℂᴿⁱ⁻
+        # on the unstable side and Ri / ℂᴿⁱ⁺ on the stable side, once the larger |Riᵗ±| ≫ δ = 1/4
+        for Ri in FT.((-30, -5, 0.5, 5)), αˢ in FT.((1e4, 1e6))
+            u = Ri < 0 ? Ri / sf.ℂᴿⁱ⁻ : Ri / sf.ℂᴿⁱ⁺
             v = u / sqrt(1 + u^2)
             expected = exp(log(C⁰) + log(C⁺ / C⁻) / 2 * v + (log(C⁺ * C⁻) / 2 - log(C⁰)) * v^2)
-            @test f(sf, Ri * αˢ, αˢ) ≈ expected rtol = 10 * sf.ℂᵅ / (sf.ℂᴿⁱ * αˢ) + 100eps(FT)
+            @test f(sf, Ri * αˢ, αˢ) ≈ expected rtol = 5e-3
         end
         # The values are reached through v: halfway in ln 𝕊 between C⁰ and C⁺ (the linear part) at v = ½
         @test f(sf, FT(stratification_number_of(sf, 1/2)), zero(FT)) ≈
               exp(log(C⁰) + log(C⁺ / C⁻) / 4 + (log(C⁺ * C⁻) / 2 - log(C⁰)) / 4) rtol=100eps(FT)
+    end
+
+    # The stable transition under strong shear: v = 1/2 at Ri ≈ 0.2, v = 0.1 and 0.9 at Ri ≈ 0.045 and 0.69
+    αˢ = FT(1e6)
+    v(Ri) = TurbulenceClosures.bounded_richardson_coordinate(sf, Ri * αˢ, αˢ)
+    @test v(FT(0.198)) ≈ 1/2 rtol=1e-2
+    @test v(FT(0.0445)) ≈ 0.1 rtol=1e-2
+    @test v(FT(0.69)) ≈ 0.9 rtol=1e-2
+    @test v(FT(-9.24)) ≈ -1/2 rtol=1e-2
+
+    # Riᵗ: exactly α_N / ℂᵅ without shear, increasing in α_N, smooth through 0 (equal one-sided slopes,
+    # continuous second derivative)
+    Riᵗ(αᴺ, αˢ) = TurbulenceClosures.turbulent_richardson_number(sf, αᴺ, αˢ)
+    for αᴺ in FT.((-3, -0.1, 0, 0.1, 3))
+        @test Riᵗ(αᴺ, zero(FT)) ≈ αᴺ / sf.ℂᵅ rtol=10eps(FT)
+    end
+    for αˢ in FT.((0, 1e-2, 1, 1e2))
+        αs = FT.(range(-2, 2, length=401))
+        @test issorted(map(a -> Riᵗ(a, αˢ), αs))
+        h = FT(FT == Float32 ? 1e-3 : 1e-5)
+        right = (Riᵗ(h, αˢ) - Riᵗ(zero(FT), αˢ)) / h
+        left = (Riᵗ(zero(FT), αˢ) - Riᵗ(-h, αˢ)) / h
+        @test right ≈ left rtol = FT == Float32 ? 1e-2 : 1e-3
     end
 
     # The local form at a point: N², S², the floor and τ²
@@ -500,7 +537,7 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
     for k in (3, 8, 14, 20, 30)
         # Stable and unstable interfaces, through the TKE diffusivity's stability function and, at
         # the cell center, the dissipation's
-        for name in (:ℂᴿⁱ, :ℂᵅ, :ℂᵉ⁻, :ℂᵉ⁰, :ℂᵉ⁺, :ℂᴰ⁻, :ℂᴰ⁰, :ℂᴰ⁺)
+        for name in (:ℂᴿⁱ⁻, :ℂᴿⁱ⁺, :ℂᵅ, :ℂᵉ⁻, :ℂᵉ⁰, :ℂᵉ⁺, :ℂᴰ⁻, :ℂᴰ⁰, :ℂᴰ⁺)
             for f in (C -> tke_stability_functionᶜᶜᶠ(1, 1, k, grid, with_scalar(name, C), velocities, fields.N², e, fields.ℓᵐ),
                       C -> dissipation_stability_functionᶜᶜᶜ(1, 1, k, grid, with_scalar(name, C), velocities, fields.N², e, fields.ℓᵐ))
                 C₀ = getfield(default, name)
@@ -525,7 +562,7 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
 
     # The surface interface, where ℓ = 0: neutral, so finite and zero
     f = C -> tke_stability_functionᶜᶜᶠ(1, 1, 1, grid, with_scalar(:ℂᵅ, C), velocities, fields.N², e, fields.ℓᵐ)
-    @test reverse_gradient(f, 4.2) == 0
+    @test reverse_gradient(f, 4.4) == 0
 end
 
 #####
