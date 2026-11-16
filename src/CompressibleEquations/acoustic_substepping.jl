@@ -1685,17 +1685,20 @@ Adapt.adapt_structure(to, r::SEFR) =
                              r.thermodynamic_constants)
 
 # Fields holding the outer-step-start state that a `StageEntryForceRemainder` is measured from, and
-# the pressure remainder of the current stage-entry state relative to it.
-step_start_force_state(grid) = (pressure = CenterField(grid),
-                                thermodynamic_density = CenterField(grid),
-                                water_density = CenterField(grid),
-                                condensate_mass_fraction = CenterField(grid),
-                                pressure_remainder = CenterField(grid))
+# the pressure remainder of the current stage-entry state relative to it. The step-start
+# thermodynamic and dry densities are the time stepper's own copies of the step-start state.
+#
+# The pressure remainder is evaluated and read while a stage is assembled, between two acoustic
+# loops, so it shares the storage of `substepper`'s scaled thermodynamic tendency, which each loop
+# rebuilds when it starts and nothing reads once the loop has ended.
+step_start_force_state(grid, substepper) = (pressure = CenterField(grid),
+                                            water_density = CenterField(grid),
+                                            condensate_mass_fraction = CenterField(grid),
+                                            pressure_remainder = substepper.scaled_thermodynamic_tendency)
 
 function store_step_start_force_state!(step_start, model)
     grid = model.grid
     parent(step_start.pressure) .= parent(model.dynamics.pressure)
-    parent(step_start.thermodynamic_density) .= parent(thermodynamic_density(model.formulation))
     parent(step_start.water_density) .= parent(model.dynamics.total_density) .- parent(model.dynamics.dry_density)
     fill!(parent(step_start.pressure_remainder), 0)
     launch!(architecture(grid), grid, :xyz, _store_condensate_mass_fraction!,

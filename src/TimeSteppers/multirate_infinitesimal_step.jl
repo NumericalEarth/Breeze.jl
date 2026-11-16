@@ -46,7 +46,7 @@ Fields
   consumes them, stage 3's pair holds the raw ``S₁`` and, for the moisture, microphysical and tracer
   fields, the raw ``ΔY₁`` (see `stage_increment_source`).
 - `fast_tendency`: scratch for the fast parts of the tendencies: with `PreLoopScalarTendencies`
-  one field, for the stage-entry fast thermodynamic tendency; with `PostLoopScalarTendencies`
+  one field, for the stage-entry fast thermodynamic tendency, sharing storage with the substepper; with `PostLoopScalarTendencies`
   one per prognostic the acoustic loop does not advance by continuity or momentum — the
   thermodynamic variable's, used as before the loop, and each scalar's, which the post-loop build
   fills with its advective tendency (see `fast_tendency_scratch`).
@@ -58,7 +58,7 @@ Fields
   a different fast operator, so with a non-diagonal tableau the step is first-order accurate (the
   constructor warns). With the `:WickerSkamarock3` coefficients it reproduces `AcousticRungeKutta3`
   bitwise; it exists to diagnose robustness in strongly nonlinear flows.
-- `step_start`: the outer-step-start pressure, thermodynamic density and water density that the
+- `step_start`: the outer-step-start pressure and water density that the
   slow remainder of the stage-entry pressure gradient and buoyancy is measured from, or `nothing`
   where that remainder is not recombined (see `step_start_storage`).
 - `residual`: what the rounded stage states and start states of the acoustic prognostics lack of
@@ -165,9 +165,9 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     accumulators = ntuple(_ -> (forcing = map(similar, prognostic_fields),
                                 offset = map(similar, prognostic_fields)), s - 2)
     scalar_tendencies = scalar_tendency_timing(post_loop_scalar_tendencies)
-    fast_tendency = fast_tendency_storage(scalar_tendencies, grid, prognostic_fields, dynamics)
+    fast_tendency = fast_tendency_storage(scalar_tendencies, grid, prognostic_fields, dynamics, substepper)
 
-    step_start = step_start_storage(grid, dynamics, tableau, relinearize_stages)
+    step_start = step_start_storage(grid, substepper, tableau, relinearize_stages)
 
     if relinearize_stages && !is_diagonal(tableau.β)
         @warn "relinearize_stages = true with a non-diagonal tableau is first-order accurate in time: " *
@@ -211,9 +211,14 @@ CompressibleEquations.recovered_state_residual(ts::MultirateInfinitesimalStep) =
 # microphysical sources and the `TendencyCallsite` callbacks complete the slow parts, before
 # any scalar is assembled. The thermodynamic variable is not told apart from the scalars here,
 # where only the dynamics is known, so it also gets one, which the stage uses before the loop.
-fast_tendency_storage(::PreLoopScalarTendencies, grid, prognostic_fields, dynamics) = CenterField(grid)
+#
+# Pre-loop, the one scratch is written and read while a stage is assembled, so it shares the
+# storage of the substepper's stage-end moisture content, which each acoustic loop writes when it
+# starts and reads for the last time when it ends.
+fast_tendency_storage(::PreLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper) =
+    substepper.stage_end_moisture_content
 
-function fast_tendency_storage(::PostLoopScalarTendencies, grid, prognostic_fields, dynamics)
+function fast_tendency_storage(::PostLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper)
     excluded = (keys(dynamics_prognostic_fields(dynamics))..., :ρu, :ρv, :ρw)
     names = filter(name -> name ∉ excluded, keys(prognostic_fields))
     return NamedTuple{names}(ntuple(_ -> CenterField(grid), length(names)))
@@ -316,9 +321,9 @@ is_diagonal(β) = all(i == j || iszero(β[i, j]) for i in axes(β, 1), j in axes
 
 # `nothing` when the stage-entry force remainder is not recombined: with a diagonal `β` or with
 # `relinearize_stages`.
-function step_start_storage(grid, dynamics, tableau, relinearize_stages)
+function step_start_storage(grid, substepper, tableau, relinearize_stages)
     recombined = !is_diagonal(tableau.β) && !relinearize_stages
-    return recombined ? step_start_force_state(grid) : nothing
+    return recombined ? step_start_force_state(grid, substepper) : nothing
 end
 
 store_step_start_state!(::Nothing, model) = nothing
