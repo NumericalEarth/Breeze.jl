@@ -246,7 +246,8 @@ compute_post_loop_scalar_tendencies!(::PreLoopScalarTendencies, model, Δt, call
 
 function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model, Δt, callbacks)
     tracer_density_to_specific!(model)
-    kernel = post_loop_scalar_tendency_kernel(model.timestepper)
+    prepare_post_loop_scalar_tendencies!(model.timestepper, model)
+    kernel = post_loop_scalar_tendency_kernel(model.timestepper, model)
     compute_scalar_tendencies!(model, fields(model), transport_velocities(model), kernel)
 
     for callback in callbacks
@@ -259,8 +260,11 @@ function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model,
     return nothing
 end
 
+# What a time stepper needs in hand before the post-loop build. Nothing by default.
+prepare_post_loop_scalar_tendencies!(timestepper, model) = nothing
+
 # The kernel of the post-loop build. By default the full tendency is added to what `Gⁿ` holds.
-post_loop_scalar_tendency_kernel(timestepper) = add_scalar_tendency!
+post_loop_scalar_tendency_kernel(timestepper, model) = add_scalar_tendency!
 
 #####
 ##### Implicit vertical solve for the acoustic prognostics

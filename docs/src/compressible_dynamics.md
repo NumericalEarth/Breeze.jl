@@ -153,12 +153,16 @@ across stages with the tableau like any other slow tendency. Leaving the advecti
 one from the current stage would keep the fluxes paired with continuity's, but it integrates
 advection with a first-order, anti-diffusive method that amplifies scalars at every Courant
 number. Recombined, the tendencies of earlier stages carry the mass fluxes ``F_j`` of those stages'
-loops, while stage ``i`` moves the dry air with ``d_i F_i``. The difference,
-``R_i = \sum_{j<i} β_{ij} (F_i - F_j)``, is therefore added to stage ``i`` as a first-order upwind
-flux of the stage-entry mass fraction. With it the stage applies exactly its own mass flux to a
-uniform mass fraction, which stays uniform to round-off with every coefficient set, and the
-scalars keep the second-order accuracy that the recombined fluxes alone lose wherever the mass
-flux changes during a step. Under adaptive implicit vertical advection the implicit remainder
+loops, while stage ``i`` moves the dry air with ``d_i F_i``. Each stage's advective tendency
+therefore includes a first-order upwind flux of the stage-entry mass fraction with the mass flux
+``R_j = \sum_{k \le j} W_{jk} F_k``, ``W = β^{-1} \mathrm{diag}(d) - I``, for which the recombined
+fluxes carry the stage's own: ``\sum_j β_{ij} (F_j + R_j) = d_i F_i``. With it the stage applies
+exactly its own mass flux to a uniform mass fraction, which stays uniform to round-off with every
+coefficient set, and the scalars keep the second-order accuracy that the recombined fluxes alone
+lose wherever the mass flux changes during a step. The correction is recombined with the rest of
+the tendency, so a strong-stability-preserving coefficient set still advances the scalars by
+convex combinations of forward-Euler steps, and its flux out of a cell is limited to what such a
+step leaves there, which keeps the water species non-negative. Under adaptive implicit vertical advection the implicit remainder
 forms the mass fraction it transports with the density the loop has compressed the cell to,
 for the same reason. The loop linearizes at
 fixed composition. This is exact for the slow, loop-mean compression, where it keeps the loop
