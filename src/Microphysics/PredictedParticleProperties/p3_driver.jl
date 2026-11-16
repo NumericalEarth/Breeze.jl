@@ -490,6 +490,25 @@ end
 #
 # The bounds per unit mass, `n₁` and `n₂`, are those of the state the rates are evaluated at
 # where they depend on it (the table bracket of ice, the shape parameter of cloud droplets).
+#
+# Where the stage leaves no mass, the bounds close on zero, and the relaxation toward the upper
+# one would drain the number. Transport that is not sign-preserving leaves such cells next to
+# falling rain, with the number still positive; mass that is carried back into a drained cell
+# has no number to go with it, its mean size sits at the largest the scheme admits, and its
+# fall speed is the largest there is. The relaxation down to the upper bound is therefore
+# weighted by
+#
+#     w(q̃) = clamp((q̃ - qˢ) / qˢ, 0, 1),    qˢ = ρ * minimum_mass_mixing_ratio,
+#
+# with `qˢ` the mass density below which P3 treats a species as absent:
+#
+#     c⁺ = c̃ + Δt (max(c̃, q̃ n₁) - c̃ + w(q̃) (min(c̃, q̃ n₂) - c̃)) / (τ + Δt).
+#
+# A number above its upper bound is left to transport below `qˢ`, relaxed in full above
+# `2 qˢ`, and the weight is linear in between. The relaxation up to the lower bound is not
+# weighted: with no mass that bound is zero, and it is what brings a negative number back. The
+# tendency is still continuous in `c̃` and `q̃`, divides by no mass, and leaves `c⁺` between
+# `c̃` and the bound.
 
 struct P3NumberRelaxations{FT}
     cloud :: FT  # tendency replacing the explicit cloud number relaxation, minus that relaxation
@@ -501,16 +520,35 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The tendency that relaxes a number density into the bounds `lower ≤ c ≤ upper` implicitly over
-the coming stage, at the rate `1 / τ`, minus the explicit relaxation tendency `explicit` that
-the process rates already carry: `(clamp(c̃, lower, upper) - c̃) / (τ + Δt) - explicit`.
+the coming stage, minus the explicit relaxation tendency `explicit` that the process rates
+already carry:
+`(max(c̃, lower) - c̃ + weight * (min(c̃, upper) - c̃)) / (τ + Δt) - explicit`,
+which is `(clamp(c̃, lower, upper) - c̃) / (τ + Δt) - explicit` for a `weight` of one.
 
 `c̃` is the number density that the stage start and every tendency but the relaxation leave,
-and the bounds are those of the mass that they leave. Zero (so that the explicit relaxation
-stands) before the first time step, when the stage interval is not known.
+and the bounds, with `lower ≤ upper`, are those of the mass that they leave. A number below
+`lower` rises to it at the rate `1 / τ`, and one above `upper` falls to it at the rate
+`weight / τ`, with `weight` the [`number_relaxation_weight`](@ref) of that mass, between zero
+and one. Zero (so that the explicit relaxation stands) before the first time step, when the
+stage interval is not known.
 """
-@inline function bounded_number_relaxation(c̃, lower, upper, explicit, τ, stage)
-    implicit = (clamp(c̃, lower, upper) - c̃) / (τ + stage.Δt)
+@inline function bounded_number_relaxation(c̃, lower, upper, explicit, τ, stage, weight = one(c̃))
+    implicit = (max(c̃, lower) - c̃ + weight * (min(c̃, upper) - c̃)) / (τ + stage.Δt)
     return ifelse(AM.stage_interval_is_known(stage), implicit - explicit, zero(explicit))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The weight of the relaxation of a number down to the upper size bound of the mass density `q̃`
+that the stage leaves: `clamp((q̃ - qˢ) / qˢ, 0, 1)`, with `qˢ` the mass density below which
+the species is treated as absent. Zero for `q̃ ≤ qˢ`, where there is no mass whose size the
+number could be bounded by, and one for `q̃ ≥ 2 qˢ`. A threshold `qˢ` of zero gives the step at
+`q̃ = 0`.
+"""
+@inline function number_relaxation_weight(q̃, qˢ)
+    ramp = clamp((q̃ - qˢ) / max(qˢ, floatmin(qˢ)), zero(q̃), one(q̃))
+    return ifelse(qˢ > 0, ramp, ifelse(q̃ > 0, one(q̃), zero(q̃)))
 end
 
 # What the stage start and every tendency leave of the field `name`, given the P3 process
@@ -522,6 +560,7 @@ end
     FT = typeof(ρ)
     parameters = p3.process_rates
     τ = parameters.sink_limiting_timescale
+    ρqˢ = ρ * FT(p3.minimum_mass_mixing_ratio) # the mass density below which a species is absent
 
     # Rain: the bounds on the slope of the exponential distribution, `λ₁ ≤ λʳ ≤ λ₂`, bound the
     # number by `q̃ λ³ / π ρʷ`.
@@ -531,7 +570,7 @@ end
     rain = bounded_number_relaxation(ρñʳ,
                                      rain_number_from_slope(ρq̃ʳ, parameters.minimum_rain_slope, parameters),
                                      rain_number_from_slope(ρq̃ʳ, parameters.maximum_rain_slope, parameters),
-                                     rain_explicit, τ, stage)
+                                     rain_explicit, τ, stage, number_relaxation_weight(ρq̃ʳ, ρqˢ))
 
     # Ice: the λ limiter bounds the number per unit of total ice mass (with the liquid coating
     # where it is tracked), and the number density is capped.
@@ -543,7 +582,8 @@ end
     ice_upper = min(maximum_ice_number(properties.nⁱ_maximum_per_mass, ρq̃ⁱ),
                     FT(parameters.maximum_ice_number_density))
     ice_lower = min(properties.nⁱ_minimum_per_mass * ρq̃ⁱ, ice_upper)
-    ice = bounded_number_relaxation(ρñⁱ, ice_lower, ice_upper, ice_explicit, τ, stage)
+    ice = bounded_number_relaxation(ρñⁱ, ice_lower, ice_upper, ice_explicit, τ, stage,
+                                    number_relaxation_weight(ρq̃ⁱ, ρqˢ))
 
     cloud = p3_cloud_number_relaxation(i, j, k, G, stage, p3, p3.aerosol, ρ, ℳ, properties, rates, result, τ)
 
@@ -572,7 +612,8 @@ end
     minimum_slope, maximum_slope = cloud_slope_bounds(μᶜˡ, parameters)
     lower = cloud_number_from_slope(ρq̃ᶜˡ, minimum_slope, μᶜˡ, parameters.liquid_water_density)
     upper = cloud_number_from_slope(ρq̃ᶜˡ, maximum_slope, μᶜˡ, parameters.liquid_water_density)
-    return bounded_number_relaxation(ρñᶜˡ, lower, upper, explicit, τ, stage)
+    weight = number_relaxation_weight(ρq̃ᶜˡ, ρ * FT(p3.minimum_mass_mixing_ratio))
+    return bounded_number_relaxation(ρñᶜˡ, lower, upper, explicit, τ, stage, weight)
 end
 
 #####
