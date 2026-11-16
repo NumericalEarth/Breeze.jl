@@ -3,9 +3,11 @@
 #   julia --project=<env> validation/mis_memory/ten_step_state.jl write <file>     # save the states
 #   julia --project=<env> validation/mis_memory/ten_step_state.jl compare <file>   # compare with saved ones
 #
+# Further arguments select the cases whose label contains all of them, as in `compare <file> Float32 P3`.
+#
 # Cases: dry, one-moment and P3 microphysics, Float32 and Float64, for AcousticRungeKutta3 and every
 # coefficient set of MultirateInfinitesimalStep, with pre-loop and post-loop scalar tendencies,
-# stochastic rounding, and a vertically-implicit closure.
+# stochastic rounding, per-stage relinearization, and a vertically-implicit closure.
 
 using Breeze
 using Oceananigans
@@ -58,28 +60,35 @@ end
 
 mis(coefficients; kwargs...) = (:MultirateInfinitesimalStep, (; coefficients, kwargs...))
 
+const coefficient_sets = (:SSPMIS43, :MIS4a, :TVDMISB, :WickerSkamarock3, :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52)
+
 configurations = []
 for FT in (Float32, Float64), case in (:dry, :OneMoment, :P3)
-    push!(configurations, (FT, case, :AcousticRungeKutta3, NamedTuple(), nothing))
-    FT === Float32 && push!(configurations, (FT, case, :AcousticRungeKutta3, (; post_loop_scalar_tendencies = true), nothing))
-    for coefficients in (:SSPMIS43, :MIS4a, :TVDMISB, :WickerSkamarock3)
-        push!(configurations, (FT, case, mis(coefficients)..., nothing))
+    for post_loop_scalar_tendencies in (false, true)
+        push!(configurations, (FT, case, :AcousticRungeKutta3, (; post_loop_scalar_tendencies), nothing))
+        for coefficients in coefficient_sets
+            push!(configurations, (FT, case, mis(coefficients; post_loop_scalar_tendencies)..., nothing))
+            if FT === Float32
+                rounding = StochasticRounding(seed = 3)
+                push!(configurations, (FT, case, mis(coefficients; post_loop_scalar_tendencies, rounding)..., nothing))
+            end
+        end
+        push!(configurations, (FT, case, mis(:WickerSkamarock3; post_loop_scalar_tendencies, relinearize_stages = true)..., nothing))
     end
     if FT === Float32
-        push!(configurations, (FT, case, mis(:SSPMIS43; post_loop_scalar_tendencies = false)..., nothing))
-        push!(configurations, (FT, case, mis(:MIS4a; post_loop_scalar_tendencies = false)..., nothing))
-        push!(configurations, (FT, case, mis(:SSPMIS43; rounding = StochasticRounding(seed = 3))..., nothing))
-        push!(configurations, (FT, case, mis(:TVDMISB; rounding = StochasticRounding(seed = 3))..., nothing))
         push!(configurations, (FT, case, mis(:SSPMIS43; relinearize_stages = true)..., nothing))
         if case !== :P3
             implicit_closure = VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(), FT; ν = 5, κ = 5)
-            push!(configurations, (FT, case, mis(:SSPMIS43)..., implicit_closure))
-            push!(configurations, (FT, case, mis(:MIS4a)..., implicit_closure))
+            for coefficients in (:SSPMIS43, :MIS4a, :DiagonalMIS52, :LowStorageMIS52, :WickerSkamarock3)
+                push!(configurations, (FT, case, mis(coefficients)..., implicit_closure))
+            end
         end
     end
 end
 
 label(c) = string(c[1], " ", c[2], " ", c[3], " ", c[4], isnothing(c[5]) ? "" : " implicit closure")
+
+filter!(c -> all(occursin(label(c)), ARGS[3:end]), configurations)
 
 states = Dict{String, Any}()
 for configuration in configurations
@@ -93,6 +102,7 @@ for configuration in configurations
     states[label(configuration)] = state
     isnothing(state) || println(label(configuration), ": finite = ", all(a -> all(isfinite, a), state),
                                 ", max|ρw| = ", maximum(abs, state.ρw))
+    flush(stdout)
 end
 
 function compare(states, reference)
@@ -107,9 +117,13 @@ function compare(states, reference)
         if isempty(differing)
             identical += 1
             println("identical  ", name)
+        elseif all(k -> state[k] == expected[k], differing)
+            println("EQUAL      ", name, ": ", differing, " differ in the sign of zeros alone")
         else
             worst = maximum(maximum(abs, Float64.(state[k]) .- Float64.(expected[k])) for k in differing)
-            println("DIFFERENT  ", name, ": ", differing, ", max |difference| = ", worst)
+            relative = maximum(maximum(abs, Float64.(state[k]) .- Float64.(expected[k])) / maximum(abs, Float64.(expected[k])) for k in differing)
+            println("DIFFERENT  ", name, ": ", differing, ", max |difference| = ", worst,
+                    ", relative to the field's maximum = ", relative, " (", relative / eps(eltype(state[1])), " eps)")
         end
     end
     println("bitwise identical: ", identical, " of ", length(states))

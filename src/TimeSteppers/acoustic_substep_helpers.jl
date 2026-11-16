@@ -255,8 +255,9 @@ function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model,
         callback.callsite isa TendencyCallsite && callback(model)
     end
 
-    assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
+    # The assembly may read the prognostic fields (see `StateIncrement`), so the tracers are densities again.
     tracer_specific_to_density!(model)
+    assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
     cache_transport_velocity!(model)
     return nothing
 end

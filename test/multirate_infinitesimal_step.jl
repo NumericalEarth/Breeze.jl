@@ -576,3 +576,124 @@ end
     model = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep)
     @test model.timestepper.tableau.β == multirate_infinitesimal_step_tableau(:SSPMIS43, eltype(grid)).β
 end
+
+#####
+##### Storage layouts
+#####
+##### The storage is chosen from the structure of the coefficients. Whatever the layout, the step is
+##### the one that accumulates a forcing and an offset per later stage, to round-off.
+#####
+
+using Breeze.TimeSteppers: stage_storage, structured_stage_storage, fold_stage_increments,
+                           TwoRegisterStorage, IncrementStorage, AccumulatorStorage
+
+@testset "MIS storage layouts" begin
+    layout(coefficients, FT = Float64) = stage_storage(multirate_infinitesimal_step_tableau(coefficients, FT))
+
+    for FT in (Float32, Float64)
+        @test layout(:WickerSkamarock3, FT) isa TwoRegisterStorage
+        @test layout(:LowStorageMIS52, FT) isa TwoRegisterStorage
+        @test layout(:DiagonalMIS42, FT) isa IncrementStorage
+        @test layout(:DiagonalMIS52, FT) isa IncrementStorage
+        @test layout(:SSPMIS43, FT) isa AccumulatorStorage
+        @test layout(:MIS4a, FT) isa AccumulatorStorage
+        @test layout(:TVDMISB, FT) isa AccumulatorStorage
+    end
+
+    # The round-off of a zero coefficient does not change the layout, and a coefficient does
+    low_storage = multirate_infinitesimal_step_tableau(:LowStorageMIS52)
+    (; α, β, γ) = low_storage
+    perturbed(A, i, j, δ) = (B = copy(A); B[i, j] += δ; B)
+    @test stage_storage(MultirateInfinitesimalStepTableau(Float64, α, perturbed(β, 3, 1, 1e-17), γ)) isa TwoRegisterStorage
+    @test stage_storage(MultirateInfinitesimalStepTableau(Float64, perturbed(α, 4, 1, 1e-17), β, γ)) isa TwoRegisterStorage
+    @test stage_storage(MultirateInfinitesimalStepTableau(Float64, perturbed(α, 4, 1, 1e-3), β, γ)) isa IncrementStorage
+    @test stage_storage(MultirateInfinitesimalStepTableau(Float64, α, perturbed(β, 3, 1, 1e-3), γ)) isa AccumulatorStorage
+
+    # Five stages with increments in two registers need the last rows of α and γ to tell ΔY₁ and ΔY₂ apart
+    diagonal = multirate_infinitesimal_step_tableau(:DiagonalMIS52)
+    parallel = copy(diagonal.γ)
+    parallel[5, 1:2] .= 2 .* diagonal.α[5, 1:2]
+    @test stage_storage(MultirateInfinitesimalStepTableau(Float64, diagonal.α, diagonal.β, parallel)) isa AccumulatorStorage
+
+    structured_stage_storage[] = false
+    @test layout(:LowStorageMIS52) isa AccumulatorStorage
+    structured_stage_storage[] = true
+
+    # Two registers: the step-start state and the tendencies, and nothing else per prognostic
+    for coefficients in (:WickerSkamarock3, :LowStorageMIS52), post_loop_scalar_tendencies in (false, true)
+        model = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients, moist = true, post_loop_scalar_tendencies)
+        ts = model.timestepper
+        @test ts.Uⁿ === ts.U⁰
+        @test isempty(ts.accumulators)
+        @test isempty(ts.transport_density_accumulators)
+        @test isnothing(ts.step_start)
+        @test isnothing(ts.transport_mass_fluxes)
+    end
+
+    # Increments: two registers per prognostic, of which the first is `U⁰`, and with five stages a
+    # third for the fields whose increments are stored when a stage completes
+    for (coefficients, registers) in ((:DiagonalMIS42, 2), (:DiagonalMIS52, 3))
+        model = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients, moist = true)
+        ts = model.timestepper
+        names = keys(prognostic_fields(model))
+        @test length(ts.accumulators) == registers
+        @test ts.accumulators[1] === ts.U⁰
+        @test keys(ts.accumulators[2]) == names
+        if registers == 3
+            @test keys(ts.accumulators[3]) == filter(name -> name ∉ (:ρᵈ, :ρu, :ρv, :ρw), names)
+        end
+        @test isempty(ts.transport_density_accumulators)
+    end
+end
+
+function storage_layout_state(; coefficients, structured, fold = true, FT, topology, post_loop_scalar_tendencies, Nt = 3)
+    Oceananigans.defaults.FloatType = FT
+    structured_stage_storage[] = structured
+    fold_stage_increments[] = fold
+    grid = RectilinearGrid(default_arch; size = (16, 12), halo = (5, 5), x = (-8e3, 8e3), z = (0, 8e3), topology)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
+                            microphysics = SaturationAdjustment(; equilibrium = WarmPhaseEquilibrium()),
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies))
+    structured_stage_storage[] = true
+    fold_stage_increments[] = true
+    Oceananigans.defaults.FloatType = Float64
+
+    constants = model.thermodynamic_constants
+    bubble(x, z) = cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2
+    set!(model; θ = (x, z) -> 300 + 2 * bubble(x, z), qᵗ = (x, z) -> 0.004 + 0.014 * bubble(x, z),
+                ρ = (x, z) -> adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, constants),
+                u = (x, z) -> 10 * sin(2π * z / 8e3), ρc = (x, z) -> exp(-((z - 3e3) / 1e3)^2 - (x / 2e3)^2))
+    for _ in 1:Nt
+        time_step!(model, 6)
+    end
+    return map(field -> Array(interior(field)), prognostic_fields(model))
+end
+
+@testset "MIS storage layouts reproduce the accumulators [$coefficients, $FT, post_loop = $post_loop_scalar_tendencies, $(topology[1])]" for
+        coefficients in (:LowStorageMIS52, :DiagonalMIS42, :DiagonalMIS52), post_loop_scalar_tendencies in (false, true),
+        (FT, topology) in ((Float32, (Periodic, Flat, Bounded)), (Float64, (Bounded, Flat, Bounded)))
+
+    # Single precision with the rounding errors of the stage states kept in the substepper's
+    # perturbation fields (periodic), double precision with those in fields of their own (bounded).
+    kw = (; coefficients, FT, topology, post_loop_scalar_tendencies)
+    accumulated = storage_layout_state(; structured = false, kw...)
+    structured = storage_layout_state(; structured = true, kw...)
+    @test stage_storage(multirate_infinitesimal_step_tableau(coefficients)) isa (coefficients === :LowStorageMIS52 ? TwoRegisterStorage : IncrementStorage)
+
+    for name in keys(accumulated)
+        scale = maximum(abs, accumulated[name])
+        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 100 * eps(scale)
+    end
+
+    # With increments in registers, a field may also store them when a stage completes
+    if coefficients !== :LowStorageMIS52
+        stored = storage_layout_state(; structured = true, fold = false, kw...)
+        for name in keys(accumulated)
+            scale = maximum(abs, accumulated[name])
+            @test maximum(abs, stored[name] .- accumulated[name]) ≤ 100 * eps(scale)
+        end
+    end
+end

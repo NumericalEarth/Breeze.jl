@@ -207,9 +207,9 @@ end
 # correction with post-loop scalar tendencies). Convex start states and stage states, with implemented Shu–Osher
 # coefficient 1.95, which a diagonal `β` makes the strong-stability coefficient. From the memory-constrained tableau
 # search, which maximizes the smaller of the linear advective Courant limit and 0.8 times that coefficient, per cost:
-# the Courant limit is 1.56 with symmetric substeps, with or without divergence damping, and Σdᵢ = 1.515. A storage
-# scheme that keeps the increments instead of one accumulator pair per later stage would need four registers for the
-# acoustic prognostics.
+# the Courant limit is 1.56 with symmetric substeps, with or without divergence damping, and Σdᵢ = 1.515. The time
+# stepper keeps the increments instead of one accumulator pair per later stage, four registers per prognostic
+# (see `IncrementStorage`).
 function multirate_infinitesimal_step_tableau(::Val{:DiagonalMIS42}, FT)
     α = [0 0 0 0
          0 0 0 0
@@ -227,7 +227,8 @@ function multirate_infinitesimal_step_tableau(::Val{:DiagonalMIS42}, FT)
 end
 
 # Five stages, second order coupled, with `β` diagonal as in `:DiagonalMIS42`: implemented Shu–Osher coefficient 2.42,
-# linear advective Courant limit 1.95, Σdᵢ = 1.557; four registers would do for the acoustic prognostics as well.
+# linear advective Courant limit 1.95, Σdᵢ = 1.557; four registers for the acoustic prognostics as well, and five for
+# the moisture, microphysical and tracer fields.
 function multirate_infinitesimal_step_tableau(::Val{:DiagonalMIS52}, FT)
     α = [0 0 0 0 0
          0.050896904389432243 0 0 0 0
@@ -248,8 +249,8 @@ function multirate_infinitesimal_step_tableau(::Val{:DiagonalMIS52}, FT)
 end
 
 # Five stages, second order coupled, with `β` diagonal and `α`, `γ` on the first subdiagonal only: stage i starts from
-# and is forced with ΔYᵢ₋₁ alone, which can be read from the state, so that two registers (Uⁿ and the tendency) would
-# suffice, as for Wicker–Skamarock RK3; the time stepper does not use that yet. Implemented Shu–Osher coefficient
+# and is forced with ΔYᵢ₋₁ alone, which is read from the prognostic fields, so that two registers (Uⁿ and the tendency)
+# suffice, as for Wicker–Skamarock RK3 (see `TwoRegisterStorage`). Implemented Shu–Osher coefficient
 # 2.13, linear advective Courant limit 1.70, Σdᵢ = 1.565. The linear analysis finds it stable without damping, with
 # thermal divergence damping up to 0.12 and with momentum damping up to 0.1, and unstable with momentum damping of 0.12.
 function multirate_infinitesimal_step_tableau(::Val{:LowStorageMIS52}, FT)
