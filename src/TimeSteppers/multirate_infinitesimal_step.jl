@@ -92,7 +92,7 @@ struct MultirateInfinitesimalStep{TB, U0, TG, TI, AS, R, UN, AC, FC, ST, SS, TA,
     fast_tendency :: FC
     scalar_tendencies :: ST
     step_start :: SS
-    transport_density_accumulators :: TA # stages 2 to s: the parts known so far of the transport density tendency's stage combination
+    transport_density_accumulators :: TA # stages 2 to s: the parts known so far of the transport density tendency's stage combination; stage 2's shares storage with `U⁰.ρᵈ`
     residual :: RS # what the rounded stage states of the acoustic prognostics lack of the exact ones; `nothing` when no stage recombines increments
     stage :: Base.RefValue{Int}
     next_stage :: Base.RefValue{Int}
@@ -188,7 +188,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
 
     return MultirateInfinitesimalStep(relinearize_stages, fold, tableau, U⁰, Gⁿ, implicit_solver, substepper,
                                       rounding, Uⁿ, accumulators, fast_tendency, scalar_tendencies, step_start,
-                                      ntuple(_ -> CenterField(grid), s - 1), residual,
+                                      transport_density_accumulator_storage(grid, U⁰, fold, s), residual,
                                       Ref(1), Ref(1), Ref(NaN))
 end
 
@@ -211,6 +211,15 @@ function stage_accumulators(prognostic_fields, U⁰, folded_names, s)
         end
         (; forcing = forcing[m], offset)
     end
+end
+
+# The accumulators of the transport density tendency of stages 2 to s. Stage 2's is written when
+# stage 1 is assembled and read when stage 2 is, just before the dry density's assembly keeps ΔY₁
+# in `U⁰`, which nothing uses until then when the dry density forms its increments in the
+# assembly. So the two share storage.
+function transport_density_accumulator_storage(grid, U⁰, fold, s)
+    second = fold ? U⁰.ρᵈ : CenterField(grid)
+    return (second, ntuple(_ -> CenterField(grid), s - 2)...)
 end
 
 # One field per acoustic prognostic for the rounding errors of its stage states (see
