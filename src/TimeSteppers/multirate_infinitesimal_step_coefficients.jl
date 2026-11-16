@@ -127,6 +127,10 @@ Available:
 - `:SSPMIS43`: four stages, second order with the fast and slow parts coupled, with a
   strong-stability-preserving slow method. The default of [`MultirateInfinitesimalStep`](@ref).
 - `:MIS4a`: four stages, third order.
+- `:DiagonalMIS42`, `:DiagonalMIS52`: four and five stages, second order, with convex stage start states, non-negative
+  slow-tendency weights and a diagonal `β`: no slow tendency of an earlier stage is recombined (experimental).
+- `:LowStorageMIS52`: five stages, second order, convex, with a diagonal `β` and stages that start from and are forced with
+  the preceding stage's increment alone (experimental).
 - `:TVDMISB`: three stages, second order.
 - `:WickerSkamarock3`: the diagonal tableau ``β = \text{diag}(1/3, 1/2, 1)``, ``α = γ = 0``, which
   reproduces [`AcousticRungeKutta3`](@ref) when the linearization is refreshed every stage
@@ -195,5 +199,74 @@ function multirate_infinitesimal_step_tableau(::Val{:SSPMIS43}, FT)
          0.42598752307186377 0 0 0
          -0.033886544164628218 -0.7094153778115867 0 0
          -0.33319589552418832 0.35581112503939216 0.19062097801779304 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Four stages, second order coupled, with `β` exactly diagonal: every stage applies its own slow tendency alone, so
+# nothing but the stage increments is recombined across stages (no step-start force state, and no mass-flux
+# correction with post-loop scalar tendencies). Convex start states and stage states, with implemented Shu–Osher
+# coefficient 1.95, which a diagonal `β` makes the strong-stability coefficient. From the memory-constrained tableau
+# search, which maximizes the smaller of the linear advective Courant limit and 0.8 times that coefficient, per cost:
+# the Courant limit is 1.56 with symmetric substeps, with or without divergence damping, and Σdᵢ = 1.515. A storage
+# scheme that keeps the increments instead of one accumulator pair per later stage would need four registers for the
+# acoustic prognostics.
+function multirate_infinitesimal_step_tableau(::Val{:DiagonalMIS42}, FT)
+    α = [0 0 0 0
+         0 0 0 0
+         0 0.88514683994874044 0 0
+         0.3664959551631537 0.29935992617137053 0.039311611338098781 0]
+    β = [0.51177187773805322 0 0 0
+         0 0.28895574543041075 0 0
+         0 0 0.42121750914992656 0
+         0 0 0 0.29322583760994175]
+    γ = [0 0 0 0
+         0.56461825608637917 0 0 0
+         0 -0.062089681685503495 0 0
+         -0.2018771450445061 -0.11134931101323786 0.53365037526198633 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Five stages, second order coupled, with `β` diagonal as in `:DiagonalMIS42`: implemented Shu–Osher coefficient 2.42,
+# linear advective Courant limit 1.95, Σdᵢ = 1.557; four registers would do for the acoustic prognostics as well.
+function multirate_infinitesimal_step_tableau(::Val{:DiagonalMIS52}, FT)
+    α = [0 0 0 0 0
+         0.050896904389432243 0 0 0 0
+         0.012704298121042686 0.6905828470129789 0 0 0
+         0.01353767743746746 0.051598541338775235 0.79361160395650987 0 0
+         0.20424189771173668 0.26529324023811207 0.27577585290001105 0.029858511137081902 0]
+    β = [0.41240278616984521 0 0 0 0
+         0 0.15116364355832304 0 0 0
+         0 0 0.3632329593575705 0 0
+         0 0 0 0.37039352668325987 0
+         0 0 0 0 0.25936521307531912]
+    γ = [0 0 0 0 0
+         0.31774185228832641 0 0 0 0
+         -0.00066111781354120187 0.19362406561646542 0 0 0
+         0.0026831788090638706 -0.03520219468637429 0.10543691494686007 0 0
+         0.038580726381893977 -0.23949824208718307 -0.22623312573504104 0.60020911915041797 0]
+    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
+end
+
+# Five stages, second order coupled, with `β` diagonal and `α`, `γ` on the first subdiagonal only: stage i starts from
+# and is forced with ΔYᵢ₋₁ alone, which can be read from the state, so that two registers (Uⁿ and the tendency) would
+# suffice, as for Wicker–Skamarock RK3; the time stepper does not use that yet. Implemented Shu–Osher coefficient
+# 2.13, linear advective Courant limit 1.70, Σdᵢ = 1.565. The linear analysis finds it stable without damping, with
+# thermal divergence damping up to 0.12 and with momentum damping up to 0.1, and unstable with momentum damping of 0.12.
+function multirate_infinitesimal_step_tableau(::Val{:LowStorageMIS52}, FT)
+    α = [0 0 0 0 0
+         0.0013991509357238207 0 0 0 0
+         0 0.79033880228520836 0 0 0
+         0 0 0.36256755930919288 0 0
+         0 0 0 0.63128055525429994 0]
+    β = [0.45690239878443312 0 0 0 0
+         0 0.12035989682869004 0 0 0
+         0 0 0.28388661373577162 0 0
+         0 0 0 0.30614890482347923 0
+         0 0 0 0 0.39814509646625662]
+    γ = [0 0 0 0 0
+         0.36093390386149332 0 0 0 0
+         0 0.17946174723584538 0 0 0
+         0 0 0.28969456837427493 0 0
+         0 0 0 0.26410464601131539 0]
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end

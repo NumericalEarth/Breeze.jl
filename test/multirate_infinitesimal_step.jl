@@ -12,10 +12,11 @@ using Breeze.TimeSteppers: MultirateInfinitesimalStepTableau, multirate_infinite
 using Oceananigans
 using Oceananigans: prognostic_fields
 using Oceananigans.TimeSteppers: update_state!
-using LinearAlgebra: istril
+using LinearAlgebra: isdiag, istril, istriu
 using Test
 
-const mis_coefficient_sets = (:WickerSkamarock3, :TVDMISB, :MIS4a, :SSPMIS43)
+const mis_coefficient_sets = (:WickerSkamarock3, :TVDMISB, :MIS4a, :SSPMIS43,
+                              :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52)
 
 function mis_bubble_model(; timestepper, coefficients = :SSPMIS43, moist = false, Δθ = 2, qᵗ = 0.012,
                           scalar_advection = WENO(order=5), post_loop_scalar_tendencies = nothing)
@@ -474,7 +475,9 @@ end
 const vapor_anomaly_reference = vapor_anomaly_density(; timestepper = :AcousticRungeKutta3, Δt = 1/256, substep = 1/16384)
 
 @testset "MIS order of accuracy with moisture [$coefficients]" for (coefficients, Δts, order) in
-        ((:TVDMISB, (1/16, 1/32, 1/64), 1.8), (:SSPMIS43, (1/8, 1/16, 1/32), 1.8), (:MIS4a, (1/2, 1/4, 1/8), 2.7))
+        ((:TVDMISB, (1/16, 1/32, 1/64), 1.8), (:SSPMIS43, (1/8, 1/16, 1/32), 1.8), (:MIS4a, (1/2, 1/4, 1/8), 2.7),
+         (:DiagonalMIS42, (1/8, 1/16, 1/32), 1.8), (:DiagonalMIS52, (1/8, 1/16, 1/32), 1.8),
+         (:LowStorageMIS52, (1/8, 1/16, 1/32), 1.8))
     reference = vapor_anomaly_reference
     errors = map(Δts) do Δt
         ρ = vapor_anomaly_density(; timestepper = :MultirateInfinitesimalStep, coefficients, Δt)
@@ -501,7 +504,7 @@ using Breeze.CompressibleEquations: horizontal_substep_form, ForwardBackwardSubs
 end
 
 @testset "MIS leaves acoustic modes bounded without divergence damping [$coefficients, Δt = $Δt]" for
-        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a), Δt in (5, 10)
+        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a, :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52), Δt in (5, 10)
 
     grid = RectilinearGrid(default_arch; size = (40, 48), halo = (5, 5), x = (-20e3, 20e3), z = (0, 12e3),
                            topology = (Periodic, Flat, Bounded))
@@ -536,6 +539,34 @@ end
     relinearized = @test_logs (:warn, r"first-order accurate") match_mode=:any AtmosphereModel(grid; dynamics,
         timestepper = :MultirateInfinitesimalStep, timestepper_kwargs)
     @test isnothing(relinearized.timestepper.step_start)
+end
+
+# A diagonal β recombines no slow tendency of an earlier stage: the stepper holds neither the step-start force
+# state nor, with post-loop scalar tendencies, the mass fluxes that correct recombined advective tendencies.
+@testset "MIS coefficient sets with a diagonal β [$coefficients]" for coefficients in (:DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52)
+    tableau = multirate_infinitesimal_step_tableau(coefficients)
+    @test isdiag(tableau.β)
+    @test all(tableau.β .≥ 0)
+
+    # Convex start states and stage states, so the slow method is strong-stability preserving
+    @test all(tableau.α .≥ 0)
+    @test all(sum(tableau.α, dims = 2) .≤ 1 + 1e-12)
+    @test all(tableau.α .+ tableau.γ .≥ -1e-12)
+    @test all(sum(tableau.α .+ tableau.γ, dims = 2) .≤ 1 + 1e-12)
+    @test tableau.strong_stability_coefficient > 1.9
+
+    if coefficients === :LowStorageMIS52
+        @test istriu(tableau.α, -1)
+        @test istriu(tableau.γ, -1)
+    end
+
+    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
+                           topology = (Bounded, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies = true)
+    model = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep, timestepper_kwargs)
+    @test isnothing(model.timestepper.step_start)
+    @test isnothing(model.timestepper.transport_mass_fluxes)
 end
 
 @testset "The default MIS coefficients" begin
