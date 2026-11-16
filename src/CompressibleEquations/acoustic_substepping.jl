@@ -27,27 +27,31 @@
 
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Field, CenterField, XFaceField, YFaceField, ZFaceField, architecture
+using Oceananigans: Field, CenterField, XFaceField, YFaceField, ZFaceField, architecture, location
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans: fields
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
-using Oceananigans.TimeSteppers: implicit_step!
-using Oceananigans.Grids: ZDirection, rnode, znode, node
-using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
+using Oceananigans.Grids: ZDirection, rnode, znode, node, Periodic, TwoSided, Closed
+using Oceananigans.Solvers: BatchedTridiagonalSolver, compute_factorization!, solve!
+using Oceananigans.TurbulenceClosures: vertically_implicit_closures, VerticallyImplicitDiffusionLowerDiagonal,
+                                      VerticallyImplicitDiffusionDiagonal, VerticallyImplicitDiffusionUpperDiagonal
+using Oceananigans.Operators: Operators
 using Oceananigans.Operators:
     ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ,
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑzᵃᵃᶜ,
-    δxᶜᵃᵃ, δyᵃᶜᵃ,
-    div_xyᶜᶜᶜ,
+    δxᶠᵃᵃ, δyᵃᶠᵃ, δzᵃᵃᶠ, δxᶜᵃᵃ, δyᵃᶜᵃ,
+    Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ,
+    Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ,
     Δz⁻¹ᶜᶜᶜ, Δz⁻¹ᶜᶜᶠ,
     Δxᶠᶜᶜ,
     Δyᶜᶠᶜ,
     Axᶠᶜᶜ, Ayᶜᶠᶜ, V⁻¹ᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow, needs_implicit_solver
 
-using Oceananigans.Grids: Flat, Bounded, Center, Face, peripheral_node,
+using Oceananigans.Architectures: CPU, GPU
+using Oceananigans.Grids: AbstractGrid, Flat, Bounded, Center, Face, peripheral_node,
                           topology,
                           minimum_xspacing, minimum_yspacing, minimum_zspacing
 
@@ -86,7 +90,8 @@ Fields:
 - `slow_vertical_momentum_tendency` (Gˢρw, z-faces): advection+Coriolis+closure+forcing (PGF/buoyancy
   excluded — those are in the fast operator).
 - `vertical_solver_source_term` (z-faces): explicit RHS of the (ρw)′ tridiagonal system.
-- `vertical_solver`: `BatchedTridiagonalSolver` for the implicit (ρw)′ update.
+- `vertical_solver`: factorized `BatchedTridiagonalSolver` of the implicit (ρw)′ update, factored once
+  per stage (`factor_vertical_solver!`) so that each substep solves by substitution.
 - `vertical_velocity_cache`, `density_cache`: the stage-entry predictor velocity and the dry
   density that weights it, frozen for `implicit_substep!` (see `cache_advecting_state!`); `nothing` without
   adaptive-implicit advection.
@@ -94,7 +99,7 @@ Fields:
   tracer tendencies were built with, frozen for `scalar_substep!` and for the thermodynamic
   tendency's condensate sedimentation term (see `cache_transport_velocity!`).
 """
-struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
+struct AcousticSubstepper{N, FT, D, AD, US, CF, TD, MP, TAV, GT, TS, WC, DC, TWC, IS}
     substeps :: N
     acoustic_cfl :: FT
     minimum_horizontal_spacing :: FT
@@ -113,8 +118,12 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     # (`model.dynamics.dry_density`, `model.dynamics.total_density`, the moisture and the
     # formulation's prognostic ρθ field — untouched by the substep loop, so they hold the
     # stage-entry state throughout and serve as the recovery base in `_recover_full_state!`).
-    linearization_potential_temperature :: CF
+    linearization_potential_temperature :: CF     # θᴸ + Λᴴ, what the loop's flux of its pressure carries (see Section 3b)
     linearization_pressure_coefficient :: CF
+    fixed_composition_sensitivity :: CF           # Λᴴ, cached with θᴸ and Cᴸ
+    transport_density_tendency :: TD              # dry air's share of the divergence of the moisture's transport mass flux
+    scaled_thermodynamic_tendency :: TD           # ς (Gρᵡ + Gᵂ), the slow forcing of the loop's pressure, rebuilt at each stage start
+    stage_end_moisture_content :: TD              # what the loop's pressure holds at the stage's end besides (ρᵡ)′ and the loop's own flux
 
     density_perturbation :: CF
     density_potential_temperature_perturbation :: CF
@@ -134,6 +143,7 @@ struct AcousticSubstepper{N, FT, D, AD, US, CF, MP, TAV, GT, TS, WC, DC, TWC}
     vertical_velocity_cache :: WC                 # stage-entry predictor w, split by momentum and ρθ
     density_cache :: DC                           # stage-entry ρᵈ; `nothing` without adaptive-implicit advection
     time_averaged_vertical_velocity_cache :: TWC  # acoustic-mean w the moisture and tracer tendencies were built with
+    implicit_advection_solver :: IS               # factorized solver of the (ρθ)′ implicit-advection system, factored per stage; `nothing` without AIVA
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
@@ -151,6 +161,10 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        a.open_boundary_relaxation,
                        adapt(to, a.linearization_potential_temperature),
                        adapt(to, a.linearization_pressure_coefficient),
+                       adapt(to, a.fixed_composition_sensitivity),
+                       adapt(to, a.transport_density_tendency),
+                       adapt(to, a.scaled_thermodynamic_tendency),
+                       adapt(to, a.stage_end_moisture_content),
                        adapt(to, a.density_perturbation),
                        adapt(to, a.density_potential_temperature_perturbation),
                        adapt(to, a.momentum_perturbation),
@@ -163,7 +177,126 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.vertical_solver),
                        adapt(to, a.vertical_velocity_cache),
                        adapt(to, a.density_cache),
-                       adapt(to, a.time_averaged_vertical_velocity_cache))
+                       adapt(to, a.time_averaged_vertical_velocity_cache),
+                       adapt(to, a.implicit_advection_solver))
+
+#####
+##### Halo fills of the substep loop
+#####
+
+# The substep kernels differentiate and interpolate with the topology-aware operators below, which
+# wrap periodic indices and reproduce the default halo images on bounded sides (zero scalar
+# gradients; terrain metrics read the grid's own, static halos). Wall-normal momentum perturbations
+# are zeroed explicitly, including for prescribed flow. So only distributed connections need
+# substep halo exchanges.
+
+fill_substep_halos!(fields, model) = fill_substep_halos!(fields, model.grid)
+fill_substep_halos!(fields, grid::AbstractGrid) = fill_architecture_halos!(fields, architecture(grid))
+fill_architecture_halos!(fields, ::Union{CPU, GPU}) = nothing
+fill_architecture_halos!(fields, arch) = fill_halo_regions!(fields)
+
+# TODO: delete this block once Oceananigans' topology-aware operators dispatch on every `AbstractGrid`
+# and include the interpolations (CliMA/Oceananigans.jl#6520), and import `δxTᶠᵃᵃ`, `δyTᵃᶠᵃ`,
+# `δxTᶜᵃᵃ`, `δyTᵃᶜᵃ`, `ℑxTᶠᵃᵃ`, `ℑyTᵃᶠᵃ`, `ℑxTᶜᵃᵃ`, `ℑyTᵃᶜᵃ` from Oceananigans.Operators. Oceananigans
+# 0.118 defines the differences for underlying grids only, so an immersed grid falls back to the
+# halo-reading `δx`, `δy`. These copies dispatch on `AbstractGrid` (so `f` is evaluated on the
+# immersed grid itself), and the x-face operators also treat a `Closed` right wall, where the terrain
+# correction evaluates them (i = Nx + 1). Convention: `δxTᶠᵃᵃ`, `ℑxTᶠᵃᵃ` take a cell-centered `f`,
+# whose difference vanishes and whose image is the wall cell at a `Closed` wall; `δxTᶜᵃᵃ`, `ℑxTᶜᵃᵃ`
+# take an x-face `f`, which vanishes at a `Closed` wall.
+const AGXP = AbstractGrid{FT, Periodic} where FT
+const AGXS = AbstractGrid{FT, TwoSided{L, R}} where {FT, L, R}
+const AGYP = AbstractGrid{FT, <:Any, Periodic} where FT
+const AGYS = AbstractGrid{FT, <:Any, TwoSided{L, R}} where {FT, L, R}
+
+# Fallbacks (Flat; folded topologies of underlying grids, which Oceananigans treats)
+@inline δxTᶠᵃᵃ(i, j, k, grid, f, args...) = Operators.δxTᶠᵃᵃ(i, j, k, grid, f, args...)
+@inline δyTᵃᶠᵃ(i, j, k, grid, f, args...) = Operators.δyTᵃᶠᵃ(i, j, k, grid, f, args...)
+@inline δxTᶜᵃᵃ(i, j, k, grid, f, args...) = Operators.δxTᶜᵃᵃ(i, j, k, grid, f, args...)
+@inline δyTᵃᶜᵃ(i, j, k, grid, f, args...) = Operators.δyTᵃᶜᵃ(i, j, k, grid, f, args...)
+
+@inline ℑxTᶠᵃᵃ(i, j, k, grid, f, args...) = ℑxᶠᵃᵃ(i, j, k, grid, f, args...)
+@inline ℑyTᵃᶠᵃ(i, j, k, grid, f, args...) = ℑyᵃᶠᵃ(i, j, k, grid, f, args...)
+@inline ℑxTᶜᵃᵃ(i, j, k, grid, f, args...) = ℑxᶜᵃᵃ(i, j, k, grid, f, args...)
+@inline ℑyTᵃᶜᵃ(i, j, k, grid, f, args...) = ℑyᵃᶜᵃ(i, j, k, grid, f, args...)
+
+# Periodic: wrap the indices
+@inline δxTᶠᵃᵃ(i, j, k, grid::AGXP, f, args...) = f(i, j, k, grid, args...) - f(ifelse(i == 1, grid.Nx, i - 1), j, k, grid, args...)
+@inline δyTᵃᶠᵃ(i, j, k, grid::AGYP, f, args...) = f(i, j, k, grid, args...) - f(i, ifelse(j == 1, grid.Ny, j - 1), k, grid, args...)
+
+@inline δxTᶠᵃᵃ(i, j, k, grid::AGXP, c::AbstractArray) = @inbounds c[i, j, k] - c[ifelse(i == 1, grid.Nx, i - 1), j, k]
+@inline δyTᵃᶠᵃ(i, j, k, grid::AGYP, c::AbstractArray) = @inbounds c[i, j, k] - c[i, ifelse(j == 1, grid.Ny, j - 1), k]
+
+@inline δxTᶜᵃᵃ(i, j, k, grid::AGXP, f, args...) = f(ifelse(i == grid.Nx, 1, i + 1), j, k, grid, args...) - f(i, j, k, grid, args...)
+@inline δyTᵃᶜᵃ(i, j, k, grid::AGYP, f, args...) = f(i, ifelse(j == grid.Ny, 1, j + 1), k, grid, args...) - f(i, j, k, grid, args...)
+
+@inline δxTᶜᵃᵃ(i, j, k, grid::AGXP, u::AbstractArray) = @inbounds u[ifelse(i == grid.Nx, 1, i + 1), j, k] - u[i, j, k]
+@inline δyTᵃᶜᵃ(i, j, k, grid::AGYP, v::AbstractArray) = @inbounds v[i, ifelse(j == grid.Ny, 1, j + 1), k] - v[i, j, k]
+
+@inline ℑxTᶠᵃᵃ(i, j, k, grid::AGXP{FT}, f, args...) where FT = FT(0.5) * (f(ifelse(i == 1, grid.Nx, i - 1), j, k, grid, args...) + f(i, j, k, grid, args...))
+@inline ℑyTᵃᶠᵃ(i, j, k, grid::AGYP{FT}, f, args...) where FT = FT(0.5) * (f(i, ifelse(j == 1, grid.Ny, j - 1), k, grid, args...) + f(i, j, k, grid, args...))
+
+@inline ℑxTᶠᵃᵃ(i, j, k, grid::AGXP{FT}, c::AbstractArray) where FT = @inbounds FT(0.5) * (c[ifelse(i == 1, grid.Nx, i - 1), j, k] + c[i, j, k])
+@inline ℑyTᵃᶠᵃ(i, j, k, grid::AGYP{FT}, c::AbstractArray) where FT = @inbounds FT(0.5) * (c[i, ifelse(j == 1, grid.Ny, j - 1), k] + c[i, j, k])
+
+@inline ℑxTᶜᵃᵃ(i, j, k, grid::AGXP{FT}, f, args...) where FT = FT(0.5) * (f(i, j, k, grid, args...) + f(ifelse(i == grid.Nx, 1, i + 1), j, k, grid, args...))
+@inline ℑyTᵃᶜᵃ(i, j, k, grid::AGYP{FT}, f, args...) where FT = FT(0.5) * (f(i, j, k, grid, args...) + f(i, ifelse(j == grid.Ny, 1, j + 1), k, grid, args...))
+
+@inline ℑxTᶜᵃᵃ(i, j, k, grid::AGXP{FT}, u::AbstractArray) where FT = @inbounds FT(0.5) * (u[i, j, k] + u[ifelse(i == grid.Nx, 1, i + 1), j, k])
+@inline ℑyTᵃᶜᵃ(i, j, k, grid::AGYP{FT}, v::AbstractArray) where FT = @inbounds FT(0.5) * (v[i, j, k] + v[i, ifelse(j == grid.Ny, 1, j + 1), k])
+
+# Closed walls: no flux across either wall for a cell-centered `f` (`δ`), whose image across the
+# wall is the wall cell (`ℑ`); no penetration for an x-face `f` (`impenetrable_difference`).
+@inline δxTᶠᵃᵃ(i, j, k, grid::AGXS{FT, L, R}, f, args...) where {FT, L, R} =
+    ifelse(((L === Closed) & (i == 1)) | ((R === Closed) & (i == grid.Nx + 1)), zero(FT), δxᶠᵃᵃ(i, j, k, grid, f, args...))
+@inline δyTᵃᶠᵃ(i, j, k, grid::AGYS{FT, L, R}, f, args...) where {FT, L, R} =
+    ifelse(((L === Closed) & (j == 1)) | ((R === Closed) & (j == grid.Ny + 1)), zero(FT), δyᵃᶠᵃ(i, j, k, grid, f, args...))
+
+@inline ℑxTᶠᵃᵃ(i, j, k, grid::AGXS{FT, L, R}, f, args...) where {FT, L, R} =
+    FT(0.5) * (f(ifelse((L === Closed) & (i == 1), i, i - 1), j, k, grid, args...) +
+               f(ifelse((R === Closed) & (i == grid.Nx + 1), i - 1, i), j, k, grid, args...))
+@inline ℑyTᵃᶠᵃ(i, j, k, grid::AGYS{FT, L, R}, f, args...) where {FT, L, R} =
+    FT(0.5) * (f(i, ifelse((L === Closed) & (j == 1), j, j - 1), k, grid, args...) +
+               f(i, ifelse((R === Closed) & (j == grid.Ny + 1), j - 1, j), k, grid, args...))
+
+@inline ℑxTᶠᵃᵃ(i, j, k, grid::AGXS{FT, L, R}, c::AbstractArray) where {FT, L, R} =
+    @inbounds FT(0.5) * (c[ifelse((L === Closed) & (i == 1), i, i - 1), j, k] + c[ifelse((R === Closed) & (i == grid.Nx + 1), i - 1, i), j, k])
+@inline ℑyTᵃᶠᵃ(i, j, k, grid::AGYS{FT, L, R}, c::AbstractArray) where {FT, L, R} =
+    @inbounds FT(0.5) * (c[i, ifelse((L === Closed) & (j == 1), j, j - 1), k] + c[i, ifelse((R === Closed) & (j == grid.Ny + 1), j - 1, j), k])
+
+@inline δxTᶜᵃᵃ(i, j, k, grid::AGXS{<:Any, L, R}, f, args...) where {L, R} =
+    Operators.impenetrable_difference(f(i + 1, j, k, grid, args...), f(i, j, k, grid, args...),
+                                      (L === Closed) & (i == 1), (R === Closed) & (i == grid.Nx))
+@inline δyTᵃᶜᵃ(i, j, k, grid::AGYS{<:Any, L, R}, f, args...) where {L, R} =
+    Operators.impenetrable_difference(f(i, j + 1, k, grid, args...), f(i, j, k, grid, args...),
+                                      (L === Closed) & (j == 1), (R === Closed) & (j == grid.Ny))
+
+@inline δxTᶜᵃᵃ(i, j, k, grid::AGXS{<:Any, L, R}, u::AbstractArray) where {L, R} =
+    @inbounds Operators.impenetrable_difference(u[i + 1, j, k], u[i, j, k], (L === Closed) & (i == 1), (R === Closed) & (i == grid.Nx))
+@inline δyTᵃᶜᵃ(i, j, k, grid::AGYS{<:Any, L, R}, v::AbstractArray) where {L, R} =
+    @inbounds Operators.impenetrable_difference(v[i, j + 1, k], v[i, j, k], (L === Closed) & (j == 1), (R === Closed) & (j == grid.Ny))
+
+# Vertical counterparts on a `Bounded` z, which Oceananigans has no convention for: a cell-centered
+# `f` has zero-gradient images across the bottom and top faces, the images `fill_halo_regions!`
+# makes with the default no-flux conditions of the substep fields, so `δzTᵃᵃᶠ` vanishes on those
+# faces and `ℑzTᵃᵃᶠ` returns the boundary cell there. Nothing reads past k = 1 or k = Nz + 1.
+# TODO: move to Oceananigans with the block above.
+const AGZB = AbstractGrid{FT, <:Any, <:Any, Bounded} where FT
+
+@inline ℑzTᵃᵃᶠ(i, j, k, grid, f, args...) = ℑzᵃᵃᶠ(i, j, k, grid, f, args...)
+@inline δzTᵃᵃᶠ(i, j, k, grid, f, args...) = δzᵃᵃᶠ(i, j, k, grid, f, args...)
+
+@inline ℑzTᵃᵃᶠ(i, j, k, grid::AGZB{FT}, f, args...) where FT =
+    FT(0.5) * (f(i, j, ifelse(k == 1, k, k - 1), grid, args...) + f(i, j, ifelse(k == grid.Nz + 1, k - 1, k), grid, args...))
+@inline ℑzTᵃᵃᶠ(i, j, k, grid::AGZB{FT}, c::AbstractArray) where FT =
+    @inbounds FT(0.5) * (c[i, j, ifelse(k == 1, k, k - 1)] + c[i, j, ifelse(k == grid.Nz + 1, k - 1, k)])
+
+@inline δzTᵃᵃᶠ(i, j, k, grid::AGZB, f, args...) =
+    f(i, j, ifelse(k == grid.Nz + 1, k - 1, k), grid, args...) - f(i, j, ifelse(k == 1, k, k - 1), grid, args...)
+@inline δzTᵃᵃᶠ(i, j, k, grid::AGZB, c::AbstractArray) =
+    @inbounds c[i, j, ifelse(k == grid.Nz + 1, k - 1, k)] - c[i, j, ifelse(k == 1, k, k - 1)]
+
+@inline ∂zTᶜᶜᶠ(i, j, k, grid, f, args...) = δzTᵃᵃᶠ(i, j, k, grid, f, args...) * Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
 
 #####
 ##### Section 2 — Constructor
@@ -172,11 +305,10 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Construct an `AcousticSubstepper`. The perturbation face fields ``(ρu)′, (ρv)′, (ρw)′`` and the
-scalar-transport velocities use topology-derived BCs (periodic wrap / impenetrability), **not** the
-prognostic momentum's BCs: inheriting them would imprint the full-state wall target onto the perturbation
-halo for a nonzero `NormalFlowBoundaryCondition` (issue \\#716) and apply momentum BCs to velocity fields.
-The wall target re-enters via the prognostic momentum's own BC after each substep's momentum update.
+Construct an `AcousticSubstepper` with auxiliary BCs for perturbations and transport velocities.
+Bounded normal faces default to `nothing`; the loop explicitly zeros lateral momentum perturbations.
+Prescribed flow stays in the stage-entry state, with prognostic BCs reapplied after stage recovery.
+Inheriting momentum BCs would impose full-state targets on perturbations (issue \\#716) and velocities.
 The `prognostic_momentum` kwarg is retained for backwards compatibility but no longer consulted.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization;
@@ -209,6 +341,14 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     # Linearization basic state — θᴸ and Cᴸ derived from live model fields once per stage.
     linearization_potential_temperature = CenterField(grid, substep_floattype)
     linearization_pressure_coefficient = CenterField(grid, substep_floattype)
+    fixed_composition_sensitivity = CenterField(grid, substep_floattype)
+    transport_density_tendency = CenterField(grid)
+
+    # Written by the kernel that starts a stage and read until the stage ends, so that the sensitivities
+    # of the pressure to the moisture are evaluated once per stage (see Section 3b). They hold sums of
+    # the model's own tendencies and densities, so they stay FT like those.
+    scaled_thermodynamic_tendency = CenterField(grid)
+    stage_end_moisture_content = CenterField(grid)
 
     density_perturbation = CenterField(grid, substep_floattype)
     density_potential_temperature_perturbation = CenterField(grid, substep_floattype)
@@ -229,19 +369,19 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     slow_vertical_momentum_tendency = ZFaceField(grid)
     vertical_solver_source_term = ZFaceField(grid) # RHS stays FT, like the (ρw)′ solve target
 
-    arch = architecture(grid)
-    Nx, Ny, Nz = size(grid)
-    scratch = zeros(arch, FT, Nx, Ny, Nz)
+    # Factored once per stage; the substeps solve by substitution
     vertical_solver = BatchedTridiagonalSolver(grid;
                                                lower_diagonal = AcousticTridiagLower(),
                                                diagonal       = AcousticTridiagDiagonal(),
                                                upper_diagonal = AcousticTridiagUpper(),
-                                               scratch,
-                                               tridiagonal_direction = ZDirection())
+                                               tridiagonal_direction = ZDirection(),
+                                               factorized = true)
 
     vertical_velocity_cache = cache_advecting_state ? ZFaceField(grid) : nothing
     density_cache = cache_advecting_state ? CenterField(grid) : nothing
     time_averaged_vertical_velocity_cache = ZFaceField(grid)
+    # The coefficients of the model's implicit solver (`implicit_diffusion_solver`), in a factorized solver of its own
+    implicit_advection_solver = cache_advecting_state ? factorized_implicit_solver(grid) : nothing
 
     return AcousticSubstepper(Ns, acoustic_cfl, Δx_min, ω, thermodynamic_tendency_factor,
                               vertical_momentum_tendency_factor,
@@ -251,6 +391,10 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               sponge, open_boundary_relaxation,
                               linearization_potential_temperature,
                               linearization_pressure_coefficient,
+                              fixed_composition_sensitivity,
+                              transport_density_tendency,
+                              scaled_thermodynamic_tendency,
+                              stage_end_moisture_content,
                               density_perturbation,
                               density_potential_temperature_perturbation,
                               momentum_perturbation,
@@ -263,7 +407,8 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               vertical_solver,
                               vertical_velocity_cache,
                               density_cache,
-                              time_averaged_vertical_velocity_cache)
+                              time_averaged_vertical_velocity_cache,
+                              implicit_advection_solver)
 end
 
 #####
@@ -289,15 +434,9 @@ function freeze_linearization_state!(substepper::AcousticSubstepper, model)
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Seed the time-averaged transport velocity with the outer-step-start velocities: stage 1 has no
-prior acoustic loop in this outer step to average over. Called at outer-step start by
-[`freeze_linearization_state!`](@ref), and by `maybe_prepare_first_time_step!` *before* the
-first tendency computation, so the first stage splits a physical velocity instead of the
-constructor's zeros.
-"""
+# Stage 1 has no prior acoustic loop to average over, so the time-averaged transport velocity is
+# seeded with the outer-step-start velocities. Also called by `maybe_prepare_first_time_step!`
+# before the first tendency computation, so the first stage splits a physical velocity, not zeros.
 function seed_time_averaged_velocities!(substepper::AcousticSubstepper, model)
     velocities = outer_step_start_transport_velocities(model)
 
@@ -320,8 +459,11 @@ outer_step_start_transport_velocities(model) = model.velocities
 # The loop's pressure perturbation is p′ = Cᴸ (ρθ)′, so Cᴸ is the slope ∂p/∂(ρθ), at fixed dry
 # density and composition, of the equation of state p = ρ Rᵐ T that the core closes with
 # `compressible_density_state`. The kernel differentiates the selected temperature inversion, so
-# stopped and non-iterated solves use the slope of the temperature they return. Derivation, closed
-# forms and the limits of this linearization: docs/src/compressible_dynamics.md.
+# stopped and non-iterated solves use the slope of the temperature they return. Where the
+# microphysics adjusts the partition of the moisture to saturation, the pressure the core
+# re-diagnoses is that of the adjusted partition, and Cᴸ is its slope along the loop's own flux
+# (`adjusted_partition_response`, Section 3b). Derivation, closed forms and the limits of this
+# linearization: docs/src/compressible_dynamics.md.
 # TODO: carry ∂p/∂ρᵈ = Cᴸ θ Hᶜ / (cᵖᵐ T − Hᶜ), which the loop omits in cloud, as a ρ′ term of p′
 # (cached per stage next to Cᴸ, differentiated through the selected inversion). It enters the
 # horizontal pressure gradient and the vertical Schur complement next to Cᴸ θᴸ.
@@ -335,6 +477,7 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
     launch!(arch, grid, :xyz, _compute_linearization_basic_state!,
             substepper.linearization_potential_temperature,
             substepper.linearization_pressure_coefficient,
+            substepper.fixed_composition_sensitivity,
             grid,
             model.formulation,
             model.dynamics,
@@ -352,16 +495,20 @@ function refresh_linearization_basic_state!(substepper::AcousticSubstepper, mode
     # is needed for the horizontal direction. Vertical reference subtraction
     # for the slow tendency is handled by `assemble_slow_vertical_momentum_tendency!`.
 
-    fill_halo_regions!(substepper.linearization_potential_temperature)
-    fill_halo_regions!(substepper.linearization_pressure_coefficient)
+    # One tuple fill: fields that share a location and halo-filling kernels fill in one launch per side.
+    fill_halo_regions!((substepper.linearization_potential_temperature,
+                        substepper.linearization_pressure_coefficient,
+                        substepper.fixed_composition_sensitivity))
 
     return nothing
 end
 
 # θᴸ and Cᴸ = ρ Rᵐ (θ ∂T/∂θ) / (ρᵈ θ) per cell, from the same moisture and state the core closes
-# the thermodynamics with (`_compute_temperature_and_pressure!`). The divisors are zero only before
-# `set!`; there they are replaced by one, and θ = 0 has zero sensitivity.
-@kernel function _compute_linearization_basic_state!(θᴸ, Cᴸ, grid, formulation, dynamics, dry_density,
+# the thermodynamics with (`_compute_temperature_and_pressure!`). In saturated cells of a scheme
+# that adjusts the partition of its moisture, Cᴸ is the slope of the adjusted pressure along the
+# loop's flux instead. The divisors are zero only before `set!`; there they are replaced by one,
+# and θ = 0 has zero sensitivity.
+@kernel function _compute_linearization_basic_state!(θᴸ, Cᴸ, Λᴴ, grid, formulation, dynamics, dry_density,
                                                      total_density, specific_prognostic_moisture,
                                                      microphysics, microphysical_fields, constants)
     i, j, k = @index(Global, NTuple)
@@ -376,12 +523,26 @@ end
     𝒰  = compressible_density_state(i, j, k, formulation, dynamics, ρ̂ᵈ, ρ, q)
     θ  = 𝒰.potential_temperature
     θ̂  = ifelse(θ == 0, one(θ), θ)
-    _, θ∂T∂θ = temperature_and_sensitivity(𝒰, constants)
+    T, θ∂T∂θ = temperature_and_sensitivity(𝒰, constants)
     Rᵐ = mixture_gas_constant(q, constants)
+    C  = ρ * Rᵐ * θ∂T∂θ / (ρ̂ᵈ * θ̂)
+    λᴴ = fixed_composition_sensitivity(formulation, 𝒰, T, constants)
+
+    # Where the scheme adjusts the partition of its moisture and the cell holds cloud, the
+    # pressure of the adjusted partition: its slope ζ C at fixed densities, and E more in the
+    # dry density than Λᴴ, both along the loop's flux (Section 3b). Elsewhere ζ = 1 and E = 0.
+    equilibrium = saturation_adjusted_equilibrium(microphysics)
+    σ, E = adjusted_partition_response(equilibrium, formulation, i, j, k, grid, 𝒰, T, ρᵈ, qᵛᵉ,
+                                       microphysics, microphysical_fields, constants)
+    ζ = 1 / (1 + C * σ)
+    θ⁺ = θ + λᴴ
+    θ̂⁺ = ifelse(θ⁺ == 0, one(θ⁺), θ⁺)
 
     @inbounds begin
-        θᴸ[i, j, k] = θ
-        Cᴸ[i, j, k] = ρ * Rᵐ * θ∂T∂θ / (ρ̂ᵈ * θ̂)
+        # The loop's flux of its pressure carries θᴸ + Λᴴ per unit of its own mass flux (Section 3b).
+        θᴸ[i, j, k] = θ⁺
+        Λᴴ[i, j, k] = λᴴ
+        Cᴸ[i, j, k] = ζ * C * (1 + E / θ̂⁺)
     end
 end
 
@@ -400,28 +561,372 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
     refresh_linearization_basic_state!(substepper, model)
 
 #####
-##### Section 4 — Adaptive substep computation (acoustic CFL)
+##### Section 3b — The moisture's part of the pressure the loop integrates
 #####
+##### The equation of state p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T, linearized at the stage-entry state in every
+##### prognostic density, is
+#####
+#####   p′ = Cᴸ ϖ ,    ϖ = (ρθ)′ + W ,    W = − Σₐ Λₐ (ρqₐ)′ + Λᵈ ρᵈ′ ,    Λᵈ = Λᴴ + Σₐ Λₐ rₐ ,
+#####
+##### with Λₐ the thermodynamic density that a unit of the moisture density ρqₐ holds at fixed
+##### pressure, rₐ = ρqₐ / ρᵈ, and Λᴴ = θ Hᶜ / (cᵖᵐ T − Hᶜ) the dependence on the dry density at
+##### fixed composition (the sensitivities and the idea of integrating the pressure are those of
+##### NumericalEarth/Breeze.jl#1253). The loop integrates ϖ in the field that holds (ρθ)′:
+#####
+#####   - The loop moves no water. With the moisture moving with the air, the dilution Σₐ Λₐ rₐ of
+#####     Λᵈ cancels the compression of the moisture, so the loop's own mass flux changes the
+#####     pressure through θᴸ and Λᴴ only: the flux of ϖ carries θᴸ + Λᴴ, which is what
+#####     `linearization_potential_temperature` holds. No loop kernel changes.
+#####   - The slow path of the moisture enters as one forcing, added to the thermodynamic
+#####     tendency: Gᵂ = − Σₐ Λₐ Gˢρqₐ + (Σₐ Λₐ rₐ) Gᵗρᵈ + Λᴴ Gˢρᵈ. The dilution is paired with
+#####     Gᵗρᵈ, the dry air's share of the divergence of the mass flux the moisture tendencies
+#####     were built with (`compute_transport_density_tendency!`): the two cancel only if they
+#####     are built from one flux, and the moisture is advected with the transport velocity, the
+#####     average over the preceding loop, not with the stage-entry momentum.
+#####   - The stage starts from ϖ = (ρθ)′ + W⁰, W⁰ the content of the start state relative to
+#####     the stage-entry state, and ends by taking the content off: W⁰, the ramp of Gᵂ, and
+#####     − ∇·(Λᴴ M), the content the loop's flux M built. The thermodynamic density is left
+#####     with its own tendency and the flux divergence − ∇·(θᴸ M).
+#####
+##### The Λₐ are evaluated once per stage, at the stage-entry state, by the kernel that adds the
+##### content (`_initialize_stage_perturbations!`). The forcing interval the stage ends at is known
+##### then, so that kernel also stores the part of the content the end of the stage takes off that
+##### does not depend on the loop (`stage_end_moisture_content`), and the forcing it gives the loop
+##### in a field of its own (`scaled_thermodynamic_tendency`), which leaves the thermodynamic
+##### tendency as it was. The end of the stage then only adds the divergence of Λᴴ M, for which
+##### Λᴴ, which the loop's flux needs at neighbors too, is stored. Without moisture every term is
+##### exactly zero.
+#####
+##### Where the microphysics adjusts the partition of its moisture density to saturation
+##### (`saturation_adjusted_equilibrium`) and the cell holds cloud, the pressure the core
+##### re-diagnoses is that of the adjusted partition, in which warming evaporates condensate
+##### (`adjusted_partition_response`). Its slope in ρθ at fixed densities is ζ ≈ 0.4 of the slope
+##### C̄ at the held partition, the moisture density keeps the cloud condensate's sensitivity, and
+##### the dry density holds E more than Λᴴ: what the vapor it carries along is worth as
+##### condensate, and the rest of the dry air's partial pressure, (1 − ζ) Rᵈ T / (ζ C̄), which is
+##### about as large as θ. Carried in the flux like Λᴴ, E would jump by that much across a cloud
+##### edge, and the flux of the loop's pressure with it. It is folded into the coefficient
+##### instead: the loop's own flux compresses the air at fixed θ and mixing ratios, where the
+##### adjusted pressure changes by ζ C̄ (θᴸ + Λᴴ + E) ρᵈ′, so
+#####
+#####   Cᴸ = ζ C̄ (1 + E / (θᴸ + Λᴴ))
+#####
+##### is its slope along the loop's flux, that of the moist adiabat: 10 to 15% below C̄, the
+##### mismatch of NumericalEarth/Breeze.jl#1086. The slow path, which is not a compression at
+##### fixed θ, enters in the units of that slope: the start state's perturbation of ρθ plus its
+##### content, and the thermodynamic tendency plus Gᵂ, both with E added to Λᴴ in their dry
+##### density terms, are scaled by ς = ζ C̄ / Cᴸ = (θᴸ + Λᴴ) / (θᴸ + Λᴴ + E). The end of the stage
+##### takes off what that scaling added along with the content.
+#####
+
+# Λᴴ = θ Hᶜ / (cᵖᵐ T − Hᶜ): ∂p/∂ρᵈ = Cᴸ Λᴴ at fixed composition and thermodynamic density.
+@inline function fixed_composition_sensitivity(::LiquidIcePotentialTemperatureFormulation, 𝒰, T, constants)
+    q = 𝒰.moisture_mass_fractions
+    Hᶜ = condensate_latent_energy(q, constants)
+    H = mixture_heat_capacity(q, constants) * T - Hᶜ
+    return 𝒰.potential_temperature * Hᶜ / ifelse(H == 0, one(H), H)
+end
+
+@inline fixed_composition_sensitivity(formulation, 𝒰, T, constants) = zero(T)
+
+# The response (σ, E) of the pressure that the core re-diagnoses where the scheme adjusts the
+# partition of its moisture density to the phase `equilibrium`: in a cell that holds cloud, the
+# vapor density is the saturation one, ρᵛ⁺(T), and the cloud condensate takes up the rest of the
+# moisture density, a fraction λ(T) of it as liquid. Elsewhere, and for a scheme that adjusts no
+# partition (`equilibrium = nothing`), both are zero.
+#
+# Derivation, with C̄ and Λᴴ the slopes at the held partition. A change at the held temperature
+# puts the moisture into the cloud condensate, so the pressure changes by
+# dp₀ = C̄ [d(ρθ) − Λᶜ d(ρqᵉ) + …], Λᶜ = λ Λˡ + (1 − λ) Λⁱ. The temperature then moves by dT, and
+# with it the partition: the vapor density by sᵛ dT, sᵛ = dρᵛ⁺/dT, at the cost of the condensate,
+# and the liquid by ρᶜ (dλ/dT) dT at the cost of the ice, with ρᶜ the cloud condensate density.
+# Hence dp = dp₀ − C̄ S dT with S = (Λᵛ − Λᶜ) sᵛ + (Λˡ − Λⁱ) ρᶜ dλ/dT. The equation of state
+# p = (ρᵈ Rᵈ + ρᵛ Rᵛ) T closes it, N dT = dp − Rᵈ T dρᵈ with N = ρ Rᵐ + Rᵛ T sᵛ, so that
+#
+#   dp = ζ dp₀ + (1 − ζ) Rᵈ T dρᵈ ,        ζ = 1 / (1 + C̄ σ) ,        σ = S / N .
+#
+# Warming evaporates condensate, which takes up most of the heat: ζ is about 0.4 at 290 K, and a
+# unit of dry air adds the rest of its partial pressure. At fixed mixing ratios the dry air also
+# carries the vapor along, which the held-temperature change counts as condensate. In units of
+# the adjusted slope ζ C̄, the dry density therefore holds, beyond Λᴴ,
+#
+#   E = (Λᵛ − Λᶜ) ρᵛ / ρᵈ + Rᵈ T σ ,
+#
+# and the moisture density keeps the sensitivity Λᶜ that `prognostic_moisture_phase_fractions`
+# gives it. sᵛ and dλ/dT are centered differences over ± 1/8 K of the saturation vapor density
+# and liquid fraction the adjustment itself uses, so they follow the selected saturation vapor
+# pressure and phase equilibrium; the truncation is 10⁻⁵ of sᵛ.
+@inline adjusted_partition_response(::Nothing, 𝒰, T, ρᵈ, qᵛᵉ, fᵛ, fˡ, fⁱ, λᵛ, λˡ, λⁱ, constants) = zero(T), zero(T)
+
+@inline function adjusted_partition_response(equilibrium, 𝒰, T, ρᵈ, qᵛᵉ, fᵛ, fˡ, fⁱ, λᵛ, λˡ, λⁱ, constants)
+    q = 𝒰.moisture_mass_fractions
+    ρ = 𝒰.density
+    T̂ = ifelse(T == 0, one(T), T)
+    ρ̂ᵈ = ifelse(ρᵈ == 0, one(ρᵈ), ρᵈ)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+
+    # The cloud condensate takes the moisture's changes where the vapor takes none, and is the
+    # moisture the vapor leaves.
+    adjusted = fᵛ == 0
+    ρᶜ = ρ * max(0, qᵛᵉ - q.vapor)
+    λᶜ = fˡ * λˡ + fⁱ * λⁱ
+
+    δ = convert(typeof(T̂), 1//8)
+    ρᵛ₊, λ₊ = equilibrium_partition(T̂ + δ, equilibrium, constants)
+    ρᵛ₋, λ₋ = equilibrium_partition(T̂ - δ, equilibrium, constants)
+    sᵛ = (ρᵛ₊ - ρᵛ₋) / 2δ
+    ∂λ∂T = (λ₊ - λ₋) / 2δ
+
+    S = (λᵛ - λᶜ) * sᵛ + (λˡ - λⁱ) * ρᶜ * ∂λ∂T
+    N = ρ * Rᵐ + Rᵛ * T̂ * sᵛ
+    σ = S / ifelse(N == 0, one(N), N)
+    E = (λᵛ - λᶜ) * ρ * q.vapor / ρ̂ᵈ + Rᵈ * T̂ * σ
+
+    return ifelse(adjusted, σ, zero(σ)), ifelse(adjusted, E, zero(E))
+end
+
+# The same, from the cell: the sensitivities and the phases of the moisture are evaluated only
+# for a scheme that adjusts a partition.
+@inline adjusted_partition_response(::Nothing, formulation, i, j, k, grid, 𝒰, T, ρᵈ, qᵛᵉ,
+                                    microphysics, microphysical_fields, constants) = zero(T), zero(T)
+
+@inline function adjusted_partition_response(equilibrium, formulation, i, j, k, grid, 𝒰, T, ρᵈ, qᵛᵉ,
+                                             microphysics, microphysical_fields, constants)
+    q = 𝒰.moisture_mass_fractions
+    fᵛ, fˡ, fⁱ = prognostic_moisture_phase_fractions(i, j, k, grid, microphysics, microphysical_fields, q)
+    λᵛ, λˡ, λⁱ = moisture_pressure_sensitivities(formulation, 𝒰, T, ρᵈ, constants)
+    return adjusted_partition_response(equilibrium, 𝒰, T, ρᵈ, qᵛᵉ, fᵛ, fˡ, fⁱ, λᵛ, λˡ, λⁱ, constants)
+end
+
+# The saturation vapor density and the liquid fraction of the cloud condensate that the phase
+# equilibrium adjusts to at temperature T.
+@inline function equilibrium_partition(T, equilibrium, constants)
+    surface = equilibrated_surface(equilibrium, T)
+    ρᵛ⁺ = saturation_vapor_pressure(T, constants, surface) / (vapor_gas_constant(constants) * T)
+    return ρᵛ⁺, surface_liquid_fraction(surface)
+end
+
+@inline surface_liquid_fraction(::PlanarLiquidSurface) = true
+@inline surface_liquid_fraction(::PlanarIceSurface) = false
+@inline surface_liquid_fraction(surface::PlanarMixedPhaseSurface) = surface.liquid_fraction
+
+# The sensitivities (Λᵛ, Λˡ, Λⁱ) of the pressure to the partial densities of vapor, liquid and
+# ice at fixed dry and thermodynamic densities, dp = Cᴸ [d(ρθ) − Σₓ Λˣ dρˣ] (from #1253):
+# Λˣ = (ρᵈ / ρ) [χˣ − δˣᵛ θ (cᵖᵐ T / H) Rᵛ / Rᵐ], with χˣ the derivative of θˡⁱ at fixed T and p
+# along the change of the mass fractions when a unit of phase x is added to a unit of mass.
+@inline function moisture_pressure_sensitivities(::LiquidIcePotentialTemperatureFormulation, 𝒰, T, ρᵈ, constants)
+    q = 𝒰.moisture_mass_fractions
+    θ = 𝒰.potential_temperature
+    ρ = 𝒰.density
+    κ̂ = 𝒰.exner_exponent
+
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    H = cᵖᵐ * T - condensate_latent_energy(q, constants)
+    Ĥ = ifelse(H == 0, one(H), H)
+    θ̂ = ifelse(θ == 0, one(θ), θ)
+    ρ̂ = ifelse(ρ == 0, one(ρ), ρ)
+    Π = Ĥ / (ĉᵖ * θ̂)
+
+    χᵛ = phase_potential_temperature_content(MoistureMassFractions(1 - q.vapor, - q.liquid, - q.ice), κ̂, q, constants, T, θ, ĉᵖ, Π)
+    χˡ = phase_potential_temperature_content(MoistureMassFractions(- q.vapor, 1 - q.liquid, - q.ice), κ̂, q, constants, T, θ, ĉᵖ, Π)
+    χⁱ = phase_potential_temperature_content(MoistureMassFractions(- q.vapor, - q.liquid, 1 - q.ice), κ̂, q, constants, T, θ, ĉᵖ, Π)
+
+    density_ratio = ρᵈ / ρ̂
+    gas_pressure_content = θ * (cᵖᵐ * T / Ĥ) * vapor_gas_constant(constants) / Rᵐ
+
+    return density_ratio * (χᵛ - gas_pressure_content), density_ratio * χˡ, density_ratio * χⁱ
+end
+
+@inline phase_potential_temperature_content(Δq, κ̂, q, constants, T, θ, ĉᵖ, Π) =
+    PotentialTemperatureFormulations.potential_temperature_content(Δq, κ̂, q, constants, T, θ, ĉᵖ, Π)
+
+# The liquid fraction of each condensate mass the scheme carries: the phase its sensitivity is
+# that of. A scheme declares it per mass with `condensate_liquid_fraction`.
+function condensate_liquid_fractions(microphysics, names)
+    fractions = map(name -> condensate_liquid_fraction(microphysics, Val(name)), names)
+
+    for (name, fraction) in zip(names, fractions)
+        isnothing(fraction) &&
+            throw(ArgumentError("The condensate mass $name of $(nameof(typeof(microphysics))) declares no " *
+                                "condensate_liquid_fraction, which the acoustic substep loop needs to " *
+                                "project its tendency onto the pressure: define " *
+                                "AtmosphereModels.condensate_liquid_fraction(microphysics, ::Val{:$name})."))
+    end
+
+    return fractions
+end
+
+# Σ over the condensate masses of their sensitivity times the value of `fields` at (i, j, k). A
+# mass with liquid fraction f holds f Λˡ + (1 − f) Λⁱ.
+@inline condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, ::Tuple{}, ::Tuple{}) = zero(λˡ)
+
+@inline function condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, liquid_fractions::Tuple, fields::Tuple)
+    f = first(liquid_fractions)
+    c = @inbounds first(fields)[i, j, k]
+    return (f * λˡ + (1 - f) * λⁱ) * c +
+           condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, Base.tail(liquid_fractions), Base.tail(fields))
+end
+
+# Everything the content of a stage is evaluated from: the stage-entry state the sensitivities are
+# evaluated at, the start state, and the slow tendencies.
+function moisture_content_arguments(substepper, model, U⁰)
+    microphysics = model.microphysics
+    Gⁿ = model.timestepper.Gⁿ
+    moisture_name = moisture_prognostic_name(microphysics)
+    condensate_names = condensate_field_names(microphysics)
+
+    state = (; formulation = model.formulation, dynamics = model.dynamics, microphysics,
+             equilibrium = saturation_adjusted_equilibrium(microphysics),
+             microphysical_fields = model.microphysical_fields, constants = model.thermodynamic_constants,
+             ρᵈ = model.dynamics.dry_density, ρ = model.dynamics.total_density,
+             qᵛᵉ = specific_prognostic_moisture(model), Λᴴ = substepper.fixed_composition_sensitivity,
+             liquid_fractions = condensate_liquid_fractions(microphysics, condensate_names))
+
+    densities = (; ρᵈ⁰ = U⁰.ρᵈ, Gᵗρᵈ = substepper.transport_density_tendency, Gˢρᵈ = Gⁿ.ρᵈ,
+                 ρqᵐ⁰ = U⁰[moisture_name], ρqᵐ = model.moisture_density, Gρqᵐ = Gⁿ[moisture_name],
+                 ρqᶜ⁰ = values(U⁰[condensate_names]),
+                 ρqᶜ = values(model.microphysical_fields[condensate_names]),
+                 Gρqᶜ = values(Gⁿ[condensate_names]))
+
+    return state, densities
+end
+
+# The content W⁰ of the start state relative to the stage-entry state, its slow rate Gᵂ, and the
+# scale ς of the slow path in the units of the loop's coefficient: one, except where the scheme
+# adjusts the partition of its moisture (Section 3b).
+@inline function moisture_content_and_tendency(i, j, k, grid, s, d)
+    @inbounds begin
+        ρᵈ = s.ρᵈ[i, j, k]
+        ρ = s.ρ[i, j, k]
+        qᵛᵉ = s.qᵛᵉ[i, j, k]
+        λᴴ = s.Λᴴ[i, j, k]
+    end
+
+    q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵛᵉ, s.microphysical_fields)
+    ρ̂ᵈ = ifelse(ρᵈ == 0, one(ρᵈ), ρᵈ)
+    𝒰 = compressible_density_state(i, j, k, s.formulation, s.dynamics, ρ̂ᵈ, ρ, q)
+    T = temperature(𝒰, s.constants)
+    λᵛ, λˡ, λⁱ = moisture_pressure_sensitivities(s.formulation, 𝒰, T, ρᵈ, s.constants)
+
+    # The moisture density holds the phases a change of it takes: the vapor, unless the scheme
+    # diagnoses condensate from it (`prognostic_moisture_phase_fractions`).
+    fᵛ, fˡ, fⁱ = prognostic_moisture_phase_fractions(i, j, k, grid, s.microphysics, s.microphysical_fields, q)
+    λᵐ = fᵛ * λᵛ + fˡ * λˡ + fⁱ * λⁱ
+    Σλr = (λᵐ * ρ * qᵛᵉ + condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, s.liquid_fractions, d.ρqᶜ)) / ρ̂ᵈ
+
+    # Where the partition is adjusted, the dry density holds E more than Λᴴ, and the slow path
+    # is scaled to the loop's coefficient, the slope along its own flux.
+    _, E = adjusted_partition_response(s.equilibrium, 𝒰, T, ρᵈ, qᵛᵉ, fᵛ, fˡ, fⁱ, λᵛ, λˡ, λⁱ, s.constants)
+    θ⁺ = 𝒰.potential_temperature + λᴴ
+    θ⁺ᴱ = θ⁺ + E
+    ς = ifelse(θ⁺ᴱ == 0, one(θ⁺), θ⁺ / ifelse(θ⁺ᴱ == 0, one(θ⁺), θ⁺ᴱ))
+
+    @inbounds begin
+        Δρᵈ = d.ρᵈ⁰[i, j, k] - ρᵈ
+        W⁰ = - λᵐ * (d.ρqᵐ⁰[i, j, k] - d.ρqᵐ[i, j, k]) -
+               (condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, s.liquid_fractions, d.ρqᶜ⁰) -
+                condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, s.liquid_fractions, d.ρqᶜ)) +
+               (Σλr + λᴴ + E) * Δρᵈ
+
+        Gᵂ = - λᵐ * d.Gρqᵐ[i, j, k] - condensate_sensitivity_sum(i, j, k, λˡ, λⁱ, s.liquid_fractions, d.Gρqᶜ) +
+               Σλr * d.Gᵗρᵈ[i, j, k] + (λᴴ + E) * d.Gˢρᵈ[i, j, k]
+    end
+
+    return W⁰, Gᵂ, ς
+end
+
+# Take the moisture content off the loop's pressure at the end of a stage, which leaves the
+# perturbation of the thermodynamic density for `_recover_full_state!`: the part the start of the
+# stage evaluated (`stage_end_moisture_content`: the content of the start state and the ramp of its
+# slow rate over the stage's forcing interval), and the content `− ∇·(Λᴴ M)` that the loop's own
+# mass flux built, with `M` that flux integrated over the stage's substeps of size `Δτ`. `M` is the
+# sum the transport velocity is averaged from, so this runs before
+# `finalize_time_averaged_velocity!` normalizes it (see Section 10).
+function remove_moisture_content!(substepper::AcousticSubstepper, model, U⁰, Δτ)
+    grid = model.grid
+    launch!(architecture(grid), grid, :xyz, _remove_moisture_content!,
+            substepper.density_potential_temperature_perturbation,
+            substepper.stage_end_moisture_content,
+            fast_content_arguments(substepper, model, U⁰)..., Δτ, 1 - substepper.forward_weight)
+    return nothing
+end
+
+# The arguments of `fast_content_divergence` after the indices, up to the substep size.
+function fast_content_arguments(substepper, model, U⁰)
+    M = substepper.time_averaged_velocities
+    return (model.grid, substepper.fixed_composition_sensitivity, model.dynamics,
+            M.u, M.v, M.w, substepper.momentum_perturbation.w, U⁰.ρu, U⁰.ρv, U⁰.ρw, model.momentum)
+end
+
+@kernel function _remove_moisture_content!(ϖ, content, grid, Λᴴ, dynamics, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ,
+                                           Δτ, ωˢ⁻)
+    i, j, k = @index(Global, NTuple)
+    ∇_ΛM = fast_content_divergence(i, j, k, grid, Λᴴ, dynamics, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    @inbounds ϖ[i, j, k] -= content[i, j, k] - Δτ * ∇_ΛM
+end
+
+# The divergence of Λᴴ times the mass flux the loop has summed to `Σρu′, Σρv′, Σρw′`: less `Δτ`
+# times this is the content the loop's own flux has built in its pressure variable.
+@inline function fast_content_divergence(i, j, k, grid, Λᴴ, dynamics, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    ∇ʰ_ΛM = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, Λᴴ, Σρu′) + δyTᵃᶜᵃ(i, j, k, grid, θFʸ, Λᴴ, Σρv′))
+    ∂z_ΛM = ∂zᶜᶜᶜ(i, j, k, grid, fast_content_flux_z, Λᴴ, dynamics, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    return ∇ʰ_ΛM + ∂z_ΛM
+end
+
+# Λᴴ times the vertical mass flux the loop integrated: the sum of (ρw)′ over the substeps, less the
+# off-centering's share of its change over the stage (Section 10). (ρw)′ is the loop's vertical
+# momentum, which is the contravariant one over terrain, so the rewind it started from is the
+# difference of `transport_ρw`, as in `_finalize_time_averaged_velocity!`. The top face, which
+# `initialize_vertical_momentum_perturbation!` does not reach, starts from zero.
+@inline function fast_content_flux_z(i, j, k, grid, Λᴴ, dynamics, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    rewind = transport_ρw(i, j, k, grid, dynamics, ρu⁰, ρv⁰, ρw⁰) -
+             transport_ρw(i, j, k, grid, dynamics, ρ𝐮ᴸ.ρu, ρ𝐮ᴸ.ρv, ρ𝐮ᴸ.ρw)
+    ρw′⁰ = ifelse(k > size(grid, 3), zero(rewind), rewind)
+    return @inbounds ℑbzᵃᵃᶠ(i, j, k, grid, Λᴴ) * (Σρw′[i, j, k] - ωˢ⁻ * (ρw′[i, j, k] - ρw′⁰))
+end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Compute the number of acoustic substeps ``N`` from the horizontal
-acoustic CFL:
-
-```math
-N \\approx
-\\left\\lceil \\frac{|\\Delta t| \\, c^{ac}}{\\nu \\, \\Delta x_\\min} \\right\\rceil ,
-```
-
-with ``c^{ac} = \\sqrt{γ^d R^d T_r}`` for a nominal reference
-temperature ``T_r = 300\\,\\mathrm{K}`` and ``ν`` the target acoustic
-Courant number `acoustic_cfl` (default `0.5`, the conventional ERF/WRF
-target — equivalent to a safety factor of `2`).
-
-``\\Delta x_\\min`` is the grid's [`minimum_horizontal_spacing`](@ref); the
-substepper computes it once and passes the number in place of `grid`.
+Compute the dry air's share, `ρᵈ / ρ`, of the divergence of the mass flux `ρ 𝐮` that the
+moisture tendencies were built with, where `velocities` are their transport velocities: the dry
+density tendency that the dilution part of the moisture content ramps with (Section 3b). Call
+this whenever the moisture tendencies are built, with the velocities they were built with.
 """
+function compute_transport_density_tendency!(substepper::AcousticSubstepper, model, velocities)
+    grid = model.grid
+    launch!(architecture(grid), grid, :xyz, _compute_transport_density_tendency!,
+            substepper.transport_density_tendency, grid,
+            model.dynamics.dry_density, model.dynamics.total_density, velocities.u, velocities.v, velocities.w)
+    return nothing
+end
+
+@kernel function _compute_transport_density_tendency!(Gᵗρᵈ, grid, ρᵈ, ρ, u, v, w)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρ̂ = ifelse(ρ[i, j, k] == 0, one(eltype(ρ)), ρ[i, j, k])
+        ∇_ρu = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, transport_mass_flux_x, ρ, u) +
+                                        δyᵃᶜᵃ(i, j, k, grid, transport_mass_flux_y, ρ, v)) +
+               ∂zᶜᶜᶜ(i, j, k, grid, transport_mass_flux_z, ρ, w)
+        Gᵗρᵈ[i, j, k] = - ρᵈ[i, j, k] / ρ̂ * ∇_ρu
+    end
+end
+
+@inline transport_mass_flux_x(i, j, k, grid, ρ, u) = @inbounds Axᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, ρ) * u[i, j, k]
+@inline transport_mass_flux_y(i, j, k, grid, ρ, v) = @inbounds Ayᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, ρ) * v[i, j, k]
+@inline transport_mass_flux_z(i, j, k, grid, ρ, w) = @inbounds ℑzᵃᵃᶠ(i, j, k, grid, ρ) * w[i, j, k]
+
+#####
+##### Section 4 — Adaptive substep computation (acoustic CFL)
+#####
+
+# Acoustic substep count from the horizontal acoustic CFL, N ≈ ⌈|Δt| cᵃᶜ / (ν Δx_min)⌉, with
+# cᵃᶜ = √(γᵈ Rᵈ Tᵣ) at a nominal Tᵣ = 300 K and ν the target Courant number `acoustic_cfl`
+# (0.5 is the conventional ERF/WRF target). The substepper computes Δx_min once (a GPU reduction).
 function compute_acoustic_substeps(Δx_min::Number, Δt, thermodynamic_constants, acoustic_cfl)
     FT   = typeof(Δx_min)
     Rᵈ   = dry_air_gas_constant(thermodynamic_constants)
@@ -435,14 +940,7 @@ end
 compute_acoustic_substeps(grid, Δt, thermodynamic_constants, acoustic_cfl) =
     compute_acoustic_substeps(minimum_horizontal_spacing(grid), Δt, thermodynamic_constants, acoustic_cfl)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The smallest horizontal spacing of `grid`, in the grid's float type: the length the acoustic
-Courant number of [`compute_acoustic_substeps`](@ref) is measured against. A `Flat` direction
-has no spacing and drops out of the minimum. On a GPU this is a reduction over the grid, so the
-substepper evaluates it once when it is built rather than at every stage.
-"""
+# A `Flat` direction has no spacing and drops out of the minimum.
 function minimum_horizontal_spacing(grid)
     FT = eltype(grid)
     TX, TY, _ = topology(grid)
@@ -593,16 +1091,8 @@ end
 
 materialize_sponge(grid, ::Nothing) = nothing
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Build the grid-dependent form of `sponge` by evaluating its ramp into a 1D profile of the damping
-rate ``γ(z) = \\text{rate} × \\text{ramp}(z)`` over z-faces. Called by the
-[`AcousticSubstepper`](@ref) constructor; a `nothing` sponge returns `nothing`.
-
-The user-facing [`UpperSponge`](@ref) constructor has no grid, so it produces a skeleton with
-`damping_profile = nothing` — this is the matching materialization step.
-"""
+# Materialize the grid-free `UpperSponge` skeleton: evaluate its ramp once per z-face into the
+# 1D damping-rate profile γ(z) = rate × ramp(z).
 function materialize_sponge(grid, sponge::UpperSponge)
     isnothing(sponge.mask) || return materialize_masked_sponge(grid, sponge)
 
@@ -844,7 +1334,7 @@ end
 # then uses per-stage Uᴸ as base, collapsing back to ``U_outer + Δevolved`` —
 # preserving the invariant. Auxiliary fields (predictors, divergence/damping
 # workspace) reset to zero; they carry no stage-to-stage history.
-function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
+function initialize_stage_perturbations!(substepper, model, Uᴸ_outer, forcing_interval)
     grid = model.grid
     arch = architecture(grid)
 
@@ -853,7 +1343,6 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     # then accumulate raw `momentum_perturbation` each substep and are normalized
     # by `finalize_time_averaged_velocity!` at stage end.
     launch!(arch, grid, :xyz, _zero_stage_workspaces!,
-            substepper.previous_density_potential_temperature_perturbation,
             substepper.density_predictor,
             substepper.density_potential_temperature_predictor,
             substepper.time_averaged_velocities.u,
@@ -866,28 +1355,45 @@ function initialize_stage_perturbations!(substepper, model, Uᴸ_outer)
     # linearization base.
     ρᵡ = thermodynamic_density(model.formulation)
     ρᵡ_name = thermodynamic_density_name(model.formulation)
+    # The stashed (ρθ)′ˢ⁻ starts equal to (ρθ)′: the divergence damping measures the change of
+    # (ρθ)′ over a substep, and none has run. A damping applied at the start of the first
+    # substep (see `fused_divergence_damping`) then adds exactly zero.
+    # The loop integrates the pressure, so the thermodynamic perturbation (and the copy the divergence
+    # damping differences) also gains the moisture content of the start state, and the slow forcing the
+    # rate of that content (Section 3b). Both are added in the same launch as the rewind, which also
+    # evaluates what the end of the stage takes off again, after the slow tendencies have ramped over
+    # `forcing_interval` (`remove_moisture_content!`).
+    state, densities = moisture_content_arguments(substepper, model, Uᴸ_outer)
     launch!(arch, grid, :xyz, _initialize_stage_perturbations!,
             substepper.density_perturbation,
             substepper.density_potential_temperature_perturbation,
+            substepper.previous_density_potential_temperature_perturbation,
             substepper.momentum_perturbation.u,
             substepper.momentum_perturbation.v,
+            substepper.scaled_thermodynamic_tendency,
+            substepper.stage_end_moisture_content,
+            model.timestepper.Gⁿ[ρᵡ_name],
             Uᴸ_outer.ρᵈ, Uᴸ_outer[ρᵡ_name], Uᴸ_outer.ρu, Uᴸ_outer.ρv,
-            model.dynamics.dry_density, ρᵡ, model.momentum.ρu, model.momentum.ρv)
+            model.dynamics.dry_density, ρᵡ, model.momentum.ρu, model.momentum.ρv,
+            grid, state, densities, forcing_interval)
     # ρw is dispatched: terrain models initialize the contravariant ρw̃ instead.
     initialize_vertical_momentum_perturbation!(substepper, model, Uᴸ_outer)
 
-    fill_halo_regions!(substepper.density_perturbation)
-    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+    # The only fill of the ρ′ halos in the stage: no substep kernel reads ρ′ off its own column, and the
+    # k = 0, Nz+1 values that `_build_vertical_rhs!` reads only feed its discarded boundary rows. Filled
+    # here, with (ρθ)′ and its stash in one launch per side, so those discarded reads stay finite.
+    fill_halo_regions!((substepper.density_perturbation,
+                        substepper.density_potential_temperature_perturbation,
+                        substepper.previous_density_potential_temperature_perturbation))
     map(fill_halo_regions!, substepper.momentum_perturbation)
 
     return nothing
 end
 
-# Zero the six stage-start workspace/accumulator fields in one launch.
-@kernel function _zero_stage_workspaces!(a, b, c, d, e, f)
+# Zero the five stage-start workspace/accumulator fields in one launch.
+@kernel function _zero_stage_workspaces!(b, c, d, e, f)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        a[i, j, k] = 0
         b[i, j, k] = 0
         c[i, j, k] = 0
         d[i, j, k] = 0
@@ -896,16 +1402,40 @@ end
     end
 end
 
-# Rewind-initialize the four non-vertical perturbations (ρ′, ρθ′, ρu′, ρv′) in one launch.
-@kernel function _initialize_stage_perturbations!(ρ′, ρθ′, ρu′, ρv′,
+# Rewind-initialize the four non-vertical perturbations (ρ′, ρθ′, ρu′, ρv′) in one launch, and add the
+# moisture content W⁰ of the start state to ρθ′ and its stash and its slow rate Gᵂ to the thermodynamic
+# tendency (see `moisture_content_and_tendency`). ρθ′ is the rewind plus W⁰, evaluated in that order,
+# and both sums are scaled by ς, which is one except where the partition of the moisture is adjusted.
+# The scaled tendency `Gˢρᵡ` is what the loop is forced with; the thermodynamic tendency `Gρᵡ` is
+# left as it is.
+#
+# The same launch evaluates `content`, what the loop's pressure variable holds beyond the
+# perturbation of the thermodynamic density and the content of the loop's own mass flux once the
+# slow tendencies have ramped over `forcing_interval`: the content of the start state and the ramp
+# of its rate, and, where the slow path was scaled to the loop's coefficient (a scheme that adjusts
+# the partition of its moisture, Section 3b), what the scaling added to the slow path ρᵡˢ of the
+# thermodynamic density. The end of the stage takes it off (`_remove_moisture_content!`).
+@kernel function _initialize_stage_perturbations!(ρ′, ρθ′, ρθ′ˢ⁻, ρu′, ρv′, Gˢρᵡ, content, Gρᵡ,
                                                   ρ_outer, ρθ_outer, ρu_outer, ρv_outer,
-                                                  ρ_stage, ρθ_stage, ρu_stage, ρv_stage)
+                                                  ρ_stage, ρθ_stage, ρu_stage, ρv_stage,
+                                                  grid, state, densities, forcing_interval)
     i, j, k = @index(Global, NTuple)
+    W⁰, Gᵂ, ς = moisture_content_and_tendency(i, j, k, grid, state, densities)
     @inbounds begin
         ρ′[i, j, k]  = ρ_outer[i, j, k]  - ρ_stage[i, j, k]
-        ρθ′[i, j, k] = ρθ_outer[i, j, k] - ρθ_stage[i, j, k]
+        ρθ′[i, j, k] = ς * ((ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + W⁰)
+        ρθ′ˢ⁻[i, j, k] = ς * ((ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + W⁰)
         ρu′[i, j, k] = ρu_outer[i, j, k] - ρu_stage[i, j, k]
         ρv′[i, j, k] = ρv_outer[i, j, k] - ρv_stage[i, j, k]
+
+        Gˢ = ς * (Gρᵡ[i, j, k] + Gᵂ)
+        Gˢρᵡ[i, j, k] = Gˢ
+
+        # The thermodynamic tendency as the scaled sum holds it, and the slow path of the
+        # thermodynamic density it ramps from the start state.
+        Gᵡ = Gˢ / ς - Gᵂ
+        ρᵡˢ = (ρθ_outer[i, j, k] - ρθ_stage[i, j, k]) + forcing_interval * Gᵡ
+        content[i, j, k] = (ς - 1) * ρᵡˢ + ς * (W⁰ + forcing_interval * Gᵂ)
     end
 end
 
@@ -954,26 +1484,94 @@ end
     end
 end
 
+# The same step preceded by the `ThermalDivergenceDamping` correction of the substep before,
+#
+#   (ρu)′^{τ+Δτ} = [(ρu)′^τ − γˣ ∂x D / θᴸ] + Δτ (Gⁿρu − ∂x pᴸ − ∂x(Cᴸ (ρθ)′)),   D = (ρθ)′ − (ρθ)′ˢ⁻,
+#
+# in the order the two separate kernels apply them, so the result is the same. Nothing reads
+# (ρu)′, (ρv)′ between that damping and this step, and (ρθ)′, (ρθ)′ˢ⁻ and θᴸ do not change in
+# between, so the damping can wait for this kernel, which already reads and writes (ρu)′, (ρv)′.
+# The first substep of a stage finds D = 0 (`initialize_stage_perturbations!`); the damping of
+# the last is applied by `finish_horizontal_momentum_perturbations!`.
+@kernel function _damped_explicit_horizontal_step!(ρu′, ρv′, grid, dynamics, Δτ, ρθ′, Cᴸ, Gⁿρu, Gⁿρv,
+                                                   ρθ′ˢ⁻, θᴸ, x_damping_scale, y_damping_scale)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        ∂x_pᴸ  = AtmosphereModels.x_pressure_gradient(i, j, k, grid, dynamics)
+        ∂x_p′  = ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ)
+        ∂y_pᴸ  = AtmosphereModels.y_pressure_gradient(i, j, k, grid, dynamics)
+        ∂y_p′  = ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ)
+
+        ∂x_p = ∂x_pᴸ + ∂x_p′
+        ∂y_p = ∂y_pᴸ + ∂y_p′
+
+        ρu′ᵈ = ρu′[i, j, k] - x_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, x_damping_scale)
+        ρv′ᵈ = ρv′[i, j, k] - y_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, y_damping_scale)
+
+        ρu′[i, j, k] = ρu′ᵈ + Δτ * (Gⁿρu[i, j, k] - ∂x_p)
+        ρv′[i, j, k] = ρv′ᵈ + Δτ * (Gⁿρv[i, j, k] - ∂y_p)
+    end
+end
+
+# Step A of a substep, with the damping of the substep before fused in
+# (`fused_divergence_damping`).
+function explicit_horizontal_step!(::NoDivergenceDamping, substepper, model, Δτ)
+    grid = model.grid
+    Gⁿ = model.timestepper.Gⁿ
+    launch!(architecture(grid), grid, :xyz, _explicit_horizontal_step!,
+            substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v,
+            grid, model.dynamics, Δτ,
+            substepper.density_potential_temperature_perturbation,
+            substepper.linearization_pressure_coefficient,
+            Gⁿ.ρu, Gⁿ.ρv)
+    return nothing
+end
+
+function explicit_horizontal_step!(damping::ThermalDivergenceDamping, substepper, model, Δτ)
+    grid = model.grid
+    Gⁿ = model.timestepper.Gⁿ
+    x_damping_scale, y_damping_scale = horizontal_damping_scales(damping, grid)
+    launch!(architecture(grid), grid, :xyz, _damped_explicit_horizontal_step!,
+            substepper.momentum_perturbation.u,
+            substepper.momentum_perturbation.v,
+            grid, model.dynamics, Δτ,
+            substepper.density_potential_temperature_perturbation,
+            substepper.linearization_pressure_coefficient,
+            Gⁿ.ρu, Gⁿ.ρv,
+            substepper.previous_density_potential_temperature_perturbation,
+            substepper.linearization_potential_temperature,
+            x_damping_scale, y_damping_scale)
+    return nothing
+end
+
 @inline δpᴸ(i, j, k, grid, ρθ′, Cᴸ) = @inbounds Cᴸ[i, j, k] * ρθ′[i, j, k]
 
-@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂xᶠᶜᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
-@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂yᶜᶠᶜ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
+@inline ∇ˣp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = δxTᶠᵃᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+@inline ∇ʸp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = δyTᵃᶠᵃ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
 @inline ∇ᶻp′(i, j, k, grid, dynamics, ρθ′, Cᴸ) = ∂zᶜᶜᶠ(i, j, k, grid, δpᴸ, ρθ′, Cᴸ)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Run the `Nτ` acoustic substeps of one RK3 stage by calling [`acoustic_substep!`](@ref) for each.
-
-The substeps run under `ReactantCore.@trace`, which is a plain loop on ordinary arrays and a
-single traced `while` loop under Reactant, so the compiled program holds one copy of the substep
-body rather than `Nτ`. Reverse-mode differentiation of that loop caches a minimal cut of its
-values (`mincut`).
-"""
+# The substeps run under `ReactantCore.@trace`: a plain loop on ordinary arrays, a single traced
+# `while` loop under Reactant, so the compiled program holds one copy of the substep body rather
+# than `Nτ`. Reverse-mode differentiation of that loop caches a minimal cut of its values (`mincut`).
 function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
-    @trace mincut=true track_numbers=false for _ in 1:Nτ
-        acoustic_substep!(model, substepper, stage, advection)
+    @trace mincut=true track_numbers=false for n in 1:Nτ
+        acoustic_substep!(model, substepper, stage, advection, n)
     end
+    finish_horizontal_momentum_perturbations!(model, substepper, stage)
+    return nothing
+end
+
+# Apply the last substep's fused divergence damping, exchange the halos of (ρu)′, (ρv)′ on distributed grids, and enforce
+# impenetrability, as the loop does after its explicit horizontal step.
+function finish_horizontal_momentum_perturbations!(model, substepper, stage)
+    grid = model.grid
+    apply_divergence_damping!(fused_divergence_damping(substepper.damping), substepper, grid, stage.Δτ,
+                              model.thermodynamic_constants)
+    fill_substep_halos!(substepper.momentum_perturbation.u, model)
+    fill_substep_halos!(substepper.momentum_perturbation.v, model)
+    enforce_wall_impenetrability!(substepper, model, grid, architecture(grid))
     return nothing
 end
 
@@ -995,8 +1593,8 @@ end
         ρθ′ˢ⁻[i, j, k] = ρθ′[i, j, k] # stash old (ρθ)′ for the divergence damping
 
         V⁻¹ = V⁻¹ᶜᶜᶜ(i, j, k, grid)
-        ∇ʰ_M  = div_xyᶜᶜᶜ(i, j, k, grid, ρu′, ρv′)
-        ∇ʰ_θM = V⁻¹ * (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) + δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′))
+        ∇ʰ_M  = V⁻¹ * (δxTᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶜ, ρu′) + δyTᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, ρv′))
+        ∇ʰ_θM = V⁻¹ * (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) + δyTᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′))
 
         ρ′★[i, j, k] = ρ′[i, j, k] +
             Δτ * (Gˢρ[i, j, k] - ∇ʰ_M) - δτˢ⁻ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
@@ -1062,7 +1660,8 @@ end
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         ρ′[i, j, k]  = ρ′★[i, j, k]  - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, Fʷ, dynamics, ρu′, ρv′, ρw′)
-        ρθ′[i, j, k] = ρθ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
+        ρθ′ᵐ⁺ = ρθ′★[i, j, k] - δτᵐ⁺ * ∂zᶜᶜᶜ(i, j, k, grid, θFᶻ, θᴸ, dynamics, ρu′, ρv′, ρw′)
+        ρθ′[i, j, k] = ρθ′ᵐ⁺
         avg.u[i, j, k] += ρu′[i, j, k]
         avg.v[i, j, k] += ρv′[i, j, k]
         avg.w[i, j, k] += ρw′[i, j, k]
@@ -1073,8 +1672,34 @@ end
 ##### Section 9 — Damping
 #####
 
+# Terrain grids specialize these gradients to retain the constant-height chain rule.
+@inline x_damping_gradient(i, j, k, grid, args...) = δxTᶠᵃᵃ(i, j, k, grid, args...) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
+@inline y_damping_gradient(i, j, k, grid, args...) = δyTᵃᶠᵃ(i, j, k, grid, args...) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
+
 # No-op default
 @inline apply_divergence_damping!(::NoDivergenceDamping, args...) = nothing
+
+# Divergence damping is applied either in its own kernel right after each substep (separate), or
+# fused into the next substep's explicit horizontal step (`explicit_horizontal_step!`). Both compute
+# the same correction; fusing saves a kernel launch and a halo fill per substep. One of the two
+# functions below returns `NoDivergenceDamping`. Only `ThermalDivergenceDamping` can be fused: its
+# correction is a single pass over fields that stay put until the next substep's predictors.
+fused_divergence_damping(damping) = NoDivergenceDamping()
+fused_divergence_damping(damping::ThermalDivergenceDamping) = damping
+
+separate_divergence_damping(damping) = damping
+separate_divergence_damping(::ThermalDivergenceDamping) = NoDivergenceDamping()
+
+# The fields whose halos are exchanged after `_post_solve_recovery!` on a distributed grid, in one
+# launch per side: (ρθ)′, whose horizontal and vertical neighbors the next substep reads, and what
+# the damping reads next to it. Nothing else read off-column is written in a substep except (ρu)′, (ρv)′.
+post_recovery_halo_fields(damping, substepper) = (substepper.density_potential_temperature_perturbation,)
+
+# `ThermalDivergenceDamping` differentiates (ρθ)′ − (ρθ)′ˢ⁻ horizontally, and reads no halo of
+# (ρθ)′ˢ⁻ before this fill.
+post_recovery_halo_fields(::ThermalDivergenceDamping, substepper) =
+    (substepper.density_potential_temperature_perturbation,
+     substepper.previous_density_potential_temperature_perturbation)
 
 # Implicit-vertical-damping prefactors threaded into the column tridiag and
 # its RHS. Returns `(dᵐ⁺, dˢ⁻) = (ω, 1−ω) · α · Δz²` for
@@ -1128,11 +1753,7 @@ end
 function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper, grid, Δτ, thermodynamic_constants)
     FT   = eltype(grid)
     arch = architecture(grid)
-    α    = damping.coefficient
-
-    TX, TY, _ = topology(grid)
-    x_damping_scale = TX === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
-    y_damping_scale = TY === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    x_damping_scale, y_damping_scale = horizontal_damping_scales(damping, grid)
 
     launch!(arch, grid, :xyz, _thermal_divergence_damping!,
             substepper.momentum_perturbation.u,
@@ -1143,6 +1764,14 @@ function apply_divergence_damping!(damping::ThermalDivergenceDamping, substepper
             grid, convert(FT, Δτ), x_damping_scale, y_damping_scale)
 
     return nothing
+end
+
+function horizontal_damping_scales(damping::ThermalDivergenceDamping, grid)
+    α = damping.coefficient
+    TX, TY, _ = topology(grid)
+    x_damping_scale = TX === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    y_damping_scale = TY === Flat ? NoHorizontalDampingScale() : horizontal_damping_scale(damping, α)
+    return x_damping_scale, y_damping_scale
 end
 
 @inline dρθ′(i, j, k, grid, ρθ′, ρθ′ˢ⁻) = @inbounds ρθ′[i, j, k] - ρθ′ˢ⁻[i, j, k]
@@ -1214,16 +1843,24 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ∂x_div = ∂xᶠᶜᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
-        θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        γˣ = κˣ(i, j, k, grid, x_damping_scale, Δτ)
-        ρu′[i, j, k] -= γˣ * ∂x_div / θᴸᶠᶜᶜ
-
-        ∂y_div = ∂yᶜᶠᶜ(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
-        θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
-        γʸ = κʸ(i, j, k, grid, y_damping_scale, Δτ)
-        ρv′[i, j, k] -= γʸ * ∂y_div / θᴸᶜᶠᶜ
+        ρu′[i, j, k] -= x_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, x_damping_scale)
+        ρv′[i, j, k] -= y_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, y_damping_scale)
     end
+end
+
+# The corrections γˣ ∂x D / θᴸ and γʸ ∂y D / θᴸ that the damping subtracts from (ρu)′ and (ρv)′.
+@inline function x_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, x_damping_scale)
+    ∂x_div = x_damping_gradient(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
+    θᴸᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+    γˣ = κˣ(i, j, k, grid, x_damping_scale, Δτ)
+    return γˣ * ∂x_div / θᴸᶠᶜᶜ
+end
+
+@inline function y_thermal_divergence_damping(i, j, k, grid, ρθ′, ρθ′ˢ⁻, θᴸ, Δτ, y_damping_scale)
+    ∂y_div = y_damping_gradient(i, j, k, grid, dρθ′, ρθ′, ρθ′ˢ⁻)
+    θᴸᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+    γʸ = κʸ(i, j, k, grid, y_damping_scale, Δτ)
+    return γʸ * ∂y_div / θᴸᶜᶠᶜ
 end
 
 # Direct divergence damping (`DirectDivergenceDamping`): form the *horizontal* Θ-flux divergence
@@ -1248,7 +1885,7 @@ function apply_divergence_damping!(damping::DirectDivergenceDamping, substepper,
     ρv′ = substepper.momentum_perturbation.v
 
     launch!(arch, grid, :xyz, _compute_horizontal_theta_flux_divergence!, δ, grid, θᴸ, ρu′, ρv′)
-    fill_halo_regions!(δ)
+    fill_substep_halos!(δ, grid)
     launch!(arch, grid, :xyz, _apply_direct_divergence_damping!, ρu′, ρv′, grid, δ, θᴸ, α)
 
     return nothing
@@ -1258,15 +1895,15 @@ end
 # `build_predictors!` uses for ∇ʰ_θM (so the damped divergence matches the one in the Θ equation).
 @kernel function _compute_horizontal_theta_flux_divergence!(δ, grid, θᴸ, ρu′, ρv′)
     i, j, k = @index(Global, NTuple)
-    @inbounds δ[i, j, k] = (δxᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) +
-                            δyᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
+    @inbounds δ[i, j, k] = (δxTᶜᵃᵃ(i, j, k, grid, θFˣ, θᴸ, ρu′) +
+                            δyTᵃᶜᵃ(i, j, k, grid, θFʸ, θᴸ, ρv′)) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
 end
 
 @kernel function _apply_direct_divergence_damping!(ρu′, ρv′, grid, δ, θᴸ, α)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * ∂xᶠᶜᶜ(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
-        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * ∂yᶜᶠᶜ(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
+        ρu′[i, j, k] += α * Δxᶠᶜᶜ(i, j, k, grid)^2 * x_damping_gradient(i, j, k, grid, δ) / ℑxᶠᵃᵃ(i, j, k, grid, θᴸ)
+        ρv′[i, j, k] += α * Δyᶜᶠᶜ(i, j, k, grid)^2 * y_damping_gradient(i, j, k, grid, δ) / ℑyᵃᶠᵃ(i, j, k, grid, θᴸ)
     end
 end
 
@@ -1283,7 +1920,7 @@ end
 #####   ⟨u⟩  ≈ ⟨ρu⟩ / ρᴸ_face
 #####
 ##### ρ′ sees the off-centered vertical flux (1 − ω)(ρw)′(n−1) + ω(ρw)′(n), so ⟨ρw⟩ must too.
-##### `solve!` is the only writer of (ρw)′ inside the loop, so the sum of that flux over
+##### The vertical solve is the only writer of (ρw)′ inside the loop, so the sum of that flux over
 ##### n = 1…Nτ telescopes onto the raw accumulation:
 #####
 #####   ∑ₙ [(1 − ω)(ρw)′(n−1) + ω(ρw)′(n)] = ∑ₙ (ρw)′(n) − (1 − ω)[(ρw)′(Nτ) − (ρw)′(0)]
@@ -1420,6 +2057,13 @@ end
 # prognostic `ValueBoundaryCondition` to the base at stage entry, so
 # `ρᴸ[halo] = 2v − ρᴸ[cell]` and the target perturbation is
 # `v − ρᴸ[cell] = (ρᴸ[halo] − ρᴸ[cell]) / 2`, read straight from the base field.
+# The loop's `(ρθ)′` is its pressure variable ϖ, which holds the moisture content
+# besides the perturbation of the thermodynamic density (Section 3b), and the end
+# of the stage takes that content off the boundary cell like any other. Its target
+# is therefore the prescribed perturbation plus the content the cell holds after
+# this substep (the content at the forcing interval the substep has reached),
+# so that the relaxed cell is the prescribed thermodynamic density once the
+# content comes off. The content is zero in dry air.
 # Relaxation factor `α ∈ (0, 1]` (default 0.5, via
 # `SplitExplicitTimeDiscretization(; open_boundary_relaxation = α)`). No-op on any
 # side without an active `NormalFlowBoundaryCondition` (periodic/walls/`nothing`
@@ -1428,51 +2072,68 @@ end
 @inline is_active_open_bc(bc) = (bc isa BoundaryCondition{<:NormalFlow}) && !(bc.condition isa Nothing)
 
 # Relax ρ′ and (ρθ)′ at the outermost open-boundary cell toward the prescribed
-# wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2.
+# wall value in a single kernel: target = v − cᴸ[iᴮ] = (cᴸ[iᴴ] − cᴸ[iᴮ]) / 2, plus
+# the content of the loop's (ρθ)′ there (`content_arguments` are those of `substep_content`).
 # `iᴮ` is the outermost interior cell index, `iᴴ` the adjacent halo cell index.
-@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, iᴮ, iᴴ, α)
+@kernel function _relax_open_boundary_x!(ρ′, ρθ′, ρᴸ, ρθᴸ, iᴮ, iᴴ, α, content_arguments)
     j, k = @index(Global, NTuple)
+    content = substep_content(iᴮ, j, k, content_arguments...)
     @inbounds begin
         ρ′[iᴮ, j, k]  += α * ((ρᴸ[iᴴ, j, k]  - ρᴸ[iᴮ, j, k])  / 2 - ρ′[iᴮ, j, k])
-        ρθ′[iᴮ, j, k] += α * ((ρθᴸ[iᴴ, j, k] - ρθᴸ[iᴮ, j, k]) / 2 - ρθ′[iᴮ, j, k])
+        ρθ′[iᴮ, j, k] += α * (((ρθᴸ[iᴴ, j, k] - ρθᴸ[iᴮ, j, k]) / 2 + content) - ρθ′[iᴮ, j, k])
     end
 end
 
-@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, jᴮ, jᴴ, α)
+@kernel function _relax_open_boundary_y!(ρ′, ρθ′, ρᴸ, ρθᴸ, jᴮ, jᴴ, α, content_arguments)
     i, k = @index(Global, NTuple)
+    content = substep_content(i, jᴮ, k, content_arguments...)
     @inbounds begin
         ρ′[i, jᴮ, k]  += α * ((ρᴸ[i, jᴴ, k]  - ρᴸ[i, jᴮ, k])  / 2 - ρ′[i, jᴮ, k])
-        ρθ′[i, jᴮ, k] += α * ((ρθᴸ[i, jᴴ, k] - ρθᴸ[i, jᴮ, k]) / 2 - ρθ′[i, jᴮ, k])
+        ρθ′[i, jᴮ, k] += α * (((ρθᴸ[i, jᴴ, k] - ρθᴸ[i, jᴮ, k]) / 2 + content) - ρθ′[i, jᴮ, k])
     end
 end
 
-function apply_open_boundary_relaxation!(substepper, model, grid, arch)
+# What the loop's pressure variable holds beyond the perturbation of the thermodynamic density with
+# `remaining_interval` of the stage's forcing interval still to run: the content the end of the
+# stage takes off (`_remove_moisture_content!`), less the ramp over the remaining interval. The
+# rate of that ramp, (ς − 1) Gρᵡ + ς Gᵂ, is the difference of the scaled and the thermodynamic
+# tendency, so the sensitivities are not evaluated again.
+@inline function substep_content(i, j, k, content, Gˢρᵡ, Gρᵡ, remaining_interval, grid, Λᴴ, dynamics,
+                                 Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, Δτ, ωˢ⁻)
+    ∇_ΛM = fast_content_divergence(i, j, k, grid, Λᴴ, dynamics, Σρu′, Σρv′, Σρw′, ρw′, ρu⁰, ρv⁰, ρw⁰, ρ𝐮ᴸ, ωˢ⁻)
+    return @inbounds content[i, j, k] - remaining_interval * (Gˢρᵡ[i, j, k] - Gρᵡ[i, j, k]) - Δτ * ∇_ΛM
+end
+
+# `n` substeps of the stage have run.
+function apply_open_boundary_relaxation!(substepper, model, grid, arch, stage, n)
     bcs_u = model.momentum.ρu.boundary_conditions
     bcs_v = model.momentum.ρv.boundary_conditions
+    west, east = is_active_open_bc(bcs_u.west), is_active_open_bc(bcs_u.east)
+    south, north = is_active_open_bc(bcs_v.south), is_active_open_bc(bcs_v.north)
+    west || east || south || north || return nothing
+
     Nx, Ny, _ = size(grid)
     α   = substepper.open_boundary_relaxation
     ρ′  = substepper.density_perturbation
     ρθ′ = substepper.density_potential_temperature_perturbation
     ρᴸ  = model.dynamics.dry_density
     ρθᴸ = thermodynamic_density(model.formulation)
-    if is_active_open_bc(bcs_u.west)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
-    end
-    if is_active_open_bc(bcs_u.east)
-        launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, Nx, Nx + 1, α)
-    end
-    if is_active_open_bc(bcs_v.south)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α)
-    end
-    if is_active_open_bc(bcs_v.north)
-        launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, Ny, Ny + 1, α)
-    end
+
+    # The forcing interval this substep has reached falls short of the stage's by this much.
+    (; Δτ, Gˢρᵡ, U⁰, forcing_interval) = stage
+    remaining_interval = forcing_interval - n * Δτ * substepper.thermodynamic_tendency_factor
+    Gρᵡ = model.timestepper.Gⁿ[thermodynamic_density_name(model.formulation)]
+    content_arguments = (substepper.stage_end_moisture_content, Gˢρᵡ, Gρᵡ, remaining_interval,
+                         fast_content_arguments(substepper, model, U⁰)..., Δτ, 1 - substepper.forward_weight)
+
+    west  && launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α, content_arguments)
+    east  && launch!(arch, grid, :yz, _relax_open_boundary_x!, ρ′, ρθ′, ρᴸ, ρθᴸ, Nx, Nx + 1, α, content_arguments)
+    south && launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, 1, 0, α, content_arguments)
+    north && launch!(arch, grid, :xz, _relax_open_boundary_y!, ρ′, ρθ′, ρᴸ, ρθᴸ, Ny, Ny + 1, α, content_arguments)
     return nothing
 end
 
-# Per-substep impenetrability enforcement on the wall-normal momentum
-# perturbations — the closed-wall companion of `apply_open_boundary_relaxation!`
-# above (which handles open lateral boundaries).
+# Zero normal perturbations at walls and prescribed-flow faces.
 
 @kernel function _zero_x_wall_face!(ρu′, iᶠ)
     j, k = @index(Global, NTuple)
@@ -1484,56 +2145,166 @@ end
     @inbounds ρv′[i, jᶠ, k] = 0
 end
 
-@inline is_impenetrable_wall(bc) = (bc isa BoundaryCondition{NormalFlow{Nothing}}) && (bc.condition isa Nothing)
-
 function enforce_wall_impenetrability!(substepper, model, grid, arch)
     TX, TY, _ = topology(grid)
     Nx, Ny, _ = size(grid)
     ρu′ = substepper.momentum_perturbation.u
     ρv′ = substepper.momentum_perturbation.v
-    bcs_u = model.momentum.ρu.boundary_conditions
-    bcs_v = model.momentum.ρv.boundary_conditions
+    # Auxiliary `nothing` BCs do not zero faces. Enforce zero perturbations explicitly
+    # to match the topology-aware divergence and hold prescribed flow in the stage-entry state.
     if TX === Bounded
-        is_impenetrable_wall(bcs_u.west) && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
-        is_impenetrable_wall(bcs_u.east) && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
+        launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
+        launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
     end
     if TY === Bounded
-        is_impenetrable_wall(bcs_v.south) && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
-        is_impenetrable_wall(bcs_v.north) && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
+        launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
+        launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
     end
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Advance the implicit half of the IMEX split for the thermodynamic perturbation over one
-substep: `(I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★`, solved on the θ predictor between Step B and Step C so
-the pressure solve and recovery act on a transport-consistent predictor. Coefficients read the
-frozen stage-entry state; the base-state part rides `Gˢρθ`
-(see `add_implicit_advection_tendency!`).
-"""
+# Implicit half of the IMEX split for the thermodynamic perturbation over one substep,
+# (I + Δτ Lⁱ) ρθ′★ⁿᵉʷ = ρθ′★, solved on the θ predictor between Step B and Step C so the pressure
+# solve and recovery act on a transport-consistent predictor. Coefficients read the frozen
+# stage-entry state; the base-state part rides Gˢρθ (see `add_implicit_advection_tendency!`).
 implicit_advection_substep!(model, substepper, advection, Δτ) = nothing
 
 function implicit_advection_substep!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
-    w = substepper.vertical_velocity_cache
-    ρᵈ = substepper.density_cache
-    implicit_step!(substepper.density_potential_temperature_predictor,
-                   model.timestepper.implicit_solver, nothing, nothing, nothing,
-                   model.clock, fields(model), Δτ, advection, (; w), ρᵈ)
+    ρθ′ = substepper.density_potential_temperature_predictor
+    solve!(ρθ′, substepper.implicit_advection_solver, ρθ′)
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
+# The (ρθ)′ implicit-advection system is the same on every substep of a stage — its coefficients depend only on
+# the frozen stage-entry w and ρᵈ caches and on Δτ — so it is factored once per stage (`factor_implicit_advection!`)
+# and each substep only substitutes. The factorization reproduces `implicit_step!` bitwise: it evaluates the
+# implicit solver's own coefficients with the arguments `implicit_step!` passes.
+factor_implicit_advection!(model, substepper, advection, Δτ) = nothing
 
-Advance the acoustic perturbation fields of `substepper` by one substep of size `stage.Δτ`.
-`stage` holds the loop-invariant quantities of the current RK3 stage: the substep size `Δτ`,
-the Crank–Nicolson weights `δτᵐ⁺` and `δτˢ⁻`, and the slow thermodynamic tendency `Gˢρᵡ`.
-Everything is passed explicitly so that the loop calling this can be traced by Reactant with
-no captured state; see [`acoustic_substep_loop!`](@ref).
-"""
-function acoustic_substep!(model, substepper, stage, advection)
+function factor_implicit_advection!(model, substepper, advection::AdaptiveImplicitVerticalAdvection, Δτ)
+    field = substepper.density_potential_temperature_predictor
+    args = implicit_step_solver_arguments(field, nothing, nothing, nothing, model.clock, fields(model),
+                                          Δτ, advection, substepper.vertical_velocity_cache, substepper.density_cache)
+    compute_factorization!(substepper.implicit_advection_solver, args...)
+    return nothing
+end
+
+# A factorized solver with the coefficients of the model's implicit solver (`implicit_diffusion_solver`)
+factorized_implicit_solver(grid) =
+    BatchedTridiagonalSolver(grid;
+                             lower_diagonal = VerticallyImplicitDiffusionLowerDiagonal(),
+                             diagonal       = VerticallyImplicitDiffusionDiagonal(),
+                             upper_diagonal = VerticallyImplicitDiffusionUpperDiagonal(),
+                             factorized = true)
+
+# The coefficient arguments `Oceananigans.TimeSteppers.implicit_step!` passes to `solve!`: the vertically
+# implicit closures (`nothing` for the substep's solve, which integrates advection alone), the advection
+# scheme with its velocity and density, and the boundary conditions of `field`.
+# TODO: this mirrors `implicit_step!`; an Oceananigans helper returning these arguments would remove the duplication.
+function implicit_step_solver_arguments(field, closure, closure_fields, tracer_index, clock, model_fields, Δt,
+                                        advection, w, density)
+    implicit_closure, implicit_closure_fields = implicit_step_closures(closure, closure_fields)
+    LX, LY, LZ = location(field)
+    bcs = field.boundary_conditions
+    return (implicit_closure, implicit_closure_fields, tracer_index, LX(), LY(), LZ(), Δt, clock, model_fields,
+            advection, w, density, bcs.top, bcs.bottom, bcs.immersed, field)
+end
+
+# The vertically implicit closures among `closure`, as `implicit_step!` selects them: `nothing` when there are none.
+function implicit_step_closures(closure, closure_fields)
+    implicit_closure, implicit_closure_fields = vertically_implicit_closures(closure, closure_fields)
+    return implicit_closure === () ? (nothing, nothing) : (implicit_closure, implicit_closure_fields)
+end
+
+# The per-stage implicit steps (scalars; momentum and the thermodynamic variable) solve up to this
+# many fields per column thread (`solve_tridiagonal_columns_in_place!`); 1 solves each field with a
+# kernel of its own. The limits are the number of scratch arrays (`implicit_step_scratch`, 4) and
+# the size of a GPU kernel's arguments, which each field of a batch adds to (CUDA allows 4 KiB,
+# and the model's fields, passed once, take much of that): lower it if a kernel fails to compile
+# with a formal-parameter-space overflow.
+const column_solve_batch_size = 3
+
+# `Oceananigans.TimeSteppers.implicit_step!` for several fields per column thread, same coefficients
+# and arithmetic; a request is `(field, tracer_index, advection, velocities)`. Invariants: no field's
+# coefficients may depend on another field of `requests`, and `Δt` must be in the grid's float type
+# (`kernel_time_step`) since it enters every coefficient of the sweep.
+function implicit_steps_in_place!(requests, implicit_solver::BatchedTridiagonalSolver, scratch,
+                                  closure, closure_fields, clock, model_fields, Δt, density)
+    implicit_closure, implicit_closure_fields = implicit_step_closures(closure, closure_fields)
+    shared = (; closure = implicit_closure, closure_fields = implicit_closure_fields,
+                Δt, clock, model_fields, density)
+
+    needed = filter(request -> needs_implicit_step(implicit_closure, request...), requests)
+    isempty(needed) && return nothing
+
+    batch_size = min(column_solve_batch_size, length(scratch))
+    one_by_one = batch_size == 1 || size(implicit_solver.grid, 3) < 2
+
+    for batch in Iterators.partition(needed, one_by_one ? 1 : batch_size)
+        fields = Tuple(first(request) for request in batch)
+        columns = Tuple(implicit_step_column(request...) for request in batch)
+        if one_by_one
+            args = implicit_step_arguments(shared, first(columns), first(fields))
+            ϕ = first(fields)
+            solve!(ϕ, implicit_solver, ϕ, args...)
+        else
+            solve_tridiagonal_columns_in_place!(fields, implicit_solver, scratch, implicit_step_arguments,
+                                                shared, columns)
+        end
+    end
+
+    return nothing
+end
+
+implicit_steps_in_place!(requests, ::Nothing, args...) = nothing
+
+needs_implicit_step(implicit_closure, field, tracer_index, advection, velocities) =
+    !isnothing(implicit_closure) || needs_implicit_solver(advection) || needs_implicit_solver(field.boundary_conditions)
+
+# What the coefficients of one field's implicit step take beyond the arguments common to a batch.
+function implicit_step_column(field, tracer_index, advection, velocities)
+    LX, LY, LZ = location(field)
+    bcs = field.boundary_conditions
+    w = isnothing(velocities) ? nothing : velocities.w
+    return (; tracer_index, ℓx = LX(), ℓy = LY(), ℓz = LZ(), advection, w,
+              top = bcs.top, bottom = bcs.bottom, immersed = bcs.immersed)
+end
+
+# The coefficient arguments `implicit_step!` passes to `solve!` (see `implicit_step_solver_arguments`),
+# from the arguments common to a batch and those of one field.
+@inline implicit_step_arguments(shared, column, ϕ) =
+    (shared.closure, shared.closure_fields, column.tracer_index, column.ℓx, column.ℓy, column.ℓz,
+     shared.Δt, shared.clock, shared.model_fields, column.advection, column.w, shared.density,
+     column.top, column.bottom, column.immersed, ϕ)
+
+# Scratch for the post-loop column sweeps: the implicit solver's own array plus the stored
+# factorization of the loop's (ρw)′ solver, free once the loop has run and recomputed before the
+# next one (`factor_vertical_solver!`).
+function implicit_step_scratch(substepper, implicit_solver)
+    solver = substepper.vertical_solver
+    return (implicit_solver.t, solver.factors.β, solver.t, solver.factors.a)
+end
+
+# The implicit (ρw)′ column system depends only on θᴸ, Cᴸ, δτᵐ⁺, the vertical damping and the
+# sponge, all fixed over a stage's substeps, so it is factored once per stage and each substep
+# only substitutes.
+function factor_vertical_solver!(substepper, grid, thermodynamic_constants, δτᵐ⁺)
+    FT = eltype(grid)
+    g = convert(FT, thermodynamic_constants.gravitational_acceleration)
+    ω = FT(substepper.forward_weight)
+    dᵐ⁺, _ = implicit_damping_factors(substepper.damping, ω, grid, FT)
+    args = (substepper.linearization_potential_temperature,
+            substepper.linearization_pressure_coefficient, g, δτᵐ⁺, dᵐ⁺,
+            substepper.sponge)
+    compute_factorization!(substepper.vertical_solver, args...)
+    return nothing
+end
+
+# Substep `n` of the stage, of size `stage.Δτ`. `stage` holds the loop-invariant quantities of the RK3
+# stage (Δτ, the Crank–Nicolson weights δτᵐ⁺ and δτˢ⁻, the slow thermodynamic tendency Gˢρᵡ, the
+# state U⁰ the stage starts from, the forcing interval it ends at); everything is passed explicitly so
+# Reactant can trace the calling loop with no captured state.
+function acoustic_substep!(model, substepper, stage, advection, n)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -1541,25 +2312,22 @@ function acoustic_substep!(model, substepper, stage, advection)
     g = convert(FT, constants.gravitational_acceleration)
     ω = FT(substepper.forward_weight)
     Gⁿ = model.timestepper.Gⁿ
-    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ) = stage
+    (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰) = stage
 
-    # Step A: explicit horizontal forward of (ρu)′, (ρv)′.
-    launch!(arch, grid, :xyz, _explicit_horizontal_step!,
-            substepper.momentum_perturbation.u,
-            substepper.momentum_perturbation.v,
-            grid, model.dynamics, Δτ,
-            substepper.density_potential_temperature_perturbation,
-            substepper.linearization_pressure_coefficient,
-            Gⁿ.ρu, Gⁿ.ρv)
+    # Step A: explicit horizontal forward of (ρu)′, (ρv)′, after the divergence damping of the
+    # substep before when that is fused into this step.
+    explicit_horizontal_step!(fused_divergence_damping(substepper.damping), substepper, model, Δτ)
 
-    fill_halo_regions!(substepper.momentum_perturbation.u)
-    fill_halo_regions!(substepper.momentum_perturbation.v)
+    # Distributed exchanges only (`fill_substep_halos!`), here and below: the kernels read no halos.
+    fill_substep_halos!(substepper.momentum_perturbation.u, model)
+    fill_substep_halos!(substepper.momentum_perturbation.v, model)
 
     # Impenetrability on the wall-normal momentum perturbations, before the
     # predictor takes their horizontal divergence (mass conservation).
     enforce_wall_impenetrability!(substepper, model, grid, arch)
 
-    # (old (ρθ)′ is stashed into ρθ′ˢ⁻ inside `_build_predictors!`, then halo-filled.)
+    # (old (ρθ)′ is stashed into ρθ′ˢ⁻ inside `_build_predictors!`; its halos are filled with
+    # those of the new (ρθ)′ after Step D, before the damping that reads them.)
 
     # Implicit-vertical-damping prefactors. When the damping strategy
     # is `ThermalDivergenceDamping(damp_vertical=true)`, the
@@ -1568,10 +2336,10 @@ function acoustic_substep!(model, substepper, stage, advection)
     # `dˢ⁻ = (1−ω)·α·Δz²` on the predictor RHS. Both reduce to
     # zero for `NoDivergenceDamping` or when the user opts out via
     # `damp_vertical=false`.
-    dᵐ⁺, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, grid, FT)
+    _, dˢ⁻ = implicit_damping_factors(substepper.damping, ω, grid, FT)
 
     # Step B: build predictors ρ′★, ρθ′★ (3D), then the (ρw)′ᵐ⁺ tridiag RHS (3D).
-    # `_build_predictors!` also stashes old (ρθ)′ into ρθ′ˢ⁻; halo-fill it for the damping.
+    # `_build_predictors!` also stashes old (ρθ)′ into ρθ′ˢ⁻.
     launch!(arch, grid, :xyz, _build_predictors!,
             substepper.density_predictor,
             substepper.density_potential_temperature_predictor,
@@ -1583,7 +2351,6 @@ function acoustic_substep!(model, substepper, stage, advection)
             grid, model.dynamics, Δτ, δτˢ⁻,
             Gⁿ.ρᵈ, Gˢρᵡ, substepper.thermodynamic_tendency_factor,
             substepper.linearization_potential_temperature)
-    fill_halo_regions!(substepper.previous_density_potential_temperature_perturbation)
 
     # Implicit half of the IMEX vertical-advection split for the thermodynamic
     # perturbation, applied to the predictor between Step B and Step C so the pressure
@@ -1607,12 +2374,9 @@ function acoustic_substep!(model, substepper, stage, advection)
     # Step C: implicit tridiag solve for (ρw)′ with implicit-half δτᵐ⁺
     # and (when active) implicit vertical damping prefactor `dᵐ⁺`.
     # `sponge` may add an implicit Rayleigh contribution on the
-    # diagonal in a layer below the lid.
-    solve!(substepper.momentum_perturbation.w, substepper.vertical_solver,
-           substepper.vertical_solver_source_term,
-           substepper.linearization_potential_temperature,
-           substepper.linearization_pressure_coefficient, g, δτᵐ⁺, dᵐ⁺,
-           substepper.sponge)
+    # diagonal in a layer below the lid. The system is the same on every substep
+    # of the stage, so it was factored once (`factor_vertical_solver!`).
+    solve!(substepper.momentum_perturbation.w, substepper.vertical_solver, substepper.vertical_solver_source_term)
 
     # Step D: post-solve recovery of ρ′, (ρθ)′ using new (ρw)′
     launch!(arch, grid, :xyz, _post_solve_recovery!,
@@ -1630,22 +2394,17 @@ function acoustic_substep!(model, substepper, stage, advection)
     # Per-substep open-boundary enforcement (issue #738): relax the outermost
     # open-boundary cell of ρ′, (ρθ)′ toward the prescribed wall value, before
     # the halo fill, so the boundary cell tracks the prescribed inflow state.
-    apply_open_boundary_relaxation!(substepper, model, grid, arch)
+    apply_open_boundary_relaxation!(substepper, model, grid, arch, stage, n)
 
-    fill_halo_regions!(substepper.density_perturbation)
-    fill_halo_regions!(substepper.density_potential_temperature_perturbation)
+    # ρ′ takes no fill: nothing in the loop reads its halos (see `initialize_stage_perturbations!`).
+    fill_substep_halos!(post_recovery_halo_fields(substepper.damping, substepper), model)
 
     # Step E: optional Klemp 2018 post-substep damping (no-op for
-    # `NoDivergenceDamping`).
-    apply_divergence_damping!(substepper.damping, substepper, grid, Δτ, constants)
-
-    fill_halo_regions!(substepper.momentum_perturbation.u)
-    fill_halo_regions!(substepper.momentum_perturbation.v)
-
-    # The damping kernel also writes the south/west wall face; re-enforce
-    # impenetrability so the next substep's divergence and the accumulated
-    # transport velocity see a closed wall (mass conservation).
-    enforce_wall_impenetrability!(substepper, model, grid, arch)
+    # `NoDivergenceDamping`). It writes (ρu)′, (ρv)′, including the south/west wall face, after
+    # this substep's last reader of them: the next substep's explicit step adds to them and then
+    # fills their halos and enforces impenetrability, and the last substep's are finished by
+    # `finish_horizontal_momentum_perturbations!`.
+    apply_divergence_damping!(separate_divergence_damping(substepper.damping), substepper, grid, Δτ, constants)
     # (time-averaged velocity accumulation is fused into `_post_solve_recovery!` above)
     return nothing
 end
@@ -1689,14 +2448,15 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     assemble_slow_vertical_momentum_tendency!(substepper, model, β_stage, Δτ)
 
     # Initialize perturbations with the SK08 rewind term so the substep
-    # effectively starts from U(t) = Uᴸ (the outer-step-start state).
-    initialize_stage_perturbations!(substepper, model, Uᴸ)
+    # effectively starts from U(t) = Uᴸ (the outer-step-start state). The slow thermodynamic
+    # tendency ramps over `forcing_interval` in the stage.
+    forcing_interval = Nτ * Δτ * substepper.thermodynamic_tendency_factor
+    initialize_stage_perturbations!(substepper, model, Uᴸ, forcing_interval)
 
-    Gⁿ = model.timestepper.Gⁿ
-    ρᵡ_name = thermodynamic_density_name(model.formulation)
-    Gˢρᵡ = getproperty(Gⁿ, ρᵡ_name)
-
-    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ)
+    Gˢρᵡ = substepper.scaled_thermodynamic_tendency
+    stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰ = Uᴸ, forcing_interval)
+    factor_implicit_advection!(model, substepper, advection, Δτ)
+    factor_vertical_solver!(substepper, grid, constants, δτᵐ⁺)
     acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
@@ -1705,6 +2465,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
     # Done BEFORE `_recover_full_state!` so we read the stage-entry
     # `model.momentum.*` (substep loop hasn't touched it) and stage-entry
     # `model.dynamics.dry_density` as the Uᴸ_stage reference.
+    remove_moisture_content!(substepper, model, Uᴸ, Δτ)
     finalize_time_averaged_velocity!(substepper, model, Nτ, Uᴸ)
 
     # Stage-end: recover the full prognostic state in-place. `model.dynamics.dry_density`,
@@ -1731,8 +2492,7 @@ function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_
 
     # Thread clock + model fields so time-dependent Open BCs on the recovered
     # prognostic state dispatch correctly in `getbc` (see #717).
-    fill_halo_regions!(model.dynamics.dry_density, boundary_condition_args(model)...)
-    fill_halo_regions!(ρᵡ, boundary_condition_args(model)...)
+    fill_halo_regions!((model.dynamics.dry_density, ρᵡ), boundary_condition_args(model)...)
     fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
     AtmosphereModels.compute_velocities!(model)
 
@@ -1741,12 +2501,17 @@ end
 
 Oceananigans.prognostic_state(substepper::AcousticSubstepper) =
     (time_averaged_velocities = Oceananigans.prognostic_state(substepper.time_averaged_velocities),
-     time_averaged_vertical_velocity_cache = Oceananigans.prognostic_state(substepper.time_averaged_vertical_velocity_cache))
+     time_averaged_vertical_velocity_cache = Oceananigans.prognostic_state(substepper.time_averaged_vertical_velocity_cache),
+     transport_density_tendency = Oceananigans.prognostic_state(substepper.transport_density_tendency))
 
 function Oceananigans.restore_prognostic_state!(restored::AcousticSubstepper, from)
     Oceananigans.restore_prognostic_state!(restored.time_averaged_velocities, from.time_averaged_velocities)
     Oceananigans.restore_prognostic_state!(restored.time_averaged_vertical_velocity_cache,
                                            from.time_averaged_vertical_velocity_cache)
+    # The pressure projection pairs the first stage's moisture tendencies with this divergence,
+    # which `cache_transport_velocity!` only refreshes after a tendency build.
+    hasproperty(from, :transport_density_tendency) &&
+        Oceananigans.restore_prognostic_state!(restored.transport_density_tendency, from.transport_density_tendency)
     return restored
 end
 
