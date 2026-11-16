@@ -421,7 +421,13 @@ end
         # In Float32 the residuals are those of rounding the prognostics: measured up to 1.5 ϵ KE⁰ in the kinetic
         # energy (0.014 J m⁻², where the mean flow loses 0.4 to 0.6 J m⁻² in a step) and 0.4 ϵ TKE⁰ in the TKE
         roundoff_KE = 8ϵ * KE⁰
-        roundoff_TKE = 8ϵ * TKE⁰
+        # The TKE also carries the rounding of each stage's update, cell by cell in the model's arithmetic: in every
+        # stage the start state, the increment and the recovered state are rounded, and the tridiagonal solve
+        # rounds its elimination and back substitution (about seven operations, each to ϵ of the TKE of the cell
+        # and of the terms the stage adds), so the allowance is 7 (s + 1) ϵ times the TKE and the sum of the
+        # magnitudes of the terms (35 ϵ for s = 4; measured up to 21 ϵ with the default dissipation)
+        roundoff_TKE = 7 * (s + 1) * ϵ * (TKE⁰ + sum(abs(b.Δρe) + abs(b.solved) + abs(b.exchange) + abs(b.dissipated) +
+                                        abs(b.shortfall) + abs(b.combination) for b in stages))
 
         for (i, b) in enumerate(stages)
             sscale = abs(b.ΔKE) + abs(b.Δhᵈ) + abs(b.dissipated)
