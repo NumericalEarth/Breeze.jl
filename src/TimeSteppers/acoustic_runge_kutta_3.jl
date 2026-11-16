@@ -202,7 +202,7 @@ scalar update, and `callbacks` with a `TendencyCallsite` fire again on them.
 function acoustic_stage!(model::AtmosphereModel, Δt, β, rounding, callbacks)
     ts = model.timestepper
     substepper = ts.substepper
-    U⁰ = stage_start_state(ts)
+    U⁰ = stage_start_state(ts, model)
 
     # Per-stage cache prep. The linearization coefficients are refreshed
     # to the current RK stage-entry state; the substep perturbations are

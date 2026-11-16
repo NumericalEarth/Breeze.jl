@@ -1496,13 +1496,14 @@ end
 ##### the last place are lost.
 #####
 ##### Neither sum needs to round what the loop integrates, because the loop integrates
-##### perturbations: the rounding errors, exact in floating point (`rounding_error`), are kept in
-##### a field per acoustic prognostic (the *residual*) and added back to the small quantity that
-##### is formed next from the rounded state:
+##### perturbations: the rounding errors, exact in floating point (`rounding_error`), are added
+##### back to the small quantity that is formed next from the rounded state. That of a stage's
+##### state is kept in a field per acoustic prognostic (the *residual*) until the next stage is
+##### assembled; that of a start state is evaluated from its two terms where the loop starts:
 #####
 #####   end of stage j:      Yⱼ = fl(Yⱼ₋₁ + U′),           residual = (Yⱼ₋₁ + U′) − Yⱼ
-#####   assembly of stage i: ΔYⱼ = (Yⱼ − Uⁿ) + residual,   U⁰ = fl(Uⁿ + Zᵢ),   residual = (Uⁿ + Zᵢ) − U⁰
-#####   start of stage i:    U′ = (U⁰ − Yᵢ₋₁) + residual
+#####   assembly of stage i: ΔYⱼ = (Yⱼ − Uⁿ) + residual
+#####   start of stage i:    U⁰ = fl(Uⁿ + Zᵢ),   U′ = (U⁰ − Yᵢ₋₁) + [(Uⁿ + Zᵢ) − U⁰]
 #####
 ##### The differences in parentheses are exact (the states are within a factor of two of each
 ##### other), so the increments and the loop's start state are those of exact sums to the
@@ -1510,10 +1511,11 @@ end
 ##### stepper's round-off treatment.
 #####
 
-# The residual fields of the start state of the current stage of `timestepper`, a `NamedTuple`
-# with keys `(ρ, ρᵡ, ρu, ρv, ρw)`, and the fields that take the residual of the state this stage
-# recovers. `nothing` where no residual is carried.
-start_state_residual(timestepper) = nothing
+# The residuals of the start state of the current stage of `timestepper`, a `NamedTuple` with keys
+# `(ρ, ρᵡ, ρu, ρv, ρw)` of arrays, which need not be stored: the residual of a sum can be evaluated
+# from its two terms where it is read. And the fields that take the residual of the state this
+# stage recovers. `nothing` where no residual is carried.
+start_state_residual(timestepper, model) = nothing
 recovered_state_residual(timestepper) = nothing
 
 @inline with_residual(x, ::Nothing, i, j, k) = x
@@ -2843,7 +2845,7 @@ function acoustic_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stag
     # effectively starts from U(t) = Uᴸ (the outer-step-start state). The slow thermodynamic
     # tendency ramps over `forcing_interval` in the stage.
     forcing_interval = Nτ * Δτ * substepper.thermodynamic_tendency_factor
-    initialize_stage_perturbations!(substepper, model, Uᴸ, forcing_interval, start_state_residual(model.timestepper))
+    initialize_stage_perturbations!(substepper, model, Uᴸ, forcing_interval, start_state_residual(model.timestepper, model))
 
     Gˢρᵡ = substepper.scaled_thermodynamic_tendency
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰ = Uᴸ, forcing_interval)

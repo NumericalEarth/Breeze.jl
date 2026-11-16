@@ -61,7 +61,7 @@ end
 
 # The state the current stage's acoustic integration starts from and its scalars update from:
 # the stored outer-step-start state, unless the stepper's stages start elsewhere.
-stage_start_state(timestepper) = timestepper.U⁰
+stage_start_state(timestepper, model) = timestepper.U⁰
 
 # Freeze the time-averaged transport velocity the moisture and tracer tendencies were just built
 # from: the next acoustic loop rebuilds it, and the implicit remainder in `scalar_substep!` (and
@@ -90,7 +90,7 @@ tendency_transport_velocities(model) =
 function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     grid = model.grid
     arch = grid.architecture
-    U⁰ = stage_start_state(model.timestepper)
+    U⁰ = stage_start_state(model.timestepper, model)
     Gⁿ = model.timestepper.Gⁿ
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
