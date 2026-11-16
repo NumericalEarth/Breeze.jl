@@ -131,6 +131,54 @@ end
     end
 end
 
+#####
+##### A passive tracer in an accelerating flow
+#####
+##### The recombined post-loop tendencies of a multirate infinitesimal step have to carry each
+##### stage's own mass flux with the tracer's own reconstruction. With the mass flux of the
+##### correction carried by another reconstruction (a first-order upwind one, in the correction's
+##### own direction), the two differ by a truncation error that does not decrease with the time
+##### step, and the tracer is first-order accurate in time wherever the flow accelerates: the
+##### differences below then halve with the time step instead of falling fourfold.
+#####
+
+# A tracer blob offset from a warm bubble that accelerates from rest. The dynamics are dry, so
+# the tracer is passive, and the substep size is the same for every Δt.
+function accelerating_bubble_tracer(; coefficients, Δt, stop_time = 16, substep = 1/64, N = 32)
+    L = 200N
+    grid = RectilinearGrid(default_arch, Float64; size = (N, N), halo = (5, 5), x = (-L / 2, L / 2), z = (0, L),
+                           topology = (Periodic, Flat, Bounded))
+    time_discretization = SplitExplicitTimeDiscretization(; substeps = round(Int, Δt / substep),
+                                                          forward_weight = 0.5, damping = NoDivergenceDamping())
+    dynamics = CompressibleDynamics(time_discretization; base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, advection = UpwindBiased(order = 5), tracers = :ρc,
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies = true))
+
+    blob(x, z, x₀) = cos(π * min(1, sqrt((x - x₀)^2 + (z - L / 3)^2) / (L / 4)) / 2)^2
+    ρᵢ(x, z) = adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, model.thermodynamic_constants)
+    set!(model; ρ = ρᵢ, θ = (x, z) -> 300 + 4 * blob(x, z, 0))
+    c = CenterField(grid)
+    set!(c, (x, z) -> blob(x, z, L / 8))
+    parent(model.tracers.ρc) .= parent(c) .* parent(total_density(model.dynamics))
+    update_state!(model)
+
+    for _ in 1:round(Int, stop_time / Δt)
+        time_step!(model, Δt)
+    end
+
+    return Array(interior(model.tracers.ρc)) ./ Array(interior(total_density(model.dynamics)))
+end
+
+@testset "Post-loop MIS tracers are second-order accurate in an accelerating flow [$coefficients]" for
+        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a)
+    c = map(Δt -> accelerating_bubble_tracer(; coefficients, Δt), (2, 1, 1/2))
+    differences = (maximum(abs, c[1] .- c[2]), maximum(abs, c[2] .- c[3]))
+    @test all(isfinite, differences)
+    @test log2(differences[1] / differences[2]) ≥ 1.7
+end
+
 @testset "TendencyCallsite callbacks edit the post-loop scalar tendencies once per stage [$timestepper]" for (timestepper, coefficients) in steppers[1:2]
     # A horizontally uniform rest state with a uniform tendency added by a callback: after one step
     # ρu and ρc each equal c Δt. Momentum takes the callback's pre-loop edit; the post-loop build
