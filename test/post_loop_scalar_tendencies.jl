@@ -135,12 +135,15 @@ end
     # A horizontally uniform rest state with a uniform tendency added by a callback: after one step
     # ρu and ρc each equal c Δt. Momentum takes the callback's pre-loop edit; the post-loop build
     # overwrites the scalar edit, so the callback fires again and ρc takes exactly one edit.
-    grid = RectilinearGrid(default_arch; size = (4, 4, 4), x = (0, 1000), y = (0, 1000), z = (0, 1000),
-                           topology = (Periodic, Periodic, Bounded))
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    # The grid, dynamics and advection are those of `uniform_scalar_bubble`, so that this model has
+    # its type (which includes the grid size) and the test compiles nothing new.
+    grid = RectilinearGrid(default_arch; size = (40, 48), halo = (5, 5), x = (-20e3, 20e3), z = (0, 12e3),
+                           topology = (Periodic, Flat, Bounded))
+    time_discretization = SplitExplicitTimeDiscretization(; damping = NoDivergenceDamping(), forward_weight = 0.65)
+    dynamics = CompressibleDynamics(time_discretization; base_pressure = 1e5, reference_potential_temperature = 300)
     timestepper_kwargs = (; post_loop_scalar_tendencies = true)
     isnothing(coefficients) || (timestepper_kwargs = merge(timestepper_kwargs, (; coefficients)))
-    model = AtmosphereModel(grid; dynamics, tracers = :ρc, timestepper, timestepper_kwargs)
+    model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc, timestepper, timestepper_kwargs)
     set!(model; ρ = model.dynamics.reference_state.density, θ = 300)
 
     c = 1e-3
