@@ -157,6 +157,14 @@ end
                                                                                 post_loop_scalar_tendencies=true)))
         end
 
+        # The first stage after the restart gives its loop the moisture tendencies of the last
+        # stage before it, which the time stepper keeps in fields of its own.
+        @testset "split-explicit, Wicker-Skamarock, post-loop scalar tendencies" begin
+            test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
+                                                          timestepper=:AcousticRungeKutta3,
+                                                          timestepper_kwargs=(; post_loop_scalar_tendencies=true)))
+        end
+
         @testset "non-equilibrium microphysics, two species" begin
             test_bitwise_restart(() -> compressible_model(FT; microphysics=OneMomentCloudMicrophysics()))
         end
