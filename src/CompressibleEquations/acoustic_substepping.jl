@@ -868,6 +868,12 @@ end
 # `finalize_time_averaged_velocity!` normalizes it (see Section 10).
 function remove_moisture_content!(substepper::AcousticSubstepper, model, U⁰, Δτ)
     grid = model.grid
+
+    # The divergence reads the horizontal sums across the east and north faces of each cell, which
+    # the substeps accumulate in the interior only: exchange them on distributed grids.
+    M = substepper.time_averaged_velocities
+    fill_substep_halos!((M.u, M.v), model)
+
     launch!(architecture(grid), grid, :xyz, _remove_moisture_content!,
             substepper.density_potential_temperature_perturbation,
             substepper.stage_end_moisture_content,
