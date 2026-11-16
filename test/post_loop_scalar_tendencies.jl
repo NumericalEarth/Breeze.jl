@@ -70,8 +70,8 @@ const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep,
     # applied, to a uniform mass fraction, which therefore stays uniform to round-off.
     # Wicker–Skamarock applies each stage's flux alone. A multirate infinitesimal step recombines
     # the stages' fluxes with its tableau (leaving them at weight one would be unstable: see the
-    # passive-scalar test below), and each stage's tendency takes an upwind flux of the mass
-    # fraction that makes the recombined mass flux the stage's own (`ScalarMassFluxCorrection`).
+    # passive-scalar test below), and each stage transports the scalars with the mass flux that
+    # makes the recombined one the stage's own (`ScalarMassFluxCorrection`).
     @test moisture_uniformity_error(post_loop) < 1e-12
     @test tracer_uniformity_error(post_loop) < 1e-12
 end

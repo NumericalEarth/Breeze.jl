@@ -1,5 +1,6 @@
 using Breeze.AtmosphereModels: thermodynamic_density_name, dynamics_prognostic_fields, SplitScalarTendencies,
-                               moisture_prognostic_name
+                               moisture_prognostic_name, microphysical_velocities, nonadvective_scalar_tendency,
+                               div_ρUc
 using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_divergence!,
                                     StageEntryForceRemainder, stage_entry_force_remainder,
                                     step_start_force_state, store_step_start_force_state!,
@@ -10,10 +11,9 @@ using Breeze.RoundingTreatments: rounding_error
 
 using Oceananigans: prognostic_fields, CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Advection: explicit_velocity_scaleᶜᶜᶠ
-using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: topology, Periodic, Flat
 using Oceananigans.Operators: Axᶠᶜᶜ, Ayᶜᶠᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, δxᶜᵃᵃ, δyᵃᶜᵃ
-using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Utils: launch!, KernelParameters, sum_of_velocities, AdaptiveVerticallyImplicitDiscretization
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -57,7 +57,8 @@ Fields
   one field, for the stage-entry fast thermodynamic tendency, sharing storage with the substepper; with `PostLoopScalarTendencies`
   one per prognostic the acoustic loop does not advance by continuity or momentum — the
   thermodynamic variable's, used as before the loop, and each scalar's, which the post-loop build
-  fills with its advective tendency (see `fast_tendency_scratch`).
+  fills with its advective tendency and the assembly leaves holding the scalar's slow tendency, for
+  the next stage's loop (see `fast_tendency_scratch` and `PredictedStageForcing`).
 - `stage`: the stage being integrated.
 - `next_stage`, `current_Δt`: the stage the next tendency evaluation feeds and the current outer step, which
   size the adaptive-implicit vertical-advection split (see `adaptive_advection_timestep`).
@@ -76,7 +77,7 @@ Fields
   (see `start_state_residual` in the acoustic substepper).
 - `fold_stage_increments`: whether the acoustic prognostics form their increments in the assembly
   of the next stage (see `stage_increment_source`).
-- `transport_mass_fluxes`: the weights, mass fluxes and limiter of the correction that makes the
+- `transport_mass_fluxes`: the weights and mass fluxes of the correction that makes the
   recombined post-loop scalar fluxes carry each stage's own mass flux, or `nothing` where the
   stages' fluxes need no correction (see `ScalarMassFluxCorrection`).
 - `scalar_tendencies`: when the moisture and tracer tendencies are built,
@@ -143,15 +144,19 @@ after each stage's own acoustic loop, with that loop's time-averaged transport v
 `PostLoopScalarTendencies`). Every stage then transports the scalars with the mass flux its own
 loop applied to the dry air, so a uniform mass fraction stays uniform to round-off with every
 coefficient set: the recombined tendencies of earlier stages carry those stages' mass fluxes, and
-each stage's tendency takes a first-order upwind flux of the stage-entry mass fraction that makes
-up the difference once the stages are recombined (see `ScalarMassFluxCorrection`). That needs a
-coefficient set whose `β` is diagonal or has no zero on its diagonal.
+each stage transports the scalars with its own mass flux plus the one that makes up the difference
+once the stages are recombined (see `ScalarMassFluxCorrection`). That needs a coefficient set whose
+`β` is diagonal or has no zero on its diagonal.
+
+The acoustic loop's pressure depends on the moisture and condensate tendencies, which are not
+built yet when a stage's loop starts. The loop takes those that the stage before built in their
+place (see `PredictedStageForcing`).
 
 `post_loop_scalar_tendencies = false` builds the scalar tendencies between stages instead, with
 the preceding loop's transport velocity, which does not keep a uniform mass fraction uniform. It
 needs less storage: the post-loop tendencies take a field for each moisture, microphysical and
 tracer variable and one for the thermodynamic variable, and, for every coefficient set but
-`:WickerSkamarock3`, three face fields for each stage after the second and one more field.
+`:WickerSkamarock3`, three face fields for each stage after the second.
 
 `Gⁿ` and `U⁰` are the tendency storage and the storage the first start states are formed from,
 allocated by default. Passing them shares the storage of another time stepper, as the
@@ -244,10 +249,9 @@ end
 
 # The correction of the scalars' recombined mass fluxes (see "Mass consistency of the recombined
 # scalar fluxes" below).
-struct ScalarMassFluxCorrection{W, F, L}
+struct ScalarMassFluxCorrection{W, F}
     weights :: W      # W = β⁻¹ diag(d) - I, the weight of each stage's mass flux in each stage's correction
     mass_fluxes :: F  # stages 3 to s: the part known so far of the correction's mass flux Rᵢ = Σⱼ Wᵢⱼ Fⱼ; the first holds F₁ through stage 2
-    limiter :: L      # scratch for the fraction of a cell's corrective outflow that the cell can supply
 end
 
 # `nothing` with pre-loop scalar tendencies, whose mass fluxes are those of the preceding loops
@@ -259,7 +263,7 @@ function transport_mass_flux_storage(::PostLoopScalarTendencies, grid, tableau)
     is_diagonal(tableau.β) && return nothing
     s = number_of_stages(tableau)
     mass_fluxes = ntuple(_ -> (u = XFaceField(grid), v = YFaceField(grid), w = ZFaceField(grid)), s - 2)
-    return ScalarMassFluxCorrection(mass_flux_correction_weights(tableau), mass_fluxes, CenterField(grid))
+    return ScalarMassFluxCorrection(mass_flux_correction_weights(tableau), mass_fluxes)
 end
 
 # W = β⁻¹ diag(d) - I by forward substitution. Its rows sum to zero, since Σⱼ βᵢⱼ = dᵢ.
@@ -1000,31 +1004,29 @@ end
 ##### diagonal, so a uniform mass fraction does not stay uniform, and the scalars are first-order
 ##### accurate in time wherever the mass flux changes during a step.
 #####
-##### Each stage's advective tendency therefore takes a second flux of the stage-entry mass
-##### fraction, -∇·(Rⱼ c̄ⱼ₋₁) with c̄ the first-order upwind value, whose mass flux
+##### Each stage therefore transports the scalars with the mass flux Fⱼ + Rⱼ,
 #####
-#####   Rⱼ = Σₖ Wⱼₖ Fₖ,   W = β⁻¹ diag(d) - I   (k ≤ j, since β is lower triangular)
+#####   Rⱼ = Σₖ Wⱼₖ Fₖ,   W = β⁻¹ diag(d) - I   (k ≤ j, since β is lower triangular),
 #####
-##### is the one for which the recombined fluxes carry the stage's own: Σⱼ βᵢⱼ (Fⱼ + Rⱼ) = dᵢ Fᵢ.
-##### Every stage then applies dᵢ Fᵢ to a uniform mass fraction exactly. The rows of W sum to
-##### zero, so Rⱼ is a combination of differences of the stages' mass fluxes, O(Δt) smaller than Fⱼ.
+##### for which the recombined fluxes carry the stage's own: Σⱼ βᵢⱼ (Fⱼ + Rⱼ) = dᵢ Fᵢ. Every stage
+##### then applies dᵢ Fᵢ to a uniform mass fraction exactly. The rows of W sum to zero, so Rⱼ is a
+##### combination of differences of the stages' mass fluxes, O(Δt) smaller than Fⱼ. Fⱼ + Rⱼ is the
+##### slow mass flux that the stages would recombine into the dry air's own, so with it the scalars
+##### have the order of accuracy of the slow method where the mass flux changes during a step.
+#####
+##### Both mass fluxes are carried by one reconstruction of the scalar: the advection operator
+##### reads the velocity whose mass flux is Fⱼ + Rⱼ (`MassConsistentVelocity`). A separate flux
+##### of Rⱼ with a reconstruction of its own, a first-order upwind one in its own direction say,
+##### would differ from the operator's by a truncation error that does not decrease with the time
+##### step, times Rⱼ: first-order accurate in time.
 #####
 ##### The correction is part of the slow tendency Sⱼ that the stages recombine, rather than an
 ##### addition to one stage's forcing, so that the scalars are still advanced by the slow method
 ##### alone: with a strong-stability-preserving coefficient set every stage remains a convex
-##### combination of forward-Euler steps (see `strong_stability_coefficient`). Added to a stage at
-##### weight one it would enter later stages through their increments with weights of either
-##### sign, and a species that a microphysical sink has emptied would go negative. It is in the
-##### advective tendency when the microphysical sources are built.
-#####
-##### A forward-Euler step of the bounded advection can leave a cell empty, so the correction's
-##### flux out of each cell is limited to what that step leaves there: scaled by
-#####
-#####   φ = min(1, max(0, c⁰ + Δτ (G + C)) / (Δτ V⁻¹ c Σ R⁺)),
-#####
-##### with Δτ the forward-Euler interval the sinks are budgeted over (`stage_time_step`), G and C
-##### the scalar's other tendencies and Σ R⁺ the correction's mass flux out of the cell. φ = 1
-##### wherever the mass fraction is uniform, so that stays exact.
+##### combination of forward-Euler steps (see `strong_stability_coefficient`), each a step of the
+##### scalar's own advection operator with the velocity of Fⱼ + Rⱼ. Added to a stage at weight one
+##### the correction would enter later stages through their increments with weights of either
+##### sign, and a species that a microphysical sink has emptied would go negative.
 #####
 ##### Fⱼ is the flux the tendencies were built with: the stage-entry total density times the loop's
 ##### transport velocity, of which adaptive implicit vertical advection leaves a fraction to the
@@ -1196,55 +1198,10 @@ end
     accumulate!(i, j, k, A, wᵏ, F)
 end
 
-# First-order upwind fluxes of `c` with the area-weighted mass flux `R`, each limited by its donor cell's `φ`.
-@inline donor_value(i, j, k, c, φ) = @inbounds φ[i, j, k] * c[i, j, k]
-
-@inline function upwind_mass_flux_x(i, j, k, grid, R, c, φ)
-    Rᶠ = correction_mass_flux(i, j, k, grid, R)
-    return ifelse(Rᶠ > 0, donor_value(i-1, j, k, c, φ), donor_value(i, j, k, c, φ)) * Rᶠ
-end
-
-@inline function upwind_mass_flux_y(i, j, k, grid, R, c, φ)
-    Rᶠ = correction_mass_flux(i, j, k, grid, R)
-    return ifelse(Rᶠ > 0, donor_value(i, j-1, k, c, φ), donor_value(i, j, k, c, φ)) * Rᶠ
-end
-
-@inline function upwind_mass_flux_z(i, j, k, grid, R, c, φ)
-    Rᶠ = correction_mass_flux(i, j, k, grid, R)
-    return ifelse(Rᶠ > 0, donor_value(i, j, k-1, c, φ), donor_value(i, j, k, c, φ)) * Rᶠ
-end
-
-# The mass flux out of a cell: R⁺ through its far faces plus R⁻ through its near ones, δ(R⁺) + |R|
-# in each direction.
-@inline outward_part(i, j, k, grid, R) = max(correction_mass_flux(i, j, k, grid, R), zero(grid))
-
-@inline outward_mass_flux(i, j, k, grid, R) =
-    δxᶜᵃᵃ(i, j, k, grid, outward_part, R.u) + abs(correction_mass_flux(i, j, k, grid, R.u)) +
-    δyᵃᶜᵃ(i, j, k, grid, outward_part, R.v) + abs(correction_mass_flux(i, j, k, grid, R.v)) +
-    δzᵃᵃᶜ(i, j, k, grid, outward_part, R.w) + abs(correction_mass_flux(i, j, k, grid, R.w))
-
-# φ: the fraction of a cell's corrective outflow over Δτ that the stage-entry content ρ c and the
-# scalar's other tendencies leave there to supply.
-@kernel function _compute_mass_flux_correction_limiter!(φ, grid, R, c, ρ, G, C, Δτ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        outflow = Δτ * V⁻¹ᶜᶜᶜ(i, j, k, grid) * c[i, j, k] * outward_mass_flux(i, j, k, grid, R)
-        available = max(zero(eltype(C)), ρ[i, j, k] * c[i, j, k] + Δτ * (G[i, j, k] + C[i, j, k]))
-        φ[i, j, k] = ifelse(outflow > available, available / outflow, one(eltype(C)))
-    end
-end
-
-@kernel function _add_mass_flux_correction!(C, grid, R, c, φ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds C[i, j, k] -= V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, upwind_mass_flux_x, R.u, c, φ) +
-                                                     δyᵃᶜᵃ(i, j, k, grid, upwind_mass_flux_y, R.v, c, φ) +
-                                                     δzᵃᵃᶜ(i, j, k, grid, upwind_mass_flux_z, R.w, c, φ))
-end
-
 # The post-loop build adds the non-advective part of each scalar's tendency to `Gⁿ` and writes the
 # advective part to the scalar's `fast_tendency` scratch (see `assemble_post_loop_stage_forcing!`),
-# with the stage's mass-flux correction where it has one: every stage but the first of a
-# coefficient set whose `β` is not diagonal.
+# transported with the stage's mass-flux correction where it has one: every stage but the first of
+# a coefficient set whose `β` is not diagonal.
 post_loop_scalar_tendency_kernel(ts::MultirateInfinitesimalStep, model) =
     post_loop_scalar_tendency_kernel(ts.transport_mass_fluxes, ts, model)
 
@@ -1253,38 +1210,78 @@ post_loop_scalar_tendency_kernel(::Nothing, ts, model) = SplitScalarTendencies(t
 function post_loop_scalar_tendency_kernel(correction, ts, model)
     split = SplitScalarTendencies(ts.fast_tendency)
     ts.stage[] == 1 && return split # R₁ = 0
-    grid = model.grid
-    Δτ = kernel_time_step(grid.architecture, grid, AtmosphereModels.stage_time_step(ts, model.clock))
-    return MassConsistentScalarTendencies(split, correction_mass_fluxes(correction, ts, model), correction.limiter,
-                                          total_density(model.dynamics), Δτ)
+    return MassConsistentScalarTendencies(split, correction_mass_fluxes(correction, ts, model))
 end
 
-# `SplitScalarTendencies` with the mass-flux correction added to each advected scalar's advective part.
-struct MassConsistentScalarTendencies{S, R, L, D, T}
-    split :: S      # the build of the two parts
+# `SplitScalarTendencies` with each scalar transported by the stage's mass flux plus its correction's.
+struct MassConsistentScalarTendencies{S, R}
+    split :: S      # where the two parts go
     mass_flux :: R  # Rᵢ, the mass flux of the stage's correction
-    limiter :: L    # scratch for φ
-    density :: D    # the total density the mass fractions were formed with
-    Δτ :: T         # the interval the correction's outflow is limited over
 end
 
-# `args` are the arguments of `AtmosphereModels.scalar_tendency`: the scalar's mass fraction comes
-# first and its advection scheme fifth.
-function AtmosphereModels.launch_scalar_tendency!(kernel::MassConsistentScalarTendencies, arch, grid, name, Gc, args)
-    AtmosphereModels.launch_scalar_tendency!(kernel.split, arch, grid, name, Gc, args)
+AtmosphereModels.launch_scalar_tendency!(kernel::MassConsistentScalarTendencies, arch, grid, name, Gc, args) =
+    launch!(arch, grid, :xyz, _add_mass_consistent_scalar_tendency!, Gc, kernel.split.advective_tendencies[name],
+            grid, kernel.mass_flux, args)
 
-    c, advection = args[1], args[5]
-    isnothing(advection) && return nothing
-
-    C = kernel.split.advective_tendencies[name]
-    R = kernel.mass_flux
-    φ = kernel.limiter
-    launch!(arch, grid, :xyz, _compute_mass_flux_correction_limiter!, φ, grid, R, c, kernel.density, Gc, C, kernel.Δτ)
-    fill_halo_regions!(φ)
-    launch!(arch, grid, :xyz, _add_mass_flux_correction!, C, grid, R, c, φ)
-
-    return nothing
+@kernel function _add_mass_consistent_scalar_tendency!(Gc, C, grid, R, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        C[i, j, k] = mass_consistent_advective_tendency(i, j, k, grid, R, args...)
+        Gc[i, j, k] += nonadvective_scalar_tendency(i, j, k, grid, args...)
+    end
 end
+
+# `AtmosphereModels.scalar_advective_tendency` with the mass flux `R` added to the one the
+# velocities carry. The arguments after `R` are those of `AtmosphereModels.scalar_tendency`.
+@inline function mass_consistent_advective_tendency(i, j, k, grid, R, c, id, name, c_forcing, advection, dynamics,
+                                                    formulation, constants, specific_prognostic_moisture, velocities,
+                                                    microphysics, microphysical_fields, args...)
+    Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
+    Uᵗ = sum_of_velocities(velocities, Uᵖ)
+    ρ = total_density(dynamics)
+    U = (u = MassConsistentVelocity(Val(:x), Uᵗ.u, R.u, ρ, grid, nothing),
+         v = MassConsistentVelocity(Val(:y), Uᵗ.v, R.v, ρ, grid, nothing),
+         w = MassConsistentVelocity(Val(:z), Uᵗ.w, R.w, ρ, grid, advection))
+    return - div_ρUc(i, j, k, grid, advection, ρ, U, c)
+end
+
+# One component of the velocity whose mass flux is that of `velocity` plus the area-weighted mass
+# flux `mass_flux` of a stage's correction, formed where the advection operator reads it, so the
+# operator carries both with one reconstruction of the scalar. The vertical component is the
+# explicitly transported one: the fraction of `velocity` that `advection` transports explicitly,
+# as the mass fluxes of the correction are (`scalar_mass_flux`), plus the correction's, which the
+# operator takes as it is (`explicit_velocity_scaleᶜᶜᶠ`).
+struct MassConsistentVelocity{D, U, R, P, G, A}
+    direction :: D
+    velocity :: U
+    mass_flux :: R
+    density :: P
+    grid :: G
+    advection :: A # the scheme whose explicit fraction scales the vertical velocity; `nothing` in the horizontal
+end
+
+Adapt.adapt_structure(to, u::MassConsistentVelocity) =
+    MassConsistentVelocity(u.direction, adapt(to, u.velocity), adapt(to, u.mass_flux), adapt(to, u.density),
+                           adapt(to, u.grid), adapt(to, u.advection))
+
+const MCV = MassConsistentVelocity
+
+@inline Base.getindex(u::MCV{Val{:x}}, i, j, k) =
+    @inbounds u.velocity[i, j, k] + correction_mass_flux(i, j, k, u.grid, u.mass_flux) /
+                                    (Axᶠᶜᶜ(i, j, k, u.grid) * ℑxᶠᵃᵃ(i, j, k, u.grid, u.density))
+
+@inline Base.getindex(v::MCV{Val{:y}}, i, j, k) =
+    @inbounds v.velocity[i, j, k] + correction_mass_flux(i, j, k, v.grid, v.mass_flux) /
+                                    (Ayᶜᶠᶜ(i, j, k, v.grid) * ℑyᵃᶠᵃ(i, j, k, v.grid, v.density))
+
+@inline Base.getindex(w::MCV{Val{:z}}, i, j, k) =
+    @inbounds explicit_vertical_fraction(i, j, k, w.grid, w.advection, w.velocity) * w.velocity[i, j, k] +
+              correction_mass_flux(i, j, k, w.grid, w.mass_flux) /
+              (Azᶜᶜᶠ(i, j, k, w.grid) * ℑzᵃᵃᶠ(i, j, k, w.grid, w.density))
+
+# The vertical component is already the explicitly transported velocity.
+@inline Oceananigans.Advection.explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, scheme, ::AdaptiveVerticallyImplicitDiscretization,
+                                                         ::MCV) = one(grid)
 
 # Assemble one field's start state and forcing, its tendency split into fast and slow parts by `split`.
 function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, name, split)
