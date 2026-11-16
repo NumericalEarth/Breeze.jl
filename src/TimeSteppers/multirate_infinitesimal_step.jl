@@ -1266,18 +1266,25 @@ Adapt.adapt_structure(to, u::MassConsistentVelocity) =
 
 const MCV = MassConsistentVelocity
 
+# The velocity that the area-weighted mass flux `R` is at density `ρᶠ` through the area `A`. Where
+# there is no mass there is no mass flux, and no velocity.
+@inline function mass_flux_velocity(R, A, ρᶠ)
+    Aρ = A * ρᶠ
+    return R / ifelse(Aρ == 0, one(Aρ), Aρ)
+end
+
 @inline Base.getindex(u::MCV{Val{:x}}, i, j, k) =
-    @inbounds u.velocity[i, j, k] + correction_mass_flux(i, j, k, u.grid, u.mass_flux) /
-                                    (Axᶠᶜᶜ(i, j, k, u.grid) * ℑxᶠᵃᵃ(i, j, k, u.grid, u.density))
+    @inbounds u.velocity[i, j, k] + mass_flux_velocity(correction_mass_flux(i, j, k, u.grid, u.mass_flux),
+                                                       Axᶠᶜᶜ(i, j, k, u.grid), ℑxᶠᵃᵃ(i, j, k, u.grid, u.density))
 
 @inline Base.getindex(v::MCV{Val{:y}}, i, j, k) =
-    @inbounds v.velocity[i, j, k] + correction_mass_flux(i, j, k, v.grid, v.mass_flux) /
-                                    (Ayᶜᶠᶜ(i, j, k, v.grid) * ℑyᵃᶠᵃ(i, j, k, v.grid, v.density))
+    @inbounds v.velocity[i, j, k] + mass_flux_velocity(correction_mass_flux(i, j, k, v.grid, v.mass_flux),
+                                                       Ayᶜᶠᶜ(i, j, k, v.grid), ℑyᵃᶠᵃ(i, j, k, v.grid, v.density))
 
 @inline Base.getindex(w::MCV{Val{:z}}, i, j, k) =
     @inbounds explicit_vertical_fraction(i, j, k, w.grid, w.advection, w.velocity) * w.velocity[i, j, k] +
-              correction_mass_flux(i, j, k, w.grid, w.mass_flux) /
-              (Azᶜᶜᶠ(i, j, k, w.grid) * ℑzᵃᵃᶠ(i, j, k, w.grid, w.density))
+              mass_flux_velocity(correction_mass_flux(i, j, k, w.grid, w.mass_flux),
+                                 Azᶜᶜᶠ(i, j, k, w.grid), ℑzᵃᵃᶠ(i, j, k, w.grid, w.density))
 
 # The vertical component is already the explicitly transported velocity.
 @inline Oceananigans.Advection.explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, scheme, ::AdaptiveVerticallyImplicitDiscretization,
