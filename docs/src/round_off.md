@@ -43,6 +43,16 @@ acoustic prognostics and its scalar updates are rounded with the chosen treatmen
 vertically-implicit solves, the pressure correction, and the acoustic perturbation updates stay
 round-to-nearest.
 
+The stages of a [`MultirateInfinitesimalStep`](@ref) start from and are forced with the increments
+``Y_j - U^n`` of earlier stages, so the rounding of an intermediate state would reach ``U^{n+1}``,
+recombined with weights of either sign. For the acoustic prognostics it does not: the acoustic loop
+integrates perturbations, so the rounding error of each intermediate sum (a stage's recovered state,
+the next stage's start state) is kept, exactly, and added back to the small quantity formed next
+from the rounded state (the increment, the perturbation the loop starts from). Only the last
+stage's recovery rounds, with the chosen treatment, as for [`AcousticRungeKutta3`](@ref). The
+moisture, microphysical and tracer fields take the chosen treatment in every stage whose increment
+a later stage reuses.
+
 Stochastic rounding works in any precision; in `Float64` it is supported but rarely useful, since
 increments are resolved. The default leaves `Float64` and `Float32` runs unchanged.
 

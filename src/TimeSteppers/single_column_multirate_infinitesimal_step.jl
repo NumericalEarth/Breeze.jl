@@ -83,8 +83,13 @@ function single_column_multirate_stage!(model, Δt, dᵢ)
     prognostic = prognostic_fields(model)
     thermodynamic_name = thermodynamic_density_name(model.formulation)
 
-    for (name, u, u⁰, G) in zip(keys(prognostic), prognostic, U⁰, Gⁿ)
-        launch!(arch, grid, :xyz, _rk3_substep!, u, u⁰, G, kernel_Δt)
+    # Every prognostic is a slow variable here, so each takes the round-off treatment that the
+    # scalars take in the stage with acoustic substepping (see `stage_rounding`).
+    rounding = stage_rounding(ts, ts.stage[])
+
+    for (field_number, (name, u, u⁰, G)) in enumerate(zip(keys(prognostic), prognostic, U⁰, Gⁿ))
+        key = rounding_key(rounding, model.clock.iteration, model.clock.stage, field_number)
+        launch_rk3_substep!(rounding, arch, grid, u, u⁰, G, kernel_Δt, key)
 
         skip_vertical_diffusion(model, name) && continue
         name === thermodynamic_name && continue

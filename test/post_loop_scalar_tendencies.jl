@@ -44,7 +44,7 @@ function tracer_uniformity_error(model)
     return maximum(abs, c .- c₀) / c₀
 end
 
-const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep, :MIS3C), (:MultirateInfinitesimalStep, :TVDMISB))
+const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep, :TVDMISB))
 
 @testset "Post-loop scalar tendencies keep a uniform mass fraction uniform [$timestepper, $coefficients]" for (timestepper, coefficients) in steppers
     Δt = 10
@@ -131,7 +131,7 @@ function advected_blob_growth(; coefficients, advection, Δt, post_loop_scalar_t
 end
 
 @testset "Post-loop MIS advection does not amplify a passive scalar [$coefficients, Courant number $courant]" for
-        coefficients in (:SSPMIS43, :TVDMISB, :MIS3C, :MIS4a), courant in (0.5, 1.0)
+        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a), courant in (0.5, 1.0)
     for advection in (WENO(order = 5), WENO(order = 5, bounds = (0, 1)))
         growth = advected_blob_growth(; coefficients, advection, Δt = courant * 200 / 20)
         @test growth ≤ 1 + 1e-3
@@ -199,7 +199,7 @@ end
     model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
                             closure = ScalarDiffusivity(ν = 10, κ = 10), forcing = (; ρc = ρc_forcing),
                             timestepper = :MultirateInfinitesimalStep,
-                            timestepper_kwargs = (; coefficients = :MIS3C, post_loop_scalar_tendencies = true))
+                            timestepper_kwargs = (; coefficients = :TVDMISB, post_loop_scalar_tendencies = true))
     set!(model; θ = θ_bubble, qᵛ = (x, z) -> q₀ * exp(-((x / 4e3)^2 + (z / 2e3)^2)),
          ρ = HydrostaticallyBalancedDensity(), u = 5)
     set!(model.tracers.ρc, (x, z) -> c₀ * exp(-((x / 3e3)^2 + ((z - 2e3) / 2e3)^2)))
@@ -263,7 +263,7 @@ function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correct
     model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
                             microphysics = OneMomentCloudMicrophysics(; negative_moisture_correction),
                             timestepper = :MultirateInfinitesimalStep,
-                            timestepper_kwargs = (; coefficients = :MIS3C, post_loop_scalar_tendencies))
+                            timestepper_kwargs = (; coefficients = :TVDMISB, post_loop_scalar_tendencies))
     constants = model.thermodynamic_constants
     set!(model; θ = θ_bubble, qᵗ = 0.018, ρ = (x, z) -> adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, constants),
                 u = (x, z) -> 15 * sin(2π * z / 8e3), w = (x, z) -> 4 * sin(2π * x / 16e3))
@@ -303,4 +303,69 @@ end
             @test maximum(abs, folded[name] .- stored[name]) ≤ 100 * eps(scale)
         end
     end
+end
+
+#####
+##### Microphysical sinks are budgeted against the advection of the same stage
+#####
+##### The post-loop build keeps each scalar's advective tendency apart from `Gⁿ`, which holds no
+##### advection when the microphysical sources are added. A sink budgeted against the stage-start
+##### state and `Gⁿ` alone can then remove what advection removes too, and the two together leave
+##### a species negative where neither does alone: at the edge of a cloud that the wind carries
+##### into dry air, cloud evaporation takes all the cloud that advection is also carrying away.
+#####
+
+using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics
+using CloudMicrophysics.Parameters: CloudIce, CloudLiquid
+
+# The moist bubble of the positivity tests (multirate_infinitesimal_step.jl,
+# bulk_microphysics_positivity.jl), carried by a 20 m s⁻¹ wind: bounded advection of every
+# scalar, no repair of negative densities, and strong-stability-preserving coefficients.
+function advected_cloud_extrema(microphysics; Δt = 10, Nt = 120)
+    FT = Float64
+    grid = RectilinearGrid(default_arch, FT; size = (32, 24), halo = (5, 5),
+                           x = (-10e3, 10e3), z = (0, 12e3), topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5,
+                                    standard_pressure = 1e5, reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, microphysics, momentum_advection = WENO(order=5),
+                            scalar_advection = WENO(order=5, bounds=(0.0, 1e30)),
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients = :SSPMIS43, post_loop_scalar_tendencies = true))
+
+    constants = model.thermodynamic_constants
+    θᵢ(x, z) = 300 + 3 * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2
+    ρᵢ(x, z) = adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, constants)
+    set!(model; ρ = ρᵢ, θ = θᵢ, qᵗ = 0.012, u = 20)
+
+    prognostics = prognostic_fields(model)
+    names = filter(name -> startswith(string(name), "ρq") || startswith(string(name), "ρn") ||
+                           name === :ρbᶠ, keys(prognostics))
+    minima = Dict(name => Inf for name in names)
+    maxima = Dict(name => -Inf for name in names)
+
+    for _ in 1:Nt
+        time_step!(model, Δt)
+        for name in names
+            minima[name] = min(minima[name], minimum(prognostics[name]))
+            maxima[name] = max(maxima[name], maximum(prognostics[name]))
+        end
+    end
+
+    return minima, maxima
+end
+
+@testset "Post-loop advection counts against the microphysical sink budgets [$label]" for (label, microphysics) in
+        (("P3", PredictedParticlePropertiesMicrophysics(Float64; negative_moisture_correction = nothing)),
+         ("1M", OneMomentCloudMicrophysics(Float64; negative_moisture_correction = nothing,
+                                           cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(Float64), CloudIce(Float64)))))
+    minima, maxima = advected_cloud_extrema(microphysics)
+
+    # Cloud, rain and ice form and are carried through dry air...
+    @test all(maxima[name] > 0 for name in keys(maxima))
+
+    # ...and nothing goes negative, beyond the roundoff of the bounded advection of fields whose
+    # neighbouring cells are many orders of magnitude apart (see bulk_microphysics_positivity.jl).
+    # Budgeted without the advective tendency, P3 leaves cloud liquid at -4e-7 kg m⁻³ and the
+    # one-moment scheme rain at -2e-4 kg m⁻³, 4% of its maximum.
+    @test all(minima[name] ≥ -eps(Float64) * maxima[name] for name in keys(minima))
 end

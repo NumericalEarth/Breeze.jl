@@ -195,6 +195,17 @@ adiabatic_twin_dynamics(dynamics, time_stepping) = dynamics
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
+Return the name of the time stepper for the adiabatic-balance twin and the keyword arguments that
+select its scheme, given the production `timestepper` and the twin's dynamics. The fallback is the
+default time stepper of `twin_dynamics`. A twin that keeps split-explicit dynamics reuses the
+production model's own acoustic time stepper instead, so that `time_stepping = nothing` balances
+with the scheme that then integrates the model.
+"""
+adiabatic_twin_timestepper(timestepper, twin_dynamics) = default_timestepper(twin_dynamics), NamedTuple()
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
 Build a stripped adiabatic twin of `model` that SHARES all field memory (momentum, velocities,
 densities, ρθ/ρs, moisture, aerosol number, tracers, temperature, pressure solver, dynamics fields)
 and steps it in place. Every retained prognostic scalar is rewrapped with its surface fluxes stripped
@@ -202,7 +213,7 @@ to no-flux (see [`adiabatic_scalar_bcs`](@ref)), sharing the production data so 
 reallocated. Prognostic aerosol number is carried as a passive tracer: activation and sedimentation
 are removed, while reversible transport preserves `nᵃ = ρnᵃ / ρ` as the balance adjusts density.
 The twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per
-`balancer.time_stepping`); microphysics, closure, the implicit diffusion solver, the sponge, and
+`balancer.time_stepping`) and its time stepper from [`adiabatic_twin_timestepper`](@ref); microphysics, closure, the implicit diffusion solver, the sponge, and
 forcing are removed; the time stepper's `Gⁿ`/`U⁰` tendency storage *aliases* the production stepper's
 same-named arrays (moisture key re-mapped from the microphysics name, e.g. `:ρqᵉ`, to the
 moistureless `:ρqᵛ`); and a fresh `Clock` is used so the balance's clock reset does not touch the
@@ -261,8 +272,9 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
     U⁰ = NamedTuple{twin_names}(model.timestepper.U⁰[remap(n)] for n in twin_names)
     # No implicit_solver: vertically-implicit diffusion is irreversible (it amplifies on the −Δt
     # step), and the closure is stripped below — the excursion must be adiabatic.
-    twin_timestepper = TimeStepper(default_timestepper(twin_dynamics), grid, twin_prognostic;
-                                   dynamics = twin_dynamics, Gⁿ, U⁰, implicit_solver = nothing)
+    twin_timestepper_name, scheme_kwargs = adiabatic_twin_timestepper(model.timestepper, twin_dynamics)
+    twin_timestepper = TimeStepper(twin_timestepper_name, grid, twin_prognostic;
+                                   dynamics = twin_dynamics, Gⁿ, U⁰, implicit_solver = nothing, scheme_kwargs...)
 
     # Advection schemes are immutable and shared; just re-key the moisture scheme and drop precip.
     twin_scalar_names = (:ρθ, twin_moisture_name, keys(twin_tracers)...)

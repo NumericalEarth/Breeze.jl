@@ -37,6 +37,7 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 - `dynamics`: Dynamics formulation. `nothing` defaults to `AnelasticDynamics`.
   Pass a `CompressibleDynamics` instance for compressible formulations.
 - `advection`: Advection scheme (default: `WENO(order=5)`)
+- `timestepper`: Time stepper, as for `AtmosphereModel` (default: `nothing`, the default of `dynamics`)
 - `closure`: Turbulence closure (default: `nothing`)
 - `microphysics`: Microphysics (default: `nothing`)
 - `topology`: Grid topology tuple (default: `(Periodic, Periodic, Bounded)`).
@@ -62,6 +63,7 @@ function convective_boundary_layer(arch = CPU();
                                    float_type = Float32,
                                    Nx = 64, Ny = 64, Nz = 64,
                                    dynamics = nothing,
+                                   timestepper = nothing,
                                    advection = WENO(order=5),
                                    closure = nothing,
                                    microphysics = nothing,
@@ -165,6 +167,7 @@ function convective_boundary_layer(arch = CPU();
     if simplified
         model = AtmosphereModel(grid;
             dynamics,
+            timestepper,
             advection,
             closure,
             coriolis,
@@ -188,6 +191,7 @@ function convective_boundary_layer(arch = CPU();
 
         model = AtmosphereModel(grid;
             dynamics,
+            timestepper,
             advection,
             closure,
             coriolis,

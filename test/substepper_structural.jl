@@ -24,7 +24,7 @@ using Breeze.CompressibleEquations: AcousticSubstepper,
                                     AcousticTridiagUpper,
                                     freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!
-using Breeze.TimeSteppers: acoustic_rk3_substep!, store_initial_state!, cache_transport_velocity!
+using Breeze.TimeSteppers: acoustic_stage!, store_initial_state!, cache_transport_velocity!
 
 using Oceananigans
 using Oceananigans.Grids: ZDirection
@@ -49,7 +49,7 @@ const CPD_STR = 1005.0
 @inline mass_flux_y(i, j, k, grid, ρ, v) = ℑyᵃᶠᵃ(i, j, k, grid, ρ) * @inbounds v[i, j, k]
 @inline mass_flux_z(i, j, k, grid, ρ, w) = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * @inbounds w[i, j, k]
 
-function _build_str_model(arch; ω = 0.55, substeps = nothing, damping = NoDivergenceDamping())
+function _build_str_model(arch; ω = 0.55, substeps = nothing, damping = NoDivergenceDamping(), model_kwargs...)
     grid = RectilinearGrid(arch;
                            size = (8, 8, NZ_STR), halo = (5, 5, 5),
                            x = (0, 100e3), y = (0, 100e3), z = (0, Lz_STR),
@@ -61,7 +61,8 @@ function _build_str_model(arch; ω = 0.55, substeps = nothing, damping = NoDiver
                                base_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
-                                  thermodynamic_constants = constants)
+                                  thermodynamic_constants = constants,
+                                  model_kwargs...)
 end
 
 function _set_str_rest!(model)
@@ -608,7 +609,8 @@ end
 
 @testset "S10 — Transport-average mass flux matches the dry-density update (default ω = 0.65, $(nameof(typeof(damping))))" for damping in
         (NoDivergenceDamping(), ThermalDivergenceDamping(; coefficient = 0.1))
-    model = _build_str_model(default_arch; ω = 0.65, substeps = 6, damping)
+    # The stages below are run by hand with the Wicker–Skamarock stage fractions.
+    model = _build_str_model(default_arch; ω = 0.65, substeps = 6, damping, timestepper = :AcousticRungeKutta3)
     _set_str_rest!(model)
 
     ρθ_field = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
@@ -631,7 +633,7 @@ end
     freeze_linearization_state!(ts.substepper, model)
     ρᵈ⁰ = CenterField(grid)
     parent(ρᵈ⁰) .= parent(ρᵈ)
-    acoustic_rk3_substep!(model, Δt, ts.β₁)
+    acoustic_stage!(model, Δt, ts.β₁, RoundToNearest(), ())
 
     residual₁, Δρᵈ₁ = stage_mass_flux_residual(model, ρᵈ⁰, ρᵈ⁰, ts.β₁, Δt)
     @test Δρᵈ₁ > 0
@@ -642,7 +644,7 @@ end
     cache_transport_velocity!(model)
     ρᵈᴸ = CenterField(grid)
     parent(ρᵈᴸ) .= parent(ρᵈ)
-    acoustic_rk3_substep!(model, Δt, ts.β₂)
+    acoustic_stage!(model, Δt, ts.β₂, RoundToNearest(), ())
 
     residual₂, Δρᵈ₂ = stage_mass_flux_residual(model, ρᵈᴸ, ρᵈ⁰, ts.β₂, Δt)
     @test Δρᵈ₂ > 0

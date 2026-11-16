@@ -61,7 +61,7 @@ stage_fractions(::WickerSkamarock3) = (1//3, 1//2, 1//1)
 $(TYPEDEF)
 
 Abstract supertype for the choice of how acoustic substeps are distributed
-across the three Wicker–Skamarock RK3 stages.
+across the stages of the outer scheme, each of which covers a fraction ``β`` of the outer step.
 
 Concrete subtypes:
 
@@ -82,7 +82,7 @@ abstract type AcousticSubstepDistribution end
 """
 $(TYPEDEF)
 
-Acoustic substep distribution where each WS-RK3 stage independently covers its
+Acoustic substep distribution where each stage of the outer scheme independently covers its
 interval ``β_\\mathrm{stage} Δt`` with ``Nτ = ⌈β_\\mathrm{stage} N⌉`` substeps of
 size ``Δτ = β_\\mathrm{stage} Δt / Nτ``. The count is proportional to the stage
 fraction and the size is fitted so the substeps exactly tile each stage — exact

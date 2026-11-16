@@ -29,7 +29,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
+                                    implicit_damping_factors, prepare_acoustic_cache!, run_acoustic_substeps!,
                                     factor_vertical_solver!,
                                     solve_tridiagonal_columns_in_place!
 using Breeze.AtmosphereModels: SlowDynamics,
@@ -384,8 +384,7 @@ for arch in arches
         grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
-        model = AtmosphereModel(grid;
-                                dynamics)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
 
         @test model.timestepper isa AcousticRungeKutta3
         @test model.timestepper.substepper isa AcousticSubstepper
@@ -396,7 +395,7 @@ for arch in arches
     end
 
     #####
-    ##### Test that default time stepper for split-explicit is AcousticRungeKutta3 (WS-RK3)
+    ##### Test that the default time stepper for split-explicit is MultirateInfinitesimalStep (SSPMIS43)
     #####
 
     @testset "Default time stepper for SplitExplicitTimeDiscretization [$(arch), $(FT)]" for FT in as_test_float_types(arch)
@@ -407,7 +406,7 @@ for arch in arches
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
         model = AtmosphereModel(grid; dynamics)
 
-        @test model.timestepper isa AcousticRungeKutta3
+        @test model.timestepper isa MultirateInfinitesimalStep
         Oceananigans.defaults.FloatType = old_FT
     end
 
@@ -475,7 +474,7 @@ for arch in arches
         stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ, U⁰ = model.timestepper.U⁰,
                  forcing_interval = 2Δτ)
         factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
-        acoustic_substep_loop!(2, model, substepper, stage, nothing)
+        run_acoustic_substeps!(2, model, substepper, stage, nothing)
 
         for field in (substepper.density_perturbation,
                       substepper.density_potential_temperature_perturbation,

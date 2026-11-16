@@ -609,6 +609,8 @@ struct P3ProcessProps{FT}
     qⁱ_total :: FT
     nⁱ :: FT
     nⁱ_diagnostic :: FT
+    nⁱ_minimum_per_mass :: FT  # fewest ice particles per unit ice mass: the lower λ bound [1/kg]
+    nⁱ_maximum_per_mass :: FT  # most ice particles per unit ice mass: the upper λ bound [1/kg]
     ρ_mean :: FT
     Nᶜˡ :: FT
     λʳ :: FT
@@ -936,8 +938,11 @@ end
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     ρ_mean = ice_mean_density(p3.ice.bulk, ice.prep)
+    nⁱ_minimum_per_mass = minimum_ice_number_per_mass(p3.ice.lambda_limiter, ice.prep, ice.qⁱ_total)
+    nⁱ_maximum_per_mass = maximum_ice_number_per_mass(p3.ice.lambda_limiter, ice.prep, ice.qⁱ_total)
     return P3ProcessProps{FT}(ice.qᶠ, ice.bᶠ, ice.Fᶠ, ice.Fˡ, ice.ρᶠ,
-                              ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, ρ_mean,
+                              ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, nⁱ_minimum_per_mass, nⁱ_maximum_per_mass,
+                              ρ_mean,
                               cloud.Nᶜˡ, λʳ)
 end
 

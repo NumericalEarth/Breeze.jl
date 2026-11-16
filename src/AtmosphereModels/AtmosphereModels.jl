@@ -79,6 +79,8 @@ export
     stage_starts_from_initial_state,
     initial_state_fields,
     stage_time_step,
+    separate_stage_tendencies,
+    accumulated_tendency,
     stage_interval_is_known,
     stage_remainder,
     patankar_fraction,

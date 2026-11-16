@@ -158,14 +158,8 @@ acoustic_prognostic_names(model) = tuple(keys(dynamics_prognostic_fields(model.d
                                          keys(model.momentum)...,
                                          thermodynamic_density_name(model.formulation))
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The prognostic fields `scalar_substep!` advances — moisture, the microphysical prognostics and
-the tracers: every prognostic the acoustic substep loop does not.
-"""
-scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_names(model),
-                                        keys(prognostic_fields(model)))
+# The prognostics `scalar_substep!` advances: every one the acoustic substep loop does not.
+scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_names(model), keys(prognostic_fields(model)))
 
 #####
 ##### When the moisture and tracer tendencies are built: before or after the stage's acoustic loop
@@ -206,22 +200,10 @@ scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_nam
 #####     fraction was scaled by.
 #####
 
-"""
-$(TYPEDEF)
-
-Build the moisture and tracer tendencies in `update_state!`, between stages, with the
-preceding acoustic loop's time-averaged transport velocity (the default).
-"""
+# Scalar tendencies are built in `update_state!`, between stages (the default).
 struct PreLoopScalarTendencies end
 
-"""
-$(TYPEDEF)
-
-Rebuild the moisture and tracer tendencies after each stage's own acoustic loop, with that
-loop's time-averaged transport velocity, so their mass fluxes are consistent with the dry-mass
-flux continuity applied (issue #1089). Select it with
-`timestepper_kwargs = (; post_loop_scalar_tendencies = true)`.
-"""
+# Scalar tendencies are rebuilt after each stage's own acoustic loop.
 struct PostLoopScalarTendencies end
 
 scalar_tendency_timing(post_loop_scalar_tendencies::Bool) =
@@ -231,13 +213,8 @@ scalar_tendency_timing(post_loop_scalar_tendencies::Bool) =
 scalar_tendencies_in_update_state(::PreLoopScalarTendencies) = true
 scalar_tendencies_in_update_state(::PostLoopScalarTendencies) = false
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Prepare the scalar tendencies for the stage-entry sources added before the acoustic loop. With
-`PostLoopScalarTendencies`, zero them: `update_state!` left no tendency there, and the flux
-boundary conditions and closure sources about to be added are what the post-loop build adds to.
-"""
+# With `PostLoopScalarTendencies`, zero the scalar tendencies: the stage-entry sources are added to
+# them before the loop, and the post-loop build adds to those.
 prepare_scalar_tendencies!(::PreLoopScalarTendencies, model) = nothing
 
 function prepare_scalar_tendencies!(::PostLoopScalarTendencies, model)
@@ -248,18 +225,8 @@ function prepare_scalar_tendencies!(::PostLoopScalarTendencies, model)
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-With `PostLoopScalarTendencies`, build the moisture and tracer tendencies after the stage's
-acoustic loop with its time-averaged transport velocity, adding them to the stage-entry sources
-(flux boundary conditions and closure sources) built before the loop; fire the `TendencyCallsite`
-callbacks again on the result; assemble the scalars' stage forcing from it
-(`assemble_post_loop_stage_forcing!`, a no-op for Wicker–Skamarock RK3); and freeze the transport
-velocity for the implicit remainder of the scalar update. The tracers are converted to specific
-values around the build, as in `update_state!`, with the stage-entry total density that the
-moisture flux is weighted by.
-"""
+# Build the scalar tendencies with the loop's time-averaged transport velocity, fire the
+# `TendencyCallsite` callbacks again, assemble the stage forcing and freeze the transport velocity.
 compute_post_loop_scalar_tendencies!(::PreLoopScalarTendencies, model, Δt, callbacks) = nothing
 
 function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model, Δt, callbacks)
@@ -277,14 +244,7 @@ function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model,
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The `compute_scalar_tendencies!` kernel of the post-loop scalar tendency build: by default
-`add_scalar_tendency!`, the full tendency added to the stage-entry sources in `Gⁿ`.
-`MultirateInfinitesimalStep` builds a scalar's advection and its sources apart instead, and sums
-them in its stage assembly.
-"""
+# The kernel of the post-loop build. By default the full tendency is added to what `Gⁿ` holds.
 post_loop_scalar_tendency_kernel(timestepper) = add_scalar_tendency!
 
 #####
