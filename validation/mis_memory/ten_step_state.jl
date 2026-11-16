@@ -95,11 +95,7 @@ for configuration in configurations
                                 ", max|ρw| = ", maximum(abs, state.ρw))
 end
 
-if mode == "write"
-    serialize(file, states)
-    println("wrote ", length(states), " states to ", file)
-else
-    reference = deserialize(file)
+function compare(states, reference)
     identical = 0
     for name in sort(collect(keys(states)))
         state, expected = states[name], get(reference, name, nothing)
@@ -117,4 +113,12 @@ else
         end
     end
     println("bitwise identical: ", identical, " of ", length(states))
+    return nothing
+end
+
+if mode == "write"
+    serialize(file, states)
+    println("wrote ", length(states), " states to ", file)
+else
+    compare(states, deserialize(file))
 end
