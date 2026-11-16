@@ -125,6 +125,10 @@ step) and between 3.3 and 3.6 (1.02), which `acoustic_cfl = 0.4` or the default 
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
 between stages with the preceding loop's (see `PostLoopScalarTendencies`).
 
+`Gⁿ` and `U⁰` are the tendency storage and the stage start state, allocated by default. Passing
+them shares the storage of another time stepper, as the adiabatic-balance twin does (see
+`adiabatic_balance_twin`).
+
 `rounding` sets the round-off treatment of the state updates that reach ``Uⁿ⁺¹`` (default:
 [`RoundToNearest`](@ref)). For the acoustic prognostics that is the last stage's recovery of the
 state from its stage-entry value plus the accumulated perturbation, alone: the earlier stages'
@@ -145,6 +149,8 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     cache_advecting_state = false,
                                     relinearize_stages = false,
                                     post_loop_scalar_tendencies = false,
+                                    Gⁿ = map(similar, prognostic_fields),
+                                    U⁰ = map(similar, prognostic_fields),
                                     rounding = RoundToNearest())
 
     FT = eltype(grid)
@@ -155,8 +161,6 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
 
     substepper = build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_state)
 
-    U⁰ = map(similar, prognostic_fields)
-    Gⁿ = map(similar, prognostic_fields)
     Uⁿ = map(similar, prognostic_fields)
     accumulators = ntuple(_ -> (forcing = map(similar, prognostic_fields),
                                 offset = map(similar, prognostic_fields)), s - 2)
@@ -260,6 +264,10 @@ CompressibleEquations.horizontal_substep_form(ts::MultirateInfinitesimalStep) =
 # Whether the next `update_state!` builds the tendencies of the first stage of an outer step.
 tendencies_feed_first_stage(timestepper) = true
 tendencies_feed_first_stage(ts::MultirateInfinitesimalStep) = ts.next_stage[] == 1
+
+# With the production model's coefficients (see the `AcousticRungeKutta3` method).
+AtmosphereModels.adiabatic_twin_timestepper(ts::MultirateInfinitesimalStep, ::SplitExplicitCompressibleDynamics) =
+    :MultirateInfinitesimalStep, (; coefficients = ts.tableau)
 
 const MultirateAcousticModel = AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep}
 
