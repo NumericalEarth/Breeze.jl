@@ -43,7 +43,9 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
-    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
+    # Synchronous: nothing completes an asynchronous fill here, so on a `Distributed` grid the halos
+    # of every prognostic that is not filled again below (the tracers) would never be received.
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)...)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
@@ -147,8 +149,7 @@ function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async).
+    # Ensure halos are filled before velocity computation (not every caller is `update_state!`).
     # Thread clock and model fields so time-dependent boundary conditions
     # (e.g. continuous-callable or FieldTimeSeries Open BCs) on density/momentum
     # dispatch correctly; without them `getbc` falls through to a signature that
