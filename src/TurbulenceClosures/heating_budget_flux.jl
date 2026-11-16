@@ -17,7 +17,7 @@
 #####     [mₖ + a₊θ₊ + a₋θ₋] sₖ - a₊(1 - θ₊) sₖ₊₁ - a₋(1 - θ₋) sₖ₋₁ = mₖ 𝒬ₖ,
 #####     m = ρ Δz,    a± = 2 ρ± Λ±² / Δz±,    θ± = ωₖ±₁ / (ωₖ + ωₖ±₁).
 #####
-##### The matrix is the M-matrix of `balance_sink!`; its columns sum to m, so Σ m s = Σ m 𝒬 and J
+##### The matrix is the M-matrix of `balance_sinks!`; its columns sum to m, so Σ m s = Σ m 𝒬 and J
 ##### vanishes at the top of the column too. Where the air is still (ω = 0 at a level and its
 ##### neighbours) the levels do not exchange, s = 𝒬 and J = 0; a heating that is uniform over a
 ##### turbulent layer gives J = 0; cooling at the top of a turbulent layer, or heating at its bottom,
@@ -235,47 +235,83 @@ end
 ##### The redistributed heating and the flux, column by column
 #####
 
-# The right-hand sides of the balance (`budget_source` of `balance_sink!`): the heating, and its cooling part
-struct HeatingSource{Q}
-    𝒬 :: Q
-end
-
-struct CoolingSource{Q}
-    𝒬 :: Q
-end
-
-@inline budget_source(source::HeatingSource, i, j, k) = @inbounds source.𝒬[i, j, k]
-@inline budget_source(source::CoolingSource, i, j, k) = @inbounds min(source.𝒬[i, j, k], zero(eltype(source.𝒬)))
-
-# ρJ at the faces from the ground: (ρJ)ₖ₊½ = (ρJ)ₖ₋½ + ρ Δz (𝒬 - s); the positive part, times `share`, over ρ at the face.
-# The boundary faces carry none.
-@inline function heating_flux!(J, s, i, j, grid, source, ρ, share)
+# The heating as redistributed, `s`, and that of its cooling part min(𝒬, 0), `sᶜ`, of the column at once: the matrix of
+# `balance_sinks!` with the shape ω = max(e, 0) and the exchange length ℂᑫᴸ ℓ, eliminated once for the two right-hand
+# sides. `work` holds the eliminated upper diagonal.
+@inline function balance_redistributed_heating!(s, sᶜ, work, i, j, grid, ℂᑫᴸ, 𝒬, e, ρ, ℓᵐ)
     Nz = size(grid, 3)
     FT = eltype(grid)
-    below = zero(FT)
-    @inbounds J[i, j, 1] = zero(FT)
-    @inbounds for k in 1:Nz
-        below += ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid) * (budget_source(source, i, j, k) - s[i, j, k])
-        J[i, j, k+1] = ifelse(k < Nz, share * max(below, zero(FT)) / ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ), zero(FT))
+    tiny = sqrt(floatmin(FT))
+    @inbounds begin
+        # Thomas algorithm; the matrix is diagonally dominant by columns
+        ω⁻ = zero(FT)
+        c′ = zero(FT)
+        d′ = zero(FT)
+        d′ᶜ = zero(FT)
+        a⁻ = zero(FT) # the exchange coefficient at the face below
+        ω = max(e[i, j, 1], zero(FT))
+        for k in 1:Nz
+            m = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+            diagonal = m
+            lower = zero(FT)
+            upper = zero(FT)
+            ω⁺ = zero(FT)
+            if k > 1
+                share = ω + ω⁻ + tiny
+                diagonal += a⁻ * ω⁻ / share
+                lower = -a⁻ * ω / share
+            end
+            if k < Nz
+                a = sink_exchange_coefficientᶜᶜᶠ(i, j, k + 1, grid, ℂᑫᴸ, ρ, ℓᵐ)
+                ω⁺ = max(e[i, j, k+1], zero(FT))
+                share = ω + ω⁺ + tiny
+                diagonal += a * ω⁺ / share
+                upper = -a * ω / share
+                a⁻ = a
+            end
+            heating = 𝒬[i, j, k]
+            pivot = diagonal - lower * c′
+            d′ = (m * heating - lower * d′) / pivot
+            d′ᶜ = (m * min(heating, zero(FT)) - lower * d′ᶜ) / pivot
+            c′ = upper / pivot
+            work[i, j, k] = c′
+            s[i, j, k] = d′
+            sᶜ[i, j, k] = d′ᶜ
+            ω⁻ = ω
+            ω = ω⁺
+        end
+        for k in Nz-1:-1:1
+            s[i, j, k] -= work[i, j, k] * s[i, j, k+1]
+            sᶜ[i, j, k] -= work[i, j, k] * sᶜ[i, j, k+1]
+        end
     end
     return nothing
 end
 
+# One thread per column: the redistributed heatings, then ρJ at the faces from the ground,
+# (ρJ)ₖ₊½ = (ρJ)ₖ₋½ + ρ Δz (𝒬 - s), whose positive part over ρ at the face is the flux (times the share ℂᑫ for the
+# applied one). The boundary faces carry none.
 @kernel function _compute_heating_budget_flux!(cl, grid, closure, ℓᵐ, e, ρ)
     i, j = @index(Global, NTuple)
     hb = getclosure(i, j, closure).heating_budget_flux
     FT = eltype(grid)
-    @inbounds for k in 1:size(grid, 3)
-        ω = max(e[i, j, k], zero(FT))
-        cl.sᑫ[i, j, k] = ω
-        cl.sᑫᶜ[i, j, k] = ω
+    Nz = size(grid, 3)
+    balance_redistributed_heating!(cl.sᑫ, cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, cl.𝒬, e, ρ, ℓᵐ)
+    below = zero(FT)
+    belowᶜ = zero(FT)
+    @inbounds begin
+        cl.Jᑫ[i, j, 1] = zero(FT)
+        cl.Jᑫᶜ[i, j, 1] = zero(FT)
+        for k in 1:Nz
+            ρΔz = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+            heating = cl.𝒬[i, j, k]
+            below += ρΔz * (heating - cl.sᑫ[i, j, k])
+            belowᶜ += ρΔz * (min(heating, zero(FT)) - cl.sᑫᶜ[i, j, k])
+            ρᶠ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
+            cl.Jᑫ[i, j, k+1] = ifelse(k < Nz, hb.ℂᑫ * max(below, zero(FT)) / ρᶠ, zero(FT))
+            cl.Jᑫᶜ[i, j, k+1] = ifelse(k < Nz, max(belowᶜ, zero(FT)) / ρᶠ, zero(FT))
+        end
     end
-    heating = HeatingSource(cl.𝒬)
-    cooling = CoolingSource(cl.𝒬)
-    balance_sink!(cl.sᑫ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, heating, ρ, ℓᵐ)
-    balance_sink!(cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, cooling, ρ, ℓᵐ)
-    heating_flux!(cl.Jᑫ, cl.sᑫ, i, j, grid, heating, ρ, hb.ℂᑫ)
-    heating_flux!(cl.Jᑫᶜ, cl.sᑫᶜ, i, j, grid, cooling, ρ, one(FT))
 end
 
 compute_heating_budget_flux!(fields, ::Nothing, closure_fields, closure, model, tracers) = nothing
