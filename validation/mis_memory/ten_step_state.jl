@@ -4,6 +4,7 @@
 #   julia --project=<env> validation/mis_memory/ten_step_state.jl compare <file>   # compare with saved ones
 #
 # Further arguments select the cases whose label contains all of them, as in `compare <file> Float32 P3`.
+# An argument may list alternatives, as in `Diagonal|LowStorage`.
 #
 # Cases: dry, one-moment and P3 microphysics, Float32 and Float64, for AcousticRungeKutta3 and every
 # coefficient set of MultirateInfinitesimalStep, with pre-loop and post-loop scalar tendencies,
@@ -88,7 +89,7 @@ end
 
 label(c) = string(c[1], " ", c[2], " ", c[3], " ", c[4], isnothing(c[5]) ? "" : " implicit closure")
 
-filter!(c -> all(occursin(label(c)), ARGS[3:end]), configurations)
+filter!(c -> all(argument -> any(occursin(label(c)), split(argument, '|')), ARGS[3:end]), configurations)
 
 states = Dict{String, Any}()
 for configuration in configurations

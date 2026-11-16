@@ -63,7 +63,8 @@ Fields
   raw ``ΔY₁`` through stage 2, so the offsets of later stages are first written with ``ΔY₂``. Stage
   4's offset then shares the storage of stage 3's forcing for the fields that form their increments
   in the assembly (see `stage_accumulators`).
-- `fast_tendency`: scratch for the fast parts of the tendencies: with `PreLoopScalarTendencies`
+- `fast_tendency`: scratch for the fast parts of the tendencies, or `nothing` for a coefficient set with a
+  diagonal `β`, which applies every tendency whole: with `PreLoopScalarTendencies`
   one field, for the stage-entry fast thermodynamic tendency, sharing storage with the substepper; with `PostLoopScalarTendencies`
   one per prognostic the acoustic loop does not advance by continuity or momentum — the
   thermodynamic variable's, used as before the loop, and each scalar's, which the post-loop build
@@ -159,10 +160,10 @@ up the difference once the stages are recombined (see `ScalarMassFluxCorrection`
 coefficient set whose `β` is diagonal or has no zero on its diagonal.
 
 `post_loop_scalar_tendencies = false` builds the scalar tendencies between stages instead, with
-the preceding loop's transport velocity, which does not keep a uniform mass fraction uniform. It
-needs less storage: the post-loop tendencies take a field for each moisture, microphysical and
-tracer variable and one for the thermodynamic variable, and, for every coefficient set but
-`:WickerSkamarock3`, three face fields for each stage after the second and one more field.
+the preceding loop's transport velocity, which does not keep a uniform mass fraction uniform. For a
+coefficient set whose `β` is not diagonal it needs less storage: the post-loop tendencies of such a
+set take a field for each moisture, microphysical and tracer variable and one for the
+thermodynamic variable, three face fields for each stage after the second and one more field.
 
 `Gⁿ` and `U⁰` are the tendency storage and the storage the first start states are formed from,
 allocated by default. Passing them shares the storage of another time stepper, as the
@@ -216,7 +217,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     Uⁿ = outer_step_state_storage(storage, prognostic_fields, U⁰)
     accumulators = stage_accumulators(storage, prognostic_fields, U⁰, folded_names, s)
     scalar_tendencies = scalar_tendency_timing(post_loop_scalar_tendencies)
-    fast_tendency = fast_tendency_storage(scalar_tendencies, grid, prognostic_fields, dynamics, substepper)
+    fast_tendency = fast_tendency_storage(storage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper)
 
     step_start = step_start_storage(grid, substepper, tableau, relinearize_stages)
 
@@ -467,10 +468,15 @@ CompressibleEquations.recovered_state_residual(ts::MultirateInfinitesimalStep) =
 # Pre-loop, the one scratch is written and read while a stage is assembled, so it shares the
 # storage of the substepper's stage-end moisture content, which each acoustic loop writes when it
 # starts and reads for the last time when it ends.
-fast_tendency_storage(::PreLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper) =
+#
+# A coefficient set with a diagonal `β` (`DiagonalStorage`) applies every tendency whole, so it
+# separates no fast part and needs no scratch.
+fast_tendency_storage(::DiagonalStorage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper) = nothing
+
+fast_tendency_storage(::AccumulatorStorage, ::PreLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper) =
     substepper.stage_end_moisture_content
 
-function fast_tendency_storage(::PostLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper)
+function fast_tendency_storage(::AccumulatorStorage, ::PostLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper)
     excluded = (keys(dynamics_prognostic_fields(dynamics))..., :ρu, :ρv, :ρw)
     names = filter(name -> name ∉ excluded, keys(prognostic_fields))
     return NamedTuple{names}(ntuple(_ -> CenterField(grid), length(names)))
@@ -479,6 +485,7 @@ end
 # The scratch for the fast part of `name`'s tendency.
 fast_tendency_scratch(ts::MultirateInfinitesimalStep, name) = fast_tendency_scratch(ts.fast_tendency, name)
 fast_tendency_scratch(scratch::NamedTuple, name) = scratch[name]
+fast_tendency_scratch(::Nothing, name) = nothing
 fast_tendency_scratch(scratch, name) = scratch
 
 # MIS assumes one fast operator for the whole step: the linearization coefficients (θᴸ, the
@@ -1136,12 +1143,14 @@ assemble_post_loop_stage_forcing!(::PreLoopScalarTendencies, ts, model, Δt) = n
 
 function assemble_post_loop_stage_forcing!(::PostLoopScalarTendencies, ts, model, Δt)
     for name in scalar_prognostic_names(model)
-        split = PartitionedTendencySplit(fast_tendency_scratch(ts, name))
-        assemble_stage_forcing!(ts, model, Δt, name, split)
+        assemble_stage_forcing!(ts, model, Δt, name, post_loop_tendency_split(ts.storage, ts, name))
     end
     start_scalar_mass_flux_sums!(ts.transport_mass_fluxes, ts, model)
     return nothing
 end
+
+post_loop_tendency_split(::AccumulatorStorage, ts, name) = PartitionedTendencySplit(fast_tendency_scratch(ts, name))
+post_loop_tendency_split(::DiagonalStorage, ts, name) = SlowTendencySplit() # the build has added the whole tendency to `Gⁿ`
 
 #####
 ##### Mass consistency of the recombined scalar fluxes
@@ -1397,7 +1406,15 @@ end
 # advective part to the scalar's `fast_tendency` scratch (see `assemble_post_loop_stage_forcing!`),
 # with the stage's mass-flux correction where it has one: every stage but the first of a
 # coefficient set whose `β` is not diagonal.
+#
+# A coefficient set with a diagonal `β` recombines no tendency (`DiagonalStorage`), so its build adds
+# the whole tendency to `Gⁿ`, as that of `AcousticRungeKutta3` does.
 post_loop_scalar_tendency_kernel(ts::MultirateInfinitesimalStep, model) =
+    post_loop_scalar_tendency_kernel(ts.storage, ts, model)
+
+post_loop_scalar_tendency_kernel(::DiagonalStorage, ts, model) = add_scalar_tendency!
+
+post_loop_scalar_tendency_kernel(::AccumulatorStorage, ts, model) =
     post_loop_scalar_tendency_kernel(ts.transport_mass_fluxes, ts, model)
 
 post_loop_scalar_tendency_kernel(::Nothing, ts, model) = SplitScalarTendencies(ts.fast_tendency)
@@ -1489,10 +1506,6 @@ end
     @inbounds write_registers!(i, j, k, updates, updated_values(i, j, k, updates))
 end
 
-# Whether the full tendency is something other than what `G` holds.
-changes_tendency(split) = false
-changes_tendency(::PartitionedTendencySplit) = true
-
 function assemble_stage_forcing!(storage::DiagonalStorage, ts, model, Δt, name, split)
     grid = model.grid
     G = ts.Gⁿ[name]
@@ -1502,7 +1515,7 @@ function assemble_stage_forcing!(storage::DiagonalStorage, ts, model, Δt, name,
 
     # Nothing to do in stage 1, nor in any stage of Wicker–Skamarock RK3
     forced = !all(iszero, weights)
-    forced || changes_tendency(split) || !isempty(updates) || return nothing
+    forced || !isempty(updates) || return nothing
     terms, weights = forced ? (terms, weights) : ((), ())
 
     launch!(architecture(grid), grid, stage_assembly_parameters(model, G), _assemble_increment_forcing!,
