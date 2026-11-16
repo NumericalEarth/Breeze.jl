@@ -103,6 +103,8 @@ struct P3Phase1Rates{FT}
     partial_melting :: FT
     complete_melting :: FT
     melting_number :: FT
+    cloud_relaxation :: FT  # vapor relaxation coefficient of cloud liquid [s⁻¹], for the implicit liquid relaxation
+    rain_relaxation :: FT   # vapor relaxation coefficient of rain [s⁻¹]
 end
 
 # Phase 2 process rates: aggregation, riming, wet growth, shedding, nucleation, and warm
@@ -344,7 +346,8 @@ end
                              autoconv, accr, cloud_self,
                              rain_evap, rain_cond, rain_self, rain_br,
                              dep, coat_cond, coat_evap,
-                             partial_melt, complete_melt, melt_n)
+                             partial_melt, complete_melt, melt_n,
+                             vapor_rates.cloud_relaxation, vapor_rates.rain_relaxation)
 end
 
 @inline function p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
@@ -766,17 +769,19 @@ end
     # budgets, so the cloud/rain/ice budgets below must see the final vapor-limited
     # rates.
     qᵗ = q.vapor + q.liquid + q.ice
-    vapor_rates = limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
-                                    rain_cond, rain_evap, dep, coat_cond, coat_evap,
-                                    nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
-                                    dt_safety, T₀, temperature_tendency, pressure_tendency, Γ)
+    liquid_rates = limit_liquid_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                            rain_cond, rain_evap, coat_cond, coat_evap,
+                                            qᵛ, qᵛ⁺ˡ, T, P, constants, dt_safety,
+                                            temperature_tendency, pressure_tendency, Γ)
     # On the grid, the liquid vapor exchange and activation are instead advanced implicitly over
     # the coming stage (see `implicit_liquid_relaxation.jl`); the explicit caps above stay the
     # gridless path and the fallback before the first time step.
-    vapor_rates = implicit_liquid_vapor_rates(liquid_stage, vapor_rates, p3, ρ, ℳ_adjusted, state,
-                                              qᵗ, constants, vapor_excess_adjustment.cloud_water_adjustment,
-                                              dep, nuc_q, nuc_n,
-                                              temperature_tendency, pressure_tendency, Γ)
+    liquid_rates = implicit_liquid_vapor_rates(liquid_stage, liquid_rates, p3, ρ, ℳ_adjusted, state, constants,
+                                               vapor_excess_adjustment.cloud_water_adjustment,
+                                               phase1.cloud_relaxation, phase1.rain_relaxation, Γ)
+    # The ice-phase caps follow whichever liquid rates were chosen, so they are evaluated once.
+    vapor_rates = limit_ice_vapor_rates(liquid_rates, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                        dt_safety, T₀, temperature_tendency, pressure_tendency)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number

@@ -321,9 +321,10 @@ step (`true`) or from the current state (`false`, as for forward Euler and SSP-R
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The prognostic fields at the start of the time step, for time steppers whose stages start
-from them (see [`stage_starts_from_initial_state`](@ref)); otherwise the current fields.
+from them (see [`stage_starts_from_initial_state`](@ref)); otherwise `nothing`, because every
+stage starts from the current fields.
 """
-@inline initial_state_fields(timestepper, model) = prognostic_fields(model)
+@inline initial_state_fields(timestepper, model) = nothing
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -351,7 +352,7 @@ tendencies it applies that are held apart from `Gⁿ`, for kernels that build te
 [`stage_start_value`](@ref) and [`accumulated_tendency`](@ref).
 """
 struct StageStart{I, C, B, T, S}
-    initial :: I       # fields at the start of the time step
+    initial :: I       # fields at the start of the time step, or `nothing` if no stage starts from them
     current :: C       # fields now
     from_initial :: B  # whether the coming stage starts from `initial`
     Δt :: T            # interval of the coming stage
@@ -376,15 +377,15 @@ function StageStart(model, select)
     timestepper = model.timestepper
     grid = model.grid
     Δt = kernel_time_step(grid.architecture, grid, stage_time_step(timestepper, model.clock))
-    return StageStart(select(initial_state_fields(timestepper, model)),
+    return StageStart(select_fields(select, initial_state_fields(timestepper, model)),
                       select(prognostic_fields(model)),
                       stage_starts_from_initial_state(timestepper, model.clock),
                       Δt,
-                      select_separate_tendencies(select, separate_stage_tendencies(timestepper, model)))
+                      select_fields(select, separate_stage_tendencies(timestepper, model)))
 end
 
-select_separate_tendencies(select, ::Nothing) = nothing
-select_separate_tendencies(select, tendencies) = select(tendencies)
+select_fields(select, ::Nothing) = nothing
+select_fields(select, fields) = select(fields)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -396,6 +397,10 @@ The value at `(i, j, k)` of the field `name` at the state the coming stage start
     @inbounds current = getproperty(s.current, name)[i, j, k]
     return ifelse(s.from_initial, initial, current)
 end
+
+# No stage starts from the step-start fields: one load, and no second set of arrays in the kernel.
+@inline stage_start_value(i, j, k, s::StageStart{Nothing}, ::Val{name}) where name =
+    @inbounds getproperty(s.current, name)[i, j, k]
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

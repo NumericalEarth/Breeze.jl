@@ -163,6 +163,10 @@ end
     @test stage_remainder(1, 1, 1, G, from_initial, Val(:c)) ≈ 3
     @test patankar_sink_fraction(1, 1, 1, G, from_initial, Val(:c), FT(0.3)) ≈ FT(1 / 2)
 
+    # A time stepper with no stage that starts from the step-start state holds no such fields.
+    current_only = StageStart(nothing, fields, false, Δt)
+    @test stage_remainder(1, 1, 1, G, current_only, Val(:c)) == stage_remainder(1, 1, 1, G, stage, Val(:c))
+
     # A tendency that the stage applies but that is held apart from `G` (post-loop advection)
     # counts against the budget like `G`: c̃ = 2 - 10 × (0.1 + 0.05) = 0.5.
     separate = (; c = fill(FT(-0.05), 1, 1, 1))

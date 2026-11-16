@@ -33,9 +33,9 @@
 # Ice deposition, the liquid coating of ice and ice nucleation are left to the explicit rates and
 # their caps in `limit_ice_vapor_rates`. Where ice shares the vapor, the liquid and ice exchange
 # should be one 2×2 backward-Euler solve, for the cloud excess toward its equilibrium condensate
-# and the ice excess toward ice saturation, which has a closed form; it would replace the calls
-# to `shared_excess_relaxation_rates` and `limit_ice_vapor_rates` in
-# `implicit_liquid_vapor_rates` below.
+# and the ice excess toward ice saturation, which has a closed form; it would replace the call
+# to `shared_excess_relaxation_rates` in `implicit_liquid_vapor_rates` below and the call to
+# `limit_ice_vapor_rates` that follows it in `compute_p3_process_rates`.
 
 """
 $(TYPEDEF)
@@ -77,28 +77,26 @@ so the relaxation keeps its bounds.
 @inline liquid_equilibrium_condensate(::Nothing, saturation_excess, ξˡ) = max(0, saturation_excess) / ξˡ
 @inline liquid_equilibrium_condensate(Γ, saturation_excess, ξˡ) = max(0, saturation_excess + Γ) / ξˡ
 
-# Gridless rates (parcels, tests): the explicit caps of `limit_vapor_rates`.
-@inline implicit_liquid_vapor_rates(::Nothing, vapor_rates, args...) = vapor_rates
+# Gridless rates (parcels, tests): the explicit caps of `limit_liquid_vapor_rates`.
+@inline implicit_liquid_vapor_rates(::Nothing, liquid_rates, args...) = liquid_rates
 
-@inline function implicit_liquid_vapor_rates(liquid_stage, vapor_rates, p3, ρ, ℳ, state, qᵗ, constants,
-                                             cloud_water_adjustment, dep, nuc_q, nuc_n,
-                                             temperature_tendency, pressure_tendency, Γ)
+# `liquid_rates` are the explicit liquid-phase rates with their caps, which the implicit ones
+# replace where the stage interval is known; the liquid coating of ice keeps the explicit rates.
+# `cloud_relaxation` and `rain_relaxation` are the relaxation coefficients that the coupled
+# explicit rates were built with (`coupled_saturation_adjustment_rates`), at the same state.
+@inline function implicit_liquid_vapor_rates(liquid_stage, liquid_rates, p3, ρ, ℳ, state, constants,
+                                             cloud_water_adjustment, cloud_relaxation, rain_relaxation, Γ)
     FT = typeof(ρ)
     parameters = p3.process_rates
     τ = parameters.sink_limiting_timescale
     T = state.T
     qᵛ = state.qᵛ
     qᵛ⁺ˡ = state.qᵛ⁺ˡ
-    transport = (; Dᵛ = state.Dᵛ, Kᵃ = state.Kᵃ, ν = state.ν)
 
-    # The relaxation coefficients and psychrometric correction of the coupled explicit rates
-    # (`coupled_saturation_adjustment_rates`), evaluated at the same state.
+    # The psychrometric correction of the coupled explicit rates, evaluated at the same state.
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
-    cloud_relaxation = cloud_vapor_relaxation_coefficient(p3, ℳ.qᶜˡ, ρ, state.Dᵛ,
-                                                          state.μᶜˡ, state.λᶜˡ, state.nᶜˡ)
-    rain_relaxation = rain_vapor_relaxation_coefficient(p3, ℳ.qʳ, state.nʳ, ρ, transport)
 
     # The saturation excess of total water and the cloud's equilibrium condensate. No model of
     # condensation is attached to P3 here, so the hook is called with `nothing`.
@@ -134,24 +132,14 @@ so the relaxation keeps its bounds.
     activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
                                                    qᵛ, qᵛ⁺ˡ, ξˡ, T, ρ)
 
-    limited = limit_ice_vapor_rates(cloud_rate, activation.mass, activation.number,
-                                    rain_cond, rain_evap, dep,
-                                    vapor_rates.coat_cond, vapor_rates.coat_evap,
-                                    nuc_q, nuc_n, qᵛ, T, state.P, qᵗ, constants, τ,
-                                    parameters.freezing_temperature,
-                                    temperature_tendency, pressure_tendency)
-
     a = stage.active
-    return (; cond = ifelse(a, limited.cond, vapor_rates.cond),
-            ccn_activation_mass = ifelse(a, limited.ccn_activation_mass, vapor_rates.ccn_activation_mass),
-            ccn_activation_number = ifelse(a, limited.ccn_activation_number, vapor_rates.ccn_activation_number),
-            rain_cond = ifelse(a, limited.rain_cond, vapor_rates.rain_cond),
-            rain_evap = ifelse(a, limited.rain_evap, vapor_rates.rain_evap),
-            dep = ifelse(a, limited.dep, vapor_rates.dep),
-            coat_cond = vapor_rates.coat_cond,
-            coat_evap = vapor_rates.coat_evap,
-            nuc_q = ifelse(a, limited.nuc_q, vapor_rates.nuc_q),
-            nuc_n = ifelse(a, limited.nuc_n, vapor_rates.nuc_n))
+    return (; cond = ifelse(a, cloud_rate, liquid_rates.cond),
+            ccn_activation_mass = ifelse(a, activation.mass, liquid_rates.ccn_activation_mass),
+            ccn_activation_number = ifelse(a, activation.number, liquid_rates.ccn_activation_number),
+            rain_cond = ifelse(a, rain_cond, liquid_rates.rain_cond),
+            rain_evap = ifelse(a, rain_evap, liquid_rates.rain_evap),
+            coat_cond = liquid_rates.coat_cond,
+            coat_evap = liquid_rates.coat_evap)
 end
 
 #####
