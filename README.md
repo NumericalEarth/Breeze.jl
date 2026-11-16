@@ -85,7 +85,7 @@ Add `using CUDA` and swap `CPU()` for `GPU()` to run on an NVIDIA GPU.
 ## Features
 
 - **Anelastic dynamics** with a pressure Poisson solver that filters sound waves
-- **Compressible dynamics** with split-explicit acoustic substepping (horizontally explicit, vertically implicit) using SSP-RK3 or Wicker-Skamarock RK3
+- **Compressible dynamics** with split-explicit acoustic substepping (horizontally explicit, vertically implicit) under a multirate infinitesimal step or Wicker–Skamarock RK3 outer scheme
 - **Terrain-following coordinates** for compressible dynamics: smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system) for flow over complex topography
 - **Moist thermodynamics** with liquid-ice potential temperature and static energy formulations
 - **Cloud microphysics**: saturation adjustment, Kessler, one- and two-moment bulk schemes via [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl), and Predicted Particle Properties (P3) mixed-phase microphysics

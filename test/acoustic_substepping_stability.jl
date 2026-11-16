@@ -234,7 +234,7 @@ for arch in arches
                                             base_pressure,
                                             standard_pressure,
                                             reference_potential_temperature = θ_background)
-            timestepper = nothing  # auto-selects :AcousticRungeKutta3 for split-explicit dynamics
+            timestepper = nothing  # the default for split-explicit dynamics, :MultirateInfinitesimalStep
         else
             error("Unknown tiny bubble model kind: $kind")
         end

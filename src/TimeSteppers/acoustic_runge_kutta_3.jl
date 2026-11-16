@@ -34,9 +34,12 @@ abstract type AcousticTimeStepper <: AbstractTimeStepper end
 """
 $(TYPEDEF)
 
-Wicker–Skamarock third-order Runge–Kutta time stepper with linearized
+Wicker–Skamarock third-order Runge–Kutta time stepper
+([Wicker and Skamarock (2002)](@cite WickerSkamarock2002)) with linearized
 acoustic substepping for fully compressible dynamics. Stage fractions
-``β = (1/3, 1/2, 1)``. Each stage:
+``β = (1/3, 1/2, 1)``. Select it with `AtmosphereModel(grid; dynamics, timestepper = :AcousticRungeKutta3)`;
+the default for a split-explicit time discretization is [`MultirateInfinitesimalStep`](@ref).
+Each stage:
 
   1. Re-evaluates slow tendencies (advection + Coriolis + closure +
      forcing only — PGF and buoyancy are handled inside the substep
@@ -66,12 +69,6 @@ Fields
 - `scalar_tendencies`: when the moisture and tracer tendencies are built,
   `PreLoopScalarTendencies` (between stages, the default) or
   `PostLoopScalarTendencies` (after each stage's own acoustic loop).
-
-References
-==========
-
-Wicker, L. J. & Skamarock, W. C. (2002). *Time-splitting methods for
-elastic models using forward time schemes.* MWR 130, 2088–2097.
 """
 struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R, ST} <: AcousticTimeStepper
     β₁ :: FT
@@ -121,9 +118,7 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     ST = typeof(scalar_tendencies)
 
     # Stage fractions come from the outer-scheme interface. Today the only
-    # supported subtype is WickerSkamarock3 with canonical (1/3, 1/2, 1);
-    # a future MIS outer scheme would extend AcousticOuterScheme and provide
-    # its own stage_fractions method.
+    # supported subtype is WickerSkamarock3 with canonical (1/3, 1/2, 1).
     β = stage_fractions(WickerSkamarock3())
     β₁ = FT(β[1])
     β₂ = FT(β[2])
