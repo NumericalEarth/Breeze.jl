@@ -37,6 +37,7 @@ using Oceananigans: UpdateStateCallsite
 ## Bulk-flux types collide with Oceananigans' own exports; take Breeze's.
 using Breeze: BulkDrag, BulkSensibleHeatFlux, BulkVaporFlux
 using Breeze.BoundaryConditions: wind_speed²ᶜᶜᶜ
+using Breeze.AtmosphereModels: dynamics_density
 
 Oceananigans.defaults.FloatType = Float32
 Oceananigans.defaults.gravitational_acceleration = 9.80616
@@ -53,11 +54,10 @@ struct WindDependentDrag{T}
     cmax::T
 end
 @inline (cd::WindDependentDrag)(i, j, grid, U, T₀) = min(cd.a + cd.b * U, cd.cmax)
-@inline Breeze.BoundaryConditions.bulk_coefficient(i, j, grid, cd::WindDependentDrag, fields, T₀, ::Nothing) =
-    cd(i, j, grid, sqrt(wind_speed²ᶜᶜᶜ(i, j, grid, fields)), T₀)
+@inline Breeze.BoundaryConditions.bulk_coefficient(i, j, k, grid, side, cd::WindDependentDrag, fields, Tˢ, ::Nothing, pˢ) =
+    cd(i, j, grid, sqrt(wind_speed²ᶜᶜᶜ(i, j, grid, fields, nothing)), Tˢ)
 # Wind-only drag: no stability correction, so no filtered virtual-potential-temperature is
 # needed (mirrors Breeze's constant-coefficient path `filtered_θᵥ_source(::Number) = nothing`).
-Breeze.BoundaryConditions.filtered_θᵥ_source(::WindDependentDrag) = nothing
 
 # Reed–Jablonowski (2012) wind-dependent boundary-layer eddy diffusivity, per the
 # DCMIP2016 simple_physics reference (TC_PBL_mod = false):
@@ -69,7 +69,7 @@ Breeze.BoundaryConditions.filtered_θᵥ_source(::WindDependentDrag) = nothing
 # sidestepping in-kernel dynamic dispatch); the generator wires that up below.
 @inline function pbl_wind_taper(i, j, k, grid, u, v, pressure)
     FT = eltype(grid)
-    wind = sqrt(wind_speed²ᶜᶜᶜ(i, j, grid, (u = u, v = v)))                # |v| at lowest level
+    wind = sqrt(wind_speed²ᶜᶜᶜ(i, j, grid, (u = u, v = v), nothing))                # |v| at lowest level
     @inbounds p = pressure[i, j, k]
     taper = ifelse(p ≥ FT(85000), one(FT), exp(-(FT(85000) - p)^2 / FT(1e8)))
     return wind, taper
@@ -233,7 +233,11 @@ vertical grid (32 surface-refined levels) are the fixed DCMIP2016 test definitio
 Keyword arguments
 =================
   - `resolution`: horizontal grid spacing in degrees (0.5 and 0.25 are the validated values).
-  - `advection_order`: WENO order (5 or 9).
+  - `advection_order`: WENO order (5 or 9) for the scalars, and for momentum unless
+    `momentum_advection` is given.
+  - `momentum_advection`: momentum advection scheme (default `WENO(order = advection_order)`),
+    for example `CompressibleWENOVectorInvariant()`.
+  - `halo`: grid halo (default `(5, 5, 5)`; `CompressibleWENOVectorInvariant()` needs `(6, 6, 5)`).
   - `z_faces`: vector of vertical cell-face heights (default: 32 surface-refined levels to a
     30 km lid). `Nz` is inferred as `length(z_faces) - 1`.
   - `architecture`: `GPU()` (default) or `CPU()`.
@@ -247,6 +251,8 @@ Returns the `Simulation`; call `run!` on it.
 """
 function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
                                                  advection_order = 9,
+                                                 momentum_advection = WENO(order = advection_order),
+                                                 halo = (5, 5, 5),
                                                  z_faces = stretched_z_faces(32, 4.2),
                                                  architecture = GPU(),
                                                  stop_time = 10days,
@@ -266,7 +272,7 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
 
     grid = LatitudeLongitudeGrid(architecture;
                                  size = (Nλ, Nφ, Nz),
-                                 halo = (5, 5, 5),
+                                 halo,
                                  longitude = (0, 360),
                                  latitude = (φ_south, φ_north),
                                  z = z_faces)
@@ -310,7 +316,8 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
 
     model = AtmosphereModel(grid; dynamics, coriolis, microphysics, closure, boundary_conditions,
                             thermodynamic_constants = constants,
-                            advection = WENO(order = advection_order))
+                            momentum_advection,
+                            scalar_advection = WENO(order = advection_order))
 
     set!(model;
          ρ  = density,
@@ -322,8 +329,8 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
     @info @sprintf("Post-init: max|u|=%.1f max|v|=%.1f m/s | max T=%.1f min T=%.1f K | max qᵗ=%.4f | ρ(sfc)≈%.3f",
                    maximum(abs, model.velocities.u), maximum(abs, model.velocities.v),
                    maximum(model.temperature), minimum(model.temperature),
-                   maximum(model.moisture_density) / maximum(model.dynamics.density),
-                   maximum(model.dynamics.density))
+                   maximum(model.moisture_density) / maximum(dynamics_density(model.dynamics)),
+                   maximum(dynamics_density(model.dynamics)))
 
     # Build the diffusivity operations now that the model fields exist. The captured
     # velocities/pressure are updated in place each step, so recomputing refreshes Kₘ, Kₑ.
@@ -369,7 +376,7 @@ function dcmip2016_tropical_cyclone_simulation(; resolution = 0.25,
             schedule = TimeInterval(output_interval), overwrite_files = true)
     end
 
-    @info "Configured DCMIP2016 TC: $(Nλ)×$(Nφ)×$(Nz) ($(resolution)° band $(φ_south)–$(φ_north)°), WENO$(advection_order)"
+    @info "Configured DCMIP2016 TC: $(Nλ)×$(Nφ)×$(Nz) ($(resolution)° band $(φ_south)–$(φ_north)°), momentum $(summary(momentum_advection)), scalars WENO$(advection_order)"
     return simulation
 end
 
