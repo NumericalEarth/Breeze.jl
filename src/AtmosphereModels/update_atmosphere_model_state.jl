@@ -255,9 +255,7 @@ function compute_auxiliary_variables!(model)
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
     if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
         compute_closure_fields!(model.closure_fields, model.closure, model)
-        # Exchanged across ranks too: the closure fields are computed in the interior only, and
-        # nothing recomputes them near rank boundaries as Oceananigans' buffer tendencies do.
-        fill_halo_regions!(model.closure_fields)
+        fill_halo_regions!(model.closure_fields; only_local_halos=true)
     end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
