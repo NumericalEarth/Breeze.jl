@@ -7,6 +7,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation, SubgridCondensation
 using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
+using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: representable_skewness
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment, linear_interp,
                                                               FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
                                                               shoc_saturation_thermodynamics
@@ -60,8 +61,27 @@ shoc_time_scale() = DoubleGaussian(; time_scale = StratificationLimitedMomentTim
     @test TKEBasedTurbulenceClosure().subgrid_distribution === nothing
     @test TKEBasedTurbulenceClosure().solver isa SinglePass
     d = DoubleGaussian()
-    @test d.skewness.maximum_skewness == 0.85
     @test d.assumed_pdf isa EqualWidthDoubleGaussianPDF
+    # The bound of the limiter is the largest skewness the PDF represents: that of its two components of equal width at
+    # the least weight of the updraft component, (1 - 2a)(1 - ℂᵍ)^{3/2} / √(a (1 - a)) with a = 0.01 and ℂᵍ = 0.4
+    @test d.skewness.maximum_skewness == representable_skewness(d.assumed_pdf)
+    @test d.skewness.maximum_skewness ≈ 0.98 * 0.6^1.5 / sqrt(0.01 * 0.99) rtol=1e-14
+    @test 4.57 < d.skewness.maximum_skewness < 4.58
+    # At the bound the PDF's updraft component has its least weight, and the bound follows the PDF given
+    for (a, ℂᵍ₀) in ((0.01, 0.4), (0.05, 0.4), (0.02, 0.6), (0.1, 0.25))
+        pdf = EqualWidthDoubleGaussianPDF(; ℂᵍ₀, minimum_updraft_fraction = a, maximum_updraft_fraction = 1 - a)
+        Sk = representable_skewness(pdf)
+        @test (1 - Sk / sqrt(4 * (1 - ℂᵍ₀)^3 + Sk^2)) / 2 ≈ a rtol=1e-12
+        @test DoubleGaussian(; assumed_pdf = pdf).skewness.maximum_skewness == Sk
+    end
+    # the less extreme of the two bounds on the weight decides
+    @test representable_skewness(EqualWidthDoubleGaussianPDF(; minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.9)) ≈
+          representable_skewness(EqualWidthDoubleGaussianPDF(; minimum_updraft_fraction = 0.1, maximum_updraft_fraction = 0.9))
+    # SHOC's PDFs have components of equal width in w too
+    @test representable_skewness(DoubleGaussianPDF()) == representable_skewness(EqualWidthDoubleGaussianPDF())
+    @test representable_skewness(SmoothDoubleGaussianPDF()) == representable_skewness(EqualWidthDoubleGaussianPDF())
+    @test DoubleGaussian(; skewness = PolynomialSaturatedSkewness(maximum_skewness = 2)).skewness.maximum_skewness == 2
+    @test DoubleGaussian(Float32).skewness.maximum_skewness isa Float32
     closure = TKEBasedTurbulenceClosure(Float32; subgrid_distribution = DoubleGaussian(Float64))
     @test closure.subgrid_distribution.second_moments.ℂᵛ₁ isa Float32
     @test closure.subgrid_distribution.time_scale.ℂᵠ === 1.3f0 # DissipationTimeScale is the default

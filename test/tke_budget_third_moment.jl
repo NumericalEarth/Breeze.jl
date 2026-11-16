@@ -55,7 +55,7 @@ end
     third_moment = TKEBudgetThirdMoment(; ℂʷᴸ, ℂʷᵀ = 0.3)
     model, ρ, Δz = budget_third_moment_column(third_moment)
     names = keys(closure_parameters(model.closure))
-    @test all(name -> name ∈ names, (:ℂʷᵉ, :ℂʷᵋ, :ℂʷᴸ, :ℂʷʳ, :ℂʷᵇ, :ℂʷᵍ, :ℂʷᴺ, :ℂʷᵀ))
+    @test all(name -> name ∈ names, (:ℂʷᵉ, :ℂʷᵋ, :ℂʷᴸ, :ℂʷʳ, :ℂʷᵇ, :ℂʷˡ, :ℂʷᵍ, :ℂʷᴺ, :ℂʷᵀ))
     @test allunique(names)
     @test with_parameters(model.closure; ℂʷᵉ = 0.2).subgrid_distribution.third_moment.ℂʷᵉ == 0.2
     for n in 1:120
@@ -157,6 +157,63 @@ end
     cl = model.closure_fields.subgrid_cloud.cloud
     @test maximum(abs, column(cl.w′³ᵇ)) > 0
     @test all(abs.(column(cl.w′³) ./ column(cl.w′²) .^ 1.5) .<= 1.5 * (1 + 1e-12))
+end
+
+@testset "TKEBudgetThirdMoment: the latent source" begin
+    @test TKEBudgetThirdMoment().ℂʷˡ == 4
+    @test :ℂʷˡ ∈ keys(closure_parameters(TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian())))
+
+    # The source is added to the buoyant source of the damped local third moment, in proportion to ℂʷˡ
+    grid = RectilinearGrid(CPU(); size=8, z=(0, 800), topology=(Flat, Flat, Bounded))
+    w′² = CenterField(grid)
+    set!(w′², 0.3)
+    τ, u, αᴺ, source = 300.0, 0.5, 0.7, 2e-4
+    for ℂʷᴺ in (0, 2)
+        latent = TKEBudgetThirdMoment(; ℂʷˡ = 3, ℂʷᴺ)
+        D = stratification_damping(latent.ℂʷᴺ, latent.stratification_damping_width, αᴺ)
+        @test damped_local_third_moment(1, 1, 4, grid, latent, w′², τ, u, αᴺ, -1e-3, 0.0, 0.0, source) ≈ 3 * τ * u * source / D rtol = 1e-14
+        @test damped_local_third_moment(1, 1, 4, grid, latent, w′², τ, u, αᴺ, -1e-3, 0.0, 0.0, 0.0) == 0
+        @test damped_local_third_moment(1, 1, 4, grid, TKEBudgetThirdMoment(; ℂʷˡ = 0, ℂʷᴺ), w′², τ, u, αᴺ, -1e-3, 0.0, 0.0, source) == 0
+    end
+
+    # In a column with a partly cloudy layer. The third moment is diagnosed from the distribution without skewness, which
+    # is the distribution of the same column with no third moment at all: with the latent source alone,
+    # w′³ = ℂʷˡ ℓ (1 - aᶜ) max(Bˡ, 0) of that distribution, before the limiter.
+    moist(model) = set!(model; qᵗ = z -> 1e-3 * (z < 520 ? 17.6 - z * 0.7 / 520 : z < 1480 ? 16.9 - (z - 520) * 5.0 / 960 : max(4.2, 11.9 - (z - 1480) * 7.7 / 520)))
+    ℂʷˡ = 3
+    unskewed, _, _ = budget_third_moment_column(TKEBudgetThirdMoment(ℂʷᵉ = 0, ℂʷᵋ = 0, ℂʷˡ = 0))
+    skewed, _, _ = budget_third_moment_column(TKEBudgetThirdMoment(; ℂʷᵉ = 0, ℂʷᵋ = 0, ℂʷˡ))
+    moist(unskewed)
+    moist(skewed)
+    cl₀ = unskewed.closure_fields.subgrid_cloud.cloud
+    cl = skewed.closure_fields.subgrid_cloud.cloud
+    @test all(column(cl₀.w′³) .== 0)
+    aᶜ, Bˡ = column(cl₀.aᶜ), column(cl₀.Bˡ)
+    partly_cloudy = findall(k -> 0.01 < aᶜ[k] < 0.99 && Bˡ[k] > 0, eachindex(aᶜ))
+    @test length(partly_cloudy) >= 3
+    ℓᵐ = Array(interior(unskewed.closure_fields.ℓᵐ))[1, 1, :]
+    ℓ = (ℓᵐ[1:end-1] .+ ℓᵐ[2:end]) ./ 2
+    expected = ℂʷˡ .* ℓ .* (1 .- aᶜ) .* max.(Bˡ, 0)
+    w′³ᵇ = column(cl.w′³ᵇ)
+    @test w′³ᵇ ≈ expected rtol = 1e-10
+    @test all(w′³ᵇ .>= 0)
+    @test all(w′³ᵇ[partly_cloudy] .> 0)
+    @test count(Bˡ .<= 0) >= 3
+    @test all(w′³ᵇ[Bˡ .<= 0] .== 0) # no upward flux of liquid, no latent source
+    # The skewness of the distribution the stage uses is positive in the partly cloudy layer and inside the bound
+    Sk = column(cl.w′³) ./ column(cl.w′²) .^ 1.5
+    @test all(Sk[partly_cloudy] .> 0)
+    @test all(abs.(Sk) .<= skewed.closure.subgrid_distribution.skewness.maximum_skewness * (1 + 1e-12))
+    # ... and its updraft component is the narrower one there
+    @test all(column(cl.a₁)[partly_cloudy] .< 0.5)
+
+    # Saturated air has none: the source vanishes with 1 - aᶜ
+    overcast, _, _ = budget_third_moment_column(TKEBudgetThirdMoment(; ℂʷᵉ = 0, ℂʷᵋ = 0, ℂʷˡ))
+    set!(overcast; qᵗ = z -> z < 1480 ? 0.022 : 0.004)
+    clᵒ = overcast.closure_fields.subgrid_cloud.cloud
+    saturated = findall(>(1 - 1e-9), column(clᵒ.aᶜ))
+    @test length(saturated) >= 3
+    @test maximum(abs, column(clᵒ.w′³ᵇ)[saturated]) <= 1e-8 * maximum(w′³ᵇ)
 end
 
 @testset "TKEBudgetThirdMoment: the closure fields are a function of the prognostic state (passes = $passes)" for passes in (1, 2)

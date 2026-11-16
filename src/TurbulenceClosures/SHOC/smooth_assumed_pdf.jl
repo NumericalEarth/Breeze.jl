@@ -73,6 +73,9 @@ SmoothDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
 
 Adapt.@adapt_structure SmoothDoubleGaussianPDF
 
+# The two plumes have the same width in w (the share ℂᵍ₁ of w′²), as in `DoubleGaussianPDF`
+@inline representable_skewness(pdf::SmoothDoubleGaussianPDF) = representable_skewness(pdf.plume_fraction_min, pdf.plume_fraction_max, pdf.ℂᵍ₁)
+
 # 0 below 0, 1 above 1, and 3x² - 2x³ between: continuous with its first derivative
 @inline function smooth_step(x)
     x = max(0, min(1, x))

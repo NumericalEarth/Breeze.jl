@@ -165,6 +165,22 @@ const ComponentDoubleGaussianPDF = Union{DoubleGaussianPDF, EqualWidthDoubleGaus
     return ifelse(constant, pdf.ℂᵍ₀, (1 + y / sqrt(1 + y * y)) / 2)
 end
 
+# The largest magnitude of the skewness of vertical velocity that the double Gaussian represents. Its two components
+# have the same width in w, so its third moment is that of their means: with the weight a↑ of the updraft component
+# and the within-component share c of w′²,
+#
+#     Sk = (1 - 2a↑) (1 - c)^{3/2} / √(a↑ (1 - a↑)),
+#
+# which grows without bound as a↑ → 0 or 1 and is largest, for the weights the PDF allows, at the least weight of
+# either component. Beyond it the PDF holds a↑ at its bound and has less skewness than it was given.
+@inline representable_skewness(pdf::ComponentDoubleGaussianPDF) =
+    representable_skewness(minimum_updraft_fraction(pdf), maximum_updraft_fraction(pdf), within_component_share(pdf, zero(pdf.w_tol)))
+
+@inline function representable_skewness(aᵐⁱⁿ, aᵐᵃˣ, c)
+    a = max(aᵐⁱⁿ, 1 - aᵐᵃˣ)
+    return (1 - 2a) * (1 - c) * sqrt((1 - c) / (a * (1 - a)))
+end
+
 # Saturation vapor pressure over liquid of Murphy and Koop (2005) (wv_sat_scream.F90, MurphyKoop_svp)
 @inline function murphy_koop_liquid_svp(t::FT) where FT
     logt = log(t)

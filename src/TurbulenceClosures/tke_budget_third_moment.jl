@@ -26,7 +26,7 @@
 ##### The damped local third moment is added to the flux members: the two sources of the stationary
 ##### budget of w′³, ∂t w′³ = 3 w′²b′ - 3 w′² ∂z w′² - w′³ / τ₃ + ..., relaxed over τ₃ = ℓ / √e,
 #####
-#####     w′³_local = τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,    D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ),    αᴺ = τ₃² N².
+#####     w′³_local = τ₃ (√e (ℂʷᵇ B⁺ + ℂʷˡ (1 - aᶜ) Bˡ⁺) - ℂʷᵍ w′² ∂z w′²) / D,    D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ),    αᴺ = τ₃² N².
 #####
 ##### √e B⁺ stands for the buoyant source w′²b′ (the buoyancy flux carried at the turbulent velocity; it
 ##### is not closed with w′³), and D ≥ 1 for the feedback of the stratification on the third moment:
@@ -34,6 +34,23 @@
 ##### first order and vanishes at finite αᴺ (the poles of `AlgebraicThirdMoment`); D keeps the damping
 ##### of stable air, αᴺ > 0, and neither amplifies nor vanishes in unstable air. δ is the width in αᴺ over
 ##### which D passes from one to 1 + ℂʷᴺ αᴺ.
+#####
+##### The latent source, ℂʷˡ √e (1 - aᶜ) Bˡ⁺, is the part of w′²b′ that condensation makes. The buoyancy is linear in
+##### θˡⁱ and qᵗ but for the liquid, b′ = b_θ θ′ + b_q qᵗ′ + (b_qˡ - b_qᵛ) qˡ′, and the liquid is one-sided,
+##### qˡ = max(s, 0) with s the saturation excess. For w and s jointly Gaussian with correlation ρ, spread σₛ and
+##### t = s̄ / σₛ, the triple moments of the linear part vanish and
+#####
+#####     w′²qˡ′ = ρ² w′² σₛ φ(t) = ρ √(w′²) (φ(t) / Φ(t)) w′qˡ′,    aᶜ = Φ(t),    w′qˡ′ = ρ √(w′²) σₛ Φ(t),
+#####
+##### (φ and Φ the density and the distribution function of the standard normal): cloudy air is the tail of the
+##### distribution that rises fastest, and it alone is heated. The ratio φ / Φ is between 1.6 (1 - aᶜ) and 2.5 (1 - aᶜ)
+##### for 0.02 ≤ aᶜ ≤ 0.98 (1.6 at aᶜ = 1/2): it vanishes in saturated air, where the heating has no preference for
+##### updrafts, and is largest where the cloud is a small fraction. With Bˡ = (b_qˡ - b_qᵛ) w′qˡ′, the part of the
+##### buoyancy flux the liquid flux carries, the stationary budget gives w′³ = 3 τ₃ w′²b′ = ℂʷˡ τ₃ √e (1 - aᶜ) Bˡ with
+##### ℂʷˡ = 3 √(2/3) ρ (1.6 to 2.5) ≈ 2 to 4 for ρ = 0.5 to 0.7 (the default is 4).
+##### aᶜ and Bˡ are those of the distribution without skewness (the first pass), so the source is a function of the
+##### prognostic state, and it does not need the net buoyancy flux to be positive: in a layer of cumulus the mean
+##### stratification is stable, B < 0 without skewness, and Bˡ > 0.
 #####
 ##### The buoyancy production needs the distribution (through aᴺ, N² and the diffusivities), and the
 ##### distribution needs w′³. The loop is not carried from one evaluation of the closure fields to the
@@ -56,12 +73,14 @@ $(TYPEDEF)
 The third moment of vertical velocity at the cell centers from the vertical integral of the
 budget of turbulent kinetic energy, with a damped local third moment,
 
-    w′³ = r (ℂʷᵉ Fᵉ + ℂʷᵋ Fᵋ) + τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D,
+    w′³ = r (ℂʷᵉ Fᵉ + ℂʷᵋ Fᵋ) + τ₃ (√e (ℂʷᵇ B⁺ + ℂʷˡ (1 - aᶜ) Bˡ⁺) - ℂʷᵍ w′² ∂z w′²) / D,
     Fʸ(z) = (1 / ρ) ∫₀ᶻ ρ (P + B - uʸ) dz′,    uʸ = cʸ ωʸ,    ωᵉ = e,    ωᵋ = ε = 𝕊ᴰ e^{3/2} / ℓ,
     τ₃ = ℓ / √e,    αᴺ = τ₃² N²,    D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ),    r = 1 + ℂʷʳ αᴺ / (1 + |αᴺ|),
 
 where `P + B` is the shear and buoyancy production the TKE equation receives (the conversions of the
-fluxes the closure applies), `B⁺ = max(B, 0)` (a buoyancy sink makes no skewness of its own),
+fluxes the closure applies), `B⁺ = max(B, 0)` (a buoyancy sink makes no skewness of its own), `aᶜ` the cloud fraction and
+`Bˡ⁺ = max(Bˡ, 0)` the part of the buoyancy flux that the liquid flux carries, `Bˡ = (b_qˡ - b_qᵛ) w′qˡ′`,
+both of the distribution without skewness,
 `ℓ` the closure's mixing length and `αᴺ` the stratification number at the cell center (`|ℂʷʳ| < 1`
 keeps `r` positive).
 
@@ -73,7 +92,11 @@ the TKE equation is steady it is the flux `-Kᵉ ∂z e` the closure applies to 
 with one turnover rate for the column. `ℂʷᵀ > 0` adds `ℂʷᵀ Fᵉ` to the flux of TKE in the TKE equation.
 
 The damped local third moment holds the two sources of the stationary budget of `w′³`, the buoyant
-one as `√e B⁺` and the gradient production `-w′² ∂z w′²`, relaxed over `τ₃`. The damping `D ≥ 1`
+one as `√e B⁺` and the gradient production `-w′² ∂z w′²`, relaxed over `τ₃`. The latent source
+`√e (1 - aᶜ) Bˡ⁺` is the part of the buoyant source `w′²b′` that condensation makes in a partly cloudy
+layer, where the cloudy air is the fastest-rising tail of the distribution and is the only air
+heated; it vanishes in saturated air (`aᶜ = 1`) and in clear air (`Bˡ = 0`), and it is positive in a
+layer of cumulus, whose net buoyancy flux without skewness is negative. The damping `D ≥ 1`
 stands for the suppression of the third moment in stably stratified air; it has no zero, so the
 member has no pole. It tends to one in unstable air and to `1 + ℂʷᴺ αᴺ` in stable air, over the width
 `δ = stratification_damping_width` in `αᴺ`.
@@ -100,6 +123,8 @@ struct TKEBudgetThirdMoment{N, FT} <: SimplifiedHigherOrderClosures.AbstractSHOC
     ℂʷʳ :: FT
     "Coefficient of the buoyant source `√e B⁺` of the damped local third moment"
     ℂʷᵇ :: FT
+    "Coefficient of the latent source `√e (1 - aᶜ) Bˡ⁺` of the damped local third moment"
+    ℂʷˡ :: FT
     "Coefficient of the gradient production `-w′² ∂z w′²` of the damped local third moment"
     ℂʷᵍ :: FT
     "Coefficient of the stratification number in the damping `D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ)` of the local third moment; not negative"
@@ -109,22 +134,31 @@ struct TKEBudgetThirdMoment{N, FT} <: SimplifiedHigherOrderClosures.AbstractSHOC
     "Width `δ` in the stratification number over which the damping passes from one to `1 + ℂʷᴺ αᴺ`; positive"
     stratification_damping_width :: FT
 
-    TKEBudgetThirdMoment{N}(ℂʷᵉ::FT, ℂʷᵋ::FT, ℂʷᴸ::FT, ℂʷʳ::FT, ℂʷᵇ::FT, ℂʷᵍ::FT, ℂʷᴺ::FT, ℂʷᵀ::FT,
+    TKEBudgetThirdMoment{N}(ℂʷᵉ::FT, ℂʷᵋ::FT, ℂʷᴸ::FT, ℂʷʳ::FT, ℂʷᵇ::FT, ℂʷˡ::FT, ℂʷᵍ::FT, ℂʷᴺ::FT, ℂʷᵀ::FT,
                             stratification_damping_width::FT) where {N, FT} =
-        new{N, FT}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width)
+        new{N, FT}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width)
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`TKEBudgetThirdMoment`](@ref). The defaults exchange the sink amplitude over eight mixing
-lengths, have a constant ratio, no transport of TKE and no damped local third moment
-(`ℂʷᵇ = ℂʷᵍ = 0`: the buoyant source `B⁺` cannot tell heating from below, carried by updrafts, from
-cooling from above, carried by downdrafts, so the budget fluxes carry the third moment), and diagnose the third moment once per
-evaluation of the closure fields, from the budget of the distribution without skewness.
+lengths, have a constant ratio and no transport of TKE, and of the damped local third moment only
+the latent source (`ℂʷᵇ = ℂʷᵍ = 0`: the buoyant source `B⁺` cannot tell heating from below, carried
+by updrafts, from cooling from above, carried by downdrafts, so the budget fluxes carry that part
+of the third moment; `ℂʷˡ = 4`: the latent source is the heating of the cloudy updrafts of a partly
+cloudy layer, which the budget of the distribution without skewness does not hold). They diagnose
+the third moment once per evaluation of the closure fields, from the budget of the distribution
+without skewness.
+
+`ℂʷˡ = 4` is the upper end of the estimate `3 √(2/3) ρ (1.6 to 2.5)` for a correlation `ρ = 0.5` to
+`0.7` of `w` with the saturation excess, and near a fit of `w′³` in the cloud layer of large-eddy
+simulations of cumulus (3.4 with their mixing length; harness `notes/cumulus-skewness.md`). It is
+an initial value: the closure's own `ρ` and `w′²` differ from the simulations', and the columns
+of the note come closer to them with a larger coefficient.
 """
 function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
-                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,
+                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0, ℂʷˡ = 4, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,
                               stratification_damping_width = 1, passes = 1)
     abs(ℂʷʳ) < 1 || throw(ArgumentError("ℂʷʳ must lie in (-1, 1) for a positive ratio, got $(ℂʷʳ)."))
     0 <= ℂʷᵀ <= 1 || throw(ArgumentError("ℂʷᵀ must lie in [0, 1], got $(ℂʷᵀ)."))
@@ -133,7 +167,7 @@ function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
     stratification_damping_width > 0 ||
         throw(ArgumentError("stratification_damping_width must be positive, got $(stratification_damping_width)."))
     passes isa Integer && passes >= 1 || throw(ArgumentError("passes must be a positive integer, got $(passes)."))
-    scalars = (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width)
+    scalars = (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width)
     return TKEBudgetThirdMoment{Int(passes)}(map(c -> convert(FT, c), scalars)...)
 end
 
@@ -302,7 +336,7 @@ end
 # neighbouring centers (one-sided at the two ends of the column). With a `HeatingBudgetFlux` the buoyant source is
 # signed by origin: of B⁺, the part Gᶜ = min(Gᑫᶜ, B⁺) that the flux driven by cooling converts is carried by
 # downdrafts, and the source is ℂʷᵇ (B⁺ - Gᶜ) - ℂʷᑫ Gᶜ.
-@inline function damped_local_third_moment(i, j, k, grid, tm, w′², τ, u, αᴺ, B, Gᑫᶜ = zero(B), ℂʷᑫ = zero(B))
+@inline function damped_local_third_moment(i, j, k, grid, tm, w′², τ, u, αᴺ, B, Gᑫᶜ = zero(B), ℂʷᑫ = zero(B), latent_source = zero(B))
     Nz = size(grid, 3)
     kᵘ = min(k + 1, Nz)
     kˡ = max(k - 1, 1)
@@ -313,7 +347,7 @@ end
     w′²∂zw′² = ifelse(kᵘ > kˡ, (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δz), zero(Δz))
     B⁺ = max(0, B)
     Gᶜ = min(Gᑫᶜ, B⁺)
-    buoyant_source = tm.ℂʷᵇ * (B⁺ - Gᶜ) - ℂʷᑫ * Gᶜ
+    buoyant_source = tm.ℂʷᵇ * (B⁺ - Gᶜ) - ℂʷᑫ * Gᶜ + tm.ℂʷˡ * latent_source
     return τ * (u * buoyant_source - tm.ℂʷᵍ * w′²∂zw′²) / stratification_damping(tm.ℂʷᴺ, tm.stratification_damping_width, αᴺ)
 end
 
@@ -367,7 +401,8 @@ end
         ℂʷᑫ = cooling_third_moment_coefficient(closure_ij.heating_budget_flux, eltype(grid))
         cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * Fᵉ + tm.ℂʷᵋ * Fᵋ) +
                            damped_local_third_moment(i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k],
-                                                     cooling_flux_conversion(cl, i, j, k), ℂʷᑫ)
+                                                     cooling_flux_conversion(cl, i, j, k), ℂʷᑫ,
+                                                     (1 - cl.aᶜ[i, j, k]) * max(cl.Bˡ[i, j, k], 0))
     end
     return nothing
 end

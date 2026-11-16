@@ -33,7 +33,8 @@ using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocit
                                       third_moment, limit_third_moment, assumed_pdf, buoyancy_flux_coefficients,
                                       plume_liquid_water_temperature, plume_saturation,
                                       clip_below, shoc_saturation_thermodynamics,
-                                      rate_norm_factor, linear_interp, hard_floor, component_vapor_excess
+                                      rate_norm_factor, linear_interp, hard_floor, component_vapor_excess,
+                                      representable_skewness
 
 
 #####
@@ -258,8 +259,17 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Return a [`DoubleGaussian`](@ref). The defaults are the components of the fixed smooth SHOC
 configuration with published coefficients, except the third moment, [`TKEBudgetThirdMoment`](@ref)
 in place of SHOC's [`AlgebraicThirdMoment`](@ref) (still available through `third_moment`), and the
-largest skewness of the third-moment limiter, 0.85 in place of SHOC's 1.2 √2 (hand-tuned against
-excess cumulus cover on the master-comparison cases).
+largest skewness of the third-moment limiter: the largest that `assumed_pdf` represents,
+
+    (1 - 2a) (1 - ℂᵍ)^{3/2} / √(a (1 - a)),
+
+with `a` the least weight the PDF allows a component and `ℂᵍ` its within-component share of `w′²` at
+zero skewness (4.58 for `a = 0.01`, `ℂᵍ = 0.4`), in place of SHOC's 1.2 √2. The two components of
+the PDF have the same width in `w`, so the third moment is carried by their weights alone, and a
+bound on the skewness is a bound on the weight of the updraft component: with 1.2 √2 it is no less
+than 0.06, with 4.58 no less than 0.01. Large-eddy simulations of cumulus have a skewness of 2 to
+5 in the cloud layer, where the saturated updrafts cover 0.5 to 5 % (harness
+`notes/cumulus-skewness.md`).
 
 `ℂʳ` is the maximum flux correlation: where the down-gradient variance ``a′²`` of ``a = θˡ`` or
 ``qᵗ`` is too small for the down-gradient flux, ``(w′a′)² > (ℂʳ)² w′² a′²``, the variance is raised
@@ -278,8 +288,8 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              second_moments = DowngradientSecondMoments(FT),
                              third_moment = TKEBudgetThirdMoment(FT),
                              stratification_number_bound = RationalSaturatedStratificationNumber(FT),
-                             skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = 0.85),
                              assumed_pdf = EqualWidthDoubleGaussianPDF(FT),
+                             skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = representable_skewness(assumed_pdf)),
                              saturation = ModelThermodynamicsSaturation(),
                              clipping = SmoothClipping(),
                              constants = SHOCConstants(FT),
