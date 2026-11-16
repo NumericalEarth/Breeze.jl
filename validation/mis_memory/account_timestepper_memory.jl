@@ -5,7 +5,7 @@
 #
 # Builds Float32 models on an N³ CPU grid (default 32, halo 5) and walks the time stepper and the
 # model for arrays, counting each array once. A "field" is the storage of one Float32 cell-centered
-# 3D field with halos. Totals are scaled to 512×512×256 (halo 5) and to 10⁸ interior cells.
+# 3D field with halos. Totals are scaled to 512×512×256 (halo 5) and to 10⁸ interior cells of that grid.
 
 using Breeze
 using Oceananigans
@@ -116,7 +116,7 @@ push!(steppers, ("WSRK3 post-loop", :AcousticRungeKutta3, (; post_loop_scalar_te
 
 field_bytes = sizeof(FT) * (N + 2H)^3
 target_field_bytes = sizeof(FT) * (512 + 2H) * (512 + 2H) * (256 + 2H)
-field_bytes_per_1e8 = sizeof(FT) * 1e8 * (N + 2H)^3 / N^3 # with the halo fraction of the accounting grid
+field_bytes_per_1e8 = target_field_bytes * 1e8 / (512 * 512 * 256) # with the halo fraction of the 512×512×256 grid
 GiB = 2.0^30
 
 summary_rows = []
