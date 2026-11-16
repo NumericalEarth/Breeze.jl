@@ -132,7 +132,7 @@ column(field) = Array(interior(field, 1, 1, :))
     @test adapt(identity, closure.mixing_length) === closure.mixing_length
     @test adapt(identity, sf) === sf
     @test sf isa TurbulentRichardsonStabilityFunction{FT}
-    @test closure.mixing_length.ℂˢ === FT(0.7511782141838061)
+    @test closure.mixing_length.ℂˢ === FT(1.299067385616381)
     @test closure.mixing_length.ℂⁱ === FT(1.5609936948461662)
     @test closure.mixing_length.ℂˢ * (sf.ℂᵘ⁰^3 / sf.ℂᴰ⁰)^(1/4) ≈ 0.4 rtol=1e-6
     @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.15900569445804447 / 0.19872163735761372

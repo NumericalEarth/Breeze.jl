@@ -148,20 +148,20 @@ The fifteen coefficients are what [`closure_parameters`](@ref) lists. For a cali
 `Breeze.TurbulenceClosures.stability_coefficient_bounds` gives each an independent interval,
 ``[0.05, 20]`` by default, except ``ℂᵅ ≥ 4.37``: at any shear the logarithmic slope of a function in
 ``α_N`` is at most ``0.699 × 1.044 \ln(20 / 0.05) / ℂᵅ`` (1.044 is the largest slope of the blend), and
-this bound keeps it below one, the width condition of the stability functions. The defaults are the provisional calibration of the
-closure in the calibration harness, clipped into ``[0.05, 20]``:
+this bound keeps it below one, the width condition of the stability functions. The defaults are hand-tuned starting values for calibration
+(``e / u★² = 3.75`` and ``κ = 0.4`` in the neutral surface layer, mixing decreasing with stability):
 
 | Function | Strongly unstable | Neutral | Strongly stable |
 |:--|--:|--:|--:|
-| momentum | 0.361 | 0.159 | 0.05 |
-| scalars | 0.0817 | 0.199 | 0.424 |
-| TKE | 0.05 | 0.05 | 0.05 |
-| dissipation | 0.05 | 0.05 | 0.0622 |
+| momentum | 0.361 | 0.159 | 0.135 |
+| scalars | 0.45 | 0.199 | 0.09 |
+| TKE | 0.361 | 0.159 | 0.135 |
+| dissipation | 0.447 | 0.447 | 0.447 |
 
 with ``ℂᴿⁱ⁻ = 16``, ``ℂᴿⁱ⁺ = 0.33`` and ``ℂᵅ = 4.4``. Under strong shear ``ℂᴿⁱ⁺ = 0.33`` puts the
 stable functions halfway through their transition, ``v = 1/2``, at ``Ri = 0.20``, where turbulence
 observations show marginal stability (``v = 0.1`` at ``Ri = 0.045``, ``v = 0.9`` at ``Ri = 0.69``);
-``ℂᴿⁱ⁻ = 16`` puts the unstable halfway point at ``Ri = -9.2``. The mixing length's wall coefficient is ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 0.751`` and its
+``ℂᴿⁱ⁻ = 16`` puts the unstable halfway point at ``Ri = -9.2``. The mixing length's wall coefficient is ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 1.30`` and its
 interior slope ``ℂⁱ ≈ 1.56``.
 
 [`RationalStabilityFunction`](@ref) is

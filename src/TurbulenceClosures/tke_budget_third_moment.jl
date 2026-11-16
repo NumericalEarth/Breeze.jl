@@ -47,7 +47,7 @@
 ##### for 0.02 ≤ aᶜ ≤ 0.98 (1.6 at aᶜ = 1/2): it vanishes in saturated air, where the heating has no preference for
 ##### updrafts, and is largest where the cloud is a small fraction. With Bˡ = (b_qˡ - b_qᵛ) w′qˡ′, the part of the
 ##### buoyancy flux the liquid flux carries, the stationary budget gives w′³ = 3 τ₃ w′²b′ = ℂʷˡ τ₃ √e (1 - aᶜ) Bˡ with
-##### ℂʷˡ = 3 √(2/3) ρ (1.6 to 2.5) ≈ 2 to 4 for ρ = 0.5 to 0.7 (the default is 4).
+##### ℂʷˡ = 3 √(2/3) ρ (1.6 to 2.5) ≈ 2 to 4 for ρ = 0.5 to 0.7 (the default is 8).
 ##### aᶜ and Bˡ are those of the distribution without skewness (the first pass), so the source is a function of the
 ##### prognostic state, and it does not need the net buoyancy flux to be positive: in a layer of cumulus the mean
 ##### stratification is stable, B < 0 without skewness, and Bˡ > 0.
@@ -146,19 +146,21 @@ Return a [`TKEBudgetThirdMoment`](@ref). The defaults exchange the sink amplitud
 lengths, have a constant ratio and no transport of TKE, and of the damped local third moment only
 the latent source (`ℂʷᵇ = ℂʷᵍ = 0`: the buoyant source `B⁺` cannot tell heating from below, carried
 by updrafts, from cooling from above, carried by downdrafts, so the budget fluxes carry that part
-of the third moment; `ℂʷˡ = 4`: the latent source is the heating of the cloudy updrafts of a partly
+of the third moment; `ℂʷˡ = 8`: the latent source is the heating of the cloudy updrafts of a partly
 cloudy layer, which the budget of the distribution without skewness does not hold). They diagnose
 the third moment once per evaluation of the closure fields, from the budget of the distribution
 without skewness.
 
-`ℂʷˡ = 4` is the upper end of the estimate `3 √(2/3) ρ (1.6 to 2.5)` for a correlation `ρ = 0.5` to
+`ℂʷˡ = 8` is twice the upper end, 4, of the estimate `3 √(2/3) ρ (1.6 to 2.5)` for a correlation `ρ = 0.5` to
 `0.7` of `w` with the saturation excess, and near a fit of `w′³` in the cloud layer of large-eddy
 simulations of cumulus (3.4 with their mixing length; harness `notes/cumulus-skewness.md`). It is
 an initial value: the closure's own `ρ` and `w′²` differ from the simulations', and the columns
-of the note come closer to them with a larger coefficient.
+of the note come closer to them with a larger coefficient: with the hand-tuned stability functions
+8 lowers the error of the BOMEX and cfsite14_04 columns against 4 and leaves the others nearly
+unchanged (harness `notes/hand-tuning.md`).
 """
 function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
-                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0, ℂʷˡ = 4, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,
+                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0, ℂʷˡ = 8, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,
                               stratification_damping_width = 1, passes = 1)
     abs(ℂʷʳ) < 1 || throw(ArgumentError("ℂʷʳ must lie in (-1, 1) for a positive ratio, got $(ℂʷʳ)."))
     0 <= ℂʷᵀ <= 1 || throw(ArgumentError("ℂʷᵀ must lie in [0, 1], got $(ℂʷᵀ)."))

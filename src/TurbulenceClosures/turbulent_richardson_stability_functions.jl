@@ -171,11 +171,19 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`TurbulentRichardsonStabilityFunction`](@ref) from its fifteen positive coefficients.
 
-The defaults are the effective values of the stratification-number functions that preceded these (the
-provisional calibration of the TKE closure to the Shen et al. (2022) LES library in the calibration
-harness), clipped into the default bounds ``[0.05, 20]``: ``ℂᵘ⁺`` (from 0.0110), ``ℂᵉ⁻`` (0.0442),
-``ℂᵉ⁰`` (0.00731), ``ℂᵉ⁺`` (0.0156) and ``ℂᴰ⁻`` (0.00541) are clipped to 0.05 and ``ℂᴰ⁰`` (0.0292)
-to 0.05. ``ℂᴿⁱ⁻ = 16`` fits ``Riᵗ`` to the unstable transition of those functions. ``ℂᴿⁱ⁺ = 0.33``
+The defaults are hand-tuned starting values for calibration. The neutral momentum coefficient
+``ℂᵘ⁰`` and tracer coefficient ``ℂᶜ⁰`` (turbulent Prandtl number 0.80) are those of the provisional
+calibration of the TKE closure to the Shen et al. (2022) LES library in the calibration harness; the
+neutral dissipation coefficient ``ℂᴰ⁰ = 1 / (3.75² ℂᵘ⁰) = 0.447`` gives ``e / u★² = 3.75`` in a neutral
+constant-stress layer, and the default wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} = 1.30`` gives
+von Kármán's constant 0.4 there. The dissipation coefficient is the same in every regime
+(``ℂᴰ⁻ = ℂᴰ⁺ = ℂᴰ⁰``), and the TKE coefficients equal the momentum coefficients (TKE Schmidt number 1).
+On the unstable side ``ℂᵘ⁻ = 0.361`` is that calibration's and ``ℂᶜ⁻ = 0.45`` is above it (Prandtl
+number 0.8), so that the correlation of ``w`` with the scalars of the double-Gaussian distribution,
+``(3 ℂᵠ 𝕊ᶜ 𝕊ᴰ / 4)^{1/2}``, is about 0.4 in convection. On the stable side mixing decreases with
+stability: ``ℂᵘ⁺ = 0.135`` and ``ℂᶜ⁺ = 0.09`` (Prandtl number 1.5) make the steady gradient Richardson
+number of uniformly stratified turbulence ``ℂᵘ⁺ / (ℂᶜ⁺ + ℂᴰ⁺) = 0.25``. ``ℂᴿⁱ⁻ = 16`` fits ``Riᵗ`` to
+the unstable transition of the calibrated functions. ``ℂᴿⁱ⁺ = 0.33``
 puts the stable transition where turbulence observations show marginal stability: under strong shear
 ``v = 1/2``, half of the way from neutral to strongly stable, at ``Ri = 0.20`` (``v = 0.1`` at
 ``Ri = 0.045`` and ``v = 0.9`` at ``Ri = 0.69``). ``ℂᵅ = 4.4`` is just above the least value the width
@@ -188,17 +196,17 @@ TurbulentRichardsonStabilityFunction()
 
 # output
 TurbulentRichardsonStabilityFunction{Float64}
-├── Riᵗ → -∞ (ℂᵘ⁻, ℂᶜ⁻, ℂᵉ⁻, ℂᴰ⁻): 0.36113, 0.0817085, 0.05, 0.05
-├── Riᵗ = 0  (ℂᵘ⁰, ℂᶜ⁰, ℂᵉ⁰, ℂᴰ⁰): 0.159006, 0.198722, 0.05, 0.05
-├── Riᵗ → ∞  (ℂᵘ⁺, ℂᶜ⁺, ℂᵉ⁺, ℂᴰ⁺): 0.05, 0.423567, 0.05, 0.062201
+├── Riᵗ → -∞ (ℂᵘ⁻, ℂᶜ⁻, ℂᵉ⁻, ℂᴰ⁻): 0.36113, 0.45, 0.36113, 0.447224
+├── Riᵗ = 0  (ℂᵘ⁰, ℂᶜ⁰, ℂᵉ⁰, ℂᴰ⁰): 0.159006, 0.198722, 0.159006, 0.447224
+├── Riᵗ → ∞  (ℂᵘ⁺, ℂᶜ⁺, ℂᵉ⁺, ℂᴰ⁺): 0.135, 0.09, 0.135, 0.447224
 └── Riᵗ± = α_N / (ℂᴿⁱ± α_S + ℂᵅ): ℂᴿⁱ⁻ = 16.0, ℂᴿⁱ⁺ = 0.33, ℂᵅ = 4.4
 ```
 """
 function TurbulentRichardsonStabilityFunction(FT::DataType = Oceananigans.defaults.FloatType;
-                                              ℂᵘ⁻ = 0.36113018152281917, ℂᵘ⁰ = 0.15900569445804447, ℂᵘ⁺ = 0.05,
-                                              ℂᶜ⁻ = 0.0817085, ℂᶜ⁰ = 0.19872163735761372, ℂᶜ⁺ = 0.423567,
-                                              ℂᵉ⁻ = 0.05, ℂᵉ⁰ = 0.05, ℂᵉ⁺ = 0.05,
-                                              ℂᴰ⁻ = 0.05, ℂᴰ⁰ = 0.05, ℂᴰ⁺ = 0.062201,
+                                              ℂᵘ⁻ = 0.36113018152281917, ℂᵘ⁰ = 0.15900569445804447, ℂᵘ⁺ = 0.135,
+                                              ℂᶜ⁻ = 0.45, ℂᶜ⁰ = 0.19872163735761372, ℂᶜ⁺ = 0.09,
+                                              ℂᵉ⁻ = 0.36113018152281917, ℂᵉ⁰ = 0.15900569445804447, ℂᵉ⁺ = 0.135,
+                                              ℂᴰ⁻ = 0.4472236755638624, ℂᴰ⁰ = 0.4472236755638624, ℂᴰ⁺ = 0.4472236755638624,
                                               ℂᴿⁱ⁻ = 16, ℂᴿⁱ⁺ = 0.33, ℂᵅ = 4.4)
 
     coefficients = (ℂᵘ⁻, ℂᵘ⁰, ℂᵘ⁺, ℂᶜ⁻, ℂᶜ⁰, ℂᶜ⁺, ℂᵉ⁻, ℂᵉ⁰, ℂᵉ⁺, ℂᴰ⁻, ℂᴰ⁰, ℂᴰ⁺, ℂᴿⁱ⁻, ℂᴿⁱ⁺, ℂᵅ)

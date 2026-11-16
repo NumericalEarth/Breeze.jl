@@ -161,7 +161,7 @@ end
 end
 
 @testset "TKEBudgetThirdMoment: the latent source" begin
-    @test TKEBudgetThirdMoment().ℂʷˡ == 4
+    @test TKEBudgetThirdMoment().ℂʷˡ == 8
     @test :ℂʷˡ ∈ keys(closure_parameters(TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian())))
 
     # The source is added to the buoyant source of the damped local third moment, in proportion to ℂʷˡ

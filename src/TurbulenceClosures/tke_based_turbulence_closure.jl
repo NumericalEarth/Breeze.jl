@@ -470,12 +470,10 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Construct a [`TKEBasedTurbulenceClosure`](@ref) with the given time discretization (default
 `VerticallyImplicitTimeDiscretization()`), float type, mixing length, stability functions, static
 stability and numerical parameters. The default stability functions are
-[`TurbulentRichardsonStabilityFunction()`](@ref TurbulentRichardsonStabilityFunction), the provisional
-calibration of the closure to the Shen et al. (2022) LES library in the calibration harness, mapped onto
-the turbulent-Richardson-number form and clipped into its bounds. The default mixing length has the
-wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} = 0.7511782141838061`` of the neutral values of the
-default stability functions (von Kármán's constant 0.4 in the surface layer) and that calibration's
-interior slope 1.5609936948461662.
+[`TurbulentRichardsonStabilityFunction()`](@ref TurbulentRichardsonStabilityFunction), hand-tuned
+starting values for calibration. The default mixing length has the
+wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} = 1.299067385616381`` of the neutral values of the
+default stability functions (von Kármán's constant 0.4 in the surface layer) and the interior slope of the provisional calibration, 1.5609936948461662.
 
 `shear` is the squared shear ``S²`` of the stability functions, [`GridMeanShear`](@ref). It carries the floor ``S²ᵐⁱⁿ > 0`` (default `1e-10` s⁻²) as
 `shear.minimum_shear_squared`; the keyword `minimum_shear_squared`, if given, replaces the floor
@@ -507,7 +505,7 @@ GridMeanShear(minimum_shear_squared = 1.0e-12)
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;
-                                   mixing_length = GradientLimitedMixingLength(ℂˢ = 0.7511782141838061, ℂⁱ = 1.5609936948461662),
+                                   mixing_length = GradientLimitedMixingLength(ℂˢ = 1.299067385616381, ℂⁱ = 1.5609936948461662),
                                    stability_functions = TurbulentRichardsonStabilityFunction(),
                                    static_stability = MoistStaticStability(),
                                    maximum_viscosity = Inf,
