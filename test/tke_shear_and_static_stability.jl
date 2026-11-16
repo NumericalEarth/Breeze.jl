@@ -308,13 +308,13 @@ spike_θ(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4
 spike_q(z) = 1e-3 * (z < 520 ? 17.0 - z * 0.7 / 520 : z < 1480 ? 16.3 - (z - 520) * 5.6 / 960 :
                      max(4.2, 10.7 - (z - 1480) * 6.5 / 520)) + (500 < z < 1100 ? 2.0e-3 : 0.0)
 
-function spike_column(stability_functions; Nz = 40, H = 2400)
+function spike_column(stability_functions; Nz = 40, H = 2400, subgrid_distribution = DoubleGaussian())
     grid = RectilinearGrid(default_arch; size = Nz, z = (0, H), topology = (Flat, Flat, Bounded))
     reference_state = ReferenceState(grid; base_pressure = 101500, potential_temperature = 299)
     microphysics = PredictedParticlePropertiesMicrophysics(; condensation = SubgridCondensation(TurbulenceClosureStatistics()),
                                                            precipitation_boundary_condition = ImpenetrableBoundaryCondition(),
                                                            process_rates = ProcessRate(Float64; sink_limiting_timescale = 10.0))
-    closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4, subgrid_distribution = DoubleGaussian(), stability_functions,
+    closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4, subgrid_distribution, stability_functions,
                                         static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()))
     ρ₀ = surface_density(reference_state)
     boundary_conditions = (ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(ρ₀ * 8e-3)),
@@ -344,6 +344,18 @@ end
     cbᵗ, Kᵗ = spike_column(TRSF(; (name => getfield(rational, name) for name in fieldnames(RationalStabilityFunction)[1:12])...))
     cbᴿ, Kᴿ = spike_column(rational)
     @info "spike test, the rational functions' values" cbᵗ cbᴿ maximum(Kᵗ)
+    @test maximum(Kᵗ) > 100
+    @test cbᵗ < 0.1
+    # The latent source of the third moment and the bound of the skewness that the PDF represents (the defaults of
+    # `DoubleGaussian`) smooth both columns, the one with the functions of the Richardson number the most (its cb(K)
+    # falls sevenfold), so the two are closer than a factor two; the turbulent Richardson number is still the smoother
+    @test cbᵗ < cbᴿ
+    # ... and with the distribution without them (no latent source, the skewness bounded at 0.85) it is by more than two
+    former_distribution() = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷˡ = 0), skewness = PolynomialSaturatedSkewness(maximum_skewness = 0.85))
+    cbᵗ, Kᵗ = spike_column(TRSF(; (name => getfield(rational, name) for name in fieldnames(RationalStabilityFunction)[1:12])...);
+                           subgrid_distribution = former_distribution())
+    cbᴿ, Kᴿ = spike_column(rational; subgrid_distribution = former_distribution())
+    @info "spike test, the rational functions' values, no latent source and the skewness bounded at 0.85" cbᵗ cbᴿ maximum(Kᵗ)
     @test maximum(Kᵗ) > 100
     @test cbᵗ < 0.1
     @test cbᵗ < cbᴿ / 2
