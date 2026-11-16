@@ -81,7 +81,8 @@ end
     # of the floored diffusivities makes no skewness
     # (not the two cells next to the layer, which its flux and its retreating top reach, nor the two below the
     # top of the domain)
-    still = findall(<(1e-6), column(model.tracers.ρe) ./ ρ)[3:end-2]
+    # (1e-4 m² s⁻²: two orders below the layer; the cell at 1.1e-5 under the top is still air too)
+    still = findall(<(1e-4), column(model.tracers.ρe) ./ ρ)[3:end-2]
     @test !isempty(still)
     @info "largest |skewness| in still air" ℂʷᴸ maximum(abs, Sk[still])
     isfinite(ℂʷᴸ) && @test maximum(abs, Sk[still]) < 1e-3
