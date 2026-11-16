@@ -220,8 +220,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |
 | ``p`` | `p` | `exponent` | Exponent of the `HarmonicBlend` of the lengths that bound the mixing length, ``(ℓ₁^{-p} + ℓ₂^{-p})^{-1/p}`` (elsewhere ``p`` is pressure) |
 | ``α_N, α_S`` | `αᴺ`, `αˢ` | | Stratification number ``τ² N²`` and shear number ``τ² (S² + S²ᵐⁱⁿ)`` of turbulence with the time scale ``τ = ℓ / \sqrt{e}`` (`TurbulentRichardsonStabilityFunction`) |
-| ``Riᵗ`` | `Riᵗ` | `turbulent_richardson_number(sf, αᴺ, αˢ)` | Turbulent Richardson number ``α_N / (ℂᴿⁱ α_S + ℂᵅ)`` of `TurbulentRichardsonStabilityFunction`: ``Ri / ℂᴿⁱ`` under strong shear, ``α_N / ℂᵅ`` without shear |
-| ``ℂᴿⁱ, ℂᵅ`` | `ℂᴿⁱ`, `ℂᵅ` | `ℂᴿⁱ`, `ℂᵅ` | Richardson number and stratification number at which ``Riᵗ = 1`` under strong shear and without shear |
+| ``Riᵗ`` | `Riᵗ` | `turbulent_richardson_number(sf, αᴺ, αˢ)` | Turbulent Richardson number of `TurbulentRichardsonStabilityFunction`, a smooth blend of ``Riᵗ^± = α_N / (ℂᴿⁱ^± α_S + ℂᵅ)`` by the sign of ``α_N``: ``Ri / ℂᴿⁱ^±`` under strong shear, ``α_N / ℂᵅ`` without shear |
+| ``ℂᴿⁱ⁻, ℂᴿⁱ⁺, ℂᵅ`` | `ℂᴿⁱ⁻`, `ℂᴿⁱ⁺`, `ℂᵅ` | `ℂᴿⁱ⁻`, `ℂᴿⁱ⁺`, `ℂᵅ` | Richardson numbers at which ``Riᵗ = ∓1`` under strong shear (unstable, stable side) and stratification number at which ``Riᵗ = 1`` without shear |
 | ``v`` | `v` | | ``Riᵗ / \sqrt{1 + Riᵗ²} ∈ (-1, 1)``, the argument of the quadratic in ``\ln 𝕊`` of `TurbulentRichardsonStabilityFunction` |
 | ``N²ᵈ, N²ˢ`` | `N²ᵈ`, `N²ˢ` | | Dry and saturated squared buoyancy frequencies, which `SaturationWeightedStaticStability` blends with the weight ``aᴺ`` |
 | ``aᴺ`` | `aᴺ` | `saturated_stability_weightᶜᶜᶠ` | Effective saturated fraction: the weight of ``N²ˢ`` in `SaturationWeightedStaticStability`, ``N² = (1 - aᴺ) N²ᵈ + aᴺ N²ˢ``, from its `fraction`; for `CondensateFluxFraction`, ``aᴺ = w′qᶜ′ / w′s′`` of the subgrid distribution |

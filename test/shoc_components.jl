@@ -669,7 +669,7 @@ surface_forcing = (surface_temperature_flux = 0.1, surface_moisture_flux = 5e-5,
         @test Kᵘ ≈ Breeze.TurbulenceClosures.momentum_stability_function(sf, αᴺ, αˢ) * ℓ * sqrt(e)
         closure = SimplifiedHigherOrderClosure(FT; turbulence_time_scale = stratification,
                                                tke_update = ForwardEulerTKE(ℂᴾ = 1), surface_forcing...)
-        @test (:ℂᵅ, :ℂᴿⁱ, :ℂᴰ⁺) ⊆ keys(closure_parameters(closure))
+        @test (:ℂᵅ, :ℂᴿⁱ⁻, :ℂᴿⁱ⁺, :ℂᴰ⁺) ⊆ keys(closure_parameters(closure))
         changed = with_parameters(closure; ℂᵅ = FT(6)).turbulence_time_scale.functions
         @test changed == TurbulentRichardsonStabilityFunction(FT; ℂᵅ = 6)
         run = run_shoc_column(closure)

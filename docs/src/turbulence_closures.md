@@ -124,11 +124,15 @@ Richardson number, formed from the stratification number ``α_N = τ² N²`` and
 ``α_S = τ² (S² + S²ᵐⁱⁿ)`` of turbulence with the time scale ``τ = ℓ / \sqrt{e}``:
 
 ```math
-Riᵗ = \frac{α_N}{ℂᴿⁱ α_S + ℂᵅ} = \frac{N²}{ℂᴿⁱ (S² + S²ᵐⁱⁿ) + ℂᵅ e / ℓ²}.
+Riᵗ = Riᵗ⁻ + (Riᵗ⁺ - Riᵗ⁻) \frac{1 + s}{2}, \qquad
+Riᵗ^± = \frac{α_N}{ℂᴿⁱ^± α_S + ℂᵅ}, \qquad
+s = \frac{x}{\sqrt{1 + x²}}, \qquad x = \frac{α_N}{δ \min(ℂᴿⁱ^± α_S + ℂᵅ)},
 ```
 
-It is ``Ri / ℂᴿⁱ`` where the shear is strong, with ``Ri = N² / (S² + S²ᵐⁱⁿ)``, ``α_N / ℂᵅ`` where the
-shear vanishes, and smooth through ``N² = 0``. Each of the four functions takes its strongly unstable,
+a blend, with ``δ = 1/4``, of a number for the unstable side and one for the stable side by a smooth
+sign of ``α_N``. It is ``Ri / ℂᴿⁱ⁻`` (unstable) or ``Ri / ℂᴿⁱ⁺`` (stable) where the shear is strong,
+with ``Ri = N² / (S² + S²ᵐⁱⁿ)``, exactly ``α_N / ℂᵅ`` where the shear vanishes, increasing in ``α_N``
+and smooth through ``N² = 0``, where its slope is the mean of the slopes of the two sides. Each of the four functions takes its strongly unstable,
 neutral and strongly stable values ``ℂ⁻, ℂ⁰, ℂ⁺`` at ``v = -1, 0, 1``, with
 ``v = Riᵗ / \sqrt{1 + Riᵗ²}``, through a quadratic in ``v`` of its logarithm:
 
@@ -140,11 +144,11 @@ The functions are positive, smooth and without branches for any positive coeffic
 shear ``S²`` and its floor ``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` come from the closure's `shear`,
 [`GridMeanShear`](@ref).
 
-The fourteen coefficients are what [`closure_parameters`](@ref) lists. For a calibration,
+The fifteen coefficients are what [`closure_parameters`](@ref) lists. For a calibration,
 `Breeze.TurbulenceClosures.stability_coefficient_bounds` gives each an independent interval,
-``[0.05, 20]`` by default, except ``ℂᵅ ≥ 4.19``: where the shear vanishes the logarithmic slope of a
-function in ``α_N`` is at most ``0.699 \ln(20 / 0.05) / ℂᵅ``, and this bound keeps it below one, the
-width condition of the stability functions. The defaults are the provisional calibration of the
+``[0.05, 20]`` by default, except ``ℂᵅ ≥ 4.37``: at any shear the logarithmic slope of a function in
+``α_N`` is at most ``0.699 × 1.044 \ln(20 / 0.05) / ℂᵅ`` (1.044 is the largest slope of the blend), and
+this bound keeps it below one, the width condition of the stability functions. The defaults are the provisional calibration of the
 closure in the calibration harness, clipped into ``[0.05, 20]``:
 
 | Function | Strongly unstable | Neutral | Strongly stable |
@@ -154,7 +158,10 @@ closure in the calibration harness, clipped into ``[0.05, 20]``:
 | TKE | 0.05 | 0.05 | 0.05 |
 | dissipation | 0.05 | 0.05 | 0.0622 |
 
-with ``ℂᴿⁱ = 8.7`` and ``ℂᵅ = 4.2``, and the mixing length's wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 0.751`` and
+with ``ℂᴿⁱ⁻ = 16``, ``ℂᴿⁱ⁺ = 0.33`` and ``ℂᵅ = 4.4``. Under strong shear ``ℂᴿⁱ⁺ = 0.33`` puts the
+stable functions halfway through their transition, ``v = 1/2``, at ``Ri = 0.20``, where turbulence
+observations show marginal stability (``v = 0.1`` at ``Ri = 0.045``, ``v = 0.9`` at ``Ri = 0.69``);
+``ℂᴿⁱ⁻ = 16`` puts the unstable halfway point at ``Ri = -9.2``. The mixing length's wall coefficient is ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 0.751`` and its
 interior slope ``ℂⁱ ≈ 1.56``.
 
 [`RationalStabilityFunction`](@ref) is
