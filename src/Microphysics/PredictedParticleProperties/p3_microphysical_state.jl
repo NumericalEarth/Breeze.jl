@@ -130,6 +130,10 @@ Return prognostic field names for the P3 scheme.
                  vapor_excess_names..., aero_names...)
 end
 
+# The vapor excess over liquid is negative wherever the air is subsaturated, so the
+# non-negative default advection does not apply to it; it uses the model-wide default.
+AM.default_advection_scheme(::P3, ::Val{:ρδqᵛ⁺ˡ}, grid) = nothing
+
 # True condensate partial densities that contribute to total air mass. Number moments,
 # supersaturation, and aerosol are not masses. Rime mass is already contained in total
 # ice mass, so including ρqᶠ would count it twice; ρbᶠ is an ice property.

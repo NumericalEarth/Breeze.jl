@@ -103,6 +103,16 @@ Arguments
      schemes may be provided. `scalar_advection` may be a `NamedTuple` with
      a different scheme for each respective scalar, identified by name.
 
+   * Unless a single `advection` or `scalar_advection` scheme is given, the moisture density
+     and prognostic microphysical fields use the microphysics' own defaults from
+     [`default_microphysics_advection`](@ref): for every microphysics scheme in Breeze, a
+     bounds-preserving `WENO` (order 5, or 3 on grids with smaller halos) with bounds `(0, ∞)`
+     and adaptive vertically implicit treatment of vertical transport above a Courant number of
+     1/4. Entries of a `scalar_advection` `NamedTuple` override these defaults field by field.
+     These schemes cost more than `Centered(order=2)` but keep fast-sedimenting species such
+     as rain non-negative and stable at large time steps. With `microphysics = nothing`
+     nothing changes.
+
    * `particles` are Lagrangian particles to be advected with the flow,
      constructed with `Oceananigans.LagrangianParticles`. Particles are advected
      with the Cartesian velocities `model.velocities` once per time step, over the
@@ -177,12 +187,24 @@ function AtmosphereModel(grid;
     # can be evaluated on this architecture (before anything is traced)
     validate_radiation(radiation, clock, grid.architecture)
 
+    # A single user-specified scalar scheme covers every scalar, microphysical fields included.
+    # Otherwise, microphysical fields the user did not name get the microphysics' own defaults.
+    use_microphysics_advection = (advection isa DefaultValue) &&
+                                 (scalar_advection isa DefaultValue || scalar_advection isa NamedTuple)
+
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
         scalar_advection = momentum_advection = advection
     else
         (momentum_advection isa DefaultValue) && (momentum_advection = Centered(order=2))
         (scalar_advection isa DefaultValue) && (scalar_advection = Centered(order=2))
+    end
+
+    if use_microphysics_advection
+        user_scalar_advection = scalar_advection isa NamedTuple ? scalar_advection : NamedTuple()
+        scalar_advection = merge(default_microphysics_advection(microphysics, grid), user_scalar_advection)
+        # An empty NamedTuple means "no per-field schemes": fall back to the model-wide default
+        scalar_advection = isempty(scalar_advection) ? Centered(order=2) : scalar_advection
     end
 
     # Check halos and throw an error if the grid's halo is too small
