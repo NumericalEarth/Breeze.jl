@@ -24,6 +24,15 @@ end
 # Returns both Float32 and Float64 for tests that need both precision levels
 all_float_types() = (Float32, Float64)
 
+# Sweeps over configurations that each compile their own model (time-stepper coefficient sets,
+# terrain formulations, lateral topologies) run one representative by default.
+# Set BREEZE_TEST_EXHAUSTIVE=true, as one CI runner does, to run every member.
+exhaustive_tests() = get(ENV, "BREEZE_TEST_EXHAUSTIVE", "false") == "true"
+
+# The members of `sweep` to test: all of them where exhaustive tests are requested, and otherwise
+# the first `representatives`.
+test_sweep(sweep; representatives=1) = exhaustive_tests() ? sweep : sweep[1:representatives]
+
 # Temperature inversions of the density-based state: non-iterated, fixed-count, stopped and converged
 temperature_solver_variants(FT) = (nothing, Breeze.FixedIterations(0), Breeze.FixedIterations(1),
                                    Breeze.FixedIterations(2), Breeze.NewtonSolver(FT; maxiter=0),

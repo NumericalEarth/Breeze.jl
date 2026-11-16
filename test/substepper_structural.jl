@@ -301,30 +301,11 @@ end
 #####
 
 @testset "S5c — Flux boundary tendencies enter acoustic RK stages" begin
-    grid = RectilinearGrid(default_arch;
-                           size = (8, 8, 8), halo = (5, 5, 5),
-                           x = (0, 1), y = (0, 1), z = (0, 1),
-                           topology = (Periodic, Periodic, Bounded))
-
-    constants = ThermodynamicConstants(eltype(grid))
-    td = SplitExplicitTimeDiscretization(substeps = 6,
-                                         damping = NoDivergenceDamping())
-    dyn = CompressibleDynamics(td;
-                               reference_potential_temperature = z -> 300,
-                               base_pressure = 1e5,
-                               standard_pressure = 1e5)
-
+    # The grid and time discretization of the testsets above, so that only what the boundary
+    # condition changes is compiled anew.
     ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.0))
-    model = AtmosphereModel(grid; dynamics = dyn,
-                                  thermodynamic_constants = constants,
-                                  boundary_conditions = (ρu = ρu_bcs,))
-
-    ref = model.dynamics.reference_state
-    Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
-    parent(model.dynamics.dry_density) .= parent(ref.density)
-    ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
-    parent(ρθ) .= parent(ref.pressure) ./ (Rᵈ .* parent(ref.exner_function))
-    update_state!(model)
+    model = _build_str_model(default_arch; boundary_conditions = (ρu = ρu_bcs,))
+    _set_str_rest!(model)
 
     ρu₀ = sum(Array(interior(model.momentum.ρu)))
     time_step!(model, 1e-3)

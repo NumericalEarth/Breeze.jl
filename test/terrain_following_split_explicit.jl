@@ -25,6 +25,11 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                               TwoLevelDecay(large_scale_height = 2500.0,
                                             small_scale_height = 1250.0))
 
+# A formulation is part of the grid's type, so each one compiles every kernel anew. Both step
+# through the substepper in the transport testset; the testsets that only repeat the sweep take
+# the first unless the exhaustive tests are requested.
+const SWEPT_TERRAIN_FORMULATIONS = test_sweep(TERRAIN_FORMULATIONS)
+
 @allowscalar begin
 @testset "TerrainFollowing split-explicit dynamics" begin
     @testset "Terrain acoustic recovery cancels the stage-base horizontal momenta" begin
@@ -93,8 +98,11 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
             # Isolate the pure slope-term reduction: disable the terrain reference (on by default
             # for terrain grids) so both branches difference the full pressure and the flat
             # (h ≡ 0) terrain path matches the height path to machine precision.
+            # The reduction is that of the terrain metrics, whichever time stepper runs the
+            # substeps. Four models are compiled here (height and terrain, with and without
+            # damping), so they take the stepper that is cheaper to compile.
             dynamics = CompressibleDynamics(time_discretization; reference_state=nothing)
-            model = AtmosphereModel(grid; dynamics)
+            model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
             set!(model,
                  ρ=1,
                  θ=300,
@@ -264,7 +272,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         @test isapprox(maximum(abs, interior(model.velocities.w)), 0; atol = 1e-12)
     end
 
-    @testset "Split-explicit terrain acoustic stability diagnostics [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
+    @testset "Split-explicit terrain acoustic stability diagnostics [$(nameof(typeof(formulation)))]" for formulation in SWEPT_TERRAIN_FORMULATIONS
         Nx, Nz = 8, 6
         Lx, Lz = 10000.0, 5000.0
         Δt = 2.0
@@ -449,7 +457,8 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
                                                                         damping=damping);
                                         slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics)
+        # The damping is the substep loop's, which the time steppers share.
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model,
              θ=300,
              ρ=model.dynamics.reference_state.density,
@@ -485,7 +494,8 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         slope_stencil = SlopeInsideInterpolation(),
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics)
+        # The stencil is the substep loop's too; the mountain wave above steps it with the default.
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
         set!(model,
              θ=300,
              ρ=model.dynamics.reference_state.density,
@@ -499,7 +509,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         @test isfinite(maximum(abs, interior(model.dynamics.dry_density)))
     end
 
-    @testset "Acoustic substep applies terrain ρw̃ slope correction [$(nameof(typeof(formulation)))]" for formulation in TERRAIN_FORMULATIONS
+    @testset "Acoustic substep applies terrain ρw̃ slope correction [$(nameof(typeof(formulation)))]" for formulation in SWEPT_TERRAIN_FORMULATIONS
         # The contravariant vertical-momentum perturbation ρw̃ = ρw − slopeₓ·ρu − slopeᵧ·ρv
         # carries a horizontal slope correction slopeₓ·∂ₓ(Cᴸ(ρθ)′) in its acoustic
         # pressure-gradient force, so `∇ᶻp′` is the vertical ∂z(Cᴸ(ρθ)′) minus that correction.
@@ -588,8 +598,11 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         return grid
     end
 
-    lateral_topologies = ((Periodic, Flat, Bounded), (Bounded, Flat, Bounded),
-                          (Periodic, Periodic, Bounded), (Bounded, Bounded, Bounded))
+    # Each topology compiles its own model. The first two cover a periodic and a walled x, a flat
+    # and a walled y; the other two run in the exhaustive tests.
+    lateral_topologies = test_sweep(((Periodic, Flat, Bounded), (Bounded, Bounded, Bounded),
+                                     (Bounded, Flat, Bounded), (Periodic, Periodic, Bounded));
+                                    representatives = 2)
 
     @testset "Topology-aware terrain operators match the halo-reading ones on filled fields [$topology]" for topology in lateral_topologies
         grid = hill_grid(topology)
