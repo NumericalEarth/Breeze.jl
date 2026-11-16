@@ -147,13 +147,20 @@ loop's mean differs from the one continuity applies, a uniform mass fraction doe
 uniform. With `timestepper_kwargs = (; post_loop_scalar_tendencies = true)` the water and
 tracer tendencies are instead rebuilt after each stage's own loop, from its mean mass flux, as
 WRF and MPAS do; their fluxes are then exactly ``q / (1 - q)`` times the dry-mass flux the stage
-applied, and a uniform mass fraction stays uniform to round-off with `AcousticRungeKutta3`. Under
+applied, and a uniform mass fraction stays uniform to round-off. Under
 a multirate infinitesimal step the whole post-loop tendency, advection included, is recombined
 across stages with the tableau like any other slow tendency. Leaving the advective part at weight
 one from the current stage would keep the fluxes paired with continuity's, but it integrates
 advection with a first-order, anti-diffusive method that amplifies scalars at every Courant
-number; recombined, a uniform mass fraction stays uniform to the accuracy of the scheme rather
-than to round-off. The loop linearizes at
+number. Recombined, the tendencies of earlier stages carry the mass fluxes ``F_j`` of those stages'
+loops, while stage ``i`` moves the dry air with ``d_i F_i``. The difference,
+``R_i = \sum_{j<i} β_{ij} (F_i - F_j)``, is therefore added to stage ``i`` as a first-order upwind
+flux of the stage-entry mass fraction. With it the stage applies exactly its own mass flux to a
+uniform mass fraction, which stays uniform to round-off with every coefficient set, and the
+scalars keep the second-order accuracy that the recombined fluxes alone lose wherever the mass
+flux changes during a step. Under adaptive implicit vertical advection the implicit remainder
+forms the mass fraction it transports with the density the loop has compressed the cell to,
+for the same reason. The loop linearizes at
 fixed composition. This is exact for the slow, loop-mean compression, where it keeps the loop
 consistent with the re-diagnosed pressure in balanced flow, and it gives the moist adiabatic
 compressibility. For the oscillation itself the re-diagnosed state is closer to fixed water
