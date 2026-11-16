@@ -117,9 +117,7 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     FT = eltype(grid)
     rounding = materialize_rounding(rounding, grid.architecture)
     R = typeof(rounding)
-    scalar_tendencies = post_loop_scalar_tendencies ?
-        PostLoopScalarTendencies(previous_tendency_storage(grid, prognostic_fields, dynamics)) :
-        PreLoopScalarTendencies()
+    scalar_tendencies = scalar_tendency_timing(post_loop_scalar_tendencies, grid, prognostic_fields, dynamics)
     ST = typeof(scalar_tendencies)
 
     # Stage fractions come from the outer-scheme interface. Today the only

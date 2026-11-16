@@ -17,7 +17,7 @@ const FT = Float32
 const N = isempty(ARGS) ? 32 : parse(Int, ARGS[1])
 const H = 5
 const requested = length(ARGS) > 1 ? Symbol.(ARGS[2:end]) :
-                  [:WickerSkamarock3, :TVDMISB, :MIS4a, :SSPMIS43, :ConvexMIS42, :ConvexMIS52, :ConvexMIS52r20]
+                  [:WickerSkamarock3, :LowStorageMIS52, :DiagonalMIS42, :DiagonalMIS52, :TVDMISB, :MIS4a, :SSPMIS43]
 
 const CMExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 
@@ -72,8 +72,12 @@ function component_arrays(timestepper, exclude)
         x = getfield(timestepper, name)
         x isa Union{Number, Base.RefValue} && continue
         if name === :accumulators
-            for (k, pair) in enumerate(x), part in keys(pair)
-                add!("accumulators[$k].$part", pair[part])
+            for (k, entry) in enumerate(x)
+                if haskey(entry, :forcing) # an accumulator pair; otherwise an increment register
+                    foreach(part -> add!("accumulators[$k].$part", entry[part]), keys(entry))
+                else
+                    add!("increment register $k", entry)
+                end
             end
         else
             add!(string(name), x)

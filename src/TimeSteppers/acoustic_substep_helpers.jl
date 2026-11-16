@@ -242,6 +242,11 @@ PostLoopScalarTendencies() = PostLoopScalarTendencies(nothing)
 scalar_tendency_timing(post_loop_scalar_tendencies::Bool) =
     post_loop_scalar_tendencies ? PostLoopScalarTendencies() : PreLoopScalarTendencies()
 
+# With fields for the tendencies of the stage before (`previous_tendency_storage`).
+scalar_tendency_timing(post_loop_scalar_tendencies::Bool, grid, prognostic_fields, dynamics) =
+    post_loop_scalar_tendencies ? PostLoopScalarTendencies(previous_tendency_storage(grid, prognostic_fields, dynamics)) :
+                                  PreLoopScalarTendencies()
+
 # One field per prognostic that the acoustic loop does not advance by continuity or momentum. The
 # moisture and condensate densities are not told apart from the others here, where only the
 # dynamics is known, so every one of them gets a field, and only theirs are written.
@@ -315,8 +320,9 @@ function compute_post_loop_scalar_tendencies!(timing::PostLoopScalarTendencies, 
 
     keep_previous_scalar_tendencies!(timing.previous_tendencies, model)
     cache_post_loop_transport!(model)
-    assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
+    # The assembly may read the prognostic fields (see `StateIncrement`), so the tracers are densities again.
     tracer_specific_to_density!(model)
+    assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
     return nothing
 end
 
