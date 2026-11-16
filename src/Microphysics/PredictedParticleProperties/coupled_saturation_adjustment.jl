@@ -19,6 +19,8 @@ struct P3CoupledVaporRates{FT}
     deposition :: FT
     coating_condensation :: FT
     coating_evaporation :: FT
+    cloud_relaxation :: FT  # vapor relaxation coefficient of cloud liquid [s⁻¹]
+    rain_relaxation :: FT   # vapor relaxation coefficient of rain [s⁻¹]
 end
 
 """
@@ -64,7 +66,8 @@ psychrometric convention of the Morrison–Gettelman rates that follow it.
     ::ProcessRate{FT, DiagnosticVaporExcess}, p3, qᶜˡ, qᵛ⁺ˡ, δqᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants
 ) where FT = no_vapor_excess_adjustment(qᶜˡ, qᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
 
-# The state unchanged, in the form of `prognostic_vapor_excess_adjustment`
+# The state unchanged, in the form of `prognostic_vapor_excess_adjustment`. `T` is the
+# temperature of `𝒰`.
 @inline function no_vapor_excess_adjustment(qᶜˡ, qᵛ⁺ˡ, T, ρᵗʰ, 𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     cloud_water_adjustment = zero(qᶜˡ)
@@ -74,7 +77,7 @@ psychrometric convention of the Morrison–Gettelman rates that follow it.
             qᵛ = q.vapor,
             qᵛ⁺ˡ,
             T,
-            P = air_pressure(𝒰, constants),
+            P = air_pressure(𝒰, constants, T),
             q,
             ρᵗʰ)
 end
@@ -364,7 +367,8 @@ cloud/precipitation fraction framework is handled separately.
     coating_evaporation = min(max(0, -raw_coating_growth), max(0, qʷⁱ) / τ)
 
     return P3CoupledVaporRates{FT}(condensation, rain_evaporation, rain_condensation,
-                                   deposition, coating_condensation, coating_evaporation)
+                                   deposition, coating_condensation, coating_evaporation,
+                                   cloud_relaxation, rain_relaxation)
 end
 
 #####

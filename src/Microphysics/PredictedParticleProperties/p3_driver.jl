@@ -444,7 +444,7 @@ The tendency to add to the process tendency `Gᵖ` so that it removes no more th
 @inline function nonnegative_tendency_limit(i, j, k, G, stage, name, Gᵖ)
     Δt = stage.Δt
     c⁰ = AM.stage_start_value(i, j, k, stage, name)
-    @inbounds Gᵒ = G[i, j, k]
+    Gᵒ = AM.accumulated_tendency(i, j, k, G, stage, name)
     c̃ = max(0, c⁰ + Δt * Gᵒ)
     limited = max(Gᵖ, -c̃ / Δt)
     known_interval = isfinite(Δt) & (Δt > 0)
@@ -496,7 +496,7 @@ and before the first time step, when the stage interval is not known.
 @inline function semi_implicit_relaxation(i, j, k, G, stage, name, Gᵖ, explicit, ρnᵗ, τ, active)
     Δt = stage.Δt
     c⁰ = AM.stage_start_value(i, j, k, stage, name)
-    @inbounds Gᵒ = G[i, j, k]
+    Gᵒ = AM.accumulated_tendency(i, j, k, G, stage, name)
     c̃ = c⁰ + Δt * (Gᵒ + Gᵖ - explicit)
     implicit = (ρnᵗ - c̃) / (τ + Δt)
     semi_implicit = active & isfinite(Δt) & (Δt > 0)
