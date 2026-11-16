@@ -40,6 +40,31 @@ end
 
 Base.summary(::MultirateInfinitesimalStepTableau{FT}) where FT = "MultirateInfinitesimalStepTableau{$FT}"
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Construct a [`MultirateInfinitesimalStepTableau`](@ref) in float type `FT` from the square,
+lower-triangular coefficient matrices `α`, `β` (with diagonal) and `γ` of
+[Knoth and Wensch (2014)](@cite KnothWensch2014). The stage interval fractions ``dᵢ = Σⱼ βᵢⱼ``,
+the stage abscissae ``cᵢ = dᵢ + Σⱼ (αᵢⱼ + γᵢⱼ) cⱼ`` and the strong-stability coefficient of the
+slow method are computed from them.
+
+```jldoctest
+using Breeze.TimeSteppers: MultirateInfinitesimalStepTableau
+
+α = zeros(3, 3)
+γ = zeros(3, 3)
+β = [1//3 0 0; 0 1//2 0; 0 0 1]
+tableau = MultirateInfinitesimalStepTableau(Float64, α, β, γ)
+tableau.d
+
+# output
+3-element Vector{Float64}:
+ 0.3333333333333333
+ 0.5
+ 1.0
+```
+"""
 function MultirateInfinitesimalStepTableau(FT, α, β, γ)
     α = convert(Matrix{FT}, α)
     β = convert(Matrix{FT}, β)

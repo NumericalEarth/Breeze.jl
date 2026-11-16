@@ -737,7 +737,8 @@ description and its limitations.
 ## Time integration
 
 Terrain dynamics inherit Breeze's
-[`SplitExplicitTimeDiscretization`](@ref): a Wicker–Skamarock RK3 outer step
+[`SplitExplicitTimeDiscretization`](@ref): a multirate infinitesimal step outer scheme
+(or Wicker–Skamarock RK3, with `timestepper = :AcousticRungeKutta3`)
 with acoustic substepping. The relevant terrain-specific bits are:
 
   - All vertical transport inside the substep loop uses ``\tilde{w}``, not ``w``.

@@ -28,7 +28,7 @@ end
 
 @testset "Vapor jump advected under an inversion [$FT]" for FT in (Float64,)
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size = (40, 250), halo = (5, 5), x = (0, 4e3), z = (0, 5e3),
+    grid = RectilinearGrid(default_arch; size = (20, 250), halo = (5, 5), x = (0, 2e3), z = (0, 5e3),
                            topology = (Periodic, Flat, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps = 6); base_pressure = 97e3,
                                     reference_potential_temperature = sounding_θ,
