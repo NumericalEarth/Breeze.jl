@@ -283,24 +283,29 @@ end
 #####
 ##### Stage increments of a multirate infinitesimal step with an active negative-moisture correction
 #####
-##### `update_state!` corrects negative moisture between stages, so an increment ΔYᵢ = Yᵢ − Uⁿ formed
-##### after it carries the correction into the forcing and start state of later stages. The increments
-##### of the moisture and microphysical fields are therefore stored when a stage completes, and only
-##### those of the acoustic prognostics, which nothing changes in between, are formed in the next
-##### stage's assembly. Either way the step must reproduce the one that stores every increment.
+##### `update_state!` corrects negative moisture between stages, and the next slow tendencies are
+##### evaluated at the corrected state. The increment ΔYᵢ = Yᵢ − Uⁿ that later stages start from and
+##### are forced with is that of the corrected state too, with every storage layout: the layout with
+##### two registers reads it from the prognostic fields, and the layouts with increment registers and
+##### with accumulators store it once `update_state!` has run. (They used to store it when the stage
+##### completed, before the correction, so that the layouts differed wherever the correction was
+##### active.) The increments of the acoustic prognostics, which `update_state!` does not change, are
+##### formed in the next stage's assembly or stored with the others; either way the step is the same.
 #####
 
 using CloudMicrophysics
 using Breeze.AtmosphereModels: SpeciesBorrowing
-using Breeze.TimeSteppers: fold_stage_increments, stage_increment_source, acoustic_prognostic_names,
-                           IncrementFromState, StoredIncrement
+using Breeze.TimeSteppers: fold_stage_increments, structured_stage_storage, stage_increment_source,
+                           acoustic_prognostic_names, IncrementFromState, StoredIncrement,
+                           TwoRegisterStorage, IncrementStorage, AccumulatorStorage
 using Oceananigans: prognostic_fields
 
 const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt).OneMomentCloudMicrophysics
 
 # Sharp-edged rain in a sheared, overturning flow: unbounded WENO undershoots at its edges, so the
 # correction has negative rain to repair after every stage.
-function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correction = SpeciesBorrowing())
+function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correction = SpeciesBorrowing(),
+                        coefficients = :TVDMISB)
     grid = RectilinearGrid(default_arch; size = (16, 16), halo = (5, 5), x = (-8e3, 8e3), z = (0, 8e3),
                            topology = (Periodic, Flat, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
@@ -308,7 +313,7 @@ function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correct
     model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
                             microphysics = OneMomentCloudMicrophysics(; negative_moisture_correction),
                             timestepper = :MultirateInfinitesimalStep,
-                            timestepper_kwargs = (; coefficients = :TVDMISB, post_loop_scalar_tendencies))
+                            timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies))
     constants = model.thermodynamic_constants
     set!(model; θ = θ_bubble, qᵗ = 0.018, ρ = (x, z) -> adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, constants),
                 u = (x, z) -> 15 * sin(2π * z / 8e3), w = (x, z) -> 4 * sin(2π * x / 16e3))
@@ -317,19 +322,21 @@ function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correct
     return model
 end
 
-function raining_bubble_state(Nt; fold, kw...)
+function raining_bubble_state(Nt; fold, structured = true, kw...)
     fold_stage_increments[] = fold
+    structured_stage_storage[] = structured
     model = raining_bubble(; kw...)
+    fold_stage_increments[] = true
+    structured_stage_storage[] = true
     for _ in 1:Nt
         time_step!(model, 6)
     end
-    fold_stage_increments[] = true
-    return map(field -> Array(interior(field)), prognostic_fields(model))
+    return map(field -> Array(interior(field)), prognostic_fields(model)), model.timestepper.storage
 end
 
 @testset "MIS stage increments with an active negative-moisture correction [post_loop = $post_loop_scalar_tendencies]" for post_loop_scalar_tendencies in (false, true)
     # The setup gives the correction something to do: uncorrected, a step leaves negative rain.
-    uncorrected = raining_bubble_state(1; fold = true, post_loop_scalar_tendencies, negative_moisture_correction = nothing)
+    uncorrected, _ = raining_bubble_state(1; fold = true, post_loop_scalar_tendencies, negative_moisture_correction = nothing)
     @test minimum(uncorrected.ρqʳ) < 0
 
     # Only the prognostics the acoustic loop advances form their increments in the assembly.
@@ -340,12 +347,37 @@ end
     end
 
     for Nt in (1, 3)
-        folded = raining_bubble_state(Nt; fold = true, post_loop_scalar_tendencies)
-        stored = raining_bubble_state(Nt; fold = false, post_loop_scalar_tendencies)
+        folded, _ = raining_bubble_state(Nt; fold = true, post_loop_scalar_tendencies)
+        stored, _ = raining_bubble_state(Nt; fold = false, post_loop_scalar_tendencies)
         @test minimum(folded.ρqʳ) ≥ 0
         for name in keys(folded)
             scale = maximum(abs, stored[name])
             @test maximum(abs, folded[name] .- stored[name]) ≤ 100 * eps(scale)
         end
+    end
+end
+
+# The increments are those of the corrected state with every layout: a coefficient set that keeps two
+# registers reads them from the corrected prognostic fields, and reproduces to round-off the same
+# set with increment registers stored after the correction and with accumulators. Three steps of
+# this bubble amplify the round-off the layouts differ by, as in "MIS storage layouts reproduce the
+# accumulators".
+@testset "MIS storage layouts agree with an active negative-moisture correction [$coefficients, post_loop = $post_loop_scalar_tendencies]" for
+        (coefficients, layout) in ((:LowStorageMIS52, TwoRegisterStorage), (:DiagonalMIS42, IncrementStorage)),
+        post_loop_scalar_tendencies in (false, true)
+
+    kw = (; coefficients, post_loop_scalar_tendencies)
+    uncorrected, _ = raining_bubble_state(1; fold = true, negative_moisture_correction = nothing, kw...)
+    @test minimum(uncorrected.ρqʳ) < 0
+
+    structured, storage = raining_bubble_state(3; fold = true, kw...)
+    accumulated, accumulator_storage = raining_bubble_state(3; fold = true, structured = false, kw...)
+    @test storage isa layout
+    @test accumulator_storage isa AccumulatorStorage
+    @test minimum(structured.ρqʳ) ≥ 0
+
+    for name in keys(accumulated)
+        scale = maximum(abs, accumulated[name])
+        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 1000 * eps(scale)
     end
 end

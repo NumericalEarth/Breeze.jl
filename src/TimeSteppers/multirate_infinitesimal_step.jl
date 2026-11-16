@@ -181,11 +181,13 @@ and `γ` have entries on the first subdiagonal alone (`:WickerSkamarock3`, `:Low
 two copies of the prognostic state, as `AcousticRungeKutta3` does: the step-start state `Uⁿ`, which
 `U⁰` then is, and the tendencies, and with post-loop scalar tendencies the fields that keep the
 moisture and condensate tendencies for the next stage's loop. Every stage forms the one increment it
-needs from the prognostic fields themselves. The increments of the moisture and microphysical fields then include what the
-negative-moisture correction of `update_state!` changed since the stage ended. Any other set with a
+needs from the prognostic fields themselves. Any other set with a
 diagonal `β` and at most five stages (`:DiagonalMIS42`, `:DiagonalMIS52`) keeps two stage increments
 besides, and a third for the moisture, microphysical and tracer fields of a five-stage set. The
-remaining sets keep a forcing and an offset accumulator for each stage after the second.
+remaining sets keep a forcing and an offset accumulator for each stage after the second. With every
+layout the increment of a stage is that of the state `update_state!` leaves after it, so the
+increments of the moisture and microphysical fields include its negative-moisture correction: a
+stage starts from, and is forced with, the corrected state that its tendency was evaluated at.
 
 `rounding` sets the round-off treatment of the state updates that reach ``Uⁿ⁺¹`` (default:
 [`RoundToNearest`](@ref)). For the acoustic prognostics that is the last stage's recovery of the
@@ -1290,7 +1292,7 @@ CompressibleEquations.moisture_forcing(ts::MultirateInfinitesimalStep, model, na
 stage_moisture_forcing(::PostLoopScalarTendencies, ts::MultirateInfinitesimalStep, model, name) =
     predicted_stage_forcing(ts.storage, ts, model, name)
 
-# The increments of the scalars are stored when a stage completes (`store_stage_increment!`), so
+# The increments of the scalars are stored before the next stage starts (`store_stage_increment!`), so
 # the accumulated forcing of stage i ≥ 3 is complete but for its own tendency when its loop starts.
 function predicted_stage_forcing(::AccumulatorStorage, ts, model, name)
     i = ts.stage[]
@@ -1769,7 +1771,7 @@ function assembly_register_updates(::IncrementStorage, source::IncrementFromStat
     end
 end
 
-# After stage i, for a field whose increments are stored: ΔYᵢ in the next free register, or, after
+# After stage i and its `update_state!`, for a field whose increments are stored: ΔYᵢ in the next free register, or, after
 # stage s - 1, the offset and the forcing of the last stage over ΔY₁ and ΔY₂.
 function store_stage_increment!(::IncrementStorage, ts, model, i, Δt)
     tableau = ts.tableau
@@ -1856,8 +1858,13 @@ end
 # (`stage_accumulators`).
 const fold_stage_increments = Ref(true)
 
-# The acoustic prognostics still hold Yᵢ₋₁ when the next stage is assembled, so the assembly forms
-# their increment. `update_state!` changes the other scalars in between, so theirs is stored.
+# The increment ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ of every field is that of the state `update_state!` leaves after
+# stage i - 1: the state the next slow tendencies are evaluated at, with the negative-moisture
+# correction of the moisture and microphysical fields. The acoustic prognostics still hold that
+# state when the next stage is assembled, so the assembly forms their increment. Those of the other
+# fields are stored once `update_state!` has run (`store_stage_increment!`): with post-loop scalar
+# tendencies the loop's pressure needs their part of the stage forcing before the loop
+# (`PredictedStageForcing`).
 stage_increment_source(model, name) = stage_increment_source(model.timestepper.storage, model, name)
 
 function stage_increment_source(storage, model, name)
@@ -1866,12 +1873,11 @@ function stage_increment_source(storage, model, name)
 end
 
 # With two registers there is nowhere to store an increment: every field forms its own from the
-# prognostic field. For the moisture and microphysical fields the increment then includes what the
-# negative-moisture correction of `update_state!` changed, so that the stage starts from, and is
-# forced with, the corrected state that its tendency was evaluated at.
+# prognostic field, which holds the state `update_state!` left until the stage updates it.
 stage_increment_source(::TwoRegisterStorage, model, name) = IncrementFromState(prognostic_fields(model)[name])
 
-# Fold the increment ΔYᵢ = Yᵢ - Uⁿ of the stage just completed into the later stages' accumulators.
+# Fold the increment ΔYᵢ = Yᵢ - Uⁿ of the stage just completed into the later stages' accumulators,
+# with Yᵢ the state `update_state!` has left.
 store_stage_increment!(ts::MultirateInfinitesimalStep, model, i, Δt) =
     store_stage_increment!(ts.storage, ts, model, i, convert(eltype(model.grid), Δt))
 
@@ -1942,11 +1948,13 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
         acoustic_stage!(model, Δt, d[i], stage_rounding(ts, i), callbacks)
 
         if i < s
-            store_stage_increment!(ts, model, i, Δt)
             ts.next_stage[] = i + 1
             Δc = i == 1 ? c[1] : c[i] - c[i-1]
             tick_stage!(model.clock, Δc * Δt)
             update_state!(model, callbacks; compute_tendencies = true)
+            # After `update_state!`, so that the increments are those of the state it leaves,
+            # with its negative-moisture correction (see `stage_increment_source`).
+            store_stage_increment!(ts, model, i, Δt)
             cache_transport_velocity!(model)
         end
     end
