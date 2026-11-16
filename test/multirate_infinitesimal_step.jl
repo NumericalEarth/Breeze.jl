@@ -606,8 +606,15 @@ using Breeze.TimeSteppers: stage_storage, structured_stage_storage, fold_stage_i
     perturbed(A, i, j, δ) = (B = copy(A); B[i, j] += δ; B)
     @test stage_storage(MultirateInfinitesimalStepTableau(Float64, α, perturbed(β, 3, 1, 1e-17), γ)) isa TwoRegisterStorage
     @test stage_storage(MultirateInfinitesimalStepTableau(Float64, perturbed(α, 4, 1, 1e-17), β, γ)) isa TwoRegisterStorage
-    @test stage_storage(MultirateInfinitesimalStepTableau(Float64, perturbed(α, 4, 1, 1e-3), β, γ)) isa IncrementStorage
     @test stage_storage(MultirateInfinitesimalStepTableau(Float64, α, perturbed(β, 3, 1, 1e-3), γ)) isa AccumulatorStorage
+
+    wicker_skamarock = multirate_infinitesimal_step_tableau(:WickerSkamarock3)
+    off_subdiagonal = perturbed(wicker_skamarock.α, 3, 1, 1e-3)
+    @test stage_storage(MultirateInfinitesimalStepTableau(Float64, off_subdiagonal, wicker_skamarock.β, wicker_skamarock.γ)) isa IncrementStorage
+
+    # Off its subdiagonal, the low-storage set would need increments in registers, which its last
+    # rows of α and γ do not allow with five stages (see below)
+    @test stage_storage(MultirateInfinitesimalStepTableau(Float64, perturbed(α, 4, 1, 1e-3), β, γ)) isa AccumulatorStorage
 
     # Five stages with increments in two registers need the last rows of α and γ to tell ΔY₁ and ΔY₂ apart
     diagonal = multirate_infinitesimal_step_tableau(:DiagonalMIS52)
@@ -646,6 +653,15 @@ using Breeze.TimeSteppers: stage_storage, structured_stage_storage, fold_stage_i
     end
 end
 
+# Three stages with a diagonal β whose last stage uses both increments: the smallest set that keeps
+# increments in registers. It is consistent (c₃ = 1) and no more.
+function three_stage_increment_tableau()
+    α = [0 0 0; 0.2 0 0; 0.1 0.3 0]
+    γ = [0 0 0; 0.1 0 0; -0.05 0.1 0]
+    β = [1/3 0 0; 0 0.4 0; 0 0 47/60]
+    return MultirateInfinitesimalStepTableau(Float64, α, β, γ)
+end
+
 function storage_layout_state(; coefficients, structured, fold = true, FT, topology, post_loop_scalar_tendencies, Nt = 3)
     Oceananigans.defaults.FloatType = FT
     structured_stage_storage[] = structured
@@ -678,6 +694,9 @@ end
 
     # Single precision with the rounding errors of the stage states kept in the substepper's
     # perturbation fields (periodic), double precision with those in fields of their own (bounded).
+    # The layouts differ in round-off alone: where the start state of a stage is rounded, and which
+    # increment of the dry density the transport density tendency takes. Three steps of this bubble
+    # amplify that to a few hundred units in the last place of the momentum.
     kw = (; coefficients, FT, topology, post_loop_scalar_tendencies)
     accumulated = storage_layout_state(; structured = false, kw...)
     structured = storage_layout_state(; structured = true, kw...)
@@ -685,7 +704,7 @@ end
 
     for name in keys(accumulated)
         scale = maximum(abs, accumulated[name])
-        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 100 * eps(scale)
+        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 1000 * eps(scale)
     end
 
     # With increments in registers, a field may also store them when a stage completes
@@ -693,7 +712,24 @@ end
         stored = storage_layout_state(; structured = true, fold = false, kw...)
         for name in keys(accumulated)
             scale = maximum(abs, accumulated[name])
-            @test maximum(abs, stored[name] .- accumulated[name]) ≤ 100 * eps(scale)
+            @test maximum(abs, stored[name] .- accumulated[name]) ≤ 1000 * eps(scale)
         end
+    end
+end
+
+@testset "MIS increment registers with three stages [post_loop = $post_loop_scalar_tendencies]" for post_loop_scalar_tendencies in (false, true)
+    coefficients = three_stage_increment_tableau()
+    @test coefficients.c[3] ≈ 1
+    @test stage_storage(coefficients) isa IncrementStorage
+
+    kw = (; coefficients, FT = Float64, topology = (Periodic, Flat, Bounded), post_loop_scalar_tendencies)
+    accumulated = storage_layout_state(; structured = false, kw...)
+    structured = storage_layout_state(; structured = true, kw...)
+    stored = storage_layout_state(; structured = true, fold = false, kw...)
+
+    for name in keys(accumulated)
+        scale = maximum(abs, accumulated[name])
+        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 1000 * eps(scale)
+        @test maximum(abs, stored[name] .- accumulated[name]) ≤ 1000 * eps(scale)
     end
 end
