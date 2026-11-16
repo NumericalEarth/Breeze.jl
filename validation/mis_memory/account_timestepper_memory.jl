@@ -53,7 +53,8 @@ collect_arrays(x) = collect_arrays!(Dict{UInt, Array}(), Set{UInt}(), x)
 bytes(arrays) = sum(sizeof, values(arrays); init = 0)
 
 # The arrays of each component of the time stepper that no earlier component and no array of
-# `exclude` (the model without its time stepper) holds.
+# `exclude` (the model without its time stepper) holds. The substepper comes first, so storage
+# that another component shares with it is counted as the substepper's.
 function component_arrays(timestepper, exclude)
     counted = Set(keys(exclude))
     components = Pair{String, Dict{UInt, Array}}[]
@@ -63,6 +64,8 @@ function component_arrays(timestepper, exclude)
         union!(counted, keys(arrays))
         push!(components, label => arrays)
     end
+
+    add!("substepper", timestepper.substepper)
 
     for name in fieldnames(typeof(timestepper))
         name === :substepper && continue
@@ -76,8 +79,6 @@ function component_arrays(timestepper, exclude)
             add!(string(name), x)
         end
     end
-
-    add!("substepper", timestepper.substepper)
 
     return components
 end
