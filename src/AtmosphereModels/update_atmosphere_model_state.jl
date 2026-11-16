@@ -43,7 +43,9 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
-    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
+    # Synchronous: nothing completes an asynchronous fill here, so on a `Distributed` grid the halos
+    # of every prognostic that is not filled again below (the tracers) would never be received.
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)...)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation!(model.radiation, model)
@@ -147,8 +149,7 @@ function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async).
+    # Ensure halos are filled before velocity computation (not every caller is `update_state!`).
     # Thread clock and model fields so time-dependent boundary conditions
     # (e.g. continuous-callable or FieldTimeSeries Open BCs) on density/momentum
     # dispatch correctly; without them `getbc` falls through to a signature that
@@ -254,7 +255,9 @@ function compute_auxiliary_variables!(model)
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
     if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
         compute_closure_fields!(model.closure_fields, model.closure, model)
-        fill_halo_regions!(model.closure_fields; only_local_halos=true)
+        # Exchanged across ranks too: the closure fields are computed in the interior only, and
+        # nothing recomputes them near rank boundaries as Oceananigans' buffer tendencies do.
+        fill_halo_regions!(model.closure_fields)
     end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
