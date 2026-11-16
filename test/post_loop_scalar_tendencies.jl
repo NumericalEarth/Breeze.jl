@@ -66,21 +66,14 @@ const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep,
     end
     @test maximum(abs, interior(post_loop.velocities.w)) > 5
 
-    # Wicker–Skamarock applies each stage's flux alone, q/(1 − q) times the dry-mass flux continuity
-    # applied, and keeps a uniform mass fraction to round-off. A multirate infinitesimal step
-    # recombines the stages' fluxes with its tableau (leaving them at weight one would be unstable:
-    # see the passive-scalar test below), while continuity integrates the mass flux inside the
-    # loop, so the two no longer pair and the mass fraction stays uniform only to the accuracy of
-    # the scheme, about 1e-3 here, as with pre-loop tendencies.
-    # TODO: a mass-consistent multirate scalar update (the stage's own mass flux times a
-    # recombined mass fraction, instead of a recombined flux) would restore round-off uniformity.
-    if timestepper === :AcousticRungeKutta3
-        @test moisture_uniformity_error(post_loop) < 1e-12
-        @test tracer_uniformity_error(post_loop) < 1e-12
-    else
-        @test moisture_uniformity_error(post_loop) < 5e-3
-        @test tracer_uniformity_error(post_loop) < 5e-3
-    end
+    # Every stage applies its own loop's mass flux, q/(1 − q) times the dry-mass flux continuity
+    # applied, to a uniform mass fraction, which therefore stays uniform to round-off.
+    # Wicker–Skamarock applies each stage's flux alone. A multirate infinitesimal step recombines
+    # the stages' fluxes with its tableau (leaving them at weight one would be unstable: see the
+    # passive-scalar test below), and each stage's tendency takes an upwind flux of the mass
+    # fraction that makes the recombined mass flux the stage's own (`ScalarMassFluxCorrection`).
+    @test moisture_uniformity_error(post_loop) < 1e-12
+    @test tracer_uniformity_error(post_loop) < 1e-12
 end
 
 #####
