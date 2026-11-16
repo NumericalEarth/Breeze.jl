@@ -109,7 +109,7 @@ one_cell_fields(values) = NamedTuple{p3_density_names}(map(v -> fill(v, 1, 1, 1)
             φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
             result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited_rates)
-            relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates)
+            relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates, result)
             rime = PPP.p3_rime_limits(1, 1, 1, G, stage, result)
 
             Gᵖ = (result.tendency_ρqᵛ, result.tendency_ρqᶜˡ, result.tendency_ρqʳ,
@@ -476,7 +476,7 @@ ice_number_after_sinks(n, Δt, rates) =
         φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
         limited_rates = PPP.patankar_limited_rates(rates, φ)
         result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited_rates)
-        relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates)
+        relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates, result)
         return (; properties, rates, φ, limited_rates, result, relaxations)
     end
 
