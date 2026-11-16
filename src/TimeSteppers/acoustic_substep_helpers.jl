@@ -1,6 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: prognostic_fields, fields, architecture, TendencyCallsite
+using Oceananigans: prognostic_fields, fields, architecture, TendencyCallsite, CenterField
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, vertical_scheme,
                               implicit_vertical_velocityᶜᶜᶠ
 using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ, ℑzᵃᵃᶠ
@@ -8,6 +8,8 @@ using Oceananigans.Utils: launch!, KernelParameters
 
 using Breeze.AtmosphereModels:
     AtmosphereModel,
+    moisture_prognostic_name,
+    condensate_field_names,
     advecting_vertical_velocity,
     continuity_density,
     StageEndDensity,
@@ -75,7 +77,9 @@ function cache_transport_velocity!(model)
 
     # The moisture's part of the loop's pressure pairs the moisture tendencies with the divergence
     # of the mass flux they were built with, which the next acoustic loop likewise overwrites.
-    compute_transport_density_tendency!(substepper, model, transport_velocities(model))
+    # With `PostLoopScalarTendencies` only the post-loop build is followed by one
+    # (`cache_post_loop_transport!`): `update_state!` builds no moisture tendencies.
+    cache_transport_density_tendency!(model.timestepper.scalar_tendencies, substepper, model)
 
     return nothing
 end
@@ -219,11 +223,43 @@ scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_nam
 # Scalar tendencies are built in `update_state!`, between stages.
 struct PreLoopScalarTendencies end
 
-# Scalar tendencies are rebuilt after each stage's own acoustic loop.
-struct PostLoopScalarTendencies end
+# Scalar tendencies are rebuilt after each stage's own acoustic loop. The loop's pressure needs
+# the moisture and condensate tendencies before that (Section 3b of the acoustic substepper), and
+# is given those of the stage before, the same transport of the mass fractions one stage earlier.
+# `previous_tendencies` is where they are kept from one stage's build to the next stage's loop,
+# or `nothing` for a time stepper that keeps them in storage of its own.
+struct PostLoopScalarTendencies{P}
+    previous_tendencies :: P
+end
+
+PostLoopScalarTendencies() = PostLoopScalarTendencies(nothing)
 
 scalar_tendency_timing(post_loop_scalar_tendencies::Bool) =
     post_loop_scalar_tendencies ? PostLoopScalarTendencies() : PreLoopScalarTendencies()
+
+# One field per prognostic that the acoustic loop does not advance by continuity or momentum. The
+# moisture and condensate densities are not told apart from the others here, where only the
+# dynamics is known, so every one of them gets a field, and only theirs are written.
+function previous_tendency_storage(grid, prognostic_fields, dynamics)
+    excluded = (keys(dynamics_prognostic_fields(dynamics))..., :ρu, :ρv, :ρw)
+    names = filter(name -> name ∉ excluded, keys(prognostic_fields))
+    return NamedTuple{names}(ntuple(_ -> CenterField(grid), length(names)))
+end
+
+# The densities whose tendencies the loop's pressure ramps with.
+moisture_forcing_names(model) = (moisture_prognostic_name(model.microphysics),
+                                 condensate_field_names(model.microphysics)...)
+
+# Keep the tendencies just built for the next stage's loop.
+keep_previous_scalar_tendencies!(::Nothing, model) = nothing
+
+function keep_previous_scalar_tendencies!(previous_tendencies, model)
+    Gⁿ = model.timestepper.Gⁿ
+    for name in moisture_forcing_names(model)
+        copyto!(parent(previous_tendencies[name]), parent(Gⁿ[name]))
+    end
+    return nothing
+end
 
 # The `AcousticTimeStepper` method is in acoustic_runge_kutta_3.jl, with the abstract type.
 scalar_tendencies_in_update_state(::PreLoopScalarTendencies) = true
@@ -241,11 +277,28 @@ function prepare_scalar_tendencies!(::PostLoopScalarTendencies, model)
     return nothing
 end
 
+cache_transport_density_tendency!(::PreLoopScalarTendencies, substepper, model) =
+    compute_transport_density_tendency!(substepper, model, transport_velocities(model))
+
+cache_transport_density_tendency!(::PostLoopScalarTendencies, substepper, model) = nothing
+
+# After the post-loop build: freeze the transport velocity it used, and evaluate the divergence of
+# its mass flux, which is paired with the tendencies just built when they predict the next
+# stage's (`moisture_forcing`).
+function cache_post_loop_transport!(model)
+    substepper = model.timestepper.substepper
+    w_cache = substepper.time_averaged_vertical_velocity_cache
+    copyto!(parent(w_cache), parent(transport_velocities(model).w))
+    compute_transport_density_tendency!(substepper, model, transport_velocities(model))
+    return nothing
+end
+
 # Build the scalar tendencies with the loop's time-averaged transport velocity, fire the
-# `TendencyCallsite` callbacks again, assemble the stage forcing and freeze the transport velocity.
+# `TendencyCallsite` callbacks again, keep what the next stage's loop needs of them, freeze the
+# transport velocity and assemble the stage forcing.
 compute_post_loop_scalar_tendencies!(::PreLoopScalarTendencies, model, Δt, callbacks) = nothing
 
-function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model, Δt, callbacks)
+function compute_post_loop_scalar_tendencies!(timing::PostLoopScalarTendencies, model, Δt, callbacks)
     tracer_density_to_specific!(model)
     prepare_post_loop_scalar_tendencies!(model.timestepper, model)
     kernel = post_loop_scalar_tendency_kernel(model.timestepper, model)
@@ -255,9 +308,10 @@ function compute_post_loop_scalar_tendencies!(::PostLoopScalarTendencies, model,
         callback.callsite isa TendencyCallsite && callback(model)
     end
 
+    keep_previous_scalar_tendencies!(timing.previous_tendencies, model)
+    cache_post_loop_transport!(model)
     assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
     tracer_specific_to_density!(model)
-    cache_transport_velocity!(model)
     return nothing
 end
 

@@ -786,14 +786,21 @@ function moisture_content_arguments(substepper, model, U⁰)
              qᵛᵉ = specific_prognostic_moisture(model), Λᴴ = substepper.fixed_composition_sensitivity,
              liquid_fractions = condensate_liquid_fractions(microphysics, condensate_names))
 
+    timestepper = model.timestepper
     densities = (; ρᵈ⁰ = U⁰.ρᵈ, Gᵗρᵈ = substepper.transport_density_tendency, Gˢρᵈ = Gⁿ.ρᵈ,
-                 ρqᵐ⁰ = U⁰[moisture_name], ρqᵐ = model.moisture_density, Gρqᵐ = Gⁿ[moisture_name],
+                 ρqᵐ⁰ = U⁰[moisture_name], ρqᵐ = model.moisture_density,
+                 Gρqᵐ = moisture_forcing(timestepper, model, moisture_name),
                  ρqᶜ⁰ = values(U⁰[condensate_names]),
                  ρqᶜ = values(model.microphysical_fields[condensate_names]),
-                 Gρqᶜ = values(Gⁿ[condensate_names]))
+                 Gρqᶜ = map(name -> moisture_forcing(timestepper, model, name), condensate_names))
 
     return state, densities
 end
+
+# The slow tendency of the moisture or condensate density `name` that the content ramps with over
+# a stage: the stage's forcing of that density, which the tendency storage holds when the loop
+# starts unless the time stepper builds the scalar tendencies after the loop, and then predicts it.
+moisture_forcing(timestepper, model, name) = timestepper.Gⁿ[name]
 
 # The sensitivities at the stage-entry state: λᵐ of the prognostic moisture density, λˡ and λⁱ of the
 # condensate phases, the dilution Σₐ λₐ rₐ, what the dry density holds beyond the dilution (the

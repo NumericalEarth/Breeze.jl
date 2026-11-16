@@ -347,11 +347,11 @@ CompressibleEquations.recovered_state_residual(ts::MultirateInfinitesimalStep) =
 fast_tendency_storage(::PreLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper) =
     substepper.stage_end_moisture_content
 
-function fast_tendency_storage(::PostLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper)
-    excluded = (keys(dynamics_prognostic_fields(dynamics))..., :ρu, :ρv, :ρw)
-    names = filter(name -> name ∉ excluded, keys(prognostic_fields))
-    return NamedTuple{names}(ntuple(_ -> CenterField(grid), length(names)))
-end
+fast_tendency_storage(::PostLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper) =
+    previous_tendency_storage(grid, prognostic_fields, dynamics)
+
+# The scratch of a post-loop scalar's fast tendency holds its slow tendency between stages.
+previous_scalar_tendency(ts::MultirateInfinitesimalStep, name) = fast_tendency_scratch(ts, name)
 
 # The scratch for the fast part of `name`'s tendency.
 fast_tendency_scratch(ts::MultirateInfinitesimalStep, name) = fast_tendency_scratch(ts.fast_tendency, name)
@@ -444,6 +444,12 @@ Adapt.adapt_structure(to, s::StageEntryForceSplit) = StageEntryForceSplit(adapt(
 @inline full_tendency(i, j, k, grid, split, G) = @inbounds G[i, j, k]
 @inline full_tendency(i, j, k, grid, s::PartitionedTendencySplit, G) = @inbounds G[i, j, k] + s.advective_tendency[i, j, k]
 
+# A post-loop scalar's slow tendency is kept where its advective part was, once the stage is
+# assembled: it predicts the next stage's, for the moisture's part of that stage's loop pressure
+# (see `PredictedStageForcing`).
+@inline keep_slow_tendency!(i, j, k, split, slow) = nothing
+@inline keep_slow_tendency!(i, j, k, s::PartitionedTendencySplit, slow) = @inbounds s.advective_tendency[i, j, k] = slow
+
 tendency_split(name, θ_name, C) = name === :ρᵈ ? ContinuityTendencySplit() :
                                   name === θ_name ? FastSlowTendencySplit(C) : SlowTendencySplit()
 
@@ -521,6 +527,7 @@ end
         slow = slow_part(i, j, k, grid, split, G)
         S₁[i, j, k] = slow
         G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * slow
+        keep_slow_tendency!(i, j, k, split, slow)
     end
 end
 
@@ -606,6 +613,7 @@ end
         S₂ = slow_part(i, j, k, grid, split, G)
         G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * S₂ + wβ₁ * S₁ + wγ₁ * ΔY
         combine!(i, j, k, F, wβ₁ᵏ, wγ₁ᵏ, wβ₂ᵏ, S₁, ΔY, S₂)
+        keep_slow_tendency!(i, j, k, split, S₂)
     end
 end
 
@@ -622,6 +630,7 @@ end
         G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * slow + forcing
         write_offsets!(source, Z₃, Z, α₃₁, α₃₂, α₁ᵏ, α₂ᵏ, ΔY₂, i, j, k)
         accumulate_forcing!(source, F, wγᵏ, wβᵏ, slow, ΔY₂, i, j, k)
+        keep_slow_tendency!(i, j, k, split, slow)
     end
 end
 
@@ -638,6 +647,7 @@ end
         forcing = completed_accumulators!(source, Fᵢ, Zᵢ, wγᵢ, αᵢ, ΔY, i, j, k)
         G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * slow + forcing
         accumulate_later_stages!(source, F, Z, wγᵏ, wβᵏ, αᵏ, slow, ΔY, i, j, k)
+        keep_slow_tendency!(i, j, k, split, slow)
     end
 end
 
@@ -792,10 +802,61 @@ function assemble_transport_density_tendency!(ts::MultirateInfinitesimalStep, mo
     Tᵢ = i == 1 ? nothing : T[i - 1]
     wγᵢ = i == 1 ? zero(eltype(d)) : γ[i, i - 1] / (d[i] * Δt)
     wγᵏ = i == 1 ? map(k -> zero(eltype(d)), ks) : increment_weights(γ, d, Δt, i - 1, ks)
+    wβᵏ = transport_density_forcing_weights(ts.scalar_tendencies, β, d, i, ks)
     launch!(architecture(grid), grid, :xyz, _assemble_transport_density_tendency!,
             ts.substepper.transport_density_tendency, Tᵢ, map(k -> T[k - 1], ks),
-            model.dynamics.dry_density, ts.Uⁿ.ρᵈ, β[i, i] / d[i], wγᵢ, wγᵏ, forcing_weights(β, d, i, ks))
+            model.dynamics.dry_density, ts.Uⁿ.ρᵈ, β[i, i] / d[i], wγᵢ, wγᵏ, wβᵏ)
     return nothing
+end
+
+# What the assembly adds of the stage's transport density tendency to the accumulators of later
+# stages. With `PostLoopScalarTendencies` the assembly holds the tendency of the stage before,
+# which stands in for the stage's own in its forcing alone: the stage's own is added to the
+# accumulators after its loop (`complete_transport_density_tendency!`).
+transport_density_forcing_weights(::PreLoopScalarTendencies, β, d, i, ks) = forcing_weights(β, d, i, ks)
+transport_density_forcing_weights(::PostLoopScalarTendencies, β, d, i, ks) = map(k -> zero(eltype(d)), ks)
+
+# After the post-loop build, which left the dry air's share of the divergence of the stage's mass
+# flux Fᵢ in the transport density tendency (`cache_post_loop_transport!`): add that of the mass
+# flux Rᵢ of the stage's correction, which the scalars' tendencies carry too, and add the sum to
+# the accumulators of later stages.
+function complete_transport_density_tendency!(ts::MultirateInfinitesimalStep, model)
+    i = ts.stage[]
+    (; β, d) = ts.tableau
+    s = length(d)
+    is_diagonal(β) && return nothing
+    grid = model.grid
+    ks = later_stages(i, s)
+    T = ts.transport_density_accumulators
+    R = stage_correction_mass_fluxes(ts.transport_mass_fluxes, ts, model)
+    launch!(architecture(grid), grid, :xyz, _complete_transport_density_tendency!,
+            ts.substepper.transport_density_tendency, map(k -> T[k - 1], ks), grid, R,
+            model.dynamics.dry_density, total_density(model.dynamics), forcing_weights(β, d, i, ks))
+    return nothing
+end
+
+# `nothing` in stage 1, whose correction has no mass flux.
+stage_correction_mass_fluxes(::Nothing, ts, model) = nothing
+stage_correction_mass_fluxes(correction, ts, model) =
+    ts.stage[] == 1 ? nothing : correction_mass_fluxes(correction, ts, model)
+
+@inline correction_dry_density_tendency(i, j, k, grid, ::Nothing, ρᵈ, ρ) = zero(grid)
+
+@inline function correction_dry_density_tendency(i, j, k, grid, R, ρᵈ, ρ)
+    ∇_R = V⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, correction_mass_flux, R.u) +
+                                   δyᵃᶜᵃ(i, j, k, grid, correction_mass_flux, R.v) +
+                                   δzᵃᵃᶜ(i, j, k, grid, correction_mass_flux, R.w))
+    @inbounds ρ̂ = ifelse(ρ[i, j, k] == 0, one(eltype(ρ)), ρ[i, j, k])
+    return @inbounds - ρᵈ[i, j, k] / ρ̂ * ∇_R
+end
+
+@kernel function _complete_transport_density_tendency!(Gᵗ, T, grid, R, ρᵈ, ρ, wβᵏ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        G = Gᵗ[i, j, k] + correction_dry_density_tendency(i, j, k, grid, R, ρᵈ, ρ)
+        Gᵗ[i, j, k] = G
+        accumulate!(i, j, k, T, wβᵏ, G)
+    end
 end
 
 @inline stage_accumulation(::Nothing, i, j, k) = false
@@ -854,12 +915,80 @@ assemble_post_loop_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt) =
 assemble_post_loop_stage_forcing!(::PreLoopScalarTendencies, ts, model, Δt) = nothing
 
 function assemble_post_loop_stage_forcing!(::PostLoopScalarTendencies, ts, model, Δt)
+    complete_transport_density_tendency!(ts, model)
     for name in scalar_prognostic_names(model)
         split = PartitionedTendencySplit(fast_tendency_scratch(ts, name))
         assemble_stage_forcing!(ts, model, Δt, name, split)
     end
     start_scalar_mass_flux_sums!(ts.transport_mass_fluxes, ts, model)
     return nothing
+end
+
+#####
+##### The moisture's part of the loop's pressure with post-loop scalar tendencies
+#####
+##### The loop's pressure ramps with the stage forcing of the moisture and condensate densities
+##### (Section 3b of the acoustic substepper), (1/dᵢ)[βᵢᵢ Sᵢ + Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt)] with the sum
+##### over the stages j < i. Built after the loop, Sᵢ is not in hand when the loop starts, and the
+##### loop is given the forcing with the slow tendency of the stage before, Sᵢ₋₁, in its place (in
+##### stage 1 that of the last stage of the step before): the same transport, of the mass fractions
+##### one stage earlier. The rest of the forcing is known. Sᵢ₋₁ is kept in the scalar's
+##### `fast_tendency` scratch, where the assembly leaves it (`keep_slow_tendency!`) and nothing
+##### writes until the next post-loop build. What the loop's pressure missed of the moisture's
+##### change over a stage, βᵢᵢ Δt (Sᵢ − Sᵢ₋₁), reaches the next stage with its start state.
+#####
+##### The dilution of the moisture is paired with the dry air's share of the divergence of the mass
+##### flux those tendencies carry (`transport_density_tendency`), so that takes the same
+##### combination: each stage's is evaluated after its loop, with the mass flux of the stage's
+##### correction, added to the accumulators of later stages there, and predicts the next stage's.
+#####
+
+# The stage forcing of one post-loop scalar with the previous stage's slow tendency standing in
+# for the stage's own, formed where it is read: `weight` times that tendency, plus the part that
+# earlier stages contributed.
+struct PredictedStageForcing{T, S, A, B} <: AbstractArray{T, 3}
+    previous_tendency :: S # Sᵢ₋₁
+    weight :: T            # βᵢᵢ / dᵢ
+    first :: A             # stage 2: S₁; later stages: the forcing accumulated so far; `nothing` in stage 1
+    first_weight :: T
+    second :: B            # stage 2: ΔY₁; `nothing` otherwise
+    second_weight :: T
+end
+
+Adapt.adapt_structure(to, G::PredictedStageForcing) =
+    PredictedStageForcing(adapt(to, G.previous_tendency), G.weight, adapt(to, G.first), G.first_weight,
+                          adapt(to, G.second), G.second_weight)
+
+Base.size(G::PredictedStageForcing) = size(G.previous_tendency)
+
+@inline weighted_term(::Nothing, w, i, j, k) = zero(w)
+Base.@propagate_inbounds weighted_term(a, w, i, j, k) = w * a[i, j, k]
+
+Base.@propagate_inbounds Base.getindex(G::PredictedStageForcing, i::Int, j::Int, k::Int) =
+    G.weight * G.previous_tendency[i, j, k] + weighted_term(G.first, G.first_weight, i, j, k) +
+    weighted_term(G.second, G.second_weight, i, j, k)
+
+CompressibleEquations.moisture_forcing(ts::MultirateInfinitesimalStep, model, name) =
+    stage_moisture_forcing(ts.scalar_tendencies, ts, model, name)
+
+# The increments of the scalars are stored when a stage completes (`store_stage_increment!`), so
+# the accumulated forcing of stage i ≥ 3 is complete but for its own tendency when its loop starts.
+function stage_moisture_forcing(::PostLoopScalarTendencies, ts::MultirateInfinitesimalStep, model, name)
+    i = ts.stage[]
+    (; β, γ, d) = ts.tableau
+    FT = eltype(model.grid)
+    S = fast_tendency_scratch(ts, name)
+    w = convert(FT, β[i, i] / d[i])
+
+    i == 1 && return PredictedStageForcing(S, w, nothing, one(FT), nothing, one(FT))
+
+    if i == 2
+        Δt = convert(FT, ts.current_Δt[])
+        return PredictedStageForcing(S, w, ts.accumulators[1].forcing[name], convert(FT, β[2, 1] / d[2]),
+                                     ts.accumulators[1].offset[name], convert(FT, γ[2, 1] / (d[2] * Δt)))
+    end
+
+    return PredictedStageForcing(S, w, ts.accumulators[i - 2].forcing[name], one(FT), nothing, one(FT))
 end
 
 #####
