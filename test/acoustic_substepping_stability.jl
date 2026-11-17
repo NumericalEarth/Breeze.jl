@@ -342,9 +342,11 @@ for arch in arches
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
-        Nx, Ny, Nz = 16, 8, 10
-        grid = RectilinearGrid(arch; size=(Nx, Ny, Nz), halo=(5, 5, 5),
-                               x=(0, 16kilometers), y=(0, 8kilometers), z=(0, 10kilometers))
+        # The grid of the first two testsets, which has the same 1 km spacings as the
+        # 16 × 8 × 10 km box this test used: the state is uniform, and a grid of another size
+        # would compile the kernels of the default time stepper again.
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
 
         td = SplitExplicitTimeDiscretization(substeps=8)
         dynamics = CompressibleDynamics(td; base_pressure=100000,
