@@ -1,6 +1,7 @@
 using Breeze.AtmosphereModels: thermodynamic_density_name, dynamics_prognostic_fields, SplitScalarTendencies,
                                moisture_prognostic_name, microphysical_velocities, nonadvective_scalar_tendency,
-                               div_ρUc
+                               div_ρUc, advective_tendency_storage, launch_split_scalar_tendency!,
+                               scalar_advective_tendency, specific_scalar_fields
 using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_divergence!,
                                     StageEntryForceRemainder, stage_entry_force_remainder,
                                     step_start_force_state, store_step_start_force_state!,
@@ -66,10 +67,10 @@ Fields
 - `fast_tendency`: scratch for the fast parts of the tendencies, or `nothing` for a coefficient set with a
   diagonal `β`, which applies every tendency whole: with `PreLoopScalarTendencies`
   one field, for the stage-entry fast thermodynamic tendency, sharing storage with the substepper; with `PostLoopScalarTendencies`
-  one per prognostic the acoustic loop does not advance by continuity or momentum — the
-  thermodynamic variable's, used as before the loop, and each scalar's, which the post-loop build
-  fills with its advective tendency and the assembly leaves holding the scalar's slow tendency, for
-  the next stage's loop (see `fast_tendency_scratch` and `PredictedStageForcing`).
+  one per moisture and condensate density, which the post-loop build fills with its advective
+  tendency and the assembly leaves holding its slow tendency, for the next stage's loop (see
+  `PredictedStageForcing`). The thermodynamic variable and the other scalars, whose tendencies no
+  loop reads, use the substepper's field in turn (see `fast_tendency_scratch`).
 - `stage`: the stage being integrated.
 - `next_stage`, `current_Δt`: the stage the next tendency evaluation feeds and the current outer step, which
   size the adaptive-implicit vertical-advection split (see `adaptive_advection_timestep`).
@@ -168,9 +169,14 @@ place (see `PredictedStageForcing`).
 
 `post_loop_scalar_tendencies = false` builds the scalar tendencies between stages instead, with
 the preceding loop's transport velocity, which does not keep a uniform mass fraction uniform. It
-needs less storage: the post-loop tendencies take a field for each moisture, microphysical and
-tracer variable and one for the thermodynamic variable, and, for a coefficient set whose `β` is not
-diagonal, three face fields for each stage after the second.
+needs less storage: the post-loop tendencies take a field for each moisture and condensate
+density, and, for a coefficient set whose `β` is not diagonal, three face fields for each stage
+after the second.
+
+`moisture_forcing_names` names the moisture and condensate densities, whose tendencies the loop's
+pressure ramps with; `AtmosphereModel` provides them. With `nothing`, the time stepper cannot tell
+them from the other scalars, and keeps a field for every prognostic that the loop does not advance
+by continuity or momentum. The step is the same either way.
 
 `Gⁿ` and `U⁰` are the tendency storage and the storage the first start states are formed from,
 allocated by default. Passing them shares the storage of another time stepper, as the
@@ -209,6 +215,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     cache_advecting_state = false,
                                     relinearize_stages = false,
                                     post_loop_scalar_tendencies = true,
+                                    moisture_forcing_names = nothing,
                                     Gⁿ = map(similar, prognostic_fields),
                                     U⁰ = map(similar, prognostic_fields),
                                     rounding = RoundToNearest())
@@ -226,8 +233,10 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     folded_names = fold ? (keys(dynamics_prognostic_fields(dynamics))..., :ρu, :ρv, :ρw) : ()
     Uⁿ = outer_step_state_storage(storage, prognostic_fields, U⁰)
     accumulators = stage_accumulators(storage, prognostic_fields, U⁰, folded_names, s)
-    scalar_tendencies = multirate_scalar_tendency_timing(storage, post_loop_scalar_tendencies, grid, prognostic_fields, dynamics)
-    fast_tendency = fast_tendency_storage(storage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper)
+    scalar_tendencies = multirate_scalar_tendency_timing(storage, post_loop_scalar_tendencies, grid, prognostic_fields,
+                                                         dynamics, moisture_forcing_names)
+    fast_tendency = fast_tendency_storage(storage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper,
+                                          moisture_forcing_names)
 
     step_start = step_start_storage(grid, substepper, tableau, relinearize_stages)
 
@@ -468,25 +477,32 @@ end
 CompressibleEquations.recovered_state_residual(ts::MultirateInfinitesimalStep) =
     ts.stage[] == number_of_stages(ts.tableau) ? nothing : ts.residual
 
-# Scratch for the fast parts of the tendencies (see the `fast_tendency` field). Post-loop
-# scalars each need their own: their advective tendencies are all in hand when the
-# microphysical sources and the `TendencyCallsite` callbacks complete the slow parts, before
-# any scalar is assembled. The thermodynamic variable is not told apart from the scalars here,
-# where only the dynamics is known, so it also gets one, which the stage uses before the loop.
+# Scratch for the fast parts of the tendencies (see the `fast_tendency` field).
 #
 # Pre-loop, the one scratch is written and read while a stage is assembled, so it shares the
 # storage of the substepper's stage-end moisture content, which each acoustic loop writes when it
 # starts and reads for the last time when it ends.
 #
+# Post-loop, the moisture and condensate densities each have a field of their own: the build
+# writes their advective tendencies there, and the assembly leaves their slow tendencies, which
+# the next stage's loop reads (`PredictedStageForcing`). No loop reads the tendency of any other
+# scalar, so those take the substepper's field in turn, between two loops: each has its
+# advective tendency built and is assembled before the next one's is built
+# (`complete_post_loop_scalar_tendencies!`). The thermodynamic variable uses the same field
+# before the loop, as it does pre-loop. Where the moisture and condensate densities are not known
+# (`moisture_forcing_names = nothing`), every one of these prognostics has a field of its own.
+#
 # A coefficient set with a diagonal `β` (`DiagonalStorage`) applies every tendency whole, so it
 # separates no fast part and needs no scratch.
-fast_tendency_storage(::DiagonalStorage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper) = nothing
+fast_tendency_storage(::DiagonalStorage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper,
+                      moisture_forcing_names) = nothing
 
-fast_tendency_storage(::AccumulatorStorage, ::PreLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper) =
-    substepper.stage_end_moisture_content
+fast_tendency_storage(::AccumulatorStorage, ::PreLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper,
+                      moisture_forcing_names) = substepper.stage_end_moisture_content
 
-fast_tendency_storage(::AccumulatorStorage, ::PostLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper) =
-    previous_tendency_storage(grid, prognostic_fields, dynamics)
+fast_tendency_storage(::AccumulatorStorage, ::PostLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper,
+                      moisture_forcing_names) =
+    previous_tendency_storage(grid, prognostic_fields, dynamics, moisture_forcing_names)
 
 # Where the slow tendency of post-loop scalar `name` is between stages: in fields kept for that,
 # or, where there are none, in the scratch of its fast tendency (see `multirate_scalar_tendency_timing`).
@@ -502,17 +518,20 @@ previous_scalar_tendency(previous_tendencies, ts, name) = previous_tendencies[na
 # of the scalar's fast tendency. A coefficient set with a diagonal `β` has no such scratch, and its
 # tendency storage is rewritten before the next loop starts, so it keeps them in fields of their
 # own, as `AcousticRungeKutta3` does.
-multirate_scalar_tendency_timing(::AccumulatorStorage, post_loop_scalar_tendencies, grid, prognostic_fields, dynamics) =
+multirate_scalar_tendency_timing(::AccumulatorStorage, post_loop_scalar_tendencies, grid, prognostic_fields, dynamics,
+                                 moisture_forcing_names) =
     scalar_tendency_timing(post_loop_scalar_tendencies)
 
-multirate_scalar_tendency_timing(::DiagonalStorage, post_loop_scalar_tendencies, grid, prognostic_fields, dynamics) =
-    scalar_tendency_timing(post_loop_scalar_tendencies, grid, prognostic_fields, dynamics)
+multirate_scalar_tendency_timing(::DiagonalStorage, post_loop_scalar_tendencies, grid, prognostic_fields, dynamics,
+                                 moisture_forcing_names) =
+    scalar_tendency_timing(post_loop_scalar_tendencies, grid, prognostic_fields, dynamics, moisture_forcing_names)
 
-# The scratch for the fast part of `name`'s tendency.
-fast_tendency_scratch(ts::MultirateInfinitesimalStep, name) = fast_tendency_scratch(ts.fast_tendency, name)
-fast_tendency_scratch(scratch::NamedTuple, name) = scratch[name]
-fast_tendency_scratch(::Nothing, name) = nothing
-fast_tendency_scratch(scratch, name) = scratch
+# The scratch for the fast part of `name`'s tendency: its own field, or the one the substepper
+# shares between two loops (see `fast_tendency_storage`).
+fast_tendency_scratch(ts::MultirateInfinitesimalStep, name) = fast_tendency_scratch(ts.fast_tendency, ts.substepper, name)
+fast_tendency_scratch(scratch::NamedTuple, substepper, name) = get(scratch, name, substepper.stage_end_moisture_content)
+fast_tendency_scratch(::Nothing, substepper, name) = nothing
+fast_tendency_scratch(scratch, substepper, name) = scratch
 
 # MIS assumes one fast operator for the whole step: the linearization coefficients (θᴸ, the
 # pressure coefficients) stay at the values `freeze_linearization_state!` computed from Uⁿ.
@@ -583,26 +602,32 @@ end
 struct PartitionedTendencySplit{C}            # post-loop scalars: G holds the sources and C the advection
     advective_tendency :: C                   # -∇·(ρ ⟨𝐔⟩ c), built apart; their sum is the slow tendency
 end
+struct TransientPartitionedTendencySplit{C}   # the same for a scalar whose slow tendency no loop reads:
+    advective_tendency :: C                   # C is shared scratch, which the assembly leaves as it is
+end
 struct StageEntryForceSplit{R}                # momentum: G is slow, and so is the remainder R of the
     remainder :: R                            # stage-entry force that the loop adds at weight one
 end
 
+const AnyPartitionedTendencySplit = Union{PartitionedTendencySplit, TransientPartitionedTendencySplit}
+
 Adapt.adapt_structure(to, s::FastSlowTendencySplit) = FastSlowTendencySplit(adapt(to, s.fast_tendency))
 Adapt.adapt_structure(to, s::PartitionedTendencySplit) = PartitionedTendencySplit(adapt(to, s.advective_tendency))
+Adapt.adapt_structure(to, s::TransientPartitionedTendencySplit) = TransientPartitionedTendencySplit(adapt(to, s.advective_tendency))
 Adapt.adapt_structure(to, s::StageEntryForceSplit) = StageEntryForceSplit(adapt(to, s.remainder))
 
 @inline slow_part(i, j, k, grid, ::SlowTendencySplit, G) = @inbounds G[i, j, k]
 @inline slow_part(i, j, k, grid, ::ContinuityTendencySplit, G) = zero(eltype(G))
 @inline slow_part(i, j, k, grid, s::FastSlowTendencySplit, G) = @inbounds G[i, j, k] - s.fast_tendency[i, j, k]
-@inline slow_part(i, j, k, grid, s::PartitionedTendencySplit, G) = @inbounds G[i, j, k] + s.advective_tendency[i, j, k]
+@inline slow_part(i, j, k, grid, s::AnyPartitionedTendencySplit, G) = @inbounds G[i, j, k] + s.advective_tendency[i, j, k]
 @inline slow_part(i, j, k, grid, s::StageEntryForceSplit, G) = @inbounds G[i, j, k] + stage_entry_force_remainder(i, j, k, grid, s.remainder)
 
 @inline full_tendency(i, j, k, grid, split, G) = @inbounds G[i, j, k]
-@inline full_tendency(i, j, k, grid, s::PartitionedTendencySplit, G) = @inbounds G[i, j, k] + s.advective_tendency[i, j, k]
+@inline full_tendency(i, j, k, grid, s::AnyPartitionedTendencySplit, G) = @inbounds G[i, j, k] + s.advective_tendency[i, j, k]
 
-# A post-loop scalar's slow tendency is kept where its advective part was, once the stage is
-# assembled: it predicts the next stage's, for the moisture's part of that stage's loop pressure
-# (see `PredictedStageForcing`).
+# The slow tendency of a moisture or condensate density is kept where its advective part was, once
+# the stage is assembled: it predicts the next stage's, for the moisture's part of that stage's
+# loop pressure (see `PredictedStageForcing`).
 @inline keep_slow_tendency!(i, j, k, split, slow) = nothing
 @inline keep_slow_tendency!(i, j, k, s::PartitionedTendencySplit, slow) = @inbounds s.advective_tendency[i, j, k] = slow
 
@@ -1230,7 +1255,9 @@ assemble_post_loop_stage_forcing!(::PreLoopScalarTendencies, ts, model, Δt) = n
 
 function assemble_post_loop_stage_forcing!(::PostLoopScalarTendencies, ts, model, Δt)
     complete_transport_density_tendency!(ts, model)
+    deferred_names = deferred_advection_names(ts, model)
     for name in scalar_prognostic_names(model)
+        name ∈ deferred_names && continue # assembled already (`complete_post_loop_scalar_tendencies!`)
         assemble_stage_forcing!(ts, model, Δt, name, post_loop_tendency_split(ts.storage, ts, name))
     end
     start_scalar_mass_flux_sums!(ts.transport_mass_fluxes, ts, model)
@@ -1239,6 +1266,61 @@ end
 
 post_loop_tendency_split(::AccumulatorStorage, ts, name) = PartitionedTendencySplit(fast_tendency_scratch(ts, name))
 post_loop_tendency_split(::DiagonalStorage, ts, name) = SlowTendencySplit() # the build has added the whole tendency to `Gⁿ`
+
+# The post-loop scalars whose advective tendency has no field of its own (see
+# `fast_tendency_storage`): the build left it out, and it is built and assembled one scalar at a
+# time, in scratch they share.
+deferred_advection_names(ts::MultirateInfinitesimalStep, model) =
+    deferred_advection_names(ts.scalar_tendencies, ts.fast_tendency, model)
+
+deferred_advection_names(scalar_tendencies, fast_tendency, model) = ()
+
+deferred_advection_names(::PostLoopScalarTendencies, fast_tendency::NamedTuple, model) =
+    filter(name -> !haskey(fast_tendency, name), scalar_prognostic_names(model))
+
+# Build the advective tendency of each of those scalars, as the build would have, and assemble its
+# stage forcing, before the next one's is built in the same scratch. This follows the
+# microphysical sources and the `TendencyCallsite` callbacks, which complete the non-advective part
+# in `Gⁿ` that the assembly adds the advective part to, in that order whichever way it was built.
+# The tracers still hold their specific values, which the advection reads and the assembly does not:
+# these scalars' increments are stored (`stage_increment_source`).
+function complete_post_loop_scalar_tendencies!(ts::MultirateInfinitesimalStep, model, Δt)
+    names = deferred_advection_names(ts, model)
+    isempty(names) && return nothing
+
+    grid = model.grid
+    Δt = convert(eltype(grid), Δt)
+    C = ts.substepper.stage_end_moisture_content
+    R = stage_correction_mass_fluxes(ts.transport_mass_fluxes, ts, model)
+    scalars = specific_scalar_fields(model)
+
+    for name in names
+        launch!(architecture(grid), grid, :xyz, _compute_scalar_advective_tendency!, C, grid, R,
+                scalars[name], Val(name), model.advection[name], model.dynamics, transport_velocities(model),
+                model.microphysics, model.microphysical_fields)
+        assemble_stage_forcing!(ts, model, Δt, name, TransientPartitionedTendencySplit(C))
+    end
+
+    return nothing
+end
+
+@kernel function _compute_scalar_advective_tendency!(C, grid, R, c, name, advection, dynamics, velocities,
+                                                     microphysics, microphysical_fields)
+    i, j, k = @index(Global, NTuple)
+    @inbounds C[i, j, k] = stage_advective_tendency(i, j, k, grid, R, c, name, advection, dynamics, velocities,
+                                                    microphysics, microphysical_fields)
+end
+
+# The advective tendency of a post-loop scalar in a stage whose correction has the mass flux `R`
+# (see "Mass consistency of the recombined scalar fluxes" below), or none.
+@inline stage_advective_tendency(i, j, k, grid, ::Nothing, c, name, advection, dynamics, velocities,
+                                 microphysics, microphysical_fields) =
+    scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities, microphysics, microphysical_fields)
+
+@inline stage_advective_tendency(i, j, k, grid, R, c, name, advection, dynamics, velocities,
+                                 microphysics, microphysical_fields) =
+    mass_consistent_advective_tendency(i, j, k, grid, R, c, name, advection, dynamics, velocities,
+                                       microphysics, microphysical_fields)
 
 #####
 ##### The moisture's part of the loop's pressure with post-loop scalar tendencies
@@ -1550,8 +1632,9 @@ post_loop_scalar_tendency_kernel(::Nothing, ts, model) = SplitScalarTendencies(t
 
 function post_loop_scalar_tendency_kernel(correction, ts, model)
     split = SplitScalarTendencies(ts.fast_tendency)
-    ts.stage[] == 1 && return split # R₁ = 0
-    return MassConsistentScalarTendencies(split, correction_mass_fluxes(correction, ts, model))
+    R = stage_correction_mass_fluxes(correction, ts, model)
+    isnothing(R) && return split # R₁ = 0
+    return MassConsistentScalarTendencies(split, R)
 end
 
 # `SplitScalarTendencies` with each scalar transported by the stage's mass flux plus its correction's.
@@ -1561,8 +1644,14 @@ struct MassConsistentScalarTendencies{S, R}
 end
 
 AtmosphereModels.launch_scalar_tendency!(kernel::MassConsistentScalarTendencies, arch, grid, name, Gc, args) =
-    launch!(arch, grid, :xyz, _add_mass_consistent_scalar_tendency!, Gc, kernel.split.advective_tendencies[name],
-            grid, kernel.mass_flux, args)
+    launch_mass_consistent_scalar_tendency!(advective_tendency_storage(kernel.split, name), kernel, arch, grid, Gc, args)
+
+launch_mass_consistent_scalar_tendency!(C, kernel, arch, grid, Gc, args) =
+    launch!(arch, grid, :xyz, _add_mass_consistent_scalar_tendency!, Gc, C, grid, kernel.mass_flux, args)
+
+# A scalar with no storage for its advective part gets the non-advective part alone, as the split does.
+launch_mass_consistent_scalar_tendency!(::Nothing, kernel, arch, grid, Gc, args) =
+    launch_split_scalar_tendency!(nothing, arch, grid, Gc, args)
 
 @kernel function _add_mass_consistent_scalar_tendency!(Gc, C, grid, R, args)
     i, j, k = @index(Global, NTuple)
@@ -1573,10 +1662,9 @@ AtmosphereModels.launch_scalar_tendency!(kernel::MassConsistentScalarTendencies,
 end
 
 # `AtmosphereModels.scalar_advective_tendency` with the mass flux `R` added to the one the
-# velocities carry. The arguments after `R` are those of `AtmosphereModels.scalar_tendency`.
-@inline function mass_consistent_advective_tendency(i, j, k, grid, R, c, id, name, c_forcing, advection, dynamics,
-                                                    formulation, constants, specific_prognostic_moisture, velocities,
-                                                    microphysics, microphysical_fields, args...)
+# velocities carry.
+@inline function mass_consistent_advective_tendency(i, j, k, grid, R, c, name, advection, dynamics, velocities,
+                                                    microphysics, microphysical_fields)
     Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
     ρ = total_density(dynamics)
@@ -1585,6 +1673,13 @@ end
          w = MassConsistentVelocity(Val(:z), Uᵗ.w, R.w, ρ, grid, advection))
     return - div_ρUc(i, j, k, grid, advection, ρ, U, c)
 end
+
+# The same, taking the argument list of `AtmosphereModels.scalar_tendency` after `R`.
+@inline mass_consistent_advective_tendency(i, j, k, grid, R, c, id, name, c_forcing, advection, dynamics, formulation,
+                                           constants, specific_prognostic_moisture, velocities, microphysics,
+                                           microphysical_fields, args...) =
+    mass_consistent_advective_tendency(i, j, k, grid, R, c, name, advection, dynamics, velocities,
+                                       microphysics, microphysical_fields)
 
 # One component of the velocity whose mass flux is that of `velocity` plus the area-weighted mass
 # flux `mass_flux` of a stage's correction, formed where the advection operator reads it, so the
