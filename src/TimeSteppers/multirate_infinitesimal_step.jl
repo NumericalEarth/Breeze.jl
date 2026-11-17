@@ -858,7 +858,7 @@ struct StageStartState{T, U, Z, R} <: AbstractArray{T, 3}
 end
 
 Adapt.adapt_structure(to, s::StageStartState) =
-    StageStartState(adapt(to, s.Uⁿ), adapt(to, s.offset), s.weight, s.rounding, s.key)
+    StageStartState(adapt(to, s.Uⁿ), adapt(to, s.offset), adapt(to, s.weight), s.rounding, s.key)
 
 Base.size(s::StageStartState) = size(s.Uⁿ)
 
@@ -881,7 +881,7 @@ struct StartStateResidual{T, U, Z, R} <: AbstractArray{T, 3}
 end
 
 Adapt.adapt_structure(to, r::StartStateResidual) =
-    StartStateResidual(adapt(to, r.Uⁿ), adapt(to, r.offset), r.weight, adapt(to, r.recovered), r.recovered_weight)
+    StartStateResidual(adapt(to, r.Uⁿ), adapt(to, r.offset), adapt(to, r.weight), adapt(to, r.recovered), adapt(to, r.recovered_weight))
 
 Base.size(r::StartStateResidual) = size(r.Uⁿ)
 
@@ -1274,8 +1274,8 @@ struct PredictedStageForcing{T, S, A, B} <: AbstractArray{T, 3}
 end
 
 Adapt.adapt_structure(to, G::PredictedStageForcing) =
-    PredictedStageForcing(adapt(to, G.previous_tendency), G.weight, adapt(to, G.first), G.first_weight,
-                          adapt(to, G.second), G.second_weight)
+    PredictedStageForcing(adapt(to, G.previous_tendency), adapt(to, G.weight), adapt(to, G.first),
+                          adapt(to, G.first_weight), adapt(to, G.second), adapt(to, G.second_weight))
 
 Base.size(G::PredictedStageForcing) = size(G.previous_tendency)
 
@@ -1498,7 +1498,7 @@ end
 
 Adapt.adapt_structure(to, R::SecondStageCorrectionMassFlux) =
     SecondStageCorrectionMassFlux(R.direction, adapt(to, R.advection), adapt(to, R.density), adapt(to, R.velocities),
-                                  adapt(to, R.first_mass_flux), R.weight, R.first_weight)
+                                  adapt(to, R.first_mass_flux), adapt(to, R.weight), adapt(to, R.first_weight))
 
 @inline correction_mass_flux(i, j, k, grid, R) = @inbounds R[i, j, k]
 
