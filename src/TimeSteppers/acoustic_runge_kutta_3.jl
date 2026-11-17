@@ -103,7 +103,8 @@ round-to-nearest.
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
 between stages with the preceding loop's (see `PostLoopScalarTendencies`). The loop's pressure
 then takes the moisture tendencies of the stage before, which are kept in a field for each
-prognostic that the loop does not advance.
+moisture and condensate density. `moisture_forcing_names` names those densities; `AtmosphereModel`
+provides them. With `nothing` every prognostic that the loop does not advance gets a field.
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
@@ -112,12 +113,14 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                              Gⁿ::TG = map(similar, prognostic_fields),
                              U⁰::U0 = map(similar, prognostic_fields),
                              rounding = RoundToNearest(),
-                             post_loop_scalar_tendencies = false) where {TI, TG, U0}
+                             post_loop_scalar_tendencies = false,
+                             moisture_forcing_names = nothing) where {TI, TG, U0}
 
     FT = eltype(grid)
     rounding = materialize_rounding(rounding, grid.architecture)
     R = typeof(rounding)
-    scalar_tendencies = scalar_tendency_timing(post_loop_scalar_tendencies, grid, prognostic_fields, dynamics)
+    scalar_tendencies = scalar_tendency_timing(post_loop_scalar_tendencies, grid, prognostic_fields, dynamics,
+                                               moisture_forcing_names)
     ST = typeof(scalar_tendencies)
 
     # Stage fractions come from the outer-scheme interface. Today the only
@@ -497,7 +500,7 @@ AtmosphereModels.timestepper_prognostic_state(timestepper::AcousticTimeStepper, 
 previous_tendency_state(::PreLoopScalarTendencies, timestepper, model) = NamedTuple()
 
 function previous_tendency_state(::PostLoopScalarTendencies, timestepper, model)
-    names = moisture_forcing_names(model)
+    names = moisture_forcing_names(model.microphysics)
     previous_tendencies = NamedTuple{names}(map(name -> previous_scalar_tendency(timestepper, name), names))
     return (; previous_scalar_tendencies = Oceananigans.prognostic_state(previous_tendencies))
 end

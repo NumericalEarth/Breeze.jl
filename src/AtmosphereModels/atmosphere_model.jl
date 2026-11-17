@@ -321,7 +321,9 @@ function AtmosphereModel(grid;
     # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
     if timestepper_uses_dynamics(timestepper)
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver,
-                                  cache_advecting_state = advection_needs_solver, timestepper_kwargs...)
+                                  cache_advecting_state = advection_needs_solver,
+                                  moisture_forcing_names = moisture_forcing_names(microphysics),
+                                  timestepper_kwargs...)
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
     end
