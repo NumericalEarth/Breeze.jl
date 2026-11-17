@@ -46,6 +46,11 @@ end
 
 const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep, :TVDMISB))
 
+# The sweeps over the recombining coefficient sets, which repeat every integration with a time
+# stepper of its own, run the default set, and the others in the exhaustive tests
+# (BREEZE_TEST_EXHAUSTIVE, set on one CI runner).
+const swept_coefficients = test_sweep((:SSPMIS43, :TVDMISB, :MIS4a))
+
 @testset "Post-loop scalar tendencies keep a uniform mass fraction uniform [$timestepper, $coefficients]" for (timestepper, coefficients) in steppers
     Δt = 10
     Nt = 60 # 10 minutes: the bubble reaches max|w| ≈ 10 m/s
@@ -124,7 +129,7 @@ function advected_blob_growth(; coefficients, advection, Δt, post_loop_scalar_t
 end
 
 @testset "Post-loop MIS advection does not amplify a passive scalar [$coefficients, Courant number $courant]" for
-        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a), courant in (0.5, 1.0)
+        coefficients in swept_coefficients, courant in (0.5, 1.0)
     for advection in (WENO(order = 5), WENO(order = 5, bounds = (0, 1)))
         growth = advected_blob_growth(; coefficients, advection, Δt = courant * 200 / 20)
         @test growth ≤ 1 + 1e-3
@@ -172,7 +177,7 @@ function accelerating_bubble_tracer(; coefficients, Δt, stop_time = 16, substep
 end
 
 @testset "Post-loop MIS tracers are second-order accurate in an accelerating flow [$coefficients]" for
-        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a)
+        coefficients in swept_coefficients
     c = map(Δt -> accelerating_bubble_tracer(; coefficients, Δt), (2, 1, 1/2))
     differences = (maximum(abs, c[1] .- c[2]), maximum(abs, c[2] .- c[3]))
     @test all(isfinite, differences)
