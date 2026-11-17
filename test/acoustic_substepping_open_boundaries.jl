@@ -36,9 +36,11 @@ const arches = (Metal.functional() || get(ENV, "BREEZE_FORCE_METAL_FUNCTIONAL", 
 
 as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float_types()
 
+# On the grid of the relaxation tests below (with their 1 km spacing), so that the kernels of the
+# substep loop are compiled for one grid size.
 function open_boundary_momentum_model(arch, FT, damping)
-    grid = RectilinearGrid(arch, FT; size=(6, 6, 4), halo=(5, 5, 5),
-                           x=(0, 6kilometers), y=(0, 6kilometers), z=(0, 200),
+    grid = RectilinearGrid(arch, FT; size=(8, 8, 4), halo=(5, 5, 5),
+                           x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
                            topology=(Bounded, Bounded, Bounded))
     boundary_conditions = (
         ρu = FieldBoundaryConditions(west=NormalFlowBoundaryCondition(FT(2)),
