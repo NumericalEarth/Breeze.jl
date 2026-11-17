@@ -421,11 +421,16 @@ end
         # In Float32 the residuals are those of rounding the prognostics: measured up to 1.5 ϵ KE⁰ in the kinetic
         # energy (0.014 J m⁻², where the mean flow loses 0.4 to 0.6 J m⁻² in a step) and 0.4 ϵ TKE⁰ in the TKE
         roundoff_KE = 8ϵ * KE⁰
-        # The TKE also carries the rounding of each stage's update: in every stage the start state, the
-        # increment, the solve and the recovered state are each rounded to ϵ of their size, and every term the
-        # stages add is rounded to ϵ of its own size, so the allowance is 4 (s + 1) ϵ times the TKE and the sum
-        # of the magnitudes of the terms (measured: up to 16 ϵ with the default dissipation, 20 ϵ for s = 4)
-        roundoff_TKE = 4 * (s + 1) * ϵ * (TKE⁰ + sum(abs(b.Δρe) + abs(b.solved) + abs(b.exchange) + abs(b.dissipated) +
+        # The TKE also carries the rounding of each stage's update, cell by cell in the model's arithmetic: in every
+        # stage the start state, the increment and the recovered state are rounded, and the tridiagonal solve of
+        # the TKE rounds its elimination and back substitution (about seven operations per stage, each to ϵ of the
+        # TKE of the cell and of the terms the stage adds). With a finite exchange length ℂʷᴸ the sink amplitude of
+        # the budget third moment comes from one more tridiagonal solve over the column, whose elimination
+        # accumulates up to Nz roundings. The same residual, measured in units of ϵ times the sum below, is seen in
+        # Float64 and Float32 (up to 3 ϵ with one amplitude, 20 to 38 ϵ with the exchanged one), so it is round-off,
+        # and the allowance is its bound, (7 (s + 1) + Nz) ϵ
+        Nz = size(model.grid, 3)
+        roundoff_TKE = (7 * (s + 1) + Nz) * ϵ * (TKE⁰ + sum(abs(b.Δρe) + abs(b.solved) + abs(b.exchange) + abs(b.dissipated) +
                                         abs(b.shortfall) + abs(b.combination) for b in stages))
 
         for (i, b) in enumerate(stages)
