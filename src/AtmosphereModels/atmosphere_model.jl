@@ -246,7 +246,7 @@ function AtmosphereModel(grid;
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
     # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
-    # (per-substep solve) and with AcousticRungeKutta3 (moisture and tracers via the generic
+    # (per-substep solve) and with the acoustic time steppers (moisture and tracers via the generic
     # implicit step; momentum and the thermodynamic variable via a per-stage solve after the
     # acoustic substep loop — see TimeSteppers/acoustic_substep_helpers.jl). On terrain-following
     # grids the split partitions the contravariant velocity (see `advecting_vertical_velocity`).

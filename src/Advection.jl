@@ -44,7 +44,7 @@ using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_
 using DocStringExtensions: TYPEDEF
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
-using Breeze.TimeSteppers: tendencies_feed_first_stage
+using Breeze.TimeSteppers: tendencies_feed_first_stage, MassConsistentVelocity
 
 using ..AtmosphereModels:
     AtmosphereModels,
@@ -103,6 +103,11 @@ Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
 @inline Base.getindex(v::ExplicitVerticalVelocity, i, j, k) =
     @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, v.grid, v.advection_scheme, v.time_discretization,
                                          v.vertical_velocity) * v.vertical_velocity[i, j, k]
+
+# A velocity that is the explicitly transported one already is taken as it is: where the explicit
+# fraction is limited, scaling it again would take off what it adds to the limited velocity.
+@inline OceananigansAdvection.explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, scheme, ::AdaptiveVerticallyImplicitDiscretization,
+                                                        ::ExplicitVerticalVelocity{<:Any, <:Any, <:Any, <:MassConsistentVelocity}) = one(grid)
 
 # Disambiguates against the `ZeroField` shortcut above.
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, ::BoundsPreservingAVIDWENO, ρ, U, ::ZeroField) = zero(grid)

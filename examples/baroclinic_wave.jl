@@ -10,7 +10,7 @@
 #
 # This example exercises `CompressibleDynamics` with
 # [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization)
-# (acoustic substepping via [`AcousticRungeKutta3`](@ref)) and
+# (acoustic substepping under the default [`MultirateInfinitesimalStep`](@ref) outer time stepper) and
 # `SphericalCoriolis` (non-hydrostatic) on a 1° latitude-longitude grid spanning
 # 75° S to 75° N. Acoustic substepping lets the outer time step be set by
 # the *advective* CFL rather than the much-tighter acoustic CFL — here a
@@ -212,8 +212,9 @@ end
 #
 # We use fully compressible dynamics with **acoustic substepping** via
 # [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization)
-# and the [`AcousticRungeKutta3`](@ref)
-# (Wicker–Skamarock RK3) outer loop. Acoustic substepping handles the
+# and its default outer time stepper, [`MultirateInfinitesimalStep`](@ref).
+# (Passing `timestepper = :AcousticRungeKutta3` to `AtmosphereModel` selects
+# Wicker–Skamarock RK3 instead.) Acoustic substepping handles the
 # fast acoustic-mode pressure gradient and buoyancy via a vertically-implicit
 # inner loop, so the outer time step is limited only by the *advective*
 # CFL — about 100× larger than the acoustic-CFL-limited Δt the fully

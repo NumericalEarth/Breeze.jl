@@ -66,21 +66,14 @@ const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep,
     end
     @test maximum(abs, interior(post_loop.velocities.w)) > 5
 
-    # Wicker–Skamarock applies each stage's flux alone, q/(1 − q) times the dry-mass flux continuity
-    # applied, and keeps a uniform mass fraction to round-off. A multirate infinitesimal step
-    # recombines the stages' fluxes with its tableau (leaving them at weight one would be unstable:
-    # see the passive-scalar test below), while continuity integrates the mass flux inside the
-    # loop, so the two no longer pair and the mass fraction stays uniform only to the accuracy of
-    # the scheme, about 1e-3 here, as with pre-loop tendencies.
-    # TODO: a mass-consistent multirate scalar update (the stage's own mass flux times a
-    # recombined mass fraction, instead of a recombined flux) would restore round-off uniformity.
-    if timestepper === :AcousticRungeKutta3
-        @test moisture_uniformity_error(post_loop) < 1e-12
-        @test tracer_uniformity_error(post_loop) < 1e-12
-    else
-        @test moisture_uniformity_error(post_loop) < 5e-3
-        @test tracer_uniformity_error(post_loop) < 5e-3
-    end
+    # Every stage applies its own loop's mass flux, q/(1 − q) times the dry-mass flux continuity
+    # applied, to a uniform mass fraction, which therefore stays uniform to round-off.
+    # Wicker–Skamarock applies each stage's flux alone. A multirate infinitesimal step recombines
+    # the stages' fluxes with its tableau (leaving them at weight one would be unstable: see the
+    # passive-scalar test below), and each stage transports the scalars with the mass flux that
+    # makes the recombined one the stage's own (`ScalarMassFluxCorrection`).
+    @test moisture_uniformity_error(post_loop) < 1e-12
+    @test tracer_uniformity_error(post_loop) < 1e-12
 end
 
 #####
@@ -138,16 +131,67 @@ end
     end
 end
 
+#####
+##### A passive tracer in an accelerating flow
+#####
+##### The recombined post-loop tendencies of a multirate infinitesimal step have to carry each
+##### stage's own mass flux with the tracer's own reconstruction. With the mass flux of the
+##### correction carried by another reconstruction (a first-order upwind one, in the correction's
+##### own direction), the two differ by a truncation error that does not decrease with the time
+##### step, and the tracer is first-order accurate in time wherever the flow accelerates: the
+##### differences below then halve with the time step instead of falling fourfold.
+#####
+
+# A tracer blob offset from a warm bubble that accelerates from rest. The dynamics are dry, so
+# the tracer is passive, and the substep size is the same for every Δt.
+function accelerating_bubble_tracer(; coefficients, Δt, stop_time = 16, substep = 1/64, N = 32)
+    L = 200N
+    grid = RectilinearGrid(default_arch, Float64; size = (N, N), halo = (5, 5), x = (-L / 2, L / 2), z = (0, L),
+                           topology = (Periodic, Flat, Bounded))
+    time_discretization = SplitExplicitTimeDiscretization(; substeps = round(Int, Δt / substep),
+                                                          forward_weight = 0.5, damping = NoDivergenceDamping())
+    dynamics = CompressibleDynamics(time_discretization; base_pressure = 1e5, standard_pressure = 1e5,
+                                    reference_potential_temperature = 300)
+    model = AtmosphereModel(grid; dynamics, advection = UpwindBiased(order = 5), tracers = :ρc,
+                            timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies = true))
+
+    blob(x, z, x₀) = cos(π * min(1, sqrt((x - x₀)^2 + (z - L / 3)^2) / (L / 4)) / 2)^2
+    ρᵢ(x, z) = adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, model.thermodynamic_constants)
+    set!(model; ρ = ρᵢ, θ = (x, z) -> 300 + 4 * blob(x, z, 0))
+    c = CenterField(grid)
+    set!(c, (x, z) -> blob(x, z, L / 8))
+    parent(model.tracers.ρc) .= parent(c) .* parent(total_density(model.dynamics))
+    update_state!(model)
+
+    for _ in 1:round(Int, stop_time / Δt)
+        time_step!(model, Δt)
+    end
+
+    return Array(interior(model.tracers.ρc)) ./ Array(interior(total_density(model.dynamics)))
+end
+
+@testset "Post-loop MIS tracers are second-order accurate in an accelerating flow [$coefficients]" for
+        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a)
+    c = map(Δt -> accelerating_bubble_tracer(; coefficients, Δt), (2, 1, 1/2))
+    differences = (maximum(abs, c[1] .- c[2]), maximum(abs, c[2] .- c[3]))
+    @test all(isfinite, differences)
+    @test log2(differences[1] / differences[2]) ≥ 1.7
+end
+
 @testset "TendencyCallsite callbacks edit the post-loop scalar tendencies once per stage [$timestepper]" for (timestepper, coefficients) in steppers[1:2]
     # A horizontally uniform rest state with a uniform tendency added by a callback: after one step
     # ρu and ρc each equal c Δt. Momentum takes the callback's pre-loop edit; the post-loop build
     # overwrites the scalar edit, so the callback fires again and ρc takes exactly one edit.
-    grid = RectilinearGrid(default_arch; size = (4, 4, 4), x = (0, 1000), y = (0, 1000), z = (0, 1000),
-                           topology = (Periodic, Periodic, Bounded))
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    # The grid, dynamics and advection are those of `uniform_scalar_bubble`, so that this model has
+    # its type (which includes the grid size) and the test compiles nothing new.
+    grid = RectilinearGrid(default_arch; size = (40, 48), halo = (5, 5), x = (-20e3, 20e3), z = (0, 12e3),
+                           topology = (Periodic, Flat, Bounded))
+    time_discretization = SplitExplicitTimeDiscretization(; damping = NoDivergenceDamping(), forward_weight = 0.65)
+    dynamics = CompressibleDynamics(time_discretization; base_pressure = 1e5, reference_potential_temperature = 300)
     timestepper_kwargs = (; post_loop_scalar_tendencies = true)
     isnothing(coefficients) || (timestepper_kwargs = merge(timestepper_kwargs, (; coefficients)))
-    model = AtmosphereModel(grid; dynamics, tracers = :ρc, timestepper, timestepper_kwargs)
+    model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc, timestepper, timestepper_kwargs)
     set!(model; ρ = model.dynamics.reference_state.density, θ = 300)
 
     c = 1e-3
@@ -210,7 +254,8 @@ end
     names = scalar_prognostic_names(model)
     @test ts.fast_tendency isa NamedTuple
     @test all(name -> haskey(ts.fast_tendency, name), names)
-    pre_loop = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep).timestepper
+    pre_loop = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep,
+                               timestepper_kwargs = (; post_loop_scalar_tendencies = false)).timestepper
     @test pre_loop.fast_tendency isa Field
 
     tracer_density_to_specific!(model)
@@ -238,24 +283,29 @@ end
 #####
 ##### Stage increments of a multirate infinitesimal step with an active negative-moisture correction
 #####
-##### `update_state!` corrects negative moisture between stages, so an increment ΔYᵢ = Yᵢ − Uⁿ formed
-##### after it carries the correction into the forcing and start state of later stages. The increments
-##### of the moisture and microphysical fields are therefore stored when a stage completes, and only
-##### those of the acoustic prognostics, which nothing changes in between, are formed in the next
-##### stage's assembly. Either way the step must reproduce the one that stores every increment.
+##### `update_state!` corrects negative moisture between stages, and the next slow tendencies are
+##### evaluated at the corrected state. The increment ΔYᵢ = Yᵢ − Uⁿ that later stages start from and
+##### are forced with is that of the corrected state too, with every storage layout: the layout with
+##### two registers reads it from the prognostic fields, and the layouts with increment registers and
+##### with accumulators store it once `update_state!` has run. (They used to store it when the stage
+##### completed, before the correction, so that the layouts differed wherever the correction was
+##### active.) The increments of the acoustic prognostics, which `update_state!` does not change, are
+##### formed in the next stage's assembly or stored with the others; either way the step is the same.
 #####
 
 using CloudMicrophysics
 using Breeze.AtmosphereModels: SpeciesBorrowing
-using Breeze.TimeSteppers: fold_stage_increments, stage_increment_source, acoustic_prognostic_names,
-                           IncrementFromState, StoredIncrement
+using Breeze.TimeSteppers: fold_stage_increments, structured_stage_storage, stage_increment_source,
+                           acoustic_prognostic_names, IncrementFromState, StoredIncrement,
+                           TwoRegisterStorage, IncrementStorage, AccumulatorStorage
 using Oceananigans: prognostic_fields
 
 const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt).OneMomentCloudMicrophysics
 
 # Sharp-edged rain in a sheared, overturning flow: unbounded WENO undershoots at its edges, so the
 # correction has negative rain to repair after every stage.
-function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correction = SpeciesBorrowing())
+function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correction = SpeciesBorrowing(),
+                        coefficients = :TVDMISB)
     grid = RectilinearGrid(default_arch; size = (16, 16), halo = (5, 5), x = (-8e3, 8e3), z = (0, 8e3),
                            topology = (Periodic, Flat, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
@@ -263,7 +313,7 @@ function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correct
     model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
                             microphysics = OneMomentCloudMicrophysics(; negative_moisture_correction),
                             timestepper = :MultirateInfinitesimalStep,
-                            timestepper_kwargs = (; coefficients = :TVDMISB, post_loop_scalar_tendencies))
+                            timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies))
     constants = model.thermodynamic_constants
     set!(model; θ = θ_bubble, qᵗ = 0.018, ρ = (x, z) -> adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, constants),
                 u = (x, z) -> 15 * sin(2π * z / 8e3), w = (x, z) -> 4 * sin(2π * x / 16e3))
@@ -272,19 +322,21 @@ function raining_bubble(; post_loop_scalar_tendencies, negative_moisture_correct
     return model
 end
 
-function raining_bubble_state(Nt; fold, kw...)
+function raining_bubble_state(Nt; fold, structured = true, kw...)
     fold_stage_increments[] = fold
+    structured_stage_storage[] = structured
     model = raining_bubble(; kw...)
+    fold_stage_increments[] = true
+    structured_stage_storage[] = true
     for _ in 1:Nt
         time_step!(model, 6)
     end
-    fold_stage_increments[] = true
-    return map(field -> Array(interior(field)), prognostic_fields(model))
+    return map(field -> Array(interior(field)), prognostic_fields(model)), model.timestepper.storage
 end
 
 @testset "MIS stage increments with an active negative-moisture correction [post_loop = $post_loop_scalar_tendencies]" for post_loop_scalar_tendencies in (false, true)
     # The setup gives the correction something to do: uncorrected, a step leaves negative rain.
-    uncorrected = raining_bubble_state(1; fold = true, post_loop_scalar_tendencies, negative_moisture_correction = nothing)
+    uncorrected, _ = raining_bubble_state(1; fold = true, post_loop_scalar_tendencies, negative_moisture_correction = nothing)
     @test minimum(uncorrected.ρqʳ) < 0
 
     # Only the prognostics the acoustic loop advances form their increments in the assembly.
@@ -295,13 +347,38 @@ end
     end
 
     for Nt in (1, 3)
-        folded = raining_bubble_state(Nt; fold = true, post_loop_scalar_tendencies)
-        stored = raining_bubble_state(Nt; fold = false, post_loop_scalar_tendencies)
+        folded, _ = raining_bubble_state(Nt; fold = true, post_loop_scalar_tendencies)
+        stored, _ = raining_bubble_state(Nt; fold = false, post_loop_scalar_tendencies)
         @test minimum(folded.ρqʳ) ≥ 0
         for name in keys(folded)
             scale = maximum(abs, stored[name])
             @test maximum(abs, folded[name] .- stored[name]) ≤ 100 * eps(scale)
         end
+    end
+end
+
+# The increments are those of the corrected state with every layout: a coefficient set that keeps two
+# registers reads them from the corrected prognostic fields, and reproduces to round-off the same
+# set with increment registers stored after the correction and with accumulators. Three steps of
+# this bubble amplify the round-off the layouts differ by, as in "MIS storage layouts reproduce the
+# accumulators".
+@testset "MIS storage layouts agree with an active negative-moisture correction [$coefficients, post_loop = $post_loop_scalar_tendencies]" for
+        (coefficients, layout) in ((:LowStorageMIS52, TwoRegisterStorage), (:DiagonalMIS42, IncrementStorage)),
+        post_loop_scalar_tendencies in (false, true)
+
+    kw = (; coefficients, post_loop_scalar_tendencies)
+    uncorrected, _ = raining_bubble_state(1; fold = true, negative_moisture_correction = nothing, kw...)
+    @test minimum(uncorrected.ρqʳ) < 0
+
+    structured, storage = raining_bubble_state(3; fold = true, kw...)
+    accumulated, accumulator_storage = raining_bubble_state(3; fold = true, structured = false, kw...)
+    @test storage isa layout
+    @test accumulator_storage isa AccumulatorStorage
+    @test minimum(structured.ρqʳ) ≥ 0
+
+    for name in keys(accumulated)
+        scale = maximum(abs, accumulated[name])
+        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 1000 * eps(scale)
     end
 end
 

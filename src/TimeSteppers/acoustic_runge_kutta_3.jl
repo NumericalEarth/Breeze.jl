@@ -16,6 +16,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, 
                                 compute_closure_tendencies!, refreshes_state_after_update, invalid_time_step
 
 using Breeze.CompressibleEquations:
+    CompressibleEquations,
     CompressibleDynamics,
     SplitExplicitTimeDiscretization,
     TerrainCompressibleDynamics,
@@ -34,9 +35,12 @@ abstract type AcousticTimeStepper <: AbstractTimeStepper end
 """
 $(TYPEDEF)
 
-Wicker–Skamarock third-order Runge–Kutta time stepper with linearized
+Wicker–Skamarock third-order Runge–Kutta time stepper
+([Wicker and Skamarock (2002)](@cite WickerSkamarock2002)) with linearized
 acoustic substepping for fully compressible dynamics. Stage fractions
-``β = (1/3, 1/2, 1)``. Each stage:
+``β = (1/3, 1/2, 1)``. Select it with `AtmosphereModel(grid; dynamics, timestepper = :AcousticRungeKutta3)`;
+the default for a split-explicit time discretization is [`MultirateInfinitesimalStep`](@ref).
+Each stage:
 
   1. Re-evaluates slow tendencies (advection + Coriolis + closure +
      forcing only — PGF and buoyancy are handled inside the substep
@@ -66,12 +70,6 @@ Fields
 - `scalar_tendencies`: when the moisture and tracer tendencies are built,
   `PreLoopScalarTendencies` (between stages, the default) or
   `PostLoopScalarTendencies` (after each stage's own acoustic loop).
-
-References
-==========
-
-Wicker, L. J. & Skamarock, W. C. (2002). *Time-splitting methods for
-elastic models using forward time schemes.* MWR 130, 2088–2097.
 """
 struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R, ST} <: AcousticTimeStepper
     β₁ :: FT
@@ -103,7 +101,9 @@ round-to-nearest.
 
 `post_loop_scalar_tendencies = true` rebuilds the moisture and tracer tendencies after each
 stage's own acoustic loop, with that loop's time-averaged transport velocity, instead of
-between stages with the preceding loop's (see `PostLoopScalarTendencies`).
+between stages with the preceding loop's (see `PostLoopScalarTendencies`). The loop's pressure
+then takes the moisture tendencies of the stage before, which are kept in a field for each
+prognostic that the loop does not advance.
 """
 function AcousticRungeKutta3(grid, prognostic_fields;
                              dynamics,
@@ -117,13 +117,11 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     FT = eltype(grid)
     rounding = materialize_rounding(rounding, grid.architecture)
     R = typeof(rounding)
-    scalar_tendencies = scalar_tendency_timing(post_loop_scalar_tendencies)
+    scalar_tendencies = scalar_tendency_timing(post_loop_scalar_tendencies, grid, prognostic_fields, dynamics)
     ST = typeof(scalar_tendencies)
 
     # Stage fractions come from the outer-scheme interface. Today the only
-    # supported subtype is WickerSkamarock3 with canonical (1/3, 1/2, 1);
-    # a future MIS outer scheme would extend AcousticOuterScheme and provide
-    # its own stage_fractions method.
+    # supported subtype is WickerSkamarock3 with canonical (1/3, 1/2, 1).
     β = stage_fractions(WickerSkamarock3())
     β₁ = FT(β[1])
     β₂ = FT(β[2])
@@ -207,7 +205,7 @@ scalar update, and `callbacks` with a `TendencyCallsite` fire again on them.
 function acoustic_stage!(model::AtmosphereModel, Δt, β, rounding, callbacks)
     ts = model.timestepper
     substepper = ts.substepper
-    U⁰ = stage_start_state(ts)
+    U⁰ = stage_start_state(ts, model)
 
     # Per-stage cache prep. The linearization coefficients are refreshed
     # to the current RK stage-entry state; the substep perturbations are
@@ -476,6 +474,15 @@ AtmosphereModels.scalar_tendencies_in_update_state(ts::AcousticTimeStepper) =
     scalar_tendencies_in_update_state(ts.scalar_tendencies)
 AtmosphereModels.thermodynamic_transport_velocities(model::CompressibleAcousticModel) = slow_thermodynamic_velocities(model)
 
+# The loop's pressure ramps with the moisture tendencies in the tendency storage, or, when they
+# are built after the loop, with those the stage before built (see `PostLoopScalarTendencies`).
+CompressibleEquations.moisture_forcing(ts::AcousticRungeKutta3, model, name) =
+    stage_moisture_forcing(ts.scalar_tendencies, ts, model, name)
+
+stage_moisture_forcing(::PreLoopScalarTendencies, ts, model, name) = ts.Gⁿ[name]
+stage_moisture_forcing(timing::PostLoopScalarTendencies, ts::AcousticRungeKutta3, model, name) =
+    timing.previous_tendencies[name]
+
 # An adiabatic-balance twin that keeps split-explicit dynamics is stepped by the production
 # model's own scheme.
 const SplitExplicitCompressibleDynamics = CompressibleDynamics{<:SplitExplicitTimeDiscretization}
@@ -486,9 +493,37 @@ AtmosphereModels.adiabatic_twin_timestepper(::AcousticRungeKutta3, ::SplitExplic
 Oceananigans.prognostic_state(timestepper::AcousticTimeStepper) =
     (substepper = Oceananigans.prognostic_state(timestepper.substepper),)
 
+# With `PostLoopScalarTendencies` the first stage after a restart gives its loop the moisture and
+# condensate tendencies that the last stage before it built, which nothing can rebuild.
+AtmosphereModels.timestepper_prognostic_state(timestepper::AcousticTimeStepper, model) =
+    merge(Oceananigans.prognostic_state(timestepper),
+          previous_tendency_state(timestepper.scalar_tendencies, timestepper, model))
+
+previous_tendency_state(::PreLoopScalarTendencies, timestepper, model) = NamedTuple()
+
+function previous_tendency_state(::PostLoopScalarTendencies, timestepper, model)
+    names = moisture_forcing_names(model)
+    previous_tendencies = NamedTuple{names}(map(name -> previous_scalar_tendency(timestepper, name), names))
+    return (; previous_scalar_tendencies = Oceananigans.prognostic_state(previous_tendencies))
+end
+
+# Where the time stepper keeps the tendency of `name` that the stage before built.
+previous_scalar_tendency(timestepper::AcousticRungeKutta3, name) = timestepper.scalar_tendencies.previous_tendencies[name]
+
 function Oceananigans.restore_prognostic_state!(restored::AcousticTimeStepper, from)
     Oceananigans.restore_prognostic_state!(restored.substepper, from.substepper)
+    hasproperty(from, :previous_scalar_tendencies) &&
+        restore_previous_tendencies!(restored.scalar_tendencies, restored, from.previous_scalar_tendencies)
     return restored
+end
+
+restore_previous_tendencies!(::PreLoopScalarTendencies, restored, from) = nothing
+
+function restore_previous_tendencies!(::PostLoopScalarTendencies, restored, from)
+    for name in keys(from)
+        Oceananigans.restore_prognostic_state!(previous_scalar_tendency(restored, name), from[name])
+    end
+    return nothing
 end
 
 Oceananigans.restore_prognostic_state!(timestepper::AcousticTimeStepper, ::Nothing) = timestepper

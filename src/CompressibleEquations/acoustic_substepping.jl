@@ -582,7 +582,9 @@ prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
 #####     Gᵗρᵈ, the dry air's share of the divergence of the mass flux the moisture tendencies
 #####     were built with (`compute_transport_density_tendency!`): the two cancel only if they
 #####     are built from one flux, and the moisture is advected with the transport velocity, the
-#####     average over the preceding loop, not with the stage-entry momentum.
+#####     average over the preceding loop, not with the stage-entry momentum. A time stepper
+#####     that builds the moisture tendencies after the loop gives the loop those of the stage
+#####     before, with the divergence of their mass flux (`moisture_forcing`).
 #####   - The stage starts from ϖ = (ρθ)′ + W⁰, W⁰ the content of the start state relative to
 #####     the stage-entry state, and ends by taking the content off: W⁰, the ramp of Gᵂ, and
 #####     − ∇·(Λᴴ M), the content the loop's flux M built. The thermodynamic density is left
@@ -786,14 +788,21 @@ function moisture_content_arguments(substepper, model, U⁰)
              qᵛᵉ = specific_prognostic_moisture(model), Λᴴ = substepper.fixed_composition_sensitivity,
              liquid_fractions = condensate_liquid_fractions(microphysics, condensate_names))
 
+    timestepper = model.timestepper
     densities = (; ρᵈ⁰ = U⁰.ρᵈ, Gᵗρᵈ = substepper.transport_density_tendency, Gˢρᵈ = Gⁿ.ρᵈ,
-                 ρqᵐ⁰ = U⁰[moisture_name], ρqᵐ = model.moisture_density, Gρqᵐ = Gⁿ[moisture_name],
+                 ρqᵐ⁰ = U⁰[moisture_name], ρqᵐ = model.moisture_density,
+                 Gρqᵐ = moisture_forcing(timestepper, model, moisture_name),
                  ρqᶜ⁰ = values(U⁰[condensate_names]),
                  ρqᶜ = values(model.microphysical_fields[condensate_names]),
-                 Gρqᶜ = values(Gⁿ[condensate_names]))
+                 Gρqᶜ = map(name -> moisture_forcing(timestepper, model, name), condensate_names))
 
     return state, densities
 end
+
+# The slow tendency of the moisture or condensate density `name` that the content ramps with over
+# a stage: the stage's forcing of that density, which the tendency storage holds when the loop
+# starts unless the time stepper builds the scalar tendencies after the loop, and then predicts it.
+moisture_forcing(timestepper, model, name) = timestepper.Gⁿ[name]
 
 # The sensitivities at the stage-entry state: λᵐ of the prognostic moisture density, λˡ and λⁱ of the
 # condensate phases, the dilution Σₐ λₐ rₐ, what the dry density holds beyond the dilution (the
@@ -868,6 +877,12 @@ end
 # `finalize_time_averaged_velocity!` normalizes it (see Section 10).
 function remove_moisture_content!(substepper::AcousticSubstepper, model, U⁰, Δτ)
     grid = model.grid
+
+    # The divergence reads the horizontal sums across the east and north faces of each cell, which
+    # the substeps accumulate in the interior only: exchange them on distributed grids.
+    M = substepper.time_averaged_velocities
+    fill_substep_halos!((M.u, M.v), model)
+
     launch!(architecture(grid), grid, :xyz, _remove_moisture_content!,
             substepper.density_potential_temperature_perturbation,
             substepper.stage_end_moisture_content,
@@ -1496,13 +1511,14 @@ end
 ##### the last place are lost.
 #####
 ##### Neither sum needs to round what the loop integrates, because the loop integrates
-##### perturbations: the rounding errors, exact in floating point (`rounding_error`), are kept in
-##### a field per acoustic prognostic (the *residual*) and added back to the small quantity that
-##### is formed next from the rounded state:
+##### perturbations: the rounding errors, exact in floating point (`rounding_error`), are added
+##### back to the small quantity that is formed next from the rounded state. That of a stage's
+##### state is kept in a field per acoustic prognostic (the *residual*) until the next stage is
+##### assembled; that of a start state is evaluated from its two terms where the loop starts:
 #####
 #####   end of stage j:      Yⱼ = fl(Yⱼ₋₁ + U′),           residual = (Yⱼ₋₁ + U′) − Yⱼ
-#####   assembly of stage i: ΔYⱼ = (Yⱼ − Uⁿ) + residual,   U⁰ = fl(Uⁿ + Zᵢ),   residual = (Uⁿ + Zᵢ) − U⁰
-#####   start of stage i:    U′ = (U⁰ − Yᵢ₋₁) + residual
+#####   assembly of stage i: ΔYⱼ = (Yⱼ − Uⁿ) + residual
+#####   start of stage i:    U⁰ = fl(Uⁿ + Zᵢ),   U′ = (U⁰ − Yᵢ₋₁) + [(Uⁿ + Zᵢ) − U⁰]
 #####
 ##### The differences in parentheses are exact (the states are within a factor of two of each
 ##### other), so the increments and the loop's start state are those of exact sums to the
@@ -1510,10 +1526,11 @@ end
 ##### stepper's round-off treatment.
 #####
 
-# The residual fields of the start state of the current stage of `timestepper`, a `NamedTuple`
-# with keys `(ρ, ρᵡ, ρu, ρv, ρw)`, and the fields that take the residual of the state this stage
-# recovers. `nothing` where no residual is carried.
-start_state_residual(timestepper) = nothing
+# The residuals of the start state of the current stage of `timestepper`, a `NamedTuple` with keys
+# `(ρ, ρᵡ, ρu, ρv, ρw)` of arrays, which need not be stored: the residual of a sum can be evaluated
+# from its two terms where it is read. And the fields that take the residual of the state this
+# stage recovers. `nothing` where no residual is carried.
+start_state_residual(timestepper, model) = nothing
 recovered_state_residual(timestepper) = nothing
 
 @inline with_residual(x, ::Nothing, i, j, k) = x
@@ -1685,17 +1702,20 @@ Adapt.adapt_structure(to, r::SEFR) =
                              r.thermodynamic_constants)
 
 # Fields holding the outer-step-start state that a `StageEntryForceRemainder` is measured from, and
-# the pressure remainder of the current stage-entry state relative to it.
-step_start_force_state(grid) = (pressure = CenterField(grid),
-                                thermodynamic_density = CenterField(grid),
-                                water_density = CenterField(grid),
-                                condensate_mass_fraction = CenterField(grid),
-                                pressure_remainder = CenterField(grid))
+# the pressure remainder of the current stage-entry state relative to it. The step-start
+# thermodynamic and dry densities are the time stepper's own copies of the step-start state.
+#
+# The pressure remainder is evaluated and read while a stage is assembled, between two acoustic
+# loops, so it shares the storage of `substepper`'s scaled thermodynamic tendency, which each loop
+# rebuilds when it starts and nothing reads once the loop has ended.
+step_start_force_state(grid, substepper) = (pressure = CenterField(grid),
+                                            water_density = CenterField(grid),
+                                            condensate_mass_fraction = CenterField(grid),
+                                            pressure_remainder = substepper.scaled_thermodynamic_tendency)
 
 function store_step_start_force_state!(step_start, model)
     grid = model.grid
     parent(step_start.pressure) .= parent(model.dynamics.pressure)
-    parent(step_start.thermodynamic_density) .= parent(thermodynamic_density(model.formulation))
     parent(step_start.water_density) .= parent(model.dynamics.total_density) .- parent(model.dynamics.dry_density)
     fill!(parent(step_start.pressure_remainder), 0)
     launch!(architecture(grid), grid, :xyz, _store_condensate_mass_fraction!,
@@ -2840,7 +2860,7 @@ function acoustic_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stag
     # effectively starts from U(t) = Uᴸ (the outer-step-start state). The slow thermodynamic
     # tendency ramps over `forcing_interval` in the stage.
     forcing_interval = Nτ * Δτ * substepper.thermodynamic_tendency_factor
-    initialize_stage_perturbations!(substepper, model, Uᴸ, forcing_interval, start_state_residual(model.timestepper))
+    initialize_stage_perturbations!(substepper, model, Uᴸ, forcing_interval, start_state_residual(model.timestepper, model))
 
     Gˢρᵡ = substepper.scaled_thermodynamic_tendency
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰ = Uᴸ, forcing_interval)

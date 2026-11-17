@@ -85,6 +85,35 @@ BoundaryConditions.needs_implicit_solver(a::DensityWeightedImplicitOperator) =
 @inline weighting_density(::Nothing, ρ) = ρ
 @inline weighting_density(ρ_diff, ρ) = ρ_diff
 
+# The density a scalar's implicit solve is weighted with after an acoustic substep loop, which has
+# advanced the continuity density since the total density `ρ` was diagnosed at stage entry. The
+# mass flux through a face is the one the explicit fraction applied, so the face density is the
+# stage-entry one. The mass fraction of a cell is its solved density over the cell's density at
+# the end of the stage, `ρ ρᵈ⁺ / ρᵈ⁻`, the stage-entry total density compressed as the loop
+# compressed the dry air: divided by the stage-entry density instead, a uniform mass fraction
+# enters the solve as `ρᵈ⁺ / ρᵈ⁻` times itself and the implicit fluxes spread that pattern.
+struct StageEndDensity{R, D, E}
+    stage_entry_density :: R            # total density ρ, diagnosed at stage entry
+    continuity_density :: D             # continuity density ρᵈ⁺ at the end of the stage
+    stage_entry_continuity_density :: E # continuity density ρᵈ⁻ at stage entry
+end
+
+Adapt.adapt_structure(to, ρ::StageEndDensity) =
+    StageEndDensity(adapt(to, ρ.stage_entry_density), adapt(to, ρ.continuity_density),
+                    adapt(to, ρ.stage_entry_continuity_density))
+
+@inline function Oceananigans.Advection.densityᶜᶜᶜ(i, j, k, grid, ρ::StageEndDensity)
+    @inbounds begin
+        ρ⁻ = ρ.stage_entry_density[i, j, k]
+        ρᵈ⁺ = ρ.continuity_density[i, j, k]
+        ρᵈ⁻ = ρ.stage_entry_continuity_density[i, j, k]
+    end
+    return ifelse(ρᵈ⁻ == 0, ρ⁻, ρ⁻ * ρᵈ⁺ / ρᵈ⁻)
+end
+
+@inline Oceananigans.Advection.densityᶜᶜᶠ(i, j, k, grid, ρ::StageEndDensity) =
+    ℑzᵃᵃᶠ(i, j, k, grid, ρ.stage_entry_density)
+
 # The implicit-advection contribution, which is present only for adaptive-implicit schemes.
 @inline density_weighted_advection_upper_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ) = zero(grid)
 @inline density_weighted_advection_lower_diagonal(i, j, k, grid, scheme, w, Δt, ℓx, ℓy, ℓz, ρ) = zero(grid)
