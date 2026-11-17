@@ -498,7 +498,8 @@ end
     # the heating is the prescribed one; the redistribution conserves it, so the flux vanishes at the top
     @test 𝒬 ≈ Float64.(budget_column(hb.heating.tendency))
     @test minimum(𝒬) < 0 < maximum(𝒬)
-    @test abs(sum(ρ .* Δzᶜ .* (𝒬 .- s))) ≤ 100ϵ * sum(ρ .* Δzᶜ .* abs.(𝒬))
+    # (the sum of ρ Δz (𝒬 - s) rounds against both the heating and its redistribution, so the bound carries both)
+    @test abs(sum(ρ .* Δzᶜ .* (𝒬 .- s))) ≤ 100ϵ * sum(ρ .* Δzᶜ .* (abs.(𝒬) .+ abs.(s)))
     @test J[1] == 0 && J[Nz+1] == 0 && Jᶜ[1] == 0 && Jᶜ[Nz+1] == 0
     @test all(≥(0), J) && all(≥(0), Jᶜ)
 
