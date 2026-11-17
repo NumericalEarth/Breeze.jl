@@ -592,3 +592,35 @@ rain_transport() = (ρqʳ = WENO(; order=5, bounds=(0.0, 1.0), time_discretizati
     bound = timestepper === :SSPRungeKutta3 ? 1e-12 * ρqʳ⁰ : 0.1 * ρqʳ⁰
     @test minimum_rain > -bound
 end
+
+@testset "ScalarVarianceTransport: the steady budget of the scalar second moments with transport" begin
+    moments(model) = (m = model.closure_fields.subgrid_cloud.moments; Array.(interior.((m.θˡ′², m.qᵗ′², m.θˡ′qᵗ′))))
+    local_model = tke_p3_column(DoubleGaussian())
+    update_state!(local_model)
+    θ₀, q₀, θq₀ = moments(local_model)
+
+    # With no diffusivity the budget is the local diagnosis
+    none = tke_p3_column(DoubleGaussian(; variance_transport = ScalarVarianceTransport(; ℂᵛᵗ = 0)))
+    update_state!(none)
+    θ, q, θq = moments(none)
+    @test θ ≈ θ₀ && q ≈ q₀ && θq ≈ θq₀
+
+    @test DoubleGaussian(Float32; variance_transport = ScalarVarianceTransport()).variance_transport.ℂᵛᵗ isa Float32
+    @test_throws ArgumentError ScalarVarianceTransport(; ℂᵛᵗ = -1)
+
+    for third in (false, true)
+        model = tke_p3_column(DoubleGaussian(; variance_transport = ScalarVarianceTransport(; ℂᵛᵗ = 1, component_third_moment = third)))
+        update_state!(model)
+        θ, q, θq = moments(model)
+        @test all(isfinite, θ) && all(isfinite, q) && all(isfinite, θq)
+        @test θ != θ₀
+        if !third # the M-matrix: non-negative variances and a correlation no larger than 1
+            @test minimum(θ) ≥ 0 && minimum(q) ≥ 0
+            @test all(θq .^ 2 .≤ θ .* q .* (1 + 1e-12) .+ 1e-30)
+        end
+        for _ in 1:3
+            time_step!(model, 10)
+        end
+        @test all(isfinite, column(model.tracers.ρe))
+    end
+end

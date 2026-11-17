@@ -146,3 +146,39 @@ end
         @test !iszero(derivatives.ℂᑫ)
     end
 end
+
+#####
+##### The column ensemble with a `DoubleGaussian` whose scalar second moments solve their budget with transport
+##### (`ScalarVarianceTransport`, with the third moment of the PDF components) and a TKE budget flux that overshoots
+##### the turbulent layer (`ℂʷᵒ`): forward and gradient
+#####
+
+@testset "reactant_tke_scalar_variance_transport" begin
+    Δt = 1.0
+    Ns = 2
+
+    grid = RectilinearGrid(ReactantState(); size=ColumnEnsembleSize(Nz=8, ensemble=(2, 1), Hz=3),
+                           z=(0, 2000), topology=(Flat, Flat, Bounded))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(); base_pressure=101325, potential_temperature=290)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+    distribution = DoubleGaussian(; third_moment = TKEBudgetThirdMoment(; ℂʷᵀ = 0.5, ℂʷᵒ = 1),
+                                  variance_transport = ScalarVarianceTransport(; ℂᵛᵗ = 1, component_third_moment = true))
+    closure = TKEBasedTurbulenceClosure(; subgrid_distribution = distribution)
+    initial_θ() = (θ = CenterField(grid); set!(θ, z -> 290 + 3e-3 * z); θ)
+
+    model = AtmosphereModel(grid; dynamics, microphysics, closure)
+    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true tke_loss(model, initial_θ(), Δt, Ns)
+    value = @with_stack_size compiled(model, initial_θ(), Δt, Ns)
+    @test isfinite(value) && value > 0
+
+    model = AtmosphereModel(grid; dynamics, microphysics, closure)
+    θ_init = initial_θ()
+    dθ_init = CenterField(grid); set!(dθ_init, 0)
+    dmodel = Enzyme.make_zero(model)
+    compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_tke_loss(
+        model, dmodel, θ_init, dθ_init, Δt, Ns)
+    dθ, loss_value = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
+    @test isfinite(loss_value)
+    @test all(isfinite, @allowscalar Array(interior(dθ)))
+end

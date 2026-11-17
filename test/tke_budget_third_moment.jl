@@ -111,6 +111,8 @@ end
 @testset "TKEBudgetThirdMoment: the damped local third moment" begin
     @test_throws ArgumentError TKEBudgetThirdMoment(ℂʷᴺ = -1)
     @test_throws ArgumentError TKEBudgetThirdMoment(passes = 0)
+    @test_throws ArgumentError TKEBudgetThirdMoment(ℂʷᵒ = -1)
+    @test TKEBudgetThirdMoment().ℂʷᵒ == 0
 
     # The damping is at least one, increases with the stratification number with a slope of at most ℂʷᴺ, and
     # is finite at any stratification number: the member has no pole

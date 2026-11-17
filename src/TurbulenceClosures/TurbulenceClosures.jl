@@ -31,7 +31,7 @@ export TKEBasedTurbulenceClosure,
        BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
        closure_parameters, with_parameters,
-       DoubleGaussian, CondensateFluxFraction, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
+       DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
        StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale
 
 using Adapt: Adapt, adapt
@@ -289,6 +289,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
                                       closure_parameters, with_parameters
 
 include("subgrid_distribution.jl")
+include("scalar_variance_transport.jl")
 include("applied_flux_energetics.jl")
 include("tke_budget_third_moment.jl")
 include("heating_budget_flux.jl")

@@ -34,7 +34,7 @@ using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocit
                                       plume_liquid_water_temperature, plume_saturation,
                                       clip_below, shoc_saturation_thermodynamics,
                                       rate_norm_factor, linear_interp, hard_floor, component_vapor_excess,
-                                      representable_skewness
+                                      representable_skewness, within_component_share
 
 
 #####
@@ -228,7 +228,7 @@ energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R}
+struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT}
     "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
@@ -249,6 +249,8 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R}
     constants :: C
     "Maximum flux correlation of w with θˡ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
     ℂʳ :: R
+    "Vertical transport of θˡ′², qᵗ′² and θˡ′qᵗ′ ([`ScalarVarianceTransport`](@ref)), or `nothing` for the local diagnosis"
+    variance_transport :: VT
 end
 
 Adapt.@adapt_structure DoubleGaussian
@@ -293,11 +295,13 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              saturation = ModelThermodynamicsSaturation(),
                              clipping = SmoothClipping(),
                              constants = SHOCConstants(FT),
-                             ℂʳ = nothing)
+                             ℂʳ = nothing,
+                             variance_transport = nothing)
     validate_distribution_saturation(saturation)
     ℂʳ = isnothing(ℂʳ) ? nothing : convert(FT, ℂʳ)
+    variance_transport = convert_component(FT, variance_transport)
     return DoubleGaussian(time_scale, second_moments, third_moment, stratification_number_bound,
-                               skewness, assumed_pdf, saturation, clipping, constants, ℂʳ)
+                               skewness, assumed_pdf, saturation, clipping, constants, ℂʳ, variance_transport)
 end
 
 # The distribution of this closure saturates with the thermodynamics of the model that holds it.
@@ -312,7 +316,7 @@ validate_distribution_saturation(::FixedConstantsLiquidSaturation) =
 convert_eltype(::Type{FT}, d::DoubleGaussian) where FT =
     DoubleGaussian(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
-                         d.assumed_pdf, d.saturation, d.clipping, d.constants, d.ℂʳ))...)
+                         d.assumed_pdf, d.saturation, d.clipping, d.constants, d.ℂʳ, d.variance_transport))...)
 
 convert_component(FT, ::Nothing) = nothing
 convert_component(FT, c) = convert_eltype(FT, c)
@@ -584,7 +588,8 @@ end
 function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names, heating_budget_flux = nothing)
     energetics = AppliedFluxEnergetics(solver)
     moments = (τ = ZFaceField(grid), θˡ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡ′qᵗ′ = ZFaceField(grid),
-               w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid))
+               w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid),
+               scalar_variance_transport_fields(grid, distribution.variance_transport)...)
     cloud = (w′² = CenterField(grid), w′³ = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
              vapor_excess_component_fields(grid)...,
@@ -788,11 +793,6 @@ end
             # The flux of θˡⁱ that the turbulence carries includes the heating budget flux (zero without one)
             w′θˡ′ += applied_heating_flux(cl, i, j, k)
 
-            # The variances no smaller than the fluxes allow at the largest correlation with w
-            w′²ᶠ = (vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ)) +
-                    vertical_velocity_variance(sm, max(e[i, j, k-1], eᵐⁱⁿ))) / 2
-            θˡ′², qᵗ′², θˡ′qᵗ′ = bound_flux_correlation(d.ℂʳ, w′²ᶠ, θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
-
             m.τ[i, j, k] = τ
             m.θˡ′²[i, j, k] = θˡ′²
             m.qᵗ′²[i, j, k] = qᵗ′²
@@ -822,6 +822,22 @@ end
         for k in 1:Nz
             cl.w′²[i, j, k] = vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ))
         end
+
+        # With a transport of the scalar second moments, their steady budget (scalar_variance_transport.jl)
+        transport_scalar_variances!(d.variance_transport, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+
+        # The variances no smaller than the fluxes allow at the largest correlation with w
+        for k in 2:Nz
+            w′²ᶠ = (cl.w′²[i, j, k] + cl.w′²[i, j, k-1]) / 2
+            θˡ′², qᵗ′², θˡ′qᵗ′ = bound_flux_correlation(d.ℂʳ, w′²ᶠ, m.θˡ′²[i, j, k], m.qᵗ′²[i, j, k], m.θˡ′qᵗ′[i, j, k],
+                                                       m.w′θˡ′[i, j, k], m.w′qᵗ′[i, j, k])
+            m.θˡ′²[i, j, k] = θˡ′²
+            m.qᵗ′²[i, j, k] = qᵗ′²
+            m.θˡ′qᵗ′[i, j, k] = θˡ′qᵗ′
+        end
+        m.θˡ′²[i, j, 1] = m.θˡ′²[i, j, k′]
+        m.qᵗ′²[i, j, 1] = m.qᵗ′²[i, j, k′]
+        m.θˡ′qᵗ′[i, j, 1] = m.θˡ′qᵗ′[i, j, k′]
 
         # The assumed PDF at the centers, from moments co-located there: the second moments are
         # interpolated from the faces to the center, and w′³ is diagnosed at the center, so that the

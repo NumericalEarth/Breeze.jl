@@ -133,10 +133,12 @@ struct TKEBudgetThirdMoment{N, FT} <: SimplifiedHigherOrderClosures.AbstractSHOC
     ℂʷᵀ :: FT
     "Width `δ` in the stratification number over which the damping passes from one to `1 + ℂʷᴺ αᴺ`; positive"
     stratification_damping_width :: FT
+    "Share of the TKE of the cell below in the sink shape `e` of a cell, `ωᵉₖ = eₖ + ℂʷᵒ eₖ₋₁`: the overshoot of the budget flux into the cell above a turbulent layer; not negative"
+    ℂʷᵒ :: FT
 
     TKEBudgetThirdMoment{N}(ℂʷᵉ::FT, ℂʷᵋ::FT, ℂʷᴸ::FT, ℂʷʳ::FT, ℂʷᵇ::FT, ℂʷˡ::FT, ℂʷᵍ::FT, ℂʷᴺ::FT, ℂʷᵀ::FT,
-                            stratification_damping_width::FT) where {N, FT} =
-        new{N, FT}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width)
+                            stratification_damping_width::FT, ℂʷᵒ::FT) where {N, FT} =
+        new{N, FT}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width, ℂʷᵒ)
 end
 
 """
@@ -161,15 +163,16 @@ unchanged (harness `notes/hand-tuning.md`).
 """
 function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
                               ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0, ℂʷˡ = 8, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,
-                              stratification_damping_width = 1, passes = 1)
+                              stratification_damping_width = 1, passes = 1, ℂʷᵒ = 0)
     abs(ℂʷʳ) < 1 || throw(ArgumentError("ℂʷʳ must lie in (-1, 1) for a positive ratio, got $(ℂʷʳ)."))
     0 <= ℂʷᵀ <= 1 || throw(ArgumentError("ℂʷᵀ must lie in [0, 1], got $(ℂʷᵀ)."))
     ℂʷᴺ >= 0 || throw(ArgumentError("ℂʷᴺ must not be negative (the damping must not vanish), got $(ℂʷᴺ)."))
     ℂʷᴸ > 0 || throw(ArgumentError("ℂʷᴸ must be positive (Inf for one sink amplitude per column), got $(ℂʷᴸ)."))
     stratification_damping_width > 0 ||
         throw(ArgumentError("stratification_damping_width must be positive, got $(stratification_damping_width)."))
+    ℂʷᵒ >= 0 || throw(ArgumentError("ℂʷᵒ must not be negative, got $(ℂʷᵒ)."))
     passes isa Integer && passes >= 1 || throw(ArgumentError("passes must be a positive integer, got $(passes)."))
-    scalars = (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width)
+    scalars = (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width, ℂʷᵒ)
     return TKEBudgetThirdMoment{Int(passes)}(map(c -> convert(FT, c), scalars)...)
 end
 
@@ -363,7 +366,9 @@ end
     tm = closure_ij.subgrid_distribution.third_moment
     ℓᵐ = closure_fields.ℓᵐ
     @inbounds for k in 1:size(grid, 3)
-        cl.uᵉ[i, j, k] = max(e[i, j, k], zero(grid_float_type(grid)))
+        # With ℂʷᵒ > 0 the shape reaches one cell above the turbulence (the overshoot); the cell below the first is none
+        e⁻ = ifelse(k > 1, max(e[i, j, max(k - 1, 1)], zero(eltype(grid))), zero(eltype(grid)))
+        cl.uᵉ[i, j, k] = max(e[i, j, k], zero(eltype(grid))) + tm.ℂʷᵒ * e⁻
         cl.uᵋ[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
     end
     # Fᵋ holds the eliminated upper diagonal of the second solve until the fluxes overwrite it
