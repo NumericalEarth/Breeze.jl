@@ -86,7 +86,6 @@ function benchmark_tendency(tendency!, args, grid;
         first_call_start = time_ns()
         Base.invokelatest(repeat_calls, tendency!, args, 1, arch)
         first_call_seconds = (time_ns() - first_call_start) / 1e9
-        verbose && @info "  First call (compiles just in time): $(@sprintf("%.3f", first_call_seconds)) s"
         start_time = time_ns()
         Base.invokelatest(repeat_calls, tendency!, args, nrepeat, arch)
         time_per_step_seconds = ((time_ns() - start_time) / 1e9) / nrepeat

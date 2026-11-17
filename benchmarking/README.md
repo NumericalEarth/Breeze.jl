@@ -97,14 +97,14 @@ also appended to the benchmark name (`..._reactant_AD_periodic_4`). `Time/Step`
 is the wall time of the combined forward+backward program divided by
 `--time_steps`.
 
-### Scalar tendency gradient
+### Scalar tendency AD
 
 `--mode scalar_tendency` times the bare WENO advective tendency
 Gc = -∇·(𝐮 c) (no model) on both backends. Adding `--ad` also times, in Float32
-only, the reverse-mode gradient of the loss L = Σ Gc² / 2 with respect to `c` and
-𝐮. One evaluation runs the tendency kernel, a pointwise kernel ℓ = Gc² / 2 with
-`sum(parent(ℓ))`, and the reverse pass (`scalar_tendency_gradient_problem` in
-`src/scalar_tendency.jl`). The same function is differentiated two ways:
+only, the reverse-mode gradient of L = mean(Gc²) with respect to `c` and 𝐮:
+`scalar_tendency_loss` and `grad_scalar_tendency_loss!` in
+`src/scalar_tendency.jl`, which follow `loss` and `grad_loss!` in
+`src/timestepping.jl`. The same function is differentiated two ways:
 
 | Backend | What runs | Compile time recorded |
 |---------|-----------|-----------------------|
@@ -112,16 +112,14 @@ only, the reverse-mode gradient of the loss L = Σ Gc² / 2 with respect to `c` 
 | `reactant raise=true` | Reactant raises the kernels to StableHLO, then Enzyme-MLIR differentiates the tensor program, which XLA compiles into one executable. | `Reactant.@compile` (tracing / MLIR / XLA) |
 
 Reactant `raise=false` is left out: differentiating an unraised kernel needs
-kernel AD, which mainline Reactant does not have. Results are recorded with
-`mode = "scalar_tendency_ad"` under `ScalarTendencyAD_...` names, and points/s
-counts gradient evaluations. Each case also logs the loss and the norms of
-∂L/∂c and ∂L/∂u, which should agree across backends. On a GPU, the per-kernel
-times of a gradient evaluation go to `kernel_profile.json` (see below). A Reactant
-case reads them from the xprof trace its timing run wrote, so it is not run again.
-A gradient case that fails is logged and skipped, so the forward cases still report.
+kernel AD. Results are recorded with `mode = "scalar_tendency_ad"` under
+`ScalarTendencyAD_...` names, and points/s counts gradient evaluations. On a GPU,
+the per-kernel times of a gradient evaluation go to `kernel_profile.json` (see
+below). An AD case that fails is logged and skipped, so the forward cases still
+report.
 
 ```bash
-# Local CPU run: forward and gradient, both backends
+# Local CPU run: forward and AD, both backends
 julia --project run_benchmarks.jl --mode scalar_tendency --ad --device CPU \
     --backend "vanilla, reactant" --size 16x16x8 --advection WENO5 \
     --float_type Float32 --time_steps 4 --dynamics none --microphysics none

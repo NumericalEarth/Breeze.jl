@@ -100,7 +100,7 @@ jobs:
           # the Reactant-compiled XLA program and the eager vanilla launch.
           # --mode tendency skips model construction, so there is no
           # dynamics/microphysics. --ad adds, in Float32 only, the reverse-mode
-          # gradient of L = Σ Gc² / 2 with respect to c and 𝐮: vanilla Enzyme vs
+          # gradient of L = mean(Gc²) with respect to c and 𝐮: vanilla Enzyme vs
           # Enzyme + Reactant (raise=true), with each one's compile time and the
           # per-kernel GPU times of a gradient evaluation (kernel_profile.*).
           - dynamics: 'none'

@@ -1,9 +1,11 @@
 #####
-##### Per-kernel GPU times of the vanilla time step
+##### Per-kernel GPU times of the vanilla time step and the scalar tendency AD cases
 #####
 ##### `run_benchmarks.jl --profile_kernels` profiles each vanilla time-stepping case after
 ##### every case has been timed and saved, in the same process: its kernels are already
-##### compiled, and the profiler cannot touch any published timing. The profile uses
+##### compiled, and the profiler cannot touch any published timing. With
+##### `--mode scalar_tendency --ad` on a GPU, each AD case is profiled the same way, on
+##### both backends (see `case_kernel_times`). The profile uses
 ##### CUDA.jl's integrated profiler (`CUDA.@profile`, CUPTI underneath; no Nsight install
 ##### needed). Each kernel's launches are grouped by its name up to the first `(` or `<`,
 ##### and the `TOP_KERNELS` kernels with the most GPU time are written to
@@ -43,58 +45,6 @@ function kernel_times(device)
 end
 
 """
-    profile_kernels(cases)
-
-Rebuild the model of each vanilla time-stepping case recorded by `run_benchmarks`,
-take its warmup steps, and profile its `time_steps` steps with `CUDA.@profile`.
-Returns one entry per case, with the `TOP_KERNELS` kernels by GPU time.
-"""
-function profile_kernels(cases)
-    entries = []
-    for case in cases
-        println("\n", "-" ^ 70)
-        println("Profiling kernels: $(case.name)")
-        println("-" ^ 70)
-
-        model = case.build_model()
-        Δt = case.float_type(case.Δt)
-        many_time_steps!(model, Δt, case.warmup_steps)
-        CUDA.synchronize()
-
-        profile = CUDA.@profile many_time_steps!(model, Δt, case.time_steps)
-        kernels = kernel_times(profile.device)
-        total_kernel_time = sum(k -> k.total_time_seconds, kernels; init = 0.0)
-
-        push!(entries, (; case.name,
-                        float_type = string(case.float_type),
-                        case.advection,
-                        case.closure,
-                        case.dynamics,
-                        case.microphysics,
-                        backend = "vanilla",
-                        grid_size = size(model.grid),
-                        case.time_steps,
-                        total_kernel_time_seconds = total_kernel_time,
-                        kernel_count = length(kernels),
-                        top_kernels = first(kernels, TOP_KERNELS),
-                        metadata = BenchmarkMetadata(Oceananigans.Architectures.architecture(model.grid))))
-
-        @info "  $(length(kernels)) kernels, $(@sprintf("%.3f", 1e3 * total_kernel_time / case.time_steps)) ms of GPU time per step"
-        for k in first(kernels, TOP_KERNELS)
-            @info @sprintf("    %-60s %8.3f ms/step  %5.1f%%  (%d launches, median %.3f ms)",
-                           first(k.name, 60), 1e3 * k.total_time_seconds / case.time_steps,
-                           100 * k.total_time_seconds / total_kernel_time, k.instances, 1e3 * k.median_time_seconds)
-        end
-    end
-
-    return entries
-end
-
-#####
-##### Per-kernel GPU times of the scalar tendency gradient (--mode scalar_tendency --ad)
-#####
-
-"""
     reactant_kernel_times(xplane_file)
 
 Group the GPU kernels in a Reactant xprof trace by name, as `kernel_times` does for a
@@ -124,59 +74,83 @@ function reactant_kernel_times(xplane_file)
 end
 
 """
-    profile_tendency_kernels(cases)
+    case_kernel_times(case)
 
-Per-kernel GPU times of the gradient cases recorded by `run_benchmarks`, one entry per
-case in the format of `profile_kernels`, with `time_steps` holding the number of
-gradient evaluations. A vanilla case is profiled here with `CUDA.@profile` over its
-`nrepeat` evaluations; a Reactant case is read from the xprof trace its timing run
-wrote to `profile_dir`, so it is not run again.
+Profile one case recorded by `run_benchmarks` and return `(kernels, grid)`:
+- a vanilla time-stepping case rebuilds its model, takes its warmup steps, and
+  profiles its `time_steps` steps with `CUDA.@profile`;
+- a vanilla scalar tendency AD case profiles `time_steps` gradient evaluations;
+- a Reactant scalar tendency AD case reads the xprof trace its timing run wrote to
+  `profile_dir`, so it is not run again.
 """
-function profile_tendency_kernels(cases)
+function case_kernel_times(case)
+    if haskey(case, :build_model)
+        model = case.build_model()
+        Δt = case.float_type(case.Δt)
+        many_time_steps!(model, Δt, case.warmup_steps)
+        CUDA.synchronize()
+        profile = CUDA.@profile many_time_steps!(model, Δt, case.time_steps)
+        return kernel_times(profile.device), model.grid
+    elseif isnothing(case.profile_dir)
+        case.run!()
+        CUDA.synchronize()
+        profile = CUDA.@profile for _ in 1:case.time_steps
+            case.run!()
+        end
+        return kernel_times(profile.device), case.grid
+    else
+        xplane_file = Reactant.Profiler.find_xplane_file(case.profile_dir)
+        return reactant_kernel_times(xplane_file), case.grid
+    end
+end
+
+"""
+    profile_kernels(cases)
+
+Profile each case recorded by `run_benchmarks` (see `case_kernel_times`). Returns one
+entry per case, with the `TOP_KERNELS` kernels by GPU time. For a scalar tendency AD
+case, a "step" is one gradient evaluation.
+"""
+function profile_kernels(cases)
     entries = []
     for case in cases
         println("\n", "-" ^ 70)
         println("Profiling kernels: $(case.name)")
         println("-" ^ 70)
 
-        kernels = if isnothing(case.profile_dir)
-            case.run!()
-            CUDA.synchronize()
-            profile = CUDA.@profile for _ in 1:case.nrepeat
-                case.run!()
-            end
-            kernel_times(profile.device)
-        else
-            reactant_kernel_times(Reactant.Profiler.find_xplane_file(case.profile_dir))
-        end
-
+        kernels, grid = case_kernel_times(case)
         total_kernel_time = sum(k -> k.total_time_seconds, kernels; init = 0.0)
+        mode = get(case, :mode, "forward")
 
         push!(entries, (; case.name,
                         float_type = string(case.float_type),
                         case.advection,
-                        closure = "none",
-                        dynamics = "none",
-                        microphysics = "none",
-                        case.backend,
-                        case.mode,
-                        case.grid_size,
-                        time_steps = case.nrepeat,
+                        case.closure,
+                        case.dynamics,
+                        case.microphysics,
+                        backend = get(case, :backend, "vanilla"),
+                        mode,
+                        grid_size = size(grid),
+                        case.time_steps,
                         total_kernel_time_seconds = total_kernel_time,
                         kernel_count = length(kernels),
                         top_kernels = first(kernels, TOP_KERNELS),
-                        metadata = BenchmarkMetadata(Oceananigans.Architectures.architecture(case.grid))))
+                        metadata = BenchmarkMetadata(Oceananigans.Architectures.architecture(grid))))
 
-        @info "  $(length(kernels)) kernels, $(@sprintf("%.3f", 1e3 * total_kernel_time / case.nrepeat)) ms of GPU time per gradient evaluation"
+        unit = step_unit(mode)
+        @info "  $(length(kernels)) kernels, $(@sprintf("%.3f", 1e3 * total_kernel_time / case.time_steps)) ms of GPU time per $unit"
         for k in first(kernels, TOP_KERNELS)
-            @info @sprintf("    %-60s %8.3f ms/eval  %5.1f%%  (%d launches, median %.3f ms)",
-                           first(k.name, 60), 1e3 * k.total_time_seconds / case.nrepeat,
+            @info @sprintf("    %-60s %8.3f ms/%s  %5.1f%%  (%d launches, median %.3f ms)",
+                           first(k.name, 60), 1e3 * k.total_time_seconds / case.time_steps, unit,
                            100 * k.total_time_seconds / total_kernel_time, k.instances, 1e3 * k.median_time_seconds)
         end
     end
 
     return entries
 end
+
+# A scalar tendency AD case's "step" is one gradient evaluation
+step_unit(mode) = mode == "scalar_tendency_ad" ? "eval" : "step"
 
 """
     write_kernel_profiles(entries; output_file = "kernel_profile.json")
@@ -194,9 +168,8 @@ function write_kernel_profiles(entries; output_file = "kernel_profile.json")
         for entry in entries
             gpu = something(entry.metadata.gpu_name, "GPU")
             per_step_ms = 1e3 * entry.total_kernel_time_seconds / entry.time_steps
-            # A gradient case's "step" is one gradient evaluation
-            gradient = get(entry, :mode, "") == "scalar_tendency_ad"
-            unit, steps = gradient ? ("eval", "gradient evaluations") : ("step", "steps")
+            unit = step_unit(entry.mode)
+            steps = unit == "eval" ? "gradient evaluations" : "steps"
             println(io, "### $(entry.name) on $gpu\n")
             println(io, "$(entry.kernel_count) kernels, $(@sprintf("%.3f", per_step_ms)) ms of GPU time per $unit over $(entry.time_steps) $steps. Top $(length(entry.top_kernels)):\n")
             println(io, "| Kernel | ms/$unit | Share | Launches | Median (ms) | Min (ms) | Max (ms) |")

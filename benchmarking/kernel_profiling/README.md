@@ -37,9 +37,9 @@ Currently the Reactant vs vanilla entry is the only one with `profile_kernels: t
 
 Kernels on the Reactant backend are XLA's fusions rather than Breeze's kernels, so they are not profiled here.
 
-## Scalar tendency gradient
+## Scalar tendency AD
 
-With `--mode scalar_tendency --ad` on a GPU, every gradient case (see the main README) is profiled too, on both backends.
+With `--mode scalar_tendency --ad` on a GPU, every AD case (see the main README) is profiled too, on both backends.
 Times are per gradient evaluation (`ms/eval`, with the entry's `time_steps` holding the number of evaluations).
 A vanilla case is profiled with `CUDA.@profile` over `--time_steps` evaluations, after every case is timed, as above.
 A Reactant case is read from the xprof trace that its timing run already wrote to `profiles/`, with `Reactant.Profiler.get_kernel_stats`.

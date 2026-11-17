@@ -4,8 +4,7 @@ export
     # Benchmark cases
     convective_boundary_layer,
     scalar_tendency_problem,
-    scalar_tendency_gradient_problem,
-    scalar_tendency_gradient_summary,
+    scalar_tendency_ad_problem,
     model_tendency_problem,
 
     # Benchmark utilities
