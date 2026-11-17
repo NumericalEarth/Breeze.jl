@@ -2553,6 +2553,15 @@ end
     @inbounds ρv′[i, jᶠ, k] = 0
 end
 
+# Whether a wall closes the left or the right side of a direction with topology `T`. The topology of
+# a `Distributed` grid is that of the rank: a `Bounded` direction that is partitioned is
+# `TwoSided{Closed, Connected}` on the first rank, `TwoSided{Connected, Closed}` on the last, and
+# `TwoSided{Connected, Connected}` between them, so a test for `Bounded` finds no wall at all.
+left_side_is_closed(T) = false
+left_side_is_closed(::Type{<:TwoSided{Closed}}) = true
+right_side_is_closed(T) = false
+right_side_is_closed(::Type{<:TwoSided{<:Any, Closed}}) = true
+
 function enforce_wall_impenetrability!(substepper, model, grid, arch)
     TX, TY, _ = topology(grid)
     Nx, Ny, _ = size(grid)
@@ -2560,14 +2569,10 @@ function enforce_wall_impenetrability!(substepper, model, grid, arch)
     ρv′ = substepper.momentum_perturbation.v
     # Auxiliary `nothing` BCs do not zero faces. Enforce zero perturbations explicitly
     # to match the topology-aware divergence and hold prescribed flow in the stage-entry state.
-    if TX === Bounded
-        launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
-        launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
-    end
-    if TY === Bounded
-        launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
-        launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
-    end
+    left_side_is_closed(TX)  && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
+    right_side_is_closed(TX) && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
+    left_side_is_closed(TY)  && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
+    right_side_is_closed(TY) && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
     return nothing
 end
 

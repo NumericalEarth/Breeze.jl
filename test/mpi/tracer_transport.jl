@@ -17,6 +17,10 @@
 #####     (`remove_moisture_content!`), a term that vanishes identically in clear air;
 #####   - an eddy viscosity is computed in the interior and read across cell faces.
 #####
+##### The last cases close the domain with walls in `y`. A rank of a partitioned `Bounded` direction
+##### has a wall on one side at most, so its own topology is not `Bounded`, and the acoustic loop has
+##### to hold the wall-normal momentum perturbation at zero on the wall it does have.
+#####
 ##### Stand-alone usage:
 #####
 #####     mpiexec -n 4 julia --project=test test/mpi/tracer_transport.jl xy
@@ -70,10 +74,10 @@ const c₀ = 1e-3 # tracer mass fraction
 bubble(x, y, z) = cos(π * min(1, sqrt(x^2 + y^2 + (z - 1500)^2) / 1e3) / 2)^2
 
 # With `cloudy = true`, a saturated bubble with saturation adjustment and an eddy viscosity.
-function tracer_transport_model(arch; timestepper, timestepper_kwargs, cloudy=false, stop_iteration=3)
+function tracer_transport_model(arch; timestepper, timestepper_kwargs, cloudy=false, walls=false, stop_iteration=3)
     grid = RectilinearGrid(arch; size = (16, 16, 16), halo = (5, 5, 5),
                            x = (-4e3, 4e3), y = (-4e3, 4e3), z = (0, 4e3),
-                           topology = (Periodic, Periodic, Bounded))
+                           topology = (Periodic, walls ? Bounded : Periodic, Bounded))
 
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                     base_pressure = 1e5, reference_potential_temperature = 300)
@@ -89,7 +93,8 @@ function tracer_transport_model(arch; timestepper, timestepper_kwargs, cloudy=fa
     θᵢ(x, y, z) = 300 + 2 * bubble(x, y, z)
     uᵢ(x, y, z) = 10 * z / 4e3
     wᵢ(x, y, z) = 4 * bubble(x, y, z)
-    set!(model; θ=θᵢ, qᵗ=0.004, u=uᵢ, v=5, w=wᵢ, ρ=HydrostaticallyBalancedDensity())
+    vᵢ(x, y, z) = walls ? 5 * cos(π * y / 8e3) : 5 # no flow through the walls at y = ±4 km
+    set!(model; θ=θᵢ, qᵗ=0.004, u=uᵢ, v=vᵢ, w=wᵢ, ρ=HydrostaticallyBalancedDensity())
 
     # `HydrostaticallyBalancedDensity` takes no condensate, so the cloud is added afterwards.
     qᵗᵢ(x, y, z) = 0.012 + 0.012 * bubble(x - 500, y + 300, z)
@@ -113,24 +118,28 @@ ark3 = :AcousticRungeKutta3
 mis = :MultirateInfinitesimalStep
 mis_kwargs = (; coefficients = :SSPMIS43)
 
-cases = ((ark3, (; post_loop_scalar_tendencies = false), false),
-         (ark3, (; post_loop_scalar_tendencies = true), false),
-         (mis, (; mis_kwargs..., post_loop_scalar_tendencies = false), false),
-         (mis, (; mis_kwargs..., post_loop_scalar_tendencies = true), false),
-         (mis, (; mis_kwargs..., post_loop_scalar_tendencies = true), true))
+# (time stepper, its keyword arguments, cloudy, walls in y)
+cases = ((ark3, (; post_loop_scalar_tendencies = false), false, false),
+         (ark3, (; post_loop_scalar_tendencies = true), false, false),
+         (mis, (; mis_kwargs..., post_loop_scalar_tendencies = false), false, false),
+         (mis, (; mis_kwargs..., post_loop_scalar_tendencies = true), false, false),
+         (mis, (; mis_kwargs..., post_loop_scalar_tendencies = true), true, false),
+         (ark3, (; post_loop_scalar_tendencies = false), false, true),
+         (mis, (; mis_kwargs..., post_loop_scalar_tendencies = true), true, true))
 
-for (timestepper, timestepper_kwargs, cloudy) in cases
+for (timestepper, timestepper_kwargs, cloudy, walls) in cases
     post_loop_scalar_tendencies = timestepper_kwargs.post_loop_scalar_tendencies
     timing = post_loop_scalar_tendencies ? "post-loop" : "pre-loop"
     air = cloudy ? "cloudy, with an eddy viscosity" : "clear"
-    @testset "Tracer transport on Distributed($(partition_name)) with $(timestepper), $(timing) scalar tendencies, $(air) [$(nranks) ranks, $(use_gpu ? "GPU" : "CPU")]" begin
+    sides = walls ? "walls in y" : "periodic in y"
+    @testset "Tracer transport on Distributed($(partition_name)) with $(timestepper), $(timing) scalar tendencies, $(air), $(sides) [$(nranks) ranks, $(use_gpu ? "GPU" : "CPU")]" begin
         arch = Distributed(child_architecture; partition=partition_for(partition_name, nranks))
-        model = tracer_transport_model(arch; timestepper, timestepper_kwargs, cloudy)
+        model = tracer_transport_model(arch; timestepper, timestepper_kwargs, cloudy, walls)
         @test model.clock.iteration == 3
         @test model.grid.architecture isa Distributed
 
         if rank == 0
-            serial_model = tracer_transport_model(CPU(); timestepper, timestepper_kwargs, cloudy)
+            serial_model = tracer_transport_model(CPU(); timestepper, timestepper_kwargs, cloudy, walls)
         end
 
         # Every prognostic, compared on the host: in GPU runs the reconstructed field is on the
