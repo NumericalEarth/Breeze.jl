@@ -184,7 +184,9 @@ using Test
         @test isapprox(interior(model.dynamics.contravariant_vertical_momentum),
                        interior(model.momentum.ρw); atol=1e-12)
 
-        # Split-explicit: TFVD(h=0) matches plain LLG after one step
+        # Split-explicit: TFVD(h=0) matches plain LLG after one step. The reduction is that of
+        # the terrain metrics, whichever time stepper runs the substeps, so this takes the one
+        # that is cheaper to compile; the terrain testset above takes the default.
         function llg_flat_model(terrain)
             g = if terrain
                 zf = TerrainFollowingVerticalDiscretization(
@@ -197,7 +199,7 @@ using Test
                 LatitudeLongitudeGrid(default_arch; size=(Nλ, Nφ, Nz), halo=(5, 5, 5),
                                       longitude=(0, 360), latitude=(-60, 60), z=(0, Lz))
             end
-            m = AtmosphereModel(g;
+            m = AtmosphereModel(g; timestepper=:AcousticRungeKutta3,
                 dynamics=CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6)))
             set!(m, ρ=1, θ=300, u=0.1, w=0.01)
             return m

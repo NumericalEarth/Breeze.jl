@@ -441,9 +441,14 @@ for arch in arches
     # topology-aware operators, so the substep loop reads no horizontal halo of the fields it writes
     # (and only the discarded boundary rows of the vertical right-hand side read their vertical halos).
     # Poisoned halos must therefore not reach the interior.
+    # Each topology and damping compiles its own model, so one pairing covers both of each and
+    # the exhaustive tests run the others.
+    halo_cases = test_sweep(((Periodic, ThermalDivergenceDamping), (Bounded, DirectDivergenceDamping),
+                             (Periodic, DirectDivergenceDamping), (Bounded, ThermalDivergenceDamping));
+                            representatives = 2)
+
     @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT), $(TX), $(Damping)]" for FT in as_test_float_types(arch),
-                                                                                         TX in (Periodic, Bounded),
-                                                                                         Damping in (ThermalDivergenceDamping, DirectDivergenceDamping)
+                                                                                         (TX, Damping) in halo_cases
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5), topology=(TX, Periodic, Bounded),
