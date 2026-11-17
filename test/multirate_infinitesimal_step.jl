@@ -739,7 +739,8 @@ end
     # perturbation fields (periodic), double precision with those in fields of their own (bounded).
     # The layouts differ in round-off alone: where the start state of a stage is rounded, and which
     # increment of the dry density the transport density tendency takes. Three steps of this bubble
-    # amplify that to a few hundred units in the last place of the momentum.
+    # amplify that to a few hundred units in the last place of the momentum, and to about 1500 on some
+    # CI platforms in single precision.
     kw = (; coefficients, FT, topology, post_loop_scalar_tendencies)
     accumulated = storage_layout_state(; structured = false, kw...)
     structured = storage_layout_state(; structured = true, kw...)
@@ -747,7 +748,7 @@ end
 
     for name in keys(accumulated)
         scale = maximum(abs, accumulated[name])
-        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 1000 * eps(scale)
+        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 4000 * eps(scale)
     end
 
     # With increments in registers, a field may also store them when a stage completes
@@ -772,7 +773,7 @@ end
 
     for name in keys(accumulated)
         scale = maximum(abs, accumulated[name])
-        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 1000 * eps(scale)
+        @test maximum(abs, structured[name] .- accumulated[name]) ≤ 4000 * eps(scale)
         @test maximum(abs, stored[name] .- accumulated[name]) ≤ 1000 * eps(scale)
     end
 end

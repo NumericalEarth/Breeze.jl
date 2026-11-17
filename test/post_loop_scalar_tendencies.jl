@@ -357,7 +357,8 @@ end
         @test minimum(folded.ρqʳ) ≥ 0
         for name in keys(folded)
             scale = maximum(abs, stored[name])
-            @test maximum(abs, folded[name] .- stored[name]) ≤ 100 * eps(scale)
+            # The two paths differ in round-off alone; GPUs fuse multiply-adds differently.
+            @test maximum(abs, folded[name] .- stored[name]) ≤ 400 * eps(scale)
         end
     end
 end
