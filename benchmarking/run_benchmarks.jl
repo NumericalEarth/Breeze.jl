@@ -23,6 +23,7 @@ using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
 using BreezeBenchmarks: checkpointing_label
 using BreezeBenchmarks: scalar_tendency_problem, model_tendency_problem, benchmark_tendency
+using BreezeBenchmarks: scalar_tendency_gradient_problem, scalar_tendency_gradient_summary
 using JSON: JSON
 using BFloat16s: BFloat16
 using Oceananigans
@@ -156,7 +157,9 @@ function parse_commandline()
 
         "--ad"
             help = "Benchmark the forward+backward (Enzyme reverse-mode) pass through the " *
-                   "stepping loop instead of forward only. Reactant backend only."
+                   "stepping loop instead of forward only (Reactant backend only). With " *
+                   "--mode scalar_tendency, also benchmark the reverse-mode gradient of a loss " *
+                   "of the scalar tendency, in Float32 only, on both backends."
             action = :store_true
 
         "--checkpoints"
@@ -388,10 +391,12 @@ end
 ##### Main benchmarking logic
 #####
 
-function run_benchmarks(args; kernel_cases = [])
+function run_benchmarks(args; kernel_cases = [], tendency_kernel_cases = [], failed_cases = String[])
     mode = args["mode"]
     device = args["device"]
     configuration = args["configuration"]
+
+    args["ad"] && mode == "model_tendency" && error("--ad is not supported with --mode model_tendency")
 
     # Parse lists from arguments
     sizes = [parse_size(s) for s in parse_list(args["size"])]
@@ -483,13 +488,25 @@ function run_benchmarks(args; kernel_cases = [])
                 raises = device == "TPU" ? (true,) : (true, false)
                 [(r ? "reactant raise=true" : "reactant raise=false",
                   r ? "reactant-raise"      : "reactant-noraise",
-                  r) for r in raises]
+                  r, false) for r in raises]
             else
-                [(backend_name, backend_name, true)]
+                [(backend_name, backend_name, true, false)]
             end
 
-            for (backend_label, tag, raise) in configs
-                name = "$(label)_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(tag)"
+            # With --ad, the scalar tendency adds its reverse-mode gradient (see
+            # `scalar_tendency_gradient_problem`) in Float32 only. On Reactant only
+            # raise=true: differentiating an unraised kernel needs kernel AD, which
+            # mainline Reactant does not have.
+            if args["ad"] && mode == "scalar_tendency" && FT == Float32
+                push!(configs, backend_name == "reactant" ?
+                      ("reactant raise=true", "reactant-raise", true, true) :
+                      (backend_name, backend_name, true, true))
+            end
+
+            for (backend_label, tag, raise, gradient) in configs
+                case_label = gradient ? "ScalarTendencyAD" : label
+                case_mode = gradient ? "scalar_tendency_ad" : mode
+                name = "$(case_label)_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(tag)"
                 println("\n", "-" ^ 70)
                 println("Running: $name")
                 println("-" ^ 70)
@@ -497,27 +514,58 @@ function run_benchmarks(args; kernel_cases = [])
                 # On Reactant, dump all MLIR (every compile stage) and the xprof
                 # profiles into per-case subdirectories so each stays separate;
                 # saved as CI artifacts (GB-25 pattern). Vanilla does not compile
-                # through Reactant, so neither is produced there.
+                # through Reactant, so neither is produced there. A gradient case
+                # on a GPU always keeps its profile, for its per-kernel times.
                 profile_dir = nothing
+                profile_gradient_kernels = gradient && device == "GPU"
+                if backend_name == "reactant" && (get(ENV, "GITHUB_ACTIONS", "false") == "true" || profile_gradient_kernels)
+                    profile_dir = mkpath(joinpath(@__DIR__, "profiles", "$(case_label)_$(adv_name)_$(tag)"))
+                end
                 if get(ENV, "GITHUB_ACTIONS", "false") == "true" && backend_name == "reactant"
-                    Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", "$(label)_$(adv_name)_$(tag)"))
+                    Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", "$(case_label)_$(adv_name)_$(tag)"))
                     Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
-                    profile_dir = mkpath(joinpath(@__DIR__, "profiles", "$(label)_$(adv_name)_$(tag)"))
                 end
 
-                tendency!, tendency_args, tendency_grid = problem(arch;
-                                                                  Nx, Ny, Nz,
-                                                                  order,
-                                                                  float_type = FT,
-                                                                  topology)
-                push!(results, benchmark_tendency(tendency!, tendency_args, tendency_grid;
-                                                  nrepeat = time_steps,
-                                                  name,
-                                                  advection = adv_name,
-                                                  backend = backend_label,
-                                                  mode,
-                                                  raise,
-                                                  profile_dir))
+                case_problem = gradient ? scalar_tendency_gradient_problem : problem
+                tendency!, tendency_args, tendency_grid = case_problem(arch;
+                                                                       Nx, Ny, Nz,
+                                                                       order,
+                                                                       float_type = FT,
+                                                                       topology)
+
+                benchmark() = benchmark_tendency(tendency!, tendency_args, tendency_grid;
+                                                 nrepeat = time_steps,
+                                                 name,
+                                                 advection = adv_name,
+                                                 backend = backend_label,
+                                                 mode = case_mode,
+                                                 raise,
+                                                 profile_dir)
+
+                if !gradient
+                    push!(results, benchmark())
+                    continue
+                end
+
+                # A gradient case that fails is logged and skipped, so the forward
+                # cases of the same run still report.
+                try
+                    result = benchmark()
+                    push!(results, result)
+                    summary = scalar_tendency_gradient_summary(tendency_args)
+                    @info "  Gradient check (compare across backends): loss = $(summary.loss), " *
+                          "‖∂L/∂c‖ = $(summary.gradient_c_norm), ‖∂L/∂u‖ = $(summary.gradient_u_norm)"
+                    if profile_gradient_kernels
+                        push!(tendency_kernel_cases, (; name, backend = backend_label, mode = case_mode,
+                                                      advection = adv_name, float_type = FT,
+                                                      grid_size = (Nx, Ny, Nz), nrepeat = time_steps,
+                                                      grid = tendency_grid, profile_dir,
+                                                      run! = () -> tendency!(tendency_args...)))
+                    end
+                catch err
+                    @error "Gradient case $name failed" exception = (err, catch_backtrace())
+                    push!(failed_cases, name)
+                end
             end
             continue
         end
@@ -607,7 +655,9 @@ end
 function main()
     args = parse_commandline()
     kernel_cases = []
-    results = run_benchmarks(args; kernel_cases)
+    tendency_kernel_cases = []
+    failed_cases = String[]
+    results = run_benchmarks(args; kernel_cases, tendency_kernel_cases, failed_cases)
 
     #####
     ##### Summary table
@@ -676,13 +726,18 @@ function main()
     ##### Kernel profiles, once every case is timed and saved
     #####
 
-    if !isempty(kernel_cases)
+    if !isempty(kernel_cases) || !isempty(tendency_kernel_cases)
         try
-            write_kernel_profiles(profile_kernels(kernel_cases))
+            write_kernel_profiles(vcat(profile_kernels(kernel_cases),
+                                       profile_tendency_kernels(tendency_kernel_cases)))
         catch err
             # A profiler failure must not fail the run, whose results above are already saved
             @error "Kernel profiling failed" exception = (err, catch_backtrace())
         end
+    end
+
+    if !isempty(failed_cases)
+        @error "$(length(failed_cases)) gradient case(s) failed and are missing from the results: $(join(failed_cases, ", "))"
     end
 
     println("Benchmarks completed at ", now(UTC), "Z")

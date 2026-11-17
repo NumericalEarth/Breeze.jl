@@ -19,6 +19,7 @@
                        backend::AbstractString = "reactant",
                        mode::AbstractString = "tendency",
                        raise = true,
+                       profile_dir = nothing,
                        verbose = true)
 
 Time `tendency!(args...)` on the architecture of `grid`. `args` is the argument
@@ -28,7 +29,9 @@ tuple for `tendency!` — e.g. `(Gc, grid, advection, U, c)` from
 raise_first=raise sync=true` (compile time recorded separately, broken down into
 tracing / MLIR / XLA stages by `timed_reactant_compile`) and profiled via
 `Reactant.Profiler.@timed`. On a vanilla grid it is run eagerly and timed over
-`nrepeat` calls with device synchronization (no Reactant compile). When
+`nrepeat` calls with device synchronization; the first call, which compiles just in
+time, is the warmup, and its time less a warm call's is recorded as the compile time
+(with no stage breakdown). When
 `profile_dir` is set, the Reactant profiler writes its xprof trace files there.
 
 Returns a `BenchmarkResult` tagged with `mode`, where `time_per_step_seconds` is
@@ -74,17 +77,24 @@ function benchmark_tendency(tendency!, args, grid;
         prof = Reactant.Profiler.@timed nrepeat=nrepeat profile_dir=profile_dir compiled!(args...)
         time_per_step_seconds = prof.runtime_ns / 1e9
     else
-        # Vanilla backend: launch the kernel eagerly (no Reactant compile). Warm
-        # up once, then time `nrepeat` launches with device synchronization.
-        compile_timings = (total=0.0, tracing=0.0, mlir=0.0, xla=0.0)
-        tendency!(args...)
-        synchronize_device(arch)
+        # Vanilla backend: launch the kernel eagerly (no Reactant compile). The
+        # first call compiles just in time (Julia, GPUCompiler, and Enzyme for a
+        # gradient), so it is timed as the warmup; then `nrepeat` launches are
+        # timed with device synchronization. Both go through `invokelatest`: a
+        # call this function dispatches statically is compiled together with it,
+        # before the first call's clock starts.
+        first_call_start = time_ns()
+        Base.invokelatest(repeat_calls, tendency!, args, 1, arch)
+        first_call_seconds = (time_ns() - first_call_start) / 1e9
+        verbose && @info "  First call (compiles just in time): $(@sprintf("%.3f", first_call_seconds)) s"
         start_time = time_ns()
-        for _ in 1:nrepeat
-            tendency!(args...)
-        end
-        synchronize_device(arch)
+        Base.invokelatest(repeat_calls, tendency!, args, nrepeat, arch)
         time_per_step_seconds = ((time_ns() - start_time) / 1e9) / nrepeat
+        # The just-in-time compile time is the first call less a warm call. It
+        # leaves out whatever an earlier case in the same process already
+        # compiled, as Reactant's compile time does.
+        compile_timings = (total = max(0.0, first_call_seconds - time_per_step_seconds),
+                           tracing = 0.0, mlir = 0.0, xla = 0.0)
     end
 
     total_time_seconds = time_per_step_seconds * nrepeat
@@ -126,4 +136,13 @@ function benchmark_tendency(tendency!, args, grid;
     memory_reclaim(arch)
 
     return result
+end
+
+# Call `f(args...)` `n` times, then wait for the device.
+function repeat_calls(f, args, n, arch)
+    for _ in 1:n
+        f(args...)
+    end
+    synchronize_device(arch)
+    return nothing
 end

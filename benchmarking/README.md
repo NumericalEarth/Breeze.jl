@@ -97,6 +97,36 @@ also appended to the benchmark name (`..._reactant_AD_periodic_4`). `Time/Step`
 is the wall time of the combined forward+backward program divided by
 `--time_steps`.
 
+### Scalar tendency gradient
+
+`--mode scalar_tendency` times the bare WENO advective tendency
+Gc = -∇·(𝐮 c) (no model) on both backends. Adding `--ad` also times, in Float32
+only, the reverse-mode gradient of the loss L = Σ Gc² / 2 with respect to `c` and
+𝐮. One evaluation runs the tendency kernel, a pointwise kernel ℓ = Gc² / 2 with
+`sum(parent(ℓ))`, and the reverse pass (`scalar_tendency_gradient_problem` in
+`src/scalar_tendency.jl`). The same function is differentiated two ways:
+
+| Backend | What runs | Compile time recorded |
+|---------|-----------|-----------------------|
+| `vanilla` | Enzyme differentiates the Julia code; KernelAbstractions' rules run the augmented forward kernel and an adjoint kernel per launch. | The first call, which compiles just in time, less a warm call |
+| `reactant raise=true` | Reactant raises the kernels to StableHLO, then Enzyme-MLIR differentiates the tensor program, which XLA compiles into one executable. | `Reactant.@compile` (tracing / MLIR / XLA) |
+
+Reactant `raise=false` is left out: differentiating an unraised kernel needs
+kernel AD, which mainline Reactant does not have. Results are recorded with
+`mode = "scalar_tendency_ad"` under `ScalarTendencyAD_...` names, and points/s
+counts gradient evaluations. Each case also logs the loss and the norms of
+∂L/∂c and ∂L/∂u, which should agree across backends. On a GPU, the per-kernel
+times of a gradient evaluation go to `kernel_profile.json` (see below). A Reactant
+case reads them from the xprof trace its timing run wrote, so it is not run again.
+A gradient case that fails is logged and skipped, so the forward cases still report.
+
+```bash
+# Local CPU run: forward and gradient, both backends
+julia --project run_benchmarks.jl --mode scalar_tendency --ad --device CPU \
+    --backend "vanilla, reactant" --size 16x16x8 --advection WENO5 \
+    --float_type Float32 --time_steps 4 --dynamics none --microphysics none
+```
+
 ### Kernel profiling
 
 With `--profile_kernels`, once every case is timed and saved, each vanilla
@@ -127,7 +157,7 @@ julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=2.0 -
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--mode` | `benchmark` | Mode: `benchmark` or `simulate` |
+| `--mode` | `benchmark` | Mode: `benchmark`, `simulate`, `scalar_tendency` or `model_tendency` |
 | `--size` | `64^3` | Grid size. Formats: `NxNyxNz` or `N^3`. Comma-separated for multiple. |
 | `--device` | `GPU` | Device: `CPU`, `GPU`, or `TPU` (TPU requires `--backend reactant`) |
 | `--backend` | `vanilla` | Execution backend: `vanilla` (eager KernelAbstractions / CUDA) or `reactant` (compiled via Reactant). Comma-separated for multiple. |
