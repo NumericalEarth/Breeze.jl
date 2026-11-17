@@ -80,3 +80,28 @@ end
         @test any(!iszero, ad_grad)
     end
 end
+
+#####
+##### The column ensemble with a `HeatingBudgetFlux` of a `PrescribedHeating` held in a reduced field (one profile
+##### for the ensemble, as a forcing of θ would hold it), stepped by `MultirateInfinitesimalStep`
+#####
+
+@testset "reactant_tke_heating_budget_flux" begin
+    Δt = 1.0
+    Ns = 2
+
+    grid = RectilinearGrid(ReactantState(); size=ColumnEnsembleSize(Nz=8, ensemble=(2, 1), Hz=3),
+                           z=(0, 2000), topology=(Flat, Flat, Bounded))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(); base_pressure=101325, potential_temperature=290)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+    cooling = Field{Nothing, Nothing, Center}(grid)
+    set!(cooling, z -> 1000 < z < 1100 ? -5 / 3600 : 0)
+    closure = TKEBasedTurbulenceClosure(static_stability = SaturationWeightedStaticStability(MixingLengthWeight(100.0)),
+                                        heating_budget_flux = HeatingBudgetFlux(ℂᑫ = 0.5, heating = PrescribedHeating(cooling)))
+    model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
+    θ_init = CenterField(grid); set!(θ_init, z -> 290 + 3e-3 * z)
+    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true tke_loss(model, θ_init, Δt, Ns)
+    value = @with_stack_size compiled(model, θ_init, Δt, Ns)
+    @test isfinite(value) && value > 0
+end

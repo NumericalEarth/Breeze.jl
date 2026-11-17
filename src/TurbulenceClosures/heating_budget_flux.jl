@@ -208,14 +208,30 @@ function add_diabatic_heating! end
 
 add_diabatic_heating!(𝒬, sources::Tuple, model, fields) = foreach(source -> add_diabatic_heating!(𝒬, source, model, fields), sources)
 
+# In a kernel rather than a broadcast over the interior views, which a `ReactantState` array outside a traced
+# function would index element by element
 function add_diabatic_heating!(𝒬, source::PrescribedHeating, model, fields)
-    interior(𝒬) .+= interior_values(source.tendency)
+    grid = model.grid
+    tendency = source.tendency
+    launch!(grid.architecture, grid, :xyz, _add_prescribed_heating!, 𝒬, interior_data(tendency), interior_size(tendency))
     return nothing
 end
 
-# The values of a prescribed tendency: of a field, or of an array of the interior
-interior_values(tendency::AbstractField) = interior(tendency)
-interior_values(tendency::AbstractArray) = tendency
+# The values of a prescribed tendency, indexed from 1 over the interior, and the size of that interior: the data of
+# a field (a reduced field keeps its data, not the field, so the kernel needs no field method), or an array
+interior_data(tendency::AbstractField) = tendency.data
+interior_data(tendency::AbstractArray) = tendency
+interior_size(tendency::AbstractField) = size(interior(tendency))
+interior_size(tendency::AbstractArray) = size(tendency)
+
+# A prescribed tendency broadcasts with the interior: a dimension of size one is read at its single index
+@kernel function _add_prescribed_heating!(𝒬, tendency, Nᵗ)
+    i, j, k = @index(Global, NTuple)
+    iᵗ = ifelse(Nᵗ[1] == 1, 1, i)
+    jᵗ = ifelse(Nᵗ[2] == 1, 1, j)
+    kᵗ = ifelse(Nᵗ[3] == 1, 1, k)
+    @inbounds 𝒬[i, j, k] += tendency[iᵗ, jᵗ, kᵗ]
+end
 
 # ∂t θˡⁱ = -∂z ℐ / (ρ ĉᵖ Π), as the tendency of ρθ applies it (∂θˡⁱ/∂h = θˡⁱ / (ĉᵖ Π θˡⁱ))
 @kernel function _add_radiative_heating!(𝒬, flux_divergence, ρ, ĉᵖΠ)
