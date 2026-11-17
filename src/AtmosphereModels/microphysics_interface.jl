@@ -445,8 +445,9 @@ before it adds its own to `G`.
 # `Gᵒ` has to hold everything else the stage applies, transport above all: a sink budgeted
 # against `c⁰` alone can remove what advection removes too. A time stepper that keeps part of
 # a stage's tendency apart from `Gⁿ` (the multirate infinitesimal step with post-loop scalar
-# tendencies keeps the advective part apart) hands it over through
-# `separate_stage_tendencies`, and `accumulated_tendency` adds it to `Gⁿ`.
+# tendencies keeps the advective part apart where it recombines the tendencies of earlier
+# stages) hands it over through `separate_stage_tendencies`, and `accumulated_tendency` adds it
+# to `Gⁿ`.
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

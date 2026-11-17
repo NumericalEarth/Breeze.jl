@@ -1631,15 +1631,24 @@ end
 @inline Oceananigans.Advection.explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, scheme, ::AdaptiveVerticallyImplicitDiscretization,
                                                          ::MCV) = one(grid)
 
-# The microphysical sources are added between that build and the assembly, when `Gⁿ` holds no
-# advection. Sinks are budgeted against what the stage start and every other tendency leave of a
-# species, advection and sedimentation included, so the scalars' advective tendencies are handed
-# to the microphysics alongside `Gⁿ`. Pre-loop, `Gⁿ` already holds them.
+# The microphysical sources are added between that build and the assembly. Sinks are budgeted
+# against what the stage start and every other tendency leave of a species, advection and
+# sedimentation included, so the microphysics is handed whatever of the scalars' advective
+# tendencies `Gⁿ` does not hold by then:
+#
+#   - Pre-loop, `update_state!` has built the whole tendency into `Gⁿ`: nothing.
+#   - Post-loop with a diagonal `β` (`TwoRegisterStorage`, `IncrementStorage`), the build has added
+#     the whole tendency to `Gⁿ` (`add_scalar_tendency!`): nothing. The fields that keep the
+#     tendencies of the stage before (`previous_scalar_tendency`) are not part of this stage's.
+#   - Post-loop with `AccumulatorStorage`, the build has written each scalar's advective tendency,
+#     with the stage's mass-flux correction, to its `fast_tendency` scratch, and `Gⁿ` holds none
+#     of it: the scratch.
 AtmosphereModels.separate_stage_tendencies(ts::MultirateInfinitesimalStep, model) =
-    separate_stage_tendencies(ts.scalar_tendencies, ts)
+    separate_stage_tendencies(ts.scalar_tendencies, ts.storage, ts)
 
-separate_stage_tendencies(::PreLoopScalarTendencies, ts) = nothing
-separate_stage_tendencies(::PostLoopScalarTendencies, ts) = ts.fast_tendency
+separate_stage_tendencies(::PreLoopScalarTendencies, storage, ts) = nothing
+separate_stage_tendencies(::PostLoopScalarTendencies, ::DiagonalStorage, ts) = nothing
+separate_stage_tendencies(::PostLoopScalarTendencies, ::AccumulatorStorage, ts) = ts.fast_tendency
 
 # Assemble one field's start state and forcing, its tendency split into fast and slow parts by `split`.
 assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, name, split) =
