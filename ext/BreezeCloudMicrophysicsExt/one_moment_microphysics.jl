@@ -777,6 +777,15 @@ end
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
+# Saturation adjustment schemes carry the equilibrium moisture, a change of which is cloud condensate
+# in saturated air (see `equilibrium_moisture_phase_fractions`). The cloud is the diagnosed condensate,
+# without the precipitation.
+@inline AM.prognostic_moisture_phase_fractions(i, j, k, grid, bμp::WP1M, μ, q) =
+    @inbounds equilibrium_moisture_phase_fractions(μ.qᶜˡ[i, j, k], zero(q.vapor))
+
+@inline AM.prognostic_moisture_phase_fractions(i, j, k, grid, bμp::MP1M, μ, q) =
+    @inbounds equilibrium_moisture_phase_fractions(μ.qᶜˡ[i, j, k], μ.qᶜⁱ[i, j, k])
+
 # Warm-phase non-equilibrium: prognostic stores true vapor; construct fractions directly.
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::WPNE1M, ρ, qᵛ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
