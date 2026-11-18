@@ -6,10 +6,13 @@ Provides time stepping schemes for AtmosphereModel, including:
 - `MultirateInfinitesimalStep`: multirate infinitesimal step methods with acoustic substepping,
   the default for compressible dynamics with a split-explicit time discretization
 - `AcousticRungeKutta3`: Wicker-Skamarock RK3 with acoustic substepping for compressible dynamics
+- `GravityWaveMultirateInfinitesimalStep`: multirate infinitesimal step methods with gravity-wave
+  substepping for hydrostatic dynamics
 """
 module TimeSteppers
 
 export SSPRungeKutta3, AcousticRungeKutta3, MultirateInfinitesimalStep,
+       GravityWaveMultirateInfinitesimalStep,
        MultirateInfinitesimalStepTableau, multirate_infinitesimal_step_tableau,
        store_initial_state!,
        ssp_rk3_substep!,
@@ -23,6 +26,7 @@ using Oceananigans: Oceananigans
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!, maybe_prepare_first_time_step!, reconcile_state!
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Utils: @apply_regionally
 using Breeze.Utils: @regional
 using Breeze.AtmosphereModels: kernel_time_step, copy_parent!
@@ -62,6 +66,7 @@ include("acoustic_substep_helpers.jl")
 include("acoustic_runge_kutta_3.jl")
 include("multirate_infinitesimal_step_coefficients.jl")
 include("multirate_infinitesimal_step.jl")
+include("gravity_wave_multirate_infinitesimal_step.jl")
 
 # Extend TimeStepper to support time steppers via Symbol
 OceananigansTimeSteppers.TimeStepper(::Val{:SSPRungeKutta3}, args...; kwargs...) =
@@ -72,5 +77,8 @@ OceananigansTimeSteppers.TimeStepper(::Val{:AcousticRungeKutta3}, args...; kwarg
 
 OceananigansTimeSteppers.TimeStepper(::Val{:MultirateInfinitesimalStep}, args...; kwargs...) =
     MultirateInfinitesimalStep(args...; kwargs...)
+
+OceananigansTimeSteppers.TimeStepper(::Val{:GravityWaveMultirateInfinitesimalStep}, args...; kwargs...) =
+    GravityWaveMultirateInfinitesimalStep(args...; kwargs...)
 
 end # module

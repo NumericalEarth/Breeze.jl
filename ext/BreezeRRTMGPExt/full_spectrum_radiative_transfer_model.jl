@@ -24,6 +24,9 @@ using RRTMGP.BCs: LwBCs, SwBCs
 # Dispatch on background_atmosphere = BackgroundAtmosphere for full-spectrum (clear-sky or all-sky) radiation
 const FullSpectrumRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere}
 
+# The level pressures are read with `level_pressure` (see `update_rrtmgp_gas_state!`)
+AtmosphereModels.uses_level_pressure(::FullSpectrumRadiativeTransferModel) = true
+
 # Shared by the clear-sky and all-sky `RadiativeTransferModel` docstrings.
 const full_spectrum_keywords_docstring = """
 - `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere()`).

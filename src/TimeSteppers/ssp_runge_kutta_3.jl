@@ -15,8 +15,9 @@ using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, ma
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_scheme, implicit_sedimentation_step!,
-                                thermodynamic_density_name
-using Oceananigans.Utils: launch!, time_difference_in_seconds
+                                thermodynamic_density_name, implicit_dynamics_step!
+using Oceananigans.Fields: Field
+using Oceananigans.Utils: launch!, time_difference_in_seconds, KernelParameters
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 """
@@ -217,12 +218,21 @@ function implicit_stage_step!(model, name, u, Δt)
     return nothing
 end
 
+# The points a stage update visits: the whole grid, except for a prognostic that is reduced in
+# the vertical (the surface pressure of `HydrostaticDynamics`), which has one level to update.
+ssp_rk3_substep_parameters(grid, u) = :xyz
+
+function ssp_rk3_substep_parameters(grid, ::Field{<:Any, <:Any, Nothing})
+    Nx, Ny, _ = size(grid)
+    return KernelParameters(1:Nx, 1:Ny, 1:1)
+end
+
 # Round-to-nearest keeps the original Shu-Osher kernel, so the default is bitwise unchanged.
 launch_ssp_rk3_substep!(::RoundToNearest, arch, grid, u, u⁰, G, Δt, α, key) =
-    launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
+    launch!(arch, grid, ssp_rk3_substep_parameters(grid, u), _ssp_rk3_substep!, u, u⁰, G, Δt, α)
 
 launch_ssp_rk3_substep!(rounding, arch, grid, u, u⁰, G, Δt, α, key) =
-    launch!(arch, grid, :xyz, _rounded_ssp_rk3_substep!, u, u⁰, G, Δt, α, rounding, key)
+    launch!(arch, grid, ssp_rk3_substep_parameters(grid, u), _rounded_ssp_rk3_substep!, u, u⁰, G, Δt, α, rounding, key)
 
 @kernel function _ssp_rk3_substep!(u, u⁰, G, Δt, α)
     i, j, k = @index(Global, NTuple)
@@ -351,6 +361,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
+    implicit_dynamics_step!(model.dynamics, model, Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
 

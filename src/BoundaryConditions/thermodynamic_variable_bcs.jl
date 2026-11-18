@@ -118,6 +118,11 @@ const NorthEnergyFluxBC  = EnergyFluxFunction{<:North}
 @inline _energy_flux_density(density, fields, i, j, k) = @inbounds density[i, j, k]
 @inline _energy_flux_density(::Nothing, fields, i, j, k) = @inbounds fields.ρᵈ[i, j, k]
 
+# ρᵈ / ρ. Dry dynamics with a diagnosed density (`HydrostaticDynamics`) have neither a density
+# captured at materialization nor a prognostic `ρᵈ` in `fields`: their ratio is one.
+@inline dry_density_ratio(density, fields, ρ, i, j, k) = _energy_flux_density(density, fields, i, j, k) / ρ
+@inline dry_density_ratio(::DryAirDensity, fields, ρ, i, j, k) = one(ρ)
+
 # Π at a grid point, from the pressure `getbc` receives in `dynamics_fields`. The state-taking
 # method ignores the potential temperature, so the zero θ is inert — the same shortcut
 # `potential_temperature_from_temperature` takes.
@@ -131,12 +136,11 @@ end
 # changes h at -(1/ρ) ∇⋅𝒬ᵀ, so ρθ = ρᵈ θ at (ρᵈ / ρ), as for the interior heating; ρᵈ = ρ on anelastic.
 @inline function 𝒬ᵀ_to_Jᶿ(i, j, k, grid, ef, 𝒬ᵀ, fields, dynamics_fields)
     qᵛ = @inbounds fields.qᵛ[i, j, k]
-    ρᵈ = _energy_flux_density(ef.density, fields, i, j, k)
     ρ = @inbounds dynamics_fields.ρ[i, j, k]
     q = grid_moisture_fractions(i, j, k, grid, ef.microphysics, ρ, qᵛ, fields)
     ĉᵖ = vapor_equivalent_heat_capacity(q, ef.thermodynamic_constants)
     Π = exner_function(i, j, k, grid, ef, q, dynamics_fields)
-    return ρᵈ / ρ * 𝒬ᵀ / (ĉᵖ * Π)
+    return dry_density_ratio(ef.density, fields, ρ, i, j, k) * 𝒬ᵀ / (ĉᵖ * Π)
 end
 
 @inline convert_energy_flux(i, j, k, grid, ef::EnergyFluxBoundaryConditionFunction, 𝒬ᵀ, fields, dynamics_fields) =
@@ -410,7 +414,7 @@ const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundary
 function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
                                                    side, loc, grid, dynamics, microphysics, constants, closure)
     ef = bc.condition
-    density = continuity_density(dynamics)
+    density = energy_flux_density(dynamics)
     pˢᵗ = convert(eltype(grid), standard_pressure(dynamics))
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density, pˢᵗ,
                                                  ef.exner_exponent)

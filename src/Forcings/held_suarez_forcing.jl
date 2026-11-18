@@ -1,4 +1,5 @@
 using ..AtmosphereModels: AtmosphereModels
+using ..HydrostaticEquations: HydrostaticDynamics
 using Oceananigans: Oceananigans
 using Oceananigans.Grids: Center, Face, LatitudeLongitudeGrid, OrthogonalSphericalShellGrid, φnode, znode
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
@@ -45,16 +46,18 @@ HeldSuarezParameters(FT = Oceananigans.defaults.FloatType;
 HeldSuarezParameters{FT}(parameters::HeldSuarezParameters) where FT =
     HeldSuarezParameters{FT}(ntuple(n -> getfield(parameters, n), fieldcount(HeldSuarezParameters))...)
 
-struct HeldSuarezForcing{V, P, A, R, D, C}
-    variable :: V                 # Val(:ρu), Val(:ρv) or Val(:ρE)
+struct HeldSuarezForcing{V, P, A, R, D, S, C}
+    variable :: V                 # Val(:ρu), Val(:ρv) or Val(:ρE); Val(:u) or Val(:v) on a prognostic velocity
     parameters :: P
     pressure :: A                 # p
     total_density :: R            # ρ
-    continuity_density :: D         # ρᵈ
+    continuity_density :: D       # ρᵈ
+    surface_pressure :: S         # pˢ where the dynamics carry it, otherwise nothing
     thermodynamic_constants :: C
 end
 
-HeldSuarezForcing(variable, parameters) = HeldSuarezForcing(variable, parameters, nothing, nothing, nothing, nothing)
+HeldSuarezForcing(variable, parameters) =
+    HeldSuarezForcing(variable, parameters, nothing, nothing, nothing, nothing, nothing)
 
 Adapt.adapt_structure(to, forcing::HeldSuarezForcing) =
     HeldSuarezForcing(forcing.variable,
@@ -62,6 +65,7 @@ Adapt.adapt_structure(to, forcing::HeldSuarezForcing) =
                       Adapt.adapt(to, forcing.pressure),
                       Adapt.adapt(to, forcing.total_density),
                       Adapt.adapt(to, forcing.continuity_density),
+                      Adapt.adapt(to, forcing.surface_pressure),
                       forcing.thermodynamic_constants)
 
 @regional HeldSuarezForcing
@@ -69,6 +73,9 @@ Adapt.adapt_structure(to, forcing::HeldSuarezForcing) =
 const XMomentumHeldSuarezForcing = HeldSuarezForcing{Val{:ρu}}
 const YMomentumHeldSuarezForcing = HeldSuarezForcing{Val{:ρv}}
 const EnergyHeldSuarezForcing = HeldSuarezForcing{Val{:ρE}}
+const XVelocityHeldSuarezForcing = HeldSuarezForcing{Val{:u}}
+const YVelocityHeldSuarezForcing = HeldSuarezForcing{Val{:v}}
+const VelocityHeldSuarezForcing = Union{XVelocityHeldSuarezForcing, YVelocityHeldSuarezForcing}
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -76,6 +83,13 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Return `(; ρu, ρv, ρE)`, the Rayleigh friction and the Newtonian temperature relaxation of
 [Held and Suarez (1994)](@cite HeldSuarez1994), to pass as `forcing` to
 [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) on a grid with latitude, alone or merged with other forcings.
+
+Under dynamics whose prognostic variables are the velocities, such as
+[`HydrostaticDynamics`](@ref Breeze.HydrostaticEquations.HydrostaticDynamics), the friction
+supplied under `ρu` and `ρv` becomes the acceleration ``- kᵘ u`` of the velocity, which is the
+friction of the momentum density divided by the density. With `HydrostaticDynamics`,
+``σ = p / pˢ`` is formed with the prognostic surface pressure and the layer pressure, and the
+temperature relaxation enters the potential temperature density divided by ``cᵖᵈ Π``.
 
 Keyword arguments
 =================
@@ -112,6 +126,17 @@ end
 
 # The kernels return density-weighted tendencies, so a specific key would multiply by ρ twice
 AtmosphereModels.is_density_tendency_forcing(::HeldSuarezForcing) = true
+
+# On a prognostic velocity, the friction - kᵘ ρu of the momentum density divided by the density
+# is - kᵘ u exactly, so the velocity kernels return the acceleration and need no wrapper.
+AtmosphereModels.is_density_tendency_forcing(::VelocityHeldSuarezForcing) = false
+AtmosphereModels.supports_prognostic_velocity(::VelocityHeldSuarezForcing) = true
+
+AtmosphereModels.wrap_density_tendency_forcing(forcing::XMomentumHeldSuarezForcing, velocity_name) =
+    HeldSuarezForcing(Val(:u), forcing.parameters)
+
+AtmosphereModels.wrap_density_tendency_forcing(forcing::YMomentumHeldSuarezForcing, velocity_name) =
+    HeldSuarezForcing(Val(:v), forcing.parameters)
 
 #####
 ##### Pointwise functions
@@ -161,12 +186,17 @@ end
     return p₁ * exp(g * ρ₁ * (z₁ - zˢ) / p₁)
 end
 
-@inline function σᶜᶜᶜ(i, j, k, grid, forcing)
+@inline σᶜᶜᶜ(i, j, k, grid, forcing) = σᶜᶜᶜ(i, j, k, grid, forcing, forcing.surface_pressure)
+
+@inline function σᶜᶜᶜ(i, j, k, grid, forcing, ::Nothing)
     g = forcing.thermodynamic_constants.gravitational_acceleration
     pˢ = hydrostatic_surface_pressure(i, j, k, grid, forcing.pressure, forcing.total_density, g)
     @inbounds p = forcing.pressure[i, j, k]
     return p / pˢ
 end
+
+# Dynamics that carry the surface pressure need no extrapolation
+@inline σᶜᶜᶜ(i, j, k, grid, forcing, pˢ) = @inbounds forcing.pressure[i, j, k] / pˢ[i, j, 1]
 
 #####
 ##### Kernels
@@ -184,6 +214,20 @@ end
     kᵘ = momentum_damping_rate(forcing.parameters, σ)
     @inbounds ρv = fields.ρv[i, j, k]
     return - kᵘ * ρv
+end
+
+@inline function (forcing::XVelocityHeldSuarezForcing)(i, j, k, grid, clock, fields)
+    σ = ℑxᶠᵃᵃ(i, j, k, grid, σᶜᶜᶜ, forcing)
+    kᵘ = momentum_damping_rate(forcing.parameters, σ)
+    @inbounds u = fields.u[i, j, k]
+    return - kᵘ * u
+end
+
+@inline function (forcing::YVelocityHeldSuarezForcing)(i, j, k, grid, clock, fields)
+    σ = ℑyᵃᶠᵃ(i, j, k, grid, σᶜᶜᶜ, forcing)
+    kᵘ = momentum_damping_rate(forcing.parameters, σ)
+    @inbounds v = fields.v[i, j, k]
+    return - kᵘ * v
 end
 
 # The enthalpy tendency ρᵈ cᵖᵈ ∂ₜT, which the thermodynamic tendency converts for the prognostic variable
@@ -223,8 +267,14 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::HeldSuar
                              context.pressure,
                              context.total_density,
                              context.continuity_density,
+                             held_suarez_surface_pressure(context.dynamics),
                              context.thermodynamic_constants)
 end
+
+# The surface pressure of σ = p / pˢ: prognostic under `HydrostaticDynamics`, and otherwise
+# extrapolated from the lowest cell (see `hydrostatic_surface_pressure`).
+held_suarez_surface_pressure(dynamics) = nothing
+held_suarez_surface_pressure(dynamics::HydrostaticDynamics) = dynamics.surface_pressure
 
 Base.summary(::HeldSuarezForcing{Val{variable}}) where variable = string("HeldSuarezForcing on ", variable)
 Base.show(io::IO, forcing::HeldSuarezForcing) = print(io, summary(forcing))

@@ -28,6 +28,7 @@ export BulkDragFunction,
        default_neutral_latent_heat_polynomial
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, continuity_density,
+                          energy_flux_density, DryAirDensity,
                           dynamics_thermodynamic_fields,
                           standard_pressure, default_drag_surface_temperature,
                           moisture_specific_name, thermodynamic_density_name,

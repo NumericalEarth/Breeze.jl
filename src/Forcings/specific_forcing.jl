@@ -122,3 +122,69 @@ AtmosphereModels.compute_forcing!(sf::SpecificForcing) = AtmosphereModels.comput
 Base.summary(sf::SpecificForcing) = string("SpecificForcing with forcing: ", prettysummary(sf.forcing))
 
 Base.show(io::IO, sf::SpecificForcing) = print(io, summary(sf))
+
+#####
+##### DensityTendencyForcing
+#####
+
+struct DensityTendencyForcing{F, D, L}
+    forcing :: F          # materialized inner forcing (kernel callable)
+    density :: D          # continuity density that weights the momentum density
+    target_location :: L  # (LX, LY, LZ) tuple of instances for the target velocity
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Wrap a user-supplied forcing that produces a *density-weighted* tendency, a force per unit
+volume, so that it can force a prognostic velocity. After materialization, the kernel callable
+returns
+
+```math
+F_{ρu}(i, j, k, t) / ρ(i, j, k)
+```
+
+with the continuity density ``ρ`` interpolated to the velocity point. This is the inverse of
+[`SpecificForcing`](@ref), and it gives the keys `ρu` and `ρv` the same meaning under dynamics
+that evolve velocities, such as
+[`HydrostaticDynamics`](@ref Breeze.HydrostaticEquations.HydrostaticDynamics), as under dynamics
+that evolve momentum densities. Users supply such forcings under `ρu` and `ρv` in the `forcing`
+`NamedTuple` passed to [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel), and
+the dispatch wraps each entry automatically; an acceleration is supplied under `u` or `v` and
+is applied as is.
+
+The inner forcing is materialized against the velocity, so it cannot read a momentum density
+from the model fields: there is none.
+"""
+DensityTendencyForcing(forcing) = DensityTendencyForcing(forcing, nothing, nothing)
+
+Adapt.adapt_structure(to, forcing::DensityTendencyForcing) =
+    DensityTendencyForcing(Adapt.adapt(to, forcing.forcing),
+                           Adapt.adapt(to, forcing.density),
+                           forcing.target_location)
+
+@regional DensityTendencyForcing
+
+@inline function (forcing::DensityTendencyForcing)(i, j, k, grid, clock, fields)
+    Fρϕ = forcing.forcing(i, j, k, grid, clock, fields)
+    ρ = density_at_target(forcing.target_location, forcing.density, i, j, k, grid)
+    return Fρϕ / ρ
+end
+
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::DensityTendencyForcing,
+                                                               field, name, model_field_names,
+                                                               context::NamedTuple)
+    inner = materialize_atmosphere_model_forcing(forcing.forcing, field, name, model_field_names, context)
+    return DensityTendencyForcing(inner, context.continuity_density, instantiated_location(field))
+end
+
+AtmosphereModels.compute_forcing!(forcing::DensityTendencyForcing) = AtmosphereModels.compute_forcing!(forcing.forcing)
+
+# Verified on a prognostic velocity: a function of the coordinates and time
+AtmosphereModels.supports_prognostic_velocity(forcing::DensityTendencyForcing) =
+    forcing.forcing isa ContinuousForcing && supports_prognostic_velocity(forcing.forcing)
+
+Base.summary(forcing::DensityTendencyForcing) =
+    string("DensityTendencyForcing with forcing: ", prettysummary(forcing.forcing))
+
+Base.show(io::IO, forcing::DensityTendencyForcing) = print(io, summary(forcing))

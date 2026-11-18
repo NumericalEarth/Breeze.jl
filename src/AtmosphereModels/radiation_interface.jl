@@ -75,6 +75,43 @@ radiation_flux_divergence(radiation) = radiation.flux_divergence
 @inline radiation_flux_divergence(i, j, k, grid, ::Nothing) = zero(eltype(grid))
 @inline radiation_flux_divergence(i, j, k, grid, flux_divergence) = @inbounds flux_divergence[i, j, k]
 
+#####
+##### Level pressures
+#####
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the object from which a radiative transfer model reads the pressure on the z-faces of the
+columns of `dynamics` (its level pressures) with [`level_pressure`](@ref), or `nothing` (the
+default) when the dynamics carry no pressure on the z-faces. The level pressures are then the
+averages of the layer pressures on either side.
+"""
+level_pressure_source(dynamics) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the pressure on the z-face `k` of column `(i, j)` that a radiative transfer model takes
+as a level pressure, from the layer pressure `p` and the [`level_pressure_source`](@ref) of the
+dynamics. Without a source it is the average of the two layer pressures, which at the lowest and
+the highest z-face reads the halo of `p`.
+"""
+@inline level_pressure(i, j, k, grid, p, ::Nothing) = ℑzᵃᵃᶠ(i, j, k, grid, p)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return whether `radiation` is known to take its level pressures from [`level_pressure`](@ref),
+and therefore from dynamics that supply them.
+
+This is a list of capabilities, not a guess: it is `false` unless a method says otherwise, so a
+radiative transfer model that the list does not know, such as a wrapper defined outside Breeze,
+is unsupported by dynamics that require it until it declares the capability. The gray and the
+RRTMGP clear-sky and all-sky models of `BreezeRRTMGPExt` declare it.
+"""
+uses_level_pressure(radiation) = false
+
 struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S}
     solar_constant :: SC # a scalar or an (Nx, Ny) array of per-column values
     solar_position :: SOP # AbstractSolarPosition: how to obtain cos(θ_z) on each update

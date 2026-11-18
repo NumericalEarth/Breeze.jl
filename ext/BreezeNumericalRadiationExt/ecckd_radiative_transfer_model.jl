@@ -42,6 +42,13 @@ end
 # clear-sky model (slot 4 `BackgroundAtmosphere`) and disjoint from its all-sky model.
 const EcCKDRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:ColumnWorkspace}
 
+# The interface pressures of the column state are extrapolated from the layer pressures (see
+# `grid_interface_pressure`), not read from the dynamics: this model does not have the capability
+# that `AtmosphereModels.uses_level_pressure` lists. The method is explicit because the type is
+# also a `RadiativeTransferModel` with a `BackgroundAtmosphere`, like the RRTMGP models that have it.
+# TODO: read the interface pressures with `AtmosphereModels.level_pressure`, then declare it.
+AtmosphereModels.uses_level_pressure(::EcCKDRadiativeTransferModel) = false
+
 # The gases of the column optics, in the order of the ecCKD tables: dry air (N₂, O₂ and the trace
 # gases the tables fold into it), the two spatially varying gases, and the well-mixed gases of
 # `BackgroundAtmosphere` the reference models tabulate.

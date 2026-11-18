@@ -45,6 +45,7 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     # pressure in practice, whose hydrostatic part dominates dynamic/acoustic perturbations by
     # orders of magnitude.
     p = dynamics_pressure(model.dynamics)
+    level_pressures = level_pressure_source(model.dynamics)
     T = model.temperature
     qᵛ = specific_humidity(model)
 
@@ -54,11 +55,11 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     ℕᴬ = params.avogad
     O₃ = background_atmosphere.O₃  # Can be ConstantField or Field
 
-    launch!(arch, grid, :xyz, _update_rrtmgp_gas_state!, as, grid, p, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
+    launch!(arch, grid, :xyz, _update_rrtmgp_gas_state!, as, grid, p, level_pressures, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     return nothing
 end
 
-@kernel function _update_rrtmgp_gas_state!(as, grid, p, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
+@kernel function _update_rrtmgp_gas_state!(as, grid, p, level_pressures, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     i, j, k = @index(Global, NTuple)
 
     Nz = size(grid, 3)
@@ -78,8 +79,8 @@ end
         qᵛₖ = max(qᵛ[i, j, k], zero(eltype(qᵛ)))
 
         # Face values at k and k+1 (needed for column dry air mass and level temperatures)
-        pᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, p)
-        pᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, p)
+        pᶠₖ = level_pressure(i, j, k, grid, p, level_pressures)
+        pᶠₖ₊₁ = level_pressure(i, j, k+1, grid, p, level_pressures)
         Tᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, T)
         Tᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, T)
 
@@ -105,7 +106,7 @@ end
 
         # Topmost level (once)
         if k == 1
-            pᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, p)
+            pᶠ[Nz+1, c] = level_pressure(i, j, Nz+1, grid, p, level_pressures)
             Tᴺ⁺¹ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
             Tᶠ[Nz+1, c] = clamp(Tᴺ⁺¹, Tmin, Tmax)
             T₀[c] = clamp(surface_temperature[i, j, 1], Tmin, Tmax)

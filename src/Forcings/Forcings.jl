@@ -12,13 +12,14 @@ using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.Grids: Center, Face
-using Oceananigans.Forcings: materialize_forcing, MultipleForcings
+using Oceananigans.Forcings: materialize_forcing, MultipleForcings, ContinuousForcing
 
 using Breeze.Utils: @regional
 using Oceananigans.MultiRegion: MultiRegionGrids, YinYangGridOfSomeKind
 
 using ..AtmosphereModels: AtmosphereModels, materialize_atmosphere_model_forcing,
-                          compute_forcing!, is_density_tendency_forcing, wrap_specific_forcing
+                          compute_forcing!, is_density_tendency_forcing, wrap_specific_forcing,
+                          wrap_density_tendency_forcing, supports_prognostic_velocity
 
 include("geostrophic_forcings.jl")
 include("subsidence_forcing.jl")
@@ -74,5 +75,20 @@ end
 function AtmosphereModels.wrap_specific_forcing(values::Tuple, density_name)
     return map(v -> wrap_specific_forcing(v, density_name), values)
 end
+
+#####
+##### Momentum-density-key wrapping for dynamics with prognostic velocities: build a
+##### DensityTendencyForcing for a user value supplied under `ρu` or `ρv`. Tuples recurse.
+#####
+
+# Several supported forcings of a prognostic velocity add
+AtmosphereModels.supports_prognostic_velocity(forcing::MultipleForcings) =
+    all(supports_prognostic_velocity, forcing.forcings)
+
+AtmosphereModels.wrap_density_tendency_forcing(::Nothing, velocity_name) = nothing
+AtmosphereModels.wrap_density_tendency_forcing(value, velocity_name) = DensityTendencyForcing(value)
+
+AtmosphereModels.wrap_density_tendency_forcing(values::Tuple, velocity_name) =
+    map(value -> wrap_density_tendency_forcing(value, velocity_name), values)
 
 end

@@ -194,6 +194,32 @@ Thermodynamic relations of the local state, such as the saturation specific humi
 total_density(dynamics) = continuity_density(dynamics)
 
 """
+$(TYPEDEF)
+
+Stands for the dry density in an energy-flux boundary condition of dynamics whose air is dry and
+whose continuity density is diagnosed rather than prognostic: the ratio of the dry density to the
+total density is one.
+"""
+struct DryAirDensity end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return what an energy-flux boundary condition reads the dry density from when the boundary
+conditions are materialized: the [`continuity_density`](@ref) by default, which is `nothing` for
+dynamics that allocate it later and carry it as the prognostic `ρᵈ`.
+"""
+energy_flux_density(dynamics) = continuity_density(dynamics)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Advance what `dynamics` integrates implicitly, after the explicit stages of a time step `Δt` and
+before the final `update_state!`. Nothing by default.
+"""
+implicit_dynamics_step!(dynamics, model, Δt) = nothing
+
+"""
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the change of the moisture mass fractions per unit mass of condensate `phase` that

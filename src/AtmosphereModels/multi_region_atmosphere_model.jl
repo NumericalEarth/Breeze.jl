@@ -35,6 +35,12 @@ function fill_horizontal_velocity_halos!(𝐯::NamedTuple, args::Vararg{Any, N};
     return nothing
 end
 
+# Dynamics that diagnose the vertical velocity carry the horizontal pair alone
+function fill_horizontal_velocity_halos!(𝐯::NamedTuple{(:u, :v)}, args::Vararg{Any, N}; kwargs...) where N
+    fill_halo_regions!((𝐯.u, 𝐯.v), args...; kwargs...)
+    return nothing
+end
+
 # Dynamics without prognostic momentum carry an empty momentum tuple
 fill_horizontal_velocity_halos!(::NamedTuple{()}, args...; kwargs...) = nothing
 

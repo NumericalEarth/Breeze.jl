@@ -4,6 +4,8 @@
 ##### These functions are defined here and extended in BoundaryConditions and Forcings modules.
 #####
 
+using Oceananigans.Forcings: ContinuousForcing
+
 """
     materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
                                                     dynamics, microphysics, thermodynamic_constants,
@@ -102,3 +104,30 @@ recurses into tuples, and errors if `value` is itself a density-tendency forcing
 to produce a helpful error message when the wrap is rejected.
 """
 function wrap_specific_forcing end
+
+"""
+    wrap_density_tendency_forcing(value, velocity_name)
+
+Wrap `value`, a forcing of a momentum density supplied under `ρu` or `ρv`, for dynamics whose
+prognostic variable is the velocity `velocity_name` itself: the wrapped forcing divides by the
+continuity density at the velocity point at kernel time. This is the inverse of
+[`wrap_specific_forcing`](@ref). Implemented in the `Forcings` module, which constructs a
+`DensityTendencyForcing` and recurses into tuples.
+"""
+function wrap_density_tendency_forcing end
+
+# A `ContinuousForcing` with neither parameters nor field dependencies
+const FunctionOfCoordinatesAndTime = ContinuousForcing{<:Any, <:Any, <:Any, Nothing, <:Any, Tuple{}}
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `true` if the materialized `forcing` is one that dynamics with prognostic velocities
+accept on `u` and `v`. Those dynamics reject every other forcing rather than apply one whose
+behavior on a velocity has not been verified. Defaults to `false`; `true` for no forcing and
+for a function of the coordinates and time without parameters or field dependencies, and
+extended in the `Forcings` module.
+"""
+supports_prognostic_velocity(forcing) = false
+supports_prognostic_velocity(::Returns) = true
+supports_prognostic_velocity(::FunctionOfCoordinatesAndTime) = true

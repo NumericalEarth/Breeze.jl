@@ -18,6 +18,7 @@ export
     AnelasticModel,
     CompressibleDynamics,
     CompressibleModel,
+    HydrostaticDynamics,
     SplitExplicitTimeDiscretization,
     AcousticOuterScheme,
     WickerSkamarock3,
@@ -317,6 +318,9 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticS
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
+
+include("HydrostaticEquations/HydrostaticEquations.jl")
+using .HydrostaticEquations: HydrostaticDynamics
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers

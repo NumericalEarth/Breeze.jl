@@ -10,7 +10,7 @@ Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation
 
 # The anelastic pressure solve is a global elliptic problem, which the regional FFT solver cannot express
 AtmosphereModels.default_dynamics(::MultiRegionGrids, constants) =
-    throw(ArgumentError("AtmosphereModel on a MultiRegionGrid needs dynamics = CompressibleDynamics(...)."))
+    throw(ArgumentError("AtmosphereModel on a MultiRegionGrid needs dynamics = CompressibleDynamics(...) or HydrostaticDynamics(...)."))
 
 AtmosphereModels.materialize_dynamics(::AnelasticDynamics, ::MultiRegionGrids, boundary_conditions, thermodynamic_constants) =
     throw(ArgumentError("AnelasticDynamics is not supported on a MultiRegionGrid."))

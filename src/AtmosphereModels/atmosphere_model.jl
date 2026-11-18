@@ -678,8 +678,13 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     specific_to_density = NamedTuple(specific_to_density_pairs(forcing_names))
     valid_specific_names = keys(specific_to_density)
 
+    # Dynamics that evolve velocities rather than momentum densities take an acceleration under
+    # the velocity's own name and a force per unit volume under the momentum density key.
+    velocity_names = prognostic_velocity_names(dynamics)
+    velocity_momentum_names = map(momentum_density_name, velocity_names)
+
     for name in user_forcing_names
-        if name ∉ forcing_names && name ∉ valid_specific_names
+        if name ∉ forcing_names && name ∉ valid_specific_names && name ∉ velocity_momentum_names
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
                          "The forcing fields are ", forcing_names,
                          "; specific-key aliases are ", valid_specific_names, '.',
@@ -714,6 +719,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # thermodynamic variables (e.g. `TemperatureForcing`) form the same local moisture mass
     # fractions as the tendency kernels.
     forcing_context = (; coriolis,
+                         dynamics,
                          density=continuity_density_field,
                          continuity_density=continuity_density_field,
                          total_density=mass_density,
@@ -726,7 +732,8 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
                          thermodynamic_constants)
 
     materialized = Tuple(
-        assemble_field_forcing(n, f, user_forcings, model_names, forcing_context)
+        n ∈ velocity_names ? assemble_velocity_forcing(n, f, user_forcings, model_names, forcing_context) :
+                             assemble_field_forcing(n, f, user_forcings, model_names, forcing_context)
         for (n, f) in pairs(forcing_fields)
     )
 
@@ -764,6 +771,40 @@ function assemble_field_forcing(tracer_name, ::Nothing, target_field,
     raw_forcing = get(user_forcings, tracer_name, nothing)
     wrapped_forcing = wrap_specific_forcing(raw_forcing, tracer_name)
     return materialize_or_default(wrapped_forcing, target_field, tracer_name, model_names, context)
+end
+
+# The prognostic momentum variables that are velocities rather than momentum densities: none
+# for dynamics that evolve `ρu`, `ρv` and `ρw`.
+prognostic_velocity_names(dynamics) =
+    filter(name -> isnothing(specific_name_of(name)), prognostic_momentum_field_names(dynamics))
+
+momentum_density_name(velocity_name) = Symbol(:ρ, velocity_name)
+
+# A prognostic velocity. A forcing under its own name (`u`) is an acceleration and is applied
+# as is: the prognostic variable is already specific, so nothing is multiplied by the density.
+# A forcing under the momentum density key (`ρu`) is a force per unit volume, as for dynamics
+# that evolve the momentum density, and is divided by the continuity density at the velocity
+# point (see `wrap_density_tendency_forcing`). The two may be supplied together, and add.
+function assemble_velocity_forcing(velocity_name, target_field, user_forcings, model_names, context)
+    acceleration = get(user_forcings, velocity_name, nothing)
+    reject_density_tendency_as_acceleration(acceleration, velocity_name)
+    raw_force = get(user_forcings, momentum_density_name(velocity_name), nothing)
+    force = wrap_density_tendency_forcing(raw_force, velocity_name)
+    combined = combine_forcing_values(acceleration, force)
+    return materialize_or_default(combined, target_field, velocity_name, model_names, context)
+end
+
+reject_density_tendency_as_acceleration(forcings::Tuple, velocity_name) =
+    foreach(forcing -> reject_density_tendency_as_acceleration(forcing, velocity_name), forcings)
+
+function reject_density_tendency_as_acceleration(forcing, velocity_name)
+    if is_density_tendency_forcing(forcing)
+        msg = string("Forcing of type ", nameof(typeof(forcing)), " produces a density-weighted tendency; ",
+                     "supply it under the momentum density key `", momentum_density_name(velocity_name),
+                     "` rather than `", velocity_name, "`, so that it is divided by the density.")
+        throw(ArgumentError(msg))
+    end
+    return nothing
 end
 
 # Strip the `ρ` prefix from a density-weighted prognostic name; returns `nothing` for

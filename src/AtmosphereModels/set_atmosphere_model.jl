@@ -74,9 +74,7 @@ function set_geographic_vectors!(model, kw)
         set_from_extrinsic_velocities!(model.velocities, model.grid,
                                        get(kw, :u, ZeroField()), get(kw, :v, ZeroField()))
 
-        ρ = continuity_density(model.dynamics)
-        set!(model.momentum.ρu, ρ * model.velocities.u)
-        set!(model.momentum.ρv, ρ * model.velocities.v)
+        set_horizontal_momentum_from_velocities!(model)
     end
 
     if haskey(kw, :ρu) || haskey(kw, :ρv)
@@ -85,6 +83,15 @@ function set_geographic_vectors!(model, kw)
                                        get(kw, :ρu, ZeroField()), get(kw, :ρv, ZeroField()))
     end
 
+    return nothing
+end
+
+# The horizontal momentum of velocities that have just been set. Dynamics whose prognostic
+# variables are the velocities themselves have nothing to do.
+function set_horizontal_momentum_from_velocities!(model)
+    ρ = continuity_density(model.dynamics)
+    set!(model.momentum.ρu, ρ * model.velocities.u)
+    set!(model.momentum.ρv, ρ * model.velocities.v)
     return nothing
 end
 

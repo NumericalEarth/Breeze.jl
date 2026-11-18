@@ -19,6 +19,9 @@ using KernelAbstractions: @kernel, @index
 # Dispatch on background_atmosphere = Nothing for gray radiation
 const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, Nothing}
 
+# The level pressures are read with `level_pressure` (see `update_rrtmgp_state!`)
+AtmosphereModels.uses_level_pressure(::GrayRadiativeTransferModel) = true
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -339,6 +342,12 @@ atmospheric data. It does not interpolate from layers to levels internally becau
    the bottom cell whenever `dynamics_pressure` carries no `Value` bottom boundary condition
    (compressible dynamics, and every terrain reference state).
 
+   Dynamics that know the pressure on their z-faces supply it through
+   `AtmosphereModels.level_pressure_source`, and none of this applies to them: `HydrostaticDynamics`
+   gives the exact pressures `A + B pˢ` of its coordinate surfaces, so that level 1 is at the
+   surface pressure, level `Nz + 1` at the pressure of the model top, and the layers' pressure
+   thicknesses sum to their difference.
+
 2. **Interpolation to levels**: Interior levels use `ℑzᵃᵃᶠ`, the arithmetic average of the two
    adjacent cell centers, for both pressure and temperature. That is second-order on a uniform
    column and first-order wherever `Δz` varies (stretched or terrain-following grids), since the
@@ -366,15 +375,16 @@ function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface
     arch = architecture(grid)
 
     p = dynamics_pressure(model.dynamics)
+    pᶠ = level_pressure_source(model.dynamics)
     T = model.temperature
     T₀ = surface_temperature
 
-    launch!(arch, grid, :xyz, _update_rrtmgp_state!, rrtmgp_state, grid, p, T, T₀)
+    launch!(arch, grid, :xyz, _update_rrtmgp_state!, rrtmgp_state, grid, p, pᶠ, T, T₀)
 
     return nothing
 end
 
-@kernel function _update_rrtmgp_state!(rrtmgp_state, grid, p, T, surface_temperature)
+@kernel function _update_rrtmgp_state!(rrtmgp_state, grid, p, level_pressures, T, surface_temperature)
     i, j, k = @index(Global, NTuple)
 
     Nz = size(grid, 3)
@@ -393,7 +403,7 @@ end
 
     @inbounds begin
         # Face values at k and k+1
-        pᶠ[k, c] = ℑzᵃᵃᶠ(i, j, k, grid, p)
+        pᶠ[k, c] = level_pressure(i, j, k, grid, p, level_pressures)
         Tᶠ[k, c] = ℑzᵃᵃᶠ(i, j, k, grid, T)
 
         # Layer values: use face-averaged temperature for consistency with level sources,
@@ -405,7 +415,7 @@ end
         # Because kernel spans (Nx, Ny, Nz)
         if k == 1
             T₀[c] = surface_temperature[i, j, 1]
-            pᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, p)
+            pᶠ[Nz+1, c] = level_pressure(i, j, Nz+1, grid, p, level_pressures)
             Tᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
         end
     end

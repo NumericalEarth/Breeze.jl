@@ -3,6 +3,7 @@ module BreezeRRTMGPExt
 using Breeze
 using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles, materialize_surface_property,
                                dynamics_pressure, total_density, resolve_column_batch_rows,
+                               level_pressure, level_pressure_source,
                                column_index, column_longitude, column_latitude, compute_radiation_flux_divergence!,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
                                assert_bound_surface_temperature, maybe_infer_solar_position,
