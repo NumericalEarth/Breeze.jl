@@ -100,26 +100,22 @@ is the wall time of the combined forward+backward program divided by
 ### Scalar tendency AD
 
 `--mode scalar_tendency` times the bare WENO advective tendency
-Gc = -∇·(𝐮 c) (no model) on both backends. Adding `--ad` also times, in Float32
-only, the reverse-mode gradient of L = mean(Gc²) with respect to `c` and 𝐮:
-`scalar_tendency_loss` and `grad_scalar_tendency_loss!` in
-`src/scalar_tendency.jl`, which follow `loss` and `grad_loss!` in
-`src/timestepping.jl`. The same function is differentiated two ways:
+Gc = -∇·(𝐮 c) (no model) on both backends. Adding `--ad` also times, on the
+Reactant backend and in Float32 only, the reverse-mode gradient of L = mean(Gc²)
+with respect to `c` and 𝐮: `scalar_tendency_loss` and `grad_scalar_tendency_loss!`
+in `src/scalar_tendency.jl`, which follow `loss` and `grad_loss!` in
+`src/timestepping.jl`. Reactant raises the kernels to StableHLO (`raise=true`),
+then Enzyme-MLIR differentiates the tensor program, which XLA compiles into one
+executable. `raise=false` is left out: differentiating an unraised kernel needs
+kernel AD.
 
-| Backend | What runs | Compile time recorded |
-|---------|-----------|-----------------------|
-| `vanilla` | Enzyme differentiates the Julia code; KernelAbstractions' rules run the augmented forward kernel and an adjoint kernel per launch. | The first call, which compiles just in time, less a warm call |
-| `reactant raise=true` | Reactant raises the kernels to StableHLO, then Enzyme-MLIR differentiates the tensor program, which XLA compiles into one executable. | `Reactant.@compile` (tracing / MLIR / XLA) |
-
-Reactant `raise=false` is left out: differentiating an unraised kernel needs
-kernel AD. Results are recorded with `mode = "scalar_tendency_ad"` under
+Results are recorded with `mode = "scalar_tendency_ad"` under
 `ScalarTendencyAD_...` names, and points/s counts gradient evaluations. On a GPU,
 the per-kernel times of a gradient evaluation go to `kernel_profile.json` (see
-below). An AD case that fails is logged and skipped, so the forward cases still
-report.
+below).
 
 ```bash
-# Local CPU run: forward and AD, both backends
+# Local CPU run: forward on both backends, AD on Reactant
 julia --project run_benchmarks.jl --mode scalar_tendency --ad --device CPU \
     --backend "vanilla, reactant" --size 16x16x8 --advection WENO5 \
     --float_type Float32 --time_steps 4 --dynamics none --microphysics none

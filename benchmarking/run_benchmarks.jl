@@ -159,7 +159,7 @@ function parse_commandline()
             help = "Benchmark the forward+backward (Enzyme reverse-mode) pass through the " *
                    "stepping loop instead of forward only (Reactant backend only). With " *
                    "--mode scalar_tendency, also benchmark the reverse-mode gradient of the " *
-                   "scalar tendency, in Float32 only, on both backends."
+                   "scalar tendency on Reactant, in Float32 only."
             action = :store_true
 
         "--checkpoints"
@@ -494,11 +494,10 @@ function run_benchmarks(args; kernel_cases = [])
             end
 
             # --ad adds the reverse-mode gradient of the scalar tendency (see
-            # `scalar_tendency_ad_problem`), in Float32 only, as the first config
-            # (raise=true on Reactant): differentiating an unraised kernel needs
-            # kernel AD.
-            if args["ad"] && mode == "scalar_tendency" && FT == Float32
-                push!(configs, (first(configs)[1:3]..., true))
+            # `scalar_tendency_ad_problem`) on Reactant, in Float32 only, with
+            # raise=true only: differentiating an unraised kernel needs kernel AD.
+            if args["ad"] && mode == "scalar_tendency" && FT == Float32 && backend_name == "reactant"
+                push!(configs, ("reactant raise=true", "reactant-raise", true, true))
             end
 
             for (backend_label, tag, raise, ad) in configs
@@ -531,30 +530,21 @@ function run_benchmarks(args; kernel_cases = [])
                                                                        float_type = FT,
                                                                        topology)
 
-                # An AD case that fails is logged and skipped, so that the forward
-                # cases of the run still report.
-                try
-                    push!(results, benchmark_tendency(tendency!, tendency_args, tendency_grid;
-                                                      nrepeat = time_steps,
-                                                      name,
-                                                      advection = adv_name,
-                                                      backend = backend_label,
-                                                      mode = case_mode,
-                                                      raise,
-                                                      profile_dir))
-                catch err
-                    ad || rethrow()
-                    @error "AD case $name failed" exception = (err, catch_backtrace())
-                    continue
-                end
+                push!(results, benchmark_tendency(tendency!, tendency_args, tendency_grid;
+                                                  nrepeat = time_steps,
+                                                  name,
+                                                  advection = adv_name,
+                                                  backend = backend_label,
+                                                  mode = case_mode,
+                                                  raise,
+                                                  profile_dir))
 
-                # Profiled by `main` once every case is timed and saved; see kernel_profiling/
+                # Kernel times read by `main` from the trace of the timing run; see kernel_profiling/
                 if ad && device == "GPU"
                     push!(kernel_cases, (; name, float_type = FT, advection = adv_name,
                                          closure = "none", dynamics = "none", microphysics = "none",
                                          backend = backend_label, mode = case_mode, time_steps,
-                                         grid = tendency_grid, profile_dir,
-                                         run! = () -> tendency!(tendency_args...)))
+                                         grid = tendency_grid, profile_dir))
                 end
             end
             continue

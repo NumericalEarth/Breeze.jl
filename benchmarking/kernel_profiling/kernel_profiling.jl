@@ -4,8 +4,8 @@
 ##### `run_benchmarks.jl --profile_kernels` profiles each vanilla time-stepping case after
 ##### every case has been timed and saved, in the same process: its kernels are already
 ##### compiled, and the profiler cannot touch any published timing. With
-##### `--mode scalar_tendency --ad` on a GPU, each AD case is profiled the same way, on
-##### both backends (see `case_kernel_times`). The profile uses
+##### `--mode scalar_tendency --ad` on a GPU, the kernel times of each (Reactant) AD case
+##### are read from the xprof trace of its timing run (see `case_kernel_times`). The profile uses
 ##### CUDA.jl's integrated profiler (`CUDA.@profile`, CUPTI underneath; no Nsight install
 ##### needed). Each kernel's launches are grouped by its name up to the first `(` or `<`,
 ##### and the `TOP_KERNELS` kernels with the most GPU time are written to
@@ -76,12 +76,10 @@ end
 """
     case_kernel_times(case)
 
-Profile one case recorded by `run_benchmarks` and return `(kernels, grid)`:
-- a vanilla time-stepping case rebuilds its model, takes its warmup steps, and
-  profiles its `time_steps` steps with `CUDA.@profile`;
-- a vanilla scalar tendency AD case profiles `time_steps` gradient evaluations;
-- a Reactant scalar tendency AD case reads the xprof trace its timing run wrote to
-  `profile_dir`, so it is not run again.
+Profile one case recorded by `run_benchmarks` and return `(kernels, grid)`. A vanilla
+time-stepping case rebuilds its model, takes its warmup steps, and profiles its
+`time_steps` steps with `CUDA.@profile`. A (Reactant) scalar tendency AD case reads
+the xprof trace its timing run wrote to `profile_dir`, so it is not run again.
 """
 function case_kernel_times(case)
     if haskey(case, :build_model)
@@ -91,13 +89,6 @@ function case_kernel_times(case)
         CUDA.synchronize()
         profile = CUDA.@profile many_time_steps!(model, Δt, case.time_steps)
         return kernel_times(profile.device), model.grid
-    elseif isnothing(case.profile_dir)
-        case.run!()
-        CUDA.synchronize()
-        profile = CUDA.@profile for _ in 1:case.time_steps
-            case.run!()
-        end
-        return kernel_times(profile.device), case.grid
     else
         xplane_file = Reactant.Profiler.find_xplane_file(case.profile_dir)
         return reactant_kernel_times(xplane_file), case.grid
