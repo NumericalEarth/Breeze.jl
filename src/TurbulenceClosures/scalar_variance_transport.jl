@@ -103,7 +103,7 @@ end
 
 @inline function transport_scalar_variances!(t::ScalarVarianceTransport, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
     Nz = size(grid, 3)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     local_center_third_moments!(t.component_third_moment, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
     work = m.variance_transport_work
     Kᶜ = closure_fields.Kᶜ

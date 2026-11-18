@@ -85,8 +85,9 @@ end
 ##### A calibration's configuration: the closure built with traced scalars (as a template whose coefficients are trained)
 ##### and the trained coefficients rebound in the loss with `with_parameters`, on a stretched column ensemble (whose
 ##### grid, traced, has a traced eltype in the kernels), stepped by `MultirateInfinitesimalStep`; the gradient is taken
-##### with respect to the trained coefficients. The heating is a `PrescribedHeating` held in a reduced field (one
-##### profile for the ensemble, as a forcing of θ would hold it).
+##### with respect to the trained coefficients. The closure has a `DoubleGaussian` with a `TKEBudgetThirdMoment` and a
+##### `ScalarVarianceTransport`, and a `HeatingBudgetFlux` of a `PrescribedHeating` held in a reduced field (one profile
+##### for the ensemble, as a forcing of θ would hold it).
 #####
 
 function trained_loss(model, coefficients, θ_init, Δt, Nsteps)
@@ -117,9 +118,13 @@ end
     microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
     cooling = Field{Nothing, Nothing, Center}(grid)
     set!(cooling, z -> 1000 < z < 1200 ? -5 / 3600 : 0)
-    closure = TKEBasedTurbulenceClosure(PT; static_stability = SaturationWeightedStaticStability(MixingLengthWeight(100.0)),
+    distribution = DoubleGaussian(PT; third_moment = TKEBudgetThirdMoment(PT),
+                                  variance_transport = ScalarVarianceTransport(PT))
+    closure = TKEBasedTurbulenceClosure(PT; static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                        subgrid_distribution = distribution,
                                         heating_budget_flux = HeatingBudgetFlux(PT; heating = PrescribedHeating(cooling)))
-    trained() = (ℂᑫ = Reactant.ConcreteRNumber(0.5), ℂᑫᴸ = Reactant.ConcreteRNumber(8.0))
+    trained() = map(Reactant.ConcreteRNumber, (ℂᵛᵗ = 1.0, ℂᑫ = 0.5, ℂᑫᴸ = 8.0, ℂʷᵀ = 0.3, ℂʷᴺ = 0.1, ℂʷʳ = 0.2,
+                                               ℂᵍˢ = 0.1, ℂᵍˢˢ = 0.05))
     θ_init = CenterField(grid); set!(θ_init, z -> 290 + 3e-3 * z)
 
     @testset "Forward" begin

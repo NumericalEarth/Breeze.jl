@@ -367,8 +367,8 @@ end
     ℓᵐ = closure_fields.ℓᵐ
     @inbounds for k in 1:size(grid, 3)
         # With ℂʷᵒ > 0 the shape reaches one cell above the turbulence (the overshoot); the cell below the first is none
-        e⁻ = ifelse(k > 1, max(e[i, j, max(k - 1, 1)], zero(eltype(grid))), zero(eltype(grid)))
-        cl.uᵉ[i, j, k] = max(e[i, j, k], zero(eltype(grid))) + tm.ℂʷᵒ * e⁻
+        e⁻ = ifelse(k > 1, max(e[i, j, max(k - 1, 1)], zero(grid_float_type(grid))), zero(grid_float_type(grid)))
+        cl.uᵉ[i, j, k] = max(e[i, j, k], zero(grid_float_type(grid))) + tm.ℂʷᵒ * e⁻
         cl.uᵋ[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
     end
     # Fᵋ holds the eliminated upper diagonal of the second solve until the fluxes overwrite it
