@@ -803,8 +803,27 @@ end
 # The enthalpy Δπ c̃ Π θ̃ / g of each layer is then expressed as the potential temperature of the
 # layer with the water it now holds, under the pressure of the water now above it, as
 # `_sediment_rain!` does: the column loses or gains enthalpy by its sources only.
-@kernel function _mix_enthalpy!(ρθ, θ̃, γ, ledger, grid, ρ, ρᵗ, ρᵗ⁺, ρqʳ, ρqˣ, A, B, πˢ, Φˢ, θ, θᵨ, Π, Πᶠ, T, C, heating,
-                                𝒬, Jᵛ_applied, Tˢ, u★, v★, τˣ, τʸ, constants, pˢᵗ, κ, g, Δt)
+#
+# The step is three kernels, each with few arrays: a device may limit the number of arrays of a
+# kernel (31 on Metal), and the grid brings its own.
+@kernel function _add_surface_energy_sources!(heating, surface_energy, surface_stress_work, grid, ρᵗ⁺, Φˢ,
+                                              𝒬, Jᵛ_applied, Tˢ, u★, v★, τˣ, τʸ, cᵖᵛ, Δt)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        # Sources of the lowest layer, in J m⁻²
+        vapor = Jᵛ_applied[i, j, 1]
+        work = (from_x_faces(i, j, 1, grid, x_stress_work, u★, τˣ, ρᵗ⁺, Δt) +
+                from_y_faces(i, j, 1, grid, y_stress_work, v★, τʸ, ρᵗ⁺, Δt))
+        surface = Δt * 𝒬[i, j, 1] + vapor * cᵖᵛ * Tˢ[i, j, 1]
+
+        surface_energy[i, j, 1] += surface + vapor * Φˢ[i, j, 1]
+        surface_stress_work[i, j, 1] += work
+        heating[i, j, 1] = heating[i, j, 1] + surface + work
+    end
+end
+
+@kernel function _solve_enthalpy!(θ̃, γ, grid, ρ, ρᵗ, ρqʳ, A, B, πˢ, θ, θᵨ, Π, Πᶠ, T, C, heating, constants, g, Δt)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -814,15 +833,6 @@ end
     ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
 
     @inbounds begin
-        # Sources of the lowest layer, in J m⁻²
-        vapor = Jᵛ_applied[i, j, 1]
-        work = (from_x_faces(i, j, 1, grid, x_stress_work, u★, τˣ, ρᵗ⁺, Δt) +
-                from_y_faces(i, j, 1, grid, y_stress_work, v★, τʸ, ρᵗ⁺, Δt))
-        surface = Δt * 𝒬[i, j, 1] + vapor * cᵖᵛ * Tˢ[i, j, 1]
-
-        ledger.surface_energy[i, j, 1] += surface + vapor * Φˢ[i, j, 1]
-        ledger.surface_stress_work[i, j, 1] += work
-
         # Forward elimination
         C⁺ = C[i, j, 2]
         a⁺ = upper_enthalpy_coefficient(i, j, 2, ρ, ρᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
@@ -831,7 +841,7 @@ end
 
         Δπ = layer_pressure_thickness(i, j, 1, A, B, πˢ)
         M = Δπ * enthalpy_factor(i, j, 1, ρ, ρᵗ, Π, cᵖᵈ, cᵖᵛ)
-        S = heating[i, j, 1] + surface + work
+        S = heating[i, j, 1]
 
         β = M + g * Δt * C⁺ * a⁻
         upper = - g * Δt * C⁺ * a⁺
@@ -865,9 +875,15 @@ end
         for k in Nz-1:-1:1
             θ̃[i, j, k] -= γ[i, j, k+1] * θ̃[i, j, k+1]
         end
+    end
+end
 
-        # The potential temperature of the enthalpy of each layer, at its new pressure and with
-        # its new water
+# The potential temperature of the enthalpy of each layer, at its new pressure and with its new water
+@kernel function _express_enthalpy_as_potential_temperature!(ρθ, grid, θ̃, ρ, ρᵗ, ρqˣ, A, B, πˢ, Π, cᵖᵈ, cᵖᵛ, pˢᵗ, κ, g)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    @inbounds begin
         ΣW = zero(grid)
         p⁺ = interface_pressure(i, j, Nz+1, A, B, πˢ)
         Πᶠ⁺ = (p⁺ / pˢᵗ)^κ
@@ -905,21 +921,42 @@ function launch_energy_mixing!(mixing, model, Δt)
     water = hydrostatic_water_fields(model.microphysics, model.microphysical_fields)
     κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
 
+    ledger = mixing.ledger
+    conversions = (shear_production = ledger.shear_production,
+                   buoyancy_source = ledger.buoyancy_source,
+                   turbulent_kinetic_energy_sinks = ledger.turbulent_kinetic_energy_sinks,
+                   water_kinetic_energy = ledger.water_kinetic_energy)
+
     launch!(arch, grid, :xy, _step_turbulent_kinetic_energy!,
             model.tracers[TKE_NAME], scratch.specific_turbulent_kinetic_energy, scratch.implicit_mass, γ,
-            scratch.heating, mixing.ledger, grid, scratch.total_density, moisture.total_density, C.energy, C.momentum,
+            scratch.heating, conversions, grid, scratch.total_density, moisture.total_density, C.energy, C.momentum,
             closure_fields.Lᵉ, closure_fields.Kᶜ, closure_fields.N², u, v, scratch.x_velocity, scratch.y_velocity,
             scratch.kinetic_energy, Δt)
 
-    launch!(arch, grid, :xy, _mix_enthalpy!,
-            model.formulation.potential_temperature_density, scratch.potential_temperature, γ, mixing.ledger, grid,
-            dynamics.density, moisture.total_density, scratch.total_density, water.ρqʳ, water_densities(model),
-            dynamics.pressure_coefficient, dynamics.surface_pressure_coefficient, dynamics.surface_pressure,
-            dynamics.surface_geopotential, model.formulation.potential_temperature,
-            moisture.density_potential_temperature, dynamics.exner_function, dynamics.interface_exner_function,
-            model.temperature, C.scalar, scratch.heating, fluxes.sensible_heat_flux, scratch.vapor_exchange,
-            fluxes.surface_temperature, scratch.x_velocity, scratch.y_velocity, fluxes.x_stress, fluxes.y_stress,
-            constants, dynamics.standard_pressure, κ, constants.gravitational_acceleration, Δt)
+    ρ = dynamics.density
+    ρᵗ = moisture.total_density
+    A = dynamics.pressure_coefficient
+    B = dynamics.surface_pressure_coefficient
+    πˢ = dynamics.surface_pressure
+    Π = dynamics.exner_function
+    θ̃ = scratch.potential_temperature
+    g = constants.gravitational_acceleration
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+
+    launch!(arch, grid, :xy, _add_surface_energy_sources!,
+            scratch.heating, ledger.surface_energy, ledger.surface_stress_work, grid, scratch.total_density,
+            dynamics.surface_geopotential, fluxes.sensible_heat_flux, scratch.vapor_exchange, fluxes.surface_temperature,
+            scratch.x_velocity, scratch.y_velocity, fluxes.x_stress, fluxes.y_stress, cᵖᵛ, Δt)
+
+    launch!(arch, grid, :xy, _solve_enthalpy!,
+            θ̃, γ, grid, ρ, ρᵗ, water.ρqʳ, A, B, πˢ, model.formulation.potential_temperature,
+            moisture.density_potential_temperature, Π, dynamics.interface_exner_function, model.temperature,
+            C.scalar, scratch.heating, constants, g, Δt)
+
+    launch!(arch, grid, :xy, _express_enthalpy_as_potential_temperature!,
+            model.formulation.potential_temperature_density, grid, θ̃, ρ, ρᵗ, water_densities(model), A, B, πˢ, Π,
+            cᵖᵈ, cᵖᵛ, dynamics.standard_pressure, κ, g)
 
     return nothing
 end
