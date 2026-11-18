@@ -119,6 +119,12 @@ end
 θᵢ(x, y, z) = 300 + z / 1000 + sin(2π * x / 1000) * cos(2π * y / 1000) * exp(-z / 500) / 10
 uᵢ(x, y, z) = cos(2π * x / 1000) * sin(π * z / 1000)
 
+# Each time stepper compiles its own stages for each float type and each rounding. The multirate
+# infinitesimal step, the default of compressible dynamics, takes the slow heating below in both
+# roundings and both float types, so the bitwise checks run it only in the exhaustive tests.
+const compressible_timesteppers = (compressible = :AcousticRungeKutta3, multirate_compressible = :MultirateInfinitesimalStep)
+const rounded_dynamics = exhaustive_tests() ? (:anelastic, :compressible, :multirate_compressible) : (:anelastic, :compressible)
+
 function rounding_test_model(FT, dynamics_kind; rounding = nothing, forcing = NamedTuple())
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 6), halo=(3, 3, 3),
@@ -132,7 +138,8 @@ function rounding_test_model(FT, dynamics_kind; rounding = nothing, forcing = Na
     else
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; advection=WENO(order=5), dynamics, tracers=:c, forcing, timestepper_kwargs)
+        timestepper = compressible_timesteppers[dynamics_kind]
+        model = AtmosphereModel(grid; advection=WENO(order=5), dynamics, tracers=:c, forcing, timestepper, timestepper_kwargs)
         set!(model; ρ=model.dynamics.reference_state.density, θ=θᵢ, u=uᵢ, qᵗ=1e-3, c=1)
     end
 
@@ -155,7 +162,7 @@ bitwise_equal(a, b) = all(map((x, y) -> isequal(x, y), a, b))
 # tests sharing this worker process keep the default precision.
 default_FT = Oceananigans.defaults.FloatType
 
-@testset "Round-off treatment of $(dynamics_kind) time stepping [$FT]" for dynamics_kind in (:anelastic, :compressible),
+@testset "Round-off treatment of $(dynamics_kind) time stepping [$FT]" for dynamics_kind in rounded_dynamics,
                                                                            FT in (Float32, Float64)
 
     model = rounding_test_model(FT, dynamics_kind)

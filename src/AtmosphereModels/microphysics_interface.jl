@@ -757,6 +757,10 @@ volume. It defaults to all prognostic fields; schemes with prognostic number con
 condensate_field_names(microphysics) = prognostic_field_names(microphysics)
 condensate_field_names(::Nothing) = tuple()
 
+# The densities whose tendencies the pressure of an acoustic substep loop ramps with: the prognostic
+# moisture and the condensate masses. Number concentrations, other moments and tracers are not among them.
+moisture_forcing_names(microphysics) = (moisture_prognostic_name(microphysics), condensate_field_names(microphysics)...)
+
 # Precipitating water is part of the thermodynamic moisture bundle, but does not
 # equilibrate as cloud condensate during a saturated parcel displacement.
 @inline precipitating_mass_fraction(i, j, k, microphysics, microphysical_fields) = 0

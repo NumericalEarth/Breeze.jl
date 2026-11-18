@@ -49,19 +49,8 @@ export
     GaussianRamp,
     ExplicitTimeStepping,
     prepare_acoustic_cache!,
-    StageEntryForceRemainder,
-    stage_entry_force_remainder,
-    step_start_force_state,
-    store_step_start_force_state!,
-    compute_pressure_remainder!,
     freeze_linearization_state!,
     acoustic_substep_loop!,
-    horizontal_substep_form,
-    start_state_residual,
-    recovered_state_residual,
-    with_residual,
-    ForwardBackwardSubsteps,
-    SymmetricSubsteps,
     compute_transport_density_tendency!
 
 using DocStringExtensions: TYPEDEF

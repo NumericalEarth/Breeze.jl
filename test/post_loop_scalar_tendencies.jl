@@ -14,7 +14,7 @@ using Breeze.AtmosphereModels: specific_prognostic_moisture, total_density, tran
 using Breeze.TimeSteppers: PreLoopScalarTendencies, PostLoopScalarTendencies, scalar_prognostic_names,
                            fast_tendency_scratch
 using Oceananigans
-using Oceananigans: TendencyCallsite, fields
+using Oceananigans: TendencyCallsite, fields, prognostic_fields
 using Statistics: mean
 using Test
 
@@ -45,6 +45,11 @@ function tracer_uniformity_error(model)
 end
 
 const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep, :TVDMISB))
+
+# The sweeps over the recombining coefficient sets, which repeat every integration with a time
+# stepper of its own, run the default set, and the others in the exhaustive tests
+# (BREEZE_TEST_EXHAUSTIVE, set on one CI runner).
+const swept_coefficients = test_sweep((:SSPMIS43, :TVDMISB, :MIS4a))
 
 @testset "Post-loop scalar tendencies keep a uniform mass fraction uniform [$timestepper, $coefficients]" for (timestepper, coefficients) in steppers
     Δt = 10
@@ -124,7 +129,7 @@ function advected_blob_growth(; coefficients, advection, Δt, post_loop_scalar_t
 end
 
 @testset "Post-loop MIS advection does not amplify a passive scalar [$coefficients, Courant number $courant]" for
-        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a), courant in (0.5, 1.0)
+        coefficients in swept_coefficients, courant in (0.5, 1.0)
     for advection in (WENO(order = 5), WENO(order = 5, bounds = (0, 1)))
         growth = advected_blob_growth(; coefficients, advection, Δt = courant * 200 / 20)
         @test growth ≤ 1 + 1e-3
@@ -172,7 +177,7 @@ function accelerating_bubble_tracer(; coefficients, Δt, stop_time = 16, substep
 end
 
 @testset "Post-loop MIS tracers are second-order accurate in an accelerating flow [$coefficients]" for
-        coefficients in (:SSPMIS43, :TVDMISB, :MIS4a)
+        coefficients in swept_coefficients
     c = map(Δt -> accelerating_bubble_tracer(; coefficients, Δt), (2, 1, 1/2))
     differences = (maximum(abs, c[1] .- c[2]), maximum(abs, c[2] .- c[3]))
     @test all(isfinite, differences)
@@ -252,10 +257,12 @@ end
 
     ts = model.timestepper
     names = scalar_prognostic_names(model)
+    # Only the moisture and condensate densities keep a field: the loop's pressure reads no other tendency.
     @test ts.fast_tendency isa NamedTuple
-    @test all(name -> haskey(ts.fast_tendency, name), names)
+    @test keys(ts.fast_tendency) == (:ρqᵛ,)
+    @test fast_tendency_scratch(ts, :ρc) === ts.substepper.stage_end_moisture_content
     pre_loop = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep,
-                               timestepper_kwargs = (; post_loop_scalar_tendencies = false)).timestepper
+                               timestepper_kwargs = (; coefficients = :SSPMIS43, post_loop_scalar_tendencies = false)).timestepper
     @test pre_loop.fast_tendency isa Field
 
     tracer_density_to_specific!(model)
@@ -266,17 +273,60 @@ end
     for name in names
         fill!(parent(ts.Gⁿ[name]), 0)
     end
-    compute_scalar_tendencies!(model, fields(model), velocities, SplitScalarTendencies(ts.fast_tendency))
+    advective_tendencies = NamedTuple{names}(map(name -> CenterField(grid), names))
+    compute_scalar_tendencies!(model, fields(model), velocities, SplitScalarTendencies(advective_tendencies))
     tracer_specific_to_density!(model)
 
     for name in names
         slow = Array(interior(ts.Gⁿ[name]))
-        fast = Array(interior(fast_tendency_scratch(ts, name)))
+        fast = Array(interior(advective_tendencies[name]))
         scale = maximum(abs, full[name])
         @test scale > 0
         @test maximum(abs, fast) > 0
         @test maximum(abs, slow) > 0
         @test maximum(abs, slow .+ fast .- full[name]) < 1e-13 * scale
+    end
+end
+
+@testset "Scalars without a tendency field of their own take the same step [$coefficients]" for
+        coefficients in test_sweep((:TVDMISB, :SSPMIS43))
+    # The loop's pressure reads the tendencies of the moisture and condensate densities alone, so
+    # only those keep a field between stages. The other scalars build their advective tendency in
+    # shared scratch just before they are assembled. A time stepper that is not told which
+    # densities those are (`moisture_forcing_names = nothing`) keeps a field for every scalar and
+    # builds every advective tendency at once: the step must be the same, bit for bit, with a
+    # closure, a forcing, a flux boundary condition and the mass-flux correction of the later stages.
+    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-20e3, 20e3), z = (0, 8e3),
+                           topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    ρc_forcing = Forcing((x, z, t) -> 1e-6 * exp(-(x / 5e3)^2))
+    ρc_boundary_conditions = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1e-5))
+
+    function stepped_model(timestepper_kwargs)
+        model = AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
+                                closure = ScalarDiffusivity(ν = 10, κ = 10), forcing = (; ρc = ρc_forcing),
+                                boundary_conditions = (; ρc = ρc_boundary_conditions),
+                                timestepper = :MultirateInfinitesimalStep,
+                                timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies = true, timestepper_kwargs...))
+        set!(model; θ = θ_bubble, qᵛ = (x, z) -> q₀ * exp(-((x / 4e3)^2 + (z / 2e3)^2)),
+             ρ = HydrostaticallyBalancedDensity(), u = 5)
+        set!(model.tracers.ρc, (x, z) -> c₀ * exp(-((x / 3e3)^2 + ((z - 2e3) / 2e3)^2)))
+        parent(model.tracers.ρc) .*= parent(total_density(model.dynamics))
+        for _ in 1:3
+            time_step!(model, 1)
+        end
+        return model
+    end
+
+    shared = stepped_model(NamedTuple())
+    separate = stepped_model((; moisture_forcing_names = nothing))
+
+    @test keys(shared.timestepper.fast_tendency) == (:ρqᵛ,)
+    @test keys(separate.timestepper.fast_tendency) == (:ρθ, :ρqᵛ, :ρc)
+    @test maximum(abs, interior(shared.tracers.ρc)) > 0
+
+    for (u, v) in zip(prognostic_fields(shared), prognostic_fields(separate))
+        @test Array(interior(u)) == Array(interior(v))
     end
 end
 
@@ -352,7 +402,8 @@ end
         @test minimum(folded.ρqʳ) ≥ 0
         for name in keys(folded)
             scale = maximum(abs, stored[name])
-            @test maximum(abs, folded[name] .- stored[name]) ≤ 100 * eps(scale)
+            # The two paths differ in round-off alone; GPUs fuse multiply-adds differently.
+            @test maximum(abs, folded[name] .- stored[name]) ≤ 400 * eps(scale)
         end
     end
 end

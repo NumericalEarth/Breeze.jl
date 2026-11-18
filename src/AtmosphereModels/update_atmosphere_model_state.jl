@@ -545,13 +545,22 @@ end
 launch_scalar_tendency!(kernel, arch, grid, name, Gc, args) = launch!(arch, grid, :xyz, kernel, Gc, grid, args)
 
 # Adds the non-advective part of each scalar's tendency to `Gⁿ` and assigns the advective part to
-# `advective_tendencies[name]`, each evaluated once.
+# `advective_tendencies[name]`, each evaluated once. A scalar with no entry there gets the
+# non-advective part alone: whoever builds with the split evaluates its advective part later.
 struct SplitScalarTendencies{C}
     advective_tendencies :: C
 end
 
+advective_tendency_storage(split::SplitScalarTendencies, name) = get(split.advective_tendencies, name, nothing)
+
 launch_scalar_tendency!(split::SplitScalarTendencies, arch, grid, name, Gc, args) =
-    launch!(arch, grid, :xyz, add_split_scalar_tendency!, Gc, split.advective_tendencies[name], grid, args)
+    launch_split_scalar_tendency!(advective_tendency_storage(split, name), arch, grid, Gc, args)
+
+launch_split_scalar_tendency!(C, arch, grid, Gc, args) =
+    launch!(arch, grid, :xyz, add_split_scalar_tendency!, Gc, C, grid, args)
+
+launch_split_scalar_tendency!(::Nothing, arch, grid, Gc, args) =
+    launch!(arch, grid, :xyz, add_nonadvective_scalar_tendency!, Gc, grid, args)
 
 @kernel function add_split_scalar_tendency!(Gc, C, grid, args)
     i, j, k = @index(Global, NTuple)
@@ -559,6 +568,11 @@ launch_scalar_tendency!(split::SplitScalarTendencies, arch, grid, name, Gc, args
         C[i, j, k] = scalar_advective_tendency(i, j, k, grid, args...)
         Gc[i, j, k] += nonadvective_scalar_tendency(i, j, k, grid, args...)
     end
+end
+
+@kernel function add_nonadvective_scalar_tendency!(Gc, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gc[i, j, k] += nonadvective_scalar_tendency(i, j, k, grid, args...)
 end
 
 # Note: compute_static_energy_tendency! and compute_potential_temperature_tendency!

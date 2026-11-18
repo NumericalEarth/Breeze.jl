@@ -8,8 +8,7 @@ using Oceananigans.Utils: launch!, KernelParameters
 
 using Breeze.AtmosphereModels:
     AtmosphereModel,
-    moisture_prognostic_name,
-    condensate_field_names,
+    moisture_forcing_names,
     advecting_vertical_velocity,
     continuity_density,
     StageEndDensity,
@@ -243,29 +242,35 @@ scalar_tendency_timing(post_loop_scalar_tendencies::Bool) =
     post_loop_scalar_tendencies ? PostLoopScalarTendencies() : PreLoopScalarTendencies()
 
 # With fields for the tendencies of the stage before (`previous_tendency_storage`).
-scalar_tendency_timing(post_loop_scalar_tendencies::Bool, grid, prognostic_fields, dynamics) =
-    post_loop_scalar_tendencies ? PostLoopScalarTendencies(previous_tendency_storage(grid, prognostic_fields, dynamics)) :
-                                  PreLoopScalarTendencies()
+scalar_tendency_timing(post_loop_scalar_tendencies::Bool, grid, prognostic_fields, dynamics, moisture_forcing_names) =
+    post_loop_scalar_tendencies ?
+        PostLoopScalarTendencies(previous_tendency_storage(grid, prognostic_fields, dynamics, moisture_forcing_names)) :
+        PreLoopScalarTendencies()
 
-# One field per prognostic that the acoustic loop does not advance by continuity or momentum. The
-# moisture and condensate densities are not told apart from the others here, where only the
-# dynamics is known, so every one of them gets a field, and only theirs are written.
-function previous_tendency_storage(grid, prognostic_fields, dynamics)
-    excluded = (keys(dynamics_prognostic_fields(dynamics))..., :ρu, :ρv, :ρw)
-    names = filter(name -> name ∉ excluded, keys(prognostic_fields))
+# One field per moisture and condensate density, the prognostics whose tendencies the loop's
+# pressure ramps with (`moisture_forcing_names`).
+function previous_tendency_storage(grid, prognostic_fields, dynamics, moisture_forcing_names)
+    names = previous_tendency_names(prognostic_fields, dynamics, moisture_forcing_names)
     return NamedTuple{names}(ntuple(_ -> CenterField(grid), length(names)))
 end
 
-# The densities whose tendencies the loop's pressure ramps with.
-moisture_forcing_names(model) = (moisture_prognostic_name(model.microphysics),
-                                 condensate_field_names(model.microphysics)...)
+previous_tendency_names(prognostic_fields, dynamics, moisture_forcing_names) =
+    filter(name -> name ∈ moisture_forcing_names, keys(prognostic_fields))
+
+# A time stepper built without the model (`moisture_forcing_names = nothing`) cannot tell the
+# moisture and condensate densities from the other scalars: every prognostic that the acoustic loop
+# does not advance by continuity or momentum gets a field, and only theirs are written.
+function previous_tendency_names(prognostic_fields, dynamics, ::Nothing)
+    excluded = (keys(dynamics_prognostic_fields(dynamics))..., :ρu, :ρv, :ρw)
+    return filter(name -> name ∉ excluded, keys(prognostic_fields))
+end
 
 # Keep the tendencies just built for the next stage's loop.
 keep_previous_scalar_tendencies!(::Nothing, model) = nothing
 
 function keep_previous_scalar_tendencies!(previous_tendencies, model)
     Gⁿ = model.timestepper.Gⁿ
-    for name in moisture_forcing_names(model)
+    for name in moisture_forcing_names(model.microphysics)
         copyto!(parent(previous_tendencies[name]), parent(Gⁿ[name]))
     end
     return nothing
@@ -305,7 +310,9 @@ end
 
 # Build the scalar tendencies with the loop's time-averaged transport velocity, fire the
 # `TendencyCallsite` callbacks again, keep what the next stage's loop needs of them, freeze the
-# transport velocity and assemble the stage forcing.
+# transport velocity and assemble the stage forcing. A time stepper that left part of a scalar's
+# tendency out of the build adds it while the tracers still hold their specific values
+# (`complete_post_loop_scalar_tendencies!`).
 compute_post_loop_scalar_tendencies!(::PreLoopScalarTendencies, model, Δt, callbacks) = nothing
 
 function compute_post_loop_scalar_tendencies!(timing::PostLoopScalarTendencies, model, Δt, callbacks)
@@ -320,6 +327,7 @@ function compute_post_loop_scalar_tendencies!(timing::PostLoopScalarTendencies, 
 
     keep_previous_scalar_tendencies!(timing.previous_tendencies, model)
     cache_post_loop_transport!(model)
+    complete_post_loop_scalar_tendencies!(model.timestepper, model, Δt)
     # The assembly may read the prognostic fields (see `StateIncrement`), so the tracers are densities again.
     tracer_specific_to_density!(model)
     assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
@@ -328,6 +336,9 @@ end
 
 # What a time stepper needs in hand before the post-loop build. Nothing by default.
 prepare_post_loop_scalar_tendencies!(timestepper, model) = nothing
+
+# What a time stepper's post-loop build left for after the sources and the callbacks. Nothing by default.
+complete_post_loop_scalar_tendencies!(timestepper, model, Δt) = nothing
 
 # The kernel of the post-loop build. By default the full tendency is added to what `Gⁿ` holds.
 post_loop_scalar_tendency_kernel(timestepper, model) = add_scalar_tendency!

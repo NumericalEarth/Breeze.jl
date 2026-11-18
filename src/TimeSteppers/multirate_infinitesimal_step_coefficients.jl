@@ -149,8 +149,9 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Return the [`MultirateInfinitesimalStepTableau`](@ref) named `name` in float type `FT`.
 Available:
 
+- `:ConvexLinearMIS6`: the default of [`MultirateInfinitesimalStep`](@ref); see below.
 - `:SSPMIS43`: four stages, second order with the fast and slow parts coupled, with a
-  strong-stability-preserving slow method. The default of [`MultirateInfinitesimalStep`](@ref).
+  strong-stability-preserving slow method.
 - `:MIS4a`: four stages, third order.
 - `:DiagonalMIS42`, `:DiagonalMIS52`: four and five stages, second order, with convex stage start states, non-negative
   slow-tendency weights and a diagonal `β`: no slow tendency of an earlier stage is recombined (experimental).
@@ -158,7 +159,8 @@ Available:
   the preceding stage's increment alone (experimental).
 - `:ConvexLinearMIS3`, `:ConvexLinearMIS4`, `:ConvexLinearMIS5`, `:ConvexLinearMIS6`: three to six stages, second
   order, with the structure of `:LowStorageMIS52` and stage states that are convex combinations of the outer-step-start
-  state and one forward-Euler step from the preceding stage, for transport with a flux limiter (experimental).
+  state and one forward-Euler step from the preceding stage, for transport with a flux limiter. `:ConvexLinearMIS6`
+  is stable at the largest time step.
 - `:TVDMISB`: three stages, second order.
 - `:WickerSkamarock3`: the diagonal tableau ``β = \text{diag}(1/3, 1/2, 1)``, ``α = γ = 0``, which
   reproduces [`AcousticRungeKutta3`](@ref) when the linearization is refreshed every stage
