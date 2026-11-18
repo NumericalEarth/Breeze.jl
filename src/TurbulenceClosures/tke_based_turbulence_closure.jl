@@ -832,8 +832,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
             closure_fields.N², grid, closure, tracers, buoyancy)
 
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²;
-                           parameters)
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²; parameters)
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers)
