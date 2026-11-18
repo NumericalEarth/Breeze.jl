@@ -70,6 +70,12 @@ const MixingLengthBlending = Union{HardMinimum, HarmonicBlend}
 component_scalar_names(::MixingLengthBlending, name) = ()
 @inline rebuild_component(blending::MixingLengthBlending, scalars, n) = blending, n
 
+# A `Val` field is a structural choice (such as `ScalarVarianceTransport`'s `component_third_moment`), not a coefficient
+@inline map_scalars(f, choice::Val) = choice
+@inline component_scalars(::Val) = ()
+component_scalar_names(::Val, name) = ()
+@inline rebuild_component(choice::Val, scalars, n) = choice, n
+
 # The coefficients of the stability functions of the turbulent Richardson number are its fourteen
 # values; the cached logarithms are rebuilt from them
 const TRSF = TurbulentRichardsonStabilityFunction
