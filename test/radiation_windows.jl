@@ -4,7 +4,7 @@ using Breeze.AtmosphereModels: radiation_interval, radiation_update_due, radiati
 using Breeze.TimeSteppers: SSPRungeKutta3, AcousticRungeKutta3
 using Dates: DateTime, Millisecond, Second
 using Oceananigans: Oceananigans, Clock, IterationInterval, TimeInterval, prognostic_state
-using Oceananigans.Utils: SpecifiedTimes, time_difference_seconds
+using Oceananigans.Utils: SpecifiedTimes, time_difference_in_seconds
 using Test
 
 advance_window_time(time::Number, seconds) = time + seconds
@@ -49,7 +49,7 @@ end
         function test_window(schedule)
             duration = radiation_interval(schedule, clock, lead, timestepper)
             next_start = next_radiation_step_start(schedule, clock, step_start, first_stage, Δt)
-            @test duration ≈ time_difference_seconds(next_start, window_start) rtol=8eps(FT)
+            @test duration ≈ time_difference_in_seconds(next_start, window_start) rtol=8eps(FT)
         end
 
         # Include exact first-stage boundaries for both steppers, where rounding up must

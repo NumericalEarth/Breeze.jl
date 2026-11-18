@@ -64,7 +64,7 @@ function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::
     # each calendar day separately, including intervals crossing the date or year boundary.
     while remaining > 0
         midnight = DateTime(Date(datetime) + Day(1))
-        duration = min(remaining, time_difference_seconds(midnight, datetime))
+        duration = min(remaining, time_difference_in_seconds(midnight, datetime))
         declination = solar_declination(day_of_year(datetime))
         first_angle = hour_angle(datetime, 0)
         launch!(architecture(grid), grid, :xy, _integrate_apparent_zenith!,

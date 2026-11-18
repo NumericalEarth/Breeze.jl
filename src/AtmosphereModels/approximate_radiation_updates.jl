@@ -9,7 +9,7 @@
 ##### shortwave transmittance.
 #####
 
-using Oceananigans.Utils: IterationInterval, TimeInterval, SpecifiedTimes, next_actuation_time, time_difference_seconds
+using Oceananigans.Utils: IterationInterval, TimeInterval, SpecifiedTimes, next_actuation_time, time_difference_in_seconds
 
 """
 $(TYPEDEF)
@@ -59,7 +59,7 @@ struct ApproximateRadiationUpdates{F, C}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The [`ApproximateRadiationUpdates`](@ref) of a radiative transfer model on `grid` solved on
 `schedule`, or `nothing` when the model solves every iteration, and so has no steps between solves.
@@ -88,7 +88,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The time in seconds by which the radiation window of a solve at `clock` begins before `clock`: the
 first stage of the time step at the first state update of a step (`clock.stage == 2`), so that the
@@ -129,7 +129,7 @@ end
 awaiting_first_stage(clock) = clock.stage == 1 && clock.iteration > 0
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The length in seconds of the radiation window of a solve at `clock` on `schedule`, which begins
 `lead` seconds before `clock` and ends at the start of the time step that solves next. Zero when
@@ -145,7 +145,7 @@ next actuating iteration. Neither calculation advances the schedule.
 function radiation_interval(schedule::Union{TimeInterval, SpecifiedTimes}, clock, lead, timestepper=nothing)
     t★ = next_actuation_time(schedule)
     (t★ === Inf || t★ <= clock.time) && return zero(lead) # a schedule counting from before the clock actuates at the next step
-    remaining = time_difference_seconds(t★, clock.time)
+    remaining = time_difference_in_seconds(t★, clock.time)
     offsets = radiation_step_offsets(timestepper, clock, lead)
     isnothing(offsets) && return finite_radiation_interval(remaining + lead)
     first_stage_offset, current_offset = offsets
@@ -177,7 +177,7 @@ radiation_interval(schedule, clock, lead, timestepper=nothing) = zero(lead)
 finite_radiation_interval(interval) = ifelse(isfinite(interval), max(0, interval), zero(interval))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fill the per-column `cos_zenith` with the cosine of the solar zenith angle with which `rtm` solves
 at the time of `model.clock`: its mean over the sunlit part of the radiation window when `rtm`
@@ -210,7 +210,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether a solve of `rtm` also computes the response of its longwave fluxes to the surface temperature:
 only when `rtm` updates its fluxes between solves and its surface temperature can change.
@@ -219,7 +219,7 @@ solves_longwave_response(rtm) = !isnothing(rtm.approximate_updates) &&
                                 !(rtm.surface_radiation.surface_temperature isa ConstantField)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The range `(Tmin, Tmax)` into which the solver of `rtm` clamps the surface temperature, or
 `nothing` when it evaluates any surface temperature.
@@ -244,7 +244,7 @@ const surface_temperature_increment = 1
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Complete a solve of `rtm` and compute its flux divergence. When `rtm` updates its fluxes between
 solves, record the fluxes and surface temperature of the solve. Turn the fluxes of the second
@@ -300,7 +300,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the fluxes of `radiation` for the current surface temperature and sun, between two solves,
 and recompute its flux divergence; solve again instead when sunlight arrives that the last solve

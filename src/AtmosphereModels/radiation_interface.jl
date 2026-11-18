@@ -129,7 +129,7 @@ function set_radiation_cache_validity!(valid::AbstractArray, value)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve the radiative transfer equations of `rtm` for the current state of `model`, which every
 backend shares: set the cosine of the solar zenith angle of the solve in the backend's
@@ -146,7 +146,7 @@ function _update_radiation!(rtm::RadiativeTransferModel, model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The per-column cosine of the solar zenith angle that the solver of `rtm` reads, implemented by
 each radiation backend.
@@ -154,7 +154,7 @@ each radiation backend.
 function solver_cos_zenith end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve the longwave and shortwave fluxes of `rtm` for the current state of `model` into its four
 flux fields, and, when [`solves_longwave_response`](@ref), the longwave fluxes at the perturbed

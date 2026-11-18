@@ -279,7 +279,7 @@ function AtmosphereModels.solve_radiative_transfer!(rtm::GrayRadiativeTransferMo
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Solve the longwave fluxes again at the perturbed surface temperature, into the longwave responses
 of `rtm.approximate_updates`. Gray optics is one batch of all the columns.
