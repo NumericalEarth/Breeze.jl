@@ -48,7 +48,7 @@ using Oceananigans.Operators:
     Axᶠᶜᶜ, Ayᶜᶠᶜ, V⁻¹ᶜᶜᶜ
 
 using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow, needs_implicit_solver
+using Oceananigans.BoundaryConditions: fill_halo_regions!, BoundaryCondition, NormalFlow, needs_implicit_solver, PolarValue
 
 using Oceananigans.Architectures: CPU, GPU
 using Oceananigans.MultiRegion: MultiRegionGrids
@@ -2627,6 +2627,12 @@ left_side_is_closed(T) = false
 left_side_is_closed(::Type{<:TwoSided{Closed}}) = true
 right_side_is_closed(T) = false
 right_side_is_closed(::Type{<:TwoSided{<:Any, Closed}}) = true
+
+# The y-face at a pole of a latitude-longitude grid has zero width, so no mass crosses it. Oceananigans gives the
+# wall-normal momentum a `PolarValue` normal-flow condition there, which is not the plain impenetrable one: without
+# this method the momentum perturbation on the pole face is never pinned in the substeps, and takes tendencies
+# computed with the metrics of a face of zero area.
+@inline is_impenetrable_wall(::BoundaryCondition{<:NormalFlow, <:PolarValue}) = true
 
 function enforce_wall_impenetrability!(substepper, model, grid, arch)
     TX, TY, _ = topology(grid)
