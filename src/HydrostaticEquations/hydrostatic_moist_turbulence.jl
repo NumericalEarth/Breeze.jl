@@ -33,13 +33,12 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, Field
 using Oceananigans.BoundaryConditions: fill_halo_regions!, getbc, Bottom
 using Oceananigans.Grids: AbstractGrid, topology
-using Oceananigans.MultiRegion: MultiRegion
-using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ
+using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, Azᶜᶜᶜ, Azᶠᶜᶜ, Azᶜᶠᶜ, ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: TurbulenceClosures as OceanTurbulenceClosures,
                                        VerticallyImplicitTimeDiscretization, build_closure_fields
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: ℑbzᵃᵃᶜ
-using Oceananigans.Utils: KernelParameters, launch!
+using Oceananigans.Utils: KernelParameters, launch!, @apply_regionally
 
 using Breeze.AtmosphereModels: AtmosphereModelBuoyancy, specific_prognostic_moisture, dynamics_thermodynamic_fields
 using Breeze.BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions
@@ -49,9 +48,10 @@ using Breeze.HydrostaticEquations: MoistHydrostaticModel, hydrostatic_water_fiel
                                    layer_mass_per_area, diffuse_column!, face_conductance, _diffuse_velocity!
 using Breeze.Thermodynamics: dry_air_gas_constant, absolute_zero_latent_heat
 using Breeze.TurbulenceClosures: TKEBasedTurbulenceClosure, TKE_NAME, buoyancy_productionᶜᶜᶠ,
+                                 clip_negative_halo_diffusivities!,
                                  _compute_tke_static_stability!, _compute_mixing_length!,
                                  _compute_tke_closure_fields!, _compute_tke_implicit_linear_coefficient!
-using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, @regional
 
 using DocStringExtensions: TYPEDEF
 
@@ -70,7 +70,8 @@ grid, differentiate and integrate in height. The horizontal operators and the ma
 of the underlying grid.
 
 The three fields are diagnosed from the state by `compute_physical_heights!` and are valid for
-that state only.
+that state only. The grid is built where a kernel is launched, from the grid of a region and the
+fields of that region.
 """
 struct PhysicalHeightGrid{FT, TX, TY, TZ, Arch, G, C, F} <: AbstractGrid{FT, TX, TY, TZ, Arch, Nothing}
     architecture :: Arch
@@ -93,7 +94,12 @@ struct PhysicalHeightGrid{FT, TX, TY, TZ, Arch, G, C, F} <: AbstractGrid{FT, TX,
     end
 end
 
-PhysicalHeightGrid(grid) = PhysicalHeightGrid(grid.architecture, grid, CenterField(grid), ZFaceField(grid), ZFaceField(grid))
+PhysicalHeightGrid(grid, heights) =
+    PhysicalHeightGrid(grid.architecture, grid, heights.layer_depth, heights.interface_spacing, heights.interface_height)
+
+height_fields(grid) = (layer_depth = CenterField(grid),          # depth of the layers, m
+                       interface_spacing = ZFaceField(grid),     # height between two layers, m
+                       interface_height = ZFaceField(grid))      # height of the z-faces above the ground, m
 
 Adapt.adapt_structure(to, grid::PhysicalHeightGrid) =
     PhysicalHeightGrid(nothing, adapt(to, grid.underlying_grid), adapt(to, grid.layer_depth),
@@ -153,22 +159,34 @@ end
     end
 end
 
-function compute_physical_heights!(physical_grid::PhysicalHeightGrid, model)
-    grid = model.grid
-    dynamics = model.dynamics
-    constants = model.thermodynamic_constants
-
+function launch_physical_heights!(heights, grid, dynamics, constants)
     launch!(grid.architecture, grid, :xy, _compute_physical_heights!,
-            physical_grid.layer_depth, physical_grid.interface_spacing, physical_grid.interface_height, grid,
+            heights.layer_depth, heights.interface_spacing, heights.interface_height, grid,
             dynamics.moisture.density_potential_temperature, dynamics.exner_function,
             dynamics.interface_exner_function, constants.dry_air.heat_capacity, constants.gravitational_acceleration)
-
-    fill_halo_regions!(physical_grid.layer_depth)
-    fill_halo_regions!(physical_grid.interface_spacing)
-    fill_halo_regions!(physical_grid.interface_height)
-
     return nothing
 end
+
+function compute_physical_heights!(heights, model)
+    @apply_regionally launch_physical_heights!(heights, model.grid, model.dynamics, model.thermodynamic_constants)
+    fill_halo_regions!(heights.layer_depth)
+    fill_halo_regions!(heights.interface_spacing)
+    fill_halo_regions!(heights.interface_height)
+    return nothing
+end
+
+#####
+##### From velocity points to cell centers
+#####
+
+# The energy of a horizontal area: a quantity per unit area at x-faces (y-faces) is brought to
+# cell centers with the areas of the faces for weights, so that the sum over the cells of Az
+# times the result is the sum over the faces of Az times the quantity. `f` is a kernel function.
+@inline x_face_energy(i, j, k, grid, f, args...) = Azᶠᶜᶜ(i, j, k, grid) * f(i, j, k, grid, args...)
+@inline y_face_energy(i, j, k, grid, f, args...) = Azᶜᶠᶜ(i, j, k, grid) * f(i, j, k, grid, args...)
+
+@inline from_x_faces(i, j, k, grid, f, args...) = ℑxᶜᵃᵃ(i, j, k, grid, x_face_energy, f, args...) / Azᶜᶜᶜ(i, j, k, grid)
+@inline from_y_faces(i, j, k, grid, f, args...) = ℑyᵃᶜᵃ(i, j, k, grid, y_face_energy, f, args...) / Azᶜᶜᶜ(i, j, k, grid)
 
 #####
 ##### Surface fluxes: what a bulk formula hands to the atmosphere
@@ -215,6 +233,8 @@ end
 Adapt.adapt_structure(to, exchange::BulkSurfaceExchange) =
     BulkSurfaceExchange(adapt(to, exchange.x_drag), adapt(to, exchange.y_drag),
                         adapt(to, exchange.sensible_heat), adapt(to, exchange.vapor))
+
+@regional BulkSurfaceExchange
 
 materialize_bulk_condition(::Nothing, location, model, closure) = nothing
 
@@ -311,7 +331,7 @@ end
 
 compute_bulk_surface_fluxes!(fluxes, ::Nothing, model) = nothing
 
-function compute_bulk_surface_fluxes!(fluxes, exchange::BulkSurfaceExchange, model)
+function launch_bulk_surface_fluxes!(fluxes, exchange, model)
     grid = model.grid
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
@@ -321,9 +341,11 @@ function compute_bulk_surface_fluxes!(fluxes, exchange::BulkSurfaceExchange, mod
             dynamics.density, dynamics.moisture.total_density, dynamics.exner_function, model.temperature,
             constants.dry_air.heat_capacity, constants.vapor.heat_capacity)
 
-    fill_halo_regions!(fluxes.x_stress)
-    fill_halo_regions!(fluxes.y_stress)
+    return nothing
+end
 
+function compute_bulk_surface_fluxes!(fluxes, exchange::BulkSurfaceExchange, model)
+    @apply_regionally launch_bulk_surface_fluxes!(fluxes, exchange, model)
     return nothing
 end
 
@@ -334,7 +356,7 @@ end
 struct MoistTurbulentMixing{C, CF, G, F, X, S, L}
     closure :: C           # the `TKEBasedTurbulenceClosure`, as it is
     closure_fields :: CF   # its fields: Kᵘ, Kᶜ, Kᵉ, N², ℓ, Lᵉ, in m² s⁻¹, s⁻², m and s⁻¹
-    physical_grid :: G     # the heights of the column behind the operators of the grid
+    heights :: G           # the heights of the column, for the `PhysicalHeightGrid` of each launch
     surface_fluxes :: F    # stress, sensible heat flux, vapor flux and surface temperature
     surface_exchange :: X  # `BulkSurfaceExchange` that fills them before every step, or nothing
     scratch :: S
@@ -362,14 +384,21 @@ Keyword arguments
 - `surface_exchange`: `nothing` (default), for which the fields of `mixing.surface_fluxes` are
   used as they are (zero unless set), or a [`BulkSurfaceExchange`](@ref) that fills them from
   the state before every step.
+
+On a multi-region grid the kernels are launched in each region, the halos of the velocities and
+of the stress are filled as pairs, and conductances that the interpolation of the halos of a
+`YinYangGrid` makes negative are clipped there, as the closure clips its diffusivities. The
+budgets of water, enthalpy and turbulent kinetic energy are those of each column on any grid.
+The kinetic energy that the mixing removes at velocity points reaches the cell centers with the
+areas of the faces for weights, which closes the energy of a single grid to rounding; across
+the seams of a `YinYangGrid`, where velocity points are interpolated, it does not.
+
+A prescribed stress must vanish on walls, where the velocity normal to the wall is zero.
 """
 function MoistTurbulentMixing(model::MoistHydrostaticModel;
                               closure = TKEBasedTurbulenceClosure(eltype(model.grid)),
                               surface_exchange = nothing)
     grid = model.grid
-
-    grid isa MultiRegion.MultiRegionGrids &&
-        throw(ArgumentError("MoistTurbulentMixing does not support multi-region grids yet."))
 
     size(grid, 3) ≥ 2 || throw(ArgumentError("MoistTurbulentMixing requires at least two layers."))
 
@@ -397,16 +426,14 @@ function MoistTurbulentMixing(model::MoistHydrostaticModel;
                potential_temperature = CenterField(grid),
                x_velocity = XFaceField(grid),
                y_velocity = YFaceField(grid),
-               x_dissipation = XFaceField(grid),
-               y_dissipation = YFaceField(grid),
                vapor_exchange = Field{Center, Center, Nothing}(grid),
-               x_stress_work = Field{Face, Center, Nothing}(grid),
-               y_stress_work = Field{Center, Face, Nothing}(grid),
                conductances = (scalar = ZFaceField(grid), momentum = ZFaceField(grid), energy = ZFaceField(grid)))
 
-    return MoistTurbulentMixing(closure, closure_fields, PhysicalHeightGrid(grid), surface_flux_fields(grid),
+    return MoistTurbulentMixing(closure, closure_fields, height_fields(grid), surface_flux_fields(grid),
                                 surface_exchange, scratch, turbulence_ledger(grid))
 end
+
+@regional MoistTurbulentMixing
 
 Base.summary(mixing::MoistTurbulentMixing) = string("MoistTurbulentMixing(", summary(mixing.closure), ")")
 Base.show(io::IO, mixing::MoistTurbulentMixing) = print(io, summary(mixing))
@@ -424,36 +451,49 @@ Oceananigans.restore_prognostic_state!(mixing::MoistTurbulentMixing, ::Nothing) 
 (mixing::MoistTurbulentMixing)(simulation) =
     moist_turbulent_mixing_step!(mixing, simulation.model, simulation.model.clock.last_Δt)
 
+
 #####
 ##### The closure fields, in the heights of the column
 #####
 
-# e = ρe / ρᵗ, and the kinetic energy of the layer per unit mass at cell centers
+@inline squared(i, j, k, grid, ϕ) = @inbounds ϕ[i, j, k]^2
+
+# e = ρe / ρᵗ, and the kinetic energy of the layer per unit mass at cell centers, with the
+# kinetic energy of the velocity points brought there by the areas of their faces
 @kernel function _compute_specific_energies!(e, 𝒦, grid, ρe, ρᵗ, u, v)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         e[i, j, k] = ρe[i, j, k] / ρᵗ[i, j, k]
-        𝒦[i, j, k] = (ℑxᶜᵃᵃ(i, j, k, grid, squared, u) + ℑyᵃᶜᵃ(i, j, k, grid, squared, v)) / 2
+        𝒦[i, j, k] = (from_x_faces(i, j, k, grid, squared, u) + from_y_faces(i, j, k, grid, squared, v)) / 2
     end
 end
 
-@inline squared(i, j, k, grid, ϕ) = @inbounds ϕ[i, j, k]^2
+function launch_specific_energies!(mixing, model)
+    grid = model.grid
+    u, v, _ = model.velocities
+    launch!(grid.architecture, grid, :xyz, _compute_specific_energies!,
+            mixing.scratch.specific_turbulent_kinetic_energy, mixing.scratch.kinetic_energy, grid,
+            model.tracers[TKE_NAME], model.dynamics.moisture.total_density, u, v)
+    return nothing
+end
 
 # The kernels of the closure, launched as they are with the heights of the column for a grid.
 # The static stability is computed on the faces between two layers; it stays zero on the ground
-# and on the model top, where the closure masks its diffusivities.
-function compute_closure_fields_in_height!(mixing, model)
+# and on the model top, where the closure masks its diffusivities. The conductances follow.
+function launch_closure_fields_in_height!(mixing, model)
     grid = model.grid
     arch = grid.architecture
-    physical_grid = mixing.physical_grid
+    dynamics = model.dynamics
+    moisture = dynamics.moisture
+    constants = model.thermodynamic_constants
+    physical_grid = PhysicalHeightGrid(grid, mixing.heights)
     closure = mixing.closure
     closure_fields = mixing.closure_fields
+    C = mixing.scratch.conductances
     e = mixing.scratch.specific_turbulent_kinetic_energy
     Nx, Ny, Nz = size(grid)
 
-    buoyancy = AtmosphereModelBuoyancy(model.dynamics, model.formulation, model.thermodynamic_constants,
-                                       model.microphysics, model.microphysical_fields)
-
+    buoyancy = AtmosphereModelBuoyancy(dynamics, model.formulation, constants, model.microphysics, model.microphysical_fields)
     tracers = NamedTuple{(TKE_NAME, :T, :qᵛᵉ)}((e, model.temperature, specific_prognostic_moisture(model)))
 
     launch!(arch, grid, KernelParameters(1:Nx, 1:Ny, 2:Nz), _compute_tke_static_stability!,
@@ -467,6 +507,12 @@ function compute_closure_fields_in_height!(mixing, model)
 
     launch!(arch, grid, :xyz, _compute_tke_implicit_linear_coefficient!,
             closure_fields.Lᵉ, physical_grid, closure, closure_fields, model.velocities, tracers)
+
+    launch!(arch, grid, :xy, _compute_moist_conductances!,
+            C.scalar, C.momentum, C.energy, grid, closure_fields.Kᶜ, closure_fields.Kᵘ, closure_fields.Kᵉ,
+            moisture.density_potential_temperature, dynamics.exner_function, dynamics.interface_exner_function,
+            moisture.interface_pressure, dynamics.density, moisture.total_density,
+            dry_air_gas_constant(constants), constants.dry_air.heat_capacity, constants.gravitational_acceleration)
 
     return nothing
 end
@@ -539,28 +585,47 @@ end
     end
 end
 
+function launch_water_mixing!(mixing, model, Δt)
+    grid = model.grid
+    scratch = mixing.scratch
+    launch!(grid.architecture, grid, :xy, _mix_water!,
+            model.moisture_density, scratch.mixing_ratio, scratch.eliminated_diagonal, scratch.total_density,
+            scratch.vapor_exchange, mixing.ledger, grid, model.dynamics.density, scratch.conductances.scalar,
+            mixing.surface_fluxes.vapor_flux, water_densities(model), Δt)
+    return nothing
+end
+
 #####
 ##### Velocities
 #####
 
 # The stress of the ground accelerates the lowest layer, of total mass μ per unit area at the
-# velocity point. `work` is the kinetic energy it removes, μ (uⁿ² - u★²) / 2.
-@kernel function _apply_surface_stress!(velocity, work, grid, ρᵗ, τ, Δt, interpolate)
+# velocity point; `velocity★` is the column of velocities that the diffusion starts from.
+@kernel function _apply_surface_stress!(velocity, velocity★, grid, ρᵗ, τ, Δt, interpolate)
     i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
 
     @inbounds begin
         μ = interpolate(i, j, 1, grid, layer_mass_per_area, ρᵗ)
-        uⁿ = velocity[i, j, 1]
-        u★ = uⁿ + Δt * τ[i, j, 1] / μ
-        work[i, j, 1] = μ * (uⁿ^2 - u★^2) / 2
-        velocity[i, j, 1] = u★
+        velocity[i, j, 1] += Δt * τ[i, j, 1] / μ
+
+        for k in 1:Nz
+            velocity★[i, j, k] = velocity[i, j, k]
+        end
     end
 end
 
-@kernel function _copy_field!(destination, source)
-    i, j, k = @index(Global, NTuple)
-    @inbounds destination[i, j, k] = source[i, j, k]
+# The kinetic energy that the stress removed from the lowest layer, μ (uⁿ² - u★²) / 2 per unit
+# area at the velocity point, with uⁿ = u★ - Δt τ / μ the velocity before it
+@inline function stress_work(i, j, k, grid, u★, τ, ρᵗ, Δt, interpolate)
+    μ = interpolate(i, j, 1, grid, layer_mass_per_area, ρᵗ)
+    u = @inbounds u★[i, j, 1]
+    uⁿ = @inbounds u - Δt * τ[i, j, 1] / μ
+    return μ * (uⁿ^2 - u^2) / 2
 end
+
+@inline x_stress_work(i, j, k, grid, u★, τ, ρᵗ, Δt) = stress_work(i, j, k, grid, u★, τ, ρᵗ, Δt, ℑxᶠᵃᵃ)
+@inline y_stress_work(i, j, k, grid, v★, τ, ρᵗ, Δt) = stress_work(i, j, k, grid, v★, τ, ρᵗ, Δt, ℑyᵃᶠᵃ)
 
 # The kinetic energy that the backward Euler step from u★ to u⁺ removes from the layer `k`, per
 # unit area at the velocity point:
@@ -570,33 +635,46 @@ end
 # half the dissipation C δu² of each of its two faces, at the new velocities, and the
 # dissipation of the time discretization. The sum over the column is the kinetic energy lost,
 # Σ μ (u★² - u⁺²) / 2, because the conductance vanishes on the first and the last face.
-@kernel function _compute_velocity_dissipation!(d, grid, u⁺, u★, ρᵗ, C, Δt, interpolate)
-    i, j, k = @index(Global, NTuple)
+@inline function velocity_dissipation(i, j, k, grid, u⁺, u★, ρᵗ, C, Δt, interpolate)
+    μ = interpolate(i, j, k, grid, layer_mass_per_area, ρᵗ)
+    C⁻ = interpolate(i, j, k, grid, C)
+    C⁺ = interpolate(i, j, k+1, grid, C)
 
     @inbounds begin
-        μ = interpolate(i, j, k, grid, layer_mass_per_area, ρᵗ)
-        C⁻ = interpolate(i, j, k, grid, C)
-        C⁺ = interpolate(i, j, k+1, grid, C)
         δu⁻ = u⁺[i, j, k] - u⁺[i, j, k-1]
         δu⁺ = u⁺[i, j, k+1] - u⁺[i, j, k]
-        d[i, j, k] = Δt * (C⁻ * δu⁻^2 + C⁺ * δu⁺^2) / 2 + μ * (u⁺[i, j, k] - u★[i, j, k])^2 / 2
+        return Δt * (C⁻ * δu⁻^2 + C⁺ * δu⁺^2) / 2 + μ * (u⁺[i, j, k] - u★[i, j, k])^2 / 2
     end
 end
 
-function mix_velocity!(velocity, velocity★, dissipation, work, stress, interpolate, mixing, model, Δt)
+@inline x_velocity_dissipation(i, j, k, grid, u⁺, u★, ρᵗ, C, Δt) = velocity_dissipation(i, j, k, grid, u⁺, u★, ρᵗ, C, Δt, ℑxᶠᵃᵃ)
+@inline y_velocity_dissipation(i, j, k, grid, v⁺, v★, ρᵗ, C, Δt) = velocity_dissipation(i, j, k, grid, v⁺, v★, ρᵗ, C, Δt, ℑyᵃᶠᵃ)
+
+function launch_surface_stress!(mixing, model, Δt)
     grid = model.grid
     arch = grid.architecture
-    ρᵗ⁺ = mixing.scratch.total_density
-    C = mixing.scratch.conductances.momentum
-    γ = mixing.scratch.eliminated_diagonal
+    scratch = mixing.scratch
+    fluxes = mixing.surface_fluxes
+    u, v, _ = model.velocities
+    ρᵗ⁺ = scratch.total_density
 
-    launch!(arch, grid, :xy, _apply_surface_stress!, velocity, work, grid, ρᵗ⁺, stress, Δt, interpolate)
-    launch!(arch, grid, :xyz, _copy_field!, velocity★, velocity)
-    launch!(arch, grid, :xy, _diffuse_velocity!, velocity, γ, grid, ρᵗ⁺, C, Δt, interpolate)
-    launch!(arch, grid, :xyz, _compute_velocity_dissipation!, dissipation, grid, velocity, velocity★, ρᵗ⁺, C, Δt, interpolate)
+    launch!(arch, grid, :xy, _apply_surface_stress!, u, scratch.x_velocity, grid, ρᵗ⁺, fluxes.x_stress, Δt, ℑxᶠᵃᵃ)
+    launch!(arch, grid, :xy, _apply_surface_stress!, v, scratch.y_velocity, grid, ρᵗ⁺, fluxes.y_stress, Δt, ℑyᵃᶠᵃ)
 
-    fill_halo_regions!(dissipation)
-    fill_halo_regions!(work)
+    return nothing
+end
+
+function launch_velocity_mixing!(mixing, model, Δt)
+    grid = model.grid
+    arch = grid.architecture
+    scratch = mixing.scratch
+    u, v, _ = model.velocities
+    ρᵗ⁺ = scratch.total_density
+    C = scratch.conductances.momentum
+    γ = scratch.eliminated_diagonal
+
+    launch!(arch, grid, :xy, _diffuse_velocity!, u, γ, grid, ρᵗ⁺, C, Δt, ℑxᶠᵃᵃ)
+    launch!(arch, grid, :xy, _diffuse_velocity!, v, γ, grid, ρᵗ⁺, C, Δt, ℑyᵃᶠᵃ)
 
     return nothing
 end
@@ -621,8 +699,8 @@ end
 # `heating` is what the enthalpy of the layer receives, in J m⁻²: minus the energy that the
 # turbulent kinetic energy takes from buoyancy, plus what its sinks return, minus the kinetic
 # and turbulent kinetic energy that the layer gains with the water it gains.
-@kernel function _step_turbulent_kinetic_energy!(ρe, e, μ′, γ, heating, ledger, grid, ρᵗ⁺, ρᵗ, Cᵉ, Lᵉ, Kᶜ, N²,
-                                                 dᵘ, dᵛ, 𝒦, Δt)
+@kernel function _step_turbulent_kinetic_energy!(ρe, e, μ′, γ, heating, ledger, grid, ρᵗ⁺, ρᵗ, Cᵉ, Cᵘ, Lᵉ, Kᶜ, N²,
+                                                 u, v, u★, v★, 𝒦, Δt)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -637,7 +715,8 @@ end
         δμ = (ρᵗ⁺[i, j, k] - ρᵗ[i, j, k]) * Δz
         eⁿ = e[i, j, k]
 
-        𝒫 = ℑxᶜᵃᵃ(i, j, k, grid, dᵘ) + ℑyᵃᶜᵃ(i, j, k, grid, dᵛ)
+        𝒫 = (from_x_faces(i, j, k, grid, x_velocity_dissipation, u, u★, ρᵗ⁺, Cᵘ, Δt) +
+             from_y_faces(i, j, k, grid, y_velocity_dissipation, v, v★, ρᵗ⁺, Cᵘ, Δt))
         B = ℑbzᵃᵃᶜ(i, j, k, grid, buoyancy_productionᶜᶜᶠ, Kᶜ, N²)
         ℬ = Δt * μ * max(0, B)
 
@@ -724,8 +803,8 @@ end
 # The enthalpy Δπ c̃ Π θ̃ / g of each layer is then expressed as the potential temperature of the
 # layer with the water it now holds, under the pressure of the water now above it, as
 # `_sediment_rain!` does: the column loses or gains enthalpy by its sources only.
-@kernel function _mix_enthalpy!(ρθ, θ̃, γ, ledger, grid, ρ, ρᵗ, ρqʳ, ρqˣ, A, B, πˢ, Φˢ, θ, θᵨ, Π, Πᶠ, T, C, heating,
-                                𝒬, Jᵛ_applied, Tˢ, wˣ, wʸ, constants, pˢᵗ, κ, g, Δt)
+@kernel function _mix_enthalpy!(ρθ, θ̃, γ, ledger, grid, ρ, ρᵗ, ρᵗ⁺, ρqʳ, ρqˣ, A, B, πˢ, Φˢ, θ, θᵨ, Π, Πᶠ, T, C, heating,
+                                𝒬, Jᵛ_applied, Tˢ, u★, v★, τˣ, τʸ, constants, pˢᵗ, κ, g, Δt)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -737,11 +816,12 @@ end
     @inbounds begin
         # Sources of the lowest layer, in J m⁻²
         vapor = Jᵛ_applied[i, j, 1]
-        stress_work = ℑxᶜᵃᵃ(i, j, 1, grid, wˣ) + ℑyᵃᶜᵃ(i, j, 1, grid, wʸ)
+        work = (from_x_faces(i, j, 1, grid, x_stress_work, u★, τˣ, ρᵗ⁺, Δt) +
+                from_y_faces(i, j, 1, grid, y_stress_work, v★, τʸ, ρᵗ⁺, Δt))
         surface = Δt * 𝒬[i, j, 1] + vapor * cᵖᵛ * Tˢ[i, j, 1]
 
         ledger.surface_energy[i, j, 1] += surface + vapor * Φˢ[i, j, 1]
-        ledger.surface_stress_work[i, j, 1] += stress_work
+        ledger.surface_stress_work[i, j, 1] += work
 
         # Forward elimination
         C⁺ = C[i, j, 2]
@@ -751,7 +831,7 @@ end
 
         Δπ = layer_pressure_thickness(i, j, 1, A, B, πˢ)
         M = Δπ * enthalpy_factor(i, j, 1, ρ, ρᵗ, Π, cᵖᵈ, cᵖᵛ)
-        S = heating[i, j, 1] + surface + stress_work
+        S = heating[i, j, 1] + surface + work
 
         β = M + g * Δt * C⁺ * a⁻
         upper = - g * Δt * C⁺ * a⁺
@@ -810,6 +890,40 @@ end
     end
 end
 
+function launch_energy_mixing!(mixing, model, Δt)
+    grid = model.grid
+    arch = grid.architecture
+    dynamics = model.dynamics
+    moisture = dynamics.moisture
+    constants = model.thermodynamic_constants
+    closure_fields = mixing.closure_fields
+    scratch = mixing.scratch
+    fluxes = mixing.surface_fluxes
+    C = scratch.conductances
+    γ = scratch.eliminated_diagonal
+    u, v, _ = model.velocities
+    water = hydrostatic_water_fields(model.microphysics, model.microphysical_fields)
+    κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+
+    launch!(arch, grid, :xy, _step_turbulent_kinetic_energy!,
+            model.tracers[TKE_NAME], scratch.specific_turbulent_kinetic_energy, scratch.implicit_mass, γ,
+            scratch.heating, mixing.ledger, grid, scratch.total_density, moisture.total_density, C.energy, C.momentum,
+            closure_fields.Lᵉ, closure_fields.Kᶜ, closure_fields.N², u, v, scratch.x_velocity, scratch.y_velocity,
+            scratch.kinetic_energy, Δt)
+
+    launch!(arch, grid, :xy, _mix_enthalpy!,
+            model.formulation.potential_temperature_density, scratch.potential_temperature, γ, mixing.ledger, grid,
+            dynamics.density, moisture.total_density, scratch.total_density, water.ρqʳ, water_densities(model),
+            dynamics.pressure_coefficient, dynamics.surface_pressure_coefficient, dynamics.surface_pressure,
+            dynamics.surface_geopotential, model.formulation.potential_temperature,
+            moisture.density_potential_temperature, dynamics.exner_function, dynamics.interface_exner_function,
+            model.temperature, C.scalar, scratch.heating, fluxes.sensible_heat_flux, scratch.vapor_exchange,
+            fluxes.surface_temperature, scratch.x_velocity, scratch.y_velocity, fluxes.x_stress, fluxes.y_stress,
+            constants, dynamics.standard_pressure, κ, constants.gravitational_acceleration, Δt)
+
+    return nothing
+end
+
 #####
 ##### One step
 #####
@@ -837,76 +951,36 @@ function moist_turbulent_mixing_step!(mixing::MoistTurbulentMixing, model, Δt)
     (isfinite(Δt) && Δt > 0) || return nothing
 
     grid = model.grid
-    arch = grid.architecture
-    dynamics = model.dynamics
-    moisture = dynamics.moisture
-    constants = model.thermodynamic_constants
-    closure_fields = mixing.closure_fields
     scratch = mixing.scratch
     fluxes = mixing.surface_fluxes
-    ledger = mixing.ledger
-    water = hydrostatic_water_fields(model.microphysics, model.microphysical_fields)
     C = scratch.conductances
-    γ = scratch.eliminated_diagonal
-    e = scratch.specific_turbulent_kinetic_energy
-    ρᵗ⁺ = scratch.total_density
     u, v, _ = model.velocities
-    ρ = dynamics.density
-    ρᵗ = moisture.total_density
-    θ = model.formulation.potential_temperature
-    θᵨ = moisture.density_potential_temperature
-    Π = dynamics.exner_function
-    Πᶠ = dynamics.interface_exner_function
-    ρe = model.tracers[TKE_NAME]
     Δt = convert(eltype(grid), Δt)
-    g = constants.gravitational_acceleration
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    κ = Rᵈ / cᵖᵈ
 
     update_state!(model; compute_tendencies=false)
 
     compute_bulk_surface_fluxes!(fluxes, mixing.surface_exchange, model)
-    compute_physical_heights!(mixing.physical_grid, model)
+    fill_halo_regions!((fluxes.x_stress, fluxes.y_stress))
 
-    launch!(arch, grid, :xyz, _compute_specific_energies!, e, scratch.kinetic_energy, grid, ρe, ρᵗ, u, v)
-    fill_halo_regions!(e)
+    compute_physical_heights!(mixing.heights, model)
 
-    compute_closure_fields_in_height!(mixing, model)
+    @apply_regionally launch_specific_energies!(mixing, model)
+    fill_halo_regions!(scratch.specific_turbulent_kinetic_energy)
 
-    launch!(arch, grid, :xy, _compute_moist_conductances!,
-            C.scalar, C.momentum, C.energy, grid, closure_fields.Kᶜ, closure_fields.Kᵘ, closure_fields.Kᵉ,
-            θᵨ, Π, Πᶠ, moisture.interface_pressure, ρ, ρᵗ, Rᵈ, cᵖᵈ, g)
-
+    @apply_regionally launch_closure_fields_in_height!(mixing, model)
     fill_halo_regions!(C.momentum)
+    clip_negative_halo_diffusivities!(tuple(C.momentum), grid)
 
-    # Water. The vapor exchanged with the ground in this step is kept for the enthalpy it carries.
-    launch!(arch, grid, :xy, _mix_water!,
-            model.moisture_density, scratch.mixing_ratio, γ, ρᵗ⁺, scratch.vapor_exchange, ledger, grid, ρ, C.scalar,
-            fluxes.vapor_flux, water_densities(model), Δt)
+    @apply_regionally launch_water_mixing!(mixing, model, Δt)
+    fill_halo_regions!(scratch.total_density)
 
-    fill_halo_regions!(ρᵗ⁺)
+    @apply_regionally launch_surface_stress!(mixing, model, Δt)
+    fill_halo_regions!((scratch.x_velocity, scratch.y_velocity))
 
-    # Velocities
-    mix_velocity!(u, scratch.x_velocity, scratch.x_dissipation, scratch.x_stress_work, fluxes.x_stress, ℑxᶠᵃᵃ,
-                  mixing, model, Δt)
-    mix_velocity!(v, scratch.y_velocity, scratch.y_dissipation, scratch.y_stress_work, fluxes.y_stress, ℑyᵃᶠᵃ,
-                  mixing, model, Δt)
+    @apply_regionally launch_velocity_mixing!(mixing, model, Δt)
+    fill_halo_regions!((u, v))
 
-    # Turbulent kinetic energy
-    launch!(arch, grid, :xy, _step_turbulent_kinetic_energy!,
-            ρe, e, scratch.implicit_mass, γ, scratch.heating, ledger, grid, ρᵗ⁺, ρᵗ, C.energy,
-            closure_fields.Lᵉ, closure_fields.Kᶜ, closure_fields.N², scratch.x_dissipation, scratch.y_dissipation,
-            scratch.kinetic_energy, Δt)
-
-    # Enthalpy
-    launch!(arch, grid, :xy, _mix_enthalpy!,
-            model.formulation.potential_temperature_density, scratch.potential_temperature, γ, ledger, grid,
-            ρ, ρᵗ, water.ρqʳ, water_densities(model),
-            dynamics.pressure_coefficient, dynamics.surface_pressure_coefficient, dynamics.surface_pressure,
-            dynamics.surface_geopotential, θ, θᵨ, Π, Πᶠ, model.temperature, C.scalar, scratch.heating,
-            fluxes.sensible_heat_flux, scratch.vapor_exchange, fluxes.surface_temperature,
-            scratch.x_stress_work, scratch.y_stress_work, constants, dynamics.standard_pressure, κ, g, Δt)
+    @apply_regionally launch_energy_mixing!(mixing, model, Δt)
 
     update_state!(model; compute_tendencies=true)
 

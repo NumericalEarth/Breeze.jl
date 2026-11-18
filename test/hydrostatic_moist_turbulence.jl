@@ -816,6 +816,165 @@ end
 end
 
 #####
+##### Curvilinear and multi-region grids
+#####
+
+using Oceananigans.MultiRegion: YinYangGrid
+using Oceananigans.Operators: Azᶜᶜᶜ, Azᶠᶜᶜ, Azᶜᶠᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ
+using Oceananigans.Utils: getregion
+
+sphere_model(grid) = AtmosphereModel(grid; dynamics = HydrostaticDynamics(top_pressure=2.5e4),
+                                     microphysics = warm_rain_microphysics(), tracers = :ρe,
+                                     formulation = moist_formulation(), momentum_advection = VectorInvariant())
+
+# A state that varies in every direction, in longitude λ and latitude φ (degrees) or in the
+# coordinates that `longitude` and `latitude` map to them. The meridional velocity vanishes at 60°.
+function set_sphere_state!(model; longitude = identity, latitude = identity)
+    at(f) = (x, y, z) -> f(longitude(x), latitude(y), z)
+    set!(model; pˢ = 1e5,
+                θ = at((λ, φ, z) -> 290 + 40z + 2 * cosd(φ) * sind(2λ)),
+                qᵗ = at((λ, φ, z) -> 0.015 * (1 - z)^3 * (1 + 0.3 * sind(λ)) * cosd(φ)),
+                u = at((λ, φ, z) -> 10 * z^0.3 * cosd(φ) * (1 + 0.2 * sind(2λ))),
+                v = at((λ, φ, z) -> 3 * z * cosd(1.5φ) * sind(λ)))
+    return nothing
+end
+
+function set_turbulent_kinetic_energy!(model, e)
+    for r in 1:regions(model.grid)
+        regional = getregion(model, r)
+        interior(regional.tracers.ρe) .= e .* interior(regional.dynamics.moisture.total_density)
+    end
+    update_state!(model; compute_tendencies=false)
+    return nothing
+end
+
+regions(grid) = 1
+regions(grid::YinYangGrid) = 2
+
+bulk_exchange(model, closure) =
+    BulkSurfaceExchange(model, closure; drag = Breeze.BulkDrag(coefficient=1.2e-3, surface_temperature=300),
+                        sensible_heat = Breeze.BulkSensibleHeatFlux(coefficient=1.1e-3, surface_temperature=300),
+                        vapor = Breeze.BulkVaporFlux(coefficient=1.1e-3, surface_temperature=300))
+
+# Energy of the air of a single grid in J: enthalpy and turbulent kinetic energy of the cells, and
+# the kinetic energy of the velocity points with the masses the mixing of the velocities uses
+function grid_energy(model)
+    grid = model.grid
+    Nx, Ny, Nz = size(grid)
+    ρᵗ = model.dynamics.moisture.total_density
+    u, v, _ = model.velocities
+    enthalpy = column_energy(model)
+    mass(i, j, k, grid, ρ) = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+
+    energy = sum(Azᶜᶜᶜ(i, j, 1, grid) * (enthalpy[i, j] + sum(model.tracers.ρe[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid) for k in 1:Nz))
+                 for i in 1:Nx, j in 1:Ny)
+    energy += sum(Azᶠᶜᶜ(i, j, k, grid) * ℑxᶠᵃᵃ(i, j, k, grid, mass, ρᵗ) * u[i, j, k]^2 / 2 for i in 1:Nx, j in 1:Ny, k in 1:Nz)
+    energy += sum(Azᶜᶠᶜ(i, j, k, grid) * ℑyᵃᶠᵃ(i, j, k, grid, mass, ρᵗ) * v[i, j, k]^2 / 2 for i in 1:Nx, j in 1:Ny+1, k in 1:Nz)
+    return energy
+end
+
+area_sum(grid, field) = sum(Azᶜᶜᶜ(i, j, 1, grid) * field[i, j, 1] for i in 1:size(grid, 1), j in 1:size(grid, 2))
+grid_water(model) = sum(Azᶜᶜᶜ(i, j, 1, model.grid) * column_water(model)[i, j] for i in 1:size(model.grid, 1), j in 1:size(model.grid, 2))
+
+@testset "Moist HydrostaticDynamics on a latitude-longitude grid" begin
+    # The moist model of the base cannot be built on a `LatitudeLongitudeGrid`, with or without the
+    # mixing ("Model grid and tracers grid are not identical"; derivations/moist_closure/logs/probe04.log),
+    # so the energy closure with the areas of a sphere cannot be tested on one yet.
+    grid = LatitudeLongitudeGrid(CPU(), Float64; size=(12, 8, 10), longitude=(-180, 180), latitude=(-60, 60), z=(0, 1))
+    @test_broken sphere_model(grid) isa AtmosphereModel
+end
+
+@testset "Mixing on a grid of unequal cell areas: energy with area weights" begin
+    # Cells whose areas differ by a factor of up to 12 between neighbors in x and in y, walls in y
+    x_faces = cumsum(vcat(0.0, [1e5 * (1 + 2 * isodd(i)) * (1 + i / 12) for i in 1:12]))
+    y_faces = cumsum(vcat(0.0, [1e5 * (1 + isodd(j)) * (2 - j / 8) for j in 1:8]))
+    grid = RectilinearGrid(CPU(), Float64; size=(12, 8, 10), x=x_faces, y=y_faces, z=(0, 1), topology=(Periodic, Bounded, Bounded))
+    model = sphere_model(grid)
+    set_sphere_state!(model; longitude = x -> 360 * x / x_faces[end] - 180, latitude = y -> 120 * y / y_faces[end] - 60)
+    areas = [Azᶜᶜᶜ(i, j, 1, grid) for i in 1:12, j in 1:8]
+    @test maximum(areas) / minimum(areas) > 5
+    set_turbulent_kinetic_energy!(model, 0.3)
+    closure = TKEBasedTurbulenceClosure(Float64)
+    mixing = MoistTurbulentMixing(model; closure, surface_exchange = bulk_exchange(model, closure))
+
+    E₀ = grid_energy(model)
+    W₀ = grid_water(model)
+    kinetic₀ = E₀ - sum(Azᶜᶜᶜ(i, j, 1, grid) * column_energy(model)[i, j] for i in 1:12, j in 1:8)
+    lowest_water = Inf
+    lowest_tke = Inf
+
+    for n in 1:10
+        moist_turbulent_mixing_step!(mixing, model, 600)
+        lowest_water = min(lowest_water, minimum(model.moisture_density))
+        lowest_tke = min(lowest_tke, minimum(model.tracers.ρe))
+    end
+
+    energy = (grid_energy(model) - E₀ - area_sum(grid, mixing.ledger.surface_energy)) / E₀
+    water = (grid_water(model) - W₀ - area_sum(grid, mixing.ledger.surface_vapor)) / W₀
+    dissipated = area_sum(grid, mixing.ledger.shear_production) + area_sum(grid, mixing.ledger.surface_stress_work)
+    @info "unequal cell areas, 10 steps with bulk surface fluxes" energy water dissipated_over_energy = dissipated / E₀ lowest_water lowest_tke
+    @test abs(energy) ≤ budget_relative
+    @test abs(water) ≤ budget_relative
+    @test dissipated / E₀ > 1e3 * budget_relative   # the transfer from velocity points is not negligible here
+    @test lowest_water ≥ 0
+    @test lowest_tke ≥ 0
+    @test area_sum(grid, mixing.ledger.surface_vapor) > 0
+    @test all(iszero, Array(interior(model.velocities.v))[:, 1, :])
+end
+
+@testset "Mixing on a Yin-Yang grid: budgets of every column, positivity" begin
+    grid = YinYangGrid(CPU(), Float64; size=(48, 16, 8), z=(0, 1), halo=(4, 4, 3))
+    model = sphere_model(grid)
+    set_sphere_state!(model)
+    set_turbulent_kinetic_energy!(model, 0.3)
+    closure = TKEBasedTurbulenceClosure(Float64)
+    mixing = MoistTurbulentMixing(model; closure, surface_exchange = bulk_exchange(model, closure))
+
+    enthalpy₀ = [column_energy(getregion(model, r)) for r in 1:2]
+    water₀ = [column_water(getregion(model, r)) for r in 1:2]
+    lowest_water = Inf
+    lowest_tke = Inf
+    lowest_conductance = Inf
+
+    for n in 1:6
+        moist_turbulent_mixing_step!(mixing, model, 600)
+        for r in 1:2
+            regional = getregion(model, r)
+            lowest_water = min(lowest_water, minimum(interior(regional.moisture_density)))
+            lowest_tke = min(lowest_tke, minimum(interior(regional.tracers.ρe)))
+            lowest_conductance = min(lowest_conductance, minimum(parent(getregion(mixing.scratch.conductances.momentum, r))))
+        end
+    end
+
+    water_residual = 0.0
+    enthalpy_residual = 0.0
+    largest_diffusivity = 0.0
+    for r in 1:2
+        regional = getregion(model, r)
+        ledger = getregion(mixing.ledger, r)
+        value(name) = Array(interior(getproperty(ledger, name)))[:, :, 1]
+        sources = (value(:surface_energy) .+ value(:turbulent_kinetic_energy_sinks) .- value(:buoyancy_source) .+
+                   value(:surface_stress_work) .- value(:water_kinetic_energy))
+        enthalpy = column_energy(regional)
+        water = column_water(regional)
+        water_residual = max(water_residual, maximum(abs, (water .- water₀[r] .- value(:surface_vapor)) ./ water₀[r]))
+        enthalpy_residual = max(enthalpy_residual, maximum(abs, (enthalpy .- enthalpy₀[r] .- sources) ./ enthalpy₀[r]))
+        largest_diffusivity = max(largest_diffusivity, maximum(interior(getregion(mixing.closure_fields.Kᶜ, r))))
+        @test all(isfinite, Array(interior(regional.temperature)))
+        @test all(isfinite, Array(interior(regional.velocities.u)))
+        @test maximum(value(:surface_vapor)) > 0
+    end
+
+    @info "Yin-Yang, 6 steps with bulk surface fluxes: worst column" water_residual enthalpy_residual lowest_water lowest_tke lowest_conductance largest_diffusivity
+    @test water_residual ≤ budget_relative
+    @test enthalpy_residual ≤ budget_relative
+    @test lowest_water ≥ 0
+    @test lowest_tke ≥ 0
+    @test lowest_conductance ≥ 0
+    @test largest_diffusivity > 0
+end
+
+#####
 ##### What the mixing may be built with
 #####
 
