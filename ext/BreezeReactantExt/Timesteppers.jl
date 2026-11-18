@@ -3,7 +3,7 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.TimeSteppers: Clock
 using Oceananigans.Utils: IterationInterval
 using Reactant: TracedRNumber, @trace
-using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!, reconcile_state!
+using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, reconcile_state!
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics: Microphysics, DCMIP2016KesslerMicrophysics
 using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel
@@ -17,8 +17,7 @@ const ReactantSSPRungeKutta3Model = AtmosphereModel{<:Any, <:Any, <:ReactantStat
 function TimeSteppers.prepare_first_time_step!(model::ReactantSSPRungeKutta3Model, Δt)
     model.clock.last_Δt = Δt
     reconcile_state!(model)
-    update_state!(model; compute_tendencies = isnothing(model.radiation),
-                  radiation_update! = AtmosphereModels.update_radiation_between_solves!)
+    AtmosphereModels.update_state_between_radiation_solves!(model; compute_tendencies = isnothing(model.radiation))
     initialize_radiation!(model.radiation, model)
     return nothing
 end
@@ -27,7 +26,7 @@ initialize_radiation!(::Nothing, model) = nothing
 
 function initialize_radiation!(radiation, model)
     AtmosphereModels.solve_scheduled_radiation!(radiation, model)
-    update_state!(model; radiation_update! = AtmosphereModels.update_radiation_between_solves!)
+    AtmosphereModels.update_state_between_radiation_solves!(model)
     return nothing
 end
 

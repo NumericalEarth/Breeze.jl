@@ -29,10 +29,6 @@ function Oceananigans.Models.update_model_field_time_series!(model::AtmosphereMo
     return nothing
 end
 
-# The first RK stage has already checked the schedule and refreshed any missing restart cache.
-update_state_between_radiation_solves!(model, callbacks=[]; compute_tendencies=true) =
-    update_state!(model, callbacks; compute_tendencies, radiation_update! = update_radiation_between_solves!)
-
 # `update_state!` is idempotent: it can be called any number of times and always
 # leaves the model in the same consistent state (refreshed halos, diagnostics, and
 # tendencies) for the prognostic fields it is given. It deliberately does *not* advance
@@ -40,7 +36,16 @@ update_state_between_radiation_solves!(model, callbacks=[]; compute_tendencies=t
 # prognostic fields by a full `Δt` and so must run exactly once per step — the
 # time-steppers invoke it directly. (The tendency-interface microphysics still runs
 # every RK stage as part of `compute_tendencies!`.)
-function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true, radiation_update! = update_radiation!)
+TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true) =
+    update_atmosphere_state!(update_radiation!, model, callbacks; compute_tendencies)
+
+# `update_state!` for the state updates of a time step after its first stage, and for the refresh
+# after an operator-split update: the first-stage `update_state!` has already checked the radiation
+# schedule and refreshed any missing restart cache, so these only update the fluxes between solves.
+update_state_between_radiation_solves!(model, callbacks=[]; compute_tendencies=true) =
+    update_atmosphere_state!(update_radiation_between_solves!, model, callbacks; compute_tendencies)
+
+function update_atmosphere_state!(radiation_update!, model, callbacks; compute_tendencies)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution

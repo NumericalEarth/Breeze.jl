@@ -28,7 +28,6 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture
 using Oceananigans.Fields: interpolate
 using Oceananigans.Grids: Center, znode
-using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 
 using Adapt: Adapt, adapt
@@ -467,7 +466,7 @@ internally for efficiency. Water vapor is diagnosed from ``q^v = q^t - q^{cl} - 
 The kernel writes prognostic fields in the interior only, so `update_state!` is called
 afterwards to restore a consistent model state (halos, diagnostics, and tendencies).
 """
-function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model, refresh_state! = update_state!)
+function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
     grid = model.grid
     arch = architecture(grid)
     Nz = grid.Nz
@@ -512,7 +511,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
-    refresh_state!(model)
+    AtmosphereModels.update_state_between_radiation_solves!(model)
 
     return nothing
 end

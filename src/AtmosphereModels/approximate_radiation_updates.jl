@@ -30,7 +30,8 @@ The state of the approximate updates of a [`RadiativeTransferModel`](@ref)'s flu
 
 Over its window the sun stays within four times `μ̄₀`. A step boundary that finds `μ₀` beyond that,
 sunlight the last solve did not average over, solves again instead: after a solve at night, or with
-an unknown or underestimated radiation interval.
+an unknown or underestimated radiation interval. That solve covers the whole grid, so a schedule
+with no known interval solves at about every time step on a grid that the day-night terminator crosses.
 
 # Fields
 $(TYPEDFIELDS)
@@ -52,7 +53,7 @@ struct ApproximateRadiationUpdates{F, C, D}
     solved_cos_zenith :: C
     "Per-column cosine of the solar zenith angle"
     cos_zenith :: C
-    "Per-column sunlit duration of the radiation window (s), a workspace of the solve"
+    "Per-column sunlit duration of the radiation window (s): a workspace of the interval average, or `nothing` for a solar position that needs none"
     sunlit_duration :: D
     "Per-column surface temperature of the last solve"
     surface_temperature :: C
@@ -81,7 +82,7 @@ function approximate_radiation_updates(arch, grid, schedule, solar_position)
     cos_zenith = column_array()
     initialize_cos_zenith!(cos_zenith, solar_position)
 
-    duration = solar_position isa DiurnalSolarPosition ? nothing : column_array()
+    duration = sunlit_duration_workspace(solar_position, column_array)
     return ApproximateRadiationUpdates(ZFaceField(grid), ZFaceField(grid),
                                        ZFaceField(grid), ZFaceField(grid),
                                        ZFaceField(grid), ZFaceField(grid),
@@ -139,6 +140,20 @@ function stage_offsets((first_stage, second_stage), clock, lead)
                                   second_stage * (clock.last_stage_Δt / (second_stage - first_stage))))
     return first_stage * stage_step_duration((first_stage, second_stage), clock), current_offset
 end
+
+# Count the schedule's time from the model's clock, as `run!` does for the schedules of callbacks
+# and output writers: the radiation window of the first solve reads the schedule's next time
+# (see `radiation_interval`). Like those, a schedule object belongs to one model.
+initialize_radiation_schedule!(radiation, clock) = nothing
+
+function initialize_radiation_schedule!(radiation::RadiativeTransferModel, clock)
+    initialize_radiation_schedule!(radiation.schedule, radiation, clock)
+    return nothing
+end
+
+initialize_radiation_schedule!(schedule, radiation, clock) = nothing
+initialize_radiation_schedule!(schedule::Union{TimeInterval, SpecifiedTimes}, radiation, clock) =
+    Oceananigans.initialize!(schedule, (; clock))
 
 # Between the steps of a run, the first stage of the step that begins at `clock` can still solve
 awaiting_first_stage(clock) = clock.stage == 1 && clock.iteration > 0

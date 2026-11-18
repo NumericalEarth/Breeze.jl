@@ -33,7 +33,9 @@ state and then every 600 s, in the steps that begin at iterations 80, 160, …
 At every other `update_state!`, a radiation with [`ApproximateRadiationUpdates`](@ref) updates
 its fluxes for the current surface temperature and sun instead, including the later Runge–Kutta
 stages and the completed step (see [`update_radiation_between_solves!`](@ref)). On every schedule,
-restoring a checkpoint without the radiation cache triggers a full solve at the next state update.
+restoring a checkpoint without the radiation cache triggers a full solve at the next `update_state!`
+that is not inside a time step, or else at the first-stage `update_state!` of the next step: the
+later state updates of a step and its operator-split refresh only update the fluxes between solves.
 
 Under Reactant the iteration is traced: `BreezeReactantExt` applies the scheduled update with a
 traced conditional, which requires a stateless schedule such as `IterationInterval`, and computes
@@ -863,9 +865,6 @@ validate_radiation(radiation, clock, arch) = validate_schedule(radiation.schedul
 function validate_radiation(radiation::RadiativeTransferModel, clock, arch)
     validate_schedule(radiation.schedule, arch)
     validate_solar_position_clock(radiation.solar_position, clock)
-    if radiation.schedule isa Union{TimeInterval, SpecifiedTimes}
-        Oceananigans.initialize!(radiation.schedule, (; clock))
-    end
     return nothing
 end
 

@@ -508,7 +508,8 @@ fluxes for both, following [HoganBozzo2015](@citet):
 
 Corrections also run at the end of the step, so the fluxes match the completed model clock.
 Restoring an older checkpoint without radiation fluxes or a required approximate-update cache
-triggers a fresh solve at the next state update, including with the default every-iteration schedule.
+triggers a fresh solve at the next state update outside a time step, or else at the first stage of
+the next step, including with the default every-iteration schedule.
 
 The radiation window covers every model time at which a state update scales the fluxes of a solve:
 from the start of the time step that solves, since later Runge–Kutta stages can return to times
@@ -518,15 +519,16 @@ before the first (SSP RK3 evaluates its third stage at ``tⁿ + Δt/2``, after i
 time, estimated using the last time step and the time stepper's stage abscissae. The interval
 ends at that step's start, before its first-stage solve. With unknown stage timing it ends at
 the scheduled time. An `IterationInterval` uses its next actuating iteration and the last time step.
-When the interval is not known, past the last explicit time, for an infinite interval, or for other schedules,
-each solve uses the current sun to compute the slant path. Shortwave fluxes still scale with the
-current solar cosine, so they vanish at night. Custom solar-position types also use the current
-angle unless they implement interval averaging.
+When the interval is not known, past the last explicit time, for an infinite interval, or for
+other schedules, each solve uses the current sun to compute the slant path. Shortwave fluxes
+still scale with the current solar cosine, so they vanish at night. Custom solar-position types
+also use the current angle unless they implement interval averaging.
 
 A fixed solar cosine and constant surface temperature require no update cache. Otherwise, when
-updates are enabled, the cache stores six extra face fields: the two longwave responses and the four fluxes
-of the last solve. These reference fluxes and the solved surface temperature are checkpointed;
-checkpoints from the earlier incremental-update format trigger a fresh solve on restore.
+updates are enabled, the cache stores six extra face fields: the two longwave responses and the
+four fluxes of the last solve. These reference fluxes and the solved surface temperature are
+checkpointed; checkpoints from the earlier incremental-update format trigger a fresh solve on
+restore.
 
 Over its window the sun stays within four times ``\bar{μ}₀``, a bound approached only by a sun
 skimming the horizon on both sides of a short night. A step boundary that finds ``μ₀ > 4 \bar{μ}₀``,
@@ -534,7 +536,11 @@ sunlight the last solve did not average over, solves again without advancing the
 the slant path of ``\bar{μ}₀`` would deposit the beam far too high in the column. That happens
 when daylight follows a night-time solve with no known interval, when the sun climbs well above
 the sun of a solve with no known interval, and when time steps grow past the interval an
-`IterationInterval` estimated. Under Reactant the fluxes are not updated between solves.
+`IterationInterval` estimated. These extra solves run for the whole grid, at most once per time
+step. On a grid that the day-night terminator crosses, a schedule with no known interval therefore
+solves at about every time step, since the sun rises in some column at each one: prefer an
+`IterationInterval` or a finite `TimeInterval` there. Under Reactant the fluxes are not updated
+between solves.
 
 ## Architecture Support
 

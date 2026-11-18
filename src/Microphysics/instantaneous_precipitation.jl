@@ -15,7 +15,6 @@ using ..AtmosphereModels:
 
 using Oceananigans: Oceananigans, CenterField, Field, Integral
 using Oceananigans.Architectures: architecture
-using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @index, @kernel
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
@@ -119,7 +118,7 @@ Condense supersaturation, retain the released latent heat, and remove the
 condensate as precipitation — applied directly to the prognostic vapor `ρqᵛ`
 and liquid-ice potential temperature density `ρθˡⁱ`.
 """
-function AtmosphereModels.microphysics_model_update!(microphysics::IP, model, refresh_state! = update_state!)
+function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     grid = model.grid
     arch = architecture(grid)
     Δt = model.clock.last_Δt
@@ -142,7 +141,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model, re
 
     # The kernel mutated prognostic fields in the interior only; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
-    refresh_state!(model)
+    AtmosphereModels.update_state_between_radiation_solves!(model)
 
     return nothing
 end

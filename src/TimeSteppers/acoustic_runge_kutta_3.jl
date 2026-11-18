@@ -332,7 +332,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, Î
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
-    microphysics_model_update!(model.microphysics, model, AtmosphereModels.update_state_between_radiation_solves!)
+    microphysics_model_update!(model.microphysics, model)
 
     # After the step's last tendency build, which is the one inside the microphysics update for a
     # scheme that refreshes the state itself (`refreshes_state_after_update`): the transport density
