@@ -32,8 +32,8 @@ end
     Oceananigans.defaults.FloatType = FT
     Δt = FT(600)
     # Only stage coefficients are needed; no fields or acoustic solver are used here.
-    steppers = ((SSPRungeKutta3(FT(1), FT(1/4), FT(2/3), nothing, nothing, nothing), (FT(1), FT(1/2))),
-                (AcousticRungeKutta3(FT(1/3), FT(1/2), FT(1), nothing, nothing, nothing, nothing), (FT(1/3), FT(1/2))))
+    steppers = ((SSPRungeKutta3(FT(1), FT(1/4), FT(2/3), nothing, nothing, nothing, nothing), (FT(1), FT(1/2))),
+                (AcousticRungeKutta3(FT(1/3), FT(1/2), FT(1), nothing, nothing, nothing, nothing, nothing), (FT(1/3), FT(1/2))))
 
     @testset "Next solving step: $(nameof(typeof(timestepper))), stage $stage, $step_start" for
             (timestepper, (first_stage, second_stage)) in steppers, stage in 1:3,
