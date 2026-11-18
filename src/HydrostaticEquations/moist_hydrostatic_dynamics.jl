@@ -441,6 +441,22 @@ function validate_time_step_state(model)
     return nothing
 end
 
+# The bounds-preserving limiter of the water is read by the tendencies alone, so it is computed
+# only when they are. The time steps of adaptive implicit advection are refreshed either way.
+function AtmosphereModels.update_advection_state!(model::MoistHydrostaticModel, compute_tendencies)
+    if compute_tendencies
+        @apply_regionally update_advection!(model.advection, model)
+    else
+        @apply_regionally update_adaptive_time_steps!(model.advection, model)
+    end
+    return nothing
+end
+
+function update_adaptive_time_steps!(advection, model)
+    foreach(scheme -> update_adaptive_timestep!(scheme, model), values(advection))
+    return nothing
+end
+
 function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydrostaticModel)
     grid = model.grid
     arch = grid.architecture

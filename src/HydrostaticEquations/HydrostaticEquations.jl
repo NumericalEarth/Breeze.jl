@@ -51,8 +51,8 @@ using Oceananigans.Advection: VectorInvariant, VectorInvariantKEGradientEnergyCo
                               bernoulli_head_U, bernoulli_head_V,
                               div_𝐯u, div_𝐯v, U_dot_∇u_hydrostatic_metric, U_dot_∇v_hydrostatic_metric,
                               _advective_momentum_flux_Wu, _advective_momentum_flux_Wv,
-                              _biased_interpolate_zᵃᵃᶠ, bias,
-                              update_bounds_preserving_limiter!, update_flux_limiter!
+                              _biased_interpolate_zᵃᵃᶠ, bias, update_advection!, update_adaptive_timestep!,
+                              update_bounds_preserving_limiter!
 using Oceananigans.Architectures: architecture, on_architecture, CPU
 using Oceananigans.BoundaryConditions: BoundaryCondition, MultiRegionCommunication, fill_halo_regions!
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, FPlane, BetaPlane, HydrostaticSphericalCoriolis
