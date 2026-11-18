@@ -44,11 +44,17 @@ is_identically_zero(_) = false
 # Periodic, no-flux and other boundary conditions that are not a source carry no condition, or
 # a zero one
 is_dry_boundary_condition(::Nothing) = true
-is_dry_boundary_condition(bc::BoundaryCondition) = is_identically_zero(bc.condition)
+is_dry_boundary_condition(bc::BoundaryCondition) = is_identically_zero(bc.condition) || fills_polar_halos(bc.condition)
 is_dry_boundary_condition(_) = false
 
 # The exchange between the regions of a multi-region grid is not a source either
 is_dry_boundary_condition(::BoundaryCondition{<:MultiRegionCommunication}) = true
+
+# Nor is the condition that Oceananigans gives a `LatitudeLongitudeGrid` at a pole: it fills the
+# halos beyond the pole with the average of the cells around it, for the stencils that reach
+# there, and the faces at the pole have no area, so nothing passes through them
+fills_polar_halos(::PolarValue) = true
+fills_polar_halos(_) = false
 
 # On a multi-region grid every region has boundary conditions of its own
 function validate_dry_boundary_conditions(model::AtmosphereModel)
