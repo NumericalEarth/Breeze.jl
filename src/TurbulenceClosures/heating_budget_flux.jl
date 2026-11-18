@@ -256,7 +256,7 @@ end
 # sides. `work` holds the eliminated upper diagonal.
 @inline function balance_redistributed_heating!(s, sᶜ, work, i, j, grid, ℂᑫᴸ, 𝒬, e, ρ, ℓᵐ)
     Nz = size(grid, 3)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     tiny = sqrt(floatmin(FT))
     @inbounds begin
         # Thomas algorithm; the matrix is diagonally dominant by columns
@@ -310,7 +310,7 @@ end
 @kernel function _compute_heating_budget_flux!(cl, grid, closure, ℓᵐ, e, ρ)
     i, j = @index(Global, NTuple)
     hb = getclosure(i, j, closure).heating_budget_flux
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     Nz = size(grid, 3)
     balance_redistributed_heating!(cl.sᑫ, cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, cl.𝒬, e, ρ, ℓᵐ)
     below = zero(FT)
@@ -362,7 +362,7 @@ end
 # From the two faces of the cell k to its center with the half-cell weights (the boundary faces carry no flux)
 @inline function heating_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
     Nz = size(grid, 3)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     kˡᵒʷ = max(k, 2)
     kᵘᵖ = min(k + 1, Nz)
     b_θˡᵒʷ, latentˡᵒʷ = heating_flux_buoyancyᶜᶜᶠ(i, j, kˡᵒʷ, grid, cl)
@@ -385,7 +385,7 @@ end
 
 # Stores the conversions at the center k and returns what the TKE equation receives; nothing without the flux
 @inline function store_heating_flux_conversions!(cl, i, j, k, grid, ρ)
-    hasproperty(cl, :Jᑫ) || return zero(eltype(grid))
+    hasproperty(cl, :Jᑫ) || return zero(grid_float_type(grid))
     dry, latent, cooling = heating_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
     @inbounds begin
         cl.Gᑫ[i, j, k] = dry + latent

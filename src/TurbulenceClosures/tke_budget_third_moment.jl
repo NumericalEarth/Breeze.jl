@@ -239,7 +239,7 @@ end
 # coefficients and the right-hand side ρ Δz (P + B). `workᵉ` and `workᵋ` hold the eliminated upper diagonals.
 @inline function balance_sinks!(uᵉ, uᵋ, workᵉ, workᵋ, i, j, grid, ℂʷᴸ, cl, ρ, ℓᵐ)
     Nz = size(grid, 3)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     tiny = sqrt(floatmin(FT))
     @inbounds if isfinite(ℂʷᴸ)
         # Thomas algorithm; each matrix is diagonally dominant by columns
@@ -363,15 +363,15 @@ end
     tm = closure_ij.subgrid_distribution.third_moment
     ℓᵐ = closure_fields.ℓᵐ
     @inbounds for k in 1:size(grid, 3)
-        cl.uᵉ[i, j, k] = max(e[i, j, k], zero(eltype(grid)))
+        cl.uᵉ[i, j, k] = max(e[i, j, k], zero(grid_float_type(grid)))
         cl.uᵋ[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
     end
     # Fᵋ holds the eliminated upper diagonal of the second solve until the fluxes overwrite it
     balance_sinks!(cl.uᵉ, cl.uᵋ, cl.budget_work, cl.Fᵋ, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
     N² = closure_fields.N²
     # The fluxes F at the centers: the integral of ρ (P + B - u) from the ground, the cell of the center counted half
-    belowᵉ = zero(eltype(grid))
-    belowᵋ = zero(eltype(grid))
+    belowᵉ = zero(grid_float_type(grid))
+    belowᵋ = zero(grid_float_type(grid))
     @inbounds for k in 1:size(grid, 3)
         ρΔz = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
         rᵉ = ρΔz * (cl.P[i, j, k] + cl.B[i, j, k] - cl.uᵉ[i, j, k])
@@ -400,7 +400,7 @@ end
         τ = ℓ / u
         αᴺ = τ * τ * (N²[i, j, k] + N²[i, j, k+1]) / 2
         r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
-        ℂʷᑫ = cooling_third_moment_coefficient(closure_ij.heating_budget_flux, eltype(grid))
+        ℂʷᑫ = cooling_third_moment_coefficient(closure_ij.heating_budget_flux, grid_float_type(grid))
         cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * Fᵉ + tm.ℂʷᵋ * Fᵋ) +
                            damped_local_third_moment(i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k],
                                                      cooling_flux_conversion(cl, i, j, k), ℂʷᑫ,

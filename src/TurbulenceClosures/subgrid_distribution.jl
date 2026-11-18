@@ -722,7 +722,7 @@ end
 # coefficients are the averages of the two faces. `lower` and `upper` are (τ, ℓ, N², θˡ′², w′θˡ′) at the
 # faces k and k+1; `w′θˡ′ᶜ` is the flux interpolated to the center; `c³` carries the gravitational acceleration.
 @inline function center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡ′ᶜ, lower, upper)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     Nz = size(grid, 3)
     c = d.constants
     cp = d.clipping
@@ -757,7 +757,7 @@ end
 @inline function subgrid_distribution_column!(m, cl, i, j, grid, d, closure, closure_fields, θ, qᵗ, e, velocities, p, thermodynamics)
     w = velocities.w
     Nz = size(grid, 3)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     c = d.constants
     cp = d.clipping
     sm = d.second_moments
@@ -1042,7 +1042,7 @@ end
 
 @kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, sat, c, m, cl)
     i, j, k = @index(Global, NTuple)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     @inbounds begin
         interior_face = k > 1
         N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics, sat, c)
@@ -1183,7 +1183,7 @@ end
 
 # Without a subgrid distribution: no spread, the grid-mean rate
 @inline function closure_vapor_excess_statistics(i, j, k, grid, ::Nothing)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     return (; μ = zero(FT), σ = zero(FT), skewness = zero(FT), f⁺ = zero(FT))
 end
 

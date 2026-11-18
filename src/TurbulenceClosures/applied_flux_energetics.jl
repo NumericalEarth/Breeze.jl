@@ -165,7 +165,7 @@ end
 # weights (the boundary faces carry none: the closure's diffusivities vanish there)
 @inline function interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     Nz = size(grid, 3)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     kˡᵒʷ = max(k, 2)
     kᵘᵖ = min(k + 1, Nz)
     Bˡᵒʷ = ifelse(k > 1, applied_buoyancy_conversionᶜᶜᶠ(i, j, kˡᵒʷ, grid, s, cl, Kᶜ), zero(FT))
@@ -189,7 +189,7 @@ end
 # enthalpy the surface fluxes of θˡⁱ and vapor remove, (z₁ - z_surface) Σ b_χ,₁ J_χ, per unit mass
 # of the lowest cell. Condensate has no surface flux here.
 @inline function surface_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, u, v, bottom_bcs, bc_args)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     Jᶿ = bottom_boundary_flux(bottom_bcs.ρθ, i, j, grid, s.ρθ, bc_args...)
     Jᵛ = bottom_boundary_flux(bottom_bcs.ρqᵛᵉ, i, j, grid, s.ρqᵛᵉ, bc_args...)
     𝒯ˣ = bottom_boundary_flux(bottom_bcs.ρu, i, j, grid, s.ρu, bc_args...)
@@ -218,7 +218,7 @@ end
         cl.P[i, j, k] = P + Pˢ
         cl.Bˢ[i, j, k] = Bˢ
         cl.Pˢ[i, j, k] = Pˢ
-        cl.ωᴮ[i, j, k] = -min(0, B) / max(e[i, j, k], buoyancy_sink_floor_value(eltype(grid)))
+        cl.ωᴮ[i, j, k] = -min(0, B) / max(e[i, j, k], buoyancy_sink_floor_value(grid_float_type(grid)))
     end
 end
 
@@ -678,7 +678,7 @@ end
 
 @kernel function _latent_corrected_stability!(N², cl, m, grid, closure, closure_fields, velocities, s, qʷ, e, thermodynamics, sat, c, ω)
     i, j, k = @index(Global, NTuple)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     closure_ij = getclosure(i, j, closure)
     kₛ = max(k, 2)
     @inbounds begin
@@ -774,7 +774,7 @@ end
 
 @kernel function _microphysics_latent_correction!(cl, grid, closure, s, qʷ, thermodynamics, sat, c, tracers, buoyancy, closure_fields)
     i, j, k = @index(Global, NTuple)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     closure_ij = getclosure(i, j, closure)
     kₛ = max(k, 2)
     @inbounds begin

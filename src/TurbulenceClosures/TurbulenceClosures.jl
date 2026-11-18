@@ -258,6 +258,11 @@ end
     end
 end
 
+# The floating-point type of the grid's numbers inside a kernel. A grid whose eltype is a traced number type (a
+# `ReactantState` grid with stretched z, adapted into a kernel) has no `floatmin` or `eps`, but its zero is the plain
+# float; for any other grid this is `eltype(grid)`.
+@inline grid_float_type(grid) = typeof(zero(eltype(grid)))
+
 include("turbulence_closure_statistics.jl")
 include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")

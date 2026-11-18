@@ -82,26 +82,67 @@ end
 end
 
 #####
-##### The column ensemble with a `HeatingBudgetFlux` of a `PrescribedHeating` held in a reduced field (one profile
-##### for the ensemble, as a forcing of θ would hold it), stepped by `MultirateInfinitesimalStep`
+##### A calibration's configuration: the closure built with traced scalars (as a template whose coefficients are trained)
+##### and the trained coefficients rebound in the loss with `with_parameters`, on a stretched column ensemble (whose
+##### grid, traced, has a traced eltype in the kernels), stepped by `MultirateInfinitesimalStep`; the gradient is taken
+##### with respect to the trained coefficients. The heating is a `PrescribedHeating` held in a reduced field (one
+##### profile for the ensemble, as a forcing of θ would hold it).
 #####
 
-@testset "reactant_tke_heating_budget_flux" begin
+function trained_loss(model, coefficients, θ_init, Δt, Nsteps)
+    model.closure = with_parameters(model.closure; coefficients...)
+    set!(model; θ=θ_init, qᵗ=0.012, u=5, ρe=0.1)
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
+        time_step!(model, Δt)
+    end
+    return sum(interior(model.tracers.ρe))
+end
+
+function grad_trained_loss(model, dmodel, coefficients, dcoefficients, θ_init, Δt, Nsteps)
+    _, loss_value = Enzyme.autodiff(Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal), trained_loss, Enzyme.Active,
+                                    Enzyme.Duplicated(model, dmodel), Enzyme.Duplicated(coefficients, dcoefficients),
+                                    Enzyme.Const(θ_init), Enzyme.Const(Δt), Enzyme.Const(Nsteps))
+    return dcoefficients, loss_value
+end
+
+@testset "reactant_tke_trained_coefficients" begin
     Δt = 1.0
     Ns = 2
+    PT = typeof(Reactant.ConcreteRNumber(0.0))
 
     grid = RectilinearGrid(ReactantState(); size=ColumnEnsembleSize(Nz=8, ensemble=(2, 1), Hz=3),
-                           z=(0, 2000), topology=(Flat, Flat, Bounded))
+                           z=[2000 * (k / 8)^1.2 for k in 0:8], topology=(Flat, Flat, Bounded))
     reference_state = ReferenceState(grid, ThermodynamicConstants(); base_pressure=101325, potential_temperature=290)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
     cooling = Field{Nothing, Nothing, Center}(grid)
-    set!(cooling, z -> 1000 < z < 1100 ? -5 / 3600 : 0)
-    closure = TKEBasedTurbulenceClosure(static_stability = SaturationWeightedStaticStability(MixingLengthWeight(100.0)),
-                                        heating_budget_flux = HeatingBudgetFlux(ℂᑫ = 0.5, heating = PrescribedHeating(cooling)))
-    model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
+    set!(cooling, z -> 1000 < z < 1200 ? -5 / 3600 : 0)
+    closure = TKEBasedTurbulenceClosure(PT; static_stability = SaturationWeightedStaticStability(MixingLengthWeight(100.0)),
+                                        heating_budget_flux = HeatingBudgetFlux(PT; heating = PrescribedHeating(cooling)))
+    trained() = (ℂᑫ = Reactant.ConcreteRNumber(0.5), ℂᑫᴸ = Reactant.ConcreteRNumber(8.0))
     θ_init = CenterField(grid); set!(θ_init, z -> 290 + 3e-3 * z)
-    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true tke_loss(model, θ_init, Δt, Ns)
-    value = @with_stack_size compiled(model, θ_init, Δt, Ns)
-    @test isfinite(value) && value > 0
+
+    @testset "Forward" begin
+        model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
+        coefficients = trained()
+        compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true trained_loss(
+            model, coefficients, θ_init, Δt, Ns)
+        value = @with_stack_size compiled(model, coefficients, θ_init, Δt, Ns)
+        @test isfinite(value) && value > 0
+    end
+
+    @testset "Gradient with respect to the trained coefficients" begin
+        model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
+        dmodel = Enzyme.make_zero(model)
+        coefficients = trained()
+        dcoefficients = map(c -> Reactant.ConcreteRNumber(0.0), coefficients)
+        compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_trained_loss(
+            model, dmodel, coefficients, dcoefficients, θ_init, Δt, Ns)
+        derivatives, loss_value = @with_stack_size compiled_grad(model, dmodel, coefficients, dcoefficients, θ_init, Δt, Ns)
+        derivatives = map(d -> Float64(Reactant.to_number(d)), derivatives)
+        @info "Gradient of the TKE with respect to the trained coefficients" derivatives
+        @test isfinite(loss_value)
+        @test all(isfinite, derivatives)
+        @test !iszero(derivatives.ℂᑫ)
+    end
 end

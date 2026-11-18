@@ -200,7 +200,7 @@ const MicrophysicsSaturatedFractionStability = SaturationWeightedStaticStability
 
 @inline function cell_saturated_fraction(i, j, k, grid, fraction::StatisticsSaturatedFraction)
     statistics = AtmosphereModels.supersaturation_statistics(fraction.statistics, i, j, k, grid, fraction.fields...)
-    return convert(eltype(grid), AtmosphereModels.saturated_fraction(statistics))
+    return convert(grid_float_type(grid), AtmosphereModels.saturated_fraction(statistics))
 end
 
 @inline function saturated_stability_weightᶜᶜᶠ(i, j, k, grid, fraction::StatisticsSaturatedFraction, buoyancy, tracers, closure_fields)

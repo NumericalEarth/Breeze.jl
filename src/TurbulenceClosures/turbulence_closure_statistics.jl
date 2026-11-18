@@ -23,6 +23,6 @@ struct TurbulenceClosureStatistics <: AtmosphereModels.AbstractSupersaturationSt
 # A closure without subgrid statistics: no spread
 @inline function AtmosphereModels.supersaturation_statistics(::TurbulenceClosureStatistics, i, j, k, grid,
                                                              closure, closure_fields, model_fields)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     return (; μ = zero(FT), σ = zero(FT), skewness = zero(FT), f⁺ = zero(FT))
 end

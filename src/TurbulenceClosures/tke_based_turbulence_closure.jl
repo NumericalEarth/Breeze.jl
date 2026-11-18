@@ -750,7 +750,7 @@ centers — penetrates air of static stability ``N²`` before its kinetic energy
 buoyancy. Infinite where ``N² ≤ 0``, so that neutral and unstable air is no obstacle.
 """
 @inline function buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     N²⁺ = clip(@inbounds N²[i, j, k])
     ℓᵇ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e) / sqrt(N²⁺)
     return ifelse(N²⁺ == 0, FT(Inf), ℓᵇ)
@@ -767,7 +767,7 @@ end
 
 # The local minimum at a cell center, with N² reconstructed from the two adjacent faces
 @inline function local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
     N²⁺ = clip(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²))
     ℓᵇ = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
@@ -789,7 +789,7 @@ end
 # two lengths goes through the blending of the mixing length: the minimum, or a `HarmonicBlend`,
 # which each sweep applies recursively (see its docstring for what that implies).
 @inline function fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml::GradientLimitedMixingLength, closure, e, N²)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     Nz = grid.Nz
     @inbounds begin
         ℓˢ[i, j, 1] = FT(Inf)
@@ -822,7 +822,7 @@ end
 end
 
 @inline function parcel_ascent(i, j, k, grid, N², e★)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     Nz = grid.Nz
     s = zero(FT); D = zero(FT); Δb = zero(FT)
     m = k
@@ -840,7 +840,7 @@ end
 end
 
 @inline function parcel_descent(i, j, k, grid, N², e★)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     s = zero(FT); D = zero(FT); Δb = zero(FT)
     m = k - 1
     @inbounds while m ≥ 1 && D < e★
@@ -947,7 +947,7 @@ end
     Kᶜ = min(𝕊ᶜ * K, closure_ij.maximum_tracer_diffusivity)
     Kᵉ = min(𝕊ᵉ * K, closure_ij.maximum_tke_diffusivity)
 
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     @inbounds begin
         closure_fields.Kᵘ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᵘ))
         closure_fields.Kᶜ[i, j, k] = mask_diffusivity(i, j, k, grid, FT(Kᶜ))
@@ -1011,7 +1011,7 @@ stays positive for any time step.
     # The buoyancy sink rate: -B⁻ / e above the floor and -B⁻ / eᵐⁱⁿ below it, so that the
     # implicit sink ωᴮ e is continuous at e = eᵐⁱⁿ and vanishes linearly with e
     B⁻ = min(0, B)
-    ωᴮ = -B⁻ / max(eᵢ, buoyancy_sink_floor(closure_fields.subgrid_cloud, closure, eltype(grid)))
+    ωᴮ = -B⁻ / max(eᵢ, buoyancy_sink_floor(closure_fields.subgrid_cloud, closure, grid_float_type(grid)))
 
     return ω + ωᴮ
 end

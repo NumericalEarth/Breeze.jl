@@ -106,7 +106,7 @@ end
 
 # The face's constant inputs, gathered once
 @inline function fraction_face_inputs(i, j, k, grid, closure, d, m, cl, θ, qᵗ, e, p, thermodynamics)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     c = d.constants
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
@@ -134,7 +134,7 @@ end
 
 # The liquid flux fraction ãᴺ at face k of the distribution formed with N² = N²ᶜ + aᴺ ΔN² there
 @inline function trial_condensate_flux_fraction(aᴺ, i, j, k, grid, closure, d, m, cl, input, velocities, θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     c = d.constants
     cp = d.clipping
     sm = d.second_moments
@@ -220,7 +220,7 @@ end
 @kernel function _bracketed_fraction_solve!(N², state, solver::BracketedFractionSolve{N}, grid, closure, moments, cloud,
                                             velocities, θ, qᵗ, e, p, thermodynamics, ℓˢ) where N
     i, j, k = @index(Global, NTuple)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     Nz = size(grid, 3)
     interior_face = (k > 1) & (k ≤ Nz)
     kₛ = clamp(k, 2, max(Nz, 2)) # a valid face for the boundary threads, whose result is discarded
@@ -305,7 +305,7 @@ end
 # ãᴺ of the stored distribution at the faces, (N²ᵇ - N²ᶜ) / ΔN², after the solve
 @kernel function _final_condensate_flux_fraction!(ãᴺᶠ, grid, closure, cloud, Kᶜ, θ, qᵗ, p, thermodynamics)
     i, j, k = @index(Global, NTuple)
-    FT = eltype(grid)
+    FT = grid_float_type(grid)
     Nz = size(grid, 3)
     kₛ = clamp(k, 2, max(Nz, 2))
     d = getclosure(i, j, closure).subgrid_distribution
