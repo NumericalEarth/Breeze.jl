@@ -15,28 +15,41 @@
 #
 #   sources        each sink is limited to what its donor holds over the time step (a limit on a rate
 #                  between two reservoirs: nothing is made negative, what leaves one density enters the
-#                  other). θˡⁱ, the densities of dry air and of all water of the cell do not change.
+#                  other). The densities of dry air and of all water of the cell do not change.
 #   sedimentation  implicit in time and upwind, from the model top down: with λ = V Δt / Δz, a cell keeps
 #                  (M + inflow) / (1 + λ) of its rain mass per unit area M = ρqʳ Δz and passes on λ times
-#                  that. Positive for any λ. The rain that leaves a cell carries the enthalpy of liquid water
-#                  at the temperature of that cell, hˡ = cˡ T - ℒˡ₀, and the potential temperature of every
-#                  cell the rain crossed is expressed again from its enthalpy ρ (cᵖᵐ T - ℒˡ₀ qˡ) = ρ ĉᵖ Π θˡⁱ
-#                  at its new composition. What reaches the ground is accumulated in a ledger.
+#                  that. Positive for any λ. What reaches the ground is accumulated in a ledger.
 #
 # A model takes this path when its microphysics is built with
 # `precipitation_boundary_condition = ColumnPhysicsPrecipitation()`: its rain then has no tendency from the
 # microphysics and no sedimentation velocity in the dynamics, and the driver calls
 # `height_coordinate_warm_rain_column_physics!` after each time step.
 #
-# The enthalpy of the cells is conserved by the sedimentation, as in the hydrostatic column physics. The cells
-# have fixed volume, so the conserved energy of the dynamics is the internal energy: the pressure work of the
-# change of mass of a cell is not accounted for. It is of the order of Rᵐ T / (cᵖ T) of the enthalpy that the
-# rain carries.
+# Energy. The cells have fixed volume and exchange no heat in this operator, so what is conserved is their internal
+# energy per unit volume plus the potential energy of their mass,
+#
+#   U = ρ (cᵛᵐ T - ℒˡ₀ qˡ),   cᵛᵐ = cᵖᵐ - Rᵐ,        (the enthalpy ρ (cᵖᵐ T - ℒˡ₀ qˡ) less the pressure p = ρ Rᵐ T)
+#
+# with Breeze's convention for the enthalpy of water (vapor cᵖᵛ T, liquid cˡ T - ℒˡ₀), in which liquid has no pressure
+# term: its internal energy per unit mass is eˡ = cˡ T - ℒˡ₀.
+#
+#   sources        no mass and no energy crosses the cell: U and ρ are unchanged while rain becomes vapor or cloud
+#                  becomes rain. T follows from U at the new composition, T⁺ = (U / ρ + ℒˡ₀ qˡ⁺) / cᵛᵐ⁺, the pressure from
+#                  the equation of state, and θˡⁱ from ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ. (At fixed θˡⁱ, which is what a pressure
+#                  coordinate keeps, U would change by the pressure work that a fixed-volume cell cannot do.)
+#   sedimentation  rain leaving a cell carries eˡ at the temperature of that cell, and the potential energy g z of the
+#                  level it leaves. Falling to the level below it releases g (zₖ₊₁ - zₖ) per unit mass, which is
+#                  dissipated as heat in the cell it enters: Uₖ⁺ = Uₖ + [inflow (eˡₖ₊₁ + g (zₖ₊₁ - zₖ)) - outflow eˡₖ] / Δz.
+#                  Rain reaching the ground leaves with eˡ₁ + g z₁: the ledger `precipitation_energy` holds that sum.
+#
+# Then Σ (U + ρ g z) Δz + precipitation_energy is unchanged by the operator, to rounding. The saturation adjustment that
+# the model applies when its state is diagnosed again is Breeze's own and is not part of this statement.
 
 using Breeze.Thermodynamics: MoistureMassFractions, mixture_heat_capacity, mixture_gas_constant,
                              vapor_equivalent_heat_capacity, condensate_latent_energy,
                              absolute_zero_latent_heat, dry_air_gas_constant
 using Oceananigans.Operators: Δzᶜᶜᶜ
+using Oceananigans.Grids: znode, Center
 using Oceananigans.TimeSteppers: update_state!
 
 struct ColumnPhysicsPrecipitation end
@@ -54,7 +67,7 @@ end
 @inline AM.microphysical_tendency(bμp::ColumnWP1M, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 # The sources of `_apply_rain_sources!` of the hydrostatic column physics, on the cells of a height grid
-@kernel function _apply_height_coordinate_rain_sources!(ρqᵉ, ρqʳ, grid, microphysics, ρ, T, qᵛ, qˡ, qᶜˡ, constants, Δt)
+@kernel function _apply_height_coordinate_rain_sources!(ρθ, ρqᵉ, ρqʳ, grid, microphysics, ρᵈ, ρ, T, qᵛ, qˡ, qᶜˡ, constants, pˢᵗ, κ, Δt)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -74,11 +87,30 @@ end
 
         ρqʳ[i, j, k] = ρqʳᵏ + δρqʳ
         ρqᵉ[i, j, k] -= δρqʳ
+
+        # Only the evaporation changes the liquid of the cell. Its internal energy does not change:
+        # temperature at the new composition, then the potential temperature that diagnoses it
+        ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+        cᵛᵐ = mixture_heat_capacity(q, constants) - mixture_gas_constant(q, constants)
+        U = ρᵏ * (cᵛᵐ * T[i, j, k] - condensate_latent_energy(q, constants))
+        q⁺ = MoistureMassFractions(q.vapor - to_vapor / ρᵏ, q.liquid + to_vapor / ρᵏ)
+        θ⁺ = potential_temperature_from_internal_energy(U, ρᵏ, q⁺, constants, pˢᵗ, κ)
+        ρθ[i, j, k] = ifelse(to_vapor != 0, ρᵈ[i, j, k] * θ⁺, ρθ[i, j, k])
     end
 end
 
-@kernel function _sediment_height_coordinate_rain!(ρθ, ρqʳ, ledger, grid, microphysics, ρᵈ, ρqᵉ, θ, T, p, qᵛ, qᶜˡ,
-                                                   constants, pˢᵗ, κ, Δt)
+# θˡⁱ of a cell of density ρ and composition q that holds the internal energy U per unit volume
+@inline function potential_temperature_from_internal_energy(U, ρ, q, constants, pˢᵗ, κ)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    ℒq = condensate_latent_energy(q, constants)
+    T = (U / ρ + ℒq) / (cᵖᵐ - Rᵐ)
+    Π = (ρ * Rᵐ * T / pˢᵗ)^κ
+    return (cᵖᵐ * T - ℒq) / (vapor_equivalent_heat_capacity(q, constants) * Π)
+end
+
+@kernel function _sediment_height_coordinate_rain!(ρθ, ρqʳ, ledger, grid, microphysics, ρᵈ, ρqᵉ, T, qᵛ, qᶜˡ,
+                                                   constants, pˢᵗ, κ, g, Δt)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
     cˡ = constants.liquid.heat_capacity
@@ -86,10 +118,12 @@ end
 
     @inbounds begin
         inflow = zero(grid)           # rain mass per unit area entering through the upper face
-        enthalpy_inflow = zero(grid)
+        energy_inflow = zero(grid)    # its internal energy, and the potential energy its fall released
 
         for k in Nz:-1:1
             Δz = Δzᶜᶜᶜ(i, j, k, grid)
+            zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
+            z⁻ = ifelse(k == 1, zero(zᵏ), znode(i, j, max(k - 1, 1), grid, Center(), Center(), Center()))
             ρqʳᵏ = ρqʳ[i, j, k]
             ρᵏ = ρᵈ[i, j, k] + ρqᵉ[i, j, k] + ρqʳᵏ
             ρqᵛ = qᵛ[i, j, k] * ρᵏ
@@ -101,33 +135,31 @@ end
             M = ρqʳᵏ * Δz
             M⁺ = (M + inflow) / (1 + λ)
             outflow = λ * M⁺
-            hˡ = cˡ * Tᵏ - ℒˡ₀
+            eˡ = cˡ * Tᵏ - ℒˡ₀
             crossed = (inflow != 0) | (outflow != 0)
 
-            # Enthalpy of the cell per unit volume before, ρ ĉᵖ Π θ, and after
+            # Internal energy of the cell per unit volume before and after
             q = MoistureMassFractions(ρqᵛ / ρᵏ, (ρqᶜˡ + ρqʳᵏ) / ρᵏ)
-            Π = (p[i, j, k] / pˢᵗ)^κ
-            𝓗 = ρᵏ * vapor_equivalent_heat_capacity(q, constants) * Π * θ[i, j, k]
-            𝓗⁺ = 𝓗 + (enthalpy_inflow - outflow * hˡ) / Δz
+            cᵛᵐ = mixture_heat_capacity(q, constants) - mixture_gas_constant(q, constants)
+            U = ρᵏ * (cᵛᵐ * Tᵏ - condensate_latent_energy(q, constants))
+            U⁺ = U + (energy_inflow - outflow * eˡ) / Δz
 
-            # The cell with its new rain: temperature from its enthalpy, pressure from the equation of state
             ρqʳ⁺ = M⁺ / Δz
             ρ⁺ = ρᵈ[i, j, k] + ρqᵉ[i, j, k] + ρqʳ⁺
             q⁺ = MoistureMassFractions(ρqᵛ / ρ⁺, (ρqᶜˡ + ρqʳ⁺) / ρ⁺)
-            T⁺ = (𝓗⁺ / ρ⁺ + condensate_latent_energy(q⁺, constants)) / mixture_heat_capacity(q⁺, constants)
-            p⁺ = ρ⁺ * mixture_gas_constant(q⁺, constants) * T⁺
-            Π⁺ = (p⁺ / pˢᵗ)^κ
-            θ⁺ = 𝓗⁺ / (ρ⁺ * vapor_equivalent_heat_capacity(q⁺, constants) * Π⁺)
+            θ⁺ = potential_temperature_from_internal_energy(U⁺, ρ⁺, q⁺, constants, pˢᵗ, κ)
 
             ρθ[i, j, k] = ifelse(crossed, ρᵈ[i, j, k] * θ⁺, ρθ[i, j, k])
             ρqʳ[i, j, k] = ifelse(crossed, ρqʳ⁺, ρqʳᵏ)
 
+            # What leaves carries eˡ of this cell; falling to the level below (or leaving at the ground with its
+            # potential energy) it releases g (zᵏ - z⁻), heat of the cell it enters
             inflow = outflow
-            enthalpy_inflow = outflow * hˡ
+            energy_inflow = outflow * (eˡ + ifelse(k == 1, g * zᵏ, g * (zᵏ - z⁻)))
         end
 
         ledger.surface_rain[i, j, 1] += inflow
-        ledger.precipitation_energy[i, j, 1] += enthalpy_inflow
+        ledger.precipitation_energy[i, j, 1] += energy_inflow
     end
 end
 
@@ -137,11 +169,11 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Apply the column physics of WP1M to `model`, an `AtmosphereModel` on a height coordinate whose microphysics
 was built with `precipitation_boundary_condition = ColumnPhysicsPrecipitation()`, over `Δt` in `substeps`
 equal applications: the conversion of cloud liquid to rain and the evaporation of rain, then the
-sedimentation of rain, each on the state the previous one leaves. `ledger` holds the fields `surface_rain`
-(kg m⁻²) and `precipitation_energy` (J m⁻²), to which what reaches the ground is added. `regions` are the
+sedimentation of rain, each on the state the previous one leaves (`sources = false` or `sedimentation = false` leaves one out). `ledger` holds the fields `surface_rain`
+(kg m⁻²) and `precipitation_energy` (J m⁻², internal plus potential energy), to which what reaches the ground is added. `regions` are the
 regions of a multi-region grid, or `nothing`.
 """
-function height_coordinate_warm_rain_column_physics!(model, ledger; Δt, substeps=1, regions=nothing)
+function height_coordinate_warm_rain_column_physics!(model, ledger; Δt, substeps=1, regions=nothing, sources=true, sedimentation=true)
     microphysics = model.microphysics
     microphysics isa ColumnWP1M ||
         throw(ArgumentError("height_coordinate_warm_rain_column_physics! needs warm-phase one-moment microphysics built " *
@@ -152,6 +184,7 @@ function height_coordinate_warm_rain_column_physics!(model, ledger; Δt, substep
     κ = convert(FT, dry_air_gas_constant(constants) / constants.dry_air.heat_capacity)
     pˢᵗ = convert(FT, model.dynamics.standard_pressure)
     δt = convert(FT, Δt / substeps)
+    g = convert(FT, constants.gravitational_acceleration)
     μ = model.microphysical_fields
     part(field, r) = isnothing(r) ? field : Oceananigans.Utils.getregion(field, r)
     parts(fields::NamedTuple, r) = map(field -> part(field, r), fields)
@@ -159,23 +192,25 @@ function height_coordinate_warm_rain_column_physics!(model, ledger; Δt, substep
 
     for n in 1:substeps
         for r in each_region
+            sources || continue
             grid = part(model.grid, r)
             launch!(grid.architecture, grid, :xyz, _apply_height_coordinate_rain_sources!,
+                    part(model.formulation.potential_temperature_density, r),
                     part(model.moisture_density, r), part(μ.ρqʳ, r), grid, microphysics,
-                    part(AM.total_density(model.dynamics), r), part(model.temperature, r),
-                    part(μ.qᵛ, r), part(μ.qˡ, r), part(μ.qᶜˡ, r), constants, δt)
+                    part(model.dynamics.dry_density, r), part(AM.total_density(model.dynamics), r), part(model.temperature, r),
+                    part(μ.qᵛ, r), part(μ.qˡ, r), part(μ.qᶜˡ, r), constants, pˢᵗ, κ, δt)
         end
 
         update_state!(model; compute_tendencies=false)
 
         for r in each_region
+            sedimentation || continue
             grid = part(model.grid, r)
             launch!(grid.architecture, grid, :xy, _sediment_height_coordinate_rain!,
                     part(model.formulation.potential_temperature_density, r), part(μ.ρqʳ, r), parts(ledger, r),
                     grid, microphysics, part(model.dynamics.dry_density, r), part(model.moisture_density, r),
-                    part(model.formulation.potential_temperature, r), part(model.temperature, r),
-                    part(AM.dynamics_pressure(model.dynamics), r), part(μ.qᵛ, r), part(μ.qᶜˡ, r),
-                    constants, pˢᵗ, κ, δt)
+                    part(model.temperature, r), part(μ.qᵛ, r), part(μ.qᶜˡ, r),
+                    constants, pˢᵗ, κ, g, δt)
         end
 
         update_state!(model; compute_tendencies = n == substeps)
