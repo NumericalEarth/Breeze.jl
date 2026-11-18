@@ -153,6 +153,14 @@ for G in (:HydrostaticPressureRectilinearGrid,
     end
 end
 
+# The densities of `HydrostaticDynamics` are masses per unit area and unit of the reference
+# coordinate on either grid (σ-weighted densities per cubic meter), so the weight of a layer is
+# ρ g Δr, not ρ g Δz: a kernel function that integrates a density of the model over a layer is
+# given the reference spacing. The pressure at the ground, extrapolated from the lowest layer by
+# the bulk formulas, is such a function, and is then the same number on both grids.
+@inline Thermodynamics.surface_pressure_from_cell_center(i, j, k, grid::HydrostaticPressureGrid, p, ρ, g) =
+    @inbounds Thermodynamics.surface_pressure_from_cell_center(p[i, j, k], ρ[i, j, k], Δrᶜᶜᶜ(i, j, k, grid), g)
+
 #####
 ##### A grid with another vertical discretization
 #####

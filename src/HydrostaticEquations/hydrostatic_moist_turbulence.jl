@@ -43,7 +43,8 @@ using Oceananigans.Utils: KernelParameters, launch!, @apply_regionally
 using Breeze.AtmosphereModels: AtmosphereModelBuoyancy, specific_prognostic_moisture, dynamics_thermodynamic_fields,
                                log_density_potential_temperature
 using Breeze.BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions
-using Breeze.HydrostaticEquations: MoistHydrostaticModel, column_physics_in_time_step, warm_rain_column_physics!, hydrostatic_water_fields,
+using Breeze.HydrostaticEquations: HydrostaticPressureGrid, HydrostaticHeightCoordinate, height_grid_or,
+                                   MoistHydrostaticModel, column_physics_in_time_step, warm_rain_column_physics!, hydrostatic_water_fields,
                                    water_densities, sum_at, interface_pressure, layer_pressure_thickness,
                                    interface_potential_temperature, height_between_layers, physical_layer_depth,
                                    layer_mass_per_area, diffuse_column!, face_conductance, _diffuse_velocity!
@@ -136,6 +137,14 @@ end
     return max(Δzᶜᶜᶜ(i, j, k, grid) / 2, h)
 end
 
+# The grids on which the kernels of the closure differentiate in height: the wrapper above, built
+# where a kernel is launched, or the physical height grid of a model that carries one
+# (`HydrostaticDynamics(physical_height_grid=true)`), which is used as it is.
+const GridOfHeights = Union{PhysicalHeightGrid, HydrostaticPressureGrid}
+
+closure_height_grid(grid, heights, ::Nothing) = PhysicalHeightGrid(grid, heights)
+closure_height_grid(grid, heights, coordinate::HydrostaticHeightCoordinate) = coordinate.grid
+
 #####
 ##### Differences of logarithms between two layers
 #####
@@ -158,13 +167,13 @@ end
 # here from fields that the hydrostatic core carries, without a difference of logarithms and
 # without raising the pressure to a power again: θᵨ is `moisture.density_potential_temperature`,
 # equal to (Rᵐ / Rᵈ) T / Π, and ln θ = ln T - ln Π with Π the Exner function of the layer.
-@inline function Operators.∂zᶜᶜᶠ(i, j, k, grid::PhysicalHeightGrid, ::typeof(log_density_potential_temperature),
+@inline function Operators.∂zᶜᶜᶠ(i, j, k, grid::GridOfHeights, ::typeof(log_density_potential_temperature),
                                  buoyancy, T, qᵛᵉ)
     θᵨ = buoyancy.dynamics.moisture.density_potential_temperature
     return @inbounds log_ratio(θᵨ[i, j, k], θᵨ[i, j, k-1]) * Operators.Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
 end
 
-@inline function Operators.∂zᶜᶜᶠ(i, j, k, grid::PhysicalHeightGrid, ::typeof(log_dry_potential_temperatureᶜᶜᶜ),
+@inline function Operators.∂zᶜᶜᶠ(i, j, k, grid::GridOfHeights, ::typeof(log_dry_potential_temperatureᶜᶜᶜ),
                                  buoyancy, T, qᵛᵉ)
     Π = buoyancy.dynamics.exner_function
     δ_log_θ = @inbounds log_ratio(T[i, j, k], T[i, j, k-1]) - log_ratio(Π[i, j, k], Π[i, j, k-1])
@@ -204,7 +213,11 @@ function launch_physical_heights!(heights, grid, dynamics, constants)
     return nothing
 end
 
-function compute_physical_heights!(heights, model)
+# The heights of a model with a physical height grid are those of its last `update_state!`
+compute_physical_heights!(heights, model) = compute_physical_heights!(heights, model, model.dynamics.height_coordinate)
+compute_physical_heights!(heights, model, ::HydrostaticHeightCoordinate) = nothing
+
+function compute_physical_heights!(heights, model, ::Nothing)
     @apply_regionally launch_physical_heights!(heights, model.grid, model.dynamics, model.thermodynamic_constants)
     fill_halo_regions!(heights.layer_depth)
     fill_halo_regions!(heights.interface_spacing)
@@ -277,16 +290,17 @@ materialize_bulk_condition(::Nothing, location, model, closure) = nothing
 
 function materialize_bulk_condition(bc, location, model, closure)
     coefficient = bc.condition.coefficient
-    coefficient isa Number ||
+    (coefficient isa Number || !isnothing(model.dynamics.height_coordinate)) ||
         throw(ArgumentError("BulkSurfaceExchange supports constant transfer coefficients only: the stability " *
                             "functions of $(summary(coefficient)) take heights from the grid, which on " *
-                            "HydrostaticDynamics are labels of the coordinate."))
+                            "HydrostaticDynamics are labels of the coordinate unless it is built with " *
+                            "physical_height_grid=true."))
 
     isnothing(bc.condition.surface_temperature) &&
         throw(ArgumentError("The bulk boundary conditions of BulkSurfaceExchange need a surface_temperature."))
 
     materialized = AtmosphereBoundaryConditions.materialize_atmosphere_boundary_condition(
-        bc, Bottom(), location, model.grid, model.dynamics, model.microphysics, model.thermodynamic_constants, closure)
+        bc, Bottom(), location, height_grid_or(model.grid, model.dynamics.height_coordinate), model.dynamics, model.microphysics, model.thermodynamic_constants, closure)
 
     formulation = AtmosphereBoundaryConditions.sensible_heat_flux_formulation(Val(:ρθ), model.formulation)
     condition = AtmosphereBoundaryConditions.set_sensible_heat_formulation(materialized, formulation).condition
@@ -374,7 +388,7 @@ function launch_bulk_surface_fluxes!(fluxes, exchange, model)
     constants = model.thermodynamic_constants
 
     launch!(grid.architecture, grid, :xy, _compute_bulk_surface_fluxes!,
-            fluxes, grid, exchange, model.clock, Oceananigans.fields(model), dynamics_thermodynamic_fields(dynamics),
+            fluxes, height_grid_or(grid, dynamics.height_coordinate), exchange, model.clock, Oceananigans.fields(model), dynamics_thermodynamic_fields(dynamics),
             dynamics.density, dynamics.moisture.total_density, dynamics.exner_function, model.temperature,
             constants.dry_air.heat_capacity, constants.vapor.heat_capacity)
 
@@ -531,7 +545,7 @@ function launch_closure_fields_in_height!(mixing, model)
     dynamics = model.dynamics
     moisture = dynamics.moisture
     constants = model.thermodynamic_constants
-    physical_grid = PhysicalHeightGrid(grid, mixing.heights)
+    physical_grid = closure_height_grid(grid, mixing.heights, dynamics.height_coordinate)
     closure = mixing.closure
     closure_fields = mixing.closure_fields
     C = mixing.scratch.conductances
