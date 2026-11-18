@@ -483,8 +483,15 @@ end
 
 Base.size(r::MixingRatio) = size(r.density)
 
-Base.@propagate_inbounds Base.getindex(r::MixingRatio, i, j, k) =
-    r.specific[i, j, k] * (r.total_density[i, j, k] / r.density[i, j, k])
+# A cell without dry mass is a halo cell beyond a rigid wall (only the first halo cell of a no-flux
+# boundary is filled). Its mixing ratio only ever multiplies the zero mass flux through the wall, so
+# it is zero rather than 0 / 0, which would make that flux, and with it the wall rows, not a number.
+Base.@propagate_inbounds function Base.getindex(r::MixingRatio, i, j, k)
+    ρ = r.density[i, j, k]
+    massless = ρ == 0
+    ratio = r.total_density[i, j, k] / ifelse(massless, one(ρ), ρ)
+    return ifelse(massless, zero(ρ), r.specific[i, j, k] * ratio)
+end
 
 # The condensate of the supported schemes does not fall in the stages: rain sedimentation is
 # part of the column physics, once per time step, so no sedimentation velocity is added here.
@@ -597,6 +604,10 @@ function AtmosphereModels.compute_dynamics_tendency!(model::MoistHydrostaticMode
             dynamics.exner_function, dynamics.interface_exner_function, dynamics.moisture.interface_pressure,
             dynamics.surface_pressure_coefficient, Gπˢ, water_tendencies(model),
             model.formulation.potential_temperature, model.temperature, water.qᵛ, water.qˡ, constants, κ, g)
+
+    # The expansion work has read the transport of the water. A time stepper that transports the
+    # scalars with the mass flux of its stages now takes it out of their tendencies.
+    leave_scalar_transport_to_stages!(model.timestepper, model)
 
     return nothing
 end

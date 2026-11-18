@@ -4,7 +4,81 @@ using Breeze.HydrostaticEquations: HydrostaticEquations, HydrostaticDynamics, Gr
                                    freeze_gravity_wave_linearization!, subtract_fast_tendencies!,
                                    gravity_wave_substep_loop!, stage_substeps, maximum_gravity_wave_speed,
                                    compute_integrated_vertical_velocity!, add_perturbation_transport!,
-                                   gravity_wave_seam_budgets, correct_completed_stage!
+                                   gravity_wave_seam_budgets, correct_completed_stage!,
+                                   compute_stage_transport_velocities!, advance_scalar_with_stage_transport!,
+                                   withhold_scalar_transport!
+
+#####
+##### How a stage advances the prognostic scalars that the substeps do not
+#####
+
+"""
+$(TYPEDEF)
+
+The scalars take the stages of the tableau as they are written: the increments of the earlier
+stages and their full tendencies are recombined with the coefficients of the tableau, and the
+transport by the velocity perturbation of the substeps is added with a centered flux of the
+specific value at the start of the time step. Valid for any tableau, and not bounds preserving.
+"""
+struct RecombinedScalarStages end
+
+"""
+$(TYPEDEF)
+
+Every stage transports the scalars once, after its substeps, with the mass flux that changes the
+layer mass over the stage, and is a convex combination of the state at the start of the time
+step and of one forward Euler step from the state the stage started from. With a transport
+scheme that keeps a mixing ratio within bounds over a forward Euler step, the scalars stay within
+them. For moist `HydrostaticDynamics`, with a tableau for which [`convex_scalar_stages`](@ref)
+holds.
+"""
+struct ConvexScalarStages end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether every stage of `tableau`, for a variable without a fast tendency, is a convex combination
+of the state at the start of the time step and of one forward Euler step from the stage before,
+
+```math
+Yᵢ = (1 - wᵢ) Uⁿ + wᵢ [Yᵢ₋₁ + (βᵢᵢ / wᵢ) Δt S(Yᵢ₋₁)] ,  \\qquad wᵢ = αᵢ,ᵢ₋₁ + γᵢ,ᵢ₋₁ ∈ (0, 1] :
+```
+
+`β` is diagonal and positive, and `α + γ` vanishes off the first subdiagonal. The
+`:ConvexLinearMIS` sets are of this kind; `:WickerSkamarock3`, whose stages restart from ``Uⁿ``
+(``wᵢ = 0``), is not.
+"""
+function convex_scalar_stages(tableau::MultirateInfinitesimalStepTableau)
+    (; α, β, γ) = tableau
+    stages = number_of_stages(tableau)
+
+    for i in 1:stages
+        β[i, i] > 0 || return false
+
+        for j in 1:i-1
+            weight = α[i, j] + γ[i, j]
+            β[i, j] == 0 || return false
+            j == i - 1 ? (0 < weight ≤ 1 || return false) : (weight == 0 || return false)
+        end
+    end
+
+    return true
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the length of the longest forward Euler step, as a fraction of the time step, of which the
+stages of `tableau` are convex combinations for a variable without a fast tendency: the largest
+``βᵢᵢ / wᵢ`` (see [`convex_scalar_stages`](@ref), which must hold). A transport scheme that
+preserves bounds up to a Courant number ``C`` over a forward Euler step preserves them over the
+time step ``Δt`` when the Courant number of this fraction of ``Δt`` is at most ``C``.
+"""
+function largest_euler_step_fraction(tableau::MultirateInfinitesimalStepTableau)
+    (; α, β, γ) = tableau
+    fractions = [i == 1 ? β[1, 1] : β[i, i] / (α[i, i-1] + γ[i, i-1]) for i in 1:number_of_stages(tableau)]
+    return maximum(fractions)
+end
 
 # The Knoth–Wensch MIS3C coefficient set, which the acoustic `MultirateInfinitesimalStep` no longer lists
 # (transcribed from ClimaTimeSteppers.jl's `mis.jl`, as the sets of multirate_infinitesimal_step_coefficients.jl were)
@@ -58,8 +132,10 @@ Fields
 - `stage_increments`: ``ΔY_j`` of every stage.
 - `implicit_solver`: unused; `HydrostaticDynamics` has no vertically implicit terms.
 - `substepper`: the `GravityWaveSubstepper` that holds the linearization and integrates the fast system.
+- `scalar_stages`: how the stages advance the other scalars, [`RecombinedScalarStages`](@ref) or
+  [`ConvexScalarStages`](@ref).
 """
-struct GravityWaveMultirateInfinitesimalStep{TB, U0, TG, SS, DY, TI, GS} <: AbstractTimeStepper
+struct GravityWaveMultirateInfinitesimalStep{TB, U0, TG, SS, DY, TI, GS, SC} <: AbstractTimeStepper
     tableau :: TB
     U⁰ :: U0
     Gⁿ :: TG
@@ -67,6 +143,7 @@ struct GravityWaveMultirateInfinitesimalStep{TB, U0, TG, SS, DY, TI, GS} <: Abst
     stage_increments :: DY
     implicit_solver :: TI
     substepper :: GS
+    scalar_stages :: SC
 end
 
 @regional GravityWaveMultirateInfinitesimalStep
@@ -84,9 +161,14 @@ Keyword arguments
 =================
 
 - `tableau`: the outer scheme, `:MIS3C` or `:MIS4a`
-  ([Knoth and Wensch 2014](@cite KnothWensch2014)), or `:WickerSkamarock3`
-  ([Wicker and Skamarock 2002](@cite WickerSkamarock2002)); or a
-  [`MultirateInfinitesimalStepTableau`](@ref). Required.
+  ([Knoth and Wensch 2014](@cite KnothWensch2014)), `:WickerSkamarock3`
+  ([Wicker and Skamarock 2002](@cite WickerSkamarock2002)), or one of the convex sets
+  `:ConvexLinearMIS3` to `:ConvexLinearMIS6`; or a [`MultirateInfinitesimalStepTableau`](@ref).
+  Required. With moist `HydrostaticDynamics` and a tableau for which
+  [`convex_scalar_stages`](@ref) holds, every stage transports the water and the tracers once,
+  with the mass flux of the stage, as a convex combination of forward Euler steps
+  ([`ConvexScalarStages`](@ref)): a bounds-preserving transport scheme then keeps the water
+  non-negative. With any other tableau the scalar update is not bounds preserving.
 - `inner_solver`: the integrator of the gravity waves,
   [`VerletSubsteps`](@ref Breeze.HydrostaticEquations.VerletSubsteps)`()` or
   [`ForwardBackwardSubsteps`](@ref Breeze.HydrostaticEquations.ForwardBackwardSubsteps)`(divergence_damping=0.1)`. Required.
@@ -175,9 +257,19 @@ function GravityWaveMultirateInfinitesimalStep(grid, prognostic_fields;
     slow_tendencies = ntuple(_ -> map(similar, prognostic_fields), stages)
     stage_increments = ntuple(_ -> map(similar, prognostic_fields), stages)
 
+    # The convex stages transport the mixing ratio per unit dry mass of moist dynamics
+    scalar_stages = moist && convex_scalar_stages(tableau) ? ConvexScalarStages() : RecombinedScalarStages()
+
     return GravityWaveMultirateInfinitesimalStep(tableau, U⁰, Gⁿ, slow_tendencies, stage_increments,
-                                                 implicit_solver, substepper)
+                                                 implicit_solver, substepper, scalar_stages)
 end
+
+const ConvexGravityWaveMultirateInfinitesimalStep =
+    GravityWaveMultirateInfinitesimalStep{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:ConvexScalarStages}
+
+# The stages transport the scalars: their tendencies keep the forcing alone
+HydrostaticEquations.leave_scalar_transport_to_stages!(timestepper::ConvexGravityWaveMultirateInfinitesimalStep, model) =
+    withhold_scalar_transport!(model, keys(timestepper.substepper.specific_scalars))
 
 # What the substeps of a stage move through the seam of a Yin-Yang grid
 HydrostaticEquations.stage_seam_budgets(timestepper::GravityWaveMultirateInfinitesimalStep, model) =
@@ -194,6 +286,9 @@ function Base.show(io::IO, timestepper::GravityWaveMultirateInfinitesimalStep)
     print(io, "├── inner_solver: ", summary(substepper.inner_solver), '\n')
     print(io, "├── substeps: ", substepper.substeps, '\n')
     print(io, "└── cfl: ", substepper.cfl)
+    timestepper.scalar_stages isa ConvexScalarStages &&
+        print(io, '\n', "    scalars: convex stages, forward Euler steps up to ",
+              round(largest_euler_step_fraction(timestepper.tableau), digits=3), " Δt")
 end
 
 #####
@@ -292,33 +387,46 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Complete stage `i` after its substeps: store its increment ``ΔY_i``, recover the state
-``Uⁿ + ΔY_i`` of the variables the substeps advanced, and advance the other scalars.
+Complete stage `i` after its substeps: advance the scalars that the substeps did not, store the
+increment ``ΔY_i`` of the variables they advanced and recover their state ``Uⁿ + ΔY_i``.
 
-The scalars take the increment ``Σ_j (α_{ij} + γ_{ij}) ΔY_j + Δt Σ_j β_{ij} G_j`` of their full
-tendencies, and the transport of their specific value at the start of the step by the velocity
-perturbation integrated over the substeps, less the part of it that the full tendencies
-``G_j`` already carry, ``Δt Σ_j β_{ij} u′_{j-1}``. The mass fluxes of this net perturbation are
-those that the surface pressure perturbation accounts for.
+The scalars are advanced first, while `model` still holds the state the stage started from, with
+the velocity perturbation integrated over the substeps less the part of it that the full
+tendencies ``G_j`` already carry, ``Δt Σ_j β_{ij} u′_{j-1}``. The mass fluxes of this net
+perturbation are those that the surface pressure perturbation accounts for.
 """
 function complete_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, model, i, Δt)
-    (; α, β, γ) = timestepper.tableau
+    β = timestepper.tableau.β
     substepper = timestepper.substepper
-    S = timestepper.slow_tendencies
     ΔY = timestepper.stage_increments
     U⁰ = timestepper.U⁰
     prognostic = prognostic_fields(model)
-
-    for name in gravity_wave_prognostic_names
-        copy_parent!(ΔY[i][name], substepper.perturbations[name])
-        set_sum!(prognostic[name], U⁰[name], ΔY[i][name])
-    end
 
     ∫𝐮′ = substepper.integrated_velocities
     for j in 2:i
         add_scaled!(∫𝐮′.u, ΔY[j-1].u, - Δt * β[i, j])
         add_scaled!(∫𝐮′.v, ΔY[j-1].v, - Δt * β[i, j])
     end
+
+    complete_scalar_stage!(timestepper.scalar_stages, timestepper, model, i, Δt)
+
+    for name in gravity_wave_prognostic_names
+        copy_parent!(ΔY[i][name], substepper.perturbations[name])
+        set_sum!(prognostic[name], U⁰[name], ΔY[i][name])
+    end
+
+    return nothing
+end
+
+# The increment ``Σ_j (α_{ij} + γ_{ij}) ΔY_j + Δt Σ_j β_{ij} G_j`` of the full tendencies, and the
+# transport of the specific value at the start of the step by the net velocity perturbation
+function complete_scalar_stage!(::RecombinedScalarStages, timestepper, model, i, Δt)
+    (; α, β, γ) = timestepper.tableau
+    substepper = timestepper.substepper
+    S = timestepper.slow_tendencies
+    ΔY = timestepper.stage_increments
+    U⁰ = timestepper.U⁰
+    prognostic = prognostic_fields(model)
 
     compute_integrated_vertical_velocity!(substepper, model)
 
@@ -336,6 +444,31 @@ function complete_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, mod
 
         add_perturbation_transport!(δρc, substepper, model, name)
         set_sum!(prognostic[name], U⁰[name], δρc)
+    end
+
+    return nothing
+end
+
+# One transport by the mass flux of the stage, from the state the stage started from: see
+# `moist_stage_scalar_transport.jl`. The slow tendencies of the scalars hold everything but
+# their transport, and the storage of their increment is the scratch of the update.
+function complete_scalar_stage!(::ConvexScalarStages, timestepper, model, i, Δt)
+    (; α, β, γ) = timestepper.tableau
+    substepper = timestepper.substepper
+    N = timestepper.slow_tendencies[i]
+    scratch = timestepper.stage_increments[i]
+    U⁰ = timestepper.U⁰
+    prognostic = prognostic_fields(model)
+
+    weight = i == 1 ? one(eltype(β)) : α[i, i-1] + γ[i, i-1]
+    Δtˢ = β[i, i] * Δt
+    Δtᵉ = Δtˢ / weight
+
+    compute_stage_transport_velocities!(substepper, model, Δtˢ)
+
+    for name in keys(substepper.specific_scalars)
+        advance_scalar_with_stage_transport!(prognostic[name], U⁰[name], scratch[name], N[name],
+                                             model, substepper, name, weight, Δtˢ, Δtᵉ)
     end
 
     return nothing
