@@ -29,6 +29,10 @@ function Oceananigans.Models.update_model_field_time_series!(model::AtmosphereMo
     return nothing
 end
 
+# The first RK stage has already checked the schedule and refreshed any missing restart cache.
+update_state_between_radiation_solves!(model, callbacks=[]; compute_tendencies=true) =
+    update_state!(model, callbacks; compute_tendencies, radiation_update! = update_radiation_between_solves!)
+
 # `update_state!` is idempotent: it can be called any number of times and always
 # leaves the model in the same consistent state (refreshed halos, diagnostics, and
 # tendencies) for the prognostic fields it is given. It deliberately does *not* advance
@@ -36,7 +40,7 @@ end
 # prognostic fields by a full `Δt` and so must run exactly once per step — the
 # time-steppers invoke it directly. (The tendency-interface microphysics still runs
 # every RK stage as part of `compute_tendencies!`.)
-function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true, radiation_update! = update_radiation!)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
@@ -46,7 +50,7 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
-    update_radiation!(model.radiation, model)
+    radiation_update!(model.radiation, model)
     compute_forcings!(model)
 
     for callback in callbacks

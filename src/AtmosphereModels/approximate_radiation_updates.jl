@@ -28,14 +28,14 @@ The state of the approximate updates of a [`RadiativeTransferModel`](@ref)'s flu
   interval is unknown, the solve uses the current solar angle and the fluxes still follow the
   moving sun.
 
-Over its window the sun stays within four times `μ̄₀`. A state update that finds `μ₀` beyond that,
+Over its window the sun stays within four times `μ̄₀`. A step boundary that finds `μ₀` beyond that,
 sunlight the last solve did not average over, solves again instead: after a solve at night, or with
 an unknown or underestimated radiation interval.
 
 # Fields
 $(TYPEDFIELDS)
 """
-struct ApproximateRadiationUpdates{F, C}
+struct ApproximateRadiationUpdates{F, C, D}
     "Response of the upwelling longwave flux to `T₀⁴` (W m⁻² K⁻⁴)"
     upwelling_longwave_response :: F
     "Response of the downwelling longwave flux to `T₀⁴` (W m⁻² K⁻⁴, signed like the flux)"
@@ -53,7 +53,7 @@ struct ApproximateRadiationUpdates{F, C}
     "Per-column cosine of the solar zenith angle"
     cos_zenith :: C
     "Per-column sunlit duration of the radiation window (s), a workspace of the solve"
-    sunlit_duration :: C
+    sunlit_duration :: D
     "Per-column surface temperature of the last solve"
     surface_temperature :: C
 end
@@ -66,8 +66,12 @@ The [`ApproximateRadiationUpdates`](@ref) of a radiative transfer model on `grid
 `BreezeReactantExt` returns `nothing` on `ReactantState`, whose traced time steps do not update
 the fluxes between solves.
 """
-approximate_radiation_updates(grid, schedule, solar_position) =
-    approximate_radiation_updates(architecture(grid), grid, schedule, solar_position)
+function approximate_radiation_updates(grid::AbstractGrid, schedule, solar_position, surface_radiation)
+    if solar_position isa FixedCosineZenith && surface_radiation.surface_temperature isa ConstantField
+        return nothing
+    end
+    return approximate_radiation_updates(architecture(grid), grid, schedule, solar_position)
+end
 
 function approximate_radiation_updates(arch, grid, schedule, solar_position)
     schedule isa IterationInterval && schedule.interval == 1 && return nothing
@@ -77,10 +81,11 @@ function approximate_radiation_updates(arch, grid, schedule, solar_position)
     cos_zenith = column_array()
     initialize_cos_zenith!(cos_zenith, solar_position)
 
+    duration = solar_position isa DiurnalSolarPosition ? nothing : column_array()
     return ApproximateRadiationUpdates(ZFaceField(grid), ZFaceField(grid),
                                        ZFaceField(grid), ZFaceField(grid),
                                        ZFaceField(grid), ZFaceField(grid),
-                                       column_array(), cos_zenith, column_array(), column_array())
+                                       column_array(), cos_zenith, duration, column_array())
 end
 
 #####
@@ -105,11 +110,21 @@ end
 # stage timing. Declared here because `TimeSteppers` loads after `AtmosphereModels`.
 stage_abscissae(timestepper) = nothing
 
+radiation_step_duration(timestepper, clock) = stage_step_duration(stage_abscissae(timestepper), clock)
+stage_step_duration(::Nothing, clock) = clock.last_Δt
+
+function stage_step_duration((first_stage, second_stage), clock)
+    clock.stage == 1 && return clock.last_Δt
+    fraction = clock.stage == 2 ? first_stage : second_stage - first_stage
+    duration = clock.last_stage_Δt / fraction
+    return isfinite(duration) && duration > 0 ? duration : clock.last_Δt
+end
+
 # The offsets from the start of the time step of `clock` to its first stage and to `clock`, or
 # `nothing` when the step timing is unknown: before a positive time step, and for time steppers
 # without stage abscissae at any but the first-stage clock, which still gives its own offset.
 function radiation_step_offsets(timestepper, clock, lead)
-    Δt = clock.last_Δt
+    Δt = radiation_step_duration(timestepper, clock)
     isfinite(Δt) && Δt > 0 || return nothing
     offsets = stage_offsets(stage_abscissae(timestepper), clock, lead)
     (isnothing(offsets) || !isfinite(last(offsets))) && return nothing
@@ -122,7 +137,7 @@ function stage_offsets((first_stage, second_stage), clock, lead)
     current_offset = ifelse(clock.stage == 1, zero(lead),
                            ifelse(clock.stage == 2, clock.last_stage_Δt,
                                   second_stage * (clock.last_stage_Δt / (second_stage - first_stage))))
-    return first_stage * clock.last_Δt, current_offset
+    return first_stage * stage_step_duration((first_stage, second_stage), clock), current_offset
 end
 
 # Between the steps of a run, the first stage of the step that begins at `clock` can still solve
@@ -152,7 +167,7 @@ function radiation_interval(schedule::Union{TimeInterval, SpecifiedTimes}, clock
 
     # The next solve's first stage must reach t★, but its window begins at the step's start.
     # A first stage already visited cannot solve again; iteration zero never actuates a schedule.
-    Δt = clock.last_Δt
+    Δt = radiation_step_duration(timestepper, clock)
     earliest_step = ifelse(awaiting_first_stage(clock), 0, 1)
     steps = max(earliest_step, ceil((remaining + current_offset - first_stage_offset) / Δt))
     return finite_radiation_interval(steps * Δt - current_offset + lead)
@@ -164,7 +179,7 @@ end
 function radiation_interval(schedule::IterationInterval, clock, lead, timestepper=nothing)
     steps = mod(schedule.offset - clock.iteration, schedule.interval)
     steps = ifelse(steps == 0 && !awaiting_first_stage(clock), schedule.interval, steps)
-    interval = steps * clock.last_Δt
+    interval = steps * radiation_step_duration(timestepper, clock)
     offsets = radiation_step_offsets(timestepper, clock, lead)
     if !isnothing(offsets)
         interval += lead - last(offsets)
@@ -253,7 +268,6 @@ bring the shortwave fluxes to the current sun.
 """
 function complete_radiation_solve!(rtm, model)
     complete_radiation_solve!(rtm.approximate_updates, rtm, model)
-    set_radiation_cache_validity!(rtm.cache_valid, true)
     return nothing
 end
 
@@ -330,7 +344,7 @@ function update_radiation_between_solves!(updates::ApproximateRadiationUpdates, 
     daylight_solves = Broadcast.instantiate(Broadcast.broadcasted(needs_daylight_solve,
                                                                   updates.cos_zenith, updates.solved_cos_zenith))
 
-    if mapreduce(identity, |, daylight_solves; init=false)
+    if model.clock.stage == 1 && mapreduce(identity, |, daylight_solves; init=false)
         _update_radiation!(rtm, model)
     else
         apply_radiation_updates!(rtm, model)

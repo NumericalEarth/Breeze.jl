@@ -82,6 +82,14 @@ end
         end
     end
 
+    @testset "Step growth at the first RK stage" begin
+        for (timestepper, (first_stage, _)) in steppers
+            lead = first_stage * FT(10)
+            clock = Clock(time=lead, iteration=4, stage=2, last_Δt=FT(5), last_stage_Δt=lead)
+            @test radiation_interval(IterationInterval(4), clock, lead, timestepper) ≈ FT(40)
+        end
+    end
+
     @testset "Initialization and unknown timing" begin
         for (timestepper, (first_stage, _)) in steppers, iteration in (0, 6)
             clock = Clock(time=FT(0), last_Δt=Δt, iteration=iteration)

@@ -1294,6 +1294,7 @@ diagnostics, and tendencies) before returning — e.g. by calling `update_state!
 Defaults to a no-op; specific microphysics schemes extend this function.
 """
 microphysics_model_update!(microphysics::Nothing, model) = nothing
+microphysics_model_update!(microphysics, model, refresh_state!) = microphysics_model_update!(microphysics, model)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

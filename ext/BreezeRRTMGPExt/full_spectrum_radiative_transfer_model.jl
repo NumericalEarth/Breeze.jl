@@ -164,7 +164,7 @@ function full_spectrum_radiative_transfer_model(grid, radiation_method, constant
                                   ice_effective_radius,
                                   column_batches,
                                   schedule,
-                                  approximate_radiation_updates(grid, schedule, solar_position),
+                                  approximate_radiation_updates(grid, schedule, solar_position, surface_radiation),
                                   radiation_cache_validity(grid))
 end
 

@@ -329,7 +329,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     # Back to tⁿ + Δt/2, the abscissa of u^(2); `corrected_Δt` below restores the Δt/2.
     tick_stage!(model.clock, (c² - c¹) * Δt)
-    update_state!(model, callbacks; compute_tendencies = true)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
 
     #
     # Third stage: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
@@ -348,11 +348,11 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    update_state!(model, callbacks; compute_tendencies = true)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
-    microphysics_model_update!(model.microphysics, model)
+    microphysics_model_update!(model.microphysics, model, AtmosphereModels.update_state_between_radiation_solves!)
 
     # Advect particles once per step, over the full Δt, with the velocity of the state
     # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,

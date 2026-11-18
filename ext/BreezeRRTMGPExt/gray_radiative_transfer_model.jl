@@ -161,7 +161,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   nothing,  # ice_effective_radius = nothing for gray
                                   nothing,  # column_batches = nothing: gray is never batched
                                   schedule,
-                                  approximate_radiation_updates(grid, schedule, solar_position),
+                                  approximate_radiation_updates(grid, schedule, solar_position, surface_radiation),
                                   radiation_cache_validity(grid))
 end
 
@@ -240,10 +240,9 @@ Solve the gray radiative fluxes for the current model state, at the solar zenith
 `_update_radiation!` has set:
 
 1. Updates the RRTMGP atmospheric state from model fields (T, p)
-2. Solves the longwave and shortwave RTE
-3. Copies the fluxes to Oceananigans fields for output
-4. Solves the longwave RTE again at the perturbed surface temperature, when the fluxes are updated
-   between solves for a changing surface temperature
+2. Computes the perturbed longwave fluxes when the surface temperature can change between solves
+3. Solves the longwave and shortwave RTE at the physical surface temperature
+4. Copies the fluxes to Oceananigans fields for output
 
 Sign convention: positive flux = upward, negative flux = downward.
 """
@@ -262,6 +261,8 @@ function AtmosphereModels.solve_radiative_transfer!(rtm::GrayRadiativeTransferMo
                                                rtm.shortwave_solver.bcs.sfc_alb_diffuse,
                                                rtm.surface_radiation, grid)
 
+    solves_longwave_response(rtm) && solve_perturbed_surface_longwave!(rtm, grid)
+
     # Solve longwave RTE (RRTMGP external call)
     solve_lw!(rtm.longwave_solver, rrtmgp_state)
 
@@ -273,15 +274,13 @@ function AtmosphereModels.solve_radiative_transfer!(rtm::GrayRadiativeTransferMo
     # Copy RRTMGP flux arrays to Oceananigans fields with sign convention
     copy_fluxes_to_fields!(rtm, grid)
 
-    solves_longwave_response(rtm) && solve_perturbed_surface_longwave!(rtm, grid)
-
     return nothing
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Solve the longwave fluxes again at the perturbed surface temperature, into the longwave responses
+Solve the longwave fluxes at the perturbed surface temperature, into the longwave responses
 of `rtm.approximate_updates`. Gray optics is one batch of all the columns.
 """
 function solve_perturbed_surface_longwave!(rtm::GrayRadiativeTransferModel, grid)

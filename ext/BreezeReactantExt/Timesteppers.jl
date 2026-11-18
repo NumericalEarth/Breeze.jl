@@ -17,7 +17,8 @@ const ReactantSSPRungeKutta3Model = AtmosphereModel{<:Any, <:Any, <:ReactantStat
 function TimeSteppers.prepare_first_time_step!(model::ReactantSSPRungeKutta3Model, Δt)
     model.clock.last_Δt = Δt
     reconcile_state!(model)
-    update_state!(model; compute_tendencies = isnothing(model.radiation))
+    update_state!(model; compute_tendencies = isnothing(model.radiation),
+                  radiation_update! = AtmosphereModels.update_radiation_between_solves!)
     initialize_radiation!(model.radiation, model)
     return nothing
 end
@@ -25,8 +26,8 @@ end
 initialize_radiation!(::Nothing, model) = nothing
 
 function initialize_radiation!(radiation, model)
-    AtmosphereModels._update_radiation!(radiation, model)
-    update_state!(model)
+    AtmosphereModels.solve_scheduled_radiation!(radiation, model)
+    update_state!(model; radiation_update! = AtmosphereModels.update_radiation_between_solves!)
     return nothing
 end
 
@@ -65,7 +66,7 @@ end
 
 function AtmosphereModels.conditionally_update_radiation!(due::TracedRNumber{Bool}, rtm, model)
     @trace track_numbers=false if due
-        AtmosphereModels._update_radiation!(rtm, model)
+        AtmosphereModels.solve_scheduled_radiation!(rtm, model)
     end
     return nothing
 end

@@ -178,6 +178,9 @@ with_batching(::Integer) = true
 function solve_radiation_batch!(rtm, solver, grid, as, lws, sws, scaling, batch_rows, j_offset)
     method = solver.radiation_method
 
+    solves_longwave_response(rtm) &&
+        solve_perturbed_surface_longwave!(rtm, solver, grid, as, lws, scaling, batch_rows, j_offset)
+
     solve_lw!(lws, as, longwave_lookups(solver.lookups, method)..., scaling)
     update_presentation!(solver.presented_flux_lw, solver.lws.flux)
 
@@ -185,9 +188,6 @@ function solve_radiation_batch!(rtm, solver, grid, as, lws, sws, scaling, batch_
     update_presentation!(solver.presented_flux_sw, solver.sws.flux)
 
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset)
-
-    solves_longwave_response(rtm) &&
-        solve_perturbed_surface_longwave!(rtm, solver, grid, as, lws, scaling, batch_rows, j_offset)
 
     return nothing
 end

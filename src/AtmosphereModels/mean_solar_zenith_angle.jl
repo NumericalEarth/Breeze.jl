@@ -48,7 +48,7 @@ function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::
     integral, duration = sunlit_cosine_integral(cosine_offset, cosine_amplitude, first_angle, angular_speed * interval)
     mean_cosine = integral / ifelse(duration > 0, duration, one(duration))
     fill_columns!(cos_zenith, mean_cosine)
-    fill_columns!(sunlit_duration, duration / angular_speed)
+    isnothing(sunlit_duration) || fill_columns!(sunlit_duration, duration / angular_speed)
     return nothing
 end
 

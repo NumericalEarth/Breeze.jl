@@ -39,7 +39,6 @@ function radiating_column(grid; epoch = nothing,
 
     microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
     model = AtmosphereModel(grid; dynamics, microphysics, radiation, clock, advection=nothing)
-    Oceananigans.initialize!(schedule, model) # count the schedule's time from the clock
     set!(model; θ, qᵗ)
     return model
 end
@@ -128,6 +127,11 @@ end
         radiation, before, updated, solved = longwave_update_and_solve(grid, optics, 300, 305)
         expected_bounds = optics isa Union{ClearSkyOptics, AllSkyOptics} ? (160, 355) : nothing
         @test surface_temperature_bounds(radiation) === expected_bounds
+        if optics isa GrayOptics
+            @test vec(Array(radiation.longwave_solver.flux.flux_up)) == solved[1]
+        elseif optics isa Union{ClearSkyOptics, AllSkyOptics}
+            @test vec(Array(RRTMGP.lw_flux_up(radiation.longwave_solver)))[eachindex(solved[1])] == solved[1]
+        end
 
         # Gray longwave fluxes are linear in the surface emission, so the update matches a solve;
         # spectral ones nearly, since the spectrum of the emission shifts with the temperature
@@ -265,6 +269,12 @@ end
 
         # A night-time solve with no known interval must acquire a transmittance at sunrise.
         model = radiating_column(grid; solar_position, schedule=TimeInterval(Inf), clock=Clock(time=FT(-6hours - 1minutes)))
+        for stage in (2, 3)
+            model.clock.stage = stage
+            update_at!(model, FT(-5hours))
+            @test iszero(only(solved_cosine(model)))
+        end
+        model.clock.stage = 1
         update_at!(model, FT(-5hours))
         @test top_downwelling_shortwave(model.radiation) ≈ current_sun(model) rtol = sqrt(eps(FT))
         @test any(>(0), column(model.radiation.upwelling_shortwave_flux))
@@ -416,7 +426,7 @@ end
         without_validity = merge(saved, (; radiation=drop(saved.radiation, :cache_valid)))
         array_validity = merge(saved, (; radiation=merge(saved.radiation, (; cache_valid=[true]))))
         incremental_updates = isnothing(saved.radiation.approximate_updates) ? nothing :
-            drop(saved.radiation.approximate_updates, :solved_upwelling_longwave_flux, :solved_downwelling_longwave_flux)
+            merge(drop(saved.radiation.approximate_updates, :solved_upwelling_longwave_flux), (; obsolete_flux=nothing))
         without_reference_fluxes = merge(saved, (; radiation=merge(saved.radiation, (; approximate_updates=incremental_updates))))
 
         for checkpoint in (without_cache, without_radiation, without_validity, array_validity, without_reference_fluxes)

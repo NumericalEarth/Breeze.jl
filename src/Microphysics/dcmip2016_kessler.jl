@@ -467,7 +467,7 @@ internally for efficiency. Water vapor is diagnosed from ``q^v = q^t - q^{cl} - 
 The kernel writes prognostic fields in the interior only, so `update_state!` is called
 afterwards to restore a consistent model state (halos, diagnostics, and tendencies).
 """
-function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
+function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model, refresh_state! = update_state!)
     grid = model.grid
     arch = architecture(grid)
     Nz = grid.Nz
@@ -512,7 +512,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
-    update_state!(model)
+    refresh_state!(model)
 
     return nothing
 end

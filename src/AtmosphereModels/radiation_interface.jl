@@ -55,7 +55,7 @@ end
 
 function conditionally_update_radiation!(due::Bool, rtm, model)
     if due
-        _update_radiation!(rtm, model)
+        solve_scheduled_radiation!(rtm, model)
     else
         update_radiation_between_solves!(rtm, model)
     end
@@ -105,6 +105,24 @@ struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS,
     schedule :: S  # Update schedule (default: IterationInterval(1) = every step)
     approximate_updates :: U # ApproximateRadiationUpdates between solves, or Nothing when solving every step
     cache_valid :: V # Independent of approximate updates, so every schedule can recover missing restart fluxes
+end
+
+# Backends implementing the original positional constructor manage their own between-solve fluxes.
+function RadiativeTransferModel(solar_constant::Union{Number, AbstractArray}, solar_position, surface_radiation, background_atmosphere,
+                                atmospheric_state, longwave_solver, shortwave_solver, up_lw, down_lw,
+                                up_sw, down_sw, divergence, liquid_radius, ice_radius, batches, schedule)
+    return RadiativeTransferModel(solar_constant, solar_position, surface_radiation, background_atmosphere,
+                                 atmospheric_state, longwave_solver, shortwave_solver, up_lw, down_lw,
+                                 up_sw, down_sw, divergence, liquid_radius, ice_radius, batches, schedule,
+                                 nothing, radiation_cache_validity(divergence.grid))
+end
+
+solve_scheduled_radiation!(rtm, model) = _update_radiation!(rtm, model)
+
+function solve_scheduled_radiation!(rtm::RadiativeTransferModel, model)
+    _update_radiation!(rtm, model)
+    set_radiation_cache_validity!(rtm.cache_valid, true)
+    return nothing
 end
 
 # Native validity lives on the host; `BreezeReactantExt` keeps it in a traced array so that
@@ -845,6 +863,9 @@ validate_radiation(radiation, clock, arch) = validate_schedule(radiation.schedul
 function validate_radiation(radiation::RadiativeTransferModel, clock, arch)
     validate_schedule(radiation.schedule, arch)
     validate_solar_position_clock(radiation.solar_position, clock)
+    if radiation.schedule isa Union{TimeInterval, SpecifiedTimes}
+        Oceananigans.initialize!(radiation.schedule, (; clock))
+    end
     return nothing
 end
 

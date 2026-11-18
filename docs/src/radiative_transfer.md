@@ -523,12 +523,13 @@ each solve uses the current sun to compute the slant path. Shortwave fluxes stil
 current solar cosine, so they vanish at night. Custom solar-position types also use the current
 angle unless they implement interval averaging.
 
-The update cache stores six extra face fields: the two longwave responses and the four fluxes
+A fixed solar cosine and constant surface temperature require no update cache. Otherwise, when
+updates are enabled, the cache stores six extra face fields: the two longwave responses and the four fluxes
 of the last solve. These reference fluxes and the solved surface temperature are checkpointed;
 checkpoints from the earlier incremental-update format trigger a fresh solve on restore.
 
 Over its window the sun stays within four times ``\bar{μ}₀``, a bound approached only by a sun
-skimming the horizon on both sides of a short night. A state update that finds ``μ₀ > 4 \bar{μ}₀``,
+skimming the horizon on both sides of a short night. A step boundary that finds ``μ₀ > 4 \bar{μ}₀``,
 sunlight the last solve did not average over, solves again without advancing the schedule, since
 the slant path of ``\bar{μ}₀`` would deposit the beam far too high in the column. That happens
 when daylight follows a night-time solve with no known interval, when the sun climbs well above

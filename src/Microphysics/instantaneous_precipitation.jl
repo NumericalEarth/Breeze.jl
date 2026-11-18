@@ -119,7 +119,7 @@ Condense supersaturation, retain the released latent heat, and remove the
 condensate as precipitation — applied directly to the prognostic vapor `ρqᵛ`
 and liquid-ice potential temperature density `ρθˡⁱ`.
 """
-function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
+function AtmosphereModels.microphysics_model_update!(microphysics::IP, model, refresh_state! = update_state!)
     grid = model.grid
     arch = architecture(grid)
     Δt = model.clock.last_Δt
@@ -142,7 +142,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
 
     # The kernel mutated prognostic fields in the interior only; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
-    update_state!(model)
+    refresh_state!(model)
 
     return nothing
 end
