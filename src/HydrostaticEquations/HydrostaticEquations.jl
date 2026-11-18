@@ -40,9 +40,15 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, Field,
                     instantiated_location
 using Oceananigans.AbstractOperations: KernelFunctionOperation
-using Oceananigans.Advection: VectorInvariantKEGradientEnergyConserving, Centered,
+using Oceananigans.Advection: VectorInvariant, VectorInvariantKEGradientEnergyConserving,
+                              VectorInvariantKineticEnergyUpwinding, VectorInvariantUpwindVorticity,
+                              AbstractCenteredAdvectionScheme, AbstractUpwindBiasedAdvectionScheme,
+                              EnergyConserving, Centered,
                               horizontal_advection_U, horizontal_advection_V,
-                              bernoulli_head_U, bernoulli_head_V
+                              bernoulli_head_U, bernoulli_head_V,
+                              div_𝐯u, div_𝐯v, U_dot_∇u_hydrostatic_metric, U_dot_∇v_hydrostatic_metric,
+                              _advective_momentum_flux_Wu, _advective_momentum_flux_Wv,
+                              _biased_interpolate_zᵃᵃᶠ, bias
 using Oceananigans.Architectures: architecture, on_architecture, CPU
 using Oceananigans.BoundaryConditions: BoundaryCondition, MultiRegionCommunication, fill_halo_regions!
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, FPlane, BetaPlane, HydrostaticSphericalCoriolis
@@ -50,7 +56,7 @@ using Oceananigans.Fields: Fields, ZeroField, set!, interior, compute!
 using Oceananigans.Grids: AbstractGrid, Bounded, Flat, topology, znodes, minimum_xspacing, minimum_yspacing
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.MultiRegion: MultiRegion
-using Oceananigans.Operators: Δzᶜᶜᶜ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ, Az⁻¹ᶜᶜᶜ, Az_qᶜᶜᶠ, V⁻¹ᶜᶜᶜ, Vᶜᶜᶜ, Vᶠᶜᶜ, Vᶜᶠᶜ,
+using Oceananigans.Operators: Δzᶜᶜᶜ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ, Az⁻¹ᶜᶜᶜ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ, V⁻¹ᶜᶜᶜ, Vᶜᶜᶜ, Vᶠᶜᶜ, Vᶜᶠᶜ,
                               δxᶜᵃᵃ, δxᶠᵃᵃ, δyᵃᶜᵃ, δyᵃᶠᵃ, δzᵃᵃᶜ, δzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ,
                               ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!

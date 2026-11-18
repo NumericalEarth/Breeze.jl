@@ -110,6 +110,38 @@ function validate_velocity_forcing(forcing, name)
     return nothing
 end
 
+# Momentum advection is either vector invariant or in flux form.
+#
+# Vector invariant: the gradient of the kinetic energy is `EnergyConserving`, or both it and the
+# vorticity flux are upwind-biased (`WENOVectorInvariant`). The vertical advection is that of the
+# scheme's vertical scheme: the kinetic-energy-conserving form unless that scheme is upwind-biased.
+# The scheme's divergence scheme is not used: the divergence of the mass flux is that of continuity.
+#
+# Flux form: a centered or an upwind-biased scheme reconstructs the velocity on the faces of the
+# velocity cells, in all three directions (see `momentum_advection_u`).
+const FluxFormScheme = Union{AbstractCenteredAdvectionScheme, AbstractUpwindBiasedAdvectionScheme}
+const SupportedVerticalScheme = Union{EnergyConserving, AbstractUpwindBiasedAdvectionScheme}
+
+validate_hydrostatic_momentum_advection(::FluxFormScheme) = nothing
+
+function validate_hydrostatic_momentum_advection(advection::VectorInvariant)
+    supported_horizontal = advection isa VectorInvariantKEGradientEnergyConserving ||
+                           (advection isa VectorInvariantKineticEnergyUpwinding &&
+                            advection isa VectorInvariantUpwindVorticity)
+
+    (supported_horizontal && advection.vertical_advection_scheme isa SupportedVerticalScheme) ||
+        throw(ArgumentError("HydrostaticDynamics requires a VectorInvariant momentum_advection to have an " *
+                            "EnergyConserving kinetic energy gradient, or to be a WENOVectorInvariant, with a " *
+                            "vertical scheme that is EnergyConserving or upwind-biased, got " *
+                            "$(summary(advection))."))
+    return nothing
+end
+
+validate_hydrostatic_momentum_advection(advection) =
+    throw(ArgumentError("HydrostaticDynamics requires momentum_advection to be VectorInvariant, or a centered " *
+                        "or upwind-biased scheme for the momentum equations in flux form, got " *
+                        "$(summary(advection))."))
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -120,9 +152,7 @@ function AtmosphereModels.initialize_model_thermodynamics!(model::HydrostaticMod
     model.formulation isa LiquidIcePotentialTemperatureFormulation ||
         unsupported_by_hydrostatic_dynamics("the $(summary(model.formulation))")
 
-    model.advection.momentum isa VectorInvariantKEGradientEnergyConserving ||
-        throw(ArgumentError("HydrostaticDynamics requires momentum_advection = VectorInvariant() with an " *
-                            "EnergyConserving kinetic energy gradient, got $(summary(model.advection.momentum))."))
+    validate_hydrostatic_momentum_advection(model.advection.momentum)
 
     isnothing(model.microphysics) || unsupported_by_hydrostatic_dynamics("microphysics")
     validate_dry_forcing(model)

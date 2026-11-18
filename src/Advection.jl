@@ -43,6 +43,7 @@ using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_discretization
 using DocStringExtensions: TYPEDEF
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using DocStringExtensions: TYPEDSIGNATURES
 
 using Breeze.TimeSteppers: tendencies_feed_first_stage, MassConsistentVelocity
 
@@ -51,6 +52,8 @@ using ..AtmosphereModels:
     div_ρUc,
     total_density,
     transport_velocities
+
+using ..HydrostaticEquations: HydrostaticEquations, XMomentumDensity, YMomentumDensity
 
 const AIVA = AdaptiveImplicitVerticalAdvection
 
@@ -297,6 +300,9 @@ function AtmosphereModels.bottom_precipitation_flux(model, microphysics)
                                                                  transport_velocities(model).w)
     return Field(operation)
 end
+
+include("compressible_vector_invariant.jl")
+include("hydrostatic_compressible_vector_invariant.jl")
 
 #####
 ##### WENO with nonlinear weights frozen at the outer-step start

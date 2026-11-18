@@ -47,8 +47,13 @@ meet, so the integrals over the sphere of the mass and of the scalars are not co
 [`HydrostaticConservationFixer`](@ref Breeze.HydrostaticEquations.HydrostaticConservationFixer)
 to a simulation.
 
-Momentum advection must be `VectorInvariant` with a kinetic energy gradient that is
-`EnergyConserving`, and the thermodynamic formulation must be
+Momentum advection is `VectorInvariant` with a kinetic energy gradient that is `EnergyConserving`,
+which with second-order `Centered` advection of the potential temperature is the configuration
+whose pressure-gradient work cancels the conversion of internal and potential energy; or a
+`WENOVectorInvariant`; or a centered or upwind-biased scheme such as `WENO(order=5)`, with which
+the momentum equations are advanced in flux form. An upwind-biased scalar advection scheme
+reconstructs the potential temperature on the faces in all three directions. The upwind-biased
+schemes dissipate energy rather than conserve it. The thermodynamic formulation must be
 `LiquidIcePotentialTemperatureFormulation`. The time stepper is `:SSPRungeKutta3`, which
 integrates the equations unsplit, or `:GravityWaveMultirateInfinitesimalStep`, which substeps
 the gravity waves.
