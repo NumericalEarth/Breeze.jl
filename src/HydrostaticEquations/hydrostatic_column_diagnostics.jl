@@ -167,6 +167,10 @@ end
 # ground up, Φ rises by cᵖᵈ θ (Πᶠ⁻ - Π) to the layer and by cᵖᵈ θ (Πᶠ⁻ - Πᶠ⁺) across it.
 @kernel function _compute_geopotential!(Φ, grid, Φˢ, θ, Π, Πᶠ, cᵖᵈ)
     i, j = @index(Global, NTuple)
+    compute_column_geopotential!(i, j, grid, Φ, Φˢ, θ, Π, Πᶠ, cᵖᵈ)
+end
+
+@inline function compute_column_geopotential!(i, j, grid, Φ, Φˢ, θ, Π, Πᶠ, cᵖᵈ)
     Nz = size(grid, 3)
 
     @inbounds begin
@@ -177,6 +181,8 @@ end
             Φᶠ += cᵖᵈ * θ[i, j, k] * (Πᶠ[i, j, k] - Πᶠ[i, j, k+1])
         end
     end
+
+    return nothing
 end
 
 #####

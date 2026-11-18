@@ -58,12 +58,20 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     # Refresh per-scheme advection state — the adaptive-implicit split time step and any
     # bounds-preserving limiter — before the tendencies that consume it.
-    @apply_regionally update_advection!(model.advection, model)
+    update_advection_state!(model, compute_tendencies)
 
     compute_tendencies && compute_tendencies!(model, callbacks)
 
     @apply_regionally tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
 
+    return nothing
+end
+
+# The advection state is refreshed in every `update_state!`, whether or not tendencies follow,
+# because the vertically-implicit solves of the next stage read it too. A model whose advection
+# state only the tendencies read may skip the refresh when none are computed.
+function update_advection_state!(model, compute_tendencies)
+    @apply_regionally update_advection!(model.advection, model)
     return nothing
 end
 
@@ -377,6 +385,24 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
+    compute_cell_thermodynamic_variables!(i, j, k, grid, temperature, specific_prognostic_moisture,
+                                          formulation, dynamics, constants, microphysics,
+                                          microphysical_fields, moisture_density)
+end
+
+# The auxiliary thermodynamic variables of one cell. A kernel that advances a column through
+# several states (the column physics of moist `HydrostaticDynamics`) diagnoses each of them with
+# this function, so that it reads what `update_state!` would have computed.
+@inline function compute_cell_thermodynamic_variables!(i, j, k, grid,
+                                                       temperature,
+                                                       specific_prognostic_moisture,
+                                                       formulation,
+                                                       dynamics,
+                                                       constants,
+                                                       microphysics,
+                                                       microphysical_fields,
+                                                       moisture_density)
+
     compute_auxiliary_thermodynamic_variables!(formulation, dynamics, i, j, k, grid)
 
     ρ_field = total_density(dynamics)  # total ρ → qᵛᵉ is a mass fraction (thermo unchanged)
@@ -403,6 +429,8 @@ end
 
     T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T
+
+    return nothing
 end
 
 function compute_tendencies!(model::AtmosphereModel, callbacks=[])

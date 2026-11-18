@@ -198,6 +198,11 @@ water_tendencies(model) = map(name -> model.timestepper.Gⁿ[name],
 @kernel function _compute_moist_layer_mass_and_exner_functions!(ρ, ρᵗ, p, Π, Πᶠ, pᶠ, pˢ, grid, A, B, πˢ,
                                                                 ρqˣ, pˢᵗ, κ, g)
     i, j = @index(Global, NTuple)
+    compute_column_moist_layer_mass_and_exner_functions!(i, j, grid, ρ, ρᵗ, p, Π, Πᶠ, pᶠ, pˢ, A, B, πˢ, ρqˣ, pˢᵗ, κ, g)
+end
+
+@inline function compute_column_moist_layer_mass_and_exner_functions!(i, j, grid, ρ, ρᵗ, p, Π, Πᶠ, pᶠ, pˢ, A, B, πˢ,
+                                                                      ρqˣ, pˢᵗ, κ, g)
     Nz = size(grid, 3)
 
     @inbounds begin
@@ -235,6 +240,8 @@ water_tendencies(model) = map(name -> model.timestepper.Gⁿ[name],
             Πᶠ⁻ = Πᶠ⁺
         end
     end
+
+    return nothing
 end
 
 function AtmosphereModels.compute_total_density!(model::MoistHydrostaticModel)
@@ -291,10 +298,15 @@ end
 
 @kernel function _compute_density_potential_temperature!(θᵨ, grid, θ, Π, qᵛ, qˡ, constants)
     i, j, k = @index(Global, NTuple)
+    compute_cell_density_potential_temperature!(i, j, k, θᵨ, θ, Π, qᵛ, qˡ, constants)
+end
+
+@inline function compute_cell_density_potential_temperature!(i, j, k, θᵨ, θ, Π, qᵛ, qˡ, constants)
     @inbounds begin
         q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k])
         θᵨ[i, j, k] = density_potential_temperature_factor(θ[i, j, k], Π[i, j, k], q, constants) * θ[i, j, k]
     end
+    return nothing
 end
 
 # Physical depth of layer `k`, in m, from the hydrostatic integral: ΔΦ / g across the layer
@@ -740,9 +752,7 @@ with stage-aware sink budgets replaces this with them.
     return to_rain, to_vapor
 end
 
-@kernel function _apply_rain_sources!(ρqᵉ, ρqʳ, grid, microphysics, ρᵗ, p, T, qᵛ, qˡ, qᶜˡ, constants, Δt)
-    i, j, k = @index(Global, NTuple)
-
+@inline function apply_cell_rain_sources!(i, j, k, ρqᵉ, ρqʳ, microphysics, ρᵗ, p, T, qᵛ, qˡ, qᶜˡ, constants, Δt)
     @inbounds begin
         ρᵏ = ρᵗ[i, j, k]
         ρqʳᵏ = ρqʳ[i, j, k]
@@ -762,6 +772,8 @@ end
         ρqʳ[i, j, k] = ρqʳᵏ + δρqʳ
         ρqᵉ[i, j, k] -= δρqʳ
     end
+
+    return nothing
 end
 
 # Sedimentation of rain over Δt, implicit in time and upwind in the physical layers, from the
@@ -775,9 +787,8 @@ end
 # and composition: the enthalpy of the layers changes only by what the rain carries, so the
 # potential energy that the fall releases stays in the air as heat (the frictional dissipation
 # of falling rain), and the column loses hˡ + Φˢ per unit mass of rain reaching the ground.
-@kernel function _sediment_rain!(ρθ, ρqʳ, ledger, grid, microphysics, ρqᵉ, ρ, A, B, πˢ, Φˢ, Φ, θ, θᵨ, Π, Πᶠ, p, T,
-                                 qᵛ, qˡ, constants, pˢᵗ, κ, g, Δt, inflow_fall_speed)
-    i, j = @index(Global, NTuple)
+@inline function sediment_column_rain!(i, j, grid, ρθ, ρqʳ, ledger, microphysics, ρqᵉ, ρ, A, B, πˢ, Φˢ, Φ, θ, θᵨ, Π, Πᶠ,
+                                       p, T, qᵛ, qˡ, constants, pˢᵗ, κ, g, Δt, inflow_fall_speed)
     Nz = size(grid, 3)
 
     cᵖᵈ = constants.dry_air.heat_capacity
@@ -849,6 +860,89 @@ end
         ledger.rain_frictional_heating[i, j, 1] += friction
         ledger.maximum_sedimentation_courant[i, j, 1] = max(ledger.maximum_sedimentation_courant[i, j, 1], courant)
     end
+
+    return nothing
+end
+
+# The state of one column that the column physics reads, diagnosed from its prognostic variables
+# as `update_state!` diagnoses it: the layer mass, pressures and Exner functions, the temperature
+# and the partition of the water, the density potential temperature and the geopotential, each
+# with the function its kernel of `update_state!` calls. The vertical mass flux and the fall
+# speed of rain are not diagnosed: the column physics does not read them.
+@inline function diagnose_moist_column!(i, j, grid, temperature, qᵛᵉ, formulation, dynamics, constants, microphysics,
+                                        microphysical_fields, ρqᵉ, ρqˣ, water, cᵖᵈ, κ, g)
+    moisture = dynamics.moisture
+    θ = formulation.potential_temperature
+    θᵨ = moisture.density_potential_temperature
+    Π = dynamics.exner_function
+    Πᶠ = dynamics.interface_exner_function
+
+    compute_column_moist_layer_mass_and_exner_functions!(i, j, grid, dynamics.density, moisture.total_density,
+                                                         dynamics.pressure, Π, Πᶠ, moisture.interface_pressure,
+                                                         moisture.total_surface_pressure,
+                                                         dynamics.pressure_coefficient,
+                                                         dynamics.surface_pressure_coefficient,
+                                                         dynamics.surface_pressure, ρqˣ,
+                                                         dynamics.standard_pressure, κ, g)
+
+    for k in 1:size(grid, 3)
+        AtmosphereModels.compute_cell_thermodynamic_variables!(i, j, k, grid, temperature, qᵛᵉ, formulation, dynamics,
+                                                               constants, microphysics, microphysical_fields, ρqᵉ)
+
+        compute_cell_density_potential_temperature!(i, j, k, θᵨ, θ, Π, water.qᵛ, water.qˡ, constants)
+    end
+
+    compute_column_geopotential!(i, j, grid, dynamics.geopotential, dynamics.surface_geopotential, θᵨ, Π, Πᶠ, cᵖᵈ)
+
+    return nothing
+end
+
+# The column physics of one column over `substeps` applications of Δt each: the sources of rain,
+# the diagnosis of the state they leave, the sedimentation of rain, and the diagnosis of the state
+# it leaves for the next application. Every application reads the state that `update_state!`
+# would have diagnosed from the prognostic variables the previous one left, so the result is that
+# of `substeps` separate applications with an `update_state!` between them. The state the last
+# application leaves is diagnosed by the `update_state!` that follows the kernel.
+@kernel function _apply_warm_rain_column_physics!(ρθ, ρqᵉ, ρqʳ, ρqˣ, ledger, grid, microphysics, microphysical_fields,
+                                                  formulation, dynamics, temperature, qᵛᵉ, water, constants,
+                                                  cᵖᵈ, κ, g, Δt, substeps, sources, sedimentation, inflow_fall_speed)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    moisture = dynamics.moisture
+    ρ = dynamics.density
+    ρᵗ = moisture.total_density
+    p = dynamics.pressure
+    θ = formulation.potential_temperature
+    θᵨ = moisture.density_potential_temperature
+
+    for n in 1:substeps
+        if sources
+            for k in 1:Nz
+                apply_cell_rain_sources!(i, j, k, ρqᵉ, ρqʳ, microphysics, ρᵗ, p, temperature,
+                                         water.qᵛ, water.qˡ, water.qᶜˡ, constants, Δt)
+            end
+
+            if sedimentation | (n < substeps)
+                diagnose_moist_column!(i, j, grid, temperature, qᵛᵉ, formulation, dynamics, constants, microphysics,
+                                       microphysical_fields, ρqᵉ, ρqˣ, water, cᵖᵈ, κ, g)
+            end
+        end
+
+        if sedimentation
+            sediment_column_rain!(i, j, grid, ρθ, ρqʳ, ledger, microphysics, ρqᵉ, ρ,
+                                  dynamics.pressure_coefficient, dynamics.surface_pressure_coefficient,
+                                  dynamics.surface_pressure, dynamics.surface_geopotential, dynamics.geopotential,
+                                  θ, θᵨ, dynamics.exner_function, dynamics.interface_exner_function, p,
+                                  temperature, water.qᵛ, water.qˡ, constants, dynamics.standard_pressure, κ, g, Δt,
+                                  inflow_fall_speed)
+
+            if n < substeps
+                diagnose_moist_column!(i, j, grid, temperature, qᵛᵉ, formulation, dynamics, constants, microphysics,
+                                       microphysical_fields, ρqᵉ, ρqˣ, water, cᵖᵈ, κ, g)
+            end
+        end
+    end
 end
 
 """
@@ -861,6 +955,10 @@ each on the state the previous one leaves (first-order sequential splitting afte
 dynamics). `sources = false` or `sedimentation = false` leaves one of the two out. With
 `substeps = n` both are applied `n` times over `Δt / n`, each on the state the previous leaves.
 
+All the applications are made by one kernel, column by column, which diagnoses the state of the
+column between them as `update_state!` does; the state of the model is updated once, after the
+last one. The result is that of `n` separate calls over `Δt / n`.
+
 The rates and the fall speed are those of `microphysics`, evaluated with the density of the air
 in kg m⁻³ and with the physical depth of the layers, neither of which is a quantity of the grid.
 The rain reaching the ground, its enthalpy and geopotential, and the heating of the air by the
@@ -871,49 +969,26 @@ function warm_rain_column_physics!(microphysics, model::MoistHydrostaticModel;
                                    inflow_fall_speed=false)
     (isfinite(Δt) && Δt > 0) || return nothing
     substeps ≥ 1 || throw(ArgumentError("substeps must be a positive integer, got $substeps"))
-
-    for n in 1:substeps
-        apply_warm_rain_column_physics!(microphysics, model, Δt / substeps, sources, sedimentation, n == substeps,
-                                        inflow_fall_speed)
-    end
-
-    return nothing
-end
-
-# One application of the column physics over Δt; tendencies are computed only after the last one.
-function apply_warm_rain_column_physics!(microphysics, model, Δt, sources, sedimentation, last, inflow_fall_speed)
+    (sources | sedimentation) || return nothing
 
     grid = model.grid
     arch = grid.architecture
     dynamics = model.dynamics
-    moisture = dynamics.moisture
     constants = model.thermodynamic_constants
     water = hydrostatic_water_fields(microphysics, model.microphysical_fields)
-    Δt = convert(eltype(grid), Δt)
-    κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    cᵖᵈ = constants.dry_air.heat_capacity
+    κ = dry_air_gas_constant(constants) / cᵖᵈ
     g = constants.gravitational_acceleration
+    substep_Δt = convert(eltype(grid), Δt / substeps)
 
-    if sources
-        @apply_regionally launch!(arch, grid, :xyz, _apply_rain_sources!,
-                                  model.moisture_density, water.ρqʳ, grid, microphysics, moisture.total_density,
-                                  dynamics.pressure, model.temperature, water.qᵛ, water.qˡ, water.qᶜˡ, constants, Δt)
+    @apply_regionally launch!(arch, grid, :xy, _apply_warm_rain_column_physics!,
+                              model.formulation.potential_temperature_density, model.moisture_density, water.ρqʳ,
+                              water_densities(model), dynamics.moisture.ledger, grid, microphysics, model.microphysical_fields,
+                              model.formulation, dynamics, model.temperature,
+                              AtmosphereModels.specific_prognostic_moisture(model), water, constants,
+                              cᵖᵈ, κ, g, substep_Δt, substeps, sources, sedimentation, inflow_fall_speed)
 
-        update_state!(model; compute_tendencies = !sedimentation & last)
-    end
-
-    sedimentation || return nothing
-
-    @apply_regionally launch!(arch, grid, :xy, _sediment_rain!,
-                              model.formulation.potential_temperature_density, water.ρqʳ, moisture.ledger,
-                              grid, microphysics, model.moisture_density, dynamics.density,
-                              dynamics.pressure_coefficient, dynamics.surface_pressure_coefficient,
-                              dynamics.surface_pressure, dynamics.surface_geopotential, dynamics.geopotential,
-                              model.formulation.potential_temperature, moisture.density_potential_temperature,
-                              dynamics.exner_function, dynamics.interface_exner_function, dynamics.pressure,
-                              model.temperature, water.qᵛ, water.qˡ, constants, dynamics.standard_pressure, κ, g, Δt,
-                              inflow_fall_speed)
-
-    update_state!(model; compute_tendencies=last)
+    update_state!(model)
 
     return nothing
 end
