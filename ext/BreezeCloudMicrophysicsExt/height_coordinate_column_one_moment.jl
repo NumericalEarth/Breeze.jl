@@ -62,6 +62,12 @@ const ColumnWP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCateg
     return nothing
 end
 
+# Where the scheme builds its tendencies in one fused kernel (`compute_fused_bulk_tendencies!`), that kernel is what
+# must not run: the methods of `microphysical_tendency` below are not called on that path.
+if isdefined(@__MODULE__, :compute_fused_bulk_tendencies!)
+    AM.compute_microphysical_tendencies!(::ColumnWP1M, model) = nothing
+end
+
 @inline AM.microphysical_tendency(bμp::ColumnWP1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants) = zero(ρ)
 @inline AM.microphysical_tendency(bμp::ColumnWP1M, ::Val{:ρqᵉ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants) = zero(ρ)
 @inline AM.microphysical_tendency(bμp::ColumnWP1M, ::Val{:ρqᵉ}, ρ, ℳ, 𝒰, constants) = zero(ρ)
