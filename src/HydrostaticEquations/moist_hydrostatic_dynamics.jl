@@ -139,7 +139,8 @@ with_moisture(dynamics, microphysics, grid) =
                         dynamics.vertical_diffusion,
                         dynamics.top_pressure,
                         dynamics.standard_pressure,
-                        HydrostaticMoisture(grid))
+                        HydrostaticMoisture(grid),
+                        dynamics.height_coordinate)
 
 # A model with a microphysics scheme carries water, and its dynamics the diagnostics of the
 # moist column
@@ -516,6 +517,8 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydr
     # own cells only, and their halos are not filled.
     fill_scalar_halos!(grid, (θ, θᵨ, dynamics.geopotential, water_mass_fractions(model)...))
     fill_scalar_halos!(grid, (dynamics.vertical_mass_flux, w))
+
+    compute_hydrostatic_heights!(dynamics.height_coordinate, grid, dynamics, θᵨ, constants)
 
     # The water that the tendencies transport: its halos across the seam of a Yin-Yang grid, from a
     # limited interpolation of the mixing ratio (`moist_seam_water_halos.jl`)
@@ -943,6 +946,8 @@ end
             # of that rain together with what enters it from above in this sweep
             ρqʳᵛ = ifelse(inflow_fall_speed, ρqʳᵏ + inflow / (g * Δz), ρqʳᵏ)
             V = positive_rain_fall_speed(microphysics, ρᵖʰ, ρqʳᵛ / (ρᵏ + ρqᵉᵏ + ρqʳᵛ))
+            # The hydrostatic integral, which is the depth on the physical-height grid wherever its heights are
+            # current; the column is diagnosed again inside this kernel, where the height grid is not
             λ = V * Δt / physical_layer_depth(i, j, k, θᵨ, Πᶠ, cᵖᵈ, g)
 
             Wʳ = g * Δz * ρqʳᵏ

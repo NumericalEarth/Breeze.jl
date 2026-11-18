@@ -271,6 +271,8 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Hydrostat
     fill_halo_regions!(dynamics.vertical_mass_flux)
     fill_halo_regions!(w)
 
+    compute_hydrostatic_heights!(dynamics.height_coordinate, grid, dynamics, θ, model.thermodynamic_constants)
+
     return nothing
 end
 

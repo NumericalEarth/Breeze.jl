@@ -2,7 +2,7 @@
 ##### HydrostaticDynamics definition
 #####
 
-struct HydrostaticDynamics{A, B, PS, GS, D, P, E, EF, G, W, HD, VD, FT, M}
+struct HydrostaticDynamics{A, B, PS, GS, D, P, E, EF, G, W, HD, VD, FT, M, HC}
     pressure_coefficient :: A          # A at z-faces, in Pa: p = A + B pˢ
     surface_pressure_coefficient :: B  # B at z-faces: p = A + B pˢ
     surface_pressure :: PS             # pˢ (prognostic, two-dimensional)
@@ -18,6 +18,7 @@ struct HydrostaticDynamics{A, B, PS, GS, D, P, E, EF, G, W, HD, VD, FT, M}
     top_pressure :: FT                 # pressure of the model top, a coordinate surface
     standard_pressure :: FT            # pˢᵗ, the reference pressure of the potential temperature
     moisture :: M                      # HydrostaticMoisture: the diagnostics of the moist column, or nothing (dry air)
+    height_coordinate :: HC            # HydrostaticHeightCoordinate: the grid of physical heights, or nothing
 end
 
 """
@@ -140,6 +141,10 @@ Keyword arguments
 - `vertical_diffusion`: `nothing` (default) or a
   [`VerticalDiffusion`](@ref Breeze.HydrostaticEquations.VerticalDiffusion) of `u`, `v` and `θ` in
   the column, solved implicitly at the end of every time step.
+- `physical_height_grid`: whether to carry a second grid whose vertical spacings and nodes are the
+  heights of the hydrostatic column in meters, updated in every `update_state!` and returned by
+  [`physical_height_grid`](@ref Breeze.HydrostaticEquations.physical_height_grid), for kernel
+  functions written for a height coordinate. The dynamics does not read it. Default `false`.
 
 ```jldoctest
 using Breeze
@@ -161,7 +166,8 @@ function HydrostaticDynamics(; surface_pressure = 101325,
                                pressure_coefficient = nothing,
                                surface_pressure_coefficient = nothing,
                                hyperdiffusion = nothing,
-                               vertical_diffusion = nothing)
+                               vertical_diffusion = nothing,
+                               physical_height_grid :: Bool = false)
 
     isnothing(pressure_coefficient) == isnothing(surface_pressure_coefficient) ||
         throw(ArgumentError("pressure_coefficient and surface_pressure_coefficient must be given together."))
@@ -172,7 +178,7 @@ function HydrostaticDynamics(; surface_pressure = 101325,
                                surface_pressure, surface_geopotential,
                                nothing, nothing, nothing, nothing, nothing, nothing,
                                hyperdiffusion, vertical_diffusion,
-                               top_pressure, standard_pressure, nothing)
+                               top_pressure, standard_pressure, nothing, physical_height_grid)
 end
 
 Adapt.adapt_structure(to, dynamics::HydrostaticDynamics) =
@@ -190,7 +196,8 @@ Adapt.adapt_structure(to, dynamics::HydrostaticDynamics) =
                         adapt(to, dynamics.vertical_diffusion),
                         dynamics.top_pressure,
                         dynamics.standard_pressure,
-                        adapt(to, dynamics.moisture))
+                        adapt(to, dynamics.moisture),
+                        adapt(to, dynamics.height_coordinate))
 
 @regional HydrostaticDynamics
 
@@ -291,7 +298,9 @@ function AtmosphereModels.materialize_dynamics(dynamics::HydrostaticDynamics, gr
                                geopotential, vertical_mass_flux,
                                materialize_hyperdiffusion(dynamics.hyperdiffusion, grid),
                                materialize_vertical_diffusion(dynamics.vertical_diffusion, grid),
-                               top_pressure, standard_pressure, nothing)
+                               top_pressure, standard_pressure, nothing,
+                               materialize_height_coordinate(dynamics.height_coordinate, grid, geopotential,
+                                                             surface_geopotential, constants))
 end
 
 # The horizontal velocities are prognostic; `w` is the diagnosed velocity through the coordinate surfaces.

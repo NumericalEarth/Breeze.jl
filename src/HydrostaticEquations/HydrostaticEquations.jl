@@ -58,14 +58,17 @@ using Oceananigans.DistributedComputations: Distributed
 using Oceananigans.BoundaryConditions: BoundaryCondition, MultiRegionCommunication, fill_halo_regions!
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, FPlane, BetaPlane, HydrostaticSphericalCoriolis
 using Oceananigans.Fields: Fields, ZeroField, set!, interior, compute!
-using Oceananigans.Grids: AbstractGrid, Bounded, Flat, topology, znodes, minimum_xspacing, minimum_yspacing
+using Oceananigans.Grids: Grids, AbstractGrid, AbstractVerticalCoordinate, StaticVerticalDiscretization, Bounded, Flat,
+                           RectilinearGrid, LatitudeLongitudeGrid, OrthogonalSphericalShellGrid,
+                           topology, znodes, minimum_xspacing, minimum_yspacing
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.MultiRegion: MultiRegion
-using Oceananigans.Operators: Δzᶜᶜᶜ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ, Az⁻¹ᶜᶜᶜ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ, V⁻¹ᶜᶜᶜ, Vᶜᶜᶜ, Vᶠᶜᶜ, Vᶜᶠᶜ,
+using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, ℑxyᶠᶠᵃ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ, Az⁻¹ᶜᶜᶜ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ, V⁻¹ᶜᶜᶜ, Vᶜᶜᶜ, Vᶠᶜᶜ, Vᶜᶠᶜ,
                               δxᶜᵃᵃ, δxᶠᵃᵃ, δyᵃᶜᵃ, δyᵃᶠᵃ, δzᵃᵃᶜ, δzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ,
                               ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!
-using Oceananigans.Utils: prettysummary, launch!, @apply_regionally, getregion, regions
+using Oceananigans.TurbulenceClosures: TurbulenceClosures as OceanTurbulenceClosures
+using Oceananigans.Utils: prettysummary, launch!, @apply_regionally, construct_regionally, getregion, regions
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
                                fixed_pressure_state_density, fill_horizontal_velocity_halos!,
@@ -91,6 +94,7 @@ const HydrostaticModel = AtmosphereModel{<:HydrostaticDynamics}
 const HydrostaticPotentialTemperatureModel =
     AtmosphereModel{<:HydrostaticDynamics, <:LiquidIcePotentialTemperatureFormulation}
 
+include("hydrostatic_height_coordinate.jl")
 include("hydrostatic_column_diagnostics.jl")
 include("hydrostatic_tendencies.jl")
 include("vertical_diffusion_step.jl")
