@@ -345,8 +345,9 @@ end
     Nz = size(grid, 3)
     kᵘ = min(k + 1, Nz)
     kˡ = max(k - 1, 1)
-    ccc = (Center(), Center(), Center())
-    Δz = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
+    # The distance between the centers kˡ and kᵘ as the spacings of the faces between them (the bounded faces excluded)
+    Δz = ifelse(k < Nz, Δzᶜᶜᶠ(i, j, k + 1, grid), zero(grid_float_type(grid))) +
+         ifelse(k > 1, Δzᶜᶜᶠ(i, j, k, grid), zero(grid_float_type(grid)))
     w′²ᵘ = @inbounds w′²[i, j, kᵘ]
     w′²ˡ = @inbounds w′²[i, j, kˡ]
     w′²∂zw′² = ifelse(kᵘ > kˡ, (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δz), zero(Δz))
