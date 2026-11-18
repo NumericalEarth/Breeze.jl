@@ -25,7 +25,7 @@ The derivation is `DERIVATION.md` of the moist closure workstream.
 """
 module HydrostaticMoistTurbulence
 
-export MoistTurbulentMixing, moist_turbulent_mixing_step!, BulkSurfaceExchange, PhysicalHeightGrid
+export MoistTurbulentMixing, moist_turbulent_mixing_step!, BulkSurfaceExchange, PhysicalHeightGrid, MoistColumnPhysics
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
@@ -42,7 +42,7 @@ using Oceananigans.Utils: KernelParameters, launch!, @apply_regionally
 
 using Breeze.AtmosphereModels: AtmosphereModelBuoyancy, specific_prognostic_moisture, dynamics_thermodynamic_fields
 using Breeze.BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions
-using Breeze.HydrostaticEquations: MoistHydrostaticModel, hydrostatic_water_fields,
+using Breeze.HydrostaticEquations: MoistHydrostaticModel, column_physics_in_time_step, warm_rain_column_physics!, hydrostatic_water_fields,
                                    water_densities, sum_at, interface_pressure, layer_pressure_thickness,
                                    interface_potential_temperature, height_between_layers, physical_layer_depth,
                                    layer_mass_per_area, diffuse_column!, face_conductance, _diffuse_velocity!
@@ -983,6 +983,53 @@ function moist_turbulent_mixing_step!(mixing::MoistTurbulentMixing, model, Δt)
     @apply_regionally launch_energy_mixing!(mixing, model, Δt)
 
     update_state!(model; compute_tendencies=true)
+
+    return nothing
+end
+
+#####
+##### The column physics of a time step, in one dispatch
+#####
+
+struct MoistColumnPhysics{M}
+    mixing :: M               # MoistTurbulentMixing
+    warm_rain_substeps :: Int # applications of the warm rain per time step
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return a callable for `Callback(MoistColumnPhysics(mixing), IterationInterval(1))` that applies
+the column physics of a moist hydrostatic model once after every time step, over the step just
+taken and each on the state the previous one leaves: the warm rain of the microphysics
+(`warm_rain_column_physics!`, in `warm_rain_substeps` applications), then the turbulent `mixing`
+([`moist_turbulent_mixing_step!`](@ref)).
+
+The time stepper must not apply the column physics as well: call
+`column_physics_in_time_step!(model, false)` first, without which the callable throws an
+`ArgumentError`. With `warm_rain_substeps = 1` the result is that of the time stepper applying
+the warm rain and of `mixing` as a callback after it.
+"""
+MoistColumnPhysics(mixing::MoistTurbulentMixing; warm_rain_substeps=1) = MoistColumnPhysics(mixing, warm_rain_substeps)
+
+# The ledger of the mixing is its only state
+Oceananigans.prognostic_state(physics::MoistColumnPhysics) = Oceananigans.prognostic_state(physics.mixing)
+
+function Oceananigans.restore_prognostic_state!(physics::MoistColumnPhysics, from)
+    Oceananigans.restore_prognostic_state!(physics.mixing, from)
+    return physics
+end
+
+function (physics::MoistColumnPhysics)(simulation)
+    model = simulation.model
+
+    column_physics_in_time_step(model) &&
+        throw(ArgumentError("MoistColumnPhysics would apply the warm rain a second time: the time stepper " *
+                            "applies it at the end of every step. Call " *
+                            "column_physics_in_time_step!(model, false) before the first step."))
+
+    warm_rain_column_physics!(model.microphysics, model; substeps=physics.warm_rain_substeps)
+    moist_turbulent_mixing_step!(physics.mixing, model, model.clock.last_Δt)
 
     return nothing
 end
