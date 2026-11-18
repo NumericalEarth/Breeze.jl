@@ -59,3 +59,53 @@ function scalar_tendency_problem(arch;
 
     return scalar_tendency!, (Gc, grid, advection, U, c), grid
 end
+
+#####
+##### Reverse-mode AD of the scalar tendency
+#####
+##### Mirrors `loss` / `grad_loss!` in timestepping.jl: `scalar_tendency_loss`
+##### evaluates the tendency and reduces it to a scalar, and
+##### `grad_scalar_tendency_loss!` differentiates it with Enzyme reverse mode with
+##### respect to the tracer and the velocities. The same function runs eagerly
+##### (vanilla Enzyme) or compiled with `Reactant.@compile` (Enzyme-MLIR).
+#####
+
+function scalar_tendency_loss(Gc, grid, advection, U, c)
+    scalar_tendency!(Gc, grid, advection, U, c)
+    return mean(interior(Gc) .^ 2)
+end
+
+function grad_scalar_tendency_loss!(Gc, dGc, grid, advection, U, dU, c, dc)
+    parent(dU.u) .= 0
+    parent(dU.v) .= 0
+    parent(dU.w) .= 0
+    parent(dc) .= 0
+    _, loss_value = Enzyme.autodiff(
+        Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
+        scalar_tendency_loss, Enzyme.Active,
+        Enzyme.Duplicated(Gc, dGc),
+        Enzyme.Const(grid),
+        Enzyme.Const(advection),
+        Enzyme.Duplicated(U, dU),
+        Enzyme.Duplicated(c, dc))
+    return loss_value
+end
+
+"""
+    scalar_tendency_ad_problem(arch; Nx, Ny, Nz, order,
+                               float_type = Float32,
+                               topology = (Periodic, Periodic, Bounded))
+
+Build the reverse-mode counterpart of `scalar_tendency_problem` on the same grid,
+fields and advection scheme: one call of the returned function evaluates
+L = mean(Gc²) and accumulates ∂L/∂c and ∂L/∂𝐮 into the shadows `dc` and `dU`.
+
+Returns `(grad_scalar_tendency_loss!, (Gc, dGc, grid, advection, U, dU, c, dc), grid)`.
+"""
+function scalar_tendency_ad_problem(arch; kw...)
+    _, (Gc, grid, advection, U, c), grid = scalar_tendency_problem(arch; kw...)
+    dGc = Enzyme.make_zero(Gc)
+    dU = Enzyme.make_zero(U)
+    dc = Enzyme.make_zero(c)
+    return grad_scalar_tendency_loss!, (Gc, dGc, grid, advection, U, dU, c, dc), grid
+end
