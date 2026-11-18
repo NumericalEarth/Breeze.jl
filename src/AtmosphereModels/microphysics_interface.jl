@@ -1839,3 +1839,92 @@ based on cloud properties.
 """
 @inline cloud_ice_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
     effective_radius_model.radius
+
+#####
+##### Default advection of microphysical fields
+#####
+
+using Oceananigans.Advection: WENO
+using Oceananigans.Grids: Flat, topology, halo_size
+using Oceananigans.Utils: AdaptiveVerticallyImplicitDiscretization
+
+"""
+    default_microphysics_advection(microphysics, grid)
+
+Return a `NamedTuple` of advection schemes for the moisture density and the prognostic
+microphysical fields of `microphysics`, which `AtmosphereModel` uses for those fields when
+the user does not specify their advection. A scheme specified by the user always wins:
+a single `advection` or `scalar_advection` scheme applies to every scalar, and an entry of a
+`scalar_advection` `NamedTuple` replaces the default for that field.
+
+Each entry is [`default_advection_scheme`](@ref)`(microphysics, name, grid)` for `name` in
+`(moisture_prognostic_name(microphysics), prognostic_field_names(microphysics)...)`; fields
+for which it returns `nothing` are left out and get the model-wide default.
+With `microphysics = nothing` the result is empty, so dry and microphysics-free models keep
+the model-wide default.
+"""
+default_microphysics_advection(::Nothing, grid) = NamedTuple()
+
+function default_microphysics_advection(microphysics, grid)
+    all_names = unique((moisture_prognostic_name(microphysics), prognostic_field_names(microphysics)...))
+    schemes = map(name -> default_advection_scheme(microphysics, Val(name), grid), all_names)
+    keep = findall(!isnothing, schemes)
+    return NamedTuple{Tuple(all_names[keep])}(Tuple(schemes[keep]))
+end
+
+"""
+    default_advection_scheme(microphysics, ::Val{name}, grid)
+
+Return the default advection scheme for the microphysical (or moisture) field `name`, or
+`nothing` to use the model-wide default. The fallback is
+[`non_negative_microphysics_advection`](@ref)`(grid)`, appropriate for mass and number
+densities. Microphysics schemes extend this for fields that can be negative or that need
+another scheme. Each call returns a new scheme, so that each field carries its own adaptive
+implicit time discretization.
+"""
+default_advection_scheme(microphysics, name, grid) = non_negative_microphysics_advection(grid)
+
+"""
+    non_negative_microphysics_advection(grid; cfl = 1/4)
+
+Return a bounds-preserving `WENO` scheme with bounds `(0, ∞)` (and the limiter's default
+`maximum_courant_number = 5/18`) and, when `grid` has a vertical
+dimension, an `AdaptiveVerticallyImplicitDiscretization` with `cfl` that treats the part of
+vertical transport (including sedimentation) above a Courant number of `cfl` implicitly.
+
+The bounds limiter keeps a field non-negative only up to a Courant number of 5/18 per
+forward-Euler substep, so the explicit part of vertical advection is capped at `cfl = 1/4`.
+Strong-stability-preserving time steppers (`SSPRungeKutta3`, and the multirate steppers, which
+budget microphysics over sub-intervals of `Δt`) are convex combinations of forward-Euler substeps
+and so inherit the property.
+
+The order is 5 when the halo allows it (a horizontal halo of 4 and a vertical halo of 3 in
+each non-`Flat` direction), otherwise 3 (halos 3 and 2). Returns `nothing` if the halo is too
+small even for order 3, in which case the model-wide default advection is used.
+
+Bounded WENO costs more than the model-wide default `Centered(order=2)`: a wider stencil, a
+limiter computed every stage, and a tridiagonal solve per column when the implicit vertical
+treatment is active.
+"""
+function non_negative_microphysics_advection(grid; cfl = 1/4)
+    FT = eltype(grid)
+    TX, TY, TZ = topology(grid)
+    Hx, Hy, Hz = halo_size(grid)
+    horizontal_halos = ((TX === Flat ? () : (Hx,))..., (TY === Flat ? () : (Hy,))...)
+    Hh = isempty(horizontal_halos) ? typemax(Int) : minimum(horizontal_halos)
+    Hv = TZ === Flat ? typemax(Int) : Hz
+
+    order = Hh ≥ 4 && Hv ≥ 3 ? 5 :
+            Hh ≥ 3 && Hv ≥ 2 ? 3 : nothing
+
+    isnothing(order) && return nothing
+
+    bounds = (zero(FT), FT(Inf))
+
+    if TZ === Flat
+        return WENO(FT; order, bounds)
+    else
+        time_discretization = AdaptiveVerticallyImplicitDiscretization(FT; cfl)
+        return WENO(FT; order, bounds, time_discretization)
+    end
+end
