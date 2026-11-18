@@ -334,6 +334,9 @@ using .Microphysics
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures
 
+# The adapter of the TKE closure to moist HydrostaticDynamics needs both modules
+include("HydrostaticEquations/hydrostatic_moist_turbulence.jl")
+
 include("Advection.jl")
 using .Advection
 
