@@ -285,12 +285,21 @@ function AtmosphereModels.compute_total_density!(model::MoistHydrostaticModel)
                               water_densities(model),
                               dynamics.standard_pressure, κ, g)
 
-    fill_halo_regions!(dynamics.density)
-    fill_halo_regions!(moisture.total_density)
-    fill_halo_regions!(dynamics.pressure)
-    fill_halo_regions!(dynamics.exner_function)
-    fill_halo_regions!(moisture.total_surface_pressure)
+    # The halos that a kernel reads: those of the densities (mass fluxes, mixing ratios) and of the
+    # Exner function (pressure-gradient force, expansion work), filled together. The layer pressure
+    # and the total surface pressure are read in their own columns only, and their halos are not filled.
+    fill_scalar_halos!(grid, (dynamics.density, moisture.total_density, dynamics.exner_function))
 
+    return nothing
+end
+
+# Fill the halos of several scalar fields. Oceananigans fills those that share a location and
+# boundary conditions with one kernel per side. On a multi-region grid, where a pair of fields can
+# be taken for the two components of a vector, they are filled one by one.
+fill_scalar_halos!(grid, fields, args...) = fill_halo_regions!(fields, args...)
+
+function fill_scalar_halos!(::MultiRegion.MultiRegionGrids, fields, args...)
+    foreach(field -> fill_halo_regions!(field, args...), fields)
     return nothing
 end
 
@@ -441,6 +450,20 @@ function validate_time_step_state(model)
     return nothing
 end
 
+# The halos of the auxiliary thermodynamic variables that a kernel reads across a column (those of
+# the potential temperature and of the mass fractions that are transported) are filled with the
+# others that the tendencies read, once everything is diagnosed
+# (`compute_auxiliary_dynamics_variables!`): no kernel in between reads across a column.
+AtmosphereModels.fill_auxiliary_thermodynamic_halos!(::MoistHydrostaticModel) = nothing
+
+# The halos of the prognostic velocities are filled with those of the other prognostic variables,
+# at the start of `update_state!`. On a distributed grid that fill may not be complete yet.
+function AtmosphereModels.compute_velocities!(model::MoistHydrostaticModel)
+    model.grid.architecture isa Distributed &&
+        fill_horizontal_velocity_halos!(model.momentum, boundary_condition_args(model)...)
+    return nothing
+end
+
 # The bounds-preserving limiter of the water is read by the tendencies alone, so it is computed
 # only when they are. The time steps of adaptive implicit advection are refreshed either way.
 function AtmosphereModels.update_advection_state!(model::MoistHydrostaticModel, compute_tendencies)
@@ -486,10 +509,13 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydr
                               θᵨ, dynamics.interface_exner_function, dynamics.pressure, model.temperature,
                               water.qᵛ, water.qˡ, constants, cᵖᵈ, g)
 
-    fill_halo_regions!(θᵨ)
-    fill_halo_regions!(dynamics.geopotential)
-    fill_halo_regions!(dynamics.vertical_mass_flux)
-    fill_halo_regions!(w)
+    # The halos that the limiter and the tendencies read, filled together where the fields share a
+    # location and boundary conditions: the potential temperatures, the geopotential and the mass
+    # fractions that are transported, then the mass flux and the velocity through the coordinate
+    # surfaces. The temperature, the phase partition and the fall speed of rain are read in their
+    # own cells only, and their halos are not filled.
+    fill_scalar_halos!(grid, (θ, θᵨ, dynamics.geopotential, water_mass_fractions(model)...))
+    fill_scalar_halos!(grid, (dynamics.vertical_mass_flux, w))
 
     # The water that the tendencies transport: its halos across the seam of a Yin-Yang grid, from a
     # limited interpolation of the mixing ratio (`moist_seam_water_halos.jl`)

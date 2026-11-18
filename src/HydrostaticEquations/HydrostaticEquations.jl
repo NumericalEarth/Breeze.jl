@@ -54,6 +54,7 @@ using Oceananigans.Advection: VectorInvariant, VectorInvariantKEGradientEnergyCo
                               _biased_interpolate_zᵃᵃᶠ, bias, update_advection!, update_adaptive_timestep!,
                               update_bounds_preserving_limiter!
 using Oceananigans.Architectures: architecture, on_architecture, CPU
+using Oceananigans.DistributedComputations: Distributed
 using Oceananigans.BoundaryConditions: BoundaryCondition, MultiRegionCommunication, fill_halo_regions!
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, FPlane, BetaPlane, HydrostaticSphericalCoriolis
 using Oceananigans.Fields: Fields, ZeroField, set!, interior, compute!

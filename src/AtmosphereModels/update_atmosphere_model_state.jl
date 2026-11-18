@@ -359,10 +359,17 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
                               model.microphysical_fields,
                               model.moisture_density)
 
+    fill_auxiliary_thermodynamic_halos!(model)
+
+    return nothing
+end
+
+# The halos of the auxiliary thermodynamic variables. A model that fills the ones its kernels
+# read together with other halos, later in `update_state!`, extends this to do nothing.
+function fill_auxiliary_thermodynamic_halos!(model)
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
     fill_halo_regions!(model.formulation)
-
     return nothing
 end
 
