@@ -172,11 +172,15 @@ function AtmosphereModels.initialize_model_thermodynamics!(model::HydrostaticMod
     return nothing
 end
 
+# The diagnosis of the layer mass checks it
+validate_new_layer_mass(model) = nothing
+
 # Diagnose the layer mass from a surface pressure the user has just supplied, and report a
 # layer without mass as the invalid argument it is.
 function diagnose_layer_mass_of_new_state!(model)
     try
         AtmosphereModels.compute_total_density!(model)
+        validate_new_layer_mass(model)
     catch err
         err isa DomainError || rethrow()
         throw(ArgumentError("The surface pressure gives a layer of HydrostaticDynamics a mass that is not " *

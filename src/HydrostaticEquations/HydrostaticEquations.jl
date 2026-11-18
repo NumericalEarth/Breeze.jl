@@ -64,7 +64,7 @@ using Oceananigans.Operators: Δzᶜᶜᶜ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜ�
                               δxᶜᵃᵃ, δxᶠᵃᵃ, δyᵃᶜᵃ, δyᵃᶠᵃ, δzᵃᵃᶜ, δzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ,
                               ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!
-using Oceananigans.Utils: prettysummary, launch!, @apply_regionally
+using Oceananigans.Utils: prettysummary, launch!, @apply_regionally, getregion, regions
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
                                fixed_pressure_state_density, fill_horizontal_velocity_halos!,

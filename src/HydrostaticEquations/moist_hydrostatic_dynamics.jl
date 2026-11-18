@@ -36,13 +36,20 @@ mutable struct ColumnPhysicsDispatch
     in_time_step :: Bool
 end
 
-struct HydrostaticMoisture{T, I, S, D, L, C}
+# When the state of a moist model is checked during an integration: every `interval` time steps,
+# or never with `interval = 0`. See `validate_moist_hydrostatic_state`.
+mutable struct StateValidation
+    interval :: Int
+end
+
+struct HydrostaticMoisture{T, I, S, D, L, C, V}
     density_potential_temperature :: T  # θᵨ = ϑ θ at cell centers
     interface_pressure :: I             # total pressure pᶠ at z-faces
     total_surface_pressure :: S         # pˢ = πˢ + Σ W (two-dimensional)
     total_density :: D                  # ρ (1 + rᵗ): mass of air and water per unit area and unit of z
     ledger :: L                         # accumulated fluxes through the ground (two-dimensional)
     column_physics :: C                 # ColumnPhysicsDispatch, or nothing inside kernels
+    state_validation :: V               # StateValidation, or nothing inside kernels
 end
 
 # Kernels read the fields only
@@ -52,6 +59,7 @@ Adapt.adapt_structure(to, moisture::HydrostaticMoisture) =
                         adapt(to, moisture.total_surface_pressure),
                         adapt(to, moisture.total_density),
                         adapt(to, moisture.ledger),
+                        nothing,
                         nothing)
 
 @regional HydrostaticMoisture
@@ -79,7 +87,8 @@ function HydrostaticMoisture(grid)
                                Field{Center, Center, Nothing}(grid),
                                CenterField(grid),
                                precipitation_ledger(grid),
-                               ColumnPhysicsDispatch(true))
+                               ColumnPhysicsDispatch(true),
+                               StateValidation(1))
 end
 
 """
@@ -100,10 +109,18 @@ column_physics_in_time_step(model::MoistHydrostaticModel) = model.dynamics.moist
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the column physics of `microphysics` over the time step that `model` has just taken, unless
-a driver has taken it over with [`column_physics_in_time_step!`](@ref). Called by the time steppers.
+a driver has taken it over with [`column_physics_in_time_step!`](@ref), and check the state of
+the model (see [`state_validation_interval!`](@ref)). Called by the time steppers.
 """
-time_step_column_physics!(microphysics, model::MoistHydrostaticModel) =
-    column_physics_in_time_step(model) ? warm_rain_column_physics!(microphysics, model) : nothing
+function time_step_column_physics!(microphysics, model::MoistHydrostaticModel)
+    column_physics_in_time_step(model) && warm_rain_column_physics!(microphysics, model)
+
+    # The end of the time step, whoever applies the column physics: the state is checked here, once,
+    # and not in each of the `update_state!`s of the step
+    validate_time_step_state(model)
+
+    return nothing
+end
 
 with_moisture(dynamics, ::Nothing, grid) = dynamics
 
@@ -274,10 +291,11 @@ function AtmosphereModels.compute_total_density!(model::MoistHydrostaticModel)
     fill_halo_regions!(dynamics.exner_function)
     fill_halo_regions!(moisture.total_surface_pressure)
 
-    validate_layer_mass(dynamics)
-
     return nothing
 end
+
+# The moist diagnosis does not check the layer mass itself (see `validate_moist_hydrostatic_state`)
+validate_new_layer_mass(model::MoistHydrostaticModel) = validate_layer_mass(model.dynamics)
 
 #####
 ##### Density potential temperature, geopotential and mass flux
@@ -356,6 +374,73 @@ function validate_moist_state(model)
     return nothing
 end
 
+# What is wrong with a cell, as bits: 1 for a layer whose mass is not positive (or not a number),
+# 2 for a density of water that is not a number
+@inline all_finite() = true
+@inline all_finite(ρq, others...) = isfinite(ρq) & all_finite(others...)
+
+@inline cell_state_defects(ρ, ρqˣ...) = ifelse(ρ > 0, 0x00, 0x01) | ifelse(all_finite(ρqˣ...), 0x00, 0x02)
+
+# The defects of all the cells of `model`, in one reduction over the dry density and the densities of water
+state_defects(model) = state_defects(model.grid, model.dynamics.density, water_densities(model))
+
+state_defects(grid, ρ, ρqˣ) = mapreduce(cell_state_defects, |, interior(ρ), map(interior, ρqˣ)...; init=0x00)
+
+function state_defects(grid::MultiRegion.MultiRegionGrids, ρ, ρqˣ)
+    defects = 0x00
+    for region in regions(grid)
+        regional_ρqˣ = map(ρq -> getregion(ρq, region), ρqˣ)
+        defects |= state_defects(getregion(grid, region), getregion(ρ, region), regional_ρqˣ)
+    end
+    return defects
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Throw unless the state of `model`, an `AtmosphereModel` with moist `HydrostaticDynamics`, is one
+that can be integrated: a `DomainError` if a layer has a mass that is not positive (see
+[`validate_layer_mass`](@ref)), an `ArgumentError` if a density of water is not a number.
+
+Both are found by one reduction over the grid, which copies one number from the device. That
+copy waits for the device, so the state is not checked in `update_state!`, which a time step
+calls several times: it is checked when the state is set, and at the end of a time step (see
+[`state_validation_interval!`](@ref)). A state that fails inside a time step therefore stops the
+integration at the end of that step rather than at the stage that produced it; nothing that is
+not a number becomes one again in between.
+"""
+function validate_moist_hydrostatic_state(model)
+    iszero(state_defects(model)) && return nothing
+
+    # Something is wrong: find what, and say so
+    validate_layer_mass(model.dynamics)
+    validate_moist_state(model)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Check the state of `model`, an `AtmosphereModel` with moist `HydrostaticDynamics`, at the end of
+every `interval`-th time step (see [`validate_moist_hydrostatic_state`](@ref)), or never during
+an integration with `interval = 0`. A new model checks every time step. The state is always
+checked when it is set.
+"""
+function state_validation_interval!(model::MoistHydrostaticModel, interval::Integer)
+    interval ≥ 0 || throw(ArgumentError("The state validation interval must not be negative, got $interval"))
+    model.dynamics.moisture.state_validation.interval = interval
+    return nothing
+end
+
+state_validation_interval(model::MoistHydrostaticModel) = model.dynamics.moisture.state_validation.interval
+
+function validate_time_step_state(model)
+    interval = state_validation_interval(model)
+    (interval > 0 && model.clock.iteration % interval == 0) && validate_moist_hydrostatic_state(model)
+    return nothing
+end
+
 function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydrostaticModel)
     grid = model.grid
     arch = grid.architecture
@@ -368,8 +453,6 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydr
     cᵖᵈ = constants.dry_air.heat_capacity
     g = constants.gravitational_acceleration
     water = hydrostatic_water_fields(model.microphysics, model.microphysical_fields)
-
-    validate_moist_state(model)
 
     @apply_regionally launch!(arch, grid, :xyz, _compute_density_potential_temperature!,
                               θᵨ, grid, θ, dynamics.exner_function, water.qᵛ, water.qˡ, constants)
@@ -899,10 +982,10 @@ end
 
 # The column physics of one column over `substeps` applications of Δt each: the sources of rain,
 # the diagnosis of the state they leave, the sedimentation of rain, and the diagnosis of the state
-# it leaves for the next application. Every application reads the state that `update_state!`
-# would have diagnosed from the prognostic variables the previous one left, so the result is that
-# of `substeps` separate applications with an `update_state!` between them. The state the last
-# application leaves is diagnosed by the `update_state!` that follows the kernel.
+# it leaves for the next application. Each of the two operations reads the state that
+# `update_state!` would have diagnosed from the prognostic variables the previous one left, so the
+# result is that of `substeps` separate applications with an `update_state!` after each
+# operation. The state the last one leaves is diagnosed by the `update_state!` that follows the kernel.
 @kernel function _apply_warm_rain_column_physics!(ρθ, ρqᵉ, ρqʳ, ρqˣ, ledger, grid, microphysics, microphysical_fields,
                                                   formulation, dynamics, temperature, qᵛᵉ, water, constants,
                                                   cᵖᵈ, κ, g, Δt, substeps, sources, sedimentation, inflow_fall_speed)
@@ -916,31 +999,35 @@ end
     θ = formulation.potential_temperature
     θᵨ = moisture.density_potential_temperature
 
-    for n in 1:substeps
-        if sources
-            for k in 1:Nz
-                apply_cell_rain_sources!(i, j, k, ρqᵉ, ρqʳ, microphysics, ρᵗ, p, temperature,
-                                         water.qᵛ, water.qˡ, water.qᶜˡ, constants, Δt)
-            end
+    # The state is that of the last `update_state!` before the first operation, and is diagnosed
+    # again before every other one
+    diagnosed = true
 
-            if sedimentation | (n < substeps)
+    for n in 1:substeps, operation in 1:2
+        apply_sources = sources & (operation == 1)
+        apply_sedimentation = sedimentation & (operation == 2)
+
+        if apply_sources | apply_sedimentation
+            if !diagnosed
                 diagnose_moist_column!(i, j, grid, temperature, qᵛᵉ, formulation, dynamics, constants, microphysics,
                                        microphysical_fields, ρqᵉ, ρqˣ, water, cᵖᵈ, κ, g)
             end
-        end
 
-        if sedimentation
-            sediment_column_rain!(i, j, grid, ρθ, ρqʳ, ledger, microphysics, ρqᵉ, ρ,
-                                  dynamics.pressure_coefficient, dynamics.surface_pressure_coefficient,
-                                  dynamics.surface_pressure, dynamics.surface_geopotential, dynamics.geopotential,
-                                  θ, θᵨ, dynamics.exner_function, dynamics.interface_exner_function, p,
-                                  temperature, water.qᵛ, water.qˡ, constants, dynamics.standard_pressure, κ, g, Δt,
-                                  inflow_fall_speed)
-
-            if n < substeps
-                diagnose_moist_column!(i, j, grid, temperature, qᵛᵉ, formulation, dynamics, constants, microphysics,
-                                       microphysical_fields, ρqᵉ, ρqˣ, water, cᵖᵈ, κ, g)
+            if apply_sources
+                for k in 1:Nz
+                    apply_cell_rain_sources!(i, j, k, ρqᵉ, ρqʳ, microphysics, ρᵗ, p, temperature,
+                                             water.qᵛ, water.qˡ, water.qᶜˡ, constants, Δt)
+                end
+            else
+                sediment_column_rain!(i, j, grid, ρθ, ρqʳ, ledger, microphysics, ρqᵉ, ρ,
+                                      dynamics.pressure_coefficient, dynamics.surface_pressure_coefficient,
+                                      dynamics.surface_pressure, dynamics.surface_geopotential, dynamics.geopotential,
+                                      θ, θᵨ, dynamics.exner_function, dynamics.interface_exner_function, p,
+                                      temperature, water.qᵛ, water.qˡ, constants, dynamics.standard_pressure, κ, g, Δt,
+                                      inflow_fall_speed)
             end
+
+            diagnosed = false
         end
     end
 end
@@ -1218,6 +1305,7 @@ function Fields.set!(model::MoistHydrostaticModel; pˢ=nothing, kw...)
         if change ≤ tolerance * scale && mismatch ≤ tolerance * scale
             diagnose_layer_mass_of_new_state!(model)
             update_state!(model; compute_tendencies=false)
+            validate_moist_hydrostatic_state(model)
             return nothing
         end
     end

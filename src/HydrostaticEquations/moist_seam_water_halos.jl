@@ -37,7 +37,6 @@
 
 using Oceananigans.MultiRegion: YinYangGrid, YinYangInterpolationTable, yin_yang_interpolation, interpolation_table,
                                 launch_yin_yang_interpolation!
-using Oceananigans.Utils: getregion
 
 @inline safe_ratio(a, b) = ifelse(b == 0, zero(a), a / ifelse(b == 0, one(b), b))
 
