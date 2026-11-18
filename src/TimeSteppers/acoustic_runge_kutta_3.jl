@@ -114,7 +114,8 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                              U⁰::U0 = map(similar, prognostic_fields),
                              rounding = RoundToNearest(),
                              post_loop_scalar_tendencies = false,
-                             moisture_forcing_names = nothing) where {TI, TG, U0}
+                             moisture_forcing_names = nothing,
+                             microphysical_names = ()) where {TI, TG, U0}
 
     FT = eltype(grid)
     rounding = materialize_rounding(rounding, grid.architecture)

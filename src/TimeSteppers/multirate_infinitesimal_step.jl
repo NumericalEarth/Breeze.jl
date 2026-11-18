@@ -177,6 +177,11 @@ pressure ramps with; `AtmosphereModel` provides them. With `nothing`, the time s
 them from the other scalars, and keeps a field for every prognostic that the loop does not advance
 by continuity or momentum. The step is the same either way.
 
+`microphysical_names` names the microphysical prognostics. Post-loop, with a coefficient set whose
+`β` is not diagonal, their advective tendencies each take a field of their own, as the moisture and
+condensate densities' do, because the microphysical sink budgets read them when the microphysical
+sources are added (`AtmosphereModels.separate_stage_tendencies`).
+
 `Gⁿ` and `U⁰` are the tendency storage and the storage the first start states are formed from,
 allocated by default. Passing them shares the storage of another time stepper, as the
 adiabatic-balance twin does (see `adiabatic_balance_twin`).
@@ -215,6 +220,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     relinearize_stages = false,
                                     post_loop_scalar_tendencies = true,
                                     moisture_forcing_names = nothing,
+                                    microphysical_names = (),
                                     Gⁿ = map(similar, prognostic_fields),
                                     U⁰ = map(similar, prognostic_fields),
                                     rounding = RoundToNearest())
@@ -235,7 +241,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     scalar_tendencies = multirate_scalar_tendency_timing(storage, post_loop_scalar_tendencies, grid, prognostic_fields,
                                                          dynamics, moisture_forcing_names)
     fast_tendency = fast_tendency_storage(storage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper,
-                                          moisture_forcing_names)
+                                          budgeted_tendency_names(moisture_forcing_names, microphysical_names))
 
     step_start = step_start_storage(grid, substepper, tableau, relinearize_stages)
 
@@ -491,8 +497,18 @@ CompressibleEquations.recovered_state_residual(ts::MultirateInfinitesimalStep) =
 # before the loop, as it does pre-loop. Where the moisture and condensate densities are not known
 # (`moisture_forcing_names = nothing`), every one of these prognostics has a field of its own.
 #
+# The microphysical prognostics take fields of their own too: the microphysical sink budgets read
+# their advective tendencies when the microphysical sources are added
+# (`AtmosphereModels.separate_stage_tendencies`), so none of them can be built afterwards in shared
+# scratch (`budgeted_tendency_names`).
+#
 # A coefficient set with a diagonal `β` (`DiagonalStorage`) applies every tendency whole, so it
 # separates no fast part and needs no scratch.
+# The scalars whose post-loop advective tendencies take fields of their own (see above).
+budgeted_tendency_names(::Nothing, microphysical_names) = nothing
+budgeted_tendency_names(moisture_forcing_names, microphysical_names) =
+    (moisture_forcing_names..., filter(name -> name ∉ moisture_forcing_names, microphysical_names)...)
+
 fast_tendency_storage(::DiagonalStorage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper,
                       moisture_forcing_names) = nothing
 

@@ -524,13 +524,17 @@ end
     tracer_specific_to_density!(model)
     separate = separate_stage_tendencies(ts, model)
 
+    # With accumulators the moisture and microphysical densities hold their advection apart; a plain
+    # tracer, which no microphysical budget reads, has its advection built after the microphysics.
     if layout === AccumulatorStorage
-        @test all(name -> haskey(separate, name), names)
+        @test haskey(separate, :ρqᵛ)
+        @test !haskey(separate, :ρc)
     else
         @test isnothing(separate)
     end
+    held_apart = isnothing(separate) ? names : filter(name -> haskey(separate, name), names)
 
-    for name in names
+    for name in held_apart
         G = Array(interior(ts.Gⁿ[name]))
         apart = isnothing(separate) ? zero(G) : Array(interior(separate[name]))
         scale = maximum(abs, full[name])
