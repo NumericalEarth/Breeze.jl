@@ -772,6 +772,49 @@ end
     @test abs(column_water(model)[1, 1] - W₀) / W₀ ≤ 1e-5
 end
 
+@testset "Bulk surface exchange in single precision: no Float64 in the conditions or their fluxes" begin
+    column, header = column_state("moist_tropical_clear")
+    microphysics = OneMomentCloudMicrophysics(Float32; cloud_formation = SaturationAdjustment(Float32; equilibrium = WarmPhaseEquilibrium()))
+    model = closure_column_model(column; FT=Float32, microphysics)
+    Nz = length(column.k)
+    set_column_state!(model, header["dry_surface_pressure_Pa"], column.theta, column.r_e, column.r_r)
+    interior(model.velocities.u) .= reshape([shear_profile(k, Nz) for k in 1:Nz], 1, 1, Nz)
+    interior(model.tracers.ρe) .= interior(model.dynamics.moisture.total_density) .* 0.1f0
+    update_state!(model; compute_tendencies=false)
+
+    # An integer surface temperature and Float64 coefficients, as a script would write them
+    closure = TKEBasedTurbulenceClosure(Float32)
+    exchange = BulkSurfaceExchange(model, closure; drag = Breeze.BulkDrag(coefficient=1.2e-3, surface_temperature=301),
+                                   sensible_heat = Breeze.BulkSensibleHeatFlux(coefficient=1.1e-3, surface_temperature=301),
+                                   vapor = Breeze.BulkVaporFlux(coefficient=1.1e-3, surface_temperature=301))
+
+    arguments = (model.grid, model.clock, Oceananigans.fields(model),
+                 Breeze.AtmosphereModels.dynamics_thermodynamic_fields(model.dynamics))
+
+    for condition in (exchange.x_drag, exchange.y_drag, exchange.sensible_heat, exchange.vapor)
+        numbers = [getfield(condition, name) for name in fieldnames(typeof(condition)) if getfield(condition, name) isa Number]
+        @test !isempty(numbers)
+        @test all(number -> number isa Float32, numbers)
+        @test Oceananigans.BoundaryConditions.getbc(condition, 1, 1, arguments...) isa Float32
+    end
+
+    # The same conditions as the user built them do return a Float64: the conversion is what the test sees
+    unconverted = Breeze.BulkVaporFlux(coefficient=1.1e-3, surface_temperature=301)
+    materialized = Breeze.BoundaryConditions.materialize_atmosphere_boundary_condition(
+        unconverted, Oceananigans.BoundaryConditions.Bottom(), (Center(), Center(), Center()), model.grid, model.dynamics,
+        model.microphysics, model.thermodynamic_constants, closure)
+    @test Oceananigans.BoundaryConditions.getbc(materialized.condition, 1, 1, arguments...) isa Float64
+
+    mixing = MoistTurbulentMixing(model; closure, surface_exchange=exchange)
+    for n in 1:5
+        moist_turbulent_mixing_step!(mixing, model, 600)
+    end
+    @test mixing.surface_fluxes.vapor_flux[1, 1, 1] > 0
+    @test all(isfinite, Array(interior(model.temperature)))
+    @test minimum(model.moisture_density) ≥ 0
+    @test minimum(model.tracers.ρe) ≥ 0
+end
+
 #####
 ##### What the mixing may be built with
 #####

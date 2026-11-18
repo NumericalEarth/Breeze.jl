@@ -232,8 +232,38 @@ function materialize_bulk_condition(bc, location, model, closure)
         bc, Bottom(), location, model.grid, model.dynamics, model.microphysics, model.thermodynamic_constants, closure)
 
     formulation = AtmosphereBoundaryConditions.sensible_heat_flux_formulation(Val(:ρθ), model.formulation)
-    return AtmosphereBoundaryConditions.set_sensible_heat_formulation(materialized, formulation).condition
+    condition = AtmosphereBoundaryConditions.set_sensible_heat_formulation(materialized, formulation).condition
+    return with_float_type(eltype(model.grid), condition)
 end
+
+# The bulk conditions keep the numbers they are given: a surface temperature written `300` stays
+# an integer and a coefficient written `1.2e-3` a `Float64`, and either promotes the flux of a
+# `Float32` model to `Float64` inside the kernel, which a GPU without double precision cannot
+# compile. Every number of a materialized condition is converted to the float type of the grid.
+@inline in_float_type(FT, x::Number) = convert(FT, x)
+@inline in_float_type(FT, x) = x
+
+with_float_type(FT, df::AtmosphereBoundaryConditions.BulkDragFunction) =
+    AtmosphereBoundaryConditions.BulkDragFunction(df.direction, df.side, in_float_type(FT, df.coefficient),
+                                                  in_float_type(FT, df.gustiness), in_float_type(FT, df.surface_temperature),
+                                                  df.filtered_velocities, df.thermodynamic_constants)
+
+with_float_type(FT, bf::AtmosphereBoundaryConditions.BulkSensibleHeatFluxFunction) =
+    AtmosphereBoundaryConditions.BulkSensibleHeatFluxFunction(bf.side, in_float_type(FT, bf.coefficient),
+                                                              in_float_type(FT, bf.gustiness),
+                                                              in_float_type(FT, bf.surface_temperature),
+                                                              in_float_type(FT, bf.standard_pressure),
+                                                              bf.thermodynamic_constants, bf.formulation,
+                                                              bf.filtered_velocities, bf.filtered_scalar, bf.microphysics)
+
+with_float_type(FT, bf::AtmosphereBoundaryConditions.BulkVaporFluxFunction) =
+    AtmosphereBoundaryConditions.BulkVaporFluxFunction(bf.side, in_float_type(FT, bf.coefficient),
+                                                       in_float_type(FT, bf.gustiness),
+                                                       in_float_type(FT, bf.surface_temperature),
+                                                       in_float_type(FT, bf.surface_relative_humidity),
+                                                       bf.thermodynamic_constants, bf.surface,
+                                                       in_float_type(FT, bf.moisture_availability),
+                                                       bf.filtered_velocities, bf.filtered_scalar)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
