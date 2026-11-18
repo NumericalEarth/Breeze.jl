@@ -97,5 +97,6 @@ include("gravity_wave_substepping.jl")
 include("hydrostatic_state_checks.jl")
 include("hydrostatic_conservation_fixer.jl")
 include("moist_hydrostatic_dynamics.jl")
+include("moist_bounded_water_advection.jl")
 
 end # module
