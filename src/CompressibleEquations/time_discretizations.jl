@@ -106,7 +106,9 @@ Acoustic substep distribution where every stage uses the same substep size
 ``Δτ = Δt/N``. ``N`` is rounded up to a multiple of 6 (= LCM of the WS-RK3 stage
 denominators 2 and 3) so the per-stage count ``Nτ = β_\\mathrm{stage} N`` is an
 exact integer and each stage covers exactly ``β Δt`` — uniform Δτ, at the cost of
-over-resolving (substep count is the next multiple of 6 ≥ the CFL minimum).
+over-resolving (substep count is the next multiple of 6 ≥ the CFL minimum). A stage
+whose ``β N`` is not an integer, as in most multirate infinitesimal step tableaux, takes
+``\\mathrm{round}(β N)`` substeps sized to cover ``β Δt`` exactly.
 """
 struct ConstantSubstepSize <: AcousticSubstepDistribution end
 
@@ -116,7 +118,8 @@ $(TYPEDEF)
 Acoustic substep distribution where stage 1 collapses to a single substep
 of size ``Δt/3``; stages 2 and 3 are the same as
 [`ConstantSubstepSize`](@ref) (``N/2`` and ``N`` substeps of size
-``Δτ = Δt/N``).
+``Δτ = Δt/N``). Under a multirate infinitesimal step, every stage shorter than
+``5 Δt / 12`` takes a single substep over its interval.
 """
 struct MonolithicFirstStage <: AcousticSubstepDistribution end
 

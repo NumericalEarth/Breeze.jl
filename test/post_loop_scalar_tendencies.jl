@@ -262,7 +262,7 @@ end
     @test keys(ts.fast_tendency) == (:ρqᵛ,)
     @test fast_tendency_scratch(ts, :ρc) === ts.substepper.stage_end_moisture_content
     pre_loop = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep,
-                               timestepper_kwargs = (; post_loop_scalar_tendencies = false)).timestepper
+                               timestepper_kwargs = (; coefficients = :SSPMIS43, post_loop_scalar_tendencies = false)).timestepper
     @test pre_loop.fast_tendency isa Field
 
     tracer_density_to_specific!(model)

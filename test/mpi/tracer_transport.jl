@@ -116,7 +116,7 @@ end
 
 ark3 = :AcousticRungeKutta3
 mis = :MultirateInfinitesimalStep
-mis_kwargs = (; coefficients = :SSPMIS43)
+mis_kwargs = NamedTuple() # the default coefficients
 
 # (time stepper, its keyword arguments, cloudy, walls in y)
 cases = ((ark3, (; post_loop_scalar_tendencies = false), false, false),

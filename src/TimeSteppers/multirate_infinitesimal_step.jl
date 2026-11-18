@@ -127,32 +127,31 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`MultirateInfinitesimalStep`](@ref) time stepper. `coefficients` is a `Symbol`
-naming a set in [`multirate_infinitesimal_step_tableau`](@ref) (default `:SSPMIS43`) or a
+naming a set in [`multirate_infinitesimal_step_tableau`](@ref) (default `:ConvexLinearMIS6`) or a
 [`MultirateInfinitesimalStepTableau`](@ref).
 
 Select it with `AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep,
-timestepper_kwargs = (; coefficients = :SSPMIS43))`.
+timestepper_kwargs = (; coefficients = :ConvexLinearMIS6))`.
 
-The default, `:SSPMIS43`, is chosen for positivity: its slow method is strong-stability preserving
-with coefficient ``r = 1.79``, so the moisture and tracer stages are convex combinations of
-forward-Euler steps for an advective Courant number up to ``1.79`` times the forward-Euler bound of
-the advection operator. Of the other sets, `:TVDMISB` has ``r = 0.75``, and `:MIS4a` and
-`:WickerSkamarock3` have ``r = 0``: no such bound at any Courant number. The bound is on the time stepping alone. Positive moisture also needs an
-advection operator that is positive under forward Euler, which the clamp of bounded WENO
-reconstructions does not provide by itself; a flux limiter would (Oceananigans.jl#6475).
+The default, `:ConvexLinearMIS6`, has six stages and is second-order accurate with the fast and
+slow parts coupled. Its `β` is diagonal and each stage starts from and is forced with the
+increment of the preceding stage alone, so it needs two registers besides the prognostic fields
+(see `TwoRegisterStorage`), and its stage states are convex combinations of the outer-step-start
+state and one forward-Euler step from the preceding stage. That makes the moisture and tracer
+stages convex combinations of forward-Euler steps for an advective Courant number up to
+``C = 1.77`` times the forward-Euler bound of the advection operator. The bound is on the time
+stepping alone. Positive moisture also needs an advection operator that is positive under forward
+Euler, which the clamp of bounded WENO reconstructions does not provide by itself; a flux limiter
+would (Oceananigans.jl#6475). Its stages cover at most 0.37 of the step, and it is stable at about
+twice the time step of `:SSPMIS43` and `:WickerSkamarock3` in moist convection.
 
-`:SSPMIS43` has four stages and is second-order accurate with the fast and slow parts coupled. Its
-first stage covers 0.56 of the step, which takes at least two acoustic substeps. It needs the
-moisture's pressure effect in the acoustic loop to stay robust in moist convection: with the
-stage-entry pressure remainder recombined across stages, the part of that remainder the loop does
-not carry is integrated explicitly. `:MIS4a` is third order, without the positivity bound.
+Of the other sets, `:SSPMIS43` (four stages, ``C = 1.79``) recombines the slow tendencies of
+earlier stages and needs more storage; `:TVDMISB` has ``C = 0.75``, and `:MIS4a` (third
+order) and `:WickerSkamarock3` have ``C = 0``: no such bound at any Courant number.
 
 The stages of every set but `:WickerSkamarock3` start from and are forced with the increments of
 earlier stages, so their acoustic substeps are symmetric in the horizontal momentum and the
-pressure (see `SymmetricSubsteps`). Without divergence damping, `:TVDMISB` and `:MIS4a` then leave
-the acoustic modes neutral at the default `acoustic_cfl = 0.5`, and `:SSPMIS43` does except for
-horizontal acoustic Courant numbers ``c Δt / Δx`` between 1.5 and 1.8 (amplified by up to 1.1 per
-step) and between 3.3 and 3.6 (1.02), which `acoustic_cfl = 0.4` or the default damping removes.
+pressure (see `SymmetricSubsteps`).
 
 By default (`post_loop_scalar_tendencies = true`) the moisture and tracer tendencies are built
 after each stage's own acoustic loop, with that loop's time-averaged transport velocity (see
@@ -210,7 +209,7 @@ solves stay round-to-nearest.
 """
 function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
-                                    coefficients = :SSPMIS43,
+                                    coefficients = :ConvexLinearMIS6,
                                     implicit_solver = nothing,
                                     cache_advecting_state = false,
                                     relinearize_stages = false,

@@ -2,7 +2,7 @@
 ##### Acoustic substepping for CompressibleDynamics
 #####
 ##### Evolves linearized acoustic perturbations (primes) about the stage-entry state Uᴸ, refreshed each
-##### WS-RK3 stage (Skamarock & Klemp 2008):  ρ′=ρ−ρᴸ, (ρθ)′=ρθ−ρθᴸ, (ρu)′=ρu−ρuᴸ (and v,w).
+##### outer stage (Skamarock & Klemp 2008):  ρ′=ρ−ρᴸ, (ρθ)′=ρθ−ρθᴸ, (ρu)′=ρu−ρuᴸ (and v,w).
 ##### θᴸ=ρθᴸ/ρᴸ and the pressure coefficient Cᴸ=∂p/∂(ρθ) (see `refresh_linearization_basic_state!`) are
 ##### cached per stage; ρᴸ,ρθᴸ,pᴸ,(ρu/v/w)ᴸ are read live (the loop never mutates them) and are the
 ##### recovery base.  Linearized equations integrated by the loop:
@@ -77,7 +77,7 @@ Fields:
 - `minimum_horizontal_spacing`: the grid's smallest horizontal spacing, which the adaptive count
   measures the acoustic Courant number against; computed once, when the substepper is built.
 - `forward_weight`: CN off-centering ω (0.5 = centered; default 0.65).
-- `damping`, `substep_distribution`: divergence-damping strategy; substep allocation across WS-RK3 stages.
+- `damping`, `substep_distribution`: divergence-damping strategy; substep allocation across the outer stages.
 - `linearization_potential_temperature` (θᴸ), `linearization_pressure_coefficient` (Cᴸ, the slope
   ∂p/∂(ρθ) of the equation of state at the stage-entry state): per-stage caches, see
   `refresh_linearization_basic_state!`.
@@ -554,8 +554,8 @@ quantities (θᴸ, Cᴸ) to the **stage-entry state** ``Uᴸ_\\mathrm{stage}``
 (per [Skamarock & Klemp 2008](@cite SkamarockKlemp2008) above eq. 16),
 recomputing them from the live `model.dynamics.*`. The rewind-perturbation
 initialization (`initialize_stage_perturbations!`, called next) handles
-the WS-RK3 invariant by setting ``(ρ)′_\\mathrm{init} = Uᴸ_\\mathrm{outer} − Uᴸ_\\mathrm{stage}``
-(zero for stage 1; nonzero for stages 2 and 3).
+the stage start state by setting ``(ρ)′_\\mathrm{init} = U⁰ − Uᴸ_\\mathrm{stage}`` (zero for stage 1),
+where ``U⁰`` is the state the stage starts from (``Uⁿ`` under Wicker–Skamarock RK3).
 """
 prepare_acoustic_cache!(substepper::AcousticSubstepper, model) =
     refresh_linearization_basic_state!(substepper, model)
@@ -1021,17 +1021,26 @@ end
     return Nτ, Δt_stage / Nτ
 end
 
-# ConstantSubstepSize: one substep size Δτ = Δt/N shared by all stages (N a multiple of 6 ⇒ β·N integral).
+# ConstantSubstepSize: about one substep size Δt/N for all stages. N is a multiple of 6, so the WS-RK3
+# stages (β = 1/3, 1/2, 1) take exactly β·N substeps of Δt/N. A stage whose β·N is not an integer (the
+# MIS tableaux) takes round(β·N) substeps sized to cover its interval β·Δt exactly.
 @inline function stage_substep_count_and_size(::ConstantSubstepSize, β_stage, Δt, Δx_min, constants, acoustic_cfl, substeps)
     N = _uniform_substep_count(Δt, Δx_min, constants, acoustic_cfl, substeps)
-    return max(1, round(Int, β_stage * N)), Δt / N
+    return uniform_stage_substeps(β_stage, Δt, N)
 end
 
-# MonolithicFirstStage: stage 1 collapses to one substep of size Δt/3; stages 2–3 like ConstantSubstepSize.
+# MonolithicFirstStage: a stage shorter than 5/12 of the step (the first WS-RK3 stage, β = 1/3) takes a
+# single substep over its interval β·Δt; longer stages are the same as ConstantSubstepSize.
 @inline function stage_substep_count_and_size(::MonolithicFirstStage, β_stage, Δt, Δx_min, constants, acoustic_cfl, substeps)
-    β_stage < (1//3 + 1//2) / 2 && return 1, Δt / 3
+    β_stage < (1//3 + 1//2) / 2 && return 1, β_stage * Δt
     N = _uniform_substep_count(Δt, Δx_min, constants, acoustic_cfl, substeps)
-    return max(1, round(Int, β_stage * N)), Δt / N
+    return uniform_stage_substeps(β_stage, Δt, N)
+end
+
+@inline function uniform_stage_substeps(β_stage, Δt, N)
+    Nτ = max(1, round(Int, β_stage * N))
+    Δτ = Nτ == β_stage * N ? Δt / N : β_stage * Δt / Nτ
+    return Nτ, Δτ
 end
 
 #####
@@ -1366,14 +1375,14 @@ end
 ##### Section 8 — Substep kernels
 #####
 
-# Initialize perturbation prognostics at each WS-RK3 stage start (Skamarock
+# Initialize perturbation prognostics at each outer stage start (Skamarock
 # & Klemp 2008, above eq. 16): substep variables are deviations from the
 # linearization base Uᴸ (refreshed by `prepare_acoustic_cache!` just before).
-# The WS-RK3 invariant ``U^{(k)} = U(t) + β_k Δt R(U^{(k-1)})`` requires each
-# stage to integrate from U(t) ≡ Uᴸ_outer. The WRF/MPAS trick: init the
-# perturbations to the rewind ``(U_outer − Uᴸ)`` so the substep's starting
-# full state ``Uᴸ + (U_outer − Uᴸ) = U_outer`` regardless of Uᴸ. Stage 1
-# rewind = 0; stages 2–3 pick up the previous-stage update. `_recover_full_state!`
+# Each stage integrates from its start state U⁰: Uⁿ under WS-RK3, whose invariant is
+# ``U^{(k)} = Uⁿ + β_k Δt R(U^{(k-1)})``, and ``Uⁿ + Σⱼ αᵢⱼ (Yⱼ − Uⁿ)`` under a multirate
+# infinitesimal step. The WRF/MPAS trick: init the perturbations to the rewind
+# ``(U⁰ − Uᴸ)`` so the substep's starting full state ``Uᴸ + (U⁰ − Uᴸ) = U⁰``
+# regardless of Uᴸ. Stage 1 rewind = 0; later stages pick up the previous-stage update. `_recover_full_state!`
 # then uses per-stage Uᴸ as base, collapsing back to ``U_outer + Δevolved`` —
 # preserving the invariant. Auxiliary fields (predictors, divergence/damping
 # workspace) reset to zero; they carry no stage-to-stage history.
@@ -2713,7 +2722,7 @@ function factor_vertical_solver!(substepper, grid, thermodynamic_constants, δτ
     return nothing
 end
 
-# Substep `n` of the stage, of size `stage.Δτ`. `stage` holds the loop-invariant quantities of the RK3
+# Substep `n` of the stage, of size `stage.Δτ`. `stage` holds the loop-invariant quantities of the outer
 # stage (Δτ, the Crank–Nicolson weights δτᵐ⁺ and δτˢ⁻, the slow thermodynamic tendency Gˢρᵡ, the
 # state U⁰ the stage starts from, the forcing interval it ends at); everything is passed explicitly so
 # Reactant can trace the calling loop with no captured state.
@@ -2838,9 +2847,9 @@ function acoustic_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stag
     FT = eltype(grid)
     constants = model.thermodynamic_constants
 
-    # Substep count Nτ and size Δτ for this stage (WS-RK3 weights β = (1/3, 1/2, 1)).
-    # The distribution decides how to split: ProportionalSubsteps fits ⌈β·N⌉ substeps to
-    # each stage's β·Δt interval; ConstantSubstepSize/MonolithicFirstStage share one Δτ = Δt/N.
+    # Substep count Nτ and size Δτ for this stage, which covers β·Δt (β = dᵢ of the outer tableau;
+    # 1/3, 1/2, 1 under WS-RK3). The distribution decides how to split: ProportionalSubsteps fits
+    # ⌈β·N⌉ substeps to each stage's interval; ConstantSubstepSize/MonolithicFirstStage share Δτ ≈ Δt/N.
     Δt_FT = FT(Δt)
     Nτ, Δτ = stage_substep_count_and_size(substepper.substep_distribution, β_stage, Δt_FT,
                                           substepper.minimum_horizontal_spacing, constants,

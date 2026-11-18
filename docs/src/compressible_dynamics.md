@@ -287,7 +287,7 @@ fields to ``U^n - U^L``.
 ### Outer schemes
 
 The default outer scheme for [`SplitExplicitTimeDiscretization`](@ref) is
-[`MultirateInfinitesimalStep`](@ref) with its `:SSPMIS43` coefficients. Select Wicker–Skamarock RK3 with
+[`MultirateInfinitesimalStep`](@ref) with its `:ConvexLinearMIS6` coefficients. Select Wicker–Skamarock RK3 with
 `timestepper = :AcousticRungeKutta3`.
 
 A multirate infinitesimal step
@@ -302,7 +302,8 @@ V(0) = U^n + \sum_{j < i} α_{ij} (Y_j - U^n) ,
 
 over the interval ``d_i Δt``, with ``d_i = \sum_j β_{ij}``, ``Y_0 = U^n``, and sets ``Y_i`` to the
 result; ``U^{n+1} = Y_s``. The acoustic substep loop is the integrator of each stage. The default
-`:SSPMIS43` set has four stages; `:MIS4a`, `:TVDMISB` and `:WickerSkamarock3` are also available
+`:ConvexLinearMIS6` set has six stages and a diagonal ``β``; `:SSPMIS43`, `:MIS4a`, `:TVDMISB`, `:WickerSkamarock3`
+and others are also available
 (see [`MultirateInfinitesimalStep`](@ref)). Wicker–Skamarock RK3 is the special case
 ``α = γ = 0``, ``β = \mathrm{diag}(1/3, 1/2, 1)``.
 
@@ -621,8 +622,8 @@ After ``N_τ`` substeps, the full prognostic state is recovered by addition:
 
 There is no Exner-to-``ρθ`` conversion and no convex blend, because the perturbation system
 already advances the same prognostic variables as the outer scheme. The slow tendencies
-``G^s`` are applied through the substep loop, so the WS-RK3 stage update
-``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})`` falls out of the same loop.
+``G^s`` are applied through the substep loop, so the stage update of the outer scheme (for
+WS-RK3, ``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})``) falls out of the same loop.
 
 ## [Klemp divergence damping](@id klemp-damping)
 

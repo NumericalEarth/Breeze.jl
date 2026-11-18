@@ -21,7 +21,7 @@ const all_mis_coefficient_sets = (:WickerSkamarock3, :TVDMISB, :MIS4a, :SSPMIS43
                                   :DiagonalMIS42, :DiagonalMIS52, :LowStorageMIS52,
                                   :ConvexLinearMIS3, :ConvexLinearMIS4, :ConvexLinearMIS5, :ConvexLinearMIS6)
 const mis_coefficient_sets = exhaustive_tests() ? all_mis_coefficient_sets :
-                                                  (:WickerSkamarock3, :SSPMIS43, :DiagonalMIS42, :ConvexLinearMIS5)
+                                                  (:WickerSkamarock3, :SSPMIS43, :DiagonalMIS42, :ConvexLinearMIS6)
 const recombining_mis_coefficient_sets = filter(!=(:WickerSkamarock3), mis_coefficient_sets)
 
 function mis_bubble_model(; timestepper, coefficients = :SSPMIS43, moist = false, Δθ = 2, qᵗ = 0.012,
@@ -198,7 +198,8 @@ const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrop
     names = (:ρθ, moisture_name, :ρᵈ, keys(condensates)...)
 
     for perturbed in (map(tuple, names)..., names)
-        model = AtmosphereModel(grid; formulation, dynamics, microphysics, timestepper = :MultirateInfinitesimalStep)
+        model = AtmosphereModel(grid; formulation, dynamics, microphysics, timestepper = :MultirateInfinitesimalStep,
+                                timestepper_kwargs = (; coefficients = :SSPMIS43)) # β with a recombined remainder
         set!(model; ρᵈ, ρθ = z -> ρᵈ(z) * θ(z), NamedTuple{(moisture_name,)}((ρqᵐ,))..., condensates...)
         update_state!(model)
 
@@ -244,7 +245,8 @@ using Breeze.CompressibleEquations: pressure_change, moisture_content_arguments
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); standard_pressure=1e5)
 
     for perturbed in ((:ρθ,), (:ρqᵛ,), (:ρᵈ,), (:ρθ, :ρqᵛ, :ρᵈ))
-        model = AtmosphereModel(grid; formulation, dynamics, timestepper = :MultirateInfinitesimalStep)
+        model = AtmosphereModel(grid; formulation, dynamics, timestepper = :MultirateInfinitesimalStep,
+                                timestepper_kwargs = (; coefficients = :SSPMIS43)) # β with a recombined remainder
         set!(model; ρᵈ = z -> 1.1 - z / 3000, ρθ = z -> 330 - z / 20, ρqᵛ = z -> 0.012 - z / 1e5)
         update_state!(model)
 
@@ -367,14 +369,20 @@ end
 
     # Under MIS the stage-1 tendencies are those of WENO, the copy holds the step-start tracer for
     # the whole step (so later stages see frozen weights and the trajectory departs from WENO), and
-    # it is refreshed by the tendency evaluation that ends the step.
-    reference = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :TVDMISB, moist = true, qᵗ = qᵗᵢ)
+    # it is refreshed by the tendency evaluation that ends the step. Post-loop scalar tendencies would
+    # leave `Gⁿ` of the moisture empty after `update_state!`, so these models build them between stages.
+    reference = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :TVDMISB, moist = true, qᵗ = qᵗᵢ,
+                                 post_loop_scalar_tendencies = false)
     frozen = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :TVDMISB, moist = true, qᵗ = qᵗᵢ,
-                              scalar_advection = FrozenWeightsWENO(order=5))
+                              scalar_advection = FrozenWeightsWENO(order=5), post_loop_scalar_tendencies = false)
+    # A wind, so that the moisture is advected from the start.
+    set!(reference; u = 5)
+    set!(frozen; u = 5)
     update_state!(reference; compute_tendencies = true)
     update_state!(frozen; compute_tendencies = true)
     Ga = Array(interior(frozen.timestepper.Gⁿ[moist_name]))
     Gb = Array(interior(reference.timestepper.Gⁿ[moist_name]))
+    @test maximum(abs, Gb) > 0
     @test maximum(abs, Ga .- Gb) <= 1e-12 * maximum(abs, Gb)
 
     frozen_q = step_start_tracer(frozen.advection[moist_name])
@@ -614,7 +622,7 @@ end
                            topology = (Bounded, Flat, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
     model = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep)
-    @test model.timestepper.tableau.β == multirate_infinitesimal_step_tableau(:SSPMIS43, eltype(grid)).β
+    @test model.timestepper.tableau.β == multirate_infinitesimal_step_tableau(:ConvexLinearMIS6, eltype(grid)).β
 end
 
 #####

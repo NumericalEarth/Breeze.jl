@@ -20,6 +20,7 @@ using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps, minimum_horizontal_spacing,
                                     stage_substep_count_and_size, ProportionalSubsteps,
+                                    ConstantSubstepSize, MonolithicFirstStage,
                                     sponge_term_diag, sponge_rhs, sponge_slow_tendency,
                                     materialize_sponge,
                                     assemble_slow_vertical_momentum_tendency!,
@@ -345,6 +346,12 @@ for arch in arches
         @test Nτ == 2
         @test Δτ ≈ 0.56 * Δt / 2
 
+        # Uniform substep sizes cover a stage of irrational length exactly.
+        for distribution in (ConstantSubstepSize(), MonolithicFirstStage()), d in (0.1069817871491099, 0.3484439652915416, 1/3, 1/2, 1)
+            Nτ, Δτ = stage_substep_count_and_size(distribution, d, Δt, Δx_min, constants, 0.5, nothing)
+            @test Nτ * Δτ ≈ d * Δt
+        end
+
         # Stages covering at most half of Δt keep the CFL count.
         @test first(stage_substep_count_and_size(distribution, 1/2, Δt, Δx_min, constants, 0.5, nothing)) == 1
         @test first(stage_substep_count_and_size(distribution, 0.139, Δt, Δx_min, constants, 0.5, nothing)) == 1
@@ -395,7 +402,7 @@ for arch in arches
     end
 
     #####
-    ##### Test that the default time stepper for split-explicit is MultirateInfinitesimalStep (SSPMIS43)
+    ##### Test that the default time stepper for split-explicit is MultirateInfinitesimalStep (ConvexLinearMIS6)
     #####
 
     @testset "Default time stepper for SplitExplicitTimeDiscretization [$(arch), $(FT)]" for FT in as_test_float_types(arch)
