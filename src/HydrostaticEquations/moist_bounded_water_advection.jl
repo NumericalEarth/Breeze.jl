@@ -34,3 +34,16 @@ function AtmosphereModels.reconstructed_fields(model::MoistHydrostaticModel, adv
     fields = map(name -> name ∈ water_names ? MixingRatio(specific[name], ρᵗ, ρ) : specific[name], names)
     return NamedTuple{names}(fields)
 end
+
+# With a flux limiter (PROVISIONAL, see `flux_limited_div_ρUc`), the fractions of the limiter are
+# those of the transport that the tendencies apply: the mixing ratio per unit dry mass, carried by
+# the velocities of the state on the layer mass of dry air, over the forward Euler step of the time
+# stepper. A time stepper that transports the water with the mass flux of its stages refreshes them
+# again for each stage (`moist_stage_scalar_transport.jl`).
+function Oceananigans.Advection.update_advection!(scheme::FluxLimitedWENO, model::MoistHydrostaticModel, r::MixingRatio)
+    grid = model.grid
+    Δt = convert(eltype(grid), flux_limiter_timestep(model.timestepper, model.clock))
+    update_bounds_preserving_limiter!(scheme, grid, r, model.velocities, Δt)
+    update_flux_limiter!(scheme, grid, r, model.velocities, Δt, model.dynamics.density)
+    return nothing
+end

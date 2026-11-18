@@ -30,7 +30,12 @@ using Oceananigans.Advection:
     adapt_advection_order,
     update_adaptive_timestep!,
     vertical_scheme,
-    WENO
+    WENO,
+    FluxLimitedWENO,
+    FluxLimitedBounds,
+    limited_tracer_flux_divergence_x,
+    limited_tracer_flux_divergence_y,
+    limited_tracer_flux_divergence_z
 
 using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, CenterField
@@ -86,6 +91,28 @@ end
     div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, U.w, c)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
 end
+
+# PROVISIONAL (hydrostatic convex-MIS work; to be superseded by the flux-corrected transport of the
+# CompressibleDynamics port): WENO with a flux limiter (Oceananigans PR 6534). Every face carries the
+# first-order upwind mass flux plus the fraction of the antidiffusive flux that the fractions of
+# `update_flux_limiter!` afford, which must have been computed with the same `ρ`, `U` and `c` and
+# with the time step of the forward Euler update. The limited fluxes scale the vertical velocity to
+# its explicit part themselves; that path is not tested under adaptive implicit vertical advection.
+@inline flux_limited_div_ρUc(i, j, k, grid, advection, ρ, U, c) =
+    V⁻¹ᶜᶜᶜ(i, j, k, grid) * (limited_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c) +
+                              limited_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c) +
+                              limited_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, U.w, c))
+
+const FluxLimitedAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:FluxLimitedBounds}
+
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, ::FluxLimitedWENO, ρ, U, ::ZeroField) = zero(grid)
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, ::FluxLimitedAVIDWENO, ρ, U, ::ZeroField) = zero(grid)
+
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, advection::FluxLimitedWENO, ρ, U, c) =
+    flux_limited_div_ρUc(i, j, k, grid, advection, ρ, U, c)
+
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, advection::FluxLimitedAVIDWENO, ρ, U, c) =
+    flux_limited_div_ρUc(i, j, k, grid, advection, ρ, U, c)
 
 # The horizontal part of `div_ρUc`, from the same face fluxes
 @inline AtmosphereModels.horizontal_div_ρUc(i, j, k, grid, advection, ρ, U, c) =
