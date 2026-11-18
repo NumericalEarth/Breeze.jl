@@ -435,6 +435,14 @@ end
 
 @regional MoistTurbulentMixing
 
+# TODO: the step ends with `update_state!(model; compute_tendencies=true)`, whose tendency kernels
+# use the advection schemes of the model. A model on a `Float32` grid built without explicit schemes
+# gets the defaults in `Oceananigans.defaults.FloatType` (`Centered()` is `Float64`), which promote
+# those kernels to `Float64` and cannot be compiled on a GPU without double precision (Metal). This
+# belongs in Oceananigans (or in the `AtmosphereModel` constructor): convert default advection
+# schemes to the float type of the grid. Until then build such a model with schemes in that type,
+# as in `scalar_advection = WENO(Float32; order=5)`.
+
 Base.summary(mixing::MoistTurbulentMixing) = string("MoistTurbulentMixing(", summary(mixing.closure), ")")
 Base.show(io::IO, mixing::MoistTurbulentMixing) = print(io, summary(mixing))
 
