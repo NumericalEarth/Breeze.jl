@@ -131,6 +131,13 @@ function GravityWaveMultirateInfinitesimalStep(grid, prognostic_fields;
     dynamics isa HydrostaticDynamics ||
         throw(ArgumentError("GravityWaveMultirateInfinitesimalStep integrates HydrostaticDynamics only."))
 
+    # The gravity-wave operator of the substeps is that of dry air: with water its coefficients
+    # (the density potential temperature, the response of the total pressure) are not implemented.
+    isnothing(dynamics.moisture) ||
+        throw(ArgumentError("GravityWaveMultirateInfinitesimalStep does not support HydrostaticDynamics with " *
+                            "moisture yet: the gravity-wave operator of the substeps is that of dry air. " *
+                            "Use timestepper = :SSPRungeKutta3."))
+
     (isnothing(tableau) || isnothing(inner_solver)) &&
         throw(ArgumentError("GravityWaveMultirateInfinitesimalStep has no default scheme. Choose both with " *
                             "timestepper_kwargs = (tableau = :MIS3C, :MIS4a or :WickerSkamarock3, " *

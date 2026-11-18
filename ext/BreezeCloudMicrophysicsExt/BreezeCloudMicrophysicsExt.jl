@@ -76,6 +76,8 @@ using Breeze.Microphysics:
     adjust_thermodynamic_state,
     equilibrium_moisture_phase_fractions
 
+using Breeze.HydrostaticEquations: HydrostaticEquations, MoistHydrostaticModel, warm_rain_column_physics!
+
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN
 
 using Oceananigans: Oceananigans, Center, Field
@@ -91,5 +93,6 @@ include("one_moment_microphysics.jl")
 include("one_moment_helpers.jl")
 include("two_moment_microphysics.jl")
 include("two_moment_helpers.jl")
+include("hydrostatic_one_moment.jl")
 
 end # module BreezeCloudMicrophysicsExt

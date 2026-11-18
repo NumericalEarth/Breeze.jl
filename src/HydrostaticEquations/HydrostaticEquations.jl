@@ -1,8 +1,11 @@
 """
     HydrostaticEquations
 
-Module implementing dry hydrostatic dynamics for atmosphere models on a hybrid sigma-pressure
-coordinate.
+Module implementing hydrostatic dynamics for atmosphere models on a hybrid sigma-pressure
+coordinate. The equations below are those of dry air; with a microphysics scheme the same
+equations hold with the density potential temperature in the pressure-gradient force and in
+hydrostatic balance, on a coordinate of dry mass under the pressure of the air and all its water
+(see [`HydrostaticDynamics`](@ref)).
 
 The vertical coordinate of the grid labels surfaces of constant ``η``, on which the pressure is
 
@@ -69,7 +72,10 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
                                owned_integral, owned_integral_value, thermodynamic_density_name,
                                radiation_flux_divergence, uses_level_pressure
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
-using Breeze.Thermodynamics: dry_air_gas_constant
+using Breeze.Thermodynamics: Thermodynamics, dry_air_gas_constant, vapor_gas_constant, MoistureMassFractions,
+                             mixture_gas_constant, mixture_heat_capacity, vapor_equivalent_heat_capacity,
+                             condensate_latent_energy, absolute_zero_latent_heat, DryExponent,
+                             ClausiusClapeyronThermodynamicConstants
 using Breeze.Utils: @regional, TYPEDSIGNATURES_WITH_DEFAULTS, TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN
 
 using DocStringExtensions: TYPEDEF
@@ -90,5 +96,6 @@ include("hydrostatic_time_stepping.jl")
 include("gravity_wave_substepping.jl")
 include("hydrostatic_state_checks.jl")
 include("hydrostatic_conservation_fixer.jl")
+include("moist_hydrostatic_dynamics.jl")
 
 end # module

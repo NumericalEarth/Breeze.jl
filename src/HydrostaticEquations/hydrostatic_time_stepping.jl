@@ -154,7 +154,10 @@ function AtmosphereModels.initialize_model_thermodynamics!(model::HydrostaticMod
 
     validate_hydrostatic_momentum_advection(model.advection.momentum)
 
-    isnothing(model.microphysics) || unsupported_by_hydrostatic_dynamics("microphysics")
+    supports_hydrostatic_dynamics(model.microphysics) ||
+        unsupported_by_hydrostatic_dynamics("the microphysics $(summary(model.microphysics)), which has not " *
+                                            "been adapted to its vertical coordinate,")
+    validate_moist_hydrostatic_model(model)
     validate_dry_forcing(model)
     validate_dry_boundary_conditions(model)
     isnothing(model.closure) || unsupported_by_hydrostatic_dynamics("turbulence closures")

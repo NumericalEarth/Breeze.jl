@@ -2,7 +2,7 @@
 ##### HydrostaticDynamics definition
 #####
 
-struct HydrostaticDynamics{A, B, PS, GS, D, P, E, EF, G, W, HD, VD, FT}
+struct HydrostaticDynamics{A, B, PS, GS, D, P, E, EF, G, W, HD, VD, FT, M}
     pressure_coefficient :: A          # A at z-faces, in Pa: p = A + B pˢ
     surface_pressure_coefficient :: B  # B at z-faces: p = A + B pˢ
     surface_pressure :: PS             # pˢ (prognostic, two-dimensional)
@@ -17,13 +17,14 @@ struct HydrostaticDynamics{A, B, PS, GS, D, P, E, EF, G, W, HD, VD, FT}
     vertical_diffusion :: VD           # VerticalDiffusion of u, v and θ in the column, or nothing
     top_pressure :: FT                 # pressure of the model top, a coordinate surface
     standard_pressure :: FT            # pˢᵗ, the reference pressure of the potential temperature
+    moisture :: M                      # HydrostaticMoisture: the diagnostics of the moist column, or nothing (dry air)
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `HydrostaticDynamics` representing dry hydrostatic dynamics on a hybrid sigma-pressure
-coordinate.
+Return `HydrostaticDynamics` representing hydrostatic dynamics on a hybrid sigma-pressure
+coordinate: of dry air, or of moist air when the model has a microphysics scheme.
 
 The grid's vertical coordinate labels coordinate surfaces rather than heights: the pressure on
 the z-face `k` of a column with surface pressure `pˢ` is `p = A[k] + B[k] * pˢ`, so the lowest face
@@ -60,9 +61,16 @@ the gravity waves.
 
 Not supported, and rejected with an `ArgumentError`:
 
-- Moisture, microphysics and turbulence closures. The equations are those of dry air, so the
-  moisture density must remain zero and may not be forced. Dissipation is not a `closure` of the
-  model but part of the dynamics: see `hyperdiffusion` and `vertical_diffusion` below.
+- Turbulence closures. Dissipation is not a `closure` of the model but part of the dynamics: see
+  `hyperdiffusion` and `vertical_diffusion` below.
+- Moisture in a model without microphysics: its equations are those of dry air, so the moisture
+  density must remain zero and may not be forced.
+- Every microphysics scheme other than the warm-phase one-moment scheme with saturation
+  adjustment (see "Moisture" below), and with it: forcings and boundary fluxes of water, fluxes of
+  energy through a boundary, radiation, `hyperdiffusion`, `vertical_diffusion`, a negative
+  moisture correction, the conservation fixer, an Exner exponent other than `DryExponent()`, a
+  saturation vapor pressure other than `ClausiusClapeyron`, and the time stepper
+  `:GravityWaveMultirateInfinitesimalStep`.
 - Radiation on a multi-region grid, and radiative transfer models that do not take the pressures
   of the coordinate surfaces from the dynamics.
 - A Coriolis force with a horizontal component of the rotation: only `FPlane`, `BetaPlane` and
@@ -77,6 +85,28 @@ A radiative transfer model heats the air through its flux divergence, which ente
 by `cᵖᵈ Π`, and is given the exact pressures `A + B pˢ` of the coordinate surfaces as its level
 pressures. A flux of energy through a boundary, supplied under `ρE`, enters `ρθ` divided by
 `cᵖᵈ Π` likewise.
+
+# Moisture
+
+A model built with `microphysics = OneMomentCloudMicrophysics(cloud_formation =
+SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()))` and `formulation =
+LiquidIcePotentialTemperatureFormulation(exner_exponent = DryExponent())` carries vapor, cloud
+liquid and rain. The coordinate, continuity and every prognostic weight remain those of dry
+air: the prognostic surface pressure, which keeps the name `pˢ` among the prognostic fields, is
+then the dry-mass surface pressure `πˢ`, and `ρ` the mass of dry air. The pressure is the weight
+of the dry air and of all the water above, so the total surface pressure
+`pˢ = πˢ + Σ g Δz ρqˣ` is diagnosed (`surface_pressure(dynamics)`); `set!(model; pˢ=...)` takes
+the total surface pressure and finds the dry one. Water is carried as a mixing ratio per unit
+dry mass by the mass fluxes that carry `θ`. The pressure-gradient force and the hydrostatic
+integral use the density potential temperature `θᵨ = T Rᵐ / (Rᵈ Π)` in place of `θ`, an energy
+source enters `ρθ` divided by `(cᵖᵈ + rᵗ cᵖᵛ) Π` with `rᵗ` the mixing ratio of all water, and the
+tendency of `ρθ` includes the expansion work that the first law requires of `θ` with the dry
+exponent. Cloud forms by saturation adjustment in every stage. Rain forms, evaporates and falls
+once per time step after the dynamics (first-order operator splitting), with rates and a fall
+speed evaluated at the density of the air in kg m⁻³ and a sedimentation that is implicit in the
+physical layer depths. Falling rain carries its enthalpy from layer to layer and through the
+ground, and the potential energy it releases heats the air it falls through; what leaves through
+the ground is accumulated in `dynamics.moisture.ledger`.
 
 Every layer must have a positive mass, that is a positive pressure thickness
 `Δp = ΔA + ΔB pˢ`, in every column. This depends on the surface pressure, so it is checked each
@@ -141,7 +171,7 @@ function HydrostaticDynamics(; surface_pressure = 101325,
                                surface_pressure, surface_geopotential,
                                nothing, nothing, nothing, nothing, nothing, nothing,
                                hyperdiffusion, vertical_diffusion,
-                               top_pressure, standard_pressure)
+                               top_pressure, standard_pressure, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::HydrostaticDynamics) =
@@ -158,7 +188,8 @@ Adapt.adapt_structure(to, dynamics::HydrostaticDynamics) =
                         adapt(to, dynamics.hyperdiffusion),
                         adapt(to, dynamics.vertical_diffusion),
                         dynamics.top_pressure,
-                        dynamics.standard_pressure)
+                        dynamics.standard_pressure,
+                        adapt(to, dynamics.moisture))
 
 @regional HydrostaticDynamics
 
@@ -259,7 +290,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::HydrostaticDynamics, gr
                                geopotential, vertical_mass_flux,
                                materialize_hyperdiffusion(dynamics.hyperdiffusion, grid),
                                materialize_vertical_diffusion(dynamics.vertical_diffusion, grid),
-                               top_pressure, standard_pressure)
+                               top_pressure, standard_pressure, nothing)
 end
 
 # The horizontal velocities are prognostic; `w` is the diagnosed velocity through the coordinate surfaces.

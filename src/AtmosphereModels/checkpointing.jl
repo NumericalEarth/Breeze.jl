@@ -6,12 +6,19 @@ function Oceananigans.prognostic_state(model::AtmosphereModel)
             fields         = prognostic_state(prognostic_fields(model)),
             closure_fields = prognostic_state(model.closure_fields),
             radiation      = prognostic_state(model.radiation),
+            dynamics       = dynamics_restart_state(model.dynamics),
             timestepper    = timestepper_prognostic_state(model.timestepper, model))
 end
 
 # What a restart needs of the time stepper. A time stepper whose restart state depends on the
 # model it steps extends this.
 timestepper_prognostic_state(timestepper, model) = prognostic_state(timestepper)
+
+# State of the dynamics that is not a prognostic field but must survive a restart, such as
+# accumulated budgets. Nothing by default.
+dynamics_restart_state(dynamics) = nothing
+restore_dynamics_restart_state!(dynamics, from) = dynamics
+restore_dynamics_restart_state!(dynamics, ::Nothing) = dynamics
 
 function Oceananigans.restore_prognostic_state!(restored::AtmosphereModel, from)
     restore_prognostic_state!(restored.clock, from.clock)
@@ -20,6 +27,8 @@ function Oceananigans.restore_prognostic_state!(restored::AtmosphereModel, from)
     restore_prognostic_state!(restored.closure_fields, from.closure_fields)
     # Older checkpoints have no `radiation` entry
     hasproperty(from, :radiation) && restore_prognostic_state!(restored.radiation, from.radiation)
+    # Older checkpoints have no `dynamics` entry
+    hasproperty(from, :dynamics) && restore_dynamics_restart_state!(restored.dynamics, from.dynamics)
     restore_prognostic_state!(restored.timestepper, from.timestepper)
     return restored
 end
