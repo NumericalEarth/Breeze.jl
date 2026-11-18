@@ -212,6 +212,22 @@ end
         @test all(prate .> 0)
     end
 
+    @testset "a cell that stops condensing reports no precipitation" begin
+        model = build_model(0.030)
+        model.clock.last_Δt = 1.0
+        microphysics_model_update!(model.microphysics, model)
+        @test all(Array(interior(model.microphysical_fields.precipitation_rate)) .> 0)
+
+        # Dry the air well below saturation: the next step condenses nothing
+        interior(model.moisture_density) .*= FT(0.2)
+        update_state!(model)
+        ρq0 = Array(interior(model.moisture_density))
+        microphysics_model_update!(model.microphysics, model)
+
+        @test Array(interior(model.moisture_density)) == ρq0
+        @test all(Array(interior(model.microphysical_fields.precipitation_rate)) .== 0)
+    end
+
     @testset "subsaturated ⇒ no-op" begin
         model = build_model(0.001)
         ρθ0 = Array(interior(model.formulation.potential_temperature_density))

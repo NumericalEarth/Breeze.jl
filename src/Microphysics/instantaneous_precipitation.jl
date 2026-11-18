@@ -205,8 +205,8 @@ end
         ρqᵛ[i, j, k]  = ρqᵛ⁺
         ρθˡⁱ[i, j, k] = ρᵈ * θᶠ    # ρθ = ρᵈθ (dry-coupled)
         μ.qᵛ[i, j, k] = 𝒰ᵥ.moisture_mass_fractions.vapor
-        μ.precipitation_rate[i, j, k] = ifelse(condensed_water_density > 0,
-                                               precipitation_rate,
-                                               μ.precipitation_rate[i, j, k])
+        # The rate of this step, zero where nothing condensed: a cell that has stopped condensing must not
+        # keep reporting the rate of an earlier step (the kernel runs once per time step).
+        μ.precipitation_rate[i, j, k] = precipitation_rate
     end
 end
