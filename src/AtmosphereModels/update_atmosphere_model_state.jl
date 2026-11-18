@@ -5,7 +5,7 @@ using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
 using Oceananigans.Grids: topology, horizontally_extended_interior_kernel_parameters,
-                          Periodic, TwoSided, Connected
+                          TwoSided, Connected
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.OutputReaders: update_field_time_series!, extract_field_time_series
@@ -219,33 +219,26 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Kernel parameters for the `Gρu` and `Gρv` launches. The default covers the interior. Dynamics whose
-kernels read `Gρu` and `Gρv` one face past the interior (the terrain-following compressible
-dynamics averages them onto cell centers) extend this to return `tendency_kernel_parameters`.
-"""
+# Kernel parameters for the `Gρu` and `Gρv` launches. Dynamics whose kernels read `Gρu` and `Gρv`
+# one face past the interior extend this to return `tendency_kernel_parameters`.
 horizontal_momentum_tendency_kernel_parameters(model) = (:xyz, :xyz)
 
 # Dynamics whose tendency kernels reach further than the advection scheme and closure check for
 # a large enough halo here, once the dynamics is materialized.
 validate_dynamics_halo(dynamics, grid, momentum_advection, closure) = nothing
 
-# Face-located tendencies are also computed at face N + 1 where the right side of a dimension
-# continues into a halo that nothing else fills: a neighboring rank (`Connected`) or the
-# periodic image. Elsewhere face N + 1 is either a boundary face or does not exist.
-tendency_range(::Face, ::Union{Periodic, TwoSided{<:Any, Connected}}, N) = 1:N+1
+# Face-located tendencies are also computed at face N + 1 where the right side of a dimension is a
+# seam with a neighboring rank (`Connected`). Computing that face locally avoids exchanging it.
+# On a periodic dimension face N + 1 is the image of face 1 and is filled as a halo instead,
+# which needs no extra halo cell.
+extended_tendency_faces(::TwoSided{<:Any, Connected}) = 1
+extended_tendency_faces(topo) = 0
+
+tendency_range(::Face, topo, N) = 1:N+extended_tendency_faces(topo)
 tendency_range(ℓ, topo, N) = 1:N
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return `KernelParameters` for a tendency located at `(ℓx, ℓy, Center())` that also cover face
-`N + 1` in each horizontal dimension whose right side is a seam between ranks or periodic, so that
-a kernel which reads the tendency at `i + 1` (or `j + 1`) finds a computed value there.
-Computing the tendency one face further out needs one more halo cell than the interior does.
-"""
+# `KernelParameters` for a tendency at `(ℓx, ℓy, Center())` that also cover face N + 1 in each
+# horizontal dimension whose right side is a seam between ranks.
 function tendency_kernel_parameters(grid, ℓx, ℓy)
     Nx, Ny, Nz = size(grid)
     TX, TY, _ = topology(grid)

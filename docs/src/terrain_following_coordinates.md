@@ -926,7 +926,7 @@ z_faces = TerrainFollowingVerticalDiscretization(
 )
 grid = RectilinearGrid(
     size = (Nx, Nz),
-    halo = (6, 5),
+    halo = (5, 5),
     x = (-Lx/2, Lx/2),
     z = z_faces,
     topology = (Periodic, Flat, Bounded),
