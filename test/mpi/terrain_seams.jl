@@ -45,21 +45,26 @@ function partition_for(name, nranks)
     error("Unknown partition $(repr(name))")
 end
 
-function terrain_simulation(arch, closure; stop_iteration=3)
-    Nx, Ny, Nz = 16, 16, 8
-    Lx, Ly, Lz = 10000, 10000, 5000
+const Lx, Ly, Lz = 10000, 10000, 5000
 
+function terrain_grid(arch)
+    Nx, Ny, Nz = 16, 16, 8
     z = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length=Nz+1)); formulation=LinearDecay())
     grid = RectilinearGrid(arch; size = (Nx, Ny, Nz), halo = (5, 5, 5),
                            x = (-Lx/2, Lx/2), y = (-Ly/2, Ly/2), z,
                            topology = (Periodic, Periodic, Bounded))
 
-    # Off-centre and anisotropic, so the slopes differ on every seam
+    # Off-center and anisotropic, so the slopes differ on every seam
     materialize_terrain!(grid, (x, y) -> 400 * exp(-((x - 1000)^2 + (y + 500)^2 / 2) / 2000^2))
+    return grid
+end
 
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
-                                    reference_potential_temperature = 300)
-    model = AtmosphereModel(grid; dynamics, closure, advection=WENO(order=5))
+terrain_dynamics() = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
+                                          reference_potential_temperature = 300)
+
+function terrain_simulation(arch, closure; stop_iteration=3)
+    grid = terrain_grid(arch)
+    model = AtmosphereModel(grid; dynamics=terrain_dynamics(), closure, advection=WENO(order=5))
     constants = model.thermodynamic_constants
 
     ρᵢ(x, y, z) = adiabatic_hydrostatic_density(z, 101325, 300, 1e5, constants)
@@ -79,6 +84,12 @@ function terrain_simulation(arch, closure; stop_iteration=3)
 end
 
 compared_fields(model) = Oceananigans.prognostic_fields(model)
+
+# WENO(order=9) fits a halo of 5 in the interior, but not at face N + 1 on a seam between ranks.
+@testset "Terrain halo too small for seams on Distributed($(partition_name))" begin
+    arch = Distributed(child_architecture; partition=partition_for(partition_name, nranks))
+    @test_throws ArgumentError AtmosphereModel(terrain_grid(arch); dynamics=terrain_dynamics(), advection=WENO(order=9))
+end
 
 closures = (nothing, SmagorinskyLilly(), TKEBasedTurbulenceClosure())
 
