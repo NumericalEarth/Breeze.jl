@@ -22,8 +22,7 @@
 using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
 using BreezeBenchmarks: checkpointing_label
-using BreezeBenchmarks: scalar_tendency_problem, model_tendency_problem, benchmark_tendency
-using BreezeBenchmarks: scalar_tendency_ad_problem
+using BreezeBenchmarks: scalar_tendency_problem, scalar_tendency_ad_problem, model_tendency_problem, benchmark_tendency
 using JSON: JSON
 using BFloat16s: BFloat16
 using Oceananigans
@@ -71,8 +70,9 @@ function parse_commandline()
     @add_arg_table! s begin
         "--mode"
             help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output, " *
-                   "'scalar_tendency' for the bare scalar WENO kernel, or 'model_tendency' for the full-model " *
-                   "compute_tendencies! (both have no Simulation and run vanilla vs Reactant)"
+                   "'scalar_tendency' for the bare scalar WENO kernel, 'scalar_tendency_ad' for its reverse-mode " *
+                   "gradient, or 'model_tendency' for the full-model compute_tendencies! (all have no Simulation " *
+                   "and run vanilla vs Reactant)"
             arg_type = String
             default = "benchmark"
 
@@ -157,9 +157,7 @@ function parse_commandline()
 
         "--ad"
             help = "Benchmark the forward+backward (Enzyme reverse-mode) pass through the " *
-                   "stepping loop instead of forward only (Reactant backend only). With " *
-                   "--mode scalar_tendency, also benchmark the reverse-mode gradient of the " *
-                   "scalar tendency on Reactant, in Float32 only."
+                   "stepping loop instead of forward only. Reactant backend only."
             action = :store_true
 
         "--checkpoints"
@@ -396,8 +394,6 @@ function run_benchmarks(args; kernel_cases = [])
     device = args["device"]
     configuration = args["configuration"]
 
-    args["ad"] && mode == "model_tendency" && error("--ad is not supported with --mode model_tendency")
-
     # Parse lists from arguments
     sizes = [parse_size(s) for s in parse_list(args["size"])]
     float_types = [make_float_type(s) for s in parse_list(args["float_type"])]
@@ -470,40 +466,33 @@ function run_benchmarks(args; kernel_cases = [])
         # both backends so the Reactant-compiled XLA program can be compared
         # against the eager vanilla launch. Handled up front; the model-stepping
         # path below is skipped.
-        if mode == "scalar_tendency" || mode == "model_tendency"
+        if mode in ("scalar_tendency", "scalar_tendency_ad", "model_tendency")
             m = match(r"^WENO(\d+)$", adv_name)
             isnothing(m) && error("$mode mode supports WENO<order> advection, got $adv_name")
             order = parse(Int, m[1])
 
-            label = mode == "scalar_tendency" ? "ScalarTendency" : "ModelTendency"
+            label, problem = mode == "scalar_tendency"    ? ("ScalarTendency",   scalar_tendency_problem) :
+                             mode == "scalar_tendency_ad" ? ("ScalarTendencyAD", scalar_tendency_ad_problem) :
+                                                            ("ModelTendency",    model_tendency_problem)
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
-            problem = mode == "scalar_tendency" ? scalar_tendency_problem : model_tendency_problem
 
             # Reactant additionally compares raise=true vs raise=false (the
             # latter keeps kernels as XLA custom calls instead of raising them to
             # StableHLO). raise=false needs the CUDA custom-call path, so it is
-            # skipped on TPU. Vanilla is eager — raise does not apply.
+            # skipped on TPU, and for AD, since differentiating an unraised kernel
+            # needs kernel AD. Vanilla is eager — raise does not apply.
             configs = if backend_name == "reactant"
-                raises = device == "TPU" ? (true,) : (true, false)
+                raises = device == "TPU" || mode == "scalar_tendency_ad" ? (true,) : (true, false)
                 [(r ? "reactant raise=true" : "reactant raise=false",
                   r ? "reactant-raise"      : "reactant-noraise",
-                  r, false) for r in raises]
+                  r) for r in raises]
             else
-                [(backend_name, backend_name, true, false)]
+                [(backend_name, backend_name, true)]
             end
 
-            # --ad adds the reverse-mode gradient of the scalar tendency (see
-            # `scalar_tendency_ad_problem`) on Reactant, in Float32 only, with
-            # raise=true only: differentiating an unraised kernel needs kernel AD.
-            if args["ad"] && mode == "scalar_tendency" && FT == Float32 && backend_name == "reactant"
-                push!(configs, ("reactant raise=true", "reactant-raise", true, true))
-            end
-
-            for (backend_label, tag, raise, ad) in configs
-                case_label = ad ? "ScalarTendencyAD" : label
-                case_mode = ad ? "scalar_tendency_ad" : mode
-                name = "$(case_label)_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(tag)"
+            for (backend_label, tag, raise) in configs
+                name = "$(label)_$(size_str)_$(ft_str)_$(adv_name)_$(topo_name)_$(tag)"
                 println("\n", "-" ^ 70)
                 println("Running: $name")
                 println("-" ^ 70)
@@ -511,41 +500,27 @@ function run_benchmarks(args; kernel_cases = [])
                 # On Reactant, dump all MLIR (every compile stage) and the xprof
                 # profiles into per-case subdirectories so each stays separate;
                 # saved as CI artifacts (GB-25 pattern). Vanilla does not compile
-                # through Reactant, so neither is produced there. An AD case on a
-                # GPU keeps its profile everywhere, for its per-kernel times.
-                on_ci = get(ENV, "GITHUB_ACTIONS", "false") == "true"
+                # through Reactant, so neither is produced there.
                 profile_dir = nothing
-                if backend_name == "reactant" && (on_ci || (ad && device == "GPU"))
-                    profile_dir = mkpath(joinpath(@__DIR__, "profiles", "$(case_label)_$(adv_name)_$(tag)"))
-                end
-                if backend_name == "reactant" && on_ci
-                    Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", "$(case_label)_$(adv_name)_$(tag)"))
+                if get(ENV, "GITHUB_ACTIONS", "false") == "true" && backend_name == "reactant"
+                    Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mkpath(joinpath(@__DIR__, "mlir_dumps", "$(label)_$(adv_name)_$(tag)"))
                     Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+                    profile_dir = mkpath(joinpath(@__DIR__, "profiles", "$(label)_$(adv_name)_$(tag)"))
                 end
 
-                case_problem = ad ? scalar_tendency_ad_problem : problem
-                tendency!, tendency_args, tendency_grid = case_problem(arch;
-                                                                       Nx, Ny, Nz,
-                                                                       order,
-                                                                       float_type = FT,
-                                                                       topology)
-
+                tendency!, tendency_args, tendency_grid = problem(arch;
+                                                                  Nx, Ny, Nz,
+                                                                  order,
+                                                                  float_type = FT,
+                                                                  topology)
                 push!(results, benchmark_tendency(tendency!, tendency_args, tendency_grid;
                                                   nrepeat = time_steps,
                                                   name,
                                                   advection = adv_name,
                                                   backend = backend_label,
-                                                  mode = case_mode,
+                                                  mode,
                                                   raise,
                                                   profile_dir))
-
-                # Kernel times read by `main` from the trace of the timing run; see kernel_profiling/
-                if ad && device == "GPU"
-                    push!(kernel_cases, (; name, float_type = FT, advection = adv_name,
-                                         closure = "none", dynamics = "none", microphysics = "none",
-                                         backend = backend_label, mode = case_mode, time_steps,
-                                         grid = tendency_grid, profile_dir))
-                end
             end
             continue
         end
@@ -613,7 +588,7 @@ function run_benchmarks(args; kernel_cases = [])
                                      microphysics=micro_name,
                                      )
         else
-            error("Unknown mode: $mode. Use 'benchmark', 'simulate', 'scalar_tendency', or 'model_tendency'.")
+            error("Unknown mode: $mode. Use 'benchmark', 'simulate', 'scalar_tendency', 'scalar_tendency_ad', or 'model_tendency'.")
         end
         push!(results, result)
 

@@ -35,14 +35,4 @@ The tables go to the job summary.
 That page has one figure per configuration, one panel per grid and one line per kernel.
 Currently the Reactant vs vanilla entry is the only one with `profile_kernels: true`.
 
-Kernels on the Reactant backend are XLA's fusions rather than Breeze's kernels, so Reactant time-stepping cases are not profiled here.
-
-## Scalar tendency AD
-
-With `--mode scalar_tendency --ad` on a GPU, each AD case (see the main README) is profiled too.
-Those cases run on Reactant, so their kernels are XLA's fusions.
-Times are per gradient evaluation (`ms/eval`), and the entry's `time_steps` holds the number of evaluations.
-They are read with `Reactant.Profiler.get_kernel_stats` from the xprof trace that the timing run already wrote to `profiles/`, so nothing is run again.
-Kernels are grouped by name like the vanilla ones.
-The trace records no median, so the Median column holds the mean.
-The publish step charts these entries in one figure, with one panel per WENO order.
+Kernels on the Reactant backend are XLA's fusions rather than Breeze's kernels, so they are not profiled here.

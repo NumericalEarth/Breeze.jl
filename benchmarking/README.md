@@ -97,30 +97,6 @@ also appended to the benchmark name (`..._reactant_AD_periodic_4`). `Time/Step`
 is the wall time of the combined forward+backward program divided by
 `--time_steps`.
 
-### Scalar tendency AD
-
-`--mode scalar_tendency` times the bare WENO advective tendency
-Gc = -∇·(𝐮 c) (no model) on both backends. Adding `--ad` also times, on the
-Reactant backend and in Float32 only, the reverse-mode gradient of L = mean(Gc²)
-with respect to `c` and 𝐮: `scalar_tendency_loss` and `grad_scalar_tendency_loss!`
-in `src/scalar_tendency.jl`, which follow `loss` and `grad_loss!` in
-`src/timestepping.jl`. Reactant raises the kernels to StableHLO (`raise=true`),
-then Enzyme-MLIR differentiates the tensor program, which XLA compiles into one
-executable. `raise=false` is left out: differentiating an unraised kernel needs
-kernel AD.
-
-Results are recorded with `mode = "scalar_tendency_ad"` under
-`ScalarTendencyAD_...` names, and points/s counts gradient evaluations. On a GPU,
-the per-kernel times of a gradient evaluation go to `kernel_profile.json` (see
-below).
-
-```bash
-# Local CPU run: forward on both backends, AD on Reactant
-julia --project run_benchmarks.jl --mode scalar_tendency --ad --device CPU \
-    --backend "vanilla, reactant" --size 16x16x8 --advection WENO5 \
-    --float_type Float32 --time_steps 4 --dynamics none --microphysics none
-```
-
 ### Kernel profiling
 
 With `--profile_kernels`, once every case is timed and saved, each vanilla
@@ -151,7 +127,7 @@ julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=2.0 -
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--mode` | `benchmark` | Mode: `benchmark`, `simulate`, `scalar_tendency` or `model_tendency` |
+| `--mode` | `benchmark` | Mode: `benchmark` or `simulate` |
 | `--size` | `64^3` | Grid size. Formats: `NxNyxNz` or `N^3`. Comma-separated for multiple. |
 | `--device` | `GPU` | Device: `CPU`, `GPU`, or `TPU` (TPU requires `--backend reactant`) |
 | `--backend` | `vanilla` | Execution backend: `vanilla` (eager KernelAbstractions / CUDA) or `reactant` (compiled via Reactant). Comma-separated for multiple. |
