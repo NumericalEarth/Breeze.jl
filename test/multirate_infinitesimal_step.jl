@@ -342,6 +342,7 @@ end
     using Breeze.Advection: step_start_tracer
     using Breeze.AtmosphereModels: moisture_prognostic_name, specific_prognostic_moisture
     using Breeze.TimeSteppers: tendencies_feed_first_stage
+    using Breeze.AtmosphereModels: compute_scalar_tendencies!, compute_scalar_tendency!
 
     qᵗᵢ(x, z) = 0.012 * exp(-z / 3e3) * (1 + 0.2 * (abs(x) < 3e3))
     grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
@@ -376,11 +377,14 @@ end
                                  post_loop_scalar_tendencies = false)
     frozen = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :TVDMISB, moist = true, qᵗ = qᵗᵢ,
                               scalar_advection = FrozenWeightsWENO(order=5), post_loop_scalar_tendencies = false)
-    # A wind, so that the moisture is advected from the start.
+    # The scalar tendencies of `update_state!` use the loop's time-averaged velocities, which are zero
+    # before the first step, so these are built with a wind instead.
     set!(reference; u = 5)
     set!(frozen; u = 5)
-    update_state!(reference; compute_tendencies = true)
-    update_state!(frozen; compute_tendencies = true)
+    for model in (reference, frozen)
+        update_state!(model; compute_tendencies = true)
+        compute_scalar_tendencies!(model, fields(model), model.velocities, compute_scalar_tendency!)
+    end
     Ga = Array(interior(frozen.timestepper.Gⁿ[moist_name]))
     Gb = Array(interior(reference.timestepper.Gⁿ[moist_name]))
     @test maximum(abs, Gb) > 0
