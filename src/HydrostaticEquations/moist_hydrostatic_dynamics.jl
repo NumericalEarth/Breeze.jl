@@ -380,6 +380,10 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydr
     fill_halo_regions!(dynamics.vertical_mass_flux)
     fill_halo_regions!(w)
 
+    # The water that the tendencies transport: its halos across the seam of a Yin-Yang grid, from a
+    # limited interpolation of the mixing ratio (`moist_seam_water_halos.jl`)
+    fill_water_seam_halos!(model)
+
     return nothing
 end
 
