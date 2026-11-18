@@ -76,7 +76,7 @@ using Breeze.Microphysics:
     adjust_thermodynamic_state,
     equilibrium_moisture_phase_fractions
 
-using Breeze.HydrostaticEquations: HydrostaticEquations, MoistHydrostaticModel, warm_rain_column_physics!
+using Breeze.HydrostaticEquations: HydrostaticEquations, MoistHydrostaticModel, time_step_column_physics!
 
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, TYPEDSIGNATURES_WITH_DEFAULTS_NO_RETURN
 

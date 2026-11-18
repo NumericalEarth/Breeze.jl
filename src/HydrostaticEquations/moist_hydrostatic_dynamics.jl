@@ -29,20 +29,30 @@
 # `HydrostaticDynamics` carries a `HydrostaticMoisture`. Every method of this file dispatches on
 # that, so a model without microphysics runs the dry code, unchanged.
 
-struct HydrostaticMoisture{T, I, S, D, L}
+# Who applies the column physics of a moist model. The time steppers apply it once at the end of
+# every step, over the step; a driver that applies it itself (`WarmRainColumnPhysics`, with its
+# own number of applications per step) first takes it from them, so that it is applied once.
+mutable struct ColumnPhysicsDispatch
+    in_time_step :: Bool
+end
+
+struct HydrostaticMoisture{T, I, S, D, L, C}
     density_potential_temperature :: T  # θᵨ = ϑ θ at cell centers
     interface_pressure :: I             # total pressure pᶠ at z-faces
     total_surface_pressure :: S         # pˢ = πˢ + Σ W (two-dimensional)
     total_density :: D                  # ρ (1 + rᵗ): mass of air and water per unit area and unit of z
     ledger :: L                         # accumulated fluxes through the ground (two-dimensional)
+    column_physics :: C                 # ColumnPhysicsDispatch, or nothing inside kernels
 end
 
+# Kernels read the fields only
 Adapt.adapt_structure(to, moisture::HydrostaticMoisture) =
     HydrostaticMoisture(adapt(to, moisture.density_potential_temperature),
                         adapt(to, moisture.interface_pressure),
                         adapt(to, moisture.total_surface_pressure),
                         adapt(to, moisture.total_density),
-                        adapt(to, moisture.ledger))
+                        adapt(to, moisture.ledger),
+                        nothing)
 
 @regional HydrostaticMoisture
 
@@ -68,8 +78,32 @@ function HydrostaticMoisture(grid)
                                ZFaceField(grid),
                                Field{Center, Center, Nothing}(grid),
                                CenterField(grid),
-                               precipitation_ledger(grid))
+                               precipitation_ledger(grid),
+                               ColumnPhysicsDispatch(true))
 end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Choose whether the time stepper of `model`, an `AtmosphereModel` with moist `HydrostaticDynamics`,
+applies the column physics at the end of every time step (`true`, the default of a new model),
+or leaves it to the driver (`false`), as [`WarmRainColumnPhysics`](@ref) requires.
+"""
+function column_physics_in_time_step!(model::MoistHydrostaticModel, in_time_step::Bool)
+    model.dynamics.moisture.column_physics.in_time_step = in_time_step
+    return nothing
+end
+
+column_physics_in_time_step(model::MoistHydrostaticModel) = model.dynamics.moisture.column_physics.in_time_step
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Apply the column physics of `microphysics` over the time step that `model` has just taken, unless
+a driver has taken it over with [`column_physics_in_time_step!`](@ref). Called by the time steppers.
+"""
+time_step_column_physics!(microphysics, model::MoistHydrostaticModel) =
+    column_physics_in_time_step(model) ? warm_rain_column_physics!(microphysics, model) : nothing
 
 with_moisture(dynamics, ::Nothing, grid) = dynamics
 
@@ -564,6 +598,110 @@ function AtmosphereModels.compute_dynamics_tendency!(model::MoistHydrostaticMode
 end
 
 #####
+##### The gravity-wave operator of the substeps with water (`gravity_wave_substepping.jl`)
+#####
+#
+# The fast system keeps the structure of the dry one, with the coefficients of moist air frozen
+# at the start of the step. Writing πˢ′ for the perturbation of the dry-mass surface pressure:
+#
+#   - continuity and the flux of θᴸ by the perturbation mass flux are those of dry air, because
+#     the coordinate and every prognostic weight are those of dry air;
+#   - the mixing ratios are frozen, so the weight of the water follows the dry mass,
+#     W′ = rᵗᴸ ΔB πˢ′, and the total pressure of the z-face `k` responds as pᶠ′ = B̃ πˢ′ with
+#     B̃ₖ = Bₖ + Σ_{j ≥ k} rᵗᴸⱼ ΔBⱼ. With (1 + κ) Δp Π = p⁻ Πᶠ⁻ - p⁺ Πᶠ⁺ of the total pressures,
+#
+#       ∂Πᶠ/∂πˢ = κ B̃ Πᶠ / pᶠ ,    ∂Π/∂πˢ = [B̃⁻ Πᶠ⁻ - B̃⁺ Πᶠ⁺ - ΔB (1 + rᵗᴸ) Π] / Δp ;
+#
+#   - the pressure-gradient force and the hydrostatic integral read the density potential
+#     temperature with its factor frozen, θᵨ′ = ϑᴸ θ′:
+#
+#       ∂τ 𝐮′ = - cᵖᵈ ϑᴸ θ′ ∇Πᴸ - cᵖᵈ θᵨᴸ ∇Π′ - ∇Φ′ ,   Φ′ = Φ[ϑᴸ θ′; Πᴸ] + Φ[θᵨᴸ; ∂Π/∂πˢ] πˢ′ .
+#
+# What the frozen coefficients leave out (the dependence of ϑ on the water and on the phase
+# partition, the latent heating of condensation in the waves, the expansion work) is in the slow
+# tendency, which is the full tendency less this operator applied to the perturbation: the split
+# scheme integrates the equations of the unsplit one. Without water every coefficient is that of
+# the dry operator.
+
+@kernel function _compute_density_factor!(ϑ, θᵨ, θ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ϑ[i, j, k] = θᵨ[i, j, k] / θ[i, j, k]
+end
+
+function freeze_moist_linearization!(substepper, model::MoistHydrostaticModel)
+    grid = model.grid
+    linearization = substepper.linearization
+    hasproperty(linearization, :θᵨ) ||
+        throw(ArgumentError("The gravity-wave substepper of this moist model was built without the moist " *
+                            "linearization: build GravityWaveSubstepper with moist = true."))
+
+    copy_parent!(linearization.θᵨ, model.dynamics.moisture.density_potential_temperature)
+
+    @apply_regionally launch!(grid.architecture, grid, :xyz, _compute_density_factor!,
+                              linearization.ϑ, linearization.θᵨ, linearization.θ)
+
+    return nothing
+end
+
+@kernel function _compute_moist_exner_function_derivatives!(dΠdπˢ, dΠᶠdπˢ, grid, B, pᶠ, ρ, ρqˣ, Π, Πᶠ, κ)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    @inbounds begin
+        B̃⁺ = B[i, j, Nz+1]
+        constant_pressure = B̃⁺ == 0
+        safe_p = ifelse(constant_pressure, one(B̃⁺), pᶠ[i, j, Nz+1])
+        dΠᶠdπˢ[i, j, Nz+1] = ifelse(constant_pressure, zero(B̃⁺), κ * B̃⁺ * Πᶠ[i, j, Nz+1] / safe_p)
+
+        for k in Nz:-1:1
+            ΔB = B[i, j, k] - B[i, j, k+1]
+            rᵗ = sum_at(i, j, k, ρqˣ) / ρ[i, j, k]
+            B̃⁻ = B̃⁺ + ΔB * (1 + rᵗ)
+            Δp = pᶠ[i, j, k] - pᶠ[i, j, k+1]
+
+            constant_pressure = B̃⁻ == 0
+            safe_p = ifelse(constant_pressure, one(Δp), pᶠ[i, j, k])
+            dΠᶠdπˢ[i, j, k] = ifelse(constant_pressure, zero(Δp), κ * B̃⁻ * Πᶠ[i, j, k] / safe_p)
+            dΠdπˢ[i, j, k] = (B̃⁻ * Πᶠ[i, j, k] - B̃⁺ * Πᶠ[i, j, k+1] - ΔB * (1 + rᵗ) * Π[i, j, k]) / Δp
+
+            B̃⁺ = B̃⁻
+        end
+    end
+end
+
+function launch_linearization_derivatives!(substepper, model, moisture::HydrostaticMoisture)
+    grid = model.grid
+    arch = grid.architecture
+    dynamics = model.dynamics
+    constants = model.thermodynamic_constants
+    cᵖᵈ = constants.dry_air.heat_capacity
+    κ = dry_air_gas_constant(constants) / cᵖᵈ
+    (; ρ, θᵨ, Π, Πᶠ, dΠdpˢ, dΠᶠdpˢ, dΦdpˢ) = substepper.linearization
+
+    launch!(arch, grid, :xy, _compute_moist_exner_function_derivatives!, dΠdpˢ, dΠᶠdpˢ, grid,
+            dynamics.surface_pressure_coefficient, moisture.interface_pressure, ρ, water_densities(model), Π, Πᶠ, κ)
+
+    # ∂Φ/∂πˢ at fixed θᵨ: the hydrostatic integral is linear in the Exner functions
+    launch!(arch, grid, :xy, _compute_geopotential!, dΦdpˢ, grid, ZeroField(eltype(grid)), θᵨ, dΠdpˢ, dΠᶠdpˢ, cᵖᵈ)
+
+    return nothing
+end
+
+# The Lamb speed of moist air, √(γᵐ Rᵐ T), is bounded by that of dry air at the density
+# temperature, because γᵐ < γᵈ; and Rᵐ / Rᵈ ≤ 1 + (Rᵛ / Rᵈ - 1) qᵛ.
+function maximum_gravity_wave_speed(model::MoistHydrostaticModel)
+    constants = model.thermodynamic_constants
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    γ = cᵖᵈ / (cᵖᵈ - Rᵈ)
+    water = hydrostatic_water_fields(model.microphysics, model.microphysical_fields)
+    T = maximum(model.temperature)
+    qᵛ = max(0, maximum(water.qᵛ))
+    return sqrt(γ * Rᵈ * T * (1 + (Rᵛ / Rᵈ - 1) * qᵛ))
+end
+
+#####
 ##### Column physics of warm rain, once per time step
 #####
 
@@ -765,7 +903,9 @@ end
 
 A callable for `Callback(WarmRainColumnPhysics(; substeps), IterationInterval(1))` that applies
 [`warm_rain_column_physics!`](@ref) after every time step, over the step just taken
-(`model.clock.last_Δt`), in `substeps` equal applications.
+(`model.clock.last_Δt`), in `substeps` equal applications. The time stepper must not apply the
+column physics as well: call `column_physics_in_time_step!(model, false)` first, without which
+the callback throws an `ArgumentError`.
 """
 struct WarmRainColumnPhysics
     substeps :: Int
@@ -777,8 +917,14 @@ WarmRainColumnPhysics(; substeps=1) = WarmRainColumnPhysics(substeps)
 Oceananigans.prognostic_state(::WarmRainColumnPhysics) = nothing
 Oceananigans.restore_prognostic_state!(physics::WarmRainColumnPhysics, ::Nothing) = physics
 
-(physics::WarmRainColumnPhysics)(simulation) =
-    warm_rain_column_physics!(simulation.model.microphysics, simulation.model; substeps=physics.substeps)
+function (physics::WarmRainColumnPhysics)(simulation)
+    model = simulation.model
+    column_physics_in_time_step(model) &&
+        throw(ArgumentError("WarmRainColumnPhysics would apply the column physics a second time: the time " *
+                            "stepper applies it at the end of every step. Call " *
+                            "column_physics_in_time_step!(model, false) before the first step."))
+    return warm_rain_column_physics!(model.microphysics, model; substeps=physics.substeps)
+end
 
 #####
 ##### What a moist model may be built with

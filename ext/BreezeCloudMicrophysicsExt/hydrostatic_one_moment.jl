@@ -37,4 +37,4 @@ end
 @inline HydrostaticEquations.rain_fall_speed(bμp::WP1M, ρ, qʳ) =
     terminal_velocity(bμp.categories.parameters.precip.rain, bμp.categories.parameters.terminal_velocity.rain, ρ, qʳ)
 
-AM.microphysics_model_update!(bμp::WP1M, model::MoistHydrostaticModel) = warm_rain_column_physics!(bμp, model)
+AM.microphysics_model_update!(bμp::WP1M, model::MoistHydrostaticModel) = time_step_column_physics!(bμp, model)

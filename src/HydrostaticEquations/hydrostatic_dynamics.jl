@@ -70,7 +70,8 @@ Not supported, and rejected with an `ArgumentError`:
   energy through a boundary, radiation, `hyperdiffusion`, `vertical_diffusion`, a negative
   moisture correction, the conservation fixer, an Exner exponent other than `DryExponent()`, a
   saturation vapor pressure other than `ClausiusClapeyron`, and the time stepper
-  `:GravityWaveMultirateInfinitesimalStep`.
+  `:GravityWaveMultirateInfinitesimalStep` unless it is built with
+  `moist_gravity_wave_operator = true`.
 - Radiation on a multi-region grid, and radiative transfer models that do not take the pressures
   of the coordinate surfaces from the dynamics.
 - A Coriolis force with a horizontal component of the rotation: only `FPlane`, `BetaPlane` and

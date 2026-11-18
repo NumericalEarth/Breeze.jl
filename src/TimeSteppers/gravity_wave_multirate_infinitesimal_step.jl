@@ -93,6 +93,13 @@ Keyword arguments
 - `substeps`: number of substeps in a time step; a stage that covers the fraction ``d`` of it
   takes ``⌈d N⌉``. With `nothing`, the default, every stage takes the smallest number that keeps
   its Courant number below `cfl`.
+- `moist_gravity_wave_operator`: with moist `HydrostaticDynamics`, integrate the gravity-wave
+  operator with the coefficients of moist air frozen at the start of the step (the density
+  potential temperature and the response of the total pressure to the dry-mass surface
+  pressure). Required (`true`) for a model with microphysics, which is rejected otherwise: the
+  split scheme integrates the equations of `:SSPRungeKutta3`, but its stability in cloud, where
+  the slow tendency carries the latent heating of the waves, is measured and not derived.
+  Default: `false`. Without water it changes nothing.
 - `cfl`: the stage Courant number ``ω Δτ`` aimed at, with ``ω`` an upper bound of the largest
   gravity-wave frequency. Default: 0.7 times the stability bound of the inner solver, which is
   ``2 / \\sqrt{1 + 2 βᵈ}`` for forward-backward substeps with divergence damping ``βᵈ`` and 2
@@ -123,6 +130,7 @@ function GravityWaveMultirateInfinitesimalStep(grid, prognostic_fields;
                                                inner_solver = nothing,
                                                substeps = nothing,
                                                cfl = nothing,
+                                               moist_gravity_wave_operator = false,
                                                implicit_solver::TI = nothing,
                                                cache_advecting_state = false, # accepted for TimeStepper-call uniformity; unused
                                                Gⁿ::TG = map(similar, prognostic_fields),
@@ -131,12 +139,16 @@ function GravityWaveMultirateInfinitesimalStep(grid, prognostic_fields;
     dynamics isa HydrostaticDynamics ||
         throw(ArgumentError("GravityWaveMultirateInfinitesimalStep integrates HydrostaticDynamics only."))
 
-    # The gravity-wave operator of the substeps is that of dry air: with water its coefficients
-    # (the density potential temperature, the response of the total pressure) are not implemented.
-    isnothing(dynamics.moisture) ||
+    # With water the gravity-wave operator of the substeps takes the coefficients of moist air (the
+    # density potential temperature, the response of the total pressure). What it leaves to the slow
+    # tendency in cloud is not small, and no stability bound of the split scheme is derived for it,
+    # so it is not chosen without being asked for.
+    moist = !isnothing(dynamics.moisture)
+    (moist && !moist_gravity_wave_operator) &&
         throw(ArgumentError("GravityWaveMultirateInfinitesimalStep does not support HydrostaticDynamics with " *
-                            "moisture yet: the gravity-wave operator of the substeps is that of dry air. " *
-                            "Use timestepper = :SSPRungeKutta3."))
+                            "moisture by default: the stability of the split scheme in cloud is not established. " *
+                            "Use timestepper = :SSPRungeKutta3, or ask for the gravity-wave operator of moist air " *
+                            "with timestepper_kwargs = (moist_gravity_wave_operator = true, ...)."))
 
     (isnothing(tableau) || isnothing(inner_solver)) &&
         throw(ArgumentError("GravityWaveMultirateInfinitesimalStep has no default scheme. Choose both with " *
@@ -153,7 +165,7 @@ function GravityWaveMultirateInfinitesimalStep(grid, prognostic_fields;
     all(d -> d > 0, tableau.d) ||
         throw(ArgumentError("Every stage of the tableau must integrate forward in time."))
 
-    substepper = GravityWaveSubstepper(grid, inner_solver, prognostic_fields; substeps, cfl)
+    substepper = GravityWaveSubstepper(grid, inner_solver, prognostic_fields; substeps, cfl, moist)
 
     slow_tendencies = ntuple(_ -> map(similar, prognostic_fields), stages)
     stage_increments = ntuple(_ -> map(similar, prognostic_fields), stages)
@@ -392,6 +404,10 @@ function OceananigansTimeSteppers.time_step!(model::GravityWaveMultirateModel, �
     implicit_dynamics_step!(model.dynamics, model, Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
+
+    # The operator-split microphysics update, once per step on the state just refreshed, as
+    # `:SSPRungeKutta3` applies it. Nothing without microphysics.
+    microphysics_model_update!(model.microphysics, model)
 
     return nothing
 end

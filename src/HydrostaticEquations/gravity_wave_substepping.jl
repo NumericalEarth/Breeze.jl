@@ -133,12 +133,15 @@ Keyword arguments
 - `substeps`: number of substeps in a time step ``Δt``; a stage that covers ``d Δt`` takes
   ``⌈d N⌉`` of them. With `nothing`, the default, each stage takes the smallest number for which
   its Courant number ``ω Δτ`` does not exceed `cfl`.
+- `moist`: whether the linearization holds the density factor `ϑ` and the density potential
+  temperature `θᵨ` of moist `HydrostaticDynamics`. Default: `false`.
 - `cfl`: the stage Courant number aimed at when `substeps` is `nothing`. Default: 0.7 times the
   stability bound of `inner_solver` (see [`stage_cfl_bound`](@ref)), which may not be exceeded.
 """
 function GravityWaveSubstepper(grid, inner_solver, prognostic_fields;
                                substeps = nothing,
-                               cfl = nothing)
+                               cfl = nothing,
+                               moist = false)
 
     FT = eltype(grid)
     bound = stage_cfl_bound(inner_solver)
@@ -161,6 +164,11 @@ function GravityWaveSubstepper(grid, inner_solver, prognostic_fields;
                      dΠdpˢ = center_field(),
                      dΠᶠdpˢ = ZFaceField(grid),
                      dΦdpˢ = center_field())
+
+    # With water the pressure-gradient force reads the density potential temperature θᵨ = ϑ θ: the
+    # linearization also freezes ϑ and θᵨ (see `moist_hydrostatic_dynamics.jl`). Without it the
+    # linearization, and every kernel that reads it, is that of dry air.
+    moist && (linearization = merge(linearization, (ϑ = center_field(), θᵨ = center_field())))
 
     scalar_names = filter(name -> name ∉ gravity_wave_prognostic_names, keys(prognostic_fields))
     specific_scalars = NamedTuple{scalar_names}(map(name -> center_field(), scalar_names))
@@ -302,6 +310,7 @@ function freeze_gravity_wave_linearization!(substepper::GravityWaveSubstepper, m
     copy_parent!(linearization.θ, model.formulation.potential_temperature)
     copy_parent!(linearization.Π, dynamics.exner_function)
     copy_parent!(linearization.Πᶠ, dynamics.interface_exner_function)
+    freeze_moist_linearization!(substepper, model)
 
     @apply_regionally launch_linearization_derivatives!(substepper, model)
 
@@ -316,13 +325,32 @@ function freeze_gravity_wave_linearization!(substepper::GravityWaveSubstepper, m
     return nothing
 end
 
+# Dry air has no density factor to freeze. The method of a moist model is in `moist_hydrostatic_dynamics.jl`.
+freeze_moist_linearization!(substepper, model) = nothing
+
+# The potential temperature that the pressure-gradient force and the hydrostatic integral read
+# from the frozen state: θᴸ in dry air, the density potential temperature θᵨᴸ with water
+pressure_gradient_potential_temperature(linearization) =
+    hasproperty(linearization, :θᵨ) ? linearization.θᵨ : linearization.θ
+
+# ϑᴸ = θᵨᴸ / θᴸ, or nothing in dry air
+density_factor(linearization) = hasproperty(linearization, :ϑ) ? linearization.ϑ : nothing
+
+# The perturbation ϑᴸ θ′ of the density potential temperature at frozen ϑ; θ′ itself in dry air
+@inline density_potential_temperature_perturbation(i, j, k, ::Nothing, θ′) = θ′
+@inline density_potential_temperature_perturbation(i, j, k, ϑᴸ, θ′) = @inbounds ϑᴸ[i, j, k] * θ′
+
 # The prognostic scalars that the substeps do not advance, in the order of `specific_scalars`
 function substepped_scalars(substepper, model)
     names = keys(substepper.specific_scalars)
     return NamedTuple{names}(map(name -> Oceananigans.prognostic_fields(model)[name], names))
 end
 
-function launch_linearization_derivatives!(substepper, model)
+launch_linearization_derivatives!(substepper, model) =
+    launch_linearization_derivatives!(substepper, model, model.dynamics.moisture)
+
+# Dry air. The method of a moist model is in `moist_hydrostatic_dynamics.jl`.
+function launch_linearization_derivatives!(substepper, model, ::Nothing)
     grid = model.grid
     arch = grid.architecture
     dynamics = model.dynamics
@@ -408,14 +436,15 @@ end
 # Potential temperature density perturbation over Δτ, the forward-weighted θ★ that the
 # pressure-gradient force reads, and the velocity perturbation that moved the mass.
 @kernel function _step_potential_temperature_perturbation!(ρθ′, θ★, ∫u′, ∫v′, grid, advection, ρᴸ, 𝐮′, ρw′,
-                                                           θᴸ, Πᴸ, Πᶠᴸ, pˢ★, B, Fρθ, g, Δτ, βᵈ)
+                                                           θᴸ, ϑᴸ, Πᴸ, Πᶠᴸ, pˢ★, B, Fρθ, g, Δτ, βᵈ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         Gρθ = fast_potential_temperature_tendency(i, j, k, grid, advection, ρᴸ, 𝐮′, ρw′, θᴸ, Πᴸ, Πᶠᴸ) + Fρθ[i, j, k]
         ρθ′[i, j, k] += Δτ * Gρθ
         ρθ★ = ρθ′[i, j, k] + βᵈ * Δτ * Gρθ
-        θ★[i, j, k] = potential_temperature_perturbation(i, j, k, grid, ρθ★, pˢ★, ρᴸ, θᴸ, B, g)
+        θ′ = potential_temperature_perturbation(i, j, k, grid, ρθ★, pˢ★, ρᴸ, θᴸ, B, g)
+        θ★[i, j, k] = density_potential_temperature_perturbation(i, j, k, ϑᴸ, θ′)
 
         ∫u′[i, j, k] += Δτ * 𝐮′.u[i, j, k]
         ∫v′[i, j, k] += Δτ * 𝐮′.v[i, j, k]
@@ -439,7 +468,7 @@ pressure_gradient_arguments(substepper, model) =
     (substepper.weighted_perturbations.θ,
      substepper.weighted_perturbations.pˢ,
      substepper.weighted_perturbations.Φ,
-     substepper.linearization.θ,
+     pressure_gradient_potential_temperature(substepper.linearization),
      substepper.linearization.Π,
      substepper.linearization.dΠdpˢ,
      substepper.linearization.dΦdpˢ,
@@ -490,7 +519,7 @@ function launch_mass_and_potential_temperature_step!(substepper, model, Δτ, β
 
     launch!(arch, grid, :xyz, _step_potential_temperature_perturbation!,
             ρθ′, weighted.θ, ∫𝐮′.u, ∫𝐮′.v, grid, substepper.advection, ρ, (; u=u′, v=v′), ρw,
-            θ, Π, Πᶠ, weighted.pˢ, B, F.ρθ, g, Δτ, βᵈ)
+            θ, density_factor(substepper.linearization), Π, Πᶠ, weighted.pˢ, B, F.ρθ, g, Δτ, βᵈ)
 
     return nothing
 end
