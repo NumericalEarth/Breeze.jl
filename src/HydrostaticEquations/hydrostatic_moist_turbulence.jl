@@ -40,7 +40,8 @@ using Oceananigans.TurbulenceClosures: TurbulenceClosures as OceanTurbulenceClos
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: ℑbzᵃᵃᶜ
 using Oceananigans.Utils: KernelParameters, launch!, @apply_regionally
 
-using Breeze.AtmosphereModels: AtmosphereModelBuoyancy, specific_prognostic_moisture, dynamics_thermodynamic_fields
+using Breeze.AtmosphereModels: AtmosphereModelBuoyancy, specific_prognostic_moisture, dynamics_thermodynamic_fields,
+                               log_density_potential_temperature
 using Breeze.BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions
 using Breeze.HydrostaticEquations: MoistHydrostaticModel, column_physics_in_time_step, warm_rain_column_physics!, hydrostatic_water_fields,
                                    water_densities, sum_at, interface_pressure, layer_pressure_thickness,
@@ -48,6 +49,7 @@ using Breeze.HydrostaticEquations: MoistHydrostaticModel, column_physics_in_time
                                    layer_mass_per_area, diffuse_column!, face_conductance, _diffuse_velocity!
 using Breeze.Thermodynamics: dry_air_gas_constant, absolute_zero_latent_heat
 using Breeze.TurbulenceClosures: TKEBasedTurbulenceClosure, TKE_NAME, buoyancy_productionᶜᶜᶠ,
+                                 log_dry_potential_temperatureᶜᶜᶜ,
                                  clip_negative_halo_diffusivities!,
                                  _compute_tke_static_stability!, _compute_mixing_length!,
                                  _compute_tke_closure_fields!, _compute_tke_implicit_linear_coefficient!
@@ -132,6 +134,41 @@ end
 @inline function OceanTurbulenceClosures.height_above_bottomᶜᶜᶜ(i, j, k, grid::PhysicalHeightGrid)
     h = @inbounds (grid.interface_height[i, j, k] + grid.interface_height[i, j, k+1]) / 2
     return max(Δzᶜᶜᶜ(i, j, k, grid) / 2, h)
+end
+
+#####
+##### Differences of logarithms between two layers
+#####
+
+# ln(a / b) for a and b of one sign. Where the two are close it is the series of 2 atanh(x) in
+# x = (a - b) / (a + b), whose first operation is a difference that floating point takes exactly:
+# the relative error of the result is then that of the arithmetic, where ln(a) - ln(b) loses the
+# digits the two logarithms share (a relative error of about ε |ln a| / |ln(a / b)|, a thousand
+# times the rounding ε for the potential temperatures of two adjacent layers). The series is
+# truncated after x⁸ / 9, with |x| < 1/20: a relative truncation error below 1e-14.
+@inline function log_ratio(a, b)
+    x = (a - b) / (a + b)
+    x² = x^2
+    series = 2 * x * (1 + x² * (1//3 + x² * (1//5 + x² * (1//7 + x² * 1//9))))
+    return ifelse(abs(x) < 1//20, series, log(a / b))
+end
+
+# The closure differentiates ln θᵨ (unsaturated branch) and ln θ of the dry potential temperature
+# (saturated branch) between two layers. The same derivatives, of the same quantities, are taken
+# here from fields that the hydrostatic core carries, without a difference of logarithms and
+# without raising the pressure to a power again: θᵨ is `moisture.density_potential_temperature`,
+# equal to (Rᵐ / Rᵈ) T / Π, and ln θ = ln T - ln Π with Π the Exner function of the layer.
+@inline function Operators.∂zᶜᶜᶠ(i, j, k, grid::PhysicalHeightGrid, ::typeof(log_density_potential_temperature),
+                                 buoyancy, T, qᵛᵉ)
+    θᵨ = buoyancy.dynamics.moisture.density_potential_temperature
+    return @inbounds log_ratio(θᵨ[i, j, k], θᵨ[i, j, k-1]) * Operators.Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
+end
+
+@inline function Operators.∂zᶜᶜᶠ(i, j, k, grid::PhysicalHeightGrid, ::typeof(log_dry_potential_temperatureᶜᶜᶜ),
+                                 buoyancy, T, qᵛᵉ)
+    Π = buoyancy.dynamics.exner_function
+    δ_log_θ = @inbounds log_ratio(T[i, j, k], T[i, j, k-1]) - log_ratio(Π[i, j, k], Π[i, j, k-1])
+    return δ_log_θ * Operators.Δz⁻¹ᶜᶜᶠ(i, j, k, grid)
 end
 
 # Depth of the layers, height between them and height of the coordinate surfaces above the
