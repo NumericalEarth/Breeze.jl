@@ -275,6 +275,13 @@ HydrostaticEquations.leave_scalar_transport_to_stages!(timestepper::ConvexGravit
 HydrostaticEquations.stage_seam_budgets(timestepper::GravityWaveMultirateInfinitesimalStep, model) =
     gravity_wave_seam_budgets(timestepper.substepper, timestepper.U⁰.pˢ, model)
 
+# The seam budgets of the substeps are those of the integrated velocity perturbation and of the
+# specific values at the start of the step, which the convex scalar stages replace by the mass flux
+# of the stage and the mixing ratio it starts from: the fixer has no budget for them.
+HydrostaticEquations.stage_seam_budgets(::ConvexGravityWaveMultirateInfinitesimalStep, model) =
+    throw(ArgumentError("HydrostaticConservationFixer does not support the convex scalar stages of " *
+                        "GravityWaveMultirateInfinitesimalStep with moist HydrostaticDynamics."))
+
 const GravityWaveMultirateModel = AtmosphereModel{<:HydrostaticDynamics, <:Any, <:Any, <:GravityWaveMultirateInfinitesimalStep}
 
 Base.summary(::GravityWaveMultirateInfinitesimalStep) = "GravityWaveMultirateInfinitesimalStep"
