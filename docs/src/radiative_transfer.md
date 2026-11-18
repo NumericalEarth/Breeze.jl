@@ -92,21 +92,23 @@ so downwelling fluxes are stored as negative numbers:
 ℐ_sw_dn = radiation.downwelling_shortwave_flux  # ≤ 0
 ```
 
-For clear-sky and all-sky optics, `downwelling_shortwave_flux` is the *total*
-downwelling shortwave (direct beam plus diffuse), and `upwelling_shortwave_flux`
-carries the sunlight scattered back upward by air and clouds together with the
-fraction reflected by the surface.
+For every optics flavor, `downwelling_shortwave_flux` is the *total* downwelling
+shortwave, direct beam plus diffuse; Breeze does not store the two separately.
+For clear-sky and all-sky optics, `upwelling_shortwave_flux` carries the sunlight
+scattered back upward by air and clouds together with the fraction reflected by
+the surface.
 
 !!! note "Shortwave radiation in the gray atmosphere"
-    The gray atmosphere uses RRTMGP's non-scattering shortwave solver, so
-    `downwelling_shortwave_flux` is the direct beam alone (no diffuse component).
-    The surface reflects the fraction `direct_surface_albedo` of the direct beam
-    diffusely, and `upwelling_shortwave_flux` is that reflected beam, attenuated by
+    The gray atmosphere uses RRTMGP's non-scattering shortwave solver, which
+    produces no diffuse downwelling shortwave. The total in
+    `downwelling_shortwave_flux` is therefore just the direct beam. The surface
+    reflects the fraction `direct_surface_albedo` of the direct beam diffusely,
+    and `upwelling_shortwave_flux` is that reflected beam, attenuated by
     ``\exp(-D τ_{sw})`` across each layer on its way up, where ``D ≈ 1.64`` is the
-    diffusivity of the gray longwave solver's default one-angle quadrature. The atmosphere absorbs what the
-    reflected beam loses, and the rest leaves through the top of the atmosphere.
-    The `diffuse_surface_albedo` has no effect, since no diffuse shortwave reaches
-    the surface.
+    diffusivity of the gray longwave solver's default one-angle quadrature. The
+    atmosphere absorbs what the reflected beam loses, and the rest leaves through
+    the top of the atmosphere. The `diffuse_surface_albedo` has no effect, since no
+    diffuse shortwave reaches the surface.
 
 ## Solar zenith angle
 
