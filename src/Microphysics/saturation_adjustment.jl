@@ -301,3 +301,9 @@ end
 
 # When no microphysics adjustment is needed
 compute_temperature(𝒰₀, ::Nothing, constants) = temperature(𝒰₀, constants)
+
+# Saturation adjustment removes the vapor excess instantly: the phase relaxation rate is infinite.
+@inline AtmosphereModels.phase_relaxation_rate(i, j, k, grid, ::SaturationAdjustment, μ, 𝒰, constants) =
+    convert(eltype(grid), Inf)
+
+AtmosphereModels.instantaneous_phase_relaxation(::SaturationAdjustment) = true

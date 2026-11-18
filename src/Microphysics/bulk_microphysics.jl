@@ -337,3 +337,21 @@ AtmosphereModels.liquid_mass_fraction(bμp::NPBM, model) =
     AtmosphereModels.liquid_mass_fraction(bμp.cloud_formation, model)
 AtmosphereModels.ice_mass_fraction(bμp::NPBM, model) =
     AtmosphereModels.ice_mass_fraction(bμp.cloud_formation, model)
+
+#####
+##### Phase relaxation rate (see `AtmosphereModels.phase_relaxation_rate`)
+#####
+
+# A bulk scheme relaxes vapor as its cloud formation does: instantly for saturation adjustment,
+# at the sum of the liquid and ice rates 1/τ of `ConstantRateCondensateFormation`.
+@inline AtmosphereModels.phase_relaxation_rate(i, j, k, grid, bμp::BulkMicrophysics, μ, 𝒰, constants) =
+    AtmosphereModels.phase_relaxation_rate(i, j, k, grid, bμp.cloud_formation, μ, 𝒰, constants)
+
+AtmosphereModels.instantaneous_phase_relaxation(bμp::BulkMicrophysics) =
+    AtmosphereModels.instantaneous_phase_relaxation(bμp.cloud_formation)
+
+@inline AtmosphereModels.phase_relaxation_rate(i, j, k, grid, cloud_formation::NonEquilibriumCloudFormation, μ, 𝒰, constants) =
+    constant_formation_rate(cloud_formation.liquid, grid) + constant_formation_rate(cloud_formation.ice, grid)
+
+@inline constant_formation_rate(formation::ConstantRateCondensateFormation, grid) = convert(eltype(grid), formation.rate)
+@inline constant_formation_rate(formation, grid) = zero(eltype(grid))

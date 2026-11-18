@@ -55,12 +55,13 @@ function read_lookup_tables(directory::AbstractString;
                             minimum_mass_mixing_ratio = 1e-14,
                             minimum_number_mixing_ratio = 1e-16,
                             precipitation_boundary_condition = nothing,
-                            negative_moisture_correction = SpeciesBorrowing(),
+                            negative_moisture_correction = nothing,
                             aerosol = nothing,
                             cloud = nothing,
                             rain = nothing,
                             process_rates = nothing,
-                            warm_rain_scheme = KhairoutdinovKogan2000())
+                            warm_rain_scheme = KhairoutdinovKogan2000(),
+                            condensation = GridMeanCondensation())
 
     table1_file = joinpath(directory, "p3_lookupTable_1.dat-v6.9-2momI")
     isfile(table1_file) || error("2momI table not found: $table1_file")
@@ -101,7 +102,8 @@ function read_lookup_tables(directory::AbstractString;
         precipitation_boundary_condition,
         negative_moisture_correction,
         aerosol,
-        warm_rain_scheme
+        warm_rain_scheme,
+        condensation
     )
 end
 
