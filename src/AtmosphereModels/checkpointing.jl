@@ -14,7 +14,7 @@ function Oceananigans.restore_prognostic_state!(restored::AtmosphereModel, from)
     restore_prognostic_state!(restored.particles, from.particles)
     restore_prognostic_state!(prognostic_fields(restored), from.fields)
     restore_prognostic_state!(restored.closure_fields, from.closure_fields)
-    # Older checkpoints can lack radiation or its approximate-update cache.
+    # Older checkpoints can lack radiation
     restore_prognostic_state!(restored.radiation, get(from, :radiation, nothing))
     restore_prognostic_state!(restored.timestepper, from.timestepper)
     return restored
@@ -22,9 +22,7 @@ end
 
 Oceananigans.restore_prognostic_state!(::AtmosphereModel, ::Nothing) = nothing
 
-# The model reads the fluxes between solves, the approximate updates change them from what the last
-# solve left, and the schedule decides when the next solve fires. Everything else (solvers,
-# workspaces, per-column state, optics tables) is rebuilt by that solve.
+# What the next solve does not rebuild: the fluxes, their updates, the schedule and the validity
 radiation_restart_state(rtm) = (; rtm.schedule,
                                   rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux,
                                   rtm.upwelling_shortwave_flux, rtm.downwelling_shortwave_flux,
@@ -33,7 +31,7 @@ radiation_restart_state(rtm) = (; rtm.schedule,
 
 approximate_updates_restart_state(::Nothing) = nothing
 
-# The current solar cosine and daylight workspace are rewritten before they are read.
+# The current solar cosine and the workspace are rewritten before they are read
 approximate_updates_restart_state(updates) = (; updates.upwelling_longwave_response, updates.downwelling_longwave_response,
                                                 updates.solved_upwelling_longwave_flux, updates.solved_downwelling_longwave_flux,
                                                 updates.solved_upwelling_shortwave_flux, updates.solved_downwelling_shortwave_flux,
@@ -41,9 +39,8 @@ approximate_updates_restart_state(updates) = (; updates.upwelling_longwave_respo
 
 Oceananigans.prognostic_state(rtm::RadiativeTransferModel) = prognostic_state(radiation_restart_state(rtm))
 
-# A checkpoint whose radiation fluxes cannot be used invalidates the cache, which defers a fresh
-# solve until `update_state!` has restored the atmosphere's diagnostics and the coupled surface is
-# ready. Validity is checkpointed too, in case another restart intervenes before that solve.
+# An incomplete checkpoint invalidates the cache, so the next `update_state!` solves once the
+# diagnostics are restored
 function Oceananigans.restore_prognostic_state!(rtm::RadiativeTransferModel, from)
     state = radiation_restart_state(rtm)
     valid = radiation_cache_is_valid(get(from, :cache_valid, true))

@@ -58,7 +58,7 @@ const OPTICS = (GrayOptics(), EcCKDOptics())
         qᵗ(z) = FT(0.015) * exp(-z / 2500)
         set!(model; θ=θ, qᵗ=qᵗ)
 
-        # Only a full solve rewrites this reference; between-solve updates rewrite the output fluxes.
+        # Only a full solve rewrites this reference
         ℐ_lw_up = radiation.approximate_updates.solved_upwelling_longwave_flux
         flux_div = radiation.flux_divergence
 

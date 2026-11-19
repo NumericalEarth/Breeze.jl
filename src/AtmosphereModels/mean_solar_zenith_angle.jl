@@ -1,8 +1,7 @@
 using Breeze.CelestialMechanics: day_of_year, solar_declination, hour_angle
 using Dates: Date, DateTime, Day, Millisecond
 
-# Integrate a + b cos(ω) only while the sun is above the horizon. Clipping to sunrise and sunset
-# weights a partially sunlit interval by its actual duration, even when daylight is very brief.
+# The integral of a + b cos(ω) and the angle spent above the horizon, between two hour angles
 @inline function sunlit_segment(cosine_offset, cosine_amplitude, first_angle, last_angle, horizon_angle)
     first_sunlit_angle = clamp(first_angle, -horizon_angle, horizon_angle)
     last_sunlit_angle = clamp(last_angle, -horizon_angle, horizon_angle)
@@ -36,12 +35,11 @@ end
     return integral, duration
 end
 
-# Each method averages over the `interval` seconds that begin `lead` seconds before `clock`.
-# Fixed and user-defined solar positions retain the instantaneous angle unless they provide an average.
+# Average over the `interval` seconds starting `lead` seconds before `clock`; other solar positions
+# keep the current angle
 average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position, grid, clock, interval, lead=0) = nothing
 
-# The per-column workspace that `average_solve_cos_zenith!` receives as `sunlit_duration`, built by
-# `column_array()`: only for a solar position whose average accumulates the duration column by column.
+# The `sunlit_duration` workspace of `average_solve_cos_zenith!`, only where it is accumulated
 sunlit_duration_workspace(solar_position, column_array) = nothing
 sunlit_duration_workspace(::ApparentSolarPosition, column_array) = column_array()
 
@@ -53,6 +51,7 @@ function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::
     integral, duration = sunlit_cosine_integral(cosine_offset, cosine_amplitude, first_angle, angular_speed * interval)
     mean_cosine = integral / ifelse(duration > 0, duration, one(duration))
     fill_columns!(cos_zenith, mean_cosine)
+    isnothing(sunlit_duration) || fill_columns!(sunlit_duration, duration / angular_speed)
     return nothing
 end
 
@@ -64,8 +63,7 @@ function average_solve_cos_zenith!(cos_zenith, sunlit_duration, solar_position::
     fill!(cos_zenith, 0)
     fill!(sunlit_duration, 0)
 
-    # The apparent-sun model changes declination and equation of time at UTC midnight. Integrate
-    # each calendar day separately, including intervals crossing the date or year boundary.
+    # Declination and equation of time change at UTC midnight, so integrate each day separately
     while remaining > 0
         midnight = DateTime(Date(datetime) + Day(1))
         duration = min(remaining, time_difference_in_seconds(midnight, datetime))

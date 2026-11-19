@@ -121,12 +121,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                    sfc_alb_diffuse = rrtmgp_αw₀,
                                    inc_flux_diffuse = nothing)
 
-    # The non-scattering shortwave solver only ever writes the direct beam
-    # (`flux_dn_dir`), leaving `flux_up` and `flux_dn` as allocated-but-unwritten
-    # memory. Zero them once so that every shortwave array in the solver agrees
-    # with the physics: no diffuse shortwave, and no upwelling shortwave within the solver.
-    # The optical depth is written only for sunlit columns; zeroing it keeps the
-    # (vanishing) reflected beam of a column that has never been sunlit finite.
+    # The non-scattering solver writes only `flux_dn_dir`, and the optical depth only for sunlit
+    # columns. Zero the rest once, so unwritten memory never reaches the fluxes.
     shortwave_flux = shortwave_solver.flux
     for array in (shortwave_flux.flux_up, shortwave_flux.flux_dn,
                   shortwave_flux.flux_net, shortwave_flux.flux_dn_dir, shortwave_solver.op.τ)
@@ -236,12 +232,11 @@ AtmosphereModels.solver_cos_zenith(rtm::GrayRadiativeTransferModel) = rtm.shortw
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Solve the gray radiative fluxes for the current model state, at the solar zenith angle that
-`_update_radiation!` has set:
+Solve the gray radiative fluxes for the current model state:
 
 1. Updates the RRTMGP atmospheric state from model fields (T, p)
-2. Computes the perturbed longwave fluxes when the surface temperature can change between solves
-3. Solves the longwave and shortwave RTE at the physical surface temperature
+2. Solves the longwave at the perturbed surface temperature, if needed
+3. Solves the longwave and shortwave RTE
 4. Copies the fluxes to Oceananigans fields for output
 
 Sign convention: positive flux = upward, negative flux = downward.
@@ -280,8 +275,7 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Solve the longwave fluxes at the perturbed surface temperature, into the longwave responses
-of `rtm.approximate_updates`. Gray optics is one batch of all the columns.
+Solve the longwave fluxes at the perturbed surface temperature into the longwave responses.
 """
 function solve_perturbed_surface_longwave!(rtm::GrayRadiativeTransferModel, grid)
     rrtmgp_state = rtm.atmospheric_state
@@ -444,10 +438,9 @@ Applies sign convention:
 * positive = upward
 * negative = downward.
 
-The non-scattering shortwave solver computes the direct beam only. The surface reflects the
-fraction `α` (the direct surface albedo) of it diffusely, and the reflected beam climbs the column
-attenuated by `exp(-D τ)` across each layer of shortwave optical depth `τ`, with `D` the
-`reflected_beam_diffusivity`.
+The shortwave solver computes only the direct beam. The surface reflects a fraction `α` (the direct
+albedo) of it, which climbs the column attenuated by `exp(-D τ)` per layer, with
+`D = reflected_beam_diffusivity`.
 """
 function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     copy_longwave_fluxes!(rtm.upwelling_longwave_flux, rtm.downwelling_longwave_flux, rtm, grid)
@@ -473,10 +466,8 @@ function copy_longwave_fluxes!(ℐ_lw_up, ℐ_lw_dn, rtm::GrayRadiativeTransferM
 end
 
 """
-The diffusivity `D ≈ 1.64` with which the direct beam reflected by the surface climbs a gray
-atmosphere: the secant of the single angle of the Gauss–Jacobi-5 quadrature with which RRTMGP's gray
-longwave solver integrates its diffuse fluxes by default. Fixed here, so that it remains a
-diffusivity when the longwave solver is given more angles, whose secants are not.
+Diffusivity `D ≈ 1.64` of the surface-reflected beam in a gray atmosphere: the secant of the
+one-angle Gauss–Jacobi-5 quadrature of RRTMGP's gray longwave solver.
 """
 const reflected_beam_diffusivity = 1 / 0.6096748751
 

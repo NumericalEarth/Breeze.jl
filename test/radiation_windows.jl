@@ -10,8 +10,7 @@ using Test
 advance_window_time(time::Number, seconds) = time + seconds
 advance_window_time(time::DateTime, seconds) = time + Millisecond(round(Int, 1000seconds))
 
-# Find the next solving step by visiting future first-stage clocks and evaluating the actual
-# schedule. This is independent of the interval estimator's rounding and offset calculation.
+# The next solving step, found by evaluating the schedule at future first-stage clocks
 function next_radiation_step_start(schedule, clock, step_start, first_stage, Δt)
     future_schedule = deepcopy(schedule)
     future_clock = deepcopy(clock)
@@ -52,8 +51,7 @@ end
             @test duration ≈ time_difference_in_seconds(next_start, window_start) rtol=8eps(FT)
         end
 
-        # Include exact first-stage boundaries for both steppers, where rounding up must
-        # not accidentally add an entire time step, including with calendar clocks.
+        # Exact first-stage boundaries must not round up to an extra step
         for interval in (900, 3600, 3700, 3800, 4200)
             next_time = advance_window_time(step_start, interval)
             period = step_start isa DateTime ? Second(interval) : FT(interval)

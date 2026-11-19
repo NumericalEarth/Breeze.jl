@@ -34,7 +34,7 @@ end
             @test only(Array(duration)) ≈ daylight rtol = rtol
         end
 
-        # The full-day mean over daylight is 2/π, irrespective of the start time or number of days.
+        # The daylight mean over whole days is 2/π
         for rotations in (1, 3), first_time in (-5hours, 0, 10hours)
             average_solve_cos_zenith!(cosine, duration, solar_position, grid, (; time=FT(first_time)), rotations * 1days)
             @test only(Array(cosine)) ≈ 2 / π rtol = rtol

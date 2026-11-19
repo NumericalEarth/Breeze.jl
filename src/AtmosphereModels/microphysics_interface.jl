@@ -1290,8 +1290,7 @@ apply microphysics processes that operate on the full model state by the full `Î
 rather than through the per-stage tendency interface. It runs after the time-stepper's
 `update_state!` has refreshed the diagnostic state it reads. Schemes that mutate
 prognostic fields here are responsible for restoring a consistent model state (halos,
-diagnostics, and tendencies) before returning, by calling `update_state_between_radiation_solves!`:
-`update_state!` without the radiation schedule, which the step has already checked.
+diagnostics, and tendencies) before returning, by calling `update_state_between_radiation_solves!`.
 Defaults to a no-op; specific microphysics schemes extend this function.
 """
 microphysics_model_update!(microphysics::Nothing, model) = nothing

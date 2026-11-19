@@ -39,9 +39,7 @@ end
 TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true) =
     update_atmosphere_state!(update_radiation!, model, callbacks; compute_tendencies)
 
-# `update_state!` for the state updates of a time step after its first stage, and for the refresh
-# after an operator-split update: the first-stage `update_state!` has already checked the radiation
-# schedule and refreshed any missing restart cache, so these only update the fluxes between solves.
+# `update_state!` after a step's first stage, which has already checked the radiation schedule
 update_state_between_radiation_solves!(model, callbacks=[]; compute_tendencies=true) =
     update_atmosphere_state!(update_radiation_between_solves!, model, callbacks; compute_tendencies)
 

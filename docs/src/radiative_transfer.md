@@ -55,8 +55,8 @@ When a `DateTime` clock is used, the cosine of the solar zenith angle is compute
 
 The [`RadiativeTransferModel`](@ref) model computes:
 
-- **Longwave radiation**: Upwelling and downwelling thermal radiation using RRTMGP's no-scattering solver. Every layer emits in both directions, and the surface emits upward and reflects `1 - ε` of the downwelling flux. Gray optics has no clouds.
-- **Shortwave radiation**: The direct solar beam, absorbed on its way down, and its reflection by the surface (see the note below)
+- **Longwave radiation**: Upwelling and downwelling thermal radiation using RRTMGP's no-scattering solver
+- **Shortwave radiation**: The direct solar beam and its reflection by the surface (see the note below)
 
 The gray atmosphere optical thickness for longwave follows the parameterization by [OGormanSchneider2008](@citet),
 
@@ -93,22 +93,16 @@ so downwelling fluxes are stored as negative numbers:
 ```
 
 For every optics flavor, `downwelling_shortwave_flux` is the *total* downwelling
-shortwave, direct beam plus diffuse; Breeze does not store the two separately.
-For clear-sky and all-sky optics, `upwelling_shortwave_flux` carries the sunlight
-scattered back upward by air and clouds together with the fraction reflected by
-the surface.
+shortwave, direct plus diffuse. For clear-sky and all-sky optics,
+`upwelling_shortwave_flux` is the sunlight scattered back by air and clouds plus
+the part reflected by the surface.
 
 !!! note "Shortwave radiation in the gray atmosphere"
-    The gray atmosphere uses RRTMGP's non-scattering shortwave solver, which
-    produces no diffuse downwelling shortwave. The total in
-    `downwelling_shortwave_flux` is therefore just the direct beam. The surface
-    reflects the fraction `direct_surface_albedo` of the direct beam diffusely,
-    and `upwelling_shortwave_flux` is that reflected beam, attenuated by
-    ``\exp(-D τ_{sw})`` across each layer on its way up, where ``D ≈ 1.64`` is the
-    diffusivity of the gray longwave solver's default one-angle quadrature. The
-    atmosphere absorbs what the reflected beam loses, and the rest leaves through
-    the top of the atmosphere. The `diffuse_surface_albedo` has no effect, since no
-    diffuse shortwave reaches the surface.
+    The gray shortwave solver does not scatter, so there is no diffuse downwelling
+    and `downwelling_shortwave_flux` is just the direct beam. The surface reflects
+    `direct_surface_albedo` of it, and `upwelling_shortwave_flux` is that reflection,
+    attenuated by ``\exp(-D τ_{sw})`` per layer with ``D ≈ 1.64``. The
+    `diffuse_surface_albedo` has no effect.
 
 ## Solar zenith angle
 
@@ -484,65 +478,32 @@ shortwave radiation scatters or reflects.
 
 ## Radiation between solves
 
-A `schedule` other than every iteration solves the radiative transfer equations only now and then.
-Between two solves the surface warms or cools and the sun moves, and every state update corrects the
-fluxes for both, following [HoganBozzo2015](@citet):
+With a `schedule` other than every iteration, the surface temperature and the sun change between
+solves. Every state update corrects the fluxes for both, following [HoganBozzo2015](@citet):
 
-- **Longwave.** Each solve repeats the longwave solve with the surface 1 K warmer, which gives the
-  response of the fluxes on every face to the fourth power of the surface temperature ``T₀``. Each
-  Runge–Kutta stage then shifts the saved fluxes of that solve by the response times the change
-  in ``T₀⁴`` since the solve. Using this fixed reference lets small Float32 corrections accumulate
-  without being rounded away at each stage. The column absorbs its share of a change in surface
-  emission, and the surface and the atmosphere
-  exchange the same longwave flux at every step. With a constant `surface_temperature` there is no
-  second solve. The full-spectrum RRTMGP solve clamps the surface temperature into its Planck
-  tables, 160 K to 355 K: within 1 K of the top the second solve cools the surface by 1 K instead,
-  and above 355 K the longwave fluxes no longer follow the surface temperature, as in a solve.
-  This clamp applies only to RRTMGP; ecCKD retains its own extrapolation of surface emission.
-- **Shortwave.** Each solve computes the slant path of the direct beam with ``\bar{μ}₀``, the
-  cosine of the solar zenith angle averaged over the sunlit part of the radiation window
-  ([HoganHirahara2015](@citet)). For `DiurnalSolarPosition` and `ApparentSolarPosition`, this is a
-  time integral clipped at sunrise and sunset, divided by the actual sunlit duration. The apparent
-  solar position is integrated separately on each calendar day. Each state update
-  then scales the solved shortwave fluxes by ``μ₀ / \bar{μ}₀``, which keeps the column's
-  transmittance and reflectance and brings the flux entering the top of the atmosphere to the
-  current sun, including a sun that rises between solves.
+- **Longwave.** Each solve also solves the longwave with the surface 1 K warmer, which gives the
+  response of each face's fluxes to ``T₀⁴``. Updates add that response times the change in ``T₀⁴``
+  since the solve, so the surface and the atmosphere exchange the same flux at every step. A
+  constant `surface_temperature` needs no second solve. RRTMGP clamps ``T₀`` to its Planck tables
+  (160 K to 355 K), so near 355 K the second solve cools the surface instead; ecCKD does not clamp.
+- **Shortwave.** Each solve uses ``\bar{μ}₀`` (`solved_cos_zenith`), the cosine of the solar zenith
+  angle averaged over the sunlit part of the radiation window ([HoganHirahara2015](@citet)), for the
+  slant path. Updates scale the solved fluxes by ``μ₀ / \bar{μ}₀``, where ``μ₀`` (`cos_zenith`) is
+  the current cosine, keeping the column's transmittance and reflectance while following
+  the current sun.
 
-Corrections also run at the end of the step, so the fluxes match the completed model clock.
-Restoring an older checkpoint without radiation fluxes or a required approximate-update cache
-triggers a fresh solve at the next state update outside a time step, or else at the first stage of
-the next step, including with the default every-iteration schedule.
+The window runs from the start of the solving step to the start of the next one. When the next
+solve time is unknown (an infinite or exhausted schedule, or a custom one), and for custom solar
+positions, the solve uses the current sun instead.
 
-The radiation window covers every model time at which a state update scales the fluxes of a solve:
-from the start of the time step that solves, since later Runge–Kutta stages can return to times
-before the first (SSP RK3 evaluates its third stage at ``tⁿ + Δt/2``, after its second at
-``tⁿ + Δt``), to the start of the time step that solves next. For a `TimeInterval` or
-`SpecifiedTimes` schedule, this is the first step whose first stage reaches the next scheduled
-time, estimated using the last time step and the time stepper's stage abscissae. The interval
-ends at that step's start, before its first-stage solve. With unknown stage timing it ends at
-the scheduled time. An `IterationInterval` uses its next actuating iteration and the last time step.
-When the interval is not known, past the last explicit time, for an infinite interval, or for
-other schedules, each solve uses the current sun to compute the slant path. Shortwave fluxes
-still scale with the current solar cosine, so they vanish at night. Custom solar-position types
-also use the current angle unless they implement interval averaging.
+If a step boundary finds ``μ₀ > 4 \bar{μ}₀`` in any column, sunlight the solve did not average
+over, the whole grid solves again. With an unknown window on a grid that the day-night terminator
+crosses, this happens about every step, so prefer an `IterationInterval` or a finite
+`TimeInterval` there.
 
-A fixed solar cosine and constant surface temperature require no update cache. Otherwise, when
-updates are enabled, the cache stores six extra face fields: the two longwave responses and the
-four fluxes of the last solve. These reference fluxes and the solved surface temperature are
-checkpointed; checkpoints from the earlier incremental-update format trigger a fresh solve on
-restore.
-
-Over its window the sun stays within four times ``\bar{μ}₀``, a bound approached only by a sun
-skimming the horizon on both sides of a short night. A step boundary that finds ``μ₀ > 4 \bar{μ}₀``,
-sunlight the last solve did not average over, solves again without advancing the schedule, since
-the slant path of ``\bar{μ}₀`` would deposit the beam far too high in the column. That happens
-when daylight follows a night-time solve with no known interval, when the sun climbs well above
-the sun of a solve with no known interval, and when time steps grow past the interval an
-`IterationInterval` estimated. These extra solves run for the whole grid, at most once per time
-step. On a grid that the day-night terminator crosses, a schedule with no known interval therefore
-solves at about every time step, since the sun rises in some column at each one: prefer an
-`IterationInterval` or a finite `TimeInterval` there. Under Reactant the fluxes are not updated
-between solves.
+The six extra face fields (two longwave responses, four solved fluxes) are checkpointed. A
+checkpoint without them solves again on restart. A fixed sun with a constant surface temperature
+needs no updates, and under Reactant the fluxes are not updated between solves.
 
 ## Architecture Support
 

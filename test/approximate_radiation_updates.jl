@@ -18,7 +18,7 @@ using NCDatasets
 using RRTMGP
 using NumericalRadiation: NumericalRadiation
 
-# A cloudy column, by default at 45°N with an hourly solve and a numeric clock anchored at `epoch`.
+# A cloudy column at 45°N, by default solved hourly
 function radiating_column(grid; epoch = nothing,
                           optics = GrayOptics(),
                           surface_temperature = 300,
@@ -49,7 +49,7 @@ column(field) = vec(Array(interior(field)))
 longwave_columns(radiation) = column.((radiation.upwelling_longwave_flux, radiation.downwelling_longwave_flux))
 top_downwelling_shortwave(radiation) = last(column(radiation.downwelling_shortwave_flux))
 
-# The shortwave fluxes per unit incoming sunlight, which isolate the optical path and absorption profile
+# The shortwave fluxes per unit incoming sunlight
 normalized_shortwave(radiation) = map(flux -> column(flux) / top_downwelling_shortwave(radiation),
                                       (radiation.upwelling_shortwave_flux, radiation.downwelling_shortwave_flux))
 
@@ -61,8 +61,7 @@ function update_at!(model, time; iteration=1)
     return model
 end
 
-# The longwave fluxes of a column solved at `solved_temperature`, then updated between solves to
-# `updated_temperature`, then solved there
+# Longwave fluxes solved at `solved_temperature`, updated to `updated_temperature`, then solved there
 function longwave_update_and_solve(grid, optics, solved_temperature, updated_temperature)
     T₀ = Field{Center, Center, Nothing}(grid)
     set!(T₀, solved_temperature)
@@ -94,8 +93,7 @@ drop(nt, names...) = (; (name => value for (name, value) in pairs(nt) if name �
     before = longwave_columns(radiation)
     heating_before = column(radiation.flux_divergence)
 
-    # The same final temperature must give the same fluxes, regardless of how many state
-    # updates reach it. In Float32, the individual upper-column increments round to zero.
+    # The same final temperature gives the same fluxes however many updates reach it, even in Float32
     set!(T₀, 301)
     update_radiation_between_solves!(radiation, model)
     single_update = longwave_columns(radiation)
@@ -133,8 +131,7 @@ end
             @test vec(Array(RRTMGP.lw_flux_up(radiation.longwave_solver)))[eachindex(solved[1])] == solved[1]
         end
 
-        # Gray longwave fluxes are linear in the surface emission, so the update matches a solve;
-        # spectral ones nearly, since the spectrum of the emission shifts with the temperature
+        # The update matches a gray solve exactly (linear in emission) and a spectral one nearly
         rtol = optics isa GrayOptics ? sqrt(eps(FT)) : FT(0.02)
         @test updated[1] .- before[1] ≈ solved[1] .- before[1] rtol = rtol
         @test updated[2] .- before[2] ≈ solved[2] .- before[2] rtol = rtol
@@ -152,8 +149,7 @@ end
     end
 
     @testset "Longwave fluxes follow the surface temperature RRTMGP solves at" begin
-        # RRTMGP's Planck tables end at 355 K, into which the solve clamps the surface temperature.
-        # Near the top the response comes from a cooler surface, and above it the fluxes stay put.
+        # RRTMGP clamps to 355 K: near it the response uses a cooler surface, above it fluxes stay put
         grid = radiation_column_grid(FT, 16, 10kilometers)
         for (solved_temperature, updated_temperature) in ((354.6, 354.9), (354.6, 356), (358, 360))
             _, before, updated, solved = longwave_update_and_solve(grid, ClearSkyOptics(), solved_temperature, updated_temperature)
@@ -202,7 +198,7 @@ end
             time_step!(model, 60)
         end
 
-        # The morning sun climbs between solves without solving again, and the column absorbs the net flux into it
+        # The morning sun climbs between solves without a new solve
         @test solved_cosine(model) == solved_window_mean
         @test top_downwelling_shortwave(radiation) < solved
         ℐ_net = column(radiation.upwelling_longwave_flux) .+ column(radiation.downwelling_longwave_flux) .+
@@ -306,8 +302,7 @@ end
         sun(time) = cos(2π * time / solar_position.day_length)
 
         # With no known interval each solve takes the current sun, here a minute above the horizon.
-        # Once the sun is four times higher, that slant path would put the beam far too high in the
-        # column, and the update solves again.
+        # Once the sun is four times higher, the update solves again
         model = radiating_column(grid; solar_position, schedule=TimeInterval(Inf), clock=Clock(time=FT(-6hours - 1minutes)))
         for (time, solved_time) in ((-6hours + 1minutes, -6hours + 1minutes),
                                     (-6hours + 3minutes, -6hours + 1minutes),
@@ -330,8 +325,7 @@ end
         ω = 2π / solar_position.day_length
         window_mean(start, duration) = (sin(ω * (start + duration)) - sin(ω * start)) / (ω * duration)
 
-        # An iteration schedule takes its interval from the last time step: here four steps of 10 s,
-        # the last 10 s of them sunlit. Should the steps grow, the next solve comes long after sunrise.
+        # Four steps of 10 s, the last sunlit; growing steps push the next solve well past sunrise
         clock = Clock(time=FT(-6hours - 30), last_Δt=FT(10))
         model = radiating_column(grid; solar_position, schedule=IterationInterval(4), clock)
         @test only(solved_cosine(model)) ≈ window_mean(-6hours, 10) rtol = 1e-3
@@ -347,8 +341,7 @@ end
         ω = 2π / solar_position.day_length
         Δt = 10
 
-        # The sun sets at 6 h, 7 s into the third time step, which solves. SSP RK3 evaluates the
-        # first stage of that step after sunset, and the second before it.
+        # Sunset falls 7 s into the solving step: SSP RK3's first stage is after it, the second before
         model = radiating_column(grid; dynamics, solar_position, schedule=IterationInterval(2),
                                  clock=Clock(time=FT(6hours - 2Δt - 7)))
         for _ in 1:2
@@ -360,8 +353,7 @@ end
         callback = Callback(record_solved_cosine, IterationInterval(1); callsite=UpdateStateCallsite())
         time_step!(model, Δt; callbacks=[callback])
 
-        # One solve, averaged over the 7 sunlit seconds of its window from the start of the step,
-        # and no daylight solve at the stage that returns to before sunset
+        # One solve, averaged over the 7 sunlit seconds, and no daylight solve before sunset
         @test length(solved) == 3
         @test all(==(first(solved)), solved)
         @test first(solved) ≈ (1 - cos(7ω)) / 7ω rtol = 1e-3

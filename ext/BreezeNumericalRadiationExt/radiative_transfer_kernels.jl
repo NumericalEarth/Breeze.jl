@@ -66,8 +66,7 @@ function solve_columns!(rtm::EcCKDRadiativeTransferModel, state, batch_size)
             surface.direct_surface_albedo, surface.diffuse_surface_albedo,
             rtm.liquid_effective_radius.radius, rtm.ice_effective_radius.radius)
 
-    # The longwave fluxes again at the perturbed surface temperature, into the longwave responses
-    # of the approximate updates
+    # The longwave fluxes at the perturbed surface temperature, into the longwave responses
     if solves_longwave_response(rtm)
         updates = rtm.approximate_updates
         launch!(architecture(grid), grid, batch_size, _column_perturbed_surface_longwave_fluxes!,
@@ -167,9 +166,8 @@ AtmosphereModels.solver_cos_zenith(rtm::EcCKDRadiativeTransferModel) = rtm.atmos
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Solve the ecCKD radiative fluxes of `rtm` for the current state of `model`, at the solar zenith
-angle that `_update_radiation!` has set. Batch by batch: integrate the extension pressures above
-the columns' tops, store the per-layer state, and solve the columns into the flux fields.
+Solve the ecCKD fluxes of `rtm` for the current state of `model`, batch by batch: integrate the
+extension pressures, store the per-layer state, and solve the columns into the flux fields.
 """
 function AtmosphereModels.solve_radiative_transfer!(rtm::EcCKDRadiativeTransferModel, model)
     grid = model.grid

@@ -192,10 +192,8 @@ function solve_radiation_batch!(rtm, solver, grid, as, lws, sws, scaling, batch_
     return nothing
 end
 
-# Solve the batch's longwave fluxes again at the perturbed surface temperature, into the longwave
-# responses of `rtm.approximate_updates`. The batch's surface temperature is then rewritten from
-# the field rather than shifted back, so that a later batch overlapping this one solves at exactly
-# the temperature of the first solve.
+# Solve the batch's longwave fluxes at the perturbed surface temperature into the longwave responses,
+# then rewrite the surface temperature from the field so overlapping batches see the same value
 function solve_perturbed_surface_longwave!(rtm, solver, grid, as, lws, scaling, batch_rows, j_offset)
     updates = rtm.approximate_updates
 
@@ -210,8 +208,7 @@ function solve_perturbed_surface_longwave!(rtm, solver, grid, as, lws, scaling, 
     return nothing
 end
 
-# Write the solver's surface temperature of the batch's columns from the field, as
-# `solver_surface_temperature(T₀, bounds)` (`solved_surface_temperature` or `perturbed_surface_temperature`)
+# Set the batch's solver surface temperature to `solver_surface_temperature(T₀, bounds)`
 function set_batch_surface_temperature!(t_sfc, rtm, grid, batch_rows, j_offset, solver_surface_temperature)
     launch!(architecture(grid), grid, (grid.Nx, batch_rows), _set_batch_surface_temperature!,
             t_sfc, rtm.surface_radiation.surface_temperature, surface_temperature_bounds(rtm),

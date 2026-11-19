@@ -64,8 +64,7 @@ struct SSPRungeKutta3{FT, U0, TG, TI, R} <: AbstractTimeStepper
     rounding :: R
 end
 
-# Stage abscissae: a Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) has Butcher row
-# sum cₘ = αₘ (cₘ₋₁ + 1), so u^(1) sits at tⁿ + Δt but u^(2) sits at tⁿ + Δt/2.
+# A Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) sits at cₘ = αₘ (cₘ₋₁ + 1)
 AtmosphereModels.stage_abscissae(ts::SSPRungeKutta3) = (ts.α¹, ts.α² * (ts.α¹ + 1))
 
 """
@@ -290,10 +289,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     α² = ts.α²
     α³ = ts.α³
 
-    # Stage abscissae (see `stage_abscissae`): u^(1) sits at tⁿ + Δt but u^(2) at tⁿ + Δt/2.
-    # Evaluating G(u^(2)) at tⁿ + Δt instead breaks the order conditions (Σbᵢcᵢ = 5/6 ≠ 1/2)
-    # and leaves `clock.stage` stuck at 2, so per-stage work keyed on `(iteration, stage)`,
-    # such as the filtered surface state, skips the third stage.
+    # u^(1) sits at tⁿ + Δt but u^(2) at tⁿ + Δt/2; evaluating G(u^(2)) at tⁿ + Δt breaks third order
     c¹, c² = AtmosphereModels.stage_abscissae(ts)  # = 1, 1/2
 
     # Compute the next time step a priori to reduce floating point error accumulation

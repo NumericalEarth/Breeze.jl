@@ -25,7 +25,7 @@ using RRTMGP.BCs: LwBCs, SwBCs
 # RRTMGP's state distinguishes its full-spectrum solvers from other spectral backends.
 const FullSpectrumRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:BackgroundAtmosphere, <:AtmosphericState}
 
-# The solve clamps the surface temperature into RRTMGP's Planck tables (`_update_rrtmgp_gas_state!`)
+# RRTMGP clamps the surface temperature into its Planck tables
 AtmosphereModels.surface_temperature_bounds(::FullSpectrumRadiativeTransferModel) = rrtmgp_temperature_bounds
 
 # Shared by the clear-sky and all-sky `RadiativeTransferModel` docstrings.
@@ -261,8 +261,7 @@ AtmosphereModels.solver_cos_zenith(rtm::FullSpectrumRadiativeTransferModel) = rt
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Solve the full-spectrum radiative fluxes for the current model state, including the cloud
-state for all-sky radiation, at the solar zenith angle that `_update_radiation!` has set.
+Solve the full-spectrum fluxes for the current model state, including clouds for all-sky optics.
 """
 function AtmosphereModels.solve_radiative_transfer!(rtm::FullSpectrumRadiativeTransferModel, model)
     grid = model.grid

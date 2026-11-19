@@ -212,9 +212,8 @@ end
         @test all(interior(ℐ_lw_dn) .≤ 0)  # Downwelling should be negative
         @test all(interior(ℐ_sw_dn) .≤ 0)  # Downwelling should be negative
 
-        # The surface reflects 10% of the direct beam, which climbs the column at the diffusivity D:
-        # since the direct beam crosses the column's optical depth τ at μ₀, the reflected beam
-        # reaches the top attenuated by exp(-D τ) = (ℐ_sw_dn[1] / ℐ_sw_dn[end])^(D μ₀).
+        # 10% of the direct beam is reflected and reaches the top attenuated by
+        # exp(-D τ) = (ℐ_sw_dn[1] / ℐ_sw_dn[end])^(D μ₀)
         ℐ_sw_up_column = vec(Array(interior(ℐ_sw_up)))
         ℐ_sw_dn_column = vec(Array(interior(ℐ_sw_dn)))
         μ₀ = @allowscalar radiation.shortwave_solver.bcs.cos_zenith[1]

@@ -72,8 +72,7 @@ end
 
 AtmosphereModels.validate_schedule(schedule::IterationInterval, ::ReactantState) = schedule
 
-# The traced conditional above solves or does nothing: Reactant does not update the fluxes between
-# solves. Validity lives in a traced array so that compiled updates can still refresh a missing cache.
+# Reactant has no updates between solves; validity is a device array so compiled steps can change it
 AtmosphereModels.approximate_radiation_updates(::ReactantState, grid, schedule, solar_position) = nothing
 AtmosphereModels.radiation_cache_validity(arch::ReactantState) = on_architecture(arch, [false])
 

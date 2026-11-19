@@ -58,9 +58,8 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     return nothing
 end
 
-# RRTMGP Planck/source lookup tables are defined over a finite temperature range. Atmospheric and
-# surface temperatures are clamped into it to avoid extrapolation that can yield tiny negative
-# source values and trigger DomainErrors in geometric means.
+# Range of RRTMGP's Planck tables, into which temperatures are clamped: extrapolation can give
+# negative sources and DomainErrors.
 # TODO: This clamping should ideally be done internally in RRTMGP.jl.
 const rrtmgp_temperature_bounds = (160, 355)
 
