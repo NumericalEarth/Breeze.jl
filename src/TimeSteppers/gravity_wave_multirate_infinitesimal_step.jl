@@ -1,6 +1,6 @@
 using Oceananigans: TendencyCallsite
 using Breeze.HydrostaticEquations: HydrostaticEquations, HydrostaticDynamics, GravityWaveSubstepper,
-                                   ForwardBackwardSubsteps, VerletSubsteps, gravity_wave_prognostic_names,
+                                   VerletSubsteps, gravity_wave_prognostic_names,
                                    freeze_gravity_wave_linearization!, subtract_fast_tendencies!,
                                    gravity_wave_substep_loop!, stage_substeps, maximum_gravity_wave_speed,
                                    compute_integrated_vertical_velocity!, add_perturbation_transport!,
@@ -155,7 +155,8 @@ function GravityWaveMultirateInfinitesimalStep(grid, prognostic_fields;
                             "timestepper_kwargs = (tableau = :MIS3C, :MIS4a or :WickerSkamarock3, " *
                             "inner_solver = VerletSubsteps() or ForwardBackwardSubsteps(divergence_damping=0.1))."))
 
-    inner_solver isa Union{ForwardBackwardSubsteps, VerletSubsteps} ||
+    # Qualified: the unqualified name is the substep form of the acoustic loop in this module
+    inner_solver isa Union{HydrostaticEquations.ForwardBackwardSubsteps, VerletSubsteps} ||
         throw(ArgumentError("inner_solver must be VerletSubsteps() or ForwardBackwardSubsteps(), got $inner_solver."))
 
     FT = eltype(grid)
