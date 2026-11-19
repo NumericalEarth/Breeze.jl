@@ -398,7 +398,7 @@ function OceananigansTimeSteppers.time_step!(model::GravityWaveMultirateModel, �
     end
 
     # Adjust the final stage to reduce the accumulation of floating point error in the time
-    corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
+    corrected_Δt = time_difference_in_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     implicit_dynamics_step!(model.dynamics, model, Δt)

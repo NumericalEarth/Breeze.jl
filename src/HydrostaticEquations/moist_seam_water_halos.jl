@@ -94,7 +94,7 @@ end
 
 # The mass fractions that `MixingRatio` reads for the prognostic densities of water, in their order
 function water_mass_fractions(model)
-    specific = specific_scalar_fields(model)
+    specific = specific_prognostic_scalar_fields(model)
     names = (AtmosphereModels.moisture_prognostic_name(model.microphysics),
              AtmosphereModels.prognostic_field_names(model.microphysics)...)
     return map(name -> specific[name], names)

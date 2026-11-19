@@ -26,7 +26,7 @@ Adapt.adapt_structure(to, r::MixingRatio) =
 # The field each scheme of `advection` reconstructs: the mixing ratio per unit dry mass for the
 # prognostic densities of water, and what any `AtmosphereModel` reconstructs for the others
 function AtmosphereModels.reconstructed_fields(model::MoistHydrostaticModel, advection::NamedTuple{names}) where names
-    specific = merge((; momentum = nothing), specific_scalar_fields(model))
+    specific = merge((; momentum = nothing), specific_prognostic_scalar_fields(model))
     water_names = (AtmosphereModels.moisture_prognostic_name(model.microphysics),
                    AtmosphereModels.prognostic_field_names(model.microphysics)...)
     ρ = model.dynamics.density
