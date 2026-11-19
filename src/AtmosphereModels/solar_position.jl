@@ -344,10 +344,14 @@ function update_apparent_zenith!(cos_zenith, ::Nothing, grid, datetime)
     return nothing
 end
 
+# The (λ, φ) of column (i, j): an explicit coordinate, or the grid's
+@inline solar_coordinate(i, j, grid, coordinate::Tuple) = coordinate
+@inline solar_coordinate(i, j, grid, ::Nothing) = (λnode(i, j, 1, grid, Center(), Center(), Center()),
+                                                  φnode(i, j, 1, grid, Center(), Center(), Center()))
+
 @kernel function _update_apparent_zenith!(cos_zenith, grid, datetime)
     i, j = @index(Global, NTuple)
-    λ = λnode(i, j, 1, grid, Center(), Center(), Center())
-    φ = φnode(i, j, 1, grid, Center(), Center(), Center())
+    λ, φ = solar_coordinate(i, j, grid, nothing)
     cos_θz = cos_solar_zenith_angle(datetime, λ, φ)
     c = column_index(i, j, grid.Nx)
     @inbounds cos_zenith[c] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)
