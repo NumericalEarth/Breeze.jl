@@ -299,6 +299,33 @@ override this method directly to compute the bundle once per cell.
 compute_microphysical_tendencies!(model) =
     compute_microphysical_tendencies!(model.microphysics, model)
 
+#####
+##### The stage that the tendencies being built will be applied over
+#####
+#
+# A multi-stage time stepper applies the tendencies evaluated at one state to another:
+# Wicker–Skamarock RK3 evaluates them at the latest stage state and adds them to the
+# step-start state. A scheme that budgets its sinks against the state it is evaluated at
+# therefore guarantees nothing about the state it is applied to. `StageStart` hands a
+# microphysics kernel what it needs to budget against the right one.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether the coming stage of `timestepper` starts from the state at the start of the time
+step (`true`) or from the current state (`false`, as for forward Euler and SSP-RK3 stages).
+"""
+@inline stage_starts_from_initial_state(timestepper, clock) = false
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The prognostic fields at the start of the time step, for time steppers whose stages start
+from them (see [`stage_starts_from_initial_state`](@ref)); otherwise `nothing`, because every
+stage starts from the current fields.
+"""
+@inline initial_state_fields(timestepper, model) = nothing
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -307,6 +334,244 @@ finite before the first time step.
 """
 @inline stage_time_step(timestepper, clock) =
     Oceananigans.Advection.adaptive_advection_timestep(timestepper, clock)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The tendencies that the coming stage applies along with `Gⁿ` but that `timestepper` holds
+apart from it while the microphysical tendencies are built, keyed by prognostic name, or
+`nothing` (the default) where `Gⁿ` holds every other tendency by then.
+"""
+@inline separate_stage_tendencies(timestepper, model) = nothing
+
+"""
+$(TYPEDEF)
+
+The state that the coming stage starts from, the interval `Δt` it advances over, and the
+tendencies it applies that are held apart from `Gⁿ`, for kernels that build tendencies. See
+[`stage_start_value`](@ref) and [`accumulated_tendency`](@ref).
+"""
+struct StageStart{I, C, B, T, S}
+    initial :: I       # fields at the start of the time step, or `nothing` if no stage starts from them
+    current :: C       # fields now
+    from_initial :: B  # whether the coming stage starts from `initial`
+    Δt :: T            # interval of the coming stage
+    separate_tendencies :: S  # tendencies the coming stage applies that `Gⁿ` does not hold, or `nothing`
+end
+
+StageStart(initial, current, from_initial, Δt) = StageStart(initial, current, from_initial, Δt, nothing)
+
+# `from_initial` and `Δt` are adapted too: under Reactant both are traced numbers
+# that the kernel adaptor must convert.
+Adapt.adapt_structure(to, s::StageStart) =
+    StageStart(adapt(to, s.initial), adapt(to, s.current), adapt(to, s.from_initial), adapt(to, s.Δt),
+               adapt(to, s.separate_tendencies))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The [`StageStart`](@ref) of `model` for the prognostic fields that `select` picks out of a
+`NamedTuple` of them.
+"""
+function StageStart(model, select)
+    timestepper = model.timestepper
+    grid = model.grid
+    Δt = kernel_time_step(grid.architecture, grid, stage_time_step(timestepper, model.clock))
+    return StageStart(select_fields(select, initial_state_fields(timestepper, model)),
+                      select(prognostic_fields(model)),
+                      stage_starts_from_initial_state(timestepper, model.clock),
+                      Δt,
+                      select_fields(select, separate_stage_tendencies(timestepper, model)))
+end
+
+select_fields(select, ::Nothing) = nothing
+select_fields(select, fields) = select(fields)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The value at `(i, j, k)` of the field `name` at the state the coming stage starts from.
+"""
+@inline function stage_start_value(i, j, k, s::StageStart, ::Val{name}) where name
+    @inbounds initial = getproperty(s.initial, name)[i, j, k]
+    @inbounds current = getproperty(s.current, name)[i, j, k]
+    return ifelse(s.from_initial, initial, current)
+end
+
+# No stage starts from the step-start fields: one load, and no second set of arrays in the kernel.
+@inline stage_start_value(i, j, k, s::StageStart{Nothing}, ::Val{name}) where name =
+    @inbounds getproperty(s.current, name)[i, j, k]
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Every tendency of the field `name` at `(i, j, k)` that the coming stage applies and that is
+known when the microphysical tendencies are built: `G`, the field's entry of `Gⁿ`, plus the
+field's entry of the tendencies held apart from it (see [`separate_stage_tendencies`](@ref)).
+A microphysics kernel that budgets a sink reads the other tendencies through this function,
+before it adds its own to `G`.
+"""
+@inline accumulated_tendency(i, j, k, G, stage::StageStart, name) =
+    with_separate_tendency(i, j, k, G, stage.separate_tendencies, name)
+
+@inline with_separate_tendency(i, j, k, G, ::Nothing, ::Val) = @inbounds G[i, j, k]
+
+@inline with_separate_tendency(i, j, k, G, separate_tendencies, ::Val{name}) where name =
+    @inbounds G[i, j, k] + getproperty(separate_tendencies, name)[i, j, k]
+
+#####
+##### Patankar-limited sinks
+#####
+#
+# A scheme's process rates are evaluated at one state and applied by the time stepper to the
+# state the coming stage starts from, over the stage interval `Δt`, alongside transport.
+# Neither the state nor the interval need match those a rate was budgeted against, so the
+# rates alone cannot keep a species non-negative.
+#
+# A sink can instead be advanced in Patankar form. With `c̃ = c⁰ + Δt Gᵒ` what the stage start
+# `c⁰` and every other tendency `Gᵒ` leave of a species, and `L` its total microphysical loss
+# rate, the loss is weighted by the ratio of the updated to the available content,
+# `L c⁺ / c̃`, so that
+#
+#     c⁺ = c̃ / (1 + Δt L / c̃)
+#
+# is non-negative for any `Δt`. That is the explicit loss scaled by `φ = c̃ / (c̃ + Δt L)`.
+# Where each process is one transfer between species, scaling a transfer by the `φ` of the
+# species it draws on (the smallest, where it draws on several) scales the recipient's gain
+# by the same factor and conserves the exchange exactly. Gains are left out of `c̃`, which
+# makes each `φ` a function of the explicit rates alone and avoids a coupled solve; the
+# cost is that a species cannot spend, within a stage, what it gains in that stage.
+#
+# `Gᵒ` has to hold everything else the stage applies, transport above all: a sink budgeted
+# against `c⁰` alone can remove what advection removes too. A time stepper that keeps part of
+# a stage's tendency apart from `Gⁿ` (the multirate infinitesimal step with post-loop scalar
+# tendencies keeps the advective part apart where it recombines the tendencies of earlier
+# stages) hands it over through `separate_stage_tendencies`, and `accumulated_tendency` adds it
+# to `Gⁿ`.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether the interval of the coming stage is known. It is not before the first time step.
+"""
+@inline stage_interval_is_known(stage::StageStart) = isfinite(stage.Δt) & (stage.Δt > 0)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+What the state the coming stage starts from and the tendencies accumulated so far (`G` and
+any held apart from it, see [`accumulated_tendency`](@ref)) leave of the field `name` at
+`(i, j, k)`: `c̃ = c⁰ + Δt Gᵒ`. Not clamped, so it is negative where transport has left a
+negative value.
+"""
+@inline function stage_remainder(i, j, k, G, stage::StageStart, name)
+    c⁰ = stage_start_value(i, j, k, stage, name)
+    Gᵒ = accumulated_tendency(i, j, k, G, stage, name)
+    return c⁰ + stage.Δt * Gᵒ
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The Patankar weight `φ = c̃ / (c̃ + Δt L)` on a loss rate `L` drawn over `Δt` from the
+content `c̃`. `φ = 0` where nothing is left to give, and `φ = 1` where nothing is asked.
+"""
+@inline function patankar_fraction(c̃, Δt, L)
+    available = max(0, c̃)
+    demand = Δt * max(0, L)
+    φ = available / (available + demand)
+    return ifelse(available + demand > 0, φ, one(φ))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The Patankar weight `φ = c̃ / (c̃ + Δt L)` on the sinks of a species with loss rate `L`
+(a density tendency), where `c̃ = c⁰ + Δt Gᵒ` is what the state the coming stage starts
+from and every other tendency leave of it. `φ = 0` where nothing is left, and `φ = 1`
+before the first time step, when the stage interval is not known.
+"""
+@inline function patankar_sink_fraction(i, j, k, G, stage::StageStart, name, L)
+    c̃ = stage_remainder(i, j, k, G, stage, name)
+    φ = patankar_fraction(c̃, stage.Δt, L)
+    return ifelse(stage_interval_is_known(stage), φ, one(φ))
+end
+
+# A sink that is already advanced implicitly against the species it draws on (a relaxation of
+# that species toward a non-negative target, see below) asks for no more than `c̃` leaves, and
+# weighting it by `φ` as well would limit it twice: a reservoir relaxed at rate `ω` would keep
+# `(1 + ωΔt) / (1 + 2ωΔt)` of itself over a stage rather than `1 / (1 + ωΔt)`. Such a sink is
+# split from the others and drawn first, in full, and the others are advanced in Patankar form
+# against what it leaves, `c̃ - Δt L¹`. The draw is still limited to `c̃`, which matters only
+# where the rate was budgeted against a state other than the one the stage starts from.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The fractions `(κ, φ)` on the sinks of a species that are split in sequence. The loss rate
+`first_loss` is drawn first and limited only by what the state the coming stage starts from
+and every other tendency leave of the species, `c̃ = c⁰ + Δt Gᵒ`: `κ = min(1, c̃ / (Δt L¹))`,
+which is exactly one where the draw fits. The loss rate `other_loss` is then weighted by the
+Patankar fraction `φ = c̃′ / (c̃′ + Δt L)` against the rest, `c̃′ = c̃ - Δt κ L¹`. Together they
+remove no more than `c̃` for any `Δt`. Both are one before the first time step, when the stage
+interval is not known.
+"""
+@inline function sequential_sink_fractions(i, j, k, G, stage::StageStart, name, first_loss, other_loss)
+    Δt = stage.Δt
+    c̃ = max(0, stage_remainder(i, j, k, G, stage, name))
+    demand = Δt * max(0, first_loss)
+    exhausted = demand > c̃
+    κ = ifelse(exhausted, c̃ / demand, one(c̃))
+    rest = ifelse(exhausted, zero(c̃), c̃ - demand)
+    φ = patankar_fraction(rest, Δt, other_loss)
+    known = stage_interval_is_known(stage)
+    return ifelse(known, κ, one(κ)), ifelse(known, φ, one(φ))
+end
+
+#####
+##### Implicit relaxation toward a target
+#####
+#
+# A process that relaxes a content `c` toward a non-negative target `c_eq` at rate `ω`
+# (condensation toward the equilibrium condensate, activation toward the activated number) can
+# be advanced over the coming stage by backward Euler,
+#
+#     c⁺ = (c + ω Δt c_eq) / (1 + ω Δt),
+#
+# a convex combination of `c` and `c_eq`: non-negative when both are, and never past the
+# target, for any `ω Δt`. The time stepper takes tendencies, so the update is applied as the
+# equivalent rate `(c⁺ - c) / Δt = ω (c_eq - c) / (1 + ω Δt)`. Where several processes draw on
+# one excess `x` (cloud and rain on the vapor excess), the excess relaxes as
+# `x⁺ = x / (1 + Δt Σωᵢ)` and process `i` takes the share `ωᵢ / Σω` of `x - x⁺`.
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The content `(c + ωΔt c_eq) / (1 + ωΔt)` that backward Euler leaves after relaxing `c` toward
+`c_eq` over a stage, with `ωΔt` the product of the relaxation rate and the stage interval.
+"""
+@inline implicit_relaxation(c, c_eq, ωΔt) = (c + ωΔt * c_eq) / (1 + ωΔt)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The rate `ω (c_eq - c) / (1 + ω Δt)` that, applied over `Δt`, takes `c` to
+[`implicit_relaxation`](@ref)`(c, c_eq, ω Δt)`. It is the explicit rate `ω (c_eq - c)` at
+`Δt = 0`.
+"""
+@inline implicit_relaxation_rate(c, c_eq, ω, Δt) = ω * (c_eq - c) / (1 + ω * Δt)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The rates `ωᵢ xᵢ / (1 + Δt Σω)` of processes with relaxation rates `ω` that draw on one
+shared excess, each seeing the excess `xᵢ` (the same `x` for all when they see one excess):
+backward Euler for the excess, `x⁺ = x / (1 + Δt Σω)`, split by `ωᵢ / Σω`.
+"""
+@inline function shared_excess_relaxation_rates(x::Tuple, ω::Tuple, Δt)
+    D = 1 + Δt * sum(ω)
+    return map((xᵢ, ωᵢ) -> ωᵢ * xᵢ / D, x, ω)
+end
 
 # No microphysics: nothing to add.
 compute_microphysical_tendencies!(::Nothing, model) = nothing

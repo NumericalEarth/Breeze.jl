@@ -95,12 +95,27 @@ Returns a NamedTuple of the possibly-rescaled rates.
                                    rain_cond, rain_evap, dep, coat_cond, coat_evap,
                                    nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
                                    dt_safety, freezing_temperature,
-                                   temperature_tendency, pressure_tendency)
+                                   temperature_tendency, pressure_tendency, Γ = nothing)
+    liquid = limit_liquid_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                      rain_cond, rain_evap, coat_cond, coat_evap,
+                                      qᵛ, qᵛ⁺ˡ, T, P, constants, dt_safety,
+                                      temperature_tendency, pressure_tendency, Γ)
+
+    return limit_ice_vapor_rates(liquid, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                 dt_safety, freezing_temperature,
+                                 temperature_tendency, pressure_tendency)
+end
+
+# The liquid-phase caps of `limit_vapor_rates` on the grid mean (`Γ = nothing`): the rates of
+# cloud liquid, activation, rain and the liquid coating of ice, rescaled.
+@inline function limit_liquid_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                          rain_cond, rain_evap, coat_cond, coat_evap,
+                                          qᵛ, qᵛ⁺ˡ, T, P, constants, dt_safety,
+                                          temperature_tendency, pressure_tendency, ::Nothing)
     FT = typeof(qᵛ)
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
-    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
     # Liquid-phase saturation-adjustment caps. In the SCF=1 limit the condensation
     # and evaporation budgets collapse to the same signed increment `δqˡ`;
@@ -128,6 +143,57 @@ Returns a NamedTuple of the possibly-rescaled rates.
     cond = max(0, cond) * f_cond + min(0, cond) * f_evp
     rain_evap = rain_evap * f_evp
     coat_evap = coat_evap * f_evp
+
+    return (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap, coat_cond, coat_evap)
+end
+
+# With the subgrid supersaturation correlation Γ, the vapor exchange of cloud liquid (its
+# condensation, its evaporation, and the seed mass `ccn_activation_mass`) is capped by the
+# increment of the vapor excess that cloud liquid sees, δqˡ + Γ / ξˡ. Rain and the liquid coating
+# of ice keep the grid-mean caps, and the ice-phase caps are unchanged.
+@inline function limit_liquid_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                          rain_cond, rain_evap, coat_cond, coat_evap,
+                                          qᵛ, qᵛ⁺ˡ, T, P, constants, dt_safety,
+                                          temperature_tendency, pressure_tendency, Γ)
+    FT = typeof(qᵛ)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+
+    Aˡ = external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, temperature_tendency,
+                                       pressure_tendency, constants)
+    δqˡ = (qᵛ - qᵛ⁺ˡ + Aˡ * dt_safety) / ξˡ
+    δqˡᶜ = δqˡ + Γ / ξˡ
+
+    # Cloud liquid
+    cloud_source_total = max(0, cond) + ccn_activation_mass
+    f_cloud_cond = sink_limiting_factor(cloud_source_total, max(0, δqˡᶜ), dt_safety)
+    f_cloud_evp = sink_limiting_factor(max(0, -cond), max(0, -δqˡᶜ), dt_safety)
+    ccn_activation_mass = ccn_activation_mass * f_cloud_cond
+    ccn_activation_number = ccn_activation_number * f_cloud_cond
+    cond = max(0, cond) * f_cloud_cond + min(0, cond) * f_cloud_evp
+
+    # Rain and the liquid coating of ice
+    f_cond = sink_limiting_factor(rain_cond + coat_cond, max(0, δqˡ), dt_safety)
+    f_evp = sink_limiting_factor(rain_evap + coat_evap, max(0, -δqˡ), dt_safety)
+    rain_cond = rain_cond * f_cond
+    coat_cond = coat_cond * f_cond
+    rain_evap = rain_evap * f_evp
+    coat_evap = coat_evap * f_evp
+
+    return (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap, coat_cond, coat_evap)
+end
+
+# The ice-phase caps of `limit_vapor_rates`, given the liquid-phase rates `liquid` already
+# limited (the result of `limit_liquid_vapor_rates`, or the implicitly relaxed rates on the grid)
+@inline function limit_ice_vapor_rates(liquid, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                       dt_safety, freezing_temperature,
+                                       temperature_tendency, pressure_tendency)
+    (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap, coat_cond, coat_evap) = liquid
+    FT = typeof(qᵛ)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)
+    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
     # Ice-phase cap, after netting the rescaled liquid tendencies into qᵛ and T.
     net_liquid = max(0, cond) + ccn_activation_mass + rain_cond + coat_cond -
@@ -338,12 +404,27 @@ end
     bounded_ice_number(limiter, diagnostic_ice_bracket(limiter, qⁱ_total, nⁱ, Fᶠ, Fˡ, ρᶠ, floors),
                        qⁱ_total, nⁱ, floors)
 
+# The fewest particles a unit of ice mass can be carried by: the inverse mean particle mass at
+# the tabulated lower λ bound, where the particles are the largest the scheme admits.
+@inline minimum_ice_number_per_mass(limiter::IceLambdaLimiter, prep, qⁱ_total) =
+    evaluate_at(limiter.large_q, prep)
+
+# Un-materialized scheme: no size bound.
+@inline minimum_ice_number_per_mass(::IceLambdaLimiter{Nothing, Nothing}, prep, qⁱ_total) = zero(qⁱ_total)
+
+# The most particles a unit of ice mass can be carried by: the inverse mean particle mass at
+# the tabulated upper λ bound, where the particles are the smallest the scheme admits.
+@inline maximum_ice_number_per_mass(limiter::IceLambdaLimiter, prep, qⁱ_total) =
+    evaluate_at(limiter.small_q, prep)
+
+@inline maximum_ice_number_per_mass(::IceLambdaLimiter{Nothing, Nothing}, prep, qⁱ_total) = oftype(qⁱ_total, Inf)
+
 @inline function bounded_ice_number(limiter::IceLambdaLimiter, prep, qⁱ_total, nⁱ, floors)
     FT = typeof(qⁱ_total)
     qⁱ₊ = max(0, qⁱ_total)
     nⁱ₊ = max(0, nⁱ)
-    nⁱ_min = evaluate_at(limiter.large_q, prep) * qⁱ₊
-    nⁱ_max = evaluate_at(limiter.small_q, prep) * qⁱ₊
+    nⁱ_min = minimum_ice_number_per_mass(limiter, prep, qⁱ_total) * qⁱ₊
+    nⁱ_max = maximum_ice_number_per_mass(limiter, prep, qⁱ_total) * qⁱ₊
     bounded = clamp(nⁱ₊, nⁱ_min, nⁱ_max)
     return ifelse(qⁱ₊ > FT(floors.mass_scale), bounded, zero(FT))
 end

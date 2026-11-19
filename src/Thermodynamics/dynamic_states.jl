@@ -26,6 +26,10 @@ density instead, so its pressure is diagnosed from the ideal gas law, `p = ρ R�
 """
 @inline air_pressure(𝒰::AbstractReferencePressureState, constants) = 𝒰.reference_pressure
 
+# The pressure of a state whose temperature `T = temperature(𝒰, constants)` the caller already
+# holds: a state that diagnoses its pressure from its temperature does not solve for it again.
+@inline air_pressure(𝒰::AbstractReferencePressureState, constants, T) = 𝒰.reference_pressure
+
 @inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, constants, equil)
     T = temperature(𝒰, constants)
     ρ = density(𝒰, constants)
@@ -314,10 +318,12 @@ end
 # is the one quantity that has to be diagnosed rather than read off the state.
 @inline density(𝒰::LiquidIceDensityState, constants) = 𝒰.density
 
-@inline function air_pressure(𝒰::LiquidIceDensityState, constants)
+@inline air_pressure(𝒰::LiquidIceDensityState, constants) = air_pressure(𝒰, constants, temperature(𝒰, constants))
+
+@inline function air_pressure(𝒰::LiquidIceDensityState, constants, T)
     q = 𝒰.moisture_mass_fractions
     Rᵐ = mixture_gas_constant(q, constants)
-    return 𝒰.density * Rᵐ * temperature(𝒰, constants)
+    return 𝒰.density * Rᵐ * T
 end
 
 # Invert θˡⁱ at constant density: cᵖᵐ T = ĉᵖ (ρ Rᵐ T / pˢᵗ)^κ θˡⁱ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ, that is,

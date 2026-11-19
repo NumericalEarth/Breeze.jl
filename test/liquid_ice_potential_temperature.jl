@@ -57,6 +57,8 @@ pressure_state(θ, q, p, κ̂) = TD.LiquidIcePotentialTemperatureState(θ, q, of
             T⁻ = TD.temperature(TD.LiquidIceDensityState(θ * (1 - ε), q, pˢᵗ, ρ, solver, κ̂), constants)
             @test T == TD.temperature(𝒰, constants)
             @test θ∂T∂θ ≈ (T⁺ - T⁻) / 2ε rtol=rtol
+            # The pressure given the temperature already in hand is the diagnosed pressure, bitwise.
+            @test TD.air_pressure(𝒰, constants, T) == TD.air_pressure(𝒰, constants)
         end
 
         # A fixed iteration count must preserve the finite, uninitialized dry state too.

@@ -48,6 +48,15 @@ export
     SpeciesBorrowing,
     AbstractNumberConcentrationCategories,
 
+    # Subgrid supersaturation statistics and the phase relaxation rate
+    AbstractSupersaturationStatistics,
+    PrescribedStatistics,
+    PrescribedPlumeStatistics,
+    supersaturation_statistics,
+    supersaturation_statistics_model_fields,
+    phase_relaxation_rate,
+    instantaneous_phase_relaxation,
+
     # Microphysics interface
     AbstractMicrophysicalState,
     NothingMicrophysicalState,
@@ -56,7 +65,21 @@ export
     microphysical_tendency,
     microphysical_tendencies,
     compute_microphysical_tendencies!,
+    StageStart,
+    stage_start_value,
+    stage_starts_from_initial_state,
+    initial_state_fields,
     stage_time_step,
+    separate_stage_tendencies,
+    accumulated_tendency,
+    stage_interval_is_known,
+    stage_remainder,
+    patankar_fraction,
+    patankar_sink_fraction,
+    sequential_sink_fractions,
+    implicit_relaxation,
+    implicit_relaxation_rate,
+    shared_excess_relaxation_rates,
     moisture_fractions,
     grid_moisture_fractions,
     update_microphysical_fields!,
@@ -174,6 +197,7 @@ using Oceananigans.Utils: prettysummary, launch!, @apply_regionally
 
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
+include("supersaturation_statistics.jl")
 include("dynamics_interface.jl")
 include("formulation_interface.jl")
 

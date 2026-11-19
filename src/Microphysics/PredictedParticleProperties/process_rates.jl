@@ -103,6 +103,8 @@ struct P3Phase1Rates{FT}
     partial_melting :: FT
     complete_melting :: FT
     melting_number :: FT
+    cloud_relaxation :: FT  # vapor relaxation coefficient of cloud liquid [s⁻¹], for the implicit liquid relaxation
+    rain_relaxation :: FT   # vapor relaxation coefficient of rain [s⁻¹]
 end
 
 # Phase 2 process rates: aggregation, riming, wet growth, shedding, nucleation, and warm
@@ -214,6 +216,7 @@ struct P3ProcessRates{FT}
     cloud_homogeneous_number :: FT # Cloud number → ice [1/kg/s]
     rain_homogeneous_mass :: FT    # Rain → ice from homogeneous freezing [kg/kg/s]
     rain_homogeneous_number :: FT  # Rain number → ice [1/kg/s]
+    homogeneous_number_excess :: FT # Frozen number above the ice number cap, not handed to ice [1/kg/s]
 
     # Above-freezing collection (T > T₀). Cloud collection goes to qʷⁱ in
     # liquid-fraction mode and sheds to rain otherwise; rain mass transfers only to qʷⁱ.
@@ -265,7 +268,7 @@ struct P3ProcessRates{FT}
 end
 
 @inline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
-                                 temperature_tendency, pressure_tendency)
+                                 temperature_tendency, pressure_tendency, Γ = nothing)
     FT = typeof(ρ)
 
     # Unpack derived state (field access on concrete struct — GPU-safe)
@@ -294,12 +297,12 @@ end
                                                       transport, q,
                                                       state.μᶜˡ, state.λᶜˡ, state.nᶜˡ,
                                                       temperature_tendency, pressure_tendency,
-                                                      state.lookups)
+                                                      state.lookups, Γ)
     cond = vapor_rates.condensation
 
     # Cloud droplet activation
     activation = compute_cloud_droplet_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ,
-                                                  qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+                                                  seed_vapor(p3.aerosol, Γ, qᵛ), qᵛ⁺ˡ, T, ρ, constants)
     ccn_activation_mass = activation.mass
     ccn_activation_number = activation.number
 
@@ -343,7 +346,8 @@ end
                              autoconv, accr, cloud_self,
                              rain_evap, rain_cond, rain_self, rain_br,
                              dep, coat_cond, coat_evap,
-                             partial_melt, complete_melt, melt_n)
+                             partial_melt, complete_melt, melt_n,
+                             vapor_rates.cloud_relaxation, vapor_rates.rain_relaxation)
 end
 
 @inline function p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
@@ -560,10 +564,20 @@ end
 # Everything from here down is `@inline`. A `@noinline` device function would receive `p3`
 # (several KB of table handles), `ℳ`, `𝒰`, and `constants` as local-memory copies, and
 # ptxas allocates registers over the whole call graph anyway.
+@inline compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                                  surface_temperature, temperature_tendency, pressure_tendency) =
+    compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                             surface_temperature, temperature_tendency, pressure_tendency,
+                             nothing)
+
+# `subgrid_statistics` are the statistics that the `condensation` option of P3 reads (`nothing` for
+# `GridMeanCondensation`).
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
-                                          pressure_tendency)
+                                          pressure_tendency,
+                                          subgrid_statistics,
+                                          liquid_stage = nothing)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -652,8 +666,12 @@ end
                                                            lookups)
 
     # === PHASE 1 & 2 RATES ===
+    # Subgrid supersaturation correlation of cloud condensation; `nothing` for `GridMeanCondensation`
+    Γ = cloud_condensation_correlation(p3.condensation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
+                                       ℳ_adjusted.qᶜˡ, T, P, ρ, constants)
+
     phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
-                             temperature_tendency, pressure_tendency)
+                             temperature_tendency, pressure_tendency, Γ)
     phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===
@@ -751,10 +769,19 @@ end
     # budgets, so the cloud/rain/ice budgets below must see the final vapor-limited
     # rates.
     qᵗ = q.vapor + q.liquid + q.ice
-    vapor_rates = limit_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
-                                    rain_cond, rain_evap, dep, coat_cond, coat_evap,
-                                    nuc_q, nuc_n, qᵛ, qᵛ⁺ˡ, T, P, qᵗ, constants,
-                                    dt_safety, T₀, temperature_tendency, pressure_tendency)
+    liquid_rates = limit_liquid_vapor_rates(cond, ccn_activation_mass, ccn_activation_number,
+                                            rain_cond, rain_evap, coat_cond, coat_evap,
+                                            qᵛ, qᵛ⁺ˡ, T, P, constants, dt_safety,
+                                            temperature_tendency, pressure_tendency, Γ)
+    # On the grid, the liquid vapor exchange and activation are instead advanced implicitly over
+    # the coming stage (see `implicit_liquid_relaxation.jl`); the explicit caps above stay the
+    # gridless path and the fallback before the first time step.
+    liquid_rates = implicit_liquid_vapor_rates(liquid_stage, liquid_rates, p3, ρ, ℳ_adjusted, state, constants,
+                                               vapor_excess_adjustment.cloud_water_adjustment,
+                                               phase1.cloud_relaxation, phase1.rain_relaxation, Γ)
+    # The ice-phase caps follow whichever liquid rates were chosen, so they are evaluated once.
+    vapor_rates = limit_ice_vapor_rates(liquid_rates, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
+                                        dt_safety, T₀, temperature_tendency, pressure_tendency)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number
@@ -772,7 +799,14 @@ end
     # the cloud sink total. Track the negative part of `cond` as a sink magnitude here
     # so it gets rescaled alongside the other cloud sinks when the budget would
     # over-deplete `qᶜˡ`.
-    cloud_evap = max(0, -cond)
+    #
+    # Where the liquid vapor exchange is relaxed implicitly over the coming stage, cloud and rain
+    # evaporation are already advanced over that stage, and are bounded by what it leaves of
+    # cloud and rain in the tendency kernel (`p3_sink_fractions`). They are left out of the
+    # budgets over `sink_limiting_timescale` here, which would cap them a second time when the
+    # stage is shorter than that timescale or starts from more cloud than the rates see.
+    implicit_evaporation = liquid_relaxation_is_active(liquid_stage)
+    cloud_evap = ifelse(implicit_evaporation, zero(FT), max(0, -cond))
     cloud_source_total = max(0, cond) + ccn_activation_mass
     # Homogeneous freezing is applied after all ordinary process budgets below,
     # consistent with its place in the process ordering. Do not reserve liquid here:
@@ -791,7 +825,7 @@ end
     cloud_warm_n  = cloud_warm_n * f_cloud
     wg_cloud      = wg_cloud * f_cloud
     wg_shed       = wg_shed * f_cloud
-    cond          = ifelse(cond < 0, cond * f_cloud, cond)
+    cond          = ifelse((cond < 0) & !implicit_evaporation, cond * f_cloud, cond)
 
     cloud_warm_to_ice = ifelse(tracks_liquid_on_ice(parameters), cloud_warm_q, zero(FT))
     cloud_warm_to_rain = ifelse(tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q)
@@ -839,7 +873,8 @@ end
         rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
                             cloud_warm_to_rain + rain_cond
         rain_available = max(0, qʳ) + rain_source_total * dt_safety
-        rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
+        rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain +
+                          ifelse(implicit_evaporation, zero(FT), rain_evap)
         f_rain = sink_limiting_factor(rain_sink_total, rain_available, dt_safety)
         rain_rim = rain_rim * f_rain
         rain_rim_n = rain_rim_n * f_rain
@@ -848,7 +883,7 @@ end
         rain_warm_q = rain_warm_q * f_rain
         rain_warm_n = rain_warm_n * f_rain
         wg_rain = wg_rain * f_rain
-        rain_evap = rain_evap * f_rain
+        rain_evap = ifelse(implicit_evaporation, rain_evap, rain_evap * f_rain)
         wg_excess_rain = wg_excess_rain * f_rain
         wg_shed_n = (wg_shed + wg_excess_rain) / parameters.shed_drop_mass
 
@@ -966,6 +1001,16 @@ end
 
     ni_correction = ifelse(whole_particle_clipping, zero(FT),
                            (nⁱ - nⁱ_global) / dt_safety)
+
+    # Immersion freezing removes whole drops, so it cannot freeze more drops than rain
+    # holds. The mass budget `f_rain` does not bound the number: the per-drop freezing
+    # rate is uncapped, and rain mass sources (shedding, melting) can keep `f_rain`
+    # near one while the frozen number exceeds the drops present. Limit the frozen
+    # number against the existing drops plus the drops that sources deliver.
+    rain_freezing_number_available = max(0, nʳ) / dt_safety +
+                                     autoconv / rain_seed_drop_mass(p3) + shed_n + wg_shed_n
+    rain_frz_n = min(rain_frz_n, rain_freezing_number_available)
+
     ice_number_source_total = nuc_n + cloud_frz_n + rain_frz_n + spl_n
     # Global and DSD corrections conceptually replace the raw population with
     # the bounded one before physical processes act. Give particle-removing
@@ -1004,9 +1049,9 @@ end
     clipping_rime_volume = clipping_rime_volume + post_clip_rime_volume
     post_process_clipping = ifelse(post_process_clipping_active, one(FT), zero(FT))
 
-    # Reserve the immersion-frozen drops first: their number companion must retain
-    # the same species-budget ratio as rain_freezing_mass.
-    # Project the remaining number-only sinks onto the population left afterward.
+    # Reserve the immersion-frozen drops first (their number was limited against the
+    # available drops above), then project the remaining number-only sinks onto the
+    # population left afterward.
     cloud_warm_rain_number = ifelse(
         tracks_liquid_on_ice(parameters), zero(FT), cloud_warm_q / parameters.shed_drop_mass)
 
@@ -1030,10 +1075,13 @@ end
     rain_number_available = max(0, nʳ) + rain_number_source_total * dt_safety
     rain_number_available_after_freezing =
         max(0, rain_number_available - rain_frz_n * dt_safety)
-    rain_number_sink_total = rain_evap_n + rain_self + rain_rim_n + rain_warm_n
+    # With the implicit relaxation active, rain evaporation of number follows its mass exactly,
+    # as `nʳ/qʳ` times the implicit mass rate, and is left out of this budget as the mass is.
+    rain_number_sink_total = ifelse(implicit_evaporation, zero(FT), rain_evap_n) +
+                             rain_self + rain_rim_n + rain_warm_n
     f_rain_number = sink_limiting_factor(
         rain_number_sink_total, rain_number_available_after_freezing, dt_safety)
-    rain_evap_n = rain_evap_n * f_rain_number
+    rain_evap_n = rain_evap_n * ifelse(implicit_evaporation, one(FT), f_rain_number)
     rain_self = rain_self * f_rain_number
     rain_rim_n = rain_rim_n * f_rain_number
     rain_warm_n = rain_warm_n * f_rain_number
@@ -1092,6 +1140,17 @@ end
     rain_hom_q = rain_hom_q * f_rain_hom
     rain_hom_n = rain_hom_n * f_rain_hom
 
+    # Homogeneous freezing hands ice the number of the liquid it freezes, which for cloud
+    # droplets is orders of magnitude above `maximum_ice_number_density`. Liquid loses every
+    # frozen drop, but ice keeps only the number that fits under that cap: the excess is
+    # never handed to ice, rather than created now and relaxed away later, when the source
+    # may have switched off. The frozen mass is unchanged, so the same mass freezes onto
+    # fewer, larger particles.
+    homogeneous_number = cloud_hom_n + rain_hom_n
+    ice_number_capacity = max(0, parameters.maximum_ice_number_density / ρ - ice_number_remaining)
+    f_hom_number = sink_limiting_factor(homogeneous_number, ice_number_capacity, dt_safety)
+    hom_n_excess = (1 - f_hom_number) * homogeneous_number
+
     # DSD number correction feedback
     ncl_correction = (cloud.nᶜˡ - ℳ.nᶜˡ) / dt_safety
     nr_correction = (nʳ - ℳ.nʳ) / dt_safety
@@ -1132,7 +1191,7 @@ end
         shed, shed_n, refrz,
         nuc_q, nuc_n, cloud_frz_q, cloud_frz_n, rain_frz_q, rain_frz_n,
         spl_q, spl_n,
-        cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n,
+        cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n, hom_n_excess,
         cloud_warm_q, cloud_warm_n, rain_warm_q, rain_warm_n,
         wg_cloud, wg_rain,
         wg_shed, wg_shed_n,

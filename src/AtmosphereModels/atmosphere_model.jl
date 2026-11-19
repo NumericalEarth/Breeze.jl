@@ -329,6 +329,7 @@ function AtmosphereModel(grid;
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver,
                                   cache_advecting_state = advection_needs_solver,
                                   moisture_forcing_names = moisture_forcing_names(microphysics),
+                                  microphysical_names = prognostic_field_names(microphysics),
                                   timestepper_kwargs...)
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)

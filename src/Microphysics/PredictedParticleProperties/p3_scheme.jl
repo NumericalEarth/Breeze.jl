@@ -4,7 +4,6 @@
 ##### Main type combining ice, rain, and cloud properties.
 #####
 
-using Breeze.AtmosphereModels: SpeciesBorrowing
 
 using Artifacts: @artifact_str
 using LazyArtifacts: LazyArtifacts
@@ -15,7 +14,7 @@ using LazyArtifacts: LazyArtifacts
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS, SG}
     # Top-level thresholds
     minimum_mass_mixing_ratio :: FT
     minimum_number_mixing_ratio :: FT
@@ -33,7 +32,18 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     aerosol :: AERO
     # Warm-rain (autoconversion/accretion/self-collection) scheme selector
     warm_rain_scheme :: WRS
+    # Condensation of cloud liquid: `GridMeanCondensation()` or `SubgridCondensation(statistics)`
+    condensation :: SG
 end
+
+# With grid-mean condensation
+PredictedParticlePropertiesMicrophysics(minimum_mass_mixing_ratio, minimum_number_mixing_ratio, ice, rain, cloud,
+                                        process_rates, precipitation_boundary_condition,
+                                        negative_moisture_correction, aerosol, warm_rain_scheme) =
+    PredictedParticlePropertiesMicrophysics(minimum_mass_mixing_ratio, minimum_number_mixing_ratio, ice, rain, cloud,
+                                            process_rates, precipitation_boundary_condition,
+                                            negative_moisture_correction, aerosol, warm_rain_scheme,
+                                            GridMeanCondensation())
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -110,14 +120,16 @@ Optional fields are allocated and advected only when enabled.
   `nothing` (default) is an open surface: the diagnosed fall speed is retained at the
   bottom face, so all sedimenting species leave the domain. `ImpenetrableBoundaryCondition()`
   zeroes the fall speed there instead, so precipitation accumulates in the lowest cell.
-- `negative_moisture_correction`: Repair of negative densities left by the advection
-  operator, applied at the top of `update_state!`. Defaults to `SpeciesBorrowing()`,
-  which borrows along the chain ``ρqʷⁱ ← ρqⁱ ← ρqʳ ← ρqᶜˡ ← ρqᵛ``, zeroes number and
-  rime fields orphaned by a vanishing ice mass, and clamps negative number and rime
-  densities. Pass `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())`
-  to additionally redistribute leftover vapor deficits within each column, or `nothing`
-  to disable the repair (P3's process rates then see zero-clamped values while the
-  prognostic fields keep their negative mass).
+- `negative_moisture_correction`: Repair of negative densities, applied at the top of
+  `update_state!`. Defaults to `nothing`: P3's process tendencies are sign-preserving over
+  each time-stepper stage, so with non-negative transport no repair is needed, and a repair
+  that overwrites the prognostics between stages breaks multistage time integration.
+  Pass `SpeciesBorrowing()` to borrow along the chain ``ρqʷⁱ ← ρqⁱ ← ρqʳ ← ρqᶜˡ ← ρqᵛ``,
+  zero number and rime fields orphaned by a vanishing ice mass, and clamp negative number
+  and rime densities; `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())`
+  additionally redistributes leftover vapor deficits within each column. Without a repair,
+  P3's process rates see zero-clamped values while the prognostic fields keep any negative
+  mass that transport leaves.
 
 # Cloud Droplet Activation
 
@@ -125,6 +137,22 @@ By default, cloud droplet concentration is prescribed by `cloud.number_concentra
 Pass `aerosol = AerosolActivation(AerosolMode())` to predict droplet number from
 aerosol activation. Set `prognostic=true` in [`AerosolActivation`](@ref) to also
 track depletion of the unactivated aerosol reservoir.
+
+# Condensation
+
+The `condensation` keyword selects how cloud liquid condenses and evaporates. P3 always
+condenses its own cloud liquid; a turbulence closure supplies at most statistics.
+
+- `GridMeanCondensation()` (default): at ``ωˡ δqᵛ⁺ˡ``, with ``δqᵛ⁺ˡ = qᵛ - qᵛ⁺ˡ`` the grid-mean
+  vapor excess over liquid.
+- `SubgridCondensation(statistics)`: at ``ωˡ (δqᵛ⁺ˡ + Γ)``, the rate averaged over the subgrid
+  distribution of the vapor excess that `supersaturation_statistics(statistics, ...)` supplies
+  (for example `SubgridCondensation(PrescribedStatistics(σ))`);
+  see [`SubgridCondensation`](@ref Breeze.Microphysics.PredictedParticleProperties.SubgridCondensation).
+
+Here ``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ`` is the phase relaxation rate of the cloud droplets
+(`AtmosphereModels.phase_relaxation_rate`). Rain, ice, activation and collection keep their
+grid-mean form.
 
 # Configuring the empirical warm-phase parameters
 
@@ -168,7 +196,7 @@ PredictedParticlePropertiesMicrophysics
 ├── rain: RainDrops
 ├── cloud: CloudDroplets
 ├── process_rates: ProcessRate
-├── negative_moisture_correction: SpeciesBorrowing(vertical_borrowing = nothing)
+├── negative_moisture_correction: nothing (no repair)
 ├── aerosol: nothing (prescribed droplet number)
 └── warm_rain_scheme: KhairoutdinovKogan2000
 ```
@@ -190,14 +218,16 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  minimum_mass_mixing_ratio = 1e-14,
                                                  minimum_number_mixing_ratio = 1e-16,
                                                  precipitation_boundary_condition = nothing,
-                                                 negative_moisture_correction = SpeciesBorrowing(),
+                                                 negative_moisture_correction = nothing,
                                                  aerosol = nothing,
                                                  cloud = nothing,
                                                  rain = nothing,
                                                  process_rates = nothing,
                                                  vapor_excess = DiagnosticVaporExcess(),
                                                  liquid_fraction = PrognosticLiquidFraction(),
-                                                 warm_rain_scheme = KhairoutdinovKogan2000())
+                                                 warm_rain_scheme = KhairoutdinovKogan2000(),
+                                                 condensation = GridMeanCondensation())
+    condensation = validate_p3_condensation(condensation)
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
                                     vapor_excess, liquid_fraction)
@@ -207,7 +237,7 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                               minimum_mass_mixing_ratio, minimum_number_mixing_ratio,
                               precipitation_boundary_condition,
                               negative_moisture_correction,
-                              aerosol, cloud, rain, process_rates, warm_rain_scheme)
+                              aerosol, cloud, rain, process_rates, warm_rain_scheme, condensation)
 end
 
 # Shorthand alias

@@ -81,10 +81,11 @@ consequences:
   and compressible formulations carry energy through whichever prognostic
   thermodynamic variable they were built with, ``ρθ`` or ``ρs``. P3 assembles no
   tendency for either.
-- **Negative densities are repaired by the host, not by P3.** The advection
-  operator is not positive-definite, so `update_state!` applies P3's
-  `negative_moisture_correction` (a `SpeciesBorrowing` by default) before the
-  rates are evaluated; see [Prognostic Equations](@ref p3_prognostics).
+- **P3 does not repair negative densities by default.** Its process tendencies are
+  sign-preserving over each time-stepper stage, so transport is the only remaining
+  source of negative values. An optional `negative_moisture_correction`
+  (`SpeciesBorrowing`) can repair them at the top of `update_state!`; see
+  [Prognostic Equations](@ref p3_prognostics).
 
 These choices are noted in context throughout the documentation.
 
@@ -2938,20 +2939,81 @@ tendency.
 
 #### Positivity
 
-The saturation-adjustment caps and per-species sink-limiting factors bound P3
-sinks against the donor reservoirs available over `sink_limiting_timescale`.
-Thus, for a single forward update no longer than that interval, limited P3 sinks
-alone cannot make the corresponding mass or number reservoirs negative. This is
-not an unconditional positivity guarantee for an arbitrary host timestep or RK
-stage. The optional ``ρδq^{v+l}`` prognostic is also excluded: subsaturation is
+The saturation-adjustment caps and per-species sink-limiting factors bound the
+gridless P3 rates against the donor reservoirs available over
+`sink_limiting_timescale`. On the grid, the tendency kernel goes further, because a
+multi-stage time stepper applies rates evaluated at one state to another, over an
+interval that need not match that timescale:
+
+- every explicit sink is advanced in Patankar form against what the state the coming stage
+  starts from, and every other tendency, leave of its donor, ``c̃``: the loss ``L``
+  becomes ``L c̃ / (c̃ + Δt L)``, so ``c̃ / (1 + Δt L / c̃) ≥ 0`` for any stage
+  interval ``Δt``. Each transfer is scaled by the fraction of the species it draws
+  on, which scales the recipient's gain by the same factor and conserves the
+  exchange;
+- the vapor exchange of liquid is a relaxation, and is advanced by backward Euler over
+  the stage in place of the saturation-adjustment caps: cloud liquid relaxes towards
+  its equilibrium condensate ``\max(0, s̄) / ξ^l`` at the droplets' vapor relaxation rate
+  ``ε^l``, with ``s̄ = q^v - q^{v+l} + ξ^l q^{cl}`` the saturation excess of total water,
+  which condensation leaves unchanged. Rain condenses and evaporates on the same vapor
+  excess at its rate ``ε^r``, so the two are relaxed together, the excess decaying by
+  ``1 / (1 + Δt (ε^l + ε^r))`` and split between them by ``ε / (ε^l + ε^r)``. Droplet
+  activation relaxes towards the activated number (or seed mass) in the same way.
+  Each update is a convex combination of what the stage leaves of the cloud and a
+  non-negative target, applied as the tendency ``(c^+ - c̃) / Δt``, so it neither
+  overshoots the target nor depends on `sink_limiting_timescale`, and it reduces to
+  the explicit rate as ``ε Δt → 0``. Ice deposition, the liquid coating of ice
+  and ice nucleation keep the explicit caps;
+- the implicit transfers are not weighted by the Patankar fraction as well, which would
+  limit them twice: a reservoir relaxed at rate ``ω`` would keep
+  ``(1 + ω Δt) / (1 + 2 ω Δt)`` of itself over a stage in place of ``1 / (1 + ω Δt)``.
+  Each is drawn from its donor first, in full, and the explicit sinks of that donor are
+  advanced in Patankar form against what it leaves, ``c̃ - Δt L^1``: cloud evaporation
+  before the other sinks of cloud liquid, rain evaporation before the other sinks of
+  rain, and condensation on cloud and rain and the seed mass of activation before the
+  other sinks of vapor. Activation is the only sink of the aerosol reservoir. A first
+  draw is limited to ``c̃``, by the factor ``\min(1, c̃ / (Δt L^1))``, which is one
+  wherever the draw fits: always for cloud evaporation and activation where the stage
+  starts from the state the rates saw, since both relax their own donor. Rain
+  evaporation relaxes the vapor deficit and not the rain, so this limit is what keeps
+  it within the rain present. Cloud and rain evaporation are likewise left out of the
+  cloud and rain budgets over `sink_limiting_timescale`, which would otherwise cap them
+  when a stage is shorter than that timescale;
+- a number sink that removes no mass, which is self-collection for rain and aggregation
+  for ice, is limited against less than the number present. Limited against the whole
+  number, it can remove nearly all of it while the mass stays ("mass without number"),
+  and the size bounds then give that mass the largest particles the scheme admits, which
+  fall fastest. The mass ``m̃`` that the stage and the limited mass sinks leave needs at
+  least ``n_{\min}`` particles: ``m̃ \, \mathbb{C}_{r,1}^3 / (π ρ_w)`` for rain, with
+  ``\mathbb{C}_{r,1}`` = `minimum_rain_slope`, and ``m̃`` times the inverse mean particle
+  mass at the tabulated lower ``λ`` bound for ice, whose mass includes the liquid
+  coating where it is tracked. With ``ñ`` what the stage and the sinks that remove number
+  with mass leave of the number, the number-only loss ``L`` is advanced in Patankar form
+  against ``b = \max(0, ñ - n_{\min})`` and becomes ``L b / (b + Δt L)``. The number
+  then approaches ``n_{\min}`` over a long stage and does not pass it for any ``Δt``,
+  and the sink is switched off where ``ñ`` is already below ``n_{\min}``. The fraction is
+  no larger than the Patankar fraction of all the explicit number sinks together, and
+  equals it where ``n_{\min} = 0``. The sinks that remove number with mass (evaporation,
+  melting, sublimation, and the riming, freezing and collection of rain) keep the
+  fraction of their mass transfer and are not floored, and nothing is added to a number
+  that is below ``n_{\min}``: the floor limits a rate and repairs no state. It is adapted
+  from [Breeze PR 1078](https://github.com/NumericalEarth/Breeze.jl/pull/1078);
+- the relaxations of number towards its size-distribution bounds and of ice number
+  towards its cap are advanced by backward Euler over the stage;
+- rime mass and volume loss is bounded by what the stage leaves of each.
+
+Under a strong-stability-preserving multirate step the stage interval is
+``Δt / C``, with ``C`` the strong-stability coefficient of the coefficient set, so
+P3 keeps every density non-negative over the whole step as long as transport does. The optional ``ρδq^{v+l}`` prognostic is also excluded: subsaturation is
 legitimately negative. Breeze does not implement a post-step "return small mass
 to vapor" cleanup, because that requires state mutation with a paired ``θ``
 correction.
 
-The advection operator is a separate matter: it is not positive-definite, so a
-stage update can return any density negative. `AtmosphereModel` therefore applies
-P3's `negative_moisture_correction` at the top of `update_state!`, before the
-rates see the state. The default `SpeciesBorrowing`:
+The advection operator is a separate matter: unless it is bounds-preserving, a
+stage update can return any density negative. P3's `negative_moisture_correction`
+is `nothing` by default, because a repair that overwrites the prognostics between
+stages breaks multistage time integration. Passing `SpeciesBorrowing()` applies a
+repair at the top of `update_state!`, before the rates see the state. It:
 
 - borrows along the chain
   ``ρq^{wi} \leftarrow ρq^i \leftarrow ρq^r \leftarrow ρq^{cl} \leftarrow ρq^v``,
@@ -2971,9 +3033,8 @@ rates see the state. The default `SpeciesBorrowing`:
 
 Passing `SpeciesBorrowing(vertical_borrowing = VerticalBorrowing())` additionally
 redistributes leftover vapor deficits within each column;
-`negative_moisture_correction = nothing` disables the repair, in which case the
-process rates still clamp what they read at zero but the prognostic fields keep
-their negative mass.
+without a repair, the process rates still clamp what they read at zero but the
+prognostic fields keep any negative mass that transport leaves.
 
 #### Consistency
 

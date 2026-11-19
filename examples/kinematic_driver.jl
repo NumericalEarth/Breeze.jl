@@ -91,9 +91,19 @@ boundary_conditions = merge(microphysical_bcs,
        w = FieldBoundaryConditions(bottom=NormalFlowBoundaryCondition(W₀),
                                    top=NormalFlowBoundaryCondition(W₀))))
 
+# P3 does not repair negative densities, so the advection of every non-negative
+# scalar is bounded below by zero. Potential temperature and the vapor excess,
+# which is negative wherever the air is subsaturated, use plain WENO.
+
+weno = WENO(order=5)
+nonnegative_weno = WENO(order=5, bounds=(0.0, 1e30))
+signed_scalars = (:ρθ, :ρδqᵛ⁺ˡ)
+scalar_advection = NamedTuple(name => ifelse(name in signed_scalars, weno, nonnegative_weno)
+                              for name in (:ρθ, :ρqᵛ, prognostic_field_names(microphysics)...))
+
 model = AtmosphereModel(grid; dynamics, microphysics, boundary_conditions,
                         formulation = :LiquidIcePotentialTemperature,
-                        advection = WENO(order=5),
+                        momentum_advection = weno, scalar_advection,
                         thermodynamic_constants = constants)
 
 # ## Initializing the vapor excess

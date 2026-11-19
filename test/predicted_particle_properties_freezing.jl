@@ -341,6 +341,111 @@ using Oceananigans.Fields: interior
         @test N32r isa Float32
     end
 
+    @testset "Homogeneous freezing respects the ice number cap [$FT]" for FT in (Float32, Float64)
+        # Cold, ice-free air slightly supersaturated over liquid: cloud activates and
+        # freezes homogeneously in the same evaluation, carrying the prescribed droplet
+        # number, which is far above `maximum_ice_number_density`. Ice must receive no
+        # more than the cap: one limiter interval of the net ice-number tendency cannot
+        # exceed it, and nothing is left for `ni_limit` to relax away afterwards.
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        thermodynamics = Breeze.Thermodynamics
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
+        τ = p3.process_rates.sink_limiting_timescale
+
+        for (T, p, 𝒮) in ((215, 100e2, 0.01), (215, 50e2, 0.05), (225, 300e2, 0.005))
+            T, p, 𝒮 = FT(T), FT(p), FT(𝒮)
+
+            # Iterate the vapor fraction to the target liquid supersaturation,
+            # since the density depends on the moisture.
+            qᵛ = FT(1e-6)
+            for _ in 1:10
+                q = MoistureMassFractions(qᵛ, zero(FT), zero(FT))
+                𝒰 = thermodynamics.with_temperature(
+                    LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), p), T, constants)
+                ρ = thermodynamics.density(𝒰, constants)
+                qᵛ⁺ˡ = thermodynamics.saturation_specific_humidity(
+                    T, ρ, constants, thermodynamics.PlanarLiquidSurface())
+                qᵛ = (1 + 𝒮) * qᵛ⁺ˡ
+            end
+
+            q = MoistureMassFractions(qᵛ, zero(FT), zero(FT))
+            𝒰 = thermodynamics.with_temperature(
+                LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), p), T, constants)
+            ρ = thermodynamics.density(𝒰, constants)
+
+            z = zero(FT)
+            ℳ = P3MicrophysicalState(z, FT(p3.cloud.number_concentration), z, z, z, z,
+                                     z, z, z, z, z, z)
+            properties = PPP.p3_process_properties(p3, ρ, ℳ)
+            rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z)
+            maximum_ice_number = p3.process_rates.maximum_ice_number_density / ρ
+
+            # The droplets do freeze, and they outnumber the cap...
+            @test rates.cloud_homogeneous_mass > 0
+            @test rates.cloud_homogeneous_number * τ > 10 * maximum_ice_number
+
+            # ...but ice gains no more than the cap. The net is a difference of two rates
+            # far above the cap, so round-off scales with the frozen number.
+            Gⁿ = tendency_ρnⁱ(rates, ρ) / ρ
+            roundoff = 10 * eps(FT) * rates.cloud_homogeneous_number * τ
+            @test Gⁿ > 0
+            @test Gⁿ * τ ≤ maximum_ice_number + roundoff
+        end
+    end
+
+    @testset "Rain immersion freezing cannot freeze more drops than exist [$FT]" for FT in (Float32, Float64)
+        # Cold, wet ice sheds rain mass onto a sparse rain population. The shed mass keeps
+        # the rain mass budget open, and the per-drop immersion-freezing rate is uncapped,
+        # so without a number limit the frozen number exceeds the drops present and the
+        # rain number goes negative within one limiter interval.
+        PPP = Breeze.Microphysics.PredictedParticleProperties
+        thermodynamics = Breeze.Thermodynamics
+        p3 = PredictedParticlePropertiesMicrophysics(FT)
+        constants = ThermodynamicConstants(FT)
+        τ = p3.process_rates.sink_limiting_timescale
+
+        # (T, p, qᵛ / qᵛ⁺ˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, qʷⁱ)
+        states = ((223.18, 23414, 0.984, 1.436e-7, 2.219e2, 2.786e-4, 1.276e2, 6.830e-5, 8.296e-5),
+                  (211.55, 43624, 0.855, 2.983e-7, 7.574e3, 5.761e-4, 5.278e2, 1.096e-4, 9.169e-5),
+                  (225.71, 37938, 0.814, 1.655e-7, 4.619e2, 2.684e-4, 3.568e2, 9.213e-5, 1.048e-4))
+
+        for state in states
+            T, p, ℋ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, qʷⁱ = FT.(state)
+            bᶠ = qᶠ / 400
+
+            qᵛ = FT(1e-6)
+            for _ in 1:10
+                q = MoistureMassFractions(qᵛ, qʳ + qʷⁱ, qⁱ)
+                𝒰 = thermodynamics.with_temperature(
+                    LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), p), T, constants)
+                ρ = thermodynamics.density(𝒰, constants)
+                qᵛ⁺ˡ = thermodynamics.saturation_specific_humidity(
+                    T, ρ, constants, thermodynamics.PlanarLiquidSurface())
+                qᵛ = ℋ * qᵛ⁺ˡ
+            end
+
+            q = MoistureMassFractions(qᵛ, qʳ + qʷⁱ, qⁱ)
+            𝒰 = thermodynamics.with_temperature(
+                LiquidIcePotentialTemperatureState(zero(FT), q, FT(1e5), p), T, constants)
+            ρ = thermodynamics.density(𝒰, constants)
+
+            z = zero(FT)
+            ℳ = P3MicrophysicalState(z, FT(p3.cloud.number_concentration), qʳ, nʳ, qⁱ, nⁱ,
+                                     qᶠ, bᶠ, qʷⁱ, z, z, z)
+            properties = PPP.p3_process_properties(p3, ρ, ℳ)
+            rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z)
+
+            # Immersion freezing is active and number-limited...
+            @test rates.rain_freezing_number > 0
+
+            # ...so one limiter interval, or any shorter step, leaves the rain number non-negative.
+            Gⁿ = tendency_ρnʳ(rates, ρ, p3) / ρ
+            @test nʳ + τ * Gⁿ ≥ -10 * eps(FT) * nʳ
+            @test nʳ + τ / 2 * Gⁿ ≥ 0
+        end
+    end
+
     @testset "Immersion freezing PSD weighting" begin
         p3 = PredictedParticlePropertiesMicrophysics(Float64)
 
@@ -575,6 +680,7 @@ using Oceananigans.Fields: interior
             FT(1e5),    # cloud_homogeneous_number
             FT(1e-7),   # rain_homogeneous_mass
             FT(500.0),  # rain_homogeneous_number
+            FT(0.0),    # homogeneous_number_excess
             FT(1e-8),   # cloud_warm_collection (above-freezing cloud collection → qʷⁱ)
             FT(1e4),    # cloud_warm_collection_number
             FT(5e-9),   # rain_warm_collection (above-freezing rain collection → qʷⁱ)
