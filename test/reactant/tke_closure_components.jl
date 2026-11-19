@@ -124,15 +124,17 @@ end
                                         subgrid_distribution = distribution,
                                         heating_budget_flux = HeatingBudgetFlux(PT; heating = PrescribedHeating(cooling)))
     trained() = map(Reactant.ConcreteRNumber, (ℂᵛᵗ = 1.0, ℂᑫ = 0.5, ℂᑫᴸ = 8.0, ℂʷᵀ = 0.3, ℂʷᴺ = 0.1, ℂʷʳ = 0.2,
-                                               ℂᵍˢ = 0.1, ℂᵍˢˢ = 0.05))
+                                               ℂᵍˢ = 0.0, ℂᵍˢˢ = 0.0,
+                                               ℂᵍ₀ = 0.4, ℂʷᵉ = 0.12, ℂʷᵋ = 0.34))
     θ_init = CenterField(grid); set!(θ_init, z -> 290 + 3e-3 * z)
 
+    forward_model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
+    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true trained_loss(
+        forward_model, trained(), θ_init, Δt, Ns)
+    loss(coefficients) = Float64(Reactant.to_number(@with_stack_size compiled(forward_model, coefficients, θ_init, Δt, Ns)))
+
     @testset "Forward" begin
-        model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
-        coefficients = trained()
-        compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true trained_loss(
-            model, coefficients, θ_init, Δt, Ns)
-        value = @with_stack_size compiled(model, coefficients, θ_init, Δt, Ns)
+        value = loss(trained())
         @test isfinite(value) && value > 0
     end
 
@@ -149,6 +151,19 @@ end
         @test isfinite(loss_value)
         @test all(isfinite, derivatives)
         @test !iszero(derivatives.ℂᑫ)
+
+        # Compare with central differences. The skewness coefficients of the within-component share start at zero,
+        # where a branch on zero slopes once selected a constant and zeroed their derivatives, and the argument of
+        # its sigmoid at zero skewness was once stored at construction, so that rebinding ℂᵍ₀ did not move it.
+        h = 1e-3
+        values = map(c -> Float64(Reactant.to_number(c)), trained())
+        for name in (:ℂᵍˢ, :ℂᵍˢˢ, :ℂᵍ₀, :ℂʷᵉ, :ℂʷᵋ, :ℂʷʳ, :ℂʷᴺ)
+            shifted(δ) = map(Reactant.ConcreteRNumber, merge(values, NamedTuple{(name,)}((values[name] + δ,))))
+            finite_difference = (loss(shifted(h)) - loss(shifted(-h))) / 2h
+            name in (:ℂᵍˢ, :ℂᵍˢˢ) && @test !iszero(derivatives[name])
+            @info "AD and FD" name derivatives[name] finite_difference
+            @test derivatives[name] ≈ finite_difference rtol=1e-2
+        end
     end
 end
 

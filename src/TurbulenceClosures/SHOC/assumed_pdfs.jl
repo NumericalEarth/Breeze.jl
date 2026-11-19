@@ -90,9 +90,8 @@ The within-component fraction of `w′²` is a smooth function of the skewness `
 
     ℂᵍ(Sk) = (1 + y / √(1 + y²)) / 2,    y = y₀ + ℂᵍˢ Sk + ℂᵍˢˢ Sk²,
 
-an algebraic sigmoid in (0, 1) with `ℂᵍ(0) = ℂᵍ₀` (`y₀` is derived from `ℂᵍ₀` once, at
-construction; with zero slopes `ℂᵍ = ℂᵍ₀` exactly). It sets the weight of the updraft
-component, `a↑ = (1 - Sk / √(4 (1 - ℂᵍ)³ + Sk²)) / 2`, and with it the kurtosis of w: for this
+an algebraic sigmoid in (0, 1) with `ℂᵍ(0) = ℂᵍ₀` (`y₀ = (2ℂᵍ₀ - 1) / √(1 - (2ℂᵍ₀ - 1)²)`; with zero slopes
+`ℂᵍ = ℂᵍ₀` to rounding). It sets the weight of the updraft component, `a↑ = (1 - Sk / √(4 (1 - ℂᵍ)³ + Sk²)) / 2`, and with it the kurtosis of w: for this
 equal-spread mixture
 
     Kurt = 3c² + 6c (1 - c) + (1 - c)² (1 - 3a↑ + 3a↑²) / (a↑ (1 - a↑)),    c = ℂᵍ(Sk),
@@ -115,8 +114,6 @@ struct EqualWidthDoubleGaussianPDF{FT} <: AbstractSHOCComponent
     ℂᵍˢ :: FT
     "Curvature of the within-component fraction in the skewness of w (in the sigmoid's argument)"
     ℂᵍˢˢ :: FT
-    "Argument of the sigmoid at zero skewness, y₀ = (2ℂᵍ₀ - 1) / √(1 - (2ℂᵍ₀ - 1)²) (derived from ℂᵍ₀)"
-    y₀ :: FT
     "Standard deviation of θˡ below which it is uniform, K"
     thl_tol :: FT
     "Standard deviation of qᵗ below which it is uniform, kg kg⁻¹"
@@ -139,10 +136,8 @@ Return `EqualWidthDoubleGaussianPDF{FT}` with the coefficients and tolerances of
 """
 function EqualWidthDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; ℂᵍ₀ = 0.4, kw...)
     0 < ℂᵍ₀ < 1 || throw(ArgumentError("ℂᵍ₀ must be in (0, 1), got $ℂᵍ₀"))
-    x = 2 * ℂᵍ₀ - 1
-    y₀ = x / sqrt(1 - x * x)
     return component_from_keywords(EqualWidthDoubleGaussianPDF, FT,
-                                   (ℂᵍ₀ = ℂᵍ₀, ℂᵍˢ = 0, ℂᵍˢˢ = 0, y₀ = y₀, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2,
+                                   (ℂᵍ₀ = ℂᵍ₀, ℂᵍˢ = 0, ℂᵍˢˢ = 0, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2,
                                     Tl_min = 100, minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99), kw)
 end
 
@@ -160,9 +155,12 @@ const ComponentDoubleGaussianPDF = Union{DoubleGaussianPDF, EqualWidthDoubleGaus
 @inline within_component_share(pdf::DoubleGaussianPDF, Sk) = pdf.ℂᵍ₁
 
 @inline function within_component_share(pdf::EqualWidthDoubleGaussianPDF, Sk)
-    y = pdf.y₀ + pdf.ℂᵍˢ * Sk + pdf.ℂᵍˢˢ * Sk * Sk
-    constant = (pdf.ℂᵍˢ == 0) & (pdf.ℂᵍˢˢ == 0) # a property of the parameters, not of the state
-    return ifelse(constant, pdf.ℂᵍ₀, (1 + y / sqrt(1 + y * y)) / 2)
+    # y₀ is derived here from ℂᵍ₀, not stored, so that rebinding ℂᵍ₀ (with_parameters) moves it; and there is no
+    # branch on zero slopes, which would select the constant ℂᵍ₀ and zero the derivatives in ℂᵍˢ and ℂᵍˢˢ
+    x = 2 * pdf.ℂᵍ₀ - 1
+    y₀ = x / sqrt(1 - x * x)
+    y = y₀ + pdf.ℂᵍˢ * Sk + pdf.ℂᵍˢˢ * Sk * Sk
+    return (1 + y / sqrt(1 + y * y)) / 2
 end
 
 # The largest magnitude of the skewness of vertical velocity that the double Gaussian represents. Its two components
