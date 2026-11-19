@@ -2241,8 +2241,8 @@ function implicit_steps_in_place!(requests, implicit_solver::BatchedTridiagonalS
     one_by_one = batch_size == 1 || size(implicit_solver.grid, 3) < 2
 
     for batch in Iterators.partition(needed, one_by_one ? 1 : batch_size)
-        fields = Tuple(first(request) for request in batch)
-        columns = Tuple(implicit_step_column(request...) for request in batch)
+        fields = Tuple(Any[first(request) for request in batch])
+        columns = Tuple(Any[implicit_step_column(request...) for request in batch])
         if one_by_one
             args = implicit_step_arguments(shared, first(columns), first(fields))
             ϕ = first(fields)
