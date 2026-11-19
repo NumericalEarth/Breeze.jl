@@ -162,6 +162,8 @@ function GravityWaveMultirateInfinitesimalStep(grid, prognostic_fields;
         throw(ArgumentError("inner_solver must be VerletSubsteps() or ForwardBackwardSubsteps(), got $inner_solver."))
 
     FT = eltype(grid)
+    tableau isa Symbol && !hasmethod(multirate_infinitesimal_step_tableau, Tuple{Val{tableau}, Type{FT}}) &&
+        throw(ArgumentError("Unknown multirate infinitesimal step tableau :$tableau."))
     tableau = multirate_infinitesimal_step_tableau(tableau, FT)
     stages = number_of_stages(tableau)
 
