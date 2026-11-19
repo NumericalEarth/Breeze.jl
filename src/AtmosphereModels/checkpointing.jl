@@ -6,8 +6,12 @@ function Oceananigans.prognostic_state(model::AtmosphereModel)
             fields         = prognostic_state(prognostic_fields(model)),
             closure_fields = prognostic_state(model.closure_fields),
             radiation      = prognostic_state(model.radiation),
-            timestepper    = prognostic_state(model.timestepper))
+            timestepper    = timestepper_prognostic_state(model.timestepper, model))
 end
+
+# What a restart needs of the time stepper. A time stepper whose restart state depends on the
+# model it steps extends this.
+timestepper_prognostic_state(timestepper, model) = prognostic_state(timestepper)
 
 function Oceananigans.restore_prognostic_state!(restored::AtmosphereModel, from)
     restore_prognostic_state!(restored.clock, from.clock)

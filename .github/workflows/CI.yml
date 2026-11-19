@@ -163,10 +163,24 @@ jobs:
               TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
           fi
 
+          if [[ ${{ matrix.os }} != ubuntu-* ]] || [[ ${{ matrix.version }} == 'min' ]]; then
+              # Tests that do not depend on the operating system or the Julia version run on
+              # ubuntu with the latest Julia only (and on the GPU runners, which run their own
+              # set). The MPI drivers in `test/distributed` run serially before the parallel
+              # tests, so they cost wall time on every runner that has them.
+              if [[ ${{ matrix.os }} != *linux-nvidia-gpu* ]]; then
+                  echo "BREEZE_TEST_SKIP=distributed/ doctests quality_assurance" | tee -a "${GITHUB_ENV}"
+              fi
+          fi
+
           if [[ ${{ runner.os }} == "macOS" ]]; then
               # On macOS runners, `Metal.functional()` returns `false` because the GPU is
-              # virtualised, but we should be able to actually use it anyway.
-              echo "BREEZE_FORCE_METAL_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
+              # virtualised, but we should be able to actually use it anyway. The Metal
+              # variants of the tests compile every model a second time, so only the macOS
+              # runner with the most jobs (Julia min) runs them.
+              if [[ ${{ matrix.version }} == 'min' ]]; then
+                  echo "BREEZE_FORCE_METAL_FUNCTIONAL=true" | tee -a "${GITHUB_ENV}"
+              fi
               # Encourage ParallelTestRunner to use multiple jobs on macOS, rather
               # than the single one it'd use by default, but cap at 3.
               NPROCM1="$(($(sysctl -n hw.logicalcpu)-1))"

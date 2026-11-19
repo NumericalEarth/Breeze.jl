@@ -19,6 +19,8 @@ using Breeze
 using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps, minimum_horizontal_spacing,
+                                    stage_substep_count_and_size, ProportionalSubsteps,
+                                    ConstantSubstepSize, MonolithicFirstStage,
                                     sponge_term_diag, sponge_rhs, sponge_slow_tendency,
                                     materialize_sponge,
                                     assemble_slow_vertical_momentum_tendency!,
@@ -28,7 +30,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
+                                    implicit_damping_factors, prepare_acoustic_cache!, run_acoustic_substeps!,
                                     factor_vertical_solver!,
                                     solve_tridiagonal_columns_in_place!
 using Breeze.AtmosphereModels: SlowDynamics,
@@ -332,6 +334,32 @@ for arch in arches
         Oceananigans.defaults.FloatType = old_FT
     end
 
+    @testset "Long stages take at least two adaptive substeps [$(arch)]" begin
+        constants = ThermodynamicConstants()
+        Δx_min = 5016.0 # the 5 km tropical-cyclone grid where a single 6.3 s substep went unstable
+        Δt = 11.25
+        distribution = ProportionalSubsteps()
+
+        # SSPMIS43's first stage covers 0.56 Δt: the CFL count alone gives one substep.
+        @test compute_acoustic_substeps(Δx_min, 0.56 * Δt, constants, 0.5) == 1
+        Nτ, Δτ = stage_substep_count_and_size(distribution, 0.56, Δt, Δx_min, constants, 0.5, nothing)
+        @test Nτ == 2
+        @test Δτ ≈ 0.56 * Δt / 2
+
+        # Uniform substep sizes cover a stage of irrational length exactly.
+        for distribution in (ConstantSubstepSize(), MonolithicFirstStage()), d in (0.1069817871491099, 0.3484439652915416, 1/3, 1/2, 1)
+            Nτ, Δτ = stage_substep_count_and_size(distribution, d, Δt, Δx_min, constants, 0.5, nothing)
+            @test Nτ * Δτ ≈ d * Δt
+        end
+
+        # Stages covering at most half of Δt keep the CFL count.
+        @test first(stage_substep_count_and_size(distribution, 1/2, Δt, Δx_min, constants, 0.5, nothing)) == 1
+        @test first(stage_substep_count_and_size(distribution, 0.139, Δt, Δx_min, constants, 0.5, nothing)) == 1
+
+        # A fixed substep count is the user's choice and is not raised.
+        @test first(stage_substep_count_and_size(distribution, 0.56, Δt, Δx_min, constants, 0.5, 1)) == 1
+    end
+
     @testset "acoustic_cfl plumbed to AcousticSubstepper [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
@@ -363,8 +391,7 @@ for arch in arches
         grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
-        model = AtmosphereModel(grid;
-                                dynamics)
+        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
 
         @test model.timestepper isa AcousticRungeKutta3
         @test model.timestepper.substepper isa AcousticSubstepper
@@ -375,7 +402,7 @@ for arch in arches
     end
 
     #####
-    ##### Test that default time stepper for split-explicit is AcousticRungeKutta3 (WS-RK3)
+    ##### Test that the default time stepper for split-explicit is MultirateInfinitesimalStep (ConvexLinearMIS6)
     #####
 
     @testset "Default time stepper for SplitExplicitTimeDiscretization [$(arch), $(FT)]" for FT in as_test_float_types(arch)
@@ -386,7 +413,7 @@ for arch in arches
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
         model = AtmosphereModel(grid; dynamics)
 
-        @test model.timestepper isa AcousticRungeKutta3
+        @test model.timestepper isa MultirateInfinitesimalStep
         Oceananigans.defaults.FloatType = old_FT
     end
 
@@ -421,9 +448,14 @@ for arch in arches
     # topology-aware operators, so the substep loop reads no horizontal halo of the fields it writes
     # (and only the discarded boundary rows of the vertical right-hand side read their vertical halos).
     # Poisoned halos must therefore not reach the interior.
+    # Each topology and damping compiles its own model, so one pairing covers both of each and
+    # the exhaustive tests run the others.
+    halo_cases = test_sweep(((Periodic, ThermalDivergenceDamping), (Bounded, DirectDivergenceDamping),
+                             (Periodic, DirectDivergenceDamping), (Bounded, ThermalDivergenceDamping));
+                            representatives = 2)
+
     @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT), $(TX), $(Damping)]" for FT in as_test_float_types(arch),
-                                                                                         TX in (Periodic, Bounded),
-                                                                                         Damping in (ThermalDivergenceDamping, DirectDivergenceDamping)
+                                                                                         (TX, Damping) in halo_cases
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5), topology=(TX, Periodic, Bounded),
@@ -454,7 +486,7 @@ for arch in arches
         stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ, U⁰ = model.timestepper.U⁰,
                  forcing_interval = 2Δτ)
         factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
-        acoustic_substep_loop!(2, model, substepper, stage, nothing)
+        run_acoustic_substeps!(2, model, substepper, stage, nothing)
 
         for field in (substepper.density_perturbation,
                       substepper.density_potential_temperature_perturbation,

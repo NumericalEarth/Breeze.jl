@@ -4,12 +4,13 @@ using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Grids: topology
+using Oceananigans.Grids: Flat, topology
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.OutputReaders: update_field_time_series!, extract_field_time_series
 using Oceananigans.TimeSteppers: TimeSteppers, Clock
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
+using Oceananigans.TurbulenceClosures.Smagorinskys: LagrangianAveragedDynamicSmagorinsky
 using Oceananigans.Units: Time
 using Oceananigans.Utils: launch!, KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
@@ -50,7 +51,9 @@ function update_atmosphere_state!(update_radiation_fluxes!, model, callbacks; co
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
-    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
+    # Synchronous: nothing completes an asynchronous fill here, so on a `Distributed` grid the halos
+    # of every prognostic that is not filled again below (the tracers) would never be received.
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)...)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation_fluxes!(model.radiation, model)
@@ -154,8 +157,7 @@ function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async).
+    # Ensure halos are filled before velocity computation (not every caller is `update_state!`).
     # Thread clock and model fields so time-dependent boundary conditions
     # (e.g. continuous-callable or FieldTimeSeries Open BCs) on density/momentum
     # dispatch correctly; without them `getbc` falls through to a signature that
@@ -260,12 +262,71 @@ function compute_auxiliary_variables!(model)
     # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
     if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
-        compute_closure_fields!(model.closure_fields, model.closure, model)
+        compute_extended_closure_fields!(model.closure_fields, model.closure, model)
+        # The local fill imposes the boundary conditions of the closure fields and the periodic
+        # images within a rank. Nothing is exchanged between ranks: the halo cells the tendencies
+        # read have just been computed.
         fill_halo_regions!(model.closure_fields; only_local_halos=true)
     end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
+    return nothing
+end
+
+#####
+##### Closure fields, computed one cell into the horizontal halos
+#####
+
+# The viscous and diffusive fluxes of an interior tendency read an eddy viscosity or diffusivity one
+# cell into the halo, corners included (`νᶠᶠᶜ` at `(1, 1)` averages the centers `(0:1, 0:1)`). On a
+# `Distributed` grid a closure field that is computed in the interior alone is stale there, because
+# its halos are filled locally and never received from a neighbouring rank. So, as Oceananigans'
+# `HydrostaticFreeSurfaceModel` does with `horizontally_extended_interior_kernel_parameters`, the
+# closure fields are computed over `0:Nx+1` and `0:Ny+1`, from the halos of the velocities,
+# thermodynamic variables and tracers, which are filled (and exchanged between ranks) before the
+# closure fields are computed. A closure's own stencil reaches one further cell, to index `-1` or
+# `N+2`, which is why these closures require a halo of at least two (`required_halo_size_x`).
+#
+# The ranges are written out, rather than taken from `horizontally_extended_interior_kernel_parameters`,
+# because on a grid with an active cells map that function returns a map of the active cells only,
+# whereas `:xyz` covers every cell and column kernels need the horizontal ranges.
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the kernel parameters over which the fields of `closure` are computed on `grid`: the
+interior plus one cell into the halo in every horizontal direction that is not `Flat`.
+The fallback `:xyz` (the interior alone) applies to closures whose fields cannot be computed
+from the halos of the model state.
+"""
+function closure_fields_kernel_parameters(grid, closure)
+    Nx, Ny, Nz = size(grid)
+    TX, TY, _ = topology(grid)
+    ii = TX === Flat ? (1:Nx) : (0:Nx+1)
+    jj = TY === Flat ? (1:Ny) : (0:Ny+1)
+    return KernelParameters(ii, jj, 1:Nz)
+end
+
+# An array of closures (a per-column ensemble) is indexed by column, and has no halo columns.
+closure_fields_kernel_parameters(grid, ::AbstractArray) = :xyz
+
+# The Lagrangian-averaged coefficient is advanced in the interior by `step_closure_prognostics!`,
+# from its own previous values, so that its halos hold nothing a viscosity could be computed from.
+# TODO: on a `Distributed` grid this closure is wrong next to a rank boundary, in Oceananigans too:
+# `𝒥ᴸᴹ` and `𝒥ᴹᴹ` are time-stepped state whose halos must be exchanged after each update, as must
+# those of `Σ` and `Σ̄`, which Oceananigans fills with `only_local_halos=true` before filtering them.
+closure_fields_kernel_parameters(grid, ::LagrangianAveragedDynamicSmagorinsky) = :xyz
+
+compute_extended_closure_fields!(closure_fields, closure, model) =
+    compute_closure_fields!(closure_fields, closure, model;
+                            parameters = closure_fields_kernel_parameters(model.grid, closure))
+
+# Each closure of a tuple over its own region
+compute_extended_closure_fields!(::Tuple{}, ::Tuple{}, model) = nothing
+
+function compute_extended_closure_fields!(closure_fields::Tuple, closures::Tuple, model)
+    compute_extended_closure_fields!(first(closure_fields), first(closures), model)
+    compute_extended_closure_fields!(Base.tail(closure_fields), Base.tail(closures), model)
     return nothing
 end
 
@@ -356,23 +417,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     compute_momentum_tendencies!(model, model_fields)
 
-    # Arguments common to energy density, moisture density, and tracer density tendencies,
-    # given the advecting velocities (contravariant for terrain-following grids):
-    tendency_args(advecting_velocities) = (
-        model.dynamics,
-        model.formulation,
-        model.thermodynamic_constants,
-        specific_prognostic_moisture(model),
-        advecting_velocities,
-        model.microphysics,
-        model.microphysical_fields,
-        model.closure,
-        model.closure_fields,
-        model.clock,
-        model_fields)
-
     advecting_velocities = transport_velocities(model)
-    common_args = tendency_args(advecting_velocities)
 
     #####
     ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
@@ -380,8 +425,57 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     # The thermodynamic variable may advect with its own velocities, but its condensate
     # sedimentation term pairs with the moisture and tracer tendencies below, so it reads theirs.
-    compute_thermodynamic_tendency!(model, tendency_args(thermodynamic_transport_velocities(model)),
+    compute_thermodynamic_tendency!(model,
+                                    scalar_tendency_arguments(model, model_fields, thermodynamic_transport_velocities(model)),
                                     advecting_velocities.w)
+
+    #####
+    ##### Moisture, microphysical and tracer density tendencies, with the microphysical sources
+    #####
+
+    # A time stepper may rebuild these after its acoustic loop instead (see
+    # `scalar_tendencies_in_update_state`), in which case the build here is skipped.
+    scalar_tendencies_in_update_state(model.timestepper) &&
+        compute_scalar_tendencies!(model, model_fields, advecting_velocities, compute_scalar_tendency!)
+
+    #####
+    ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
+    #####
+
+    compute_dynamics_tendency!(model)
+
+    for callback in callbacks
+        callback.callsite isa TendencyCallsite && callback(model)
+    end
+
+    return nothing
+end
+
+# Whether `compute_tendencies!` builds the moisture, microphysical and tracer tendencies. A time
+# stepper that rebuilds them after its acoustic substep loop returns `false`.
+scalar_tendencies_in_update_state(timestepper) = true
+
+# Arguments common to the thermodynamic, moisture, microphysical and tracer density tendencies,
+# given the advecting velocities (contravariant for terrain-following grids).
+scalar_tendency_arguments(model, model_fields, advecting_velocities) = (
+    model.dynamics,
+    model.formulation,
+    model.thermodynamic_constants,
+    specific_prognostic_moisture(model),
+    advecting_velocities,
+    model.microphysics,
+    model.microphysical_fields,
+    model.closure,
+    model.closure_fields,
+    model.clock,
+    model_fields)
+
+# Build the moisture, microphysical and tracer tendencies into `Gⁿ` with `kernel`, then add the
+# microphysical sources. The tracers hold their specific values here, as in `update_state!`.
+function compute_scalar_tendencies!(model, model_fields, advecting_velocities, kernel)
+    grid = model.grid
+    arch = grid.architecture
+    common_args = scalar_tendency_arguments(model, model_fields, advecting_velocities)
 
     #####
     ##### Moisture density tendency
@@ -397,7 +491,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         common_args...)
 
     Gρqᵛᵉ = getproperty(model.timestepper.Gⁿ, moist_name)
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵛᵉ, grid, ρq_args)
+    launch_scalar_tendency!(kernel, arch, grid, moist_name, Gρqᵛᵉ, ρq_args)
 
     #####
     ##### Tracer density tendencies
@@ -405,10 +499,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     # Pass specific (per-mass) fields for scalar advection: div_ρUc computes ∇·(ρ₀uq),
     # so passing density-weighted ρ₀q would double-count ρ₀.
-    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[specific_field_name(name)]
-                                                 for name in prognostic_field_names(model.microphysics))
-
-    scalars = merge(prognostic_microphysical_fields, model.tracers)
+    scalars = specific_scalar_fields(model)
     for (i, name) in enumerate(keys(scalars))
         ρc = scalars[name]
 
@@ -421,7 +512,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
             common_args...)
 
         Gρc = getproperty(model.timestepper.Gⁿ, name)
-        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
+        launch_scalar_tendency!(kernel, arch, grid, name, Gρc, scalar_args)
     end
 
     #####
@@ -430,16 +521,6 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     compute_microphysical_tendencies!(model)
 
-    #####
-    ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
-    #####
-
-    compute_dynamics_tendency!(model)
-
-    for callback in callbacks
-        callback.callsite isa TendencyCallsite && callback(model)
-    end
-
     return nothing
 end
 
@@ -447,6 +528,58 @@ end
 @kernel function compute_scalar_tendency!(Gc, grid, args)
     i, j, k = @index(Global, NTuple)
     @inbounds Gc[i, j, k] = scalar_tendency(i, j, k, grid, args...)
+end
+
+# The same tendency, added to what `Gc` already holds (sources built before an acoustic loop).
+@kernel function add_scalar_tendency!(Gc, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gc[i, j, k] += scalar_tendency(i, j, k, grid, args...)
+end
+
+# The specific (per-mass) fields of the microphysical prognostics and the tracers, keyed by
+# their prognostic (density) names. The tracers are specific only inside `update_state!` and
+# the time steppers' post-loop scalar tendency build (`tracer_density_to_specific!`).
+function specific_scalar_fields(model)
+    density_names = prognostic_field_names(model.microphysics)
+    specific_names = map(specific_field_name, density_names)
+    specific_fields = map(name -> model.microphysical_fields[name], specific_names)
+    microphysical_scalars = NamedTuple{density_names}(specific_fields)
+    return merge(microphysical_scalars, model.tracers)
+end
+
+# Build one scalar's tendency `Gc` with `kernel`, a kernel function writing `Gc` alone or a
+# `SplitScalarTendencies` (below).
+launch_scalar_tendency!(kernel, arch, grid, name, Gc, args) = launch!(arch, grid, :xyz, kernel, Gc, grid, args)
+
+# Adds the non-advective part of each scalar's tendency to `Gⁿ` and assigns the advective part to
+# `advective_tendencies[name]`, each evaluated once. A scalar with no entry there gets the
+# non-advective part alone: whoever builds with the split evaluates its advective part later.
+struct SplitScalarTendencies{C}
+    advective_tendencies :: C
+end
+
+advective_tendency_storage(split::SplitScalarTendencies, name) = get(split.advective_tendencies, name, nothing)
+
+launch_scalar_tendency!(split::SplitScalarTendencies, arch, grid, name, Gc, args) =
+    launch_split_scalar_tendency!(advective_tendency_storage(split, name), arch, grid, Gc, args)
+
+launch_split_scalar_tendency!(C, arch, grid, Gc, args) =
+    launch!(arch, grid, :xyz, add_split_scalar_tendency!, Gc, C, grid, args)
+
+launch_split_scalar_tendency!(::Nothing, arch, grid, Gc, args) =
+    launch!(arch, grid, :xyz, add_nonadvective_scalar_tendency!, Gc, grid, args)
+
+@kernel function add_split_scalar_tendency!(Gc, C, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        C[i, j, k] = scalar_advective_tendency(i, j, k, grid, args...)
+        Gc[i, j, k] += nonadvective_scalar_tendency(i, j, k, grid, args...)
+    end
+end
+
+@kernel function add_nonadvective_scalar_tendency!(Gc, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gc[i, j, k] += nonadvective_scalar_tendency(i, j, k, grid, args...)
 end
 
 # Note: compute_static_energy_tendency! and compute_potential_temperature_tendency!

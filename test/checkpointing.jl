@@ -48,10 +48,10 @@ function anelastic_model(FT; microphysics=nothing, closure=nothing, optics=nothi
 end
 
 function compressible_model(FT; time_discretization=ExplicitTimeStepping(), microphysics=nothing, closure=nothing,
-                            timestepper_kwargs=NamedTuple(), model_kwargs...)
+                            timestepper=nothing, timestepper_kwargs=NamedTuple(), model_kwargs...)
     grid = test_grid(FT)
     dynamics = CompressibleDynamics(time_discretization; reference_potential_temperature=300)
-    model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper_kwargs, model_kwargs...)
+    model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper, timestepper_kwargs, model_kwargs...)
     set!(model; ρ=model.dynamics.reference_state.density, θ=θᵢ, qᵗ=0.015, u=uᵢ)
     return model
 end
@@ -142,6 +142,36 @@ end
 
         @testset "split-explicit, no microphysics, no closure" begin
             test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization()))
+        end
+
+        @testset "split-explicit, multirate infinitesimal step" begin
+            test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
+                                                          timestepper=:MultirateInfinitesimalStep,
+                                                          timestepper_kwargs=(; coefficients=:TVDMISB)))
+        end
+
+        @testset "split-explicit, multirate infinitesimal step, post-loop scalar tendencies" begin
+            test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
+                                                          timestepper=:MultirateInfinitesimalStep,
+                                                          timestepper_kwargs=(; coefficients=:TVDMISB,
+                                                                                post_loop_scalar_tendencies=true)))
+        end
+
+        # The first stage after the restart gives its loop the moisture tendencies of the last
+        # stage before it, which the time stepper keeps in fields of its own.
+        @testset "split-explicit, Wicker-Skamarock, post-loop scalar tendencies" begin
+            test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
+                                                          timestepper=:AcousticRungeKutta3,
+                                                          timestepper_kwargs=(; post_loop_scalar_tendencies=true)))
+        end
+
+        # The storage of a multirate infinitesimal step follows its coefficients (two registers, stage
+        # increments, accumulators). None of it outlives a step but the moisture tendencies of the last
+        # stage, which the sets with a diagonal `β` keep in fields of their own.
+        @testset "split-explicit, multirate infinitesimal step [$coefficients]" for coefficients in (:LowStorageMIS52, :DiagonalMIS52)
+            test_bitwise_restart(() -> compressible_model(FT; time_discretization=SplitExplicitTimeDiscretization(),
+                                                          timestepper=:MultirateInfinitesimalStep,
+                                                          timestepper_kwargs=(; coefficients)))
         end
 
         @testset "non-equilibrium microphysics, two species" begin

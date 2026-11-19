@@ -299,7 +299,8 @@ end
 
 @testset "Setting specific microphysical variables [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -653,7 +654,8 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
     microphysics = OneMomentCloudMicrophysics(FT)
     adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
-    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
+    model = AtmosphereModel(grid; dynamics, microphysics, timestepper=:AcousticRungeKutta3,
+                            scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
     @test model.timestepper isa Breeze.TimeSteppers.AcousticRungeKutta3
 
     Δt = FT(10)
@@ -834,7 +836,8 @@ end
 
 @testset "Mixed-phase non-equilibrium time-stepping [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)
@@ -871,7 +874,8 @@ end
 
 @testset "sedimentation_velocity, condensate_liquid_fraction, and microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -926,7 +930,8 @@ end
 
 @testset "Diagnosed cloud condensate does not sediment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 2), extent=(100, 100, 100))
+    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), extent=(100, 100, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=280)
@@ -1372,7 +1377,8 @@ end
 
 @testset "Mixed-phase sedimenting condensates and snow bottom flux [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=250)
@@ -1408,7 +1414,8 @@ end
 
 @testset "Mixed-phase non-equilibrium snow field materialization [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)

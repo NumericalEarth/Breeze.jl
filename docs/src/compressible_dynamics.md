@@ -41,7 +41,8 @@ For static energy, ``χ = s``, the source encodes the pressure work.
 strategies:
 
 - [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization):
-  Wicker–Skamarock RK3 outer integration with an inner acoustic substep loop. The outer step
+  A multirate outer integration with an inner acoustic substep loop: a multirate infinitesimal
+  step by default, or Wicker–Skamarock RK3. The outer step
   is bounded by the **advective** CFL (``Δt \sim Δx / U``); the inner substep is bounded by the
   **horizontal acoustic** CFL (``Δτ \sim Δx / c_s``). This is the recommended choice and the
   rest of this page describes its design.
@@ -87,8 +88,8 @@ side is decomposed into
 ∂_t U = G^{\text{slow}}(U) + G^{\text{fast}}(U; U^L) ,
 ```
 
-where the **slow operator** ``G^{\text{slow}}`` is evaluated once per outer RK stage from the
-current RK predictor state and held fixed during that stage's substep loop. It contains
+where the **slow operator** ``G^{\text{slow}}`` is evaluated once per outer stage from the
+current stage-entry state and held fixed during that stage's substep loop. It contains
 advective flux divergences, Coriolis and other body forces, subgrid stresses, microphysics,
 radiation, and boundary flux tendencies. The ordinary momentum-tendency kernels run in a
 mode that excludes pressure-gradient and buoyancy forces; those forces are reintroduced in
@@ -96,12 +97,21 @@ the acoustic substep loop as a stage-entry background contribution plus a linear
 perturbation contribution.
 
 The **fast operator** ``G^{\text{fast}}`` is the linearization of the acoustic and buoyancy
-dynamics about the **RK stage-entry state** ``U^L``. The cached background fields are
-refreshed before every RK stage:
+dynamics about a **linearization state** ``U^L``, whose background fields are cached:
 
 ```math
 ρ^L, \quad (ρθ)^L, \quad p^L, \quad θ^L = (ρθ)^L/ρ^L, \quad C^L .
 ```
+
+When the cache is refreshed depends on the outer scheme. [`AcousticRungeKutta3`](@ref) refreshes
+it before every stage, so ``U^L`` is the stage-entry state. [`MultirateInfinitesimalStep`](@ref),
+the default, linearizes once per outer step: the coefficients ``θ^L`` and ``C^L`` are those of the
+outer-step-start state ``U^n`` for every stage, so that all stages share one fast operator, while
+the stage-entry pressure gradient and buoyancy are still evaluated at each stage's entry state.
+The part of that stage-entry force which the frozen operator does not carry is slow, and is
+recombined across stages with the other slow tendencies. (`relinearize_stages = true` refreshes
+the cache every stage under a multirate infinitesimal step as well, at first-order accuracy for
+a non-diagonal tableau.)
 
 ``C^L`` is the slope ``∂p/∂(ρθ)`` of the compressible core's equation of state at ``U^L``, at
 fixed dry density and composition. With ``p = ρ R^m T`` and the temperature inverted from
@@ -127,12 +137,49 @@ Without condensate all give ``γ^e = 1 / (1 - \hat κ)``, which is
 ``γ^m = c^p_m / c^v_m`` with the vapor-equivalent exponent and ``γ^d`` with the dry one; condensate
 lowers it. In dry air ``C^L = γ^d R^d (p^L / p^{st})^{κ^d}``.
 
-The substep loop also moves the dry density and holds the water densities fixed. Scalar
-transport then advects the water with the preceding loop's mean velocity (the
-outer-step-start velocity in stage 1;
+The substep loop also moves the dry density and holds the water densities fixed. The water and
+tracer tendencies are built either between stages or after each stage's own loop
+(`post_loop_scalar_tendencies` in `timestepper_kwargs`). Built between stages, they advect the
+water with the preceding loop's mean velocity (the outer-step-start velocity in stage 1;
 [#1089](https://github.com/NumericalEarth/Breeze.jl/issues/1089)), so the water follows the
-loop-mean compression of the
-air, one stage late, but not the acoustic oscillation within a loop. The loop linearizes at
+loop-mean compression of the air, one stage late, but not the acoustic oscillation within a loop.
+Because the preceding loop's mean differs from the one continuity applies, a uniform mass fraction
+does not stay uniform. Built after each stage's own loop, from its mean mass flux, as WRF and MPAS
+do, their fluxes are exactly ``q / (1 - q)`` times the dry-mass flux the stage applied, and a
+uniform mass fraction stays uniform to round-off. This is the default of
+[`MultirateInfinitesimalStep`](@ref); [`AcousticRungeKutta3`](@ref) builds them between stages
+unless `post_loop_scalar_tendencies = true`. Under
+a multirate infinitesimal step the whole post-loop tendency, advection included, is recombined
+across stages with the tableau like any other slow tendency. Leaving the advective part at weight
+one from the current stage would keep the fluxes paired with continuity's, but it integrates
+advection with a first-order, anti-diffusive method that amplifies scalars at every Courant
+number. Recombined, the tendencies of earlier stages carry the mass fluxes ``F_j`` of those stages'
+loops, while stage ``i`` moves the dry air with ``d_i F_i``. Each stage therefore transports the
+water and the tracers with the mass flux ``F_j + R_j``,
+``R_j = \sum_{k \le j} W_{jk} F_k``, ``W = β^{-1} \mathrm{diag}(d) - I``, for which the recombined
+fluxes carry the stage's own: ``\sum_j β_{ij} (F_j + R_j) = d_i F_i``. With it the stage applies
+exactly its own mass flux to a uniform mass fraction, which stays uniform to round-off with every
+coefficient set. ``F_j + R_j`` is the slow mass flux that the stages would recombine into the dry
+air's own, and one reconstruction of the scalar carries both parts, so the scalars keep the order
+of accuracy of the slow method where the mass flux changes during a step. The correction is
+recombined with the rest of the tendency, so a strong-stability-preserving coefficient set still
+advances the scalars by convex combinations of forward-Euler steps of their own advection
+operator. Under adaptive implicit vertical advection the implicit remainder
+forms the mass fraction it transports with the density the loop has compressed the cell to,
+for the same reason.
+
+The pressure that the loop integrates changes with the water densities over a stage, through
+their stage forcing and the dilution it is paired with. Built after the loop, a stage's water
+tendencies are not in hand when its loop starts. The loop is given the forcing with the tendencies
+that the stage before built in place of the stage's own (in the first stage, those of the last
+stage of the step before): the same transport, of the mass fractions one stage earlier. What the
+loop's pressure missed of the change of the water over the stage reaches the next stage with the
+state it starts from. Without this the loop would see the water one stage late, which amplifies
+the vertical velocity where a sharp vapor gradient is advected
+([#1093](https://github.com/NumericalEarth/Breeze.jl/issues/1093)) and makes a multirate
+infinitesimal step first-order accurate.
+
+The loop linearizes at
 fixed composition. This is exact for the slow, loop-mean compression, where it keeps the loop
 consistent with the re-diagnosed pressure in balanced flow, and it gives the moist adiabatic
 compressibility. For the oscillation itself the re-diagnosed state is closer to fixed water
@@ -227,16 +274,47 @@ about ``\hat κ (\hat γ H^c / c^p_m)^2 / (2 \tilde{T})``, a few tenths of a kel
 liquid, which leaves about 1% less condensate than the converged equilibrium. One Newton step
 removes nearly all of it.
 
-The outer-step-start state ``U^n`` is also stored. Stages 2 and 3 initialize perturbations
-with the rewind term ``U^n - U^L`` so that the full state at the beginning of every
-substep loop is still ``U^n`` while the linearized coefficients come from the current RK
-predictor. This is Breeze's current stage-rewind formulation for preserving the
-Wicker-Skamarock RK3 invariant. It should not be read as identical to every production
+The outer-step-start state ``U^n`` is also stored. A stage whose start state ``U^0`` differs from
+its entry state initializes the perturbations with the rewind term ``U^0 - U^L_{\text{entry}}``,
+so that the full state at the beginning of its substep loop is ``U^0``. Under Wicker–Skamarock RK3
+every stage starts from ``U^0 = U^n``, which is Breeze's stage-rewind formulation for preserving
+the Wicker–Skamarock invariant; under a multirate infinitesimal step stage ``i`` starts from
+``U^0 = U^n + \sum_j α_{ij} (Y_j - U^n)``, a combination of the earlier stage results ``Y_j``. It should not be read as identical to every production
 small-step implementation: for example, MPAS-Atmosphere stores stage-state increments
 with different bookkeeping rather than literally initializing these Breeze perturbation
 fields to ``U^n - U^L``.
 
-### Outer scheme: Wicker–Skamarock RK3
+### Outer schemes
+
+The default outer scheme for [`SplitExplicitTimeDiscretization`](@ref) is
+[`MultirateInfinitesimalStep`](@ref) with its `:ConvexLinearMIS6` coefficients. Select Wicker–Skamarock RK3 with
+`timestepper = :AcousticRungeKutta3`.
+
+A multirate infinitesimal step
+([Wensch et al. 2009](@cite WenschKnothGalant2009); [Knoth and Wensch 2014](@cite KnothWensch2014))
+with ``s`` stages and coefficients ``α``, ``β``, ``γ`` integrates, in stage ``i``,
+
+```math
+∂_τ V = G^{\text{fast}}(V) + \frac{1}{d_i} \left [ \sum_{j \le i} β_{ij} \, G^{\text{slow}}(Y_{j-1})
+        + \sum_{j < i} γ_{ij} \frac{Y_j - U^n}{Δt} \right ] , \qquad
+V(0) = U^n + \sum_{j < i} α_{ij} (Y_j - U^n) ,
+```
+
+over the interval ``d_i Δt``, with ``d_i = \sum_j β_{ij}``, ``Y_0 = U^n``, and sets ``Y_i`` to the
+result; ``U^{n+1} = Y_s``. The acoustic substep loop is the integrator of each stage. The default
+`:ConvexLinearMIS6` set has six stages and a diagonal ``β``; `:SSPMIS43`, `:MIS4a`, `:TVDMISB`, `:WickerSkamarock3`
+and others are also available
+(see [`MultirateInfinitesimalStep`](@ref)). Wicker–Skamarock RK3 is the special case
+``α = γ = 0``, ``β = \mathrm{diag}(1/3, 1/2, 1)``.
+
+A substep advances the horizontal momentum with the old pressure and then the pressure with the
+new momentum, which leaves the momentum half a substep behind the pressure. Stages that start from
+or are forced with the increments of earlier stages (``α ≠ 0`` or ``γ ≠ 0``) cannot tolerate that
+skew: it amplifies the acoustic modes. Their first substep therefore advances the horizontal
+momentum over ``Δτ / 2`` and the stage closes with another ``Δτ / 2``, so that each stage is a
+sequence of symmetric substeps (momentum over ``Δτ / 2``, pressure over ``Δτ``, momentum over
+``Δτ / 2``). The stages of Wicker–Skamarock RK3 all start from ``U^n`` and keep the plain
+forward–backward substeps.
 
 The [`AcousticRungeKutta3`](@ref) time stepper is the three-stage Wicker–Skamarock RK3
 ([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) with stage fractions
@@ -255,24 +333,26 @@ previous-stage state. The acoustic substep loop is invoked inside ``R(\cdot)`` t
 perturbations about the current stage-entry state, initialized with the rewind term
 described above.
 
-The acoustic substep size is **constant** across all stages,
+With either outer scheme, a stage covers a fraction ``β_k`` of the outer step (``β_k = d_k``
+for a multirate infinitesimal step). By default
+([`ProportionalSubsteps`](@ref Breeze.CompressibleEquations.ProportionalSubsteps)) each stage
+tiles its own interval exactly, with
 
 ```math
-Δτ = Δt / N ,
+N_τ = \max(\lceil β_k N \rceil, \, 1) , \qquad Δτ = β_k Δt / N_τ ,
 ```
 
-while the substep count varies by stage:
-
-```math
-N_τ = \max(\mathrm{round}(β_k N), \, 1) ,
-```
-
-so the canonical Wicker–Skamarock distribution is ``N/3, N/2, N`` substeps in stages 1, 2, 3
-respectively. This keeps the acoustic CFL number identical at every stage. The substep
-distribution is selectable via the `substep_distribution` keyword
-([`AcousticSubstepDistribution`](@ref Breeze.CompressibleEquations.AcousticSubstepDistribution));
-[`MonolithicFirstStage`](@ref Breeze.CompressibleEquations.MonolithicFirstStage) is also
-available as an alternative that collapses stage 1 to a single substep of size ``Δt/3``.
+substeps for a fixed full-step count ``N``, so ``Δτ`` can differ slightly between stages. With
+the adaptive default `substeps = nothing`, ``N_τ`` is instead the acoustic-CFL count for the
+stage interval ``β_k Δt``, and a stage covering more than half of the outer step takes at
+least two substeps. The distribution is selectable via the `substep_distribution` keyword
+([`AcousticSubstepDistribution`](@ref Breeze.CompressibleEquations.AcousticSubstepDistribution)).
+[`ConstantSubstepSize`](@ref Breeze.CompressibleEquations.ConstantSubstepSize) shares one substep
+size ``Δτ = Δt / N`` between all stages, with ``N`` rounded up to a multiple of 6 and
+``N_τ = \max(\mathrm{round}(β_k N), 1)``: the canonical Wicker–Skamarock distribution of
+``N/3, N/2, N`` substeps in stages 1, 2, 3.
+[`MonolithicFirstStage`](@ref Breeze.CompressibleEquations.MonolithicFirstStage) is the same
+except that it collapses stage 1 to a single substep of size ``Δt/3``.
 
 ### Linearized perturbation equations
 
@@ -290,11 +370,13 @@ inside the substep loop is
 \end{aligned}
 ```
 
-Each ``G^s`` is the slow tendency for that variable, held constant across the ``N_τ``
-substeps of a given RK stage. For vertical momentum, ``G^s_{ρw}`` is assembled by adding the
+Each ``G^s`` is the slow tendency for that variable (under a multirate infinitesimal step, the
+stage's combination of slow tendencies and increments), held constant across the ``N_τ``
+substeps of a given stage. For vertical momentum, ``G^s_{ρw}`` is assembled by adding the
 stage-entry vertical pressure-gradient and buoyancy imbalance,
 ``-∂_z(p^L - p_r) - g(ρ^L - ρ_r)``, to the slow non-pressure tendency. The linearized pressure
-coefficient ``C^L`` and the temperature-flux factor ``θ^L`` are cached for the stage, which is
+coefficient ``C^L`` and the temperature-flux factor ``θ^L`` are cached (for the stage under
+Wicker–Skamarock RK3, for the outer step under a multirate infinitesimal step), which is
 what makes each stage's substep system linear.
 
 ### Terrain-following fast acoustic system
@@ -540,8 +622,8 @@ After ``N_τ`` substeps, the full prognostic state is recovered by addition:
 
 There is no Exner-to-``ρθ`` conversion and no convex blend, because the perturbation system
 already advances the same prognostic variables as the outer scheme. The slow tendencies
-``G^s`` are applied through the substep loop, so the WS-RK3 stage update
-``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})`` falls out of the same loop.
+``G^s`` are applied through the substep loop, so the stage update of the outer scheme (for
+WS-RK3, ``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})``) falls out of the same loop.
 
 ## [Klemp divergence damping](@id klemp-damping)
 
@@ -694,12 +776,12 @@ split-explicit acoustic loop can dominate the cost. In the same RICO harness the
 run failed at ``\mathrm{CFL} = 1.4`` and completed at ``\mathrm{CFL} = 0.7``. Benchmark
 both the accepted ``Δt`` and the acoustic substep count ``N`` when comparing formulations.
 
-The default `substeps = nothing` adaptively chooses ``N`` from the horizontal acoustic CFL
-each step:
+The default `substeps = nothing` adaptively chooses the substep count of each stage from the
+horizontal acoustic CFL of its interval ``β_k Δt``:
 
 ```math
-N \approx
-\left\lceil \frac{Δt \, c^{ac}}{ν \, Δx_\min} \right\rceil ,
+N_τ \approx
+\left\lceil \frac{β_k Δt \, c^{ac}}{ν \, Δx_\min} \right\rceil ,
 ```
 
 with ``c^{ac} = \sqrt{γ^d R^d T_r}`` evaluated at a nominal reference temperature ``T_r = 300\,``K and
@@ -707,7 +789,8 @@ with ``c^{ac} = \sqrt{γ^d R^d T_r}`` evaluated at a nominal reference temperatu
 conventional safety factor of ``2``). Lower ``ν`` produces more substeps and a shorter
 ``Δτ``; raise it (closer to the linear stability bound of ``1``) only after verifying that
 the resulting acoustic noise level remains acceptable. The setting is ignored when
-`substeps` is given an explicit integer, which pins ``Δτ = Δt / N`` for reproducibility.
+`substeps` is given an explicit integer ``N``, which pins the substep counts
+(``\lceil β_k N \rceil`` per stage by default) for reproducibility.
 
 ## Defaults and verification
 

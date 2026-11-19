@@ -40,7 +40,12 @@ function saturated_column_model(FT, microphysics, dynamics_kind; constants = The
     else
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 290)
     end
-    model = AtmosphereModel(grid; dynamics, microphysics, thermodynamic_constants = constants, advection = nothing)
+
+    # The tests read the moisture tendencies that `update_state!` builds. The split-explicit time
+    # stepper builds them there only with pre-loop scalar tendencies.
+    timestepper_kwargs = dynamics_kind === :anelastic ? (;) : (; post_loop_scalar_tendencies = false)
+    model = AtmosphereModel(grid; dynamics, microphysics, timestepper_kwargs,
+                            thermodynamic_constants = constants, advection = nothing)
 
     # Air 10 K warmer than the reference, saturated at its own pressure and temperature, or
     # holding a fraction `supersaturation` more water than that.
