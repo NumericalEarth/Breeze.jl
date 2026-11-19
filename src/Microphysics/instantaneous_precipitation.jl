@@ -112,6 +112,11 @@ end
 ##### Once-per-step irreversible condensation + rain-out
 #####
 
+# Phase change and precipitation happen in the operator-split update, outside the microphysical
+# tendencies and the model's sedimentation
+AtmosphereModels.tendency_phase_change(::IP) = false
+AtmosphereModels.sediments_through_model(::IP) = false
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
