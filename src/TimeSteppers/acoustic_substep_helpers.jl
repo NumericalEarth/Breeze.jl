@@ -72,7 +72,7 @@ stage_start_state(timestepper, model) = timestepper.U⁰
 function cache_transport_velocity!(model)
     substepper = model.timestepper.substepper
     w_cache = substepper.time_averaged_vertical_velocity_cache
-    copyto!(parent(w_cache), parent(transport_velocities(model).w))
+    copy_parent!(w_cache, transport_velocities(model).w)
 
     # The moisture's part of the loop's pressure pairs the moisture tendencies with the divergence
     # of the mass flux they were built with, which the next acoustic loop likewise overwrites.
@@ -238,6 +238,8 @@ end
 
 PostLoopScalarTendencies() = PostLoopScalarTendencies(nothing)
 
+@regional PostLoopScalarTendencies
+
 scalar_tendency_timing(post_loop_scalar_tendencies::Bool) =
     post_loop_scalar_tendencies ? PostLoopScalarTendencies() : PreLoopScalarTendencies()
 
@@ -271,7 +273,7 @@ keep_previous_scalar_tendencies!(::Nothing, model) = nothing
 function keep_previous_scalar_tendencies!(previous_tendencies, model)
     Gⁿ = model.timestepper.Gⁿ
     for name in moisture_forcing_names(model.microphysics)
-        copyto!(parent(previous_tendencies[name]), parent(Gⁿ[name]))
+        copy_parent!(previous_tendencies[name], Gⁿ[name])
     end
     return nothing
 end
@@ -287,7 +289,7 @@ prepare_scalar_tendencies!(::PreLoopScalarTendencies, model) = nothing
 function prepare_scalar_tendencies!(::PostLoopScalarTendencies, model)
     Gⁿ = model.timestepper.Gⁿ
     for name in scalar_prognostic_names(model)
-        fill!(parent(Gⁿ[name]), 0)
+        @apply_regionally fill!(parent(Gⁿ[name]), 0)
     end
     return nothing
 end
@@ -303,7 +305,7 @@ cache_transport_density_tendency!(::PostLoopScalarTendencies, substepper, model)
 function cache_post_loop_transport!(model)
     substepper = model.timestepper.substepper
     w_cache = substepper.time_averaged_vertical_velocity_cache
-    copyto!(parent(w_cache), parent(transport_velocities(model).w))
+    copy_parent!(w_cache, transport_velocities(model).w)
     compute_transport_density_tendency!(substepper, model, transport_velocities(model))
     return nothing
 end
@@ -316,10 +318,8 @@ end
 compute_post_loop_scalar_tendencies!(::PreLoopScalarTendencies, model, Δt, callbacks) = nothing
 
 function compute_post_loop_scalar_tendencies!(timing::PostLoopScalarTendencies, model, Δt, callbacks)
-    tracer_density_to_specific!(model)
-    prepare_post_loop_scalar_tendencies!(model.timestepper, model)
-    kernel = post_loop_scalar_tendency_kernel(model.timestepper, model)
-    compute_scalar_tendencies!(model, fields(model), transport_velocities(model), kernel)
+    # The builds and assemblies launch region by region; the callbacks run once, on the whole model
+    @apply_regionally launch_post_loop_scalar_tendencies!(model)
 
     for callback in callbacks
         callback.callsite isa TendencyCallsite && callback(model)
@@ -327,10 +327,18 @@ function compute_post_loop_scalar_tendencies!(timing::PostLoopScalarTendencies, 
 
     keep_previous_scalar_tendencies!(timing.previous_tendencies, model)
     cache_post_loop_transport!(model)
-    complete_post_loop_scalar_tendencies!(model.timestepper, model, Δt)
+    @apply_regionally complete_post_loop_scalar_tendencies!(model.timestepper, model, Δt)
     # The assembly may read the prognostic fields (see `StateIncrement`), so the tracers are densities again.
-    tracer_specific_to_density!(model)
-    assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
+    @apply_regionally tracer_specific_to_density!(model)
+    @apply_regionally assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
+    return nothing
+end
+
+function launch_post_loop_scalar_tendencies!(model)
+    tracer_density_to_specific!(model)
+    prepare_post_loop_scalar_tendencies!(model.timestepper, model)
+    kernel = post_loop_scalar_tendency_kernel(model.timestepper, model)
+    compute_scalar_tendencies!(model, fields(model), transport_velocities(model), kernel)
     return nothing
 end
 
@@ -352,8 +360,8 @@ post_loop_scalar_tendency_kernel(timestepper, model) = add_scalar_tendency!
 # wᴸ = wᵉ + wⁱ). The full wᴸ is cached, not the clipped wᵉ, which loses the remainder in
 # saturated cells.
 cache_advecting_state!(model) =
-    cache_advecting_state!(model.timestepper.substepper.vertical_velocity_cache,
-                           model.timestepper.substepper.density_cache, model)
+    @apply_regionally cache_advecting_state!(model.timestepper.substepper.vertical_velocity_cache,
+                                             model.timestepper.substepper.density_cache, model)
 
 cache_advecting_state!(::Nothing, ::Nothing, model) = nothing
 
@@ -419,8 +427,8 @@ function add_implicit_advection_tendency!(model, advection::AdaptiveImplicitVert
     w, ρᵈ = advecting_state(model)
     θ_name = thermodynamic_density_name(model.formulation)
     ρθ = prognostic_fields(model)[θ_name]
-    launch!(architecture(grid), grid, :xyz, _implicit_advection_base_tendency!,
-            model.timestepper.Gⁿ[θ_name], grid, scheme, td, w, ρθ, ρᵈ)
+    @apply_regionally launch!(architecture(grid), grid, :xyz, _implicit_advection_base_tendency!,
+                              model.timestepper.Gⁿ[θ_name], grid, scheme, td, w, ρθ, ρᵈ)
     return nothing
 end
 
@@ -436,7 +444,7 @@ postloop_thermodynamic_scheme(::AdaptiveImplicitVerticalAdvection, ρ) = implici
 # tridiagonal system, the operator split WRF and CM1 use. The advecting velocity must be the one
 # the field's slow tendency was built with (the stage-entry predictor velocities).
 implicit_substep!(model, Δt_stage) =
-    implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
+    @apply_regionally implicit_substep!(model, model.timestepper.implicit_solver, Δt_stage)
 
 # No implicit solver ⇒ nothing in the model is vertically implicit.
 implicit_substep!(model, ::Nothing, Δt_stage) = nothing

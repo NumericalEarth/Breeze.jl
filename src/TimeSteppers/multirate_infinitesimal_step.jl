@@ -11,6 +11,7 @@ using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_diverg
 using Breeze.RoundingTreatments: rounding_error
 
 using Oceananigans: prognostic_fields, CenterField, XFaceField, YFaceField, ZFaceField, architecture
+using Oceananigans.Fields: compute!
 using Oceananigans.Advection: explicit_velocity_scaleᶜᶜᶠ
 using Oceananigans.Grids: topology, Periodic, Flat
 using Oceananigans.Operators: Axᶠᶜᶜ, Ayᶜᶠᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, δxᶜᵃᵃ, δyᵃᶜᵃ
@@ -253,6 +254,8 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
                                       Ref(1), Ref(1), Ref(NaN))
 end
 
+@regional MultirateInfinitesimalStep
+
 #####
 ##### Storage layouts
 #####
@@ -385,6 +388,8 @@ struct ScalarMassFluxCorrection{W, F}
     weights :: W      # W = β⁻¹ diag(d) - I, the weight of each stage's mass flux in each stage's correction
     mass_fluxes :: F  # stages 3 to s: the part known so far of the correction's mass flux Rᵢ = Σⱼ Wᵢⱼ Fⱼ; the first holds F₁ through stage 2
 end
+
+@regional ScalarMassFluxCorrection
 
 # `nothing` with pre-loop scalar tendencies, whose mass fluxes are those of the preceding loops
 # whatever the tableau, and with a diagonal `β`, whose stages each apply their own flux alone.
@@ -884,6 +889,8 @@ end
 Adapt.adapt_structure(to, s::StageStartState) =
     StageStartState(adapt(to, s.Uⁿ), adapt(to, s.offset), adapt(to, s.weight), s.rounding, s.key)
 
+@regional StageStartState
+
 Base.size(s::StageStartState) = size(s.Uⁿ)
 
 Base.@propagate_inbounds Base.getindex(s::StageStartState, i::Int, j::Int, k::Int) =
@@ -906,6 +913,8 @@ end
 
 Adapt.adapt_structure(to, r::StartStateResidual) =
     StartStateResidual(adapt(to, r.Uⁿ), adapt(to, r.offset), adapt(to, r.weight), adapt(to, r.recovered), adapt(to, r.recovered_weight))
+
+@regional StartStateResidual
 
 Base.size(r::StartStateResidual) = size(r.Uⁿ)
 
@@ -933,6 +942,8 @@ StateIncrement(u, Uⁿ, residual) = StateIncrement{eltype(u), typeof(u), typeof(
 
 Adapt.adapt_structure(to, d::StateIncrement) = StateIncrement(adapt(to, d.u), adapt(to, d.Uⁿ), adapt(to, d.residual))
 
+@regional StateIncrement
+
 Base.size(d::StateIncrement) = size(d.u)
 
 Base.@propagate_inbounds Base.getindex(d::StateIncrement, i::Int, j::Int, k::Int) =
@@ -957,6 +968,8 @@ end
 WeightedSum(terms, weights) = WeightedSum{eltype(weights), typeof(terms), typeof(weights)}(terms, weights)
 
 Adapt.adapt_structure(to, s::WeightedSum) = WeightedSum(adapt(to, s.terms), adapt(to, s.weights))
+
+@regional WeightedSum
 
 Base.size(s::WeightedSum) = size(first(s.terms))
 
@@ -1080,6 +1093,14 @@ function assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
     C = fast_tendency_scratch(ts, θ_name)
     compute_fast_thermodynamic_tendency!(ts.storage, C, ts.substepper, model)
     compute_pressure_remainder!(ts.step_start, ts.substepper, model, ts.Uⁿ)
+    # The assemblies read and write each point alone, so they launch region by region
+    @apply_regionally assemble_pre_loop_stage_forcing!(ts, model, Δt)
+    return nothing
+end
+
+function assemble_pre_loop_stage_forcing!(ts, model, Δt)
+    θ_name = thermodynamic_density_name(model.formulation)
+    C = fast_tendency_scratch(ts, θ_name)
     assemble_transport_density_tendency!(ts, model, Δt)
     for name in pre_loop_assembly_names(ts.scalar_tendencies, model)
         assemble_stage_forcing!(ts, model, Δt, name, stage_tendency_split(ts, model, name, θ_name, C))
@@ -2023,6 +2044,36 @@ function store_outer_step_state!(ts::MultirateInfinitesimalStep, model)
 end
 
 #####
+##### The seam budget of the acoustic loop on a Yin-Yang grid
+#####
+
+# Later stages start from, and are forced with, the states of earlier ones, so the state of every stage
+# gains back what its acoustic loop moved through the seam, over the interval dᵢ Δt of the stage. With
+# `PostLoopScalarTendencies` the callbacks at the `TendencyCallsite` run a second time in a stage, right
+# after its loop, when the perturbations, the mean velocities and the linearization are those of that loop
+# and the momentum is as the loop left it: that call corrects the state, from the budgets evaluated then
+# (`after`, see `acoustic_divergences`).
+#
+# TODO: with `PreLoopScalarTendencies` there is no call between a stage's loop and its scalar update, and
+# the loop's budget is not returned. With a `β` that is not diagonal the thermodynamic tendency is also
+# recombined apart from its fast part, whose seam budget the tendency correction then weights as slow.
+function AtmosphereModels.correct_acoustic_state!(ts::MultirateInfinitesimalStep, fixer, model, contents, budgets)
+    clock = model.clock
+    # The call before a stage's loop, in `update_state!`, announces the stage as the next one
+    callsite = (clock.iteration, ts.next_stage[])
+    after_loop = fixer.last_callsite[] == callsite && ts.next_stage[] == ts.stage[]
+    fixer.last_callsite[] = callsite
+    after_loop || return nothing
+
+    foreach(compute!, budgets.mean)
+    foreach(compute!, budgets.after)
+    interval = ts.tableau.d[ts.stage[]] * ts.current_Δt[]
+    AtmosphereModels.return_acoustic_seam_mass!(fixer, model, contents, budgets.mean, budgets.after, interval)
+
+    return nothing
+end
+
+#####
 ##### Time stepping
 #####
 
@@ -2037,7 +2088,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
     s = length(d)
     tⁿ⁺¹ = model.clock.time + Δt
 
-    store_outer_step_state!(ts, model)
+    @apply_regionally store_outer_step_state!(ts, model)
     store_step_start_state!(ts.step_start, model)
     freeze_linearization_state!(ts.substepper, model)
 
@@ -2052,7 +2103,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
             update_state!(model, callbacks; compute_tendencies = true)
             # After `update_state!`, so that the increments are those of the state it leaves,
             # with its negative-moisture correction (see `stage_increment_source`).
-            store_stage_increment!(ts, model, i, Δt)
+            @apply_regionally store_stage_increment!(ts, model, i, Δt)
             cache_transport_velocity!(model)
         end
     end

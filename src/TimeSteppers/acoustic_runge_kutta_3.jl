@@ -1,5 +1,8 @@
 using KernelAbstractions: @kernel, @index
 
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Grids: Center
+using Oceananigans.Operators: div_xyᶜᶜᶜ
 using Oceananigans: TendencyCallsite
 using Oceananigans.Utils: time_difference_in_seconds
 
@@ -13,7 +16,8 @@ using Oceananigans.TimeSteppers:
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!,
-                                compute_closure_tendencies!, refreshes_state_after_update, invalid_time_step
+                                compute_closure_tendencies!, refreshes_state_after_update, invalid_time_step,
+                                continuity_density, thermodynamic_density
 
 using Breeze.CompressibleEquations:
     CompressibleEquations,
@@ -26,7 +30,8 @@ using Breeze.CompressibleEquations:
     acoustic_substep_loop!,
     prepare_acoustic_cache!,
     freeze_linearization_state!,
-    seed_time_averaged_velocities!
+    seed_time_averaged_velocities!,
+    horizontal_theta_flux_divergence
 
 # Outer time steppers that drive the acoustic substep loop. Subtypes carry `U⁰`, `Gⁿ`,
 # `implicit_solver` and `substepper`.
@@ -146,6 +151,8 @@ build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_sta
                                               ρv = prognostic_fields.ρv,
                                               ρw = prognostic_fields.ρw))
 
+@regional AcousticRungeKutta3
+
 #####
 ##### Adaptive-implicit vertical advection split time step
 #####
@@ -209,8 +216,8 @@ function acoustic_stage!(model::AtmosphereModel, Δt, β, rounding, callbacks)
     # to the current RK stage-entry state; the substep perturbations are
     # initialized with a rewind term inside the substep loop so the
     # WS-RK3 invariant still starts from Uⁿ.
-    refresh_stage_linearization!(ts, substepper, model)
-    cache_advecting_state!(model)
+    @noinline refresh_stage_linearization!(ts, substepper, model)
+    @noinline cache_advecting_state!(model)
 
     # `update_state!` built the slow tendencies (advection + Coriolis + diffusion; PGF and
     # buoyancy are excluded — those are handled inside the substep loop in linearized form
@@ -218,13 +225,13 @@ function acoustic_stage!(model::AtmosphereModel, Δt, β, rounding, callbacks)
     # With `PostLoopScalarTendencies`, `update_state!` built no scalar tendencies: zero them
     # first, so the boundary flux and closure sources are what the post-loop build adds to.
     prepare_scalar_tendencies!(ts.scalar_tendencies, model)
-    compute_flux_bc_tendencies!(model)
-    compute_closure_tendencies!(model)
+    @noinline compute_flux_bc_tendencies!(model)
+    @noinline compute_closure_tendencies!(model)
 
     # Base-state part of the IMEX vertical-advection split's implicit half (a no-op unless
     # the thermodynamic scheme is adaptive-implicit); the perturbation part is solved per
     # substep inside the loop, dispatched on the scheme type.
-    add_implicit_advection_tendency!(model)
+    @noinline add_implicit_advection_tendency!(model)
 
     # Combine the stored stage tendencies and increments into this stage's slow forcing and
     # start state (a no-op for Wicker–Skamarock RK3, whose stages all start from Uⁿ and apply
@@ -246,13 +253,13 @@ function acoustic_stage!(model::AtmosphereModel, Δt, β, rounding, callbacks)
     # the tracers' solves sedimented, which then takes the thermodynamic variable's post-loop
     # closure diffusion; that variable's implicit vertical transport was already applied inside
     # the substep loop (see `implicit_sedimentation_step!`).
-    scalar_stage_update!(model, β * Δt, rounding)
+    @noinline scalar_stage_update!(model, β * Δt, rounding)
 
     # Vertically-implicit solve for the acoustic prognostics (momentum and the thermodynamic
     # variable) over the stage interval β Δt: the implicit remainder of adaptive implicit
     # vertical advection combined with vertically-implicit closure diffusion. A no-op when
     # the timestepper has no implicit solver.
-    implicit_substep!(model, β * Δt)
+    @noinline implicit_substep!(model, β * Δt)
 
     return nothing
 end
@@ -264,7 +271,7 @@ end
 function scalar_stage_update!(model::AtmosphereModel, Δt_stage, rounding)
     grid = model.grid
     kernel_Δt = kernel_time_step(grid.architecture, grid, Δt_stage)
-    return scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
+    return @apply_regionally scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
 end
 
 # Round-to-nearest keeps the original kernel, so the default is bitwise unchanged.
@@ -487,6 +494,41 @@ const SplitExplicitCompressibleDynamics = CompressibleDynamics{<:SplitExplicitTi
 
 AtmosphereModels.adiabatic_twin_timestepper(::AcousticRungeKutta3, ::SplitExplicitCompressibleDynamics) =
     :AcousticRungeKutta3, NamedTuple()
+
+# The seam budgets of the acoustic loop on a Yin-Yang grid (see `ConservationFixer`). The loop moves the dry
+# density with the momentum perturbation (ρu)′ of its substeps and the thermodynamic density with θᴸ (ρu)′.
+# Its transport velocity ⟨u⟩ = (ρuᴸ + ⟨(ρu)′⟩) / ℑ(ρᴸ) averages the perturbation over the stage, so the seam
+# budget of the loop's fluxes is that of the flux of the mean momentum ⟨u⟩ ℑ(ρᴸ), with ρᴸ = ρᵈ − ρ′ the
+# density the stage was entered with, less that of the flux of the momentum ρuᴸ it was entered with.
+#
+# θᴸ is the potential temperature the loop linearizes about. The substepper caches it with the sensitivity Λᴴ
+# of the pressure to the moisture content added, whose flux the end of a stage takes off the thermodynamic
+# density again (`remove_moisture_content!`), so Λᴴ is taken off here. It is exactly zero without moisture.
+#
+# `entry` is evaluated before the loop, from the state the stage is entered with: Wicker–Skamarock stages
+# refresh θᴸ to that state, whose potential temperature is ρθ / ρᵈ. `after` evaluates the same budget once
+# the loop has run, from the recovered state less the perturbations the loop left, with the θᴸ it used: a
+# multirate infinitesimal step keeps the θᴸ of the start of the step, which the callsite before the first
+# stage does not hold yet.
+function AtmosphereModels.acoustic_divergences(model::CompressibleAcousticModel)
+    substepper = model.timestepper.substepper
+    ρᵈ = continuity_density(model.dynamics)
+    ρθ = thermodynamic_density(model.formulation)
+    ρᴸ = ρᵈ - substepper.density_perturbation
+    θᴸ = substepper.linearization_potential_temperature - substepper.fixed_composition_sensitivity
+    ρuᴸ = model.momentum.ρu - substepper.momentum_perturbation.u
+    ρvᴸ = model.momentum.ρv - substepper.momentum_perturbation.v
+    mean_ρu = substepper.time_averaged_velocities.u * ρᴸ
+    mean_ρv = substepper.time_averaged_velocities.v * ρᴸ
+    entry = acoustic_flux_divergences(model.grid, ρθ / ρᵈ, model.momentum.ρu, model.momentum.ρv)
+    after = acoustic_flux_divergences(model.grid, θᴸ, ρuᴸ, ρvᴸ)
+    mean = acoustic_flux_divergences(model.grid, θᴸ, mean_ρu, mean_ρv)
+    return (; entry, after, mean)
+end
+
+acoustic_flux_divergences(grid, θ, ρu, ρv) =
+    (KernelFunctionOperation{Center, Center, Center}(div_xyᶜᶜᶜ, grid, ρu, ρv),
+     KernelFunctionOperation{Center, Center, Center}(horizontal_theta_flux_divergence, grid, θ, ρu, ρv))
 
 Oceananigans.prognostic_state(timestepper::AcousticTimeStepper) =
     (substepper = Oceananigans.prognostic_state(timestepper.substepper),)

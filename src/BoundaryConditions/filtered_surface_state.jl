@@ -15,9 +15,9 @@
 
 using KernelAbstractions: @kernel, @index
 using Oceananigans: architecture
-using Oceananigans.Fields: interpolate
-using Oceananigans.Grids: xnode, ynode, topology, Flat
-using Oceananigans.Utils: launch!, KernelParameters, prettysummary
+using Oceananigans.Fields: fractional_z_index
+using Oceananigans.Grids: topology, Flat
+using Oceananigans.Utils: launch!, KernelParameters, prettysummary, interpolator
 
 #####
 ##### FilteredSurfaceVelocities
@@ -186,11 +186,11 @@ end
 # No height specified: use first grid cell value
 @inline interpolate_or_surface(i, j, grid, field, ℓx, ℓy, ::Nothing) = @inbounds field[i, j, 1]
 
-# Fixed reference height: interpolate using Oceananigans.Fields.interpolate
+# Fixed reference height: interpolate linearly in z within column (i, j)
 @inline function interpolate_or_surface(i, j, grid, field, ℓx, ℓy, z)
-    x = xnode(i, j, 1, grid, ℓx, ℓy, Center())
-    y = ynode(i, j, 1, grid, ℓx, ℓy, Center())
-    return interpolate((x, y, z), field, (ℓx, ℓy, Center()), grid)
+    kk = fractional_z_index(z, (ℓx, ℓy, Center()), grid)
+    k⁻, k⁺, ζ = interpolator(kk)
+    return @inbounds (1 - ζ) * field[i, j, k⁻] + ζ * field[i, j, k⁺]
 end
 
 #####

@@ -195,6 +195,8 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.contravariant_vertical_velocity),
                          adapt(to, dynamics.contravariant_vertical_momentum))
 
+@regional CompressibleDynamics
+
 # The compressible θˡⁱ→T inversion is implicit (T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ), so the
 # default temperature solver iterates to convergence. The anelastic inversion is
 # closed-form and uses the generic `nothing` fallback.
@@ -330,14 +332,14 @@ build_reference_state(grid, ::Nothing, ref_spec, base_pressure, standard_pressur
 
 function seed_pressure!(pressure, grid, pressure_reference)
     arch = grid.architecture
-    launch!(arch, grid, :xyz, _seed_pressure_from_field!, pressure, pressure_reference)
+    @apply_regionally launch!(arch, grid, :xyz, _seed_pressure_from_field!, pressure, pressure_reference)
     fill_halo_regions!(pressure)
     return nothing
 end
 
 function seed_pressure!(pressure, grid, pressure_value::Number)
     arch = grid.architecture
-    launch!(arch, grid, :xyz, _seed_pressure_from_value!, pressure, pressure_value)
+    @apply_regionally launch!(arch, grid, :xyz, _seed_pressure_from_value!, pressure, pressure_value)
     fill_halo_regions!(pressure)
     return nothing
 end
@@ -577,6 +579,16 @@ AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
 
 default_timestepper(::SplitExplicitTimeDiscretization) = :MultirateInfinitesimalStep
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
+
+# The slow tendencies of `SplitExplicitTimeDiscretization` omit the vertical pressure gradient and the
+# buoyancy, which only the acoustic substeps of `MultirateInfinitesimalStep` and `AcousticRungeKutta3` integrate
+const AcousticTimeStepperName = Union{Val{:MultirateInfinitesimalStep}, Val{:AcousticRungeKutta3}}
+
+AtmosphereModels.validate_timestepper(::AcousticTimeStepperName, ::CompressibleDynamics{<:SplitExplicitTimeDiscretization}) = nothing
+
+AtmosphereModels.validate_timestepper(::Val{name}, ::CompressibleDynamics{<:SplitExplicitTimeDiscretization}) where name =
+    throw(ArgumentError("CompressibleDynamics(SplitExplicitTimeDiscretization()) requires timestepper = " *
+                        ":MultirateInfinitesimalStep or :AcousticRungeKutta3, got :$name."))
 
 #####
 ##### Show methods

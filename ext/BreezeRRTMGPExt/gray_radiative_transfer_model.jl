@@ -7,8 +7,8 @@
 
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
-using Oceananigans.Grids: ynode, znodes
-using Oceananigans.Grids: AbstractGrid, Center, Face, Flat
+using Oceananigans.Grids: znodes
+using Oceananigans.Grids: AbstractGrid, Face, Flat
 using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel,
                                AbstractSolarPosition, ApparentSolarPosition,
                                DiurnalSolarPosition, FixedCosineZenith
@@ -200,7 +200,7 @@ _set_latitude_from_grid!(rrtmgp_latitude, ::AbstractGrid{<:Any, <:Any, <:Flat}) 
 
 @kernel function _set_latitude_from_grid_kernel!(rrtmgp_latitude, grid)
     i, j = @index(Global, NTuple)
-    φ = ynode(i, j, 1, grid, Center(), Center(), Center())
+    φ = column_latitude(i, j, grid)
     c = column_index(i, j, grid.Nx)
     @inbounds rrtmgp_latitude[c] = φ
 end
