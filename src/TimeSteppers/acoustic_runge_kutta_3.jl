@@ -76,6 +76,8 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R} <: AbstractTimeStepper
     rounding :: R
 end
 
+AtmosphereModels.stage_abscissae(ts::AcousticRungeKutta3) = (ts.β₁, ts.β₂)
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -305,7 +307,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     acoustic_rk3_substep!(model, Δt, β₂)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
-    update_state!(model, callbacks; compute_tendencies = true)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
     cache_transport_velocity!(model)
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**). Every stage restarts from Uⁿ, so only this stage's
@@ -326,7 +328,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     # Forwarding the callbacks through microphysics_model_update! would fix this and let the pass
     # always be skipped.
     skip_tendencies = skip_pre_microphysics_tendencies(model.microphysics, Δt, callbacks)
-    update_state!(model, callbacks; compute_tendencies = !skip_tendencies)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks; compute_tendencies = !skip_tendencies)
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.

@@ -28,7 +28,6 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture
 using Oceananigans.Fields: interpolate
 using Oceananigans.Grids: Center, znode
-using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 
 using Adapt: Adapt, adapt
@@ -512,7 +511,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # The kernel mutated prognostic fields in the interior; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
-    update_state!(model)
+    AtmosphereModels.update_state_between_radiation_solves!(model)
 
     return nothing
 end
