@@ -133,6 +133,8 @@ function GravityWaveMultirateInfinitesimalStep(grid, prognostic_fields;
                                                moist_gravity_wave_operator = false,
                                                implicit_solver::TI = nothing,
                                                cache_advecting_state = false, # accepted for TimeStepper-call uniformity; unused
+                                               moisture_forcing_names = nothing, # accepted for TimeStepper-call uniformity; unused
+                                               microphysical_names = (),         # accepted for TimeStepper-call uniformity; unused
                                                Gⁿ::TG = map(similar, prognostic_fields),
                                                U⁰::U0 = map(similar, prognostic_fields)) where {TI, TG, U0}
 
