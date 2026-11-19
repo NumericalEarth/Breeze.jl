@@ -55,8 +55,8 @@ When a `DateTime` clock is used, the cosine of the solar zenith angle is compute
 
 The [`RadiativeTransferModel`](@ref) model computes:
 
-- **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
-- **Shortwave radiation**: Direct beam solar radiation
+- **Longwave radiation**: Upwelling and downwelling thermal radiation using RRTMGP's no-scattering solver
+- **Shortwave radiation**: The direct solar beam and its reflection by the surface (see the note below)
 
 The gray atmosphere optical thickness for longwave follows the parameterization by [OGormanSchneider2008](@citet),
 
@@ -92,25 +92,17 @@ so downwelling fluxes are stored as negative numbers:
 ℐ_sw_dn = radiation.downwelling_shortwave_flux  # ≤ 0
 ```
 
-For clear-sky and all-sky optics, `downwelling_shortwave_flux` is the *total*
-downwelling shortwave (direct beam plus diffuse), and `upwelling_shortwave_flux`
-carries the sunlight scattered back upward by air and clouds together with the
-fraction reflected by the surface.
+For every optics flavor, `downwelling_shortwave_flux` is the *total* downwelling
+shortwave, direct plus diffuse. For clear-sky and all-sky optics,
+`upwelling_shortwave_flux` is the sunlight scattered back by air and clouds plus
+the part reflected by the surface.
 
 !!! note "Shortwave radiation in the gray atmosphere"
-    The gray atmosphere uses RRTMGP's non-scattering shortwave solver, so
-    `downwelling_shortwave_flux` is the direct beam alone (no diffuse component)
-    and `upwelling_shortwave_flux` is identically zero. The field still exists so
-    that the four flux components, the net flux, and output writers have the same
-    shape for every optics flavor.
-
-!!! warning "Gray optics ignores the surface albedo in the shortwave"
-    Because the gray shortwave solver only propagates the direct beam downward, it
-    never reflects it: `surface_albedo` (and `direct_surface_albedo` /
-    `diffuse_surface_albedo`) has no effect on the gray shortwave fluxes, and the
-    surface absorbs all of the direct beam that reaches it. The albedo is still
-    used for the clear-sky and all-sky solvers. Use [`ClearSkyOptics`](@ref) or
-    [`AllSkyOptics`](@ref) if the shortwave albedo matters for your study.
+    The gray shortwave solver does not scatter, so there is no diffuse downwelling
+    and `downwelling_shortwave_flux` is just the direct beam. The surface reflects
+    `direct_surface_albedo` of it, and `upwelling_shortwave_flux` is that reflection,
+    attenuated by ``\exp(-D τ_{sw})`` per layer with ``D ≈ 1.64``. The
+    `diffuse_surface_albedo` has no effect.
 
 ## Solar zenith angle
 
@@ -483,6 +475,35 @@ formulation adds ``Q_{\mathscr{I}} / (\hat{c}ᵖ \hat{Π})`` to its potential-te
 tendency, with the vapor-equivalent heat capacity ``\hat{c}ᵖ`` and Exner function ``\hat{Π}``
 (see [Liquid-ice potential temperature](@ref liquid-ice-potential-temperature)). Omitting the upwelling shortwave would bias either tendency wherever
 shortwave radiation scatters or reflects.
+
+## Radiation between solves
+
+With a `schedule` other than every iteration, the surface temperature and the sun change between
+solves. Every state update corrects the fluxes for both, following [HoganBozzo2015](@citet):
+
+- **Longwave.** Each solve also solves the longwave with the surface 1 K warmer, which gives the
+  response of each face's fluxes to ``T₀⁴``. Updates add that response times the change in ``T₀⁴``
+  since the solve, so the surface and the atmosphere exchange the same flux at every step. A
+  constant `surface_temperature` needs no second solve. RRTMGP clamps ``T₀`` to its Planck tables
+  (160 K to 355 K), so near 355 K the second solve cools the surface instead; ecCKD does not clamp.
+- **Shortwave.** Each solve uses ``\bar{μ}₀`` (`solved_cos_zenith`), the cosine of the solar zenith
+  angle averaged over the sunlit part of the radiation window ([HoganHirahara2015](@citet)), for the
+  slant path. Updates scale the solved fluxes by ``μ₀ / \bar{μ}₀``, where ``μ₀`` (`cos_zenith`) is
+  the current cosine, keeping the column's transmittance and reflectance while following
+  the current sun.
+
+The window runs from the start of the solving step to the start of the next one. When the next
+solve time is unknown (an infinite or exhausted schedule, or a custom one), and for custom solar
+positions, the solve uses the current sun instead.
+
+If a step boundary finds ``μ₀ > 4 \bar{μ}₀`` in any column, sunlight the solve did not average
+over, the whole grid solves again. With an unknown window on a grid that the day-night terminator
+crosses, this happens about every step, so prefer an `IterationInterval` or a finite
+`TimeInterval` there.
+
+The six extra face fields (two longwave responses, four solved fluxes) are checkpointed. A
+checkpoint without them solves again on restart. A fixed sun with a constant surface temperature
+needs no updates, and under Reactant the fluxes are not updated between solves.
 
 ## Architecture Support
 
