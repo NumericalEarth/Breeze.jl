@@ -35,8 +35,12 @@ import Pkg
 Pkg.status()
 """
 
+# ARM inputs must be staged explicitly; render the LASSO example without executing
+# it when they are absent. No substitute case is downloaded for the docs build.
+execute_example = basename(script_path) != "ena_differentiability.jl" || haskey(ENV, "ENA_LASSO_BUNDLE")
+
 @time basename(script_path) Literate.markdown(script_path, literated_dir;
-                                              flavor = Literate.DocumenterFlavor(),
-                                              preprocess = content -> example_preamble * content * example_postamble,
-                                              execute = true,
+                                              flavor = execute_example ? Literate.DocumenterFlavor() : Literate.CommonMarkFlavor(),
+                                              preprocess = content -> example_preamble * content * (execute_example ? example_postamble : ""),
+                                              execute = execute_example,
                                               )

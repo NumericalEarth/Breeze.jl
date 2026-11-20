@@ -33,6 +33,8 @@ Manifest-v*.toml
 data/P3_LUT/*.dat*
 
 # output files
+examples/data/ena/
+examples/ena_output/
 validation_output/
 *.jld2
 *.nc

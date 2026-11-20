@@ -5,6 +5,7 @@ Each one is a complete, self-contained script that builds a grid, configures an 
 Reading an example alongside the reference pages is usually faster than reading the reference pages alone.
 
 Together, the examples span much of what Breeze can do: dry and moist thermal bubbles, gravity and acoustic waves, large-eddy simulations of shallow cumulus convection and boundary layers, radiative transfer in a single column, flow over mountains, supercells, tropical cyclones, and baroclinic waves on the sphere.
+One example differentiates a large-eddy simulation: it computes the sensitivity of a stratocumulus forecast at the ARM Eastern North Atlantic site to its initial state with [Reactant](https://github.com/EnzymeAD/Reactant.jl) and [Enzyme](https://github.com/EnzymeAD/Enzyme.jl).
 Some are classic benchmark cases from the literature that are useful for validating the model and comparing numerical methods.
 Others are physically motivated setups that show how to combine dynamics, thermodynamics, microphysics, radiation, and surface fluxes into a realistic simulation.
 Parcel-model and kinematic-driver examples strip the dynamics away entirely, which makes them a convenient playground for prototyping microphysics and radiation schemes.
