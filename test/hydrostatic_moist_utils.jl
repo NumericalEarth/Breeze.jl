@@ -62,26 +62,37 @@ end
 
 moist_formulation() = LiquidIcePotentialTemperatureFormulation(exner_exponent=DryExponent())
 
+# The column diagnostics below read fields on the host: each field's interior is copied once to an
+# Array and the vertical spacings are taken from a CPU copy of the grid, so that they also work on a
+# GPU without scalar indexing of device arrays. On the CPU the values are those of indexing the
+# fields directly (same values, same summation order).
+host(field) = Array(interior(field))
+host_grid(grid) = Oceananigans.Architectures.on_architecture(CPU(), grid)
+
 # Enthalpy of the column plus the geopotential of its mass at the ground, per unit area in
 # J m⁻²: Σ Δp (cᵖᵐ T - ℒˡ₀ qˡ) / g + Φˢ pˢ / g, from the diagnosed temperature and composition
 # rather than from the potential temperature that the model carries.
 function column_energy(model)
-    grid = model.grid
+    grid = host_grid(model.grid)
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
     g = constants.gravitational_acceleration
-    ρᵗ = dynamics.moisture.total_density
-    μ = model.microphysical_fields
+    ρᵗ = host(dynamics.moisture.total_density)
+    qᵛ = host(model.microphysical_fields.qᵛ)
+    qˡ = host(model.microphysical_fields.qˡ)
+    T = host(model.temperature)
+    Φˢ = host(dynamics.surface_geopotential)
+    pˢ = host(dynamics.moisture.total_surface_pressure)
     Nx, Ny, Nz = size(grid)
     energy = zeros(Nx, Ny)
 
     for i in 1:Nx, j in 1:Ny
         for k in 1:Nz
-            q = MoistureMassFractions(μ.qᵛ[i, j, k], μ.qˡ[i, j, k])
-            H = mixture_heat_capacity(q, constants) * model.temperature[i, j, k] - condensate_latent_energy(q, constants)
+            q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k])
+            H = mixture_heat_capacity(q, constants) * T[i, j, k] - condensate_latent_energy(q, constants)
             energy[i, j] += ρᵗ[i, j, k] * Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid) * H
         end
-        energy[i, j] += dynamics.surface_geopotential[i, j, 1] * dynamics.moisture.total_surface_pressure[i, j, 1] / g
+        energy[i, j] += Φˢ[i, j, 1] * pˢ[i, j, 1] / g
     end
 
     return energy
@@ -89,18 +100,19 @@ end
 
 # Water of the column per unit area, in kg m⁻²
 function column_water(model)
-    grid = model.grid
+    grid = host_grid(model.grid)
     Nx, Ny, Nz = size(grid)
-    ρqʳ = model.microphysical_fields.ρqʳ
-    return [sum((model.moisture_density[i, j, k] + ρqʳ[i, j, k]) * Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid) for k in 1:Nz)
+    ρqᵉ = host(model.moisture_density)
+    ρqʳ = host(model.microphysical_fields.ρqʳ)
+    return [sum((ρqᵉ[i, j, k] + ρqʳ[i, j, k]) * Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid) for k in 1:Nz)
             for i in 1:Nx, j in 1:Ny]
 end
 
 # Dry mass of the column per unit area, in kg m⁻²
 function column_dry_mass(model)
-    grid = model.grid
+    grid = host_grid(model.grid)
     Nx, Ny, Nz = size(grid)
-    ρ = model.dynamics.density
+    ρ = host(model.dynamics.density)
     return [sum(ρ[i, j, k] * Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid) for k in 1:Nz) for i in 1:Nx, j in 1:Ny]
 end
 
