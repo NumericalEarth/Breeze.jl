@@ -117,19 +117,32 @@ end
 # can land a unit in the last place of c outside them where ĉ is far outside (θ ≪ 1), and a wind
 # then carries it into an empty neighbour. Bounding the face value before the flux is formed keeps
 # the flux single-valued (it depends on the donor cell alone), hence conservative.
-@inline bounded_face_value(advection, ĉ) = clamp(ĉ, advection.bounds.minimum_value, advection.bounds.maximum_value)
+#
+# The clamp acts on a scalar only where its donor value lies within the bounds of its scheme: the
+# interval is widened to include the donor value cᵢ, so a scalar outside the bounds it was given (a
+# uniform tracer of 2 with bounds (0, 1), a potential temperature advected with the bounds of water)
+# is transported as before. On the nonhydrostatic branch (64f5f49c) the clamp is to the bounds alone.
+@inline function bounded_face_value(advection, ĉ, cᵢ)
+    b = advection.bounds
+    return clamp(ĉ, min(b.minimum_value, cᵢ), max(b.maximum_value, cᵢ))
+end
+
+# The donor value of the face (i, j, k) for a face velocity ũ: the cell the flow comes from
+@inline x_donor(i, j, k, c, ũ) = @inbounds ifelse(ũ > 0, c[i-1, j, k], c[i, j, k])
+@inline y_donor(i, j, k, c, ṽ) = @inbounds ifelse(ṽ > 0, c[i, j-1, k], c[i, j, k])
+@inline z_donor(i, j, k, c, w̃) = @inbounds ifelse(w̃ > 0, c[i, j, k-1], c[i, j, k])
 
 @inline function clamped_face_flux_x(i, j, k, grid, advection, ρ, u, c)
     b = advection.bounds
     ũ = @inbounds u[i, j, k]
-    ĉ = bounded_face_value(advection, upwind_face_value_x(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ũ, c))
+    ĉ = bounded_face_value(advection, upwind_face_value_x(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ũ, c), x_donor(i, j, k, c, ũ))
     return ℑxᶠᵃᵃ(i, j, k, grid, ρ) * Axᶠᶜᶜ(i, j, k, grid) * ũ * ĉ
 end
 
 @inline function clamped_face_flux_y(i, j, k, grid, advection, ρ, v, c)
     b = advection.bounds
     ṽ = @inbounds v[i, j, k]
-    ĉ = bounded_face_value(advection, upwind_face_value_y(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ṽ, c))
+    ĉ = bounded_face_value(advection, upwind_face_value_y(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ṽ, c), y_donor(i, j, k, c, ṽ))
     return ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Ayᶜᶠᶜ(i, j, k, grid) * ṽ * ĉ
 end
 
@@ -137,7 +150,7 @@ end
     b = advection.bounds
     td = advection.time_discretization
     w̃ = @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, advection, td, w) * w[i, j, k]
-    ĉ = bounded_face_value(advection, upwind_face_value_z(i, j, k, grid, advection, nothing, b.reconstruction_limiter, w̃, c))
+    ĉ = bounded_face_value(advection, upwind_face_value_z(i, j, k, grid, advection, nothing, b.reconstruction_limiter, w̃, c), z_donor(i, j, k, c, w̃))
     return ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Azᶜᶜᶠ(i, j, k, grid) * w̃ * ĉ
 end
 
@@ -313,7 +326,7 @@ end
     bounds = advection.bounds
     explicit_w = explicit_vertical_velocity(advection, grid, w)
     @inbounds wₑ = explicit_w[i, j, k]
-    ĉ = bounded_face_value(advection, upwind_face_value_z(i, j, k, grid, advection, nothing, bounds.reconstruction_limiter, wₑ, q))
+    ĉ = bounded_face_value(advection, upwind_face_value_z(i, j, k, grid, advection, nothing, bounds.reconstruction_limiter, wₑ, q), z_donor(i, j, k, q, wₑ))
     return Azᶜᶜᶠ(i, j, k, grid) * wₑ * ĉ
 end
 
