@@ -5,7 +5,7 @@ using Breeze.HydrostaticEquations: VerletSubsteps, column_physics_in_time_step!
 using Breeze.TimeSteppers: ConvexScalarStages, RecombinedScalarStages, convex_scalar_stages,
                            largest_euler_step_fraction, multirate_infinitesimal_step_tableau
 using Oceananigans
-using Oceananigans.Advection: UpwindBiased
+using Oceananigans.Advection: UpwindBiased, BoundsPreservation
 using Test
 
 include("hydrostatic_moist_utils.jl")
@@ -106,9 +106,8 @@ end
 end
 
 water_schemes = (("first-order upwind", () -> UpwindBiased(order=1)),
-                 # The bounds-preserving WENO of Oceananigans 0.118; the flux limiter of the provisional
-                 # Oceananigans #6534 pin is not on it
-                 ("bounded WENO5", () -> WENO(order=5, bounds=(0, 1))))
+                 ("WENO5 with flux limiter", () -> WENO(order=5, bounds=BoundsPreservation(0, 1; flux_limiter=true))),
+                 ("WENO5 with flux limiter, no rescaling", () -> WENO(order=5, bounds=BoundsPreservation(0, 1; flux_limiter=true, rescaling=false))))
 
 @testset "Bounds and budgets of convex scalar stages [$name]" for (name, scheme) in water_schemes
     result = integrate_boxes(convex_slice(scheme), 1200, 36)
