@@ -82,8 +82,27 @@ end
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, ::Nothing, ρ, U, c) = zero(grid)
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, ::BoundsPreservingWENO, ρ, U, ::ZeroField) = zero(grid)
 
+# The upwind face values that the θ kernel of Oceananigans #6534 caches are written only on the
+# faces where the velocities it was refreshed with (those of the model) carry flow, in their
+# direction. Breeze transports with other velocities (the sedimentation velocity of condensate,
+# which crosses the bottom face; the transport velocities of the stages), for which the cache is
+# stale: a uniform rain column then exported nothing through the ground (cloud_microphysics_1M,
+# "Bounds-preserving WENO bottom precipitation flux"). Breeze's bounded fluxes therefore form the
+# rescaled upwind face values from the reconstruction and the cached θ, without the face cache.
+# TODO: an Oceananigans option to skip the face cache, or a cache keyed by velocity (#6534).
+@inline without_face_cache(advection) = advection
+
+@inline function without_face_cache(advection::WENO{N, FT, WCT, <:Any, <:BoundsPreservation}) where {N, FT, WCT}
+    b = advection.bounds
+    bounds = BoundsPreservation(b.minimum_value, b.maximum_value, b.maximum_cfl, b.minimum_weight,
+                                b.reconstruction_limiter, b.flux_limiter, nothing)
+    return WENO{N, FT, WCT}(bounds, advection.buffer_scheme, advection.advecting_velocity_scheme,
+                            advection.time_discretization)
+end
+
 # Is this immersed-boundary safe without having to extend it in ImmersedBoundaries.jl? I think so... (velocity on immmersed boundaries is masked to 0)
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c)
+    advection = without_face_cache(advection)
     div_x = bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c)
     div_y = bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c)
     div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, U.w, c)
@@ -120,9 +139,11 @@ const FluxLimitedAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplic
 @inline AtmosphereModels.horizontal_div_ρUc(i, j, k, grid, ::Nothing, ρ, U, c) = zero(grid)
 @inline AtmosphereModels.horizontal_div_ρUc(i, j, k, grid, ::BoundsPreservingWENO, ρ, U, ::ZeroField) = zero(grid)
 
-@inline AtmosphereModels.horizontal_div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c) =
-    V⁻¹ᶜᶜᶜ(i, j, k, grid) * (bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c) +
-                              bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c))
+@inline function AtmosphereModels.horizontal_div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c)
+    advection = without_face_cache(advection)
+    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c) +
+                                     bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c))
+end
 
 # A bounds-preserving WENO whose vertical time discretization is adaptive-implicit.
 const BoundsPreservingAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:BoundsPreservation}
@@ -155,6 +176,7 @@ Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
 # Without the s-scaled velocity the bounded path transported 1 + (1 - s) times: a full
 # explicit flux plus the implicit remainder (issue #913). Horizontal fluxes stay explicit.
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingAVIDWENO, ρ, U, c)
+    advection = without_face_cache(advection)
     wᵉ = ExplicitVerticalVelocity(grid, advection, time_discretization(advection), U.w)
     div_x = bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c)
     div_y = bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c)
@@ -199,8 +221,8 @@ end
 # Bounds-preserving WENO (Oceananigans #6534 semantics) forms each face flux from the upwind
 # reconstruction alone, rescaled by the limiter θ of the upwind cell (`reconstruction_limiter`, or
 # none with `NoRescaling`), read from the face values cached by the θ kernel where the scheme keeps
-# them. The sedimentation fluxes are formed with the same face values the tracer tendency uses
-# (`bounded_face_flux_z`), so the latent heat moves with exactly the mass the tracer tendency moves.
+# them. Like the tracer tendency (`div_ρUc`), they are formed without the face cache (see
+# `without_face_cache`), so the latent heat moves with exactly the mass the tracer tendency moves.
 @inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection::BoundsPreservingWENO, wᵗ, wˢ, q)
     w = SumOfArrays{2}(wᵗ, wˢ)
     F⁻ = (bounded_sedimentation_mass_flux(i, j, k,   grid, advection, w,  q),
@@ -216,7 +238,7 @@ end
     bounds = advection.bounds
     explicit_w = explicit_vertical_velocity(advection, grid, w)
     @inbounds wₑ = explicit_w[i, j, k]
-    ĉ = upwind_face_value_z(i, j, k, grid, advection, bounds.upwind_face_values, bounds.reconstruction_limiter, wₑ, q)
+    ĉ = upwind_face_value_z(i, j, k, grid, advection, nothing, bounds.reconstruction_limiter, wₑ, q)
     return Azᶜᶜᶠ(i, j, k, grid) * wₑ * ĉ
 end
 
@@ -272,7 +294,7 @@ end
 end
 
 # Bounds-preserving WENO: the bottom face flux of cell 1 as `bounded_face_flux_z` forms it, from the
-# rescaled upwind face value (see `bounded_sedimentation_mass_flux`).
+# rescaled upwind face value, without the face cache (see `without_face_cache`).
 @inline function bottom_advective_tracer_flux(i, j, grid, advection::BoundsPreservingWENO, ρ, w, c)
     ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
     explicit_flux = -ρ_face * bounded_sedimentation_mass_flux(i, j, 1, grid, advection, w, c) / Azᶜᶜᶠ(i, j, 1, grid)
