@@ -32,7 +32,9 @@ using Oceananigans.Advection:
     FluxLimitedBounds,
     limited_tracer_flux_divergence_x,
     limited_tracer_flux_divergence_y,
-    limited_tracer_flux_divergence_z
+    limited_tracer_flux_divergence_z,
+    limited_face_flux_z,
+    upwind_face_value_z
 
 using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, CenterField
