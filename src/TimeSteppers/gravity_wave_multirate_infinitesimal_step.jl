@@ -52,14 +52,12 @@ function convex_scalar_stages(tableau::MultirateInfinitesimalStepTableau)
     (; α, β, γ) = tableau
     stages = number_of_stages(tableau)
 
+    # The structure that the multirate infinitesimal step stores with two registers
+    stage_storage(tableau) isa TwoRegisterStorage || return false
+
     for i in 1:stages
         β[i, i] > 0 || return false
-
-        for j in 1:i-1
-            weight = α[i, j] + γ[i, j]
-            β[i, j] == 0 || return false
-            j == i - 1 ? (0 < weight ≤ 1 || return false) : (weight == 0 || return false)
-        end
+        i > 1 && (0 < α[i, i-1] + γ[i, i-1] ≤ 1 || return false)
     end
 
     return true
@@ -132,10 +130,13 @@ Fields
 - `stage_increments`: ``ΔY_j`` of every stage.
 - `implicit_solver`: unused; `HydrostaticDynamics` has no vertically implicit terms.
 - `substepper`: the `GravityWaveSubstepper` that holds the linearization and integrates the fast system.
+- `storage`: the storage layout of the coefficient set, chosen as for the acoustic
+  `MultirateInfinitesimalStep` (see `stage_storage`). With `TwoRegisterStorage` one slow tendency
+  and two increments are stored; otherwise one of each per stage.
 - `scalar_stages`: how the stages advance the other scalars, [`RecombinedScalarStages`](@ref) or
   [`ConvexScalarStages`](@ref).
 """
-struct GravityWaveMultirateInfinitesimalStep{TB, U0, TG, SS, DY, TI, GS, SC} <: AbstractTimeStepper
+struct GravityWaveMultirateInfinitesimalStep{TB, U0, TG, SS, DY, TI, GS, SL, SC} <: AbstractTimeStepper
     tableau :: TB
     U⁰ :: U0
     Gⁿ :: TG
@@ -143,6 +144,7 @@ struct GravityWaveMultirateInfinitesimalStep{TB, U0, TG, SS, DY, TI, GS, SC} <: 
     stage_increments :: DY
     implicit_solver :: TI
     substepper :: GS
+    storage :: SL
     scalar_stages :: SC
 end
 
@@ -254,22 +256,64 @@ function GravityWaveMultirateInfinitesimalStep(grid, prognostic_fields;
 
     substepper = GravityWaveSubstepper(grid, inner_solver, prognostic_fields; substeps, cfl, moist)
 
-    slow_tendencies = ntuple(_ -> map(similar, prognostic_fields), stages)
-    stage_increments = ntuple(_ -> map(similar, prognostic_fields), stages)
+    storage = stage_storage(tableau)
+    slow_tendencies = ntuple(_ -> map(similar, prognostic_fields), tendency_registers(storage, stages))
+    stage_increments = ntuple(_ -> map(similar, prognostic_fields), increment_registers(storage, stages))
 
     # The convex stages transport the mixing ratio per unit dry mass of moist dynamics
     scalar_stages = moist && convex_scalar_stages(tableau) ? ConvexScalarStages() : RecombinedScalarStages()
 
     return GravityWaveMultirateInfinitesimalStep(tableau, U⁰, Gⁿ, slow_tendencies, stage_increments,
-                                                 implicit_solver, substepper, scalar_stages)
+                                                 implicit_solver, substepper, storage, scalar_stages)
 end
 
 const ConvexGravityWaveMultirateInfinitesimalStep =
-    GravityWaveMultirateInfinitesimalStep{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:ConvexScalarStages}
+    GravityWaveMultirateInfinitesimalStep{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:ConvexScalarStages}
 
 # The stages transport the scalars: their tendencies keep the forcing alone
 HydrostaticEquations.leave_scalar_transport_to_stages!(timestepper::ConvexGravityWaveMultirateInfinitesimalStep, model) =
     withhold_scalar_transport!(model, keys(timestepper.substepper.specific_scalars))
+
+# The registers of the stages. With `TwoRegisterStorage` (diagonal `β`, `α` and `γ` on the first
+# subdiagonal) stage `i` reads only its own slow tendency and the increment of stage `i - 1`, so one
+# tendency register and two alternating increment registers suffice; the coefficients that this
+# drops are those that `stage_storage` judges negligible.
+tendency_registers(::TwoRegisterStorage, stages) = 1
+tendency_registers(storage, stages) = stages
+increment_registers(::TwoRegisterStorage, stages) = min(2, stages)
+increment_registers(storage, stages) = stages
+
+tendency_register(::TwoRegisterStorage, i) = 1
+tendency_register(storage, i) = i
+increment_register(::TwoRegisterStorage, i) = mod1(i, 2)
+increment_register(storage, i) = i
+
+# The earlier stages whose increments, and the stages whose slow tendencies, stage `i` reads
+increment_stages(::TwoRegisterStorage, i) = max(1, i - 1):i-1
+increment_stages(storage, i) = 1:i-1
+tendency_stages(::TwoRegisterStorage, i) = i:i
+tendency_stages(storage, i) = 1:i
+
+stage_slow_tendencies(ts::GravityWaveMultirateInfinitesimalStep, j) = ts.slow_tendencies[tendency_register(ts.storage, j)]
+stage_increment(ts::GravityWaveMultirateInfinitesimalStep, j) = ts.stage_increments[increment_register(ts.storage, j)]
+
+# The interval over which a stage-aware sink budget (`AtmosphereModels.StageStart`) drains a
+# species, as for the acoustic `MultirateInfinitesimalStep`: `Δt / C` with `C` the strong-stability
+# coefficient of the coefficient set. For convex stages (see `convex_scalar_stages`), stage `i` is
+# `(1 - wᵢ) Uⁿ + wᵢ [Yᵢ₋₁ + (βᵢᵢ / wᵢ) Δt S(Yᵢ₋₁)]` and `1 / C = maxᵢ βᵢᵢ / wᵢ` (see
+# `largest_euler_step_fraction`), so a sink budgeted against the state the stage starts from,
+# `Yᵢ₋₁` (the default `stage_starts_from_initial_state = false`), over this interval leaves every
+# species of every stage non-negative. This is not the substep interval `dᵢ Δt` of the gravity
+# waves. The time step is that of the last step, as the stepper keeps no current one; before the
+# first step it is not finite and the budgets fall back to their fixed timescales.
+# Moist `HydrostaticDynamics` builds no microphysical tendencies within the stages
+# (its column physics is applied once per step, see `time_step_column_physics!`), so nothing reads
+# this yet but a microphysics scheme that does.
+@inline function AtmosphereModels.stage_time_step(ts::GravityWaveMultirateInfinitesimalStep, clock)
+    Δt = clock.last_Δt
+    C = ts.tableau.strong_stability_coefficient
+    return ifelse(C > 0, Δt / C, Δt)
+end
 
 # What the substeps of a stage move through the seam of a Yin-Yang grid
 HydrostaticEquations.stage_seam_budgets(timestepper::GravityWaveMultirateInfinitesimalStep, model) =
@@ -342,7 +386,7 @@ the full tendencies, from which the transport by the velocity perturbation is ta
 stage is completed.
 """
 function store_slow_tendencies!(timestepper::GravityWaveMultirateInfinitesimalStep, model, i)
-    S = timestepper.slow_tendencies[i]
+    S = stage_slow_tendencies(timestepper, i)
 
     for (s, G) in zip(S, timestepper.Gⁿ)
         copy_parent!(s, G)
@@ -363,8 +407,7 @@ forcing they hold constant, ``[Σ_j γ_{ij} ΔY_j / Δt + Σ_j β_{ij} S_j] / d_
 function initialize_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, i, Δt)
     (; α, β, γ, d) = timestepper.tableau
     substepper = timestepper.substepper
-    S = timestepper.slow_tendencies
-    ΔY = timestepper.stage_increments
+    storage = timestepper.storage
 
     for name in gravity_wave_prognostic_names
         U′ = substepper.perturbations[name]
@@ -372,13 +415,14 @@ function initialize_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, i
         fill!(U′, 0)
         fill!(F, 0)
 
-        for j in 1:i-1
-            add_scaled!(U′, ΔY[j][name], α[i, j])
-            add_scaled!(F, ΔY[j][name], γ[i, j] / (d[i] * Δt))
+        for j in increment_stages(storage, i)
+            ΔYⱼ = stage_increment(timestepper, j)
+            add_scaled!(U′, ΔYⱼ[name], α[i, j])
+            add_scaled!(F, ΔYⱼ[name], γ[i, j] / (d[i] * Δt))
         end
 
-        for j in 1:i
-            add_scaled!(F, S[j][name], β[i, j] / d[i])
+        for j in tendency_stages(storage, i)
+            add_scaled!(F, stage_slow_tendencies(timestepper, j)[name], β[i, j] / d[i])
         end
     end
 
@@ -405,21 +449,24 @@ perturbation are those that the surface pressure perturbation accounts for.
 function complete_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, model, i, Δt)
     β = timestepper.tableau.β
     substepper = timestepper.substepper
-    ΔY = timestepper.stage_increments
+    storage = timestepper.storage
+    ΔYᵢ = stage_increment(timestepper, i)
     U⁰ = timestepper.U⁰
     prognostic = prognostic_fields(model)
 
     ∫𝐮′ = substepper.integrated_velocities
-    for j in 2:i
-        add_scaled!(∫𝐮′.u, ΔY[j-1].u, - Δt * β[i, j])
-        add_scaled!(∫𝐮′.v, ΔY[j-1].v, - Δt * β[i, j])
+    for j in tendency_stages(storage, i)
+        j > 1 || continue
+        ΔYⱼ₋₁ = stage_increment(timestepper, j - 1)
+        add_scaled!(∫𝐮′.u, ΔYⱼ₋₁.u, - Δt * β[i, j])
+        add_scaled!(∫𝐮′.v, ΔYⱼ₋₁.v, - Δt * β[i, j])
     end
 
     complete_scalar_stage!(timestepper.scalar_stages, timestepper, model, i, Δt)
 
     for name in gravity_wave_prognostic_names
-        copy_parent!(ΔY[i][name], substepper.perturbations[name])
-        set_sum!(prognostic[name], U⁰[name], ΔY[i][name])
+        copy_parent!(ΔYᵢ[name], substepper.perturbations[name])
+        set_sum!(prognostic[name], U⁰[name], ΔYᵢ[name])
     end
 
     return nothing
@@ -430,23 +477,22 @@ end
 function complete_scalar_stage!(::RecombinedScalarStages, timestepper, model, i, Δt)
     (; α, β, γ) = timestepper.tableau
     substepper = timestepper.substepper
-    S = timestepper.slow_tendencies
-    ΔY = timestepper.stage_increments
+    storage = timestepper.storage
     U⁰ = timestepper.U⁰
     prognostic = prognostic_fields(model)
 
     compute_integrated_vertical_velocity!(substepper, model)
 
     for name in keys(substepper.specific_scalars)
-        δρc = ΔY[i][name]
+        δρc = stage_increment(timestepper, i)[name]
         fill!(δρc, 0)
 
-        for j in 1:i-1
-            add_scaled!(δρc, ΔY[j][name], α[i, j] + γ[i, j])
+        for j in increment_stages(storage, i)
+            add_scaled!(δρc, stage_increment(timestepper, j)[name], α[i, j] + γ[i, j])
         end
 
-        for j in 1:i
-            add_scaled!(δρc, S[j][name], Δt * β[i, j])
+        for j in tendency_stages(storage, i)
+            add_scaled!(δρc, stage_slow_tendencies(timestepper, j)[name], Δt * β[i, j])
         end
 
         add_perturbation_transport!(δρc, substepper, model, name)
@@ -462,8 +508,8 @@ end
 function complete_scalar_stage!(::ConvexScalarStages, timestepper, model, i, Δt)
     (; α, β, γ) = timestepper.tableau
     substepper = timestepper.substepper
-    N = timestepper.slow_tendencies[i]
-    scratch = timestepper.stage_increments[i]
+    N = stage_slow_tendencies(timestepper, i)
+    scratch = stage_increment(timestepper, i)
     U⁰ = timestepper.U⁰
     prognostic = prognostic_fields(model)
 
@@ -485,7 +531,7 @@ end
 # grid a conservation fixer among the tendency callbacks returns what they moved through the
 # seam, to the increment of the stage and to the state built from it.
 function return_stage_seam_budgets!(timestepper::GravityWaveMultirateInfinitesimalStep, model, i, callbacks)
-    targets = (timestepper.stage_increments[i], prognostic_fields(model))
+    targets = (stage_increment(timestepper, i), prognostic_fields(model))
 
     for callback in callbacks
         callback.callsite isa TendencyCallsite && correct_completed_stage!(callback.func, model, targets)
