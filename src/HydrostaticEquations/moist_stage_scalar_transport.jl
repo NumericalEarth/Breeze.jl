@@ -166,9 +166,12 @@ function launch_scalar_stage_transport!(ρc⁺, ρc, ρc⁰, N, model, substeppe
     𝐮̂ = (u = ∫𝐮′.u, v = ∫𝐮′.v, w = ∫𝐮′.w)
     r = DryMassMixingRatio(ρc, ρ)
 
-    # The limiters of the scheme, for the forward Euler step of the stage
-    update_bounds_preserving_limiter!(advection, grid, r, 𝐮̂, Δtᵉ)
-    update_flux_limiter!(advection, grid, r, 𝐮̂, convert(FT, Δtᵉ), ρ)
+    # The limiter of the scheme, for the mixing ratio the stage transports. With Oceananigans 0.118
+    # the bounds-preserving limiter depends on the reconstructed field alone, not on the velocities
+    # or the forward Euler step `Δtᵉ`; the flux limiter of Oceananigans #6534 (provisional, 021c1abc)
+    # is not on this pin.
+    # TODO: refresh a flux limiter here with `𝐮̂` and `Δtᵉ` once Oceananigans has one (#6475/#6534).
+    update_bounds_preserving_limiter!(advection, grid, r)
 
     launch!(arch, grid, :xyz, _advance_scalar_with_stage_transport!,
             ρc⁺, grid, advection, ρ, 𝐮̂, r, ρc, ρc⁰, N, convert(FT, weight), convert(FT, Δtˢ))
