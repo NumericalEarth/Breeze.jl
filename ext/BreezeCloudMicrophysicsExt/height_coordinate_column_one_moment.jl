@@ -87,8 +87,7 @@ end
         conversion = ifelse(qᶜˡᵏ > 0, conversion, zero(conversion))
         evaporation = ifelse(qʳ > 0, evaporation, zero(evaporation))
 
-        to_rain = min(ρᵏ * Δt * conversion, ρᵏ * max(0, qᶜˡᵏ))
-        to_vapor = max(ρᵏ * Δt * evaporation, - max(0, ρqʳᵏ))
+        to_rain, to_vapor = HydrostaticEquations.rain_source_transfers(microphysics, i, j, k, ρqʳ, ρᵏ, qᶜˡᵏ, conversion, evaporation, Δt)
         δρqʳ = to_rain + to_vapor
 
         ρqʳ[i, j, k] = ρqʳᵏ + δρqʳ

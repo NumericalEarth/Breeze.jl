@@ -725,6 +725,21 @@ end
 # nothing is made negative, and what leaves one density enters the other. The total water and
 # the pressure of the layer do not change, and θ is invariant under a phase change at fixed
 # pressure and total water, so the latent heat is in the temperature of the next diagnosis.
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The densities `(to_rain, to_vapor)` that the column physics moves over `Δt` from cloud liquid to
+rain and from rain to vapor (`to_vapor ≤ 0`), at the cell `(i, j, k)` with density `ρ` (of the
+grid), cloud liquid `qᶜˡ` and rain density `ρqʳ`, given the specific rates `conversion ≥ 0` and
+`evaporation ≤ 0`. The default limits each sink to what its donor holds; a microphysics scheme
+with stage-aware sink budgets replaces this with them.
+"""
+@inline function rain_source_transfers(microphysics, i, j, k, ρqʳ, ρ, qᶜˡ, conversion, evaporation, Δt)
+    to_rain = min(ρ * Δt * conversion, ρ * max(0, qᶜˡ))
+    to_vapor = max(ρ * Δt * evaporation, - max(0, @inbounds ρqʳ[i, j, k]))
+    return to_rain, to_vapor
+end
+
 @kernel function _apply_rain_sources!(ρqᵉ, ρqʳ, grid, microphysics, ρᵗ, p, T, qᵛ, qˡ, qᶜˡ, constants, Δt)
     i, j, k = @index(Global, NTuple)
 
@@ -741,8 +756,7 @@ end
         conversion = ifelse(qᶜˡᵏ > 0, conversion, zero(conversion))
         evaporation = ifelse(qʳ > 0, evaporation, zero(evaporation))
 
-        to_rain = min(ρᵏ * Δt * conversion, ρᵏ * max(0, qᶜˡᵏ))
-        to_vapor = max(ρᵏ * Δt * evaporation, - max(0, ρqʳᵏ))
+        to_rain, to_vapor = rain_source_transfers(microphysics, i, j, k, ρqʳ, ρᵏ, qᶜˡᵏ, conversion, evaporation, Δt)
         δρqʳ = to_rain + to_vapor
 
         ρqʳ[i, j, k] = ρqʳᵏ + δρqʳ

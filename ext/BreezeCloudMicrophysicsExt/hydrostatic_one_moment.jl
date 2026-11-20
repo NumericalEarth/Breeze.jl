@@ -34,6 +34,24 @@ HydrostaticEquations.hydrostatic_water_fields(::WP1M, μ) = (; qᵛ=μ.qᵛ, qˡ
     return Sᵃᶜⁿᵛ + Sᵃᶜᶜ, min(Sᵉᵛᵃᵖ, zero(Sᵉᵛᵃᵖ))
 end
 
+# The column physics acts over the whole time step from the state the dynamics left, with no other
+# tendency: that is the `AtmosphereModels.StageStart` of the column physics (`from_initial = false`,
+# interval `Δt`, nothing accumulated), and its transfers take the Patankar fractions of the
+# `StageSinkBudget` of the one- and two-moment schemes (`sink_budgets.jl`). Cloud liquid is
+# diagnosed by the saturation adjustment, so it is budgeted as a diagnostic reservoir; rain is
+# prognostic. `ρ` is the density of the grid, the same measure as `ρqʳ`, which the fractions need;
+# the rates themselves were evaluated with the physical density.
+@inline function HydrostaticEquations.rain_source_transfers(::WP1M, i, j, k, ρqʳ, ρ, qᶜˡ, conversion, evaporation, Δt)
+    rain = (; ρqʳ)
+    stage = AM.StageStart(nothing, rain, false, Δt)
+    nothing_accumulated = (; ρqʳ = ZeroField(typeof(Δt)))
+    budget = StageSinkBudget(i, j, k, nothing_accumulated, stage, Δt)
+    qʳ = @inbounds ρqʳ[i, j, k] / ρ
+    φᶜˡ = diagnostic_sink_fraction(budget, ρ, qᶜˡ, conversion)
+    φʳ = sink_fraction(budget, Val(:ρqʳ), ρ, qʳ, -evaporation)
+    return ρ * Δt * φᶜˡ * conversion, ρ * Δt * φʳ * evaporation
+end
+
 @inline HydrostaticEquations.rain_fall_speed(bμp::WP1M, ρ, qʳ) =
     terminal_velocity(bμp.categories.parameters.precip.rain, bμp.categories.parameters.terminal_velocity.rain, ρ, qʳ)
 

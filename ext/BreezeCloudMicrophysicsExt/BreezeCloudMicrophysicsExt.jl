@@ -84,6 +84,7 @@ using Oceananigans: Oceananigans, Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Operators: ℑzᵃᵃᶜ
 using Oceananigans.Utils: launch!
+using Oceananigans.Fields: ZeroField
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
 
