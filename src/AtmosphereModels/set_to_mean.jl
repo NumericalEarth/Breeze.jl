@@ -354,18 +354,22 @@ function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state, 
     return pˢ
 end
 
+# Whether an array of interior data is all zero; extensions specialize it for arrays that cannot be reduced in
+# place (see `BreezeReactantExt`).
+data_all_zero(data) = all(iszero, data)
+
 has_nonzero_mass_fraction(::Nothing) = false
 
 function has_nonzero_mass_fraction(mass_fraction)
     field = mass_fraction isa Field ? mass_fraction : Field(mass_fraction)
-    return !all(iszero, interior(field))
+    return !data_all_zero(interior(field))
 end
 
 function has_condensate(model)
     names = condensate_field_names(model.microphysics)
     for name in names
         field = model.microphysical_fields[name]
-        all(iszero, interior(field)) || return true
+        data_all_zero(interior(field)) || return true
     end
 
     if applicable(liquid_mass_fraction, model.microphysics, model)

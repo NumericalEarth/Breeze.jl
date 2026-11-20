@@ -140,6 +140,9 @@ nothing #hide
 
 advection = WENO(order=9)   # WENO(order=5), Centered(order=6) are too dissipative
 
+# In this example, we choose `closure = SmagorinskyLilly` to facilitate comparison with legacy LES.
+# In general, `Smagorinsky(coefficient = DynamicCoefficient(averaging = LagrangianAveraging()))` is
+# the more robust approach under non-canonical and/or horizontally heterogeneous conditions.
 closure = SmagorinskyLilly()
 
 model = AtmosphereModel(grid; dynamics, coriolis, advection, forcing, closure,

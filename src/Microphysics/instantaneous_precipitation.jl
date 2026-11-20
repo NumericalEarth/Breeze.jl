@@ -15,7 +15,6 @@ using ..AtmosphereModels:
 
 using Oceananigans: Oceananigans, CenterField, Field, Integral
 using Oceananigans.Architectures: architecture
-using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @index, @kernel
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
@@ -142,7 +141,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
 
     # The kernel mutated prognostic fields in the interior only; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
-    update_state!(model)
+    AtmosphereModels.update_state_between_radiation_solves!(model)
 
     return nothing
 end

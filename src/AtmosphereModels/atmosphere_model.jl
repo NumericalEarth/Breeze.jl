@@ -176,6 +176,7 @@ function AtmosphereModel(grid;
     # Validate that the radiation's solar position can read the clock, and that its schedule
     # can be evaluated on this architecture (before anything is traced)
     validate_radiation(radiation, clock, grid.architecture)
+    initialize_radiation_schedule!(radiation, clock)
 
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.

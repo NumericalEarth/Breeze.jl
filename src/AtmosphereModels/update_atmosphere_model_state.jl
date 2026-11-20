@@ -37,7 +37,14 @@ end
 # prognostic fields by a full `Δt` and so must run exactly once per step — the
 # time-steppers invoke it directly. (The tendency-interface microphysics still runs
 # every RK stage as part of `compute_tendencies!`.)
-function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true) =
+    update_atmosphere_state!(update_radiation!, model, callbacks; compute_tendencies)
+
+# `update_state!` after a step's first stage, which has already checked the radiation schedule
+update_state_between_radiation_solves!(model, callbacks=[]; compute_tendencies=true) =
+    update_atmosphere_state!(update_radiation_between_solves!, model, callbacks; compute_tendencies)
+
+function update_atmosphere_state!(update_radiation_fluxes!, model, callbacks; compute_tendencies)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
@@ -47,7 +54,7 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
     fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)...)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
-    update_radiation!(model.radiation, model)
+    update_radiation_fluxes!(model.radiation, model)
     compute_forcings!(model)
 
     for callback in callbacks
