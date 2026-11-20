@@ -18,9 +18,6 @@ using Oceananigans.Advection:
     BoundsPreservingWENO,
     FunctionStencil,
     implicit_vertical_velocityᶜᶜᶠ,
-    bounded_tracer_flux_divergence_x,
-    bounded_tracer_flux_divergence_y,
-    bounded_tracer_flux_divergence_z,
     explicit_velocity_scaleᶜᶜᶠ,
     materialize_advection,
     adapt_advection_order,
@@ -29,19 +26,21 @@ using Oceananigans.Advection:
     WENO,
     FluxLimitedWENO,
     FluxLimitedBounds,
-    limited_tracer_flux_divergence_x,
-    limited_tracer_flux_divergence_y,
-    limited_tracer_flux_divergence_z,
-    limited_face_flux_z,
-    upwind_face_value_z
+    upwind_face_value_x,
+    upwind_face_value_y,
+    upwind_face_value_z,
+    upwind_face_flux_x,
+    upwind_face_flux_y,
+    upwind_face_flux_z,
+    face_factor
 
 using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, CenterField
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.Fields: Field, ZeroField
-using Oceananigans.Grids: Center
-using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
+using Oceananigans.Grids: Center, AbstractGrid, Flat
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ, Axᶠᶜᶜ, Ayᶜᶠᶜ
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_discretization
 using DocStringExtensions: TYPEDEF
@@ -100,12 +99,90 @@ end
                             advection.time_discretization)
 end
 
+#####
+##### Bounded-by-construction face fluxes of bounds-preserving and flux-limited WENO (Breeze-owned)
+#####
+#
+# Two rounding defects of Oceananigans #6534 let Float32 rain go below zero by ~1e-17 (see
+# derivations/hydro_current_stack/OA6534_FCT_CANCELLATION.md):
+#   (B) the rescaled upwind face value θ (ĉ - c) + c can land an ulp outside the bounds;
+#   (A) the limited flux Jᵘ + ϑ (Jᴴ - Jᵘ) leaves an ulp-level residue where Jᵘ and Jᴴ - Jᵘ cancel.
+# Breeze forms its bounded fluxes with its own functions: the face value is clamped to the bounds
+# (`bounded_face_value`, as on the nonhydrostatic campaign branch, 64f5f49c), and the limited flux is
+# the convex combination ϑ Jᴴ + (1 - ϑ) Jᵘ of two bounded fluxes, with the face factor ϑ chosen from
+# the cached antidiffusive flux as in #6534.
+# TODO: both belong in Oceananigans' `bounded_face_flux_{x,y,z}` / `limited_face_flux_{x,y,z}` (#6534).
+
+# The limited value θ (ĉ - c) + c lies within the bounds in exact arithmetic. In floating point it
+# can land a unit in the last place of c outside them where ĉ is far outside (θ ≪ 1), and a wind
+# then carries it into an empty neighbour. Bounding the face value before the flux is formed keeps
+# the flux single-valued (it depends on the donor cell alone), hence conservative.
+@inline bounded_face_value(advection, ĉ) = clamp(ĉ, advection.bounds.minimum_value, advection.bounds.maximum_value)
+
+@inline function clamped_face_flux_x(i, j, k, grid, advection, ρ, u, c)
+    b = advection.bounds
+    ũ = @inbounds u[i, j, k]
+    ĉ = bounded_face_value(advection, upwind_face_value_x(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ũ, c))
+    return ℑxᶠᵃᵃ(i, j, k, grid, ρ) * Axᶠᶜᶜ(i, j, k, grid) * ũ * ĉ
+end
+
+@inline function clamped_face_flux_y(i, j, k, grid, advection, ρ, v, c)
+    b = advection.bounds
+    ṽ = @inbounds v[i, j, k]
+    ĉ = bounded_face_value(advection, upwind_face_value_y(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ṽ, c))
+    return ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Ayᶜᶠᶜ(i, j, k, grid) * ṽ * ĉ
+end
+
+@inline function clamped_face_flux_z(i, j, k, grid, advection, ρ, w, c)
+    b = advection.bounds
+    td = advection.time_discretization
+    w̃ = @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, advection, td, w) * w[i, j, k]
+    ĉ = bounded_face_value(advection, upwind_face_value_z(i, j, k, grid, advection, nothing, b.reconstruction_limiter, w̃, c))
+    return ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Azᶜᶜᶠ(i, j, k, grid) * w̃ * ĉ
+end
+
+@inline function convex_limited_face_flux_x(i, j, k, grid, advection, ρ, u, c)
+    L = advection.bounds.flux_limiter
+    A = @inbounds L.antidiffusive_fluxes.x[i, j, k]
+    ϑ = face_factor(A, L.outgoing_fraction, L.incoming_fraction, i-1, j, k, i, j, k)
+    return ϑ * clamped_face_flux_x(i, j, k, grid, advection, ρ, u, c) + (1 - ϑ) * upwind_face_flux_x(i, j, k, grid, advection, ρ, u, c)
+end
+
+@inline function convex_limited_face_flux_y(i, j, k, grid, advection, ρ, v, c)
+    L = advection.bounds.flux_limiter
+    A = @inbounds L.antidiffusive_fluxes.y[i, j, k]
+    ϑ = face_factor(A, L.outgoing_fraction, L.incoming_fraction, i, j-1, k, i, j, k)
+    return ϑ * clamped_face_flux_y(i, j, k, grid, advection, ρ, v, c) + (1 - ϑ) * upwind_face_flux_y(i, j, k, grid, advection, ρ, v, c)
+end
+
+@inline function convex_limited_face_flux_z(i, j, k, grid, advection, ρ, w, c)
+    L = advection.bounds.flux_limiter
+    A = @inbounds L.antidiffusive_fluxes.z[i, j, k]
+    ϑ = face_factor(A, L.outgoing_fraction, L.incoming_fraction, i, j, k-1, i, j, k)
+    return ϑ * clamped_face_flux_z(i, j, k, grid, advection, ρ, w, c) + (1 - ϑ) * upwind_face_flux_z(i, j, k, grid, advection, ρ, w, c)
+end
+
+# Divergences of these fluxes; a Flat direction has no faces
+for (dir, F) in ((:x, :clamped_face_flux_x), (:y, :clamped_face_flux_y), (:z, :clamped_face_flux_z),
+                 (:x, :convex_limited_face_flux_x), (:y, :convex_limited_face_flux_y), (:z, :convex_limited_face_flux_z))
+    D = Symbol(F, :_divergence)
+    if dir == :x
+        @eval @inline $D(i, j, k, grid, args...) = $F(i+1, j, k, grid, args...) - $F(i, j, k, grid, args...)
+        @eval @inline $D(i, j, k, grid::AbstractGrid{<:Any, Flat}, args...) = zero(grid)
+    elseif dir == :y
+        @eval @inline $D(i, j, k, grid, args...) = $F(i, j+1, k, grid, args...) - $F(i, j, k, grid, args...)
+        @eval @inline $D(i, j, k, grid::AbstractGrid{<:Any, <:Any, Flat}, args...) = zero(grid)
+    else
+        @eval @inline $D(i, j, k, grid, args...) = $F(i, j, k+1, grid, args...) - $F(i, j, k, grid, args...)
+        @eval @inline $D(i, j, k, grid::AbstractGrid{<:Any, <:Any, <:Any, Flat}, args...) = zero(grid)
+    end
+end
+
 # Is this immersed-boundary safe without having to extend it in ImmersedBoundaries.jl? I think so... (velocity on immmersed boundaries is masked to 0)
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c)
-    advection = without_face_cache(advection)
-    div_x = bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c)
-    div_y = bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c)
-    div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, U.w, c)
+    div_x = clamped_face_flux_x_divergence(i, j, k, grid, advection, ρ, U.u, c)
+    div_y = clamped_face_flux_y_divergence(i, j, k, grid, advection, ρ, U.v, c)
+    div_z = clamped_face_flux_z_divergence(i, j, k, grid, advection, ρ, U.w, c)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
 end
 
@@ -116,9 +193,9 @@ end
 # with the time step of the forward Euler update. The limited fluxes scale the vertical velocity to
 # its explicit part themselves; that path is not tested under adaptive implicit vertical advection.
 @inline flux_limited_div_ρUc(i, j, k, grid, advection, ρ, U, c) =
-    V⁻¹ᶜᶜᶜ(i, j, k, grid) * (limited_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c) +
-                              limited_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c) +
-                              limited_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, U.w, c))
+    V⁻¹ᶜᶜᶜ(i, j, k, grid) * (convex_limited_face_flux_x_divergence(i, j, k, grid, advection, ρ, U.u, c) +
+                              convex_limited_face_flux_y_divergence(i, j, k, grid, advection, ρ, U.v, c) +
+                              convex_limited_face_flux_z_divergence(i, j, k, grid, advection, ρ, U.w, c))
 
 const FluxLimitedAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:FluxLimitedBounds}
 
@@ -140,9 +217,8 @@ const FluxLimitedAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplic
 @inline AtmosphereModels.horizontal_div_ρUc(i, j, k, grid, ::BoundsPreservingWENO, ρ, U, ::ZeroField) = zero(grid)
 
 @inline function AtmosphereModels.horizontal_div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c)
-    advection = without_face_cache(advection)
-    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c) +
-                                     bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c))
+    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (clamped_face_flux_x_divergence(i, j, k, grid, advection, ρ, U.u, c) +
+                                     clamped_face_flux_y_divergence(i, j, k, grid, advection, ρ, U.v, c))
 end
 
 # A bounds-preserving WENO whose vertical time discretization is adaptive-implicit.
@@ -176,11 +252,10 @@ Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
 # Without the s-scaled velocity the bounded path transported 1 + (1 - s) times: a full
 # explicit flux plus the implicit remainder (issue #913). Horizontal fluxes stay explicit.
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingAVIDWENO, ρ, U, c)
-    advection = without_face_cache(advection)
     wᵉ = ExplicitVerticalVelocity(grid, advection, time_discretization(advection), U.w)
-    div_x = bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, U.u, c)
-    div_y = bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, U.v, c)
-    div_z = bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, wᵉ, c)
+    div_x = clamped_face_flux_x_divergence(i, j, k, grid, advection, ρ, U.u, c)
+    div_y = clamped_face_flux_y_divergence(i, j, k, grid, advection, ρ, U.v, c)
+    div_z = clamped_face_flux_z_divergence(i, j, k, grid, advection, ρ, wᵉ, c)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
 end
 
@@ -238,7 +313,7 @@ end
     bounds = advection.bounds
     explicit_w = explicit_vertical_velocity(advection, grid, w)
     @inbounds wₑ = explicit_w[i, j, k]
-    ĉ = upwind_face_value_z(i, j, k, grid, advection, nothing, bounds.reconstruction_limiter, wₑ, q)
+    ĉ = bounded_face_value(advection, upwind_face_value_z(i, j, k, grid, advection, nothing, bounds.reconstruction_limiter, wₑ, q))
     return Azᶜᶜᶠ(i, j, k, grid) * wₑ * ĉ
 end
 
@@ -248,10 +323,10 @@ end
 # sedimentation velocity, and the latent heat moves with exactly what the tendency moves.
 @inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection::FluxLimitedWENO, wᵗ, wˢ, q)
     w = SumOfArrays{2}(wᵗ, wˢ)
-    F⁻ = (limited_face_flux_z(i, j, k,   grid, advection, 1, w,  q),
-          limited_face_flux_z(i, j, k,   grid, advection, 1, wᵗ, q))
-    F⁺ = (limited_face_flux_z(i, j, k+1, grid, advection, 1, w,  q),
-          limited_face_flux_z(i, j, k+1, grid, advection, 1, wᵗ, q))
+    F⁻ = (convex_limited_face_flux_z(i, j, k,   grid, advection, 1, w,  q),
+          convex_limited_face_flux_z(i, j, k,   grid, advection, 1, wᵗ, q))
+    F⁺ = (convex_limited_face_flux_z(i, j, k+1, grid, advection, 1, w,  q),
+          convex_limited_face_flux_z(i, j, k+1, grid, advection, 1, wᵗ, q))
     return F⁻, F⁺
 end
 
@@ -304,7 +379,7 @@ end
 # With a flux limiter: the limited bottom face flux the tracer tendency applies.
 @inline function bottom_advective_tracer_flux(i, j, grid, advection::FluxLimitedWENO, ρ, w, c)
     ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
-    explicit_flux = -ρ_face * limited_face_flux_z(i, j, 1, grid, advection, 1, w, c) / Azᶜᶜᶠ(i, j, 1, grid)
+    explicit_flux = -ρ_face * convex_limited_face_flux_z(i, j, 1, grid, advection, 1, w, c) / Azᶜᶜᶠ(i, j, 1, grid)
     return explicit_flux + implicit_bottom_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c)
 end
 
