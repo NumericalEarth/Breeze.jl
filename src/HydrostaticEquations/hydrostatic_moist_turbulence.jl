@@ -33,6 +33,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceField, ZFaceField, Field
 using Oceananigans.BoundaryConditions: fill_halo_regions!, getbc, Bottom
 using Oceananigans.Grids: AbstractGrid, topology
+using Oceananigans.Models: boundary_condition_args
 using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, Azᶜᶜᶜ, Azᶠᶜᶜ, Azᶜᶠᶜ, ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: TurbulenceClosures as OceanTurbulenceClosures,
@@ -1043,6 +1044,20 @@ state the model is in (first-order sequential splitting after the dynamics):
 Rain is not mixed. The state is diagnosed again at the end, which is where the phases of the
 water adjust to the mixed state.
 """
+# The halos of the diagnosed state that the mixing reads across columns (its closure fields are
+# computed one cell into the horizontal halos, and the bulk exchange and the conductances read
+# neighbouring cells): the temperature, the partition of the water, the layer pressure and the
+# total surface pressure. `update_state!` of a moist hydrostatic model does not fill them, because
+# the kernels of the dynamics read them in their own columns only (`fill_auxiliary_thermodynamic_halos!`).
+function fill_mixing_halos!(model)
+    dynamics = model.dynamics
+    fill_halo_regions!(model.temperature)
+    fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
+    fill_halo_regions!(dynamics.pressure)
+    fill_halo_regions!(dynamics.moisture.total_surface_pressure)
+    return nothing
+end
+
 function moist_turbulent_mixing_step!(mixing::MoistTurbulentMixing, model, Δt)
     (isfinite(Δt) && Δt > 0) || return nothing
 
@@ -1054,6 +1069,7 @@ function moist_turbulent_mixing_step!(mixing::MoistTurbulentMixing, model, Δt)
     Δt = convert(eltype(grid), Δt)
 
     update_state!(model; compute_tendencies=false)
+    fill_mixing_halos!(model)
 
     compute_bulk_surface_fluxes!(fluxes, mixing.surface_exchange, model)
     fill_halo_regions!((fluxes.x_stress, fluxes.y_stress))
