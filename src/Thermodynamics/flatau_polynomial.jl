@@ -23,7 +23,7 @@ function Adapt.adapt_structure(to, fp::FlatauPolynomial)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `FlatauPolynomial` saturation vapor pressure formulation:
 the eighth-order polynomial fits of [Flatau et al. (1992)](@cite Flatau1992)
@@ -85,7 +85,7 @@ for saturation vapor pressure calculations.
 const FlatauPolynomialThermodynamicConstants{FT, C, I, FP<:FlatauPolynomial} = ThermodynamicConstants{FT, C, I, FP}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the saturation vapor pressure over a planar liquid surface from the
 Flatau et al. (1992) eighth-order polynomial in ``T - Tᵣ``.
@@ -97,7 +97,7 @@ Flatau et al. (1992) eighth-order polynomial in ``T - Tᵣ``.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the saturation vapor pressure over a planar ice surface from the
 Flatau et al. (1992) eighth-order polynomial in ``T - Tᵣ``.
@@ -109,7 +109,7 @@ Flatau et al. (1992) eighth-order polynomial in ``T - Tᵣ``.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the saturation vapor pressure over a planar mixed-phase surface by linearly
 interpolating the liquid and ice Flatau polynomials by `liquid_fraction`.

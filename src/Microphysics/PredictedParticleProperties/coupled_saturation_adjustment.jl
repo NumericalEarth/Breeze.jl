@@ -22,7 +22,7 @@ struct P3CoupledVaporRates{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Bounded Grabowski–Morrison saturation adjustment applied before the
 Morrison–Gettelman semi-analytic rates. It aligns `qᵛ`, `qᶜˡ`, `T`, `qᵛ⁺ˡ`, and
@@ -123,7 +123,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Externally driven change in the vapor excess over a surface with saturation specific
 humidity `qᵛ⁺` and latent heat `ℒ`, at fixed vapor,
@@ -211,7 +211,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute cloud, rain, and ice diffusional growth rates using a shared
 semi-analytic saturation adjustment, in the `SCF = SPF = 1` limit; the subgrid

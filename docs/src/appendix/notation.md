@@ -213,6 +213,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
 | ``θ^L``                             | `θᴸ`   | `AcousticSubstepper.linearization_potential_temperature` | Stage-entry potential temperature, ``θ^L = (ρθ)^L / ρ^L`` |
 | ``C^L``                             | `Cᴸ`   | `AcousticSubstepper.linearization_pressure_coefficient` | Linearized pressure coefficient, the slope ``∂p/∂(ρθ)`` of the equation of state at the stage-entry state, ``C^L = γ^e p^L / (ρθ)^L`` |
+| ``ζ``                               | `ζ`    | `adjusted_partition_response`       | Ratio of the slope ``∂p/∂(ρθ)`` of the saturation-adjusted pressure to the slope at the held partition, at fixed densities |
 | ``γ^e``                             | `γᵉ`   |                                     | Effective heat-capacity ratio of the linearized equation of state, ``γ^e = (θ / T) ∂T/∂θ`` |
 | ``θ ∂T/∂θ``                         | `θ∂T∂θ` | `temperature_and_sensitivity(𝒰, constants)` | Temperature sensitivity at fixed density and composition, propagated through the selected inversion |
 | ``\tilde{T}``                       | `T̃`    |                                     | Condensate-free root of the density-based inversion of ``θˡⁱ`` (the root with ``H^c = 0``) |

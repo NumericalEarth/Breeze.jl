@@ -19,7 +19,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Schmidt number correction factor for ventilation-enhanced table values.
 
@@ -81,7 +81,7 @@ struct P3IceLookups{FT, P}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build the [`P3IceLookups`](@ref) of the ice population `(qⁱ, qʷⁱ, nⁱ, Fᶠ, Fˡ, ρᶠ)`.
 `nⁱ` is the bounded number the rates see, not the pre-limiter number.
@@ -112,7 +112,7 @@ end
     ventilation + ventilation_sc_correction(ν, Dᵛ, ρ_correction, floors) * enhanced_ventilation
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute per-particle ventilation integral C(D) × f_v(D) for deposition
 using PSD-integrated lookup tables.

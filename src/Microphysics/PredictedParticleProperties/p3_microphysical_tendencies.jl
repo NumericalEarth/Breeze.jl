@@ -26,7 +26,7 @@ end
     p3_tendency_component(p3_state_tendencies(p3, ρ, ℳ, 𝒰, constants), name)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Cloud number tendency: gains from activation and loses proportionally with cloud sinks.
 
@@ -40,7 +40,7 @@ reached through the prognostic loop.
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Cloud liquid tendency: gains from condensation and droplet activation; loses to autoconversion, accretion, riming, freezing, and collection by melting ice.
 """
@@ -48,7 +48,7 @@ Cloud liquid tendency: gains from condensation and droplet activation; loses to 
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rain mass tendency: gains from autoconversion, accretion, melting, shedding; loses to evaporation, riming.
 """
@@ -56,7 +56,7 @@ Rain mass tendency: gains from autoconversion, accretion, melting, shedding; los
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rain number tendency: gains from autoconversion, melting, shedding; loses to self-collection, riming.
 """
@@ -64,7 +64,7 @@ Rain number tendency: gains from autoconversion, melting, shedding; loses to sel
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Ice mass tendency: gains from deposition, riming, refreezing; loses to melting.
 """
@@ -72,7 +72,7 @@ Ice mass tendency: gains from deposition, riming, refreezing; loses to melting.
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Ice number tendency: gains from nucleation, freezing, and splintering; loses to melting, sublimation, and aggregation.
 """
@@ -80,7 +80,7 @@ Ice number tendency: gains from nucleation, freezing, and splintering; loses to 
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rime mass tendency: gains from cloud/rain riming, refreezing; loses proportionally with melting.
 """
@@ -88,7 +88,7 @@ Rime mass tendency: gains from cloud/rain riming, refreezing; loses proportional
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rime volume tendency: gains from new rime; loses with melting.
 """
@@ -96,7 +96,7 @@ Rime volume tendency: gains from new rime; loses with melting.
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Liquid on ice tendency: gains from partial melting and above-freezing collection; loses to shedding and refreezing.
 """
@@ -104,7 +104,7 @@ Liquid on ice tendency: gains from partial melting and above-freezing collection
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Vapor excess tendency: zero when `vapor_excess = DiagnosticVaporExcess()`.
 """
@@ -113,7 +113,7 @@ Vapor excess tendency: zero when `vapor_excess = DiagnosticVaporExcess()`.
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Vapor tendency: loses from condensation, deposition, nucleation; gains from evaporation, sublimation.
 """
@@ -121,7 +121,7 @@ Vapor tendency: loses from condensation, deposition, nucleation; gains from evap
     p3_single_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Aerosol number tendency: depletion equal to the cloud-droplet activation rate.
 Zero in the prescribed-Nᶜˡ path.
@@ -137,7 +137,7 @@ Zero in the prescribed-Nᶜˡ path.
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply saturation adjustment for P3.
 

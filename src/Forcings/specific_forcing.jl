@@ -16,7 +16,7 @@ struct SpecificForcing{F, D, L}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Wrap a user-supplied forcing that produces a *specific* (per-unit-mass) tendency so that
 Breeze applies the density multiply ``ρ`` at kernel time. After materialization, the

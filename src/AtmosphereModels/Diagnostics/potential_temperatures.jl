@@ -126,7 +126,7 @@ const StabilityEquivalentPotentialTemperature = KernelFunctionOperation{C, C, C,
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the pressure field used for computing potential temperature.
 For anelastic dynamics, this is the reference pressure.
@@ -134,7 +134,7 @@ For anelastic dynamics, this is the reference pressure.
 dynamics_pressure_for_potential_temperature(dynamics) = dynamics.reference_state.pressure
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the standard pressure for potential temperature calculations.
 """

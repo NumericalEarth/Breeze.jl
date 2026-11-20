@@ -35,7 +35,8 @@ export TerrainMetrics,
        materialize_terrain!, build_terrain_metrics, ∂z∂x, ∂z∂y, TerrainFollowingGrid
 
 using Adapt: Adapt, adapt
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using DocStringExtensions: TYPEDEF
 using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, Center, Face, Field, set!
 using Oceananigans.Architectures: architecture
@@ -44,7 +45,7 @@ using Oceananigans.Grids: Flat, topology, znode, rnode, ξnode, ηnode
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid
 using Oceananigans.Models: LagrangianParticleTracking
 using Oceananigans.TimeSteppers: AbstractLagrangianParticles
-using Oceananigans.Utils: instantiate, interpolator, launch!
+using Oceananigans.Utils: instantiate, launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ
 

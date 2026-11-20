@@ -22,7 +22,7 @@
 using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
 using BreezeBenchmarks: checkpointing_label
-using BreezeBenchmarks: scalar_tendency_problem, model_tendency_problem, benchmark_tendency
+using BreezeBenchmarks: scalar_tendency_problem, scalar_tendency_ad_problem, model_tendency_problem, benchmark_tendency
 using JSON: JSON
 using BFloat16s: BFloat16
 using Oceananigans
@@ -90,8 +90,9 @@ function parse_commandline()
     @add_arg_table! s begin
         "--mode"
             help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output, " *
-                   "'scalar_tendency' for the bare scalar WENO kernel, or 'model_tendency' for the full-model " *
-                   "compute_tendencies! (both have no Simulation and run vanilla vs Reactant)"
+                   "'scalar_tendency' for the bare scalar WENO kernel, 'scalar_tendency_ad' for its reverse-mode " *
+                   "gradient, or 'model_tendency' for the full-model compute_tendencies! (all have no Simulation " *
+                   "and run vanilla vs Reactant)"
             arg_type = String
             default = "benchmark"
 
@@ -513,22 +514,24 @@ function run_benchmarks(args; kernel_cases = [])
         # both backends so the Reactant-compiled XLA program can be compared
         # against the eager vanilla launch. Handled up front; the model-stepping
         # path below is skipped.
-        if mode == "scalar_tendency" || mode == "model_tendency"
+        if mode in ("scalar_tendency", "scalar_tendency_ad", "model_tendency")
             m = match(r"^WENO(\d+)$", adv_name)
             isnothing(m) && error("$mode mode supports WENO<order> advection, got $adv_name")
             order = parse(Int, m[1])
 
-            label = mode == "scalar_tendency" ? "ScalarTendency" : "ModelTendency"
+            label, problem = mode == "scalar_tendency"    ? ("ScalarTendency",   scalar_tendency_problem) :
+                             mode == "scalar_tendency_ad" ? ("ScalarTendencyAD", scalar_tendency_ad_problem) :
+                                                            ("ModelTendency",    model_tendency_problem)
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
-            problem = mode == "scalar_tendency" ? scalar_tendency_problem : model_tendency_problem
 
             # Reactant additionally compares raise=true vs raise=false (the
             # latter keeps kernels as XLA custom calls instead of raising them to
             # StableHLO). raise=false needs the CUDA custom-call path, so it is
-            # skipped on TPU. Vanilla is eager — raise does not apply.
+            # skipped on TPU, and for AD, since differentiating an unraised kernel
+            # needs kernel AD. Vanilla is eager — raise does not apply.
             configs = if backend_name == "reactant"
-                raises = device == "TPU" ? (true,) : (true, false)
+                raises = device == "TPU" || mode == "scalar_tendency_ad" ? (true,) : (true, false)
                 [(r ? "reactant raise=true" : "reactant raise=false",
                   r ? "reactant-raise"      : "reactant-noraise",
                   r) for r in raises]
@@ -634,7 +637,7 @@ function run_benchmarks(args; kernel_cases = [])
                                      microphysics=micro_name,
                                      )
         else
-            error("Unknown mode: $mode. Use 'benchmark', 'simulate', 'scalar_tendency', or 'model_tendency'.")
+            error("Unknown mode: $mode. Use 'benchmark', 'simulate', 'scalar_tendency', 'scalar_tendency_ad', or 'model_tendency'.")
         end
         push!(results, result)
 

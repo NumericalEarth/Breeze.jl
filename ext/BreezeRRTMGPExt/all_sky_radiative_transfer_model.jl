@@ -21,7 +21,7 @@ using RRTMGP.AtmosphericStates: CloudState, MaxRandomOverlap
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an all-sky (gas + cloud) full-spectrum `RadiativeTransferModel` for the given grid.
 

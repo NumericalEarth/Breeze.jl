@@ -40,7 +40,7 @@ struct DefaultTemperatureSolver end
 Base.summary(::DefaultTemperatureSolver) = "DefaultTemperatureSolver"
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the default solver for a formulation's temperature inversion given `dynamics`.
 
@@ -57,7 +57,7 @@ default_temperature_solver(dynamics) = nothing
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the Exner exponent ([`VaporEquivalentExponent`](@ref Breeze.Thermodynamics.VaporEquivalentExponent)
 or [`DryExponent`](@ref Breeze.Thermodynamics.DryExponent)) that defines the liquid-ice potential

@@ -18,9 +18,9 @@ using Breeze.Thermodynamics:
     equilibrated_surface
 
 using Breeze.Solvers: SecantSolver, secant_solve, materialize_solver
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using Oceananigans: Oceananigans, CenterField
-using DocStringExtensions: TYPEDSIGNATURES
 
 struct SaturationAdjustment{E, S}
     equilibrium :: E
@@ -30,7 +30,7 @@ end
 const SA = SaturationAdjustment
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `SaturationAdjustment` microphysics representing an instantaneous adjustment
 to `equilibrium` between condensates and water vapor, computed by a secant iteration
@@ -155,6 +155,24 @@ end
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
+# A change of the equilibrium moisture ρqᵉ at fixed temperature is vapor in unsaturated air. In
+# saturated air the vapor is held at saturation, which depends on the temperature alone, so the
+# change is cloud condensate, with the liquid fraction of the cloud the equilibrium diagnosed.
+@inline AtmosphereModels.prognostic_moisture_phase_fractions(i, j, k, grid, ::SA, μ, q) =
+    equilibrium_moisture_phase_fractions(q.liquid, q.ice)
+
+# In such cells the pressure re-diagnosed is that of the partition this equilibrium adjusts to.
+@inline AtmosphereModels.saturation_adjusted_equilibrium(μ::SA) = μ.equilibrium
+
+@inline function equilibrium_moisture_phase_fractions(qᶜˡ, qᶜⁱ)
+    qᶜ = qᶜˡ + qᶜⁱ
+    saturated = qᶜ > 0
+    λ = qᶜˡ / ifelse(saturated, qᶜ, one(qᶜ))
+    return (ifelse(saturated, zero(λ), one(λ)),
+            ifelse(saturated, λ, zero(λ)),
+            ifelse(saturated, 1 - λ, zero(λ)))
+end
+
 # State-based moisture fractions for saturation adjustment (used by parcel models).
 # The moisture fractions come from the thermodynamic state after adjustment.
 # Since NothingMicrophysicalState has no prognostic variables, we return all vapor.
@@ -215,7 +233,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 
@@ -271,7 +289,7 @@ the state's total water, heat capacity, gas constant, and latent energy.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Perform saturation adjustment and return the temperature
 associated with the adjusted state.

@@ -20,7 +20,8 @@ module RoundingTreatments
 
 export RoundToNearest, StochasticRounding
 
-using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using DocStringExtensions: TYPEDEF
 using Oceananigans.Architectures: CPU, child_architecture
 
 """
@@ -82,7 +83,7 @@ and the sum moves to the neighboring float in the direction of ``e`` with probab
 struct TwoSum end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Stochastic rounding for the stage updates of a time stepper. Each stage update ``u⁰ + δ``
 is rounded to one of the two floats that bracket the exact sum, choosing the upper one with
@@ -116,7 +117,7 @@ StochasticRounding(seed=42)
 StochasticRounding(; seed = 0) = StochasticRounding(seed % UInt32, nothing)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `rounding` with the summation it uses on `arch`: [`WidenedSum`](@ref) on CPUs and
 [`TwoSum`](@ref) on GPUs. Treatments without a choice of summation are returned unchanged.
@@ -148,7 +149,7 @@ Base.show(io::IO, r::StochasticRounding) =
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the 32-bit key that, together with the grid indices, determines the random numbers of
 one stage update of one prognostic `field` (an integer that distinguishes the fields updated in
@@ -178,7 +179,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return ``a + b`` rounded according to the round-off treatment. `i, j, k` and `key`
 (from [`rounding_key`](@ref)) seed the random number of [`StochasticRounding`](@ref).

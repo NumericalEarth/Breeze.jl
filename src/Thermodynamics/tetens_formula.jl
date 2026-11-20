@@ -31,7 +31,7 @@ function Adapt.adapt_structure(to, tf::TetensFormula)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `TetensFormula` saturation vapor pressure formulation.
 [Tetens's (1930)](@cite Tetens1930) formula is an empirical relationship
@@ -98,7 +98,7 @@ for saturation vapor pressure calculations.
 const TetensFormulaThermodynamicConstants{FT, C, I, TF<:TetensFormula} = ThermodynamicConstants{FT, C, I, TF}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the saturation vapor pressure over a planar liquid surface
 using Tetens' empirical formula:
@@ -117,7 +117,7 @@ pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( aˡ \\frac{T - Tᵣ}{T - δTˡ} \\right)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the saturation vapor pressure over a planar ice surface using [Tetens'](@cite Tetens1930)
 empirical formula with ice coefficients from [Murray (1967)](@cite  Murray1967):
@@ -141,7 +141,7 @@ pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( aⁱ \\frac{T - Tᵣ}{T - δTⁱ} \\right)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the saturation vapor pressure over a mixed-phase surface
 by linearly interpolating between liquid and ice saturation vapor pressures

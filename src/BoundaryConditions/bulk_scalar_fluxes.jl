@@ -24,7 +24,7 @@ struct BulkSensibleHeatFluxFunction{S, C, G, T, SP, TC, F, FV, FS, M}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 A bulk sensible heat flux function. The flux is computed as:
 
@@ -181,9 +181,7 @@ struct BulkVaporFluxFunction{S, C, G, T, H, TC, SF, M, FV, FS}
 end
 
 """
-    BulkVaporFluxFunction(; coefficient, gustiness=DefaultGustiness(), surface_temperature,
-                            surface_relative_humidity=1, moisture_availability=nothing,
-                            filtered_velocities=nothing)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Create a bulk vapor flux function for computing wall moisture fluxes.
 The flux is computed as:

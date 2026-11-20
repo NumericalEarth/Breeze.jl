@@ -5,7 +5,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the buoyancy force density for compressible dynamics at cell center `(i, j, k)`.
 

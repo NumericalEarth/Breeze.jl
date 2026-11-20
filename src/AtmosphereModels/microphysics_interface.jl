@@ -99,7 +99,7 @@ end
 # This enables a generic grid-indexed wrapper that calls the gridless microphysical_state.
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Extract prognostic microphysical variables at grid point `(i, j, k)` into a NamedTuple
 of scalar values.
@@ -165,7 +165,7 @@ See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 @inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = NothingMicrophysicalState(typeof(ρ))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Restore scheme-specific constraints on density-weighted microphysical
 `prognostics` after a parcel time-integration substep.
@@ -176,7 +176,7 @@ constraints may extend this hook to return a corrected value.
 @inline postprocess_microphysical_prognostics(microphysics, prognostics, ρ) = prognostics
 
 """
-    grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, velocities)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)`.
 
@@ -246,7 +246,7 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 @inline microphysical_tendency(microphysics::Nothing, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the tendencies of `names` together, as a tuple in the order given.
 
@@ -277,7 +277,7 @@ See also [`microphysical_tendency`](@ref), [`compute_microphysical_tendencies!`]
 # `compute_tendencies=false`).
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Add microphysics tendency contributions to the model's `Gⁿ` fields.
 
@@ -362,7 +362,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the prognostic moisture field name as a Symbol for the given microphysics scheme.
 
@@ -392,7 +392,7 @@ never itself prognostic and therefore works for any of them.
 const total_moisture_density_name = :ρqᵗ
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Strip the leading `ρ` from a density-weighted field name to obtain
 the specific (per-mass) name. For example, `:ρqᶜˡ` → `:qᶜˡ`.
@@ -400,7 +400,7 @@ the specific (per-mass) name. For example, `:ρqᶜˡ` → `:qᶜˡ`.
 specific_field_name(name::Symbol) = (s = string(name); Symbol(s[nextind(s, 1):end]))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the specific (per-mass) moisture field name by stripping the `ρ` prefix
 from [`moisture_prognostic_name`](@ref).
@@ -408,7 +408,7 @@ from [`moisture_prognostic_name`](@ref).
 moisture_specific_name(microphysics) = specific_field_name(moisture_prognostic_name(microphysics))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the prognostic specific moisture field for `model`.
 
@@ -419,7 +419,7 @@ microphysical variables, and the total air density.
 specific_prognostic_moisture(model) = model.microphysical_fields[moisture_specific_name(model.microphysics)]
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the specific humidity (vapor mass fraction) field for the given `model`.
 
@@ -435,7 +435,7 @@ liquid_mass_fraction(::Nothing, model) = nothing
 ice_mass_fraction(::Nothing, model) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Possibly apply saturation adjustment. If a `microphysics` scheme does not invoke saturation adjustment,
 just return the `state` unmodified.
@@ -452,14 +452,14 @@ Non-equilibrium schemes return the state unchanged.
     maybe_adjust_thermodynamic_state(state, microphysics, qᵛᵉ, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `tuple()` - `Nothing` microphysics has no prognostic variables.
 """
 prognostic_field_names(::Nothing) = tuple()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the names of prognostic fields that carry aerosol populations for `microphysics`.
 
@@ -470,7 +470,7 @@ those fields without depending on scheme-specific names.
 @inline aerosol_field_names(microphysics) = tuple()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the names of the prognostic microphysical fields that carry condensate *mass*
 (condensate and precipitation densities), excluding number-concentration fields.
@@ -489,7 +489,7 @@ condensate_field_names(::Nothing) = tuple()
 
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build microphysical fields associated with `microphysics` on `grid` and with
 user defined `boundary_conditions`.
@@ -497,7 +497,7 @@ user defined `boundary_conditions`.
 materialize_microphysical_fields(microphysics::Nothing, grid, boundary_conditions) = (; qᵛ=CenterField(grid))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the aerosol population stored in a microphysics scheme's native units.
 
@@ -511,7 +511,7 @@ Returns `0` by default.
 initial_aerosol_number(microphysics) = 0
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the default aerosol number *density* ``ρ nᵃ`` [m⁻³] for a microphysics scheme,
 given the air density `ρ` (a field for grid models, a number for parcels).
@@ -536,7 +536,7 @@ unless a scheme overrides it.
 initial_aerosol_number_density(microphysics, ρ) = initial_aerosol_number(microphysics)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Write the default aerosol reservoir [`initial_aerosol_number_density`](@ref) into `ρnᵃ`,
 using the total air density [`total_density`](@ref) of `model`. A no-op for schemes without
@@ -563,7 +563,7 @@ function set_default_aerosol_number!(model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update auxiliary microphysical fields at grid point `(i, j, k)`.
 
@@ -634,7 +634,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update all microphysical fields at grid point `(i, j, k)`.
 
@@ -658,7 +658,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convert total specific moisture ``qᵗ`` to the scheme-dependent specific moisture ``qᵛᵉ``
 given the density-weighted microphysical variables `μ` and the total air density `ρ`,
@@ -700,7 +700,7 @@ specific_prognostic_moisture(microphysics, 0.02, μ, 1.2)
 @inline subtract_condensate(qᵗ, μ, ρ, names::Tuple{Symbol, Vararg}) = qᵗ - sum_properties(μ, names) / ρ
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute [`MoistureMassFractions`](@ref) from a microphysical state `ℳ` and
 scheme-dependent specific moisture ``qᵛᵉ``.
@@ -740,7 +740,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Grid-indexed version of [`moisture_fractions`](@ref).
 
@@ -770,7 +770,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Total condensate density ``ρᵗ = ρqᵛᵉ + Σ ρqᶜ`` at `(i, j, k)`: the moisture density ``ρqᵛᵉ``
 (vapor or equilibrium moisture) plus every condensed-species density named by
@@ -793,7 +793,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Total air density ``ρ = ρᵈ + ρᵗ`` at `(i, j, k)`: the dry-air density `dry_density`
 plus the [`total_condensate_density`](@ref) ``ρᵗ``. This is the diagnosed total mass density used
@@ -823,7 +823,7 @@ end
 # at the ice speed but carries liquid enthalpy.
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the sedimentation velocity field (vertical component, [m/s], negative = downward) for
 the prognostic tracer `name`, or `nothing` (the default) if the tracer does not sediment.
@@ -834,7 +834,7 @@ Microphysics schemes extend this function for each sedimenting tracer, dispatchi
 @inline sedimentation_velocity(microphysics, microphysical_fields, ::Val) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the liquid fraction of the condensate mass `name`: `1` for liquid, `0` for ice, a number
 in between for a mass of mixed composition, or `nothing` (the default) for anything that is not
@@ -849,11 +849,14 @@ behind. The fraction is the enthalpy the mass carries, not what it falls with: P
 ice `ρqʷⁱ` falls at the ice speed yet is liquid, because no fusion enthalpy has been released
 for it and [`moisture_fractions`](@ref) counts it in the liquid mass fraction.
 
-The default `nothing` covers three cases, none needing a method: condensate that does not
-sediment (saturation-adjusted cloud), a sedimenting tracer that is not a condensate mass (a
-number moment such as `ρnᶜˡ`, or a non-additive property such as P3's `ρqᶠ` and `ρbᶠ`), and a
-scheme that precipitates by its own means. Only a sedimenting condensate mass with no liquid
-fraction is an error.
+The default `nothing` covers two cases, neither needing a method: condensate that is not a
+prognostic mass (saturation-adjusted cloud), and a tracer that is not a condensate mass (a
+number moment such as `ρnᶜˡ`, or a non-additive property such as P3's `ρqᶠ` and `ρbᶠ`). A
+sedimenting condensate mass with no liquid fraction is an error.
+
+The acoustic substep loop of the compressible core projects the tendency of every name in
+[`condensate_field_names`](@ref) onto its pressure with the sensitivity of the mass's phase, so
+there every such name must declare its fraction, whether or not it sediments.
 
 A mixed-phase particle is normally two condensate masses sharing a fall speed, as P3 carries ice
 `ρqⁱ` and the liquid on it `ρqʷⁱ`. One mass of mixed composition may instead return its liquid
@@ -863,7 +866,38 @@ composition.
 @inline condensate_liquid_fraction(microphysics, ::Val) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the fractions `(vapor, liquid, ice)` of a change of the prognostic moisture density
+([`moisture_prognostic_name`](@ref)) that each phase takes at fixed temperature, in a cell whose
+moisture mass fractions are `q`.
+
+The default is all vapor: a scheme with prognostic condensate carries the vapor as its moisture
+density. A scheme whose moisture density includes condensate that it diagnoses (saturation
+adjustment) extends this with the partition its equilibrium gives a change.
+
+The acoustic substep loop of the compressible core projects the moisture tendency onto its
+pressure with the sensitivities of these phases.
+"""
+@inline prognostic_moisture_phase_fractions(i, j, k, grid, microphysics, microphysical_fields, q) =
+    (one(q.vapor), zero(q.vapor), zero(q.vapor))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the phase equilibrium to which the scheme adjusts the partition of its prognostic moisture
+density ([`moisture_prognostic_name`](@ref)) in saturated air, or `nothing` if it adjusts none.
+
+The default is `nothing`: a scheme with prognostic condensate holds the partition it carries.
+Saturation adjustment returns its equilibrium. In a cell where such a scheme holds cloud
+condensate (where [`prognostic_moisture_phase_fractions`](@ref) gives the vapor no share), the
+pressure that the compressible core re-diagnoses is that of the adjusted partition, in which
+warming evaporates condensate, and the acoustic substep loop linearizes that pressure.
+"""
+@inline saturation_adjusted_equilibrium(microphysics) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the microphysical velocities associated with `microphysics`, `microphysical_fields`, and tracer `name`.
 
@@ -887,7 +921,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a `ZFaceField` suitable for storing a sedimentation velocity: `bottom = nothing`
 ensures a kernel-set bottom-face value is preserved during `fill_halo_regions!`, while the
@@ -914,7 +948,7 @@ const ImpenetrableSedimentationBC = BoundaryCondition{<:NormalFlow, Nothing}
 @inline bottom_sedimentation_velocity(::ImpenetrableSedimentationBC, w) = zero(w)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Store the fall-speed magnitude `𝕎` diagnosed at cell center `(i, j, k)` in the
 sedimentation velocity field `w_field` at the cell's bottom face: microphysics libraries
@@ -973,7 +1007,7 @@ Base.show(io::IO, c::SedimentingCondensate) = print(io, summary(c))
 liquid_fraction_summary(f) = f == 1 ? "liquid" : f == 0 ? "ice" : string("liquid fraction ", prettysummary(f))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Materialize the sedimenting condensates for the selected dynamics. Eulerian dynamics use
 the microphysics-only materializer by default.
@@ -982,7 +1016,7 @@ materialize_sedimentation(dynamics, microphysics, microphysical_fields, advectio
     materialize_sedimentation(microphysics, microphysical_fields, advection)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the `NamedTuple` of [`SedimentingCondensate`](@ref)s of `microphysics`, keyed by prognostic
 name: one for every name in [`condensate_field_names`](@ref) with a [`sedimentation_velocity`](@ref),
@@ -1062,7 +1096,7 @@ end
 # the regime the solve exists for.
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the condensate content of the thermodynamic variable of `formulation` at cell `(i, j, k)`,
 as `(; χ = (χˡ, χⁱ), h = (hˡ, hⁱ), ∂φ∂h)`: per phase the content `χˣ = ∂φ/∂qˣ` of the specific
@@ -1080,7 +1114,7 @@ consumes the content.
 function condensate_content end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the tendency of the continuity-density-weighted thermodynamic variable (`ρθ = ρᵈ θ` or `ρs = ρᵈ s`)
 at cell `(i, j, k)` from the sedimentation of the condensate the `condensates` describe (see
@@ -1208,7 +1242,7 @@ end
 @inline liquid_fraction_content(f, χ) = f * χ[1] + (1 - f) * χ[2]
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the vertical advective mass fluxes of humidity `q` through the lower and upper faces of
 cell `(i, j, k)`, as `((F⁻(wᵗ + wˢ), F⁻(wᵗ)), (F⁺(wᵗ + wˢ), F⁺(wᵗ)))`: at each face, the flux at
@@ -1227,7 +1261,7 @@ Implemented in `Breeze.Advection`, which owns the flux operators.
 function sedimentation_mass_fluxes end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Like [`sedimentation_mass_fluxes`](@ref), but the first-order upwind remainder that the adaptive
 implicit vertical solve applies to the tracer, evaluated at the solved state `ρq / ρ` with the
@@ -1247,7 +1281,7 @@ mirrors the solve's coefficients (see `density_weighted_implicit_diffusion.jl`).
     implicit_sedimentation_mass_fluxes(i, j, k, grid, condensate.advection, wᵗ, condensate.velocity, condensate.density, ρ)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the operator-split microphysics update for the given `microphysics` scheme.
 
@@ -1256,13 +1290,13 @@ apply microphysics processes that operate on the full model state by the full `�
 rather than through the per-stage tendency interface. It runs after the time-stepper's
 `update_state!` has refreshed the diagnostic state it reads. Schemes that mutate
 prognostic fields here are responsible for restoring a consistent model state (halos,
-diagnostics, and tendencies) before returning — e.g. by calling `update_state!`.
+diagnostics, and tendencies) before returning, by calling `update_state_between_radiation_solves!`.
 Defaults to a no-op; specific microphysics schemes extend this function.
 """
 microphysics_model_update!(microphysics::Nothing, model) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether an operator-split microphysics update refreshes halos, diagnostics, and all
 tendencies before returning for a finite positive time step. Such schemes must not
@@ -1272,7 +1306,7 @@ only when no tendency callbacks would be lost. Defaults to `false`.
 refreshes_state_after_update(microphysics) = false
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Validate that `microphysics` is compatible with the model's `thermodynamic_constants`.
 
@@ -1284,7 +1318,7 @@ failure surfaces as an opaque dynamic `getproperty` / GPU compilation error.
 validate_microphysics(microphysics, thermodynamic_constants) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Validate that `microphysics` can run on architecture `arch`; a no-op by default. Extensions throw
 an `ArgumentError` at model construction for schemes that need settings an architecture requires
@@ -1293,7 +1327,7 @@ an `ArgumentError` at model construction for schemes that need settings an archi
 validate_microphysics_architecture(microphysics, arch) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Adjust the thermodynamic `state` according to the `scheme`.
 For example, if `scheme isa SaturationAdjustment`, then this function
@@ -1309,7 +1343,7 @@ If a scheme is non-adjusting, we just return `state`.
 #####
 
 """
-    precipitation_rate(model, phase=:liquid)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `KernelFunctionOperation` representing the precipitation rate for the given `phase`.
 
@@ -1336,7 +1370,7 @@ precipitation_rate(model, microphysics, phase) = CenterField(model.grid)
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary,
 in kg/m²/s (positive = downward flux out of domain).
@@ -1367,7 +1401,7 @@ bottom_precipitation_flux(model) = bottom_precipitation_flux(model, model.microp
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `KernelFunctionOperation` at `(Center, Center, Face)` for the downward mass flux of
 sedimenting condensate through every ``z``-face, in kg m⁻² s⁻¹ (positive downward).
@@ -1442,7 +1476,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `KernelFunctionOperation` at `(Center, Center, Center)` that evaluates the
 microphysical process rate called `name` of `model.microphysics` (for example
@@ -1501,7 +1535,7 @@ struct ConstantRadiusParticles{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the effective radius of cloud liquid droplets in meters.
 
@@ -1515,7 +1549,7 @@ based on cloud properties.
     effective_radius_model.radius
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the effective radius of cloud ice particles in meters.
 

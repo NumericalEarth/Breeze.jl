@@ -98,7 +98,7 @@ abstract type AbstractNumberConcentrationCategories end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a tuple of `Field` objects for density-weighted prognostic moisture mass
 fields that participate in the negative-moisture correction, ordered from heaviest
@@ -114,7 +114,7 @@ Default: empty tuple (no correction).
 correction_moisture_fields(microphysics, microphysical_fields) = ()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a tuple of `(number_field, mass_field)` pairs for number concentration
 consistency. After species borrowing, any number field whose corresponding
@@ -129,7 +129,7 @@ Default: empty tuple (no number fields to correct).
 correction_number_mass_pairs(microphysics, microphysical_fields) = ()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a tuple of `Field` objects for density-weighted number concentration
 fields that should be clamped to non-negative after advection.
@@ -147,7 +147,7 @@ Default: empty tuple (no number fields to clamp).
 correction_number_fields(microphysics, microphysical_fields) = ()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fix negative moisture mixing ratios produced by the advection operator.
 

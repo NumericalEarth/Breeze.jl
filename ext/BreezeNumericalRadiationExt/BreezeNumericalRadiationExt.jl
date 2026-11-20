@@ -16,14 +16,17 @@ using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, Surface
                                ConstantRadiusParticles, AbstractSolarPosition, ApparentSolarPosition,
                                materialize_background_atmosphere, materialize_surface_property,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
-                               assert_bound_surface_temperature, maybe_infer_solar_position,
-                               initialize_cos_zenith!, update_cos_zenith!,
-                               column_index, compute_radiation_flux_divergence!, show_radiation_summary,
+                               maybe_infer_solar_position, initialize_cos_zenith!,
+                               column_index, show_radiation_summary,
+                               approximate_radiation_updates, solves_longwave_response,
+                               perturbed_surface_temperature, surface_temperature_bounds,
+                               radiation_cache_validity,
                                bottom_face_pressure, top_face_pressure,
                                overlying_atmosphere_faces,
                                dynamics_pressure, total_density, specific_prognostic_moisture,
                                grid_moisture_fractions
 using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using NumericalRadiation: EcCKDTabulatedGasOpticsModel, EcCKDGasOpticsModel,
                           read_reference_ecckd_gas_optics, read_ecckd_tabulated_gas_optics,
@@ -46,7 +49,7 @@ using Oceananigans.Utils: launch!, IterationInterval, prettysummary
 using Adapt: Adapt, adapt
 using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using DocStringExtensions: TYPEDEF
 
 include("overlying_atmosphere.jl")
 include("column_workspace.jl")

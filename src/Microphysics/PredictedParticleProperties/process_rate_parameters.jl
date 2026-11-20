@@ -22,7 +22,7 @@ struct NumericalFloors{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct the numerical floors shared by the P3 process rates: the smallest value each
 quantity is allowed to take before it enters a division or a logarithm, so that a
@@ -329,7 +329,7 @@ struct ProcessRate{FT, VE, LF}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct process rate parameters with default values from P3 literature.
 

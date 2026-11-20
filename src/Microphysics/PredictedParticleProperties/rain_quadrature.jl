@@ -47,7 +47,7 @@ export RainMassWeightedVelocity,
 const GUNN_KINZER_WATER_DENSITY = 997     # [kg/m³], mass basis of the fit
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Piecewise Gunn-Kinzer / Beard rain terminal velocity [m/s] at diameter `D` [m], scaled by
 `ρ_correction`. Captures Stokes drag below the first transition diameter (D ≈ 134 μm by
@@ -121,7 +121,7 @@ struct RainMassWeightedVelocity{N, W, F, FS}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `RainMassWeightedVelocity` with `points` quadrature points,
 integrating the fall-speed law defined by `fall_speed`.
@@ -135,7 +135,7 @@ function RainMassWeightedVelocity(FT::DataType = Oceananigans.defaults.FloatType
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Velocity moment ratio of an exponential rain PSD on the Chebyshev-Gauss nodes,
 
@@ -223,7 +223,7 @@ struct RainNumberWeightedVelocity{N, W, F, FS}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `RainNumberWeightedVelocity` with `points` quadrature points,
 integrating the fall-speed law defined by `fall_speed`.
@@ -301,7 +301,7 @@ struct RainVelocityDiameterIntegral{N, W, FS}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `RainVelocityDiameterIntegral` with `points` quadrature points,
 integrating the fall-speed law defined by `fall_speed`.

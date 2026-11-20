@@ -53,7 +53,7 @@ struct ApparentSolarPosition{C, E} <: AbstractSolarPosition
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an [`ApparentSolarPosition`](@ref) with optional `coordinate` and `epoch`.
 
@@ -163,7 +163,7 @@ struct DiurnalSolarPosition{FT} <: AbstractSolarPosition
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`DiurnalSolarPosition`](@ref) with sensible defaults: perpetual
 equinox (`declination = 0`), 24-hour day (`day_length = 86400` s), and noon
@@ -236,7 +236,7 @@ compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round
 compute_datetime(t::Number, epoch::Nothing) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fill `cos_zenith` once at construction from the solar-position specification.
 
@@ -264,7 +264,7 @@ function fill_columns!(column_array, values::AbstractArray)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the per-column cosine of the solar zenith angle in `cos_zenith`, dispatched on the
 solar-position specification:
@@ -300,7 +300,7 @@ function update_cos_zenith!(cos_zenith, sp::DiurnalSolarPosition, grid, clock)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Check that `solar_position` can read the model's `clock`, once, when the radiation joins a model:
 [`DiurnalSolarPosition`](@ref) needs a numeric clock, and [`ApparentSolarPosition`](@ref) a
@@ -344,10 +344,14 @@ function update_apparent_zenith!(cos_zenith, ::Nothing, grid, datetime)
     return nothing
 end
 
+# The (λ, φ) of column (i, j): an explicit coordinate, or the grid's
+@inline solar_coordinate(i, j, grid, coordinate::Tuple) = coordinate
+@inline solar_coordinate(i, j, grid, ::Nothing) = (λnode(i, j, 1, grid, Center(), Center(), Center()),
+                                                  φnode(i, j, 1, grid, Center(), Center(), Center()))
+
 @kernel function _update_apparent_zenith!(cos_zenith, grid, datetime)
     i, j = @index(Global, NTuple)
-    λ = λnode(i, j, 1, grid, Center(), Center(), Center())
-    φ = φnode(i, j, 1, grid, Center(), Center(), Center())
+    λ, φ = solar_coordinate(i, j, grid, nothing)
     cos_θz = cos_solar_zenith_angle(datetime, λ, φ)
     c = column_index(i, j, grid.Nx)
     @inbounds cos_zenith[c] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)

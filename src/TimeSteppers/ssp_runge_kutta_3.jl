@@ -9,14 +9,14 @@ using Oceananigans.TimeSteppers:
     step_lagrangian_particles!,
     implicit_step!
 
-using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
                                 microphysics_model_update!, field_advection_scheme,
                                 compute_closure_tendencies!,
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_scheme, implicit_sedimentation_step!,
                                 thermodynamic_density_name
-using Oceananigans.Utils: launch!, time_difference_seconds
+using Oceananigans.Utils: launch!, time_difference_in_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
 """
@@ -64,8 +64,11 @@ struct SSPRungeKutta3{FT, U0, TG, TI, R} <: AbstractTimeStepper
     rounding :: R
 end
 
+# A Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) sits at cₘ = αₘ (cₘ₋₁ + 1)
+AtmosphereModels.stage_abscissae(ts::SSPRungeKutta3) = (ts.α¹, ts.α² * (ts.α¹ + 1))
+
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields` as described
 by [Shu and Osher (1988)](@cite Shu1988Efficient).
@@ -126,7 +129,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply an SSP RK3 substep with coefficient ``α``:
 ```math
@@ -175,7 +178,7 @@ function ssp_rk3_substep!(model, Δt, α)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Apply the vertically-implicit solve of the prognostic `u` named `name` over `Δt`: the
 first-order upwind remainder of adaptive implicit vertical advection and the vertically-implicit
@@ -239,7 +242,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Copy prognostic fields to `U⁰` storage for use in later RK3 stages.
 """
@@ -256,7 +259,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Step forward `model` one time step ``Δt`` with the SSP RK3 method.
 
@@ -286,13 +289,8 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     α² = ts.α²
     α³ = ts.α³
 
-    # Stage abscissae: a Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) has
-    # Butcher row sum cₘ = αₘ (cₘ₋₁ + 1), so u^(1) sits at tⁿ + Δt but u^(2) sits at
-    # tⁿ + Δt/2. Evaluating G(u^(2)) at tⁿ + Δt instead breaks the order conditions
-    # (Σbᵢcᵢ = 5/6 ≠ 1/2) and leaves `clock.stage` stuck at 2, so per-stage work keyed on
-    # `(iteration, stage)`, such as the filtered surface state, skips the third stage.
-    c¹ = α¹              # = 1
-    c² = α² * (c¹ + 1)   # = 1/2
+    # u^(1) sits at tⁿ + Δt but u^(2) at tⁿ + Δt/2; evaluating G(u^(2)) at tⁿ + Δt breaks third order
+    c¹, c² = AtmosphereModels.stage_abscissae(ts)  # = 1, 1/2
 
     # Compute the next time step a priori to reduce floating point error accumulation
     tⁿ⁺¹ = model.clock.time + Δt
@@ -327,7 +325,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     # Back to tⁿ + Δt/2, the abscissa of u^(2); `corrected_Δt` below restores the Δt/2.
     tick_stage!(model.clock, (c² - c¹) * Δt)
-    update_state!(model, callbacks; compute_tendencies = true)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
 
     #
     # Third stage: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
@@ -341,12 +339,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     make_pressure_correction!(model, α³ * Δt)
 
     # Adjust final time-step to reduce floating point error accumulation
-    corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
+    corrected_Δt = time_difference_in_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
 
-    update_state!(model, callbacks; compute_tendencies = true)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
