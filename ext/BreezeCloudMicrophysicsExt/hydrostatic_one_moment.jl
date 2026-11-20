@@ -49,7 +49,11 @@ end
     qʳ = @inbounds ρqʳ[i, j, k] / ρ
     φᶜˡ = diagnostic_sink_fraction(budget, ρ, qᶜˡ, conversion)
     φʳ = sink_fraction(budget, Val(:ρqʳ), ρ, qʳ, -evaporation)
-    return ρ * Δt * φᶜˡ * conversion, ρ * Δt * φʳ * evaporation
+    # The Patankar fractions keep both reservoirs non-negative in exact arithmetic; the bounds by the
+    # donors only remove the rounding of the products, which can leave a denormal negative remainder
+    to_rain = min(ρ * Δt * φᶜˡ * conversion, ρ * max(0, qᶜˡ))
+    to_vapor = max(ρ * Δt * φʳ * evaporation, - max(0, @inbounds ρqʳ[i, j, k]))
+    return to_rain, to_vapor
 end
 
 @inline HydrostaticEquations.rain_fall_speed(bμp::WP1M, ρ, qʳ) =
