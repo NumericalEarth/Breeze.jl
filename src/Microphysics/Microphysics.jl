@@ -37,6 +37,7 @@ include("bulk_microphysics.jl")
 include("microphysics_diagnostics.jl")
 include("dcmip2016_kessler.jl")
 include("instantaneous_precipitation.jl")
+include("hydrostatic_instantaneous_precipitation.jl")
 
 #####
 ##### Predicted Particle Properties (P3) submodule

@@ -113,7 +113,7 @@ a driver has taken it over with [`column_physics_in_time_step!`](@ref), and chec
 the model (see [`state_validation_interval!`](@ref)). Called by the time steppers.
 """
 function time_step_column_physics!(microphysics, model::MoistHydrostaticModel)
-    column_physics_in_time_step(model) && warm_rain_column_physics!(microphysics, model)
+    column_physics_in_time_step(model) && apply_column_physics!(microphysics, model)
 
     # The end of the time step, whoever applies the column physics: the state is checked here, once,
     # and not in each of the `update_state!`s of the step
@@ -121,6 +121,10 @@ function time_step_column_physics!(microphysics, model::MoistHydrostaticModel)
 
     return nothing
 end
+
+# The column physics of a scheme: warm rain (sources and sedimentation) by default; a scheme
+# without rain between steps extends this with `rain_out_column_physics!`
+apply_column_physics!(microphysics, model) = warm_rain_column_physics!(microphysics, model)
 
 with_moisture(dynamics, ::Nothing, grid) = dynamics
 
@@ -505,10 +509,12 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydr
                               dynamics.vertical_mass_flux, w, grid,
                               dynamics.surface_pressure_coefficient, dynamics.density, u, v)
 
-    @apply_regionally launch!(arch, grid, :xyz, _compute_rain_sedimentation_velocity!,
-                              water.wʳ, grid, model.microphysics, moisture.total_density, water.ρqʳ,
-                              θᵨ, dynamics.interface_exner_function, dynamics.pressure, model.temperature,
-                              water.qᵛ, water.qˡ, constants, cᵖᵈ, g)
+    # A scheme without rain between time steps (instantaneous precipitation) has no fall speed
+    isnothing(water.wʳ) ||
+        @apply_regionally launch!(arch, grid, :xyz, _compute_rain_sedimentation_velocity!,
+                                  water.wʳ, grid, model.microphysics, moisture.total_density, water.ρqʳ,
+                                  θᵨ, dynamics.interface_exner_function, dynamics.pressure, model.temperature,
+                                  water.qᵛ, water.qˡ, constants, cᵖᵈ, g)
 
     # The halos that the limiter and the tendencies read, filled together where the fields share a
     # location and boundary conditions: the potential temperatures, the geopotential and the mass
@@ -908,6 +914,17 @@ end
     return nothing
 end
 
+# The Exner function of the lower face of a layer, and the potential temperature of the layer, under
+# the pressure `p⁻` of its lower face and `p⁺` (Exner function `Πᶠ⁺`) of its upper face, with dry
+# pressure thickness `Δπ`, weight of water `Wᵗ⁺` and enthalpy `𝓗⁺` per unit area: the layer Exner
+# function is the mass-weighted mean of (p / pˢᵗ)^κ across the layer.
+@inline function reexpressed_layer(p⁻, p⁺, Πᶠ⁺, Δπ, Wᵗ⁺, 𝓗⁺, cᵖᵈ, cᵖᵛ, pˢᵗ, κ)
+    Πᶠ⁻ = (p⁻ / pˢᵗ)^κ
+    Π⁺ = (p⁻ * Πᶠ⁻ - p⁺ * Πᶠ⁺) / ((1 + κ) * (Δπ + Wᵗ⁺))
+    θ⁺ = 𝓗⁺ / ((Δπ * cᵖᵈ + Wᵗ⁺ * cᵖᵛ) * Π⁺)
+    return Πᶠ⁻, θ⁺
+end
+
 # Sedimentation of rain over Δt, implicit in time and upwind in the physical layers, from the
 # model top down: with λ = V Δt / (physical depth) the Courant number of a layer at the fall
 # speed of the start of the step, the layer keeps (Wʳ + inflow) / (1 + λ) of the weight of its
@@ -970,9 +987,7 @@ end
             Wᵗ⁺ = g * Δz * (ρqᵉᵏ + ρqʳ⁺)
             ΣW += ifelse(crossed, Wᵗ⁺, Wᵗ)
             p⁻ = interface_pressure(i, j, k, A, B, πˢ) + ΣW
-            Πᶠ⁻ = (p⁻ / pˢᵗ)^κ
-            Π⁺ = (p⁻ * Πᶠ⁻ - p⁺ * Πᶠ⁺) / ((1 + κ) * (Δπ + Wᵗ⁺))
-            θ⁺ = 𝓗⁺ / ((Δπ * cᵖᵈ + Wᵗ⁺ * cᵖᵛ) * Π⁺)
+            Πᶠ⁻, θ⁺ = reexpressed_layer(p⁻, p⁺, Πᶠ⁺, Δπ, Wᵗ⁺, 𝓗⁺, cᵖᵈ, cᵖᵛ, pˢᵗ, κ)
 
             ρθ[i, j, k] = ifelse(crossed, ρᵏ * θ⁺, ρθ[i, j, k])
             ρqʳ[i, j, k] = ifelse(crossed, ρqʳ⁺, ρqʳᵏ)
@@ -1125,6 +1140,123 @@ function warm_rain_column_physics!(microphysics, model::MoistHydrostaticModel;
                               model.formulation, dynamics, model.temperature,
                               AtmosphereModels.specific_prognostic_moisture(model), water, constants,
                               cᵖᵈ, κ, g, substep_Δt, substeps, sources, sedimentation, inflow_fall_speed)
+
+    update_state!(model)
+
+    return nothing
+end
+
+#####
+##### Instantaneous rain-out: condensation and the fall of the condensate within the time step
+#####
+#
+# A scheme without rain between time steps (zero-moment, instantaneous precipitation) condenses the
+# supersaturation of every layer at its pressure, with θ fixed (θ is invariant under a phase change
+# at fixed pressure and total water, so the latent heat is in the temperature), and the condensate
+# falls to the ground within the step: the sweep of `sediment_column_rain!` with the condensate of
+# each layer in place of its rain and a fall that keeps nothing, so every layer passes on all it
+# holds and all that enters it (no Courant number, no λ = ∞). The enthalpy, pressure and ledger
+# bookkeeping is that of the sedimentation of rain: the condensate leaving a layer carries
+# hˡ = cˡ T - ℒˡ₀ at the temperature of that layer after condensation, the layers it crossed are
+# expressed again at their new pressure, and the column loses hˡ + Φˢ per unit mass reaching the
+# ground; the potential energy the fall releases is the frictional heating of the ledger.
+#
+# The scheme provides `rainout_condensate(microphysics, i, j, k, grid, formulation, dynamics, constants, ρqᵛ)`,
+# the density of the condensate of layer k (same measure as ρqᵛ) and the temperature after condensation.
+function rainout_condensate end
+
+@kernel function _rain_out_columns!(ρθ, ρqᵛ, precipitation_rate, ledger, grid, microphysics, formulation, dynamics,
+                                    constants, κ, g, Δt)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    ρ = dynamics.density
+    A = dynamics.pressure_coefficient
+    B = dynamics.surface_pressure_coefficient
+    πˢ = dynamics.surface_pressure
+    Φˢ = dynamics.surface_geopotential
+    Φ = dynamics.geopotential
+    Π = dynamics.exner_function
+    θ = formulation.potential_temperature
+    pˢᵗ = dynamics.standard_pressure
+
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    cˡ = constants.liquid.heat_capacity
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+
+    @inbounds begin
+        ΣW = zero(grid)
+        inflow = zero(grid)
+        enthalpy_inflow = zero(grid)
+        friction = zero(grid)
+        p⁺ = interface_pressure(i, j, Nz+1, A, B, πˢ)
+        Πᶠ⁺ = (p⁺ / pˢᵗ)^κ
+
+        for k in Nz:-1:1
+            Δz = Δzᶜᶜᶜ(i, j, k, grid)
+            Δπ = layer_pressure_thickness(i, j, k, A, B, πˢ)
+            ρqᵛᵏ = ρqᵛ[i, j, k]
+
+            ρc, T₁ = rainout_condensate(microphysics, i, j, k, grid, formulation, dynamics, constants, ρqᵛ)
+
+            # Instant fall: the layer keeps nothing and passes on its condensate and all that enters it
+            outflow = inflow + g * Δz * ρc
+            hˡ = cˡ * T₁ - ℒˡ₀
+            crossed = (inflow != 0) | (outflow != 0)
+
+            # Enthalpy of the layer, Δπ (cᵖᵈ + rᵗ cᵖᵛ) Π θ, before (all of its water) and after
+            Wᵗ = g * Δz * ρqᵛᵏ
+            𝓗 = (Δπ * cᵖᵈ + Wᵗ * cᵖᵛ) * Π[i, j, k] * θ[i, j, k]
+            𝓗⁺ = 𝓗 + enthalpy_inflow - outflow * hˡ
+
+            ρqᵛ⁺ = ρqᵛᵏ - ρc
+            Wᵗ⁺ = g * Δz * ρqᵛ⁺
+            ΣW += ifelse(crossed, Wᵗ⁺, Wᵗ)
+            p⁻ = interface_pressure(i, j, k, A, B, πˢ) + ΣW
+            Πᶠ⁻, θ⁺ = reexpressed_layer(p⁻, p⁺, Πᶠ⁺, Δπ, Wᵗ⁺, 𝓗⁺, cᵖᵈ, cᵖᵛ, pˢᵗ, κ)
+
+            ρθ[i, j, k] = ifelse(crossed, ρ[i, j, k] * θ⁺, ρθ[i, j, k])
+            ρqᵛ[i, j, k] = ifelse(ρc > 0, ρqᵛ⁺, ρqᵛᵏ)
+            precipitation_rate[i, j, k] = ρc / Δt
+
+            below = max(k - 1, 1)
+            Φ⁻ = ifelse(k == 1, Φˢ[i, j, 1], Φ[i, j, below])
+            friction += outflow / g * (Φ[i, j, k] - Φ⁻)
+
+            inflow = outflow
+            enthalpy_inflow = outflow * hˡ
+            p⁺ = p⁻
+            Πᶠ⁺ = Πᶠ⁻
+        end
+
+        ledger.surface_rain[i, j, 1] += inflow / g
+        ledger.precipitation_energy[i, j, 1] += (enthalpy_inflow + inflow * Φˢ[i, j, 1]) / g
+        ledger.rain_frictional_heating[i, j, 1] += friction
+    end
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Apply the instantaneous rain-out of `microphysics` (a scheme without rain between time steps) to
+`model`, an `AtmosphereModel` with moist [`HydrostaticDynamics`](@ref), over the time step just
+taken: every layer condenses its supersaturation at its pressure, and the condensate falls to the
+ground within the step, with the enthalpy, pressure and ledger bookkeeping of the sedimentation
+of rain (see `_rain_out_columns!`). Once per call; the state is updated afterwards.
+"""
+function rain_out_column_physics!(microphysics, model::MoistHydrostaticModel; Δt=model.clock.last_Δt)
+    (isfinite(Δt) && Δt > 0) || return nothing
+    grid = model.grid
+    constants = model.thermodynamic_constants
+    κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    g = constants.gravitational_acceleration
+
+    @apply_regionally launch!(grid.architecture, grid, :xy, _rain_out_columns!,
+                              model.formulation.potential_temperature_density, model.moisture_density,
+                              model.microphysical_fields.precipitation_rate, model.dynamics.moisture.ledger,
+                              grid, microphysics, model.formulation, model.dynamics, constants, κ, g,
+                              convert(eltype(grid), Δt))
 
     update_state!(model)
 
