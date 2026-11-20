@@ -868,16 +868,19 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The densities `(to_rain, to_vapor)` that the column physics moves over `Δt` from cloud liquid to
-rain and from rain to vapor (`to_vapor ≤ 0`), at the cell `(i, j, k)` with density `ρ` (of the
-grid), cloud liquid `qᶜˡ` and rain density `ρqʳ`, given the specific rates `conversion ≥ 0` and
-`evaporation ≤ 0`. The default limits each sink to what its donor holds; a microphysics scheme
-with stage-aware sink budgets replaces this with them.
+What the column physics does over `Δt` at the cell `(i, j, k)`, with density `ρ` (of the grid),
+cloud liquid `qᶜˡ` and rain density `ρqʳ`, given the specific rates `conversion ≥ 0` (cloud liquid
+to rain) and `evaporation ≤ 0` (rain to vapor): the density `to_rain` converted from cloud liquid,
+and the rain density `rain_kept` that evaporation leaves of `ρqʳ`. The rain afterwards is
+`rain_kept + to_rain`, a sum of non-negative numbers wherever `ρqʳ ≥ 0`. The default limits each
+sink to what its donor holds; a microphysics scheme with stage-aware sink budgets replaces this
+with them.
 """
 @inline function rain_source_transfers(microphysics, i, j, k, ρqʳ, ρ, qᶜˡ, conversion, evaporation, Δt)
+    ρqʳᵏ = @inbounds ρqʳ[i, j, k]
     to_rain = min(ρ * Δt * conversion, ρ * max(0, qᶜˡ))
-    to_vapor = max(ρ * Δt * evaporation, - max(0, @inbounds ρqʳ[i, j, k]))
-    return to_rain, to_vapor
+    rain_kept = ρqʳᵏ + max(ρ * Δt * evaporation, - max(0, ρqʳᵏ))
+    return to_rain, rain_kept
 end
 
 @inline function apply_cell_rain_sources!(i, j, k, ρqᵉ, ρqʳ, microphysics, ρᵗ, p, T, qᵛ, qˡ, qᶜˡ, constants, Δt)
@@ -894,10 +897,11 @@ end
         conversion = ifelse(qᶜˡᵏ > 0, conversion, zero(conversion))
         evaporation = ifelse(qʳ > 0, evaporation, zero(evaporation))
 
-        to_rain, to_vapor = rain_source_transfers(microphysics, i, j, k, ρqʳ, ρᵏ, qᶜˡᵏ, conversion, evaporation, Δt)
-        δρqʳ = to_rain + to_vapor
+        to_rain, rain_kept = rain_source_transfers(microphysics, i, j, k, ρqʳ, ρᵏ, qᶜˡᵏ, conversion, evaporation, Δt)
+        ρqʳ⁺ = rain_kept + to_rain
+        δρqʳ = ρqʳ⁺ - ρqʳᵏ
 
-        ρqʳ[i, j, k] = ρqʳᵏ + δρqʳ
+        ρqʳ[i, j, k] = ρqʳ⁺
         ρqᵉ[i, j, k] -= δρqʳ
     end
 

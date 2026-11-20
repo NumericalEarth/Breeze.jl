@@ -87,10 +87,12 @@ end
         conversion = ifelse(qᶜˡᵏ > 0, conversion, zero(conversion))
         evaporation = ifelse(qʳ > 0, evaporation, zero(evaporation))
 
-        to_rain, to_vapor = HydrostaticEquations.rain_source_transfers(microphysics, i, j, k, ρqʳ, ρᵏ, qᶜˡᵏ, conversion, evaporation, Δt)
-        δρqʳ = to_rain + to_vapor
+        to_rain, rain_kept = HydrostaticEquations.rain_source_transfers(microphysics, i, j, k, ρqʳ, ρᵏ, qᶜˡᵏ, conversion, evaporation, Δt)
+        to_vapor = rain_kept - ρqʳᵏ
+        ρqʳ⁺ = rain_kept + to_rain
+        δρqʳ = ρqʳ⁺ - ρqʳᵏ
 
-        ρqʳ[i, j, k] = ρqʳᵏ + δρqʳ
+        ρqʳ[i, j, k] = ρqʳ⁺
         ρqᵉ[i, j, k] -= δρqʳ
 
         # Only the evaporation changes the liquid of the cell. Its internal energy does not change:

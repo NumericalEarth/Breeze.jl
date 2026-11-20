@@ -46,10 +46,15 @@ end
     stage = AM.StageStart(nothing, rain, false, Δt)
     nothing_accumulated = (; ρqʳ = ZeroField(typeof(Δt)))
     budget = StageSinkBudget(i, j, k, nothing_accumulated, stage, Δt)
-    qʳ = @inbounds ρqʳ[i, j, k] / ρ
+    ρqʳᵏ = @inbounds ρqʳ[i, j, k]
     φᶜˡ = diagnostic_sink_fraction(budget, ρ, qᶜˡ, conversion)
-    φʳ = sink_fraction(budget, Val(:ρqʳ), ρ, qʳ, -evaporation)
-    return ρ * Δt * φᶜˡ * conversion, ρ * Δt * φʳ * evaporation
+    φʳ = sink_fraction(budget, Val(:ρqʳ), ρ, ρqʳᵏ / ρ, -evaporation)
+    # In Patankar form the rain left by evaporation is φʳ ρqʳ: ρqʳ - Δt φʳ L = ρqʳ² / (ρqʳ + Δt L),
+    # computed as a product of non-negative numbers so that no rounding takes it below zero (the
+    # difference form left -1.75e-46 in hydrostatic_moist T3). Negative rain (none is made here) is
+    # left as it is.
+    rain_kept = ifelse(ρqʳᵏ > 0, φʳ * ρqʳᵏ, ρqʳᵏ)
+    return ρ * Δt * φᶜˡ * conversion, rain_kept
 end
 
 @inline HydrostaticEquations.rain_fall_speed(bμp::WP1M, ρ, qʳ) =
