@@ -1111,10 +1111,12 @@ MoistColumnPhysics(mixing::MoistTurbulentMixing; warm_rain_substeps=1) = MoistCo
 # The ledger of the mixing is its only state
 Oceananigans.prognostic_state(physics::MoistColumnPhysics) = Oceananigans.prognostic_state(physics.mixing)
 
-function Oceananigans.restore_prognostic_state!(physics::MoistColumnPhysics, from)
+function Oceananigans.restore_prognostic_state!(physics::MoistColumnPhysics, from::NamedTuple)
     Oceananigans.restore_prognostic_state!(physics.mixing, from)
     return physics
 end
+
+Oceananigans.restore_prognostic_state!(physics::MoistColumnPhysics, ::Nothing) = physics
 
 function (physics::MoistColumnPhysics)(simulation)
     model = simulation.model

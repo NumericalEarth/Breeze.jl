@@ -107,8 +107,9 @@ for G in (:HydrostaticPressureRectilinearGrid,
           :HydrostaticPressureOrthogonalSphericalShellGrid)
 
     @eval begin
-        @inline Operators.Δzᵃᵃᶜ(i, j, k, grid::$G) = layer_depthᶜᶜᶜ(i, j, k, grid)
-        @inline Operators.Δzᵃᵃᶠ(i, j, k, grid::$G) = interface_spacingᶜᶜᶠ(i, j, k, grid)
+        # Integer indices: Oceananigans has methods for arrays of indices on any grid
+        @inline Operators.Δzᵃᵃᶜ(i::Integer, j::Integer, k::Integer, grid::$G) = layer_depthᶜᶜᶜ(i, j, k, grid)
+        @inline Operators.Δzᵃᵃᶠ(i::Integer, j::Integer, k::Integer, grid::$G) = interface_spacingᶜᶜᶠ(i, j, k, grid)
 
         @inline Operators.Δzᶜᶜᶜ(i, j, k, grid::$G) = layer_depthᶜᶜᶜ(i, j, k, grid)
         @inline Operators.Δzᶜᶜᶠ(i, j, k, grid::$G) = interface_spacingᶜᶜᶠ(i, j, k, grid)

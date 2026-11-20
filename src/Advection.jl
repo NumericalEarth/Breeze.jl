@@ -17,7 +17,6 @@ using Oceananigans.Advection:
     BoundsPreservation,
     BoundsPreservingWENO,
     FunctionStencil,
-    upwind_biased_product,
     implicit_vertical_velocityᶜᶜᶠ,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
