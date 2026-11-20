@@ -1354,8 +1354,9 @@ end
     # The bounds-preserving limiter is cached on the scheme and refreshed from the specific field
     # by `update_state!` before the tendencies; the rain profile was written directly above, so
     # refresh it here the way `update_advection!` does.
-    Oceananigans.Advection.update_bounds_preserving_limiter!(rain.advection, grid, μ.qʳ)
-    @test any(θ -> θ < 1, Array(interior(rain.advection.bounds.limiter, 1, 1, :)))
+    # (Oceananigans #6534 API: the velocities that carry the content, and no time step for a fixed weight)
+    Oceananigans.Advection.update_bounds_preserving_limiter!(rain.advection, grid, μ.qʳ, U, nothing)
+    @test any(θ -> θ < 1, Array(interior(rain.advection.bounds.reconstruction_limiter, 1, 1, :)))
     unlimited = (Breeze.AtmosphereModels.SedimentingCondensate(rain.velocity, rain.specific_humidity, rain.density,
                                                               rain.liquid_fraction, unlimited_scheme),)
 

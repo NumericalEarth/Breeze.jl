@@ -17,10 +17,7 @@ using Oceananigans.Advection:
     BoundsPreservation,
     BoundsPreservingWENO,
     FunctionStencil,
-    LeftBias,
-    RightBias,
     upwind_biased_product,
-    rescaled_reconstruction,
     implicit_vertical_velocityᶜᶜᶠ,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
@@ -198,49 +195,41 @@ end
     return F⁻, F⁺
 end
 
-# Bounds-preserving WENO rescales its face reconstructions by the cached limiter of the cell
-# each one draws on, so the fluxes of cell k are rebuilt from the same limited reconstructions
-# `bounded_tracer_flux_divergence_z` forms its mass fluxes from: the latent heat stays with the
-# mass at cloud and precipitation edges, where the limiter acts and the unlimited WENO fluxes
-# would move heat the tracer tendency does not move.
+# Bounds-preserving WENO (Oceananigans #6534 semantics) forms each face flux from the upwind
+# reconstruction alone, rescaled by the limiter θ of the upwind cell (`reconstruction_limiter`, or
+# none with `NoRescaling`), read from the face values cached by the θ kernel where the scheme keeps
+# them. The sedimentation fluxes are formed with the same face values the tracer tendency uses
+# (`bounded_face_flux_z`), so the latent heat moves with exactly the mass the tracer tendency moves.
 @inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection::BoundsPreservingWENO, wᵗ, wˢ, q)
     w = SumOfArrays{2}(wᵗ, wˢ)
-    c₋ᴸ, c₋ᴿ, c₊ᴸ, c₊ᴿ = bounded_face_reconstructions(i, j, k, grid, advection, q)
-    F⁻ = (bounded_sedimentation_mass_flux(i, j, k,   grid, advection, w,  q, c₋ᴸ, c₋ᴿ),
-          bounded_sedimentation_mass_flux(i, j, k,   grid, advection, wᵗ, q, c₋ᴸ, c₋ᴿ))
-    F⁺ = (bounded_sedimentation_mass_flux(i, j, k+1, grid, advection, w,  q, c₊ᴸ, c₊ᴿ),
-          bounded_sedimentation_mass_flux(i, j, k+1, grid, advection, wᵗ, q, c₊ᴸ, c₊ᴿ))
+    F⁻ = (bounded_sedimentation_mass_flux(i, j, k,   grid, advection, w,  q),
+          bounded_sedimentation_mass_flux(i, j, k,   grid, advection, wᵗ, q))
+    F⁺ = (bounded_sedimentation_mass_flux(i, j, k+1, grid, advection, w,  q),
+          bounded_sedimentation_mass_flux(i, j, k+1, grid, advection, wᵗ, q))
     return F⁻, F⁺
 end
 
-# Face flux from the limited reconstructions `cᴸ`, `cᴿ`, with the explicit CFL scaling that
-# `div_ρUc` applies under adaptive implicit vertical advection.
-@inline function bounded_sedimentation_mass_flux(i, j, k, grid, advection, w, q, cᴸ, cᴿ)
+# Face flux from the rescaled upwind face value, with the explicit CFL scaling that `div_ρUc`
+# applies under adaptive implicit vertical advection.
+@inline function bounded_sedimentation_mass_flux(i, j, k, grid, advection, w, q)
+    bounds = advection.bounds
     explicit_w = explicit_vertical_velocity(advection, grid, w)
     @inbounds wₑ = explicit_w[i, j, k]
-    return Azᶜᶜᶠ(i, j, k, grid) * upwind_biased_product(wₑ, cᴸ, cᴿ)
+    ĉ = upwind_face_value_z(i, j, k, grid, advection, bounds.upwind_face_values, bounds.reconstruction_limiter, wₑ, q)
+    return Azᶜᶜᶠ(i, j, k, grid) * wₑ * ĉ
 end
 
-# Reconstructions of `c` at the lower (`k`) and upper (`k + 1`) faces of cell (i, j, k), returned
-# as `(c₋ᴸ, c₋ᴿ, c₊ᴸ, c₊ᴿ)`, each rescaled by the cached bounds-preserving limiter θ of the cell it
-# draws on (k − 1, k, k and k + 1), exactly as `bounded_tracer_flux_divergence_z` forms its face
-# states, so that the two cells sharing a face see the same limited flux through it and the
-# latent heat moves with exactly the mass the tracer tendency moves. The limiter is refreshed by
-# `update_advection!` before the tendencies that consume it (see `update_state!`).
-@inline function bounded_face_reconstructions(i, j, k, grid, advection::BoundsPreservingWENO, c)
-    θ = advection.bounds.limiter
-
-    c₊ᴸ = _biased_interpolate_zᵃᵃᶠ(i, j, k+1, grid, advection, LeftBias,  c)
-    c₊ᴿ = _biased_interpolate_zᵃᵃᶠ(i, j, k+1, grid, advection, RightBias, c)
-    c₋ᴸ = _biased_interpolate_zᵃᵃᶠ(i, j, k,   grid, advection, LeftBias,  c)
-    c₋ᴿ = _biased_interpolate_zᵃᵃᶠ(i, j, k,   grid, advection, RightBias, c)
-
-    c₊ᴸ = rescaled_reconstruction(c₊ᴸ, i, j, k,   grid, θ, c)
-    c₊ᴿ = rescaled_reconstruction(c₊ᴿ, i, j, k+1, grid, θ, c)
-    c₋ᴸ = rescaled_reconstruction(c₋ᴸ, i, j, k-1, grid, θ, c)
-    c₋ᴿ = rescaled_reconstruction(c₋ᴿ, i, j, k,   grid, θ, c)
-
-    return c₋ᴸ, c₋ᴿ, c₊ᴸ, c₊ᴿ
+# With a flux limiter the tracer tendency applies the upwind flux plus the limited antidiffusive
+# flux of each face (`limited_face_flux_z`). The antidiffusive part is the same at `wᵗ + wˢ` and at
+# `wᵗ`, so the sedimentation part of the mass flux, their difference, is the upwind flux of the
+# sedimentation velocity, and the latent heat moves with exactly what the tendency moves.
+@inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection::FluxLimitedWENO, wᵗ, wˢ, q)
+    w = SumOfArrays{2}(wᵗ, wˢ)
+    F⁻ = (limited_face_flux_z(i, j, k,   grid, advection, 1, w,  q),
+          limited_face_flux_z(i, j, k,   grid, advection, 1, wᵗ, q))
+    F⁺ = (limited_face_flux_z(i, j, k+1, grid, advection, 1, w,  q),
+          limited_face_flux_z(i, j, k+1, grid, advection, 1, wᵗ, q))
+    return F⁻, F⁺
 end
 
 #####
@@ -281,14 +270,18 @@ end
     return -ρ_face * min(wⁱ, 0) * c_above
 end
 
-# Bounds-preserving WENO: the bottom face flux of cell 1 as `bounded_tracer_flux_divergence_z`
-# forms it, from the reconstructions rescaled by the cached limiter of each donor cell.
+# Bounds-preserving WENO: the bottom face flux of cell 1 as `bounded_face_flux_z` forms it, from the
+# rescaled upwind face value (see `bounded_sedimentation_mass_flux`).
 @inline function bottom_advective_tracer_flux(i, j, grid, advection::BoundsPreservingWENO, ρ, w, c)
-    c₋ᴸ, c₋ᴿ, _, _ = bounded_face_reconstructions(i, j, 1, grid, advection, c)
-    explicit_w = explicit_vertical_velocity(advection, grid, w)
-    @inbounds w⁻ = explicit_w[i, j, 1]
     ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
-    explicit_flux = -ρ_face * upwind_biased_product(w⁻, c₋ᴸ, c₋ᴿ)
+    explicit_flux = -ρ_face * bounded_sedimentation_mass_flux(i, j, 1, grid, advection, w, c) / Azᶜᶜᶠ(i, j, 1, grid)
+    return explicit_flux + implicit_bottom_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c)
+end
+
+# With a flux limiter: the limited bottom face flux the tracer tendency applies.
+@inline function bottom_advective_tracer_flux(i, j, grid, advection::FluxLimitedWENO, ρ, w, c)
+    ρ_face = ℑzᵃᵃᶠ(i, j, 1, grid, ρ)
+    explicit_flux = -ρ_face * limited_face_flux_z(i, j, 1, grid, advection, 1, w, c) / Azᶜᶜᶠ(i, j, 1, grid)
     return explicit_flux + implicit_bottom_advective_tracer_flux(i, j, grid, advection, ρ_face, w, c)
 end
 
