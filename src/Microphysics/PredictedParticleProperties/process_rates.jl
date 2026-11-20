@@ -560,10 +560,16 @@ end
 # Everything from here down is `@inline`. A `@noinline` device function would receive `p3`
 # (several KB of table handles), `ℳ`, `𝒰`, and `constants` as local-memory copies, and
 # ptxas allocates registers over the whole call graph anyway.
+@inline compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                                  surface_temperature, temperature_tendency, pressure_tendency) =
+    compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                             surface_temperature, temperature_tendency, pressure_tendency,
+                             DiracStatistics())
+
 @inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                           surface_temperature,
                                           temperature_tendency,
-                                          pressure_tendency)
+                                          pressure_tendency, 𝒮)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -652,8 +658,10 @@ end
                                                            lookups)
 
     # === PHASE 1 & 2 RATES ===
-    phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
-                             temperature_tendency, pressure_tendency)
+    phase1_grid_mean = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
+                                       temperature_tendency, pressure_tendency)
+    # Subgrid information from the turbulence closure; the identity for `DiracStatistics`.
+    phase1 = p3_subgrid_phase1_rates(𝒮, phase1_grid_mean, p3, ρ, ℳ_adjusted, constants, state)
     phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===
