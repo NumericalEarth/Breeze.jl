@@ -132,13 +132,21 @@ The anelastic formulation uses a multi-stage time integrator for advection, Cori
    \boldsymbol{\nabla \cdot}\, \big( ρᵣ \, \boldsymbol{\nabla} \phi \big) = \frac{1}{Δt} \, \boldsymbol{\nabla \cdot}\, \widetilde{(ρᵣ \boldsymbol{u})} ,
    ```
 
-   with periodic lateral boundaries and homogeneous Neumann boundary conditions in ``z``.
+   with homogeneous Neumann boundary conditions in ``z``, and lateral conditions set by the horizontal topology: periodic for a `Periodic` direction, and homogeneous Neumann for a `Bounded` one, which the solver transforms with a discrete cosine transform.
 
 2. Update momentum to enforce ``\boldsymbol{\nabla \cdot}\, (ρᵣ \boldsymbol{u}^{n+1}) = 0``:
 
    ```math
    ρᵣ \boldsymbol{u}^{n+1} = \widetilde{(ρᵣ \boldsymbol{u})} - Δt \, ρᵣ \boldsymbol{\nabla} \phi .
    ```
+
+A laterally-bounded domain carries a solvability constraint that a periodic one does not. With homogeneous Neumann conditions on every lateral boundary, the Poisson problem has a solution only if the net mass flux through those boundaries vanishes,
+
+```math
+\oint ρᵣ \, \boldsymbol{u} \boldsymbol{\cdot} \boldsymbol{\hat{n}} \, \mathrm{d}A = 0 .
+```
+
+The solver fixes ``\phi`` to within a constant by zeroing the mean of the solution, but it does not modify the right-hand side, so an imbalance is not rejected — it is spread through the domain as spurious divergence. Impenetrable walls refill to zero and are already balanced, but prescribed lateral boundaries have no reason to balance to round-off. `enforce_lateral_mass_balance!` removes the imbalance after every momentum halo fill, by subtracting a uniform offset from the normal momentum on the lateral faces that opt into the correction — those whose `NormalFlowBoundaryCondition` carries `BalancedTransport()` or a radiation scheme. The offset is uniform in momentum rather than in velocity, so the velocity increment scales as ``1/ρᵣ(z)`` and the flux integral is removed exactly whatever ``ρᵣ`` does over the column.
 
 In Breeze this projection is implemented as a Fourier-tridiagonal solve in the vertical with variable ``ρᵣ(z)``, aligning with the hydrostatic reference state. The hydrostatic pressure anomaly ``p_h'`` can be obtained diagnostically by vertical integration of buoyancy and used when desired to separate hydrostatic and nonhydrostatic pressure effects.
 
@@ -154,3 +162,4 @@ The stage updates accept a round-off treatment, for example
 - ``s``: Moist static energy.
 - ``q^t``: Total specific humidity (vapor + condensates).
 - ``\phi``: Nonhydrostatic pressure correction potential used by the projection.
+- ``\boldsymbol{\hat{n}}``: Outward unit normal on a domain boundary.

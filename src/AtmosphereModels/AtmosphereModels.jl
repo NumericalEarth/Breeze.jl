@@ -19,6 +19,8 @@ export
     SlowDynamics,
     compute_pressure_correction!,
     make_pressure_correction!,
+    enforce_lateral_mass_balance!,
+    materialize_boundary_transport,
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
     specific_thermodynamic_field,
     thermodynamic_density_name,
