@@ -22,6 +22,12 @@ Let ``ρ`` denote density, ``\boldsymbol{u}`` velocity, ``p`` pressure, ``\bolds
 Notation ``\boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u})`` above denotes a vector whose components are
 ``[\boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u})]_i = \boldsymbol{\nabla \cdot}\, (ρ u_i \boldsymbol{u})``.
 
+Here ``ρ`` is the *total* density, so this balance carries the full pressure gradient and the total
+gravitational force ``ρ g``. Breeze steps not this mixture momentum but the continuity-density-weighted one
+(``ρᵈ \boldsymbol{u}`` compressible, ``ρᵣ \boldsymbol{u}`` anelastic), so both forces enter the
+tendency rescaled by ``ρᵈ/ρ``, exactly 1 where the two densities coincide. See
+[Compressible dynamics](@ref Compressible-section).
+
 ## Thermodynamic equation
 
 In addition to mass and momentum, Breeze advances a thermodynamic prognostic variable ``ρᵡ`` — the density-weighted form of a thermodynamic state function ``χ(T, p, q)`` — in conservative (flux) form:
@@ -36,7 +42,7 @@ Breeze supports two concrete choices for ``χ``:
 
 - **Liquid-ice potential temperature** (``ρᵡ = ρ θˡⁱ``, the default): ``θˡⁱ = H / (\hat{c}ᵖ \hat{Π})`` is the enthalpy ``H = c^{pm} T - \mathscr{L}^l_0 q^l - \mathscr{L}^i_0 q^i`` in temperature units, referred to the standard pressure with the vapor-equivalent Exner function ``\hat{Π} = (p / pˢᵗ)^{\hat{κ}}``; see [Liquid-ice potential temperature](@ref liquid-ice-potential-temperature). It is exactly invariant under phase change, and its expansion source ``\mathcal{E}_θ = (R^m T - \hat{R} \hat{Π} θˡⁱ) / (\hat{c}ᵖ \hat{Π})`` is proportional to the condensate, so that ``θˡⁱ`` is materially conserved under adiabatic motion in clear air.
 
-- **Static energy** (``ρᵡ = ρ s``): The moist static energy ``s = H + g z`` adds the gravitational potential energy, with ``\mathscr{L}^l_0`` and ``\mathscr{L}^i_0`` the latent heats of condensation and deposition extrapolated to absolute zero. Its source is the pressure work ``\mathrm{D} p / \mathrm{D} t`` plus the geopotential change ``ρ g w``, which on the anelastic core combine into the buoyancy flux ``- ρᵣ w b``; see [Anelastic dynamics](@ref Anelastic-section).
+- **Static energy** (``ρᵡ = ρ s``): The moist static energy ``s = H + g z`` adds the gravitational potential energy, with ``\mathscr{L}^l_0`` and ``\mathscr{L}^i_0`` the latent heats of condensation and deposition extrapolated to absolute zero. Its source is the pressure work ``\mathrm{D} p / \mathrm{D} t`` plus the geopotential change ``ρ g w``, which on the anelastic core combine into the buoyancy flux ``- ρᵣ w b``; see [Anelastic dynamics](@ref Anelastic-section). On the compressible core the same mixture term enters the dry-weighted ``ρᵈ s`` scaled by ``ρᵈ/ρ``, as the forces enter the dry-air momentum.
 
 The thermodynamic equation couples to the momentum equation through the equation of state (below) and buoyancy.
 

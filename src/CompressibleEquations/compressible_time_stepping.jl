@@ -69,6 +69,52 @@ end
 end
 
 #####
+##### Dry-air mass fraction at the momentum locations (qᵈ = ρᵈ/ρ)
+#####
+
+# Diagnose qᵈ = ρᵈ/ρ at the x-, y-, and z-faces into `dynamics.dry_mass_fraction`, where
+# `dynamics_mass_fraction*` reads it. Each value is the ratio of the face-interpolated densities,
+# not an interpolated cell-centered ratio, so that qᵈ ⋅ (-g ℑ(ρ)) is exactly -g ℑ(ρᵈ) — the same
+# face density `_compute_velocities!` divides by. `safe_divide` covers ρ = 0 (masked or unset
+# cells) with an unweighted force.
+#
+# Run this once per `update_state!`, after the halos of both ρᵈ and ρ are filled: the faces on
+# and next to a boundary interpolate into the halo. The kernel covers every face whose two
+# neighboring cells exist, halo included, so no halo fill of the face fields is needed and a
+# stencil that reaches into the halo (terrain slope corrections) reads the ratio of the same
+# halo densities it would compute in place.
+function compute_dry_mass_fraction!(model)
+    grid = model.grid
+    arch = grid.architecture
+    dynamics = model.dynamics
+    qᵈ = dynamics.dry_mass_fraction
+    launch!(arch, grid, face_with_halo_kernel_parameters(grid), _compute_dry_mass_fraction!,
+            qᵈ.x, qᵈ.y, qᵈ.z, grid, dynamics.dry_density, dynamics.total_density)
+    return nothing
+end
+
+# Indices of the faces whose two neighboring cell centers `i - 1` and `i` both lie within the
+# array, halo included. A `Flat` direction has no halo and a single index.
+face_with_halo_range(N, H) = H == 0 ? (1:N) : ((2 - H):(N + H))
+
+function face_with_halo_kernel_parameters(grid)
+    Nx, Ny, Nz = size(grid)
+    Hx, Hy, Hz = halo_size(grid)
+    return KernelParameters(face_with_halo_range(Nx, Hx),
+                            face_with_halo_range(Ny, Hy),
+                            face_with_halo_range(Nz, Hz))
+end
+
+@kernel function _compute_dry_mass_fraction!(qᵈᶠᶜᶜ, qᵈᶜᶠᶜ, qᵈᶜᶜᶠ, grid, ρᵈ, ρ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        qᵈᶠᶜᶜ[i, j, k] = safe_divide(ℑxᶠᵃᵃ(i, j, k, grid, ρᵈ), ℑxᶠᵃᵃ(i, j, k, grid, ρ), one(grid))
+        qᵈᶜᶠᶜ[i, j, k] = safe_divide(ℑyᵃᶠᵃ(i, j, k, grid, ρᵈ), ℑyᵃᶠᵃ(i, j, k, grid, ρ), one(grid))
+        qᵈᶜᶜᶠ[i, j, k] = safe_divide(ℑzᵃᵃᶠ(i, j, k, grid, ρᵈ), ℑzᵃᵃᶠ(i, j, k, grid, ρ), one(grid))
+    end
+end
+
+#####
 ##### Initial-condition density reconciliation: make ρᵈ and the total density ρ consistent
 #####
 
@@ -382,6 +428,8 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
     # These fields are needed for pressure computation via equation of state
     fill_halo_regions!(dynamics.dry_density)
     fill_halo_regions!(prognostic_fields(model.formulation))
+
+    compute_dry_mass_fraction!(model)
 
     launch!(arch, grid, :xyz,
             _compute_temperature_and_pressure!,

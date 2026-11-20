@@ -167,8 +167,10 @@ Return the *continuity density*: the density whose continuity equation the model
 Momentum and the thermodynamic variable are stored per unit of it (`ρu = ρᵈ u`, `ρθ = ρᵈ θ`), so it
 is also the divisor for diagnosing velocity (`u = ρu/ρᵈ`) and potential temperature (`θ = ρθ/ρᵈ`).
 
-- `AnelasticDynamics`: the time-independent reference density `ρᵣ`.
-- `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`.
+- `AnelasticDynamics`: the time-independent reference density `ρᵣ`, giving `ρu = ρᵣ u`
+  and `ρθ = ρᵣ θ`.
+- `CompressibleDynamics`: the prognostic dry-air density `ρᵈ`, giving dry-air momentum
+  `ρu = ρᵈ u` and `ρθ = ρᵈ θ`. This density is advanced by continuity.
 
 The *total* air density `ρ = ρᵈ + Σ ρˣ` (dry air plus every water species) is a separate quantity,
 [`total_density`](@ref): it recovers the moisture mass fractions (`qˣ = ρˣ/ρ`) and weights scalar and
@@ -192,6 +194,21 @@ Thermodynamic relations of the local state, such as the saturation specific humi
 [`thermodynamic_state_density`](@ref) instead.
 """
 total_density(dynamics) = continuity_density(dynamics)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return ``qᵈ = ρᵈ/ρ`` at an x-face: [`continuity_density`](@ref) over [`total_density`](@ref).
+`dynamics_mass_fractionᶜᶠᶜ` and `dynamics_mass_fractionᶜᶜᶠ` are the same at y- and z-faces.
+
+The momentum tendencies multiply the mixture pressure gradient and buoyancy force by it, since
+those act on the total mass while the momentum is the continuity-density-weighted ``ρᵈ u``.
+Defaults to `1`, exact wherever `total_density === continuity_density` (e.g. anelastic).
+Derivation: [Compressible dynamics](@ref Compressible-section).
+"""
+@inline dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, dynamics) = one(grid)
+@inline dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, dynamics) = one(grid)
+@inline dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, dynamics) = one(grid)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -468,30 +485,32 @@ dynamics_prognostic_fields(dynamics) = NamedTuple()
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the x-component of the pressure gradient force at (Face, Center, Center).
+Return the x-component of the pressure gradient at (Face, Center, Center).
 
 For anelastic dynamics, returns zero (pressure is handled via projection).
-For compressible dynamics, returns `-∂p/∂x`.
+For compressible dynamics, returns `∂p/∂x`. The momentum tendency subtracts it weighted by
+[`dynamics_mass_fractionᶠᶜᶜ`](@ref).
 """
 @inline x_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the y-component of the pressure gradient force at (Center, Face, Center).
+Return the y-component of the pressure gradient at (Center, Face, Center).
 
 For anelastic dynamics, returns zero (pressure is handled via projection).
-For compressible dynamics, returns `-∂p/∂y`.
+For compressible dynamics, returns `∂p/∂y` (see [`x_pressure_gradient`](@ref)).
 """
 @inline y_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the z-component of the pressure gradient force at (Center, Center, Face).
+Return the z-component of the pressure gradient at (Center, Center, Face).
 
 For anelastic dynamics, returns zero (pressure is handled via projection).
-For compressible dynamics, returns `-∂p/∂z`.
+For compressible dynamics, returns `∂(p - pᵣ)/∂z`, with `pᵣ` the reference pressure when a
+reference state is present (see [`x_pressure_gradient`](@ref)).
 """
 @inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
@@ -526,6 +545,8 @@ Adapt.adapt_structure(to, s::SlowDynamics) = SlowDynamics(adapt(to, s.dynamics))
 @inline z_pressure_gradient(i, j, k, grid, ::SlowDynamics) = zero(grid)
 
 @inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowDynamics, args...) = zero(grid)
+
+# `dynamics_mass_fraction*` keeps its default of 1 here: every force it would weight is zeroed above.
 
 #####
 ##### Tendency computation interface

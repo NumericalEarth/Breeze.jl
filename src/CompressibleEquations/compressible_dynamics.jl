@@ -19,6 +19,9 @@ Fields
 
 - `dry_density`: Prognostic dry-air density field ρᵈ
 - `total_density`: Diagnosed total air density ρ = ρᵈ + Σρˣ (used for thermodynamics, scalar advection, EOS, buoyancy)
+- `dry_mass_fraction`: Dry-air mass fraction qᵈ = ρᵈ/ρ at the momentum locations, a `NamedTuple`
+  of an x-face, a y-face, and a z-face field `(x, y, z)`. Diagnosed once per state update and read
+  wherever the pressure gradient and buoyancy act on the dry-air momentum
 - `pressure`: Diagnostic pressure field p = ρ Rᵐ T
 - `standard_pressure`: Reference pressure pˢᵗ for potential temperature (default 10⁵ Pa)
 - `base_pressure`: Mean pressure of the reference atmosphere at ``z = 0`` (p₀). The
@@ -43,7 +46,7 @@ The moist equation-of-state θˡⁱ→T temperature inversion is controlled by t
 thermodynamic formulation, not the dynamics: see `temperature_solver` on
 `LiquidIcePotentialTemperatureFormulation`.
 """
-struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM}
+struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM, Q}
     time_discretization :: TD                  # SplitExplicitTimeDiscretization or ExplicitTimeStepping
     dry_density :: D                           # ρᵈ (prognostic dry-air density)
     total_density :: DT                        # ρ = ρᵈ + Σρˣ (diagnosed; thermo/advection/EOS/buoyancy)
@@ -54,6 +57,7 @@ struct CompressibleDynamics{TD, D, DT, P, FT, RS, TM, CV, CM}
     terrain_metrics :: TM                      # TerrainMetrics for terrain-following coordinates (or Nothing) — the "is terrain?" signal
     contravariant_vertical_velocity :: CV      # w̃ diagnostic field (or Nothing)
     contravariant_vertical_momentum :: CM      # ρw̃ diagnostic field (or Nothing)
+    dry_mass_fraction :: Q                     # qᵈ = ρᵈ/ρ cached at the x-, y-, and z-faces (diagnosed once per update)
 end
 
 # Skeleton-only marker stored in the reference-spec slot for the default `reference_state = :auto`
@@ -180,7 +184,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     terrain_metrics_spec = terrain_metrics === nothing ? slope_stencil : terrain_metrics
     return CompressibleDynamics(time_discretization, nothing, nothing, nothing, pˢᵗ, p₀, ref_spec,
                                 terrain_metrics_spec,
-                                nothing, nothing)
+                                nothing, nothing, nothing)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
@@ -193,7 +197,8 @@ Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
                          adapt(to, dynamics.reference_state),
                          adapt(to, dynamics.terrain_metrics),
                          adapt(to, dynamics.contravariant_vertical_velocity),
-                         adapt(to, dynamics.contravariant_vertical_momentum))
+                         adapt(to, dynamics.contravariant_vertical_momentum),
+                         adapt(to, dynamics.dry_mass_fraction))
 
 # The compressible θˡⁱ→T inversion is implicit (T = (ρRᵐT/pˢᵗ)^κ θ + ΔL/cᵖᵐ), so the
 # default temperature solver iterates to convergence. The anelastic inversion is
@@ -300,11 +305,18 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
         seed_pressure!(pressure, grid, base_pressure)
     end
 
+    # Dry-air mass fraction qᵈ = ρᵈ/ρ at the momentum locations (see `compute_dry_mass_fraction!`).
+    # It starts at one, the value `compute_dry_mass_fraction!` gives where there is no air yet, so
+    # a model whose state has not been set weights forces as dry air does.
+    dry_mass_fraction = (x=XFaceField(grid), y=YFaceField(grid), z=ZFaceField(grid))
+    foreach(qᵈ -> fill!(parent(qᵈ), 1), dry_mass_fraction)
+
     return CompressibleDynamics(dynamics.time_discretization, density, total_density, pressure,
                                 standard_pressure, base_pressure, reference_state,
                                 terrain_metrics,
                                 contravariant_vertical_velocity,
-                                contravariant_vertical_momentum)
+                                contravariant_vertical_momentum,
+                                dry_mass_fraction)
 end
 
 #####
@@ -418,7 +430,8 @@ with_time_discretization(dynamics::CompressibleDynamics, time_discretization) =
                          dynamics.reference_state,
                          dynamics.terrain_metrics,
                          dynamics.contravariant_vertical_velocity,
-                         dynamics.contravariant_vertical_momentum)
+                         dynamics.contravariant_vertical_momentum,
+                         dynamics.dry_mass_fraction)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -460,6 +473,14 @@ AtmosphereModels.adiabatic_twin_dynamics(dynamics::CompressibleDynamics, time_st
 # density used by the thermodynamics, scalar advection, equation of state, and buoyancy. The
 # continuity density `continuity_density` (ρᵈ) is used only by velocity/momentum/continuity/ρθ.
 AtmosphereModels.total_density(dynamics::CompressibleDynamics) = dynamics.total_density
+
+# Dry-air mass fraction qᵈ = ρᵈ/ρ = 1 - qᵗ at the momentum locations, read from the face fields
+# that `compute_dry_mass_fraction!` fills once per state update. The momentum tendencies and the
+# acoustic substep loop evaluate qᵈ many times between updates; reading one cached value there
+# replaces two interpolations and a division over two more fields in memory-bound kernels.
+@inline AtmosphereModels.dynamics_mass_fractionᶠᶜᶜ(i, j, k, grid, d::CompressibleDynamics) = @inbounds d.dry_mass_fraction.x[i, j, k]
+@inline AtmosphereModels.dynamics_mass_fractionᶜᶠᶜ(i, j, k, grid, d::CompressibleDynamics) = @inbounds d.dry_mass_fraction.y[i, j, k]
+@inline AtmosphereModels.dynamics_mass_fractionᶜᶜᶠ(i, j, k, grid, d::CompressibleDynamics) = @inbounds d.dry_mass_fraction.z[i, j, k]
 
 # Sedimentation drains the diagnosed total density but not the prognostic dry density (its
 # continuity has no sedimentation source), so every mass fraction renormalizes: the composition

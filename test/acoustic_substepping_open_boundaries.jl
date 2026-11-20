@@ -183,7 +183,7 @@ for arch in arches
             ω = FT(substepper.forward_weight)
             stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ, U⁰ = model.timestepper.U⁰,
                      forcing_interval = 3Δτ)
-            factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
+            factor_vertical_solver!(substepper, grid, model.dynamics, model.thermodynamic_constants, stage.δτᵐ⁺)
             acoustic_substep_loop!(3, model, substepper, stage, nothing)
 
             # Check momentum increments and the raw transport sum.
