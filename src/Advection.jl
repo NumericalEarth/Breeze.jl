@@ -32,8 +32,17 @@ using Oceananigans.Advection:
     limited_tracer_flux_divergence_x,
     limited_tracer_flux_divergence_y,
     limited_tracer_flux_divergence_z,
+    limited_face_flux_x,
+    limited_face_flux_y,
     limited_face_flux_z,
-    upwind_face_value_z
+    upwind_face_value_z,
+    upwind_face_flux_x,
+    upwind_face_flux_y,
+    upwind_face_flux_z,
+    bounded_face_flux_x,
+    bounded_face_flux_y,
+    bounded_face_flux_z,
+    face_factor
 
 using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, CenterField
@@ -98,6 +107,42 @@ end
                                 b.reconstruction_limiter, b.flux_limiter, nothing)
     return WENO{N, FT, WCT}(bounds, advection.buffer_scheme, advection.advecting_velocity_scheme,
                             advection.time_discretization)
+end
+
+# The limited face flux of a flux-limited WENO scheme as a convex combination of the bounded
+# high-order flux Jᴴ, formed directly, and the upwind flux Jᵘ: J = ϑ Jᴴ + (1 - ϑ) Jᵘ.
+# Oceananigans #6534 forms it as Jᵘ + ϑ A with the cached antidiffusive flux A = Jᴴ - Jᵘ. Where the two
+# nearly cancel (an empty cell under a full one, ϑ = 1), Jᵘ + A rounds to one ulp of the operands
+# instead of Jᴴ, and that residue drains a cell holding many orders of magnitude less: in Float32 a
+# raining slice left ρqʳ = -2.3e-17 in a cell of content 5.7e-24 (derivations/hydro_current_stack/
+# OA6534_FCT_CANCELLATION.md). The convex form returns Jᴴ exactly for ϑ = 1 and combines two bounded
+# fluxes otherwise. The cached A still selects the face factor ϑ, as in #6534.
+# TODO: move this into Oceananigans' `limited_face_flux_{x,y,z}` (#6534) and remove the override.
+@inline function OceananigansAdvection.limited_face_flux_x(i, j, k, grid, advection::FluxLimitedWENO, ρ, u, c)
+    limiter = advection.bounds.flux_limiter
+    Jᵘ = upwind_face_flux_x(i, j, k, grid, advection, ρ, u, c)
+    Jᴴ = bounded_face_flux_x(i, j, k, grid, without_face_cache(advection), ρ, u, c)
+    A = @inbounds limiter.antidiffusive_fluxes.x[i, j, k]
+    ϑ = face_factor(A, limiter.outgoing_fraction, limiter.incoming_fraction, i-1, j, k, i, j, k)
+    return ϑ * Jᴴ + (1 - ϑ) * Jᵘ
+end
+
+@inline function OceananigansAdvection.limited_face_flux_y(i, j, k, grid, advection::FluxLimitedWENO, ρ, v, c)
+    limiter = advection.bounds.flux_limiter
+    Jᵘ = upwind_face_flux_y(i, j, k, grid, advection, ρ, v, c)
+    Jᴴ = bounded_face_flux_y(i, j, k, grid, without_face_cache(advection), ρ, v, c)
+    A = @inbounds limiter.antidiffusive_fluxes.y[i, j, k]
+    ϑ = face_factor(A, limiter.outgoing_fraction, limiter.incoming_fraction, i, j-1, k, i, j, k)
+    return ϑ * Jᴴ + (1 - ϑ) * Jᵘ
+end
+
+@inline function OceananigansAdvection.limited_face_flux_z(i, j, k, grid, advection::FluxLimitedWENO, ρ, w, c)
+    limiter = advection.bounds.flux_limiter
+    Jᵘ = upwind_face_flux_z(i, j, k, grid, advection, ρ, w, c)
+    Jᴴ = bounded_face_flux_z(i, j, k, grid, without_face_cache(advection), ρ, w, c)
+    A = @inbounds limiter.antidiffusive_fluxes.z[i, j, k]
+    ϑ = face_factor(A, limiter.outgoing_fraction, limiter.incoming_fraction, i, j, k-1, i, j, k)
+    return ϑ * Jᴴ + (1 - ϑ) * Jᵘ
 end
 
 # Is this immersed-boundary safe without having to extend it in ImmersedBoundaries.jl? I think so... (velocity on immmersed boundaries is masked to 0)
@@ -242,10 +287,10 @@ end
     return Azᶜᶜᶠ(i, j, k, grid) * wₑ * ĉ
 end
 
-# With a flux limiter the tracer tendency applies the upwind flux plus the limited antidiffusive
-# flux of each face (`limited_face_flux_z`). The antidiffusive part is the same at `wᵗ + wˢ` and at
-# `wᵗ`, so the sedimentation part of the mass flux, their difference, is the upwind flux of the
-# sedimentation velocity, and the latent heat moves with exactly what the tendency moves.
+# With a flux limiter the tracer tendency applies the limited flux of each face (`limited_face_flux_z`,
+# ϑ Jᴴ + (1 - ϑ) Jᵘ with the face factor ϑ of the cached antidiffusive flux). The sedimentation fluxes
+# are the same function at `wᵗ + wˢ` and at `wᵗ`, so the latent heat moves with exactly what the
+# tendency moves.
 @inline function AtmosphereModels.sedimentation_mass_fluxes(i, j, k, grid, advection::FluxLimitedWENO, wᵗ, wˢ, q)
     w = SumOfArrays{2}(wᵗ, wˢ)
     F⁻ = (limited_face_flux_z(i, j, k,   grid, advection, 1, w,  q),
