@@ -4,7 +4,7 @@
 #
 # A stage of a split-explicit time stepper whose slow tendency enters alone (a diagonal `β`) and
 # which recombines the increment of the stage before only, with the weight w ∈ (0, 1], changes the
-# dry-mass surface pressure, and with it the layer mass ρ, by one mass flux:
+# total surface pressure, and with it the layer mass ρ, by one mass flux:
 #
 #   ρⁱ = (1 - w) ρ⁰ + w ρⁱ⁻¹ - ∇·M ,
 #   M  = Δtˢ [ρⁱ⁻¹ 𝐮ⁱ⁻¹ - ρᴸ 𝐮′ⁱ⁻¹] + ρᴸ ∫ 𝐮′ dτ ,
@@ -12,7 +12,7 @@
 # with Δtˢ the length of the stage, ρⁱ⁻¹ 𝐮ⁱ⁻¹ the mass flux of the state the stage starts from,
 # which its slow tendency holds, and ρᴸ 𝐮′ the mass flux of the velocity perturbation of the
 # substeps on the frozen layer mass, whose time integral the substeps accumulate. The scalars are
-# carried by the same mass flux, with the mixing ratio per unit dry mass of the state the stage
+# carried by the same mass flux, with the mass fraction per unit total mass of the state the stage
 # starts from, r = ρc / ρ, reconstructed upwind of it:
 #
 #   (ρc)ⁱ = (1 - w) (ρc)⁰ + w [(ρc)ⁱ⁻¹ - Δtᵉ ∇·(M r̂ / Δtᵉ w)] + Δtˢ N ,     Δtᵉ = Δtˢ / w ,
@@ -30,25 +30,25 @@
 # layer mass of the state the stage starts from, M = Δtˢ ρⁱ⁻¹ 𝐮̂, with the vertical component
 # that continuity gives.
 
-# The mixing ratio per unit dry mass of a prognostic density, r = ρc / ρ. A cell without dry mass
+# The specific value of a prognostic density, r = ρc / ρ, per unit total mass. A cell without mass
 # is a halo cell beyond a rigid wall, whose mixing ratio only ever multiplies the vanishing mass
 # flux through the wall: it is zero rather than 0 / 0.
-struct DryMassMixingRatio{FT, C, D} <: AbstractArray{FT, 3}
+struct LayerMassFraction{FT, C, D} <: AbstractArray{FT, 3}
     weighted :: C  # ρc
-    density :: D   # ρ, of dry air
+    density :: D   # ρ, the total layer mass of the coordinate
 
-    DryMassMixingRatio(ρc::C, ρ::D) where {C, D} = new{eltype(ρ), C, D}(ρc, ρ)
+    LayerMassFraction(ρc::C, ρ::D) where {C, D} = new{eltype(ρ), C, D}(ρc, ρ)
 end
 
-Base.size(r::DryMassMixingRatio) = size(r.density)
+Base.size(r::LayerMassFraction) = size(r.density)
 
-Base.@propagate_inbounds function Base.getindex(r::DryMassMixingRatio, i, j, k)
+Base.@propagate_inbounds function Base.getindex(r::LayerMassFraction, i, j, k)
     ρ = r.density[i, j, k]
     massless = ρ == 0
     return ifelse(massless, zero(ρ), r.weighted[i, j, k] / ifelse(massless, one(ρ), ρ))
 end
 
-Adapt.adapt_structure(to, r::DryMassMixingRatio) = DryMassMixingRatio(adapt(to, r.weighted), adapt(to, r.density))
+Adapt.adapt_structure(to, r::LayerMassFraction) = LayerMassFraction(adapt(to, r.weighted), adapt(to, r.density))
 
 #####
 ##### The tendencies of the scalars other than transport
@@ -167,7 +167,7 @@ function launch_scalar_stage_transport!(ρc⁺, ρc, ρc⁰, N, model, substeppe
     ρ = model.dynamics.density
     ∫𝐮′ = substepper.integrated_velocities
     𝐮̂ = coordinate_transport_velocities(grid, ∫𝐮′.u, ∫𝐮′.v, ∫𝐮′.w, ∫𝐮′.ρw)
-    r = DryMassMixingRatio(ρc, ρ)
+    r = LayerMassFraction(ρc, ρ)
 
     # The limiters of the scheme, for the forward Euler step of the stage
     update_bounds_preserving_limiter!(advection, grid, r, 𝐮̂, Δtᵉ)
@@ -190,7 +190,7 @@ Advance the prognostic scalar `name` of `model` over a stage of length `Δtˢ`,
 
 with `ρc⁰` its value at the start of the time step, `weight` ``w``, `N` its tendencies other than
 transport, ``𝐮̂`` the velocities that [`compute_stage_transport_velocities!`](@ref) left in
-`substepper`, and ``r̂`` the reconstruction of its mixing ratio per unit dry mass by its advection
+`substepper`, and ``r̂`` the reconstruction of its mass fraction per unit total mass by its advection
 scheme, whose limiters are refreshed for the forward Euler step of length `Δtᵉ` ``= Δtˢ / w`` that
 the stage holds. `model` must hold the state the stage started from. The new state is left in
 `scratch`, from which [`complete_scalar_stage_transport!`](@ref) sets `ρc` once the surface

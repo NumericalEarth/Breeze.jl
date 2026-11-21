@@ -11,7 +11,7 @@ energy) are called as they are. What this module adds is
 1. a geometry, [`PhysicalHeightGrid`](@ref): the vertical spacings of the hydrostatic column in
    meters, `ΔΦ / g`, behind the operators that the closure calls on its `grid`. The grid of
    `HydrostaticDynamics` labels coordinate surfaces, and its `Δz` is not a height.
-2. the conservative insertion of the turbulent fluxes in the budgets of the dry-mass coordinate:
+2. the conservative insertion of the turbulent fluxes in the budgets of the total-mass coordinate:
    one backward Euler step per time step and per column for the water that does not fall, the
    enthalpy, the velocities and the turbulent kinetic energy, each a tridiagonal solve.
 3. the heat that closes the energy budget: the enthalpy of a layer changes by the divergence of
@@ -34,7 +34,7 @@ using Oceananigans: Oceananigans, Center, Face, CenterField, XFaceField, YFaceFi
 using Oceananigans.BoundaryConditions: fill_halo_regions!, getbc, Bottom
 using Oceananigans.Grids: AbstractGrid, topology
 using Oceananigans.Models: boundary_condition_args
-using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, Azᶜᶜᶜ, Azᶠᶜᶜ, Azᶜᶠᶜ, ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ
+using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ
 using Oceananigans.TimeSteppers: update_state!, time_discretization
 using Oceananigans.TurbulenceClosures: TurbulenceClosures as OceanTurbulenceClosures,
                                        VerticallyImplicitTimeDiscretization, build_closure_fields
@@ -46,9 +46,11 @@ using Breeze.AtmosphereModels: AtmosphereModelBuoyancy, specific_prognostic_mois
 using Breeze.BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions
 using Breeze.HydrostaticEquations: HydrostaticPressureGrid, HydrostaticHeightCoordinate, height_grid_or,
                                    MoistHydrostaticModel, column_physics_in_time_step, warm_rain_column_physics!, hydrostatic_water_fields,
-                                   water_densities, sum_at, interface_pressure, layer_pressure_thickness,
+                                   water_densities, sum_at, layer_pressure_thickness,
                                    interface_potential_temperature, height_between_layers, physical_layer_depth,
-                                   layer_mass_per_area, diffuse_column!, face_conductance, _diffuse_velocity!
+                                   layer_mass_per_area, diffuse_column!, face_conductance, _diffuse_velocity!,
+                                   change_column_surface_pressure!, column_mass_densities,
+                                   from_x_faces, from_y_faces, specific_kinetic_energy, surface_pressure_kinetic_energy
 using Breeze.Thermodynamics: dry_air_gas_constant, absolute_zero_latent_heat
 using Breeze.TurbulenceClosures: TKEBasedTurbulenceClosure, TKE_NAME, buoyancy_productionᶜᶜᶠ,
                                  log_dry_potential_temperatureᶜᶜᶜ,
@@ -230,14 +232,8 @@ end
 ##### From velocity points to cell centers
 #####
 
-# The energy of a horizontal area: a quantity per unit area at x-faces (y-faces) is brought to
-# cell centers with the areas of the faces for weights, so that the sum over the cells of Az
-# times the result is the sum over the faces of Az times the quantity. `f` is a kernel function.
-@inline x_face_energy(i, j, k, grid, f, args...) = Azᶠᶜᶜ(i, j, k, grid) * f(i, j, k, grid, args...)
-@inline y_face_energy(i, j, k, grid, f, args...) = Azᶜᶠᶜ(i, j, k, grid) * f(i, j, k, grid, args...)
-
-@inline from_x_faces(i, j, k, grid, f, args...) = ℑxᶜᵃᵃ(i, j, k, grid, x_face_energy, f, args...) / Azᶜᶜᶜ(i, j, k, grid)
-@inline from_y_faces(i, j, k, grid, f, args...) = ℑyᵃᶜᵃ(i, j, k, grid, y_face_energy, f, args...) / Azᶜᶜᶜ(i, j, k, grid)
+# `from_x_faces` and `from_y_faces` of `HydrostaticEquations` bring a quantity per unit area at
+# the velocity points to cell centers with the areas of the faces for weights.
 
 #####
 ##### Surface fluxes: what a bulk formula hands to the atmosphere
@@ -257,12 +253,13 @@ end
 # Accumulated over the integration, per unit area
 function turbulence_ledger(grid)
     return (surface_vapor = Field{Center, Center, Nothing}(grid),         # kg m⁻²: vapor through the ground
-            surface_energy = Field{Center, Center, Nothing}(grid),        # J m⁻²: 𝒬 + Jᵛ (cᵖᵛ Tˢ + Φˢ)
+            surface_energy = Field{Center, Center, Nothing}(grid),        # J m⁻²: 𝒬 + Jᵛ (cᵖᵛ Tˢ + Φˢ) + kinetic
+            surface_vapor_kinetic_energy = Field{Center, Center, Nothing}(grid), # J m⁻²: the kinetic part, Jᵛ Σ ΔB 𝒦
             surface_stress_work = Field{Center, Center, Nothing}(grid),   # J m⁻²: kinetic energy removed by the stress
             shear_production = Field{Center, Center, Nothing}(grid),      # J m⁻²: kinetic energy → TKE
             buoyancy_source = Field{Center, Center, Nothing}(grid),       # J m⁻²: enthalpy → TKE (B > 0)
             turbulent_kinetic_energy_sinks = Field{Center, Center, Nothing}(grid), # J m⁻²: TKE → enthalpy
-            water_kinetic_energy = Field{Center, Center, Nothing}(grid))  # J m⁻²: enthalpy → (kinetic + TKE) of water changing layer
+            water_kinetic_energy = Field{Center, Center, Nothing}(grid))  # J m⁻²: enthalpy → TKE of the vapor of the ground
 end
 
 """
@@ -365,7 +362,7 @@ end
 # a density in kg m⁻³: a stress in N m⁻², a flux J of θ per unit mass of air, and a vapor
 # flux in kg m⁻² s⁻¹. The flux of θ enters the lowest layer at fixed composition and pressure,
 # where the enthalpy per unit mass is ĉᵖ Π θ with ĉᵖ = qᵈ cᵖᵈ + qᵗ cᵖᵛ: it is ĉᵖ Π J in W m⁻².
-@kernel function _compute_bulk_surface_fluxes!(fluxes, grid, exchange, clock, fields, dynamics_fields, ρ, ρᵗ, Π, T, cᵖᵈ, cᵖᵛ)
+@kernel function _compute_bulk_surface_fluxes!(fluxes, grid, exchange, clock, fields, dynamics_fields, ρ, ρqˣ, Π, T, cᵖᵈ, cᵖᵛ)
     i, j = @index(Global, NTuple)
 
     @inbounds begin
@@ -373,7 +370,7 @@ end
         fluxes.y_stress[i, j, 1] = bulk_flux(exchange.y_drag, i, j, grid, clock, fields, dynamics_fields)
 
         J = bulk_flux(exchange.sensible_heat, i, j, grid, clock, fields, dynamics_fields)
-        ĉᵖ = (cᵖᵈ * ρ[i, j, 1] + cᵖᵛ * (ρᵗ[i, j, 1] - ρ[i, j, 1])) / ρᵗ[i, j, 1]
+        ĉᵖ = cᵖᵈ + sum_at(i, j, 1, ρqˣ) / ρ[i, j, 1] * (cᵖᵛ - cᵖᵈ)
         fluxes.sensible_heat_flux[i, j, 1] = ĉᵖ * Π[i, j, 1] * J
 
         fluxes.vapor_flux[i, j, 1] = bulk_flux(exchange.vapor, i, j, grid, clock, fields, dynamics_fields)
@@ -390,7 +387,7 @@ function launch_bulk_surface_fluxes!(fluxes, exchange, model)
 
     launch!(grid.architecture, grid, :xy, _compute_bulk_surface_fluxes!,
             fluxes, height_grid_or(grid, dynamics.height_coordinate), exchange, model.clock, Oceananigans.fields(model), dynamics_thermodynamic_fields(dynamics),
-            dynamics.density, dynamics.moisture.total_density, dynamics.exner_function, model.temperature,
+            dynamics.density, water_densities(model), dynamics.exner_function, model.temperature,
             constants.dry_air.heat_capacity, constants.vapor.heat_capacity)
 
     return nothing
@@ -425,7 +422,7 @@ vertically implicit time discretization. It is applied by [`moist_turbulent_mixi
 or as a callback, `Callback(mixing, IterationInterval(1))`, once per time step.
 
 The closure is not a `closure` of the model: its diffusivities are computed here, in the heights
-of the hydrostatic column, and the fluxes enter the budgets of the dry-mass coordinate. The
+of the hydrostatic column, and the fluxes enter the budgets of the total-mass coordinate. The
 tracer `ρe` is the turbulent kinetic energy per unit area and unit of the grid's coordinate,
 `e` times the total density, which the model advects.
 
@@ -473,6 +470,7 @@ function MoistTurbulentMixing(model::MoistHydrostaticModel;
                implicit_mass = CenterField(grid),
                mixing_ratio = CenterField(grid),
                total_density = CenterField(grid),
+               initial_water_density = CenterField(grid),
                kinetic_energy = CenterField(grid),
                heating = CenterField(grid),
                potential_temperature = CenterField(grid),
@@ -516,7 +514,6 @@ Oceananigans.restore_prognostic_state!(mixing::MoistTurbulentMixing, ::Nothing) 
 ##### The closure fields, in the heights of the column
 #####
 
-@inline squared(i, j, k, grid, ϕ) = @inbounds ϕ[i, j, k]^2
 
 # e = ρe / ρᵗ, and the kinetic energy of the layer per unit mass at cell centers, with the
 # kinetic energy of the velocity points brought there by the areas of their faces
@@ -524,7 +521,7 @@ Oceananigans.restore_prognostic_state!(mixing::MoistTurbulentMixing, ::Nothing) 
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         e[i, j, k] = ρe[i, j, k] / ρᵗ[i, j, k]
-        𝒦[i, j, k] = (from_x_faces(i, j, k, grid, squared, u) + from_y_faces(i, j, k, grid, squared, v)) / 2
+        𝒦[i, j, k] = specific_kinetic_energy(i, j, k, grid, u, v)
     end
 end
 
@@ -533,7 +530,7 @@ function launch_specific_energies!(mixing, model)
     u, v, _ = model.velocities
     launch!(grid.architecture, grid, :xyz, _compute_specific_energies!,
             mixing.scratch.specific_turbulent_kinetic_energy, mixing.scratch.kinetic_energy, grid,
-            model.tracers[TKE_NAME], model.dynamics.moisture.total_density, u, v)
+            model.tracers[TKE_NAME], model.dynamics.density, u, v)
     return nothing
 end
 
@@ -571,7 +568,7 @@ function launch_closure_fields_in_height!(mixing, model)
     launch!(arch, grid, :xy, _compute_moist_conductances!,
             C.scalar, C.momentum, C.energy, grid, closure_fields.Kᶜ, closure_fields.Kᵘ, closure_fields.Kᵉ,
             moisture.density_potential_temperature, dynamics.exner_function, dynamics.interface_exner_function,
-            moisture.interface_pressure, dynamics.density, moisture.total_density,
+            moisture.interface_pressure,
             dry_air_gas_constant(constants), constants.dry_air.heat_capacity, constants.gravitational_acceleration)
 
     return nothing
@@ -583,11 +580,10 @@ end
 
 # C = ρᵃ K / Δh on the z-faces between two layers, in kg m⁻² s⁻¹, with ρᵃ = p / (Rᵈ Tᵨ) the
 # density of the air on the face at its total pressure and density temperature Tᵨ = Πᶠ θᵨ, and
-# Δh the height between the layers. Momentum and turbulent kinetic energy are carried by the
-# air and its water; the scalars by the dry air alone, ρᵈ = qᵈ ρᵃ, so that the exchange leaves
-# the dry mass of every layer as the coordinate has it. Without water these are the
-# conductances of the dry `VerticalDiffusion`.
-@kernel function _compute_moist_conductances!(Cᶜ, Cᵘ, Cᵉ, grid, Kᶜ, Kᵘ, Kᵉ, θᵨ, Π, Πᶠ, pᶠ, ρ, ρᵗ, Rᵈ, cᵖᵈ, g)
+# Δh the height between the layers. Momentum, turbulent kinetic energy and the scalars, which are
+# per unit total mass, are all carried by the air and its water, the mass of the coordinate.
+# Without water these are the conductances of the dry `VerticalDiffusion`.
+@kernel function _compute_moist_conductances!(Cᶜ, Cᵘ, Cᵉ, grid, Kᶜ, Kᵘ, Kᵉ, θᵨ, Π, Πᶠ, pᶠ, Rᵈ, cᵖᵈ, g)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -600,9 +596,8 @@ end
             Tᵨ = Πᶠ[i, j, k] * interface_potential_temperature(i, j, k, grid, θᵨ, Π, Πᶠ)
             ρᵃ = pᶠ[i, j, k] / (Rᵈ * Tᵨ)
             Δh = height_between_layers(i, j, k, grid, θᵨ, Π, Πᶠ, cᵖᵈ, g)
-            qᵈ = (ρ[i, j, k] / ρᵗ[i, j, k] + ρ[i, j, k-1] / ρᵗ[i, j, k-1]) / 2
 
-            Cᶜ[i, j, k] = ρᵃ * Kᶜ[i, j, k] / Δh * qᵈ
+            Cᶜ[i, j, k] = ρᵃ * Kᶜ[i, j, k] / Δh
             Cᵘ[i, j, k] = ρᵃ * Kᵘ[i, j, k] / Δh
             Cᵉ[i, j, k] = ρᵃ * Kᵉ[i, j, k] / Δh
         end
@@ -617,17 +612,21 @@ end
 ##### Water that does not fall
 #####
 
-# One backward Euler step of the mixing ratio r = ρqᵉ / ρ of the water that does not fall, per
-# unit dry mass, with the dry mass of the layers for weights. The vapor flux through the ground
-# enters the lowest layer; a flux out of the air (dew) is limited to the water of that layer,
-# and the ledger holds what was exchanged.
-@kernel function _mix_water!(ρqᵉ, r, γ, ρᵗ⁺, exchanged, ledger, grid, ρ, C, Jᵛ, ρqˣ, Δt)
+# One backward Euler step of the mass fraction r = ρqᵉ / ρ of the water that does not fall, per
+# unit total mass, with the total mass of the layers for weights. The vapor flux through the
+# ground enters the lowest layer; a flux out of the air (dew) is limited to the water of that
+# layer, and the ledger holds what was exchanged. `ρᵗ⁺` is the density of the mass the layers
+# then hold, which differs from that of the coordinate by the vapor of the lowest layer until the
+# surface pressure takes it up (`launch_energy_mixing!`), and `ρqᵗ` the density of all water
+# before the step.
+@kernel function _mix_water!(ρqᵉ, r, γ, ρᵗ⁺, ρqᵗ, exchanged, ledger, grid, ρ, C, Jᵛ, ρqˣ, Δt)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
     @inbounds begin
         for k in 1:Nz
             r[i, j, k] = ρqᵉ[i, j, k] / ρ[i, j, k]
+            ρqᵗ[i, j, k] = sum_at(i, j, k, ρqˣ)
         end
 
         μ = layer_mass_per_area(i, j, 1, grid, ρ)
@@ -641,8 +640,10 @@ end
 
     @inbounds for k in 1:Nz
         ρqᵉ[i, j, k] = ρ[i, j, k] * r[i, j, k]
-        ρᵗ⁺[i, j, k] = ρ[i, j, k] + sum_at(i, j, k, ρqˣ)
+        ρᵗ⁺[i, j, k] = ρ[i, j, k]
     end
+
+    @inbounds ρᵗ⁺[i, j, 1] = ρ[i, j, 1] * (1 + exchanged[i, j, 1] / layer_mass_per_area(i, j, 1, grid, ρ))
 end
 
 function launch_water_mixing!(mixing, model, Δt)
@@ -650,7 +651,7 @@ function launch_water_mixing!(mixing, model, Δt)
     scratch = mixing.scratch
     launch!(grid.architecture, grid, :xy, _mix_water!,
             model.moisture_density, scratch.mixing_ratio, scratch.eliminated_diagonal, scratch.total_density,
-            scratch.vapor_exchange, mixing.ledger, grid, model.dynamics.density, scratch.conductances.scalar,
+            scratch.initial_water_density, scratch.vapor_exchange, mixing.ledger, grid, model.dynamics.density, scratch.conductances.scalar,
             mixing.surface_fluxes.vapor_flux, water_densities(model), Δt)
     return nothing
 end
@@ -757,10 +758,13 @@ end
 # `diffuse_column!` with the mass μ′ = μ (1 - Δt Lᵉ).
 #
 # `heating` is what the enthalpy of the layer receives, in J m⁻²: minus the energy that the
-# turbulent kinetic energy takes from buoyancy, plus what its sinks return, minus the kinetic
-# and turbulent kinetic energy that the layer gains with the water it gains.
+# turbulent kinetic energy takes from buoyancy, plus what its sinks return, minus the turbulent
+# kinetic energy that the lowest layer gains with the vapor of the ground, which `ρe` keeps through
+# the change of the surface pressure. The kinetic energy that the vapor brings is not taken from
+# the enthalpy: it crosses the ground with the vapor and is booked with the surface fluxes
+# (`_express_enthalpy_as_potential_temperature!`).
 @kernel function _step_turbulent_kinetic_energy!(ρe, e, μ′, γ, heating, ledger, grid, ρᵗ⁺, ρᵗ, Cᵉ, Cᵘ, Lᵉ, Kᶜ, N²,
-                                                 u, v, u★, v★, 𝒦, Δt)
+                                                 u, v, u★, v★, Δt)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -782,11 +786,11 @@ end
 
         μ′[i, j, k] = μ * (1 - Δt * Lᵉ[i, j, k])
         e[i, j, k] = (μ * eⁿ + 𝒫 + ℬ) / μ′[i, j, k]
-        heating[i, j, k] = - ℬ - δμ * (𝒦[i, j, k] + eⁿ)
+        heating[i, j, k] = - ℬ - δμ * eⁿ
 
         production += 𝒫
         buoyancy_source += ℬ
-        water_energy += δμ * (𝒦[i, j, k] + eⁿ)
+        water_energy += δμ * eⁿ
     end
 
     diffuse_column!(e, γ, i, j, grid, Δt, μ′, Cᵉ, stored_mass, face_conductance)
@@ -811,58 +815,60 @@ end
 ##### Enthalpy
 #####
 
-# Enthalpy of the air of a layer per unit dry mass over its potential temperature, c̃ Π with
-# c̃ = cᵖᵈ + rᵗ cᵖᵛ: the enthalpy of the layer is Δπ c̃ Π θ / g.
-@inline enthalpy_factor(i, j, k, ρ, ρᵗ, Π, cᵖᵈ, cᵖᵛ) =
-    @inbounds (cᵖᵈ + (ρᵗ[i, j, k] - ρ[i, j, k]) / ρ[i, j, k] * cᵖᵛ) * Π[i, j, k]
+# Enthalpy of the air of a layer per unit total mass over its potential temperature, ĉᵖ Π with
+# ĉᵖ = cᵖᵈ + qᵗ (cᵖᵛ - cᵖᵈ), from the density `ρqᵗ` of all its water: the enthalpy of the layer is
+# Δp ĉᵖ Π θ / g.
+@inline enthalpy_factor(i, j, k, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ) =
+    @inbounds (cᵖᵈ + ρqᵗ[i, j, k] / ρ[i, j, k] * (cᵖᵛ - cᵖᵈ)) * Π[i, j, k]
 
-# Mass of the air and of the water that does not fall, per unit dry mass: 1 + rᵉ
-@inline nonprecipitating_loading(i, j, k, ρ, ρᵗ, ρqʳ) = @inbounds (ρᵗ[i, j, k] - ρqʳ[i, j, k]) / ρ[i, j, k]
+# Mass of the air and of the water that does not fall, per unit total mass: 1 - qʳ
+@inline nonprecipitating_loading(i, j, k, ρ, ρqʳ) = @inbounds 1 - ρqʳ[i, j, k] / ρ[i, j, k]
 
-# Enthalpy of the rain of a layer per unit dry mass, rʳ (cˡ T - ℒˡ₀), which the turbulence does
+# Enthalpy of the rain of a layer per unit total mass, qʳ (cˡ T - ℒˡ₀), which the turbulence does
 # not carry
 @inline rain_enthalpy(i, j, k, ρ, ρqʳ, T, cˡ, ℒˡ₀) = @inbounds ρqʳ[i, j, k] / ρ[i, j, k] * (cˡ * T[i, j, k] - ℒˡ₀)
 
 # The flux of enthalpy through the z-face `k`, between the layers `k - 1` and `k`, is down the
-# gradient of the static energy of the air and of the water that does not fall, per unit dry mass:
+# gradient of the static energy of the air and of the water that does not fall, per unit total mass:
 #
-#   F = - Cᶜ [χ[k] - χ[k-1] + (1 + r̄ᵉ) g Δh - (χʳ[k] - χʳ[k-1])] ,    χ = c̃ Π θ ,
+#   F = - Cᶜ [χ[k] - χ[k-1] + (1 - q̄ʳ) g Δh - (χʳ[k] - χʳ[k-1])] ,    χ = ĉᵖ Π θ ,
 #
 # with g Δh = cᵖᵈ [θᵨ[k-1] (Π[k-1] - Πᶠ) + θᵨ[k] (Πᶠ - Π[k])] the geopotential between the two
 # layers and χʳ the enthalpy of the rain. With θᵨ = ϑ θ it is linear in θ,
 #
 #   F = - Cᶜ (a⁺ θ[k] - a⁻ θ[k-1] + R) ,
-#   a⁺ = c̃ Π[k] + (1 + r̄ᵉ) cᵖᵈ ϑ[k] (Πᶠ - Π[k]) ,    a⁻ = c̃ Π[k-1] - (1 + r̄ᵉ) cᵖᵈ ϑ[k-1] (Π[k-1] - Πᶠ) ,
+#   a⁺ = ĉᵖ Π[k] + (1 - q̄ʳ) cᵖᵈ ϑ[k] (Πᶠ - Π[k]) ,    a⁻ = ĉᵖ Π[k-1] - (1 - q̄ʳ) cᵖᵈ ϑ[k-1] (Π[k-1] - Πᶠ) ,
 #
 # and without water a⁺ = a⁻ = cᵖᵈ Πᶠ: the flux of the dry `VerticalDiffusion` times cᵖᵈ Πᶠ.
-@inline function upper_enthalpy_coefficient(i, j, k, ρ, ρᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-    loading = (nonprecipitating_loading(i, j, k, ρ, ρᵗ, ρqʳ) + nonprecipitating_loading(i, j, k-1, ρ, ρᵗ, ρqʳ)) / 2
+@inline function upper_enthalpy_coefficient(i, j, k, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+    loading = (nonprecipitating_loading(i, j, k, ρ, ρqʳ) + nonprecipitating_loading(i, j, k-1, ρ, ρqʳ)) / 2
     ϑ = @inbounds θᵨ[i, j, k] / θ[i, j, k]
-    return @inbounds enthalpy_factor(i, j, k, ρ, ρᵗ, Π, cᵖᵈ, cᵖᵛ) + loading * cᵖᵈ * ϑ * (Πᶠ[i, j, k] - Π[i, j, k])
+    return @inbounds enthalpy_factor(i, j, k, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ) + loading * cᵖᵈ * ϑ * (Πᶠ[i, j, k] - Π[i, j, k])
 end
 
-@inline function lower_enthalpy_coefficient(i, j, k, ρ, ρᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-    loading = (nonprecipitating_loading(i, j, k, ρ, ρᵗ, ρqʳ) + nonprecipitating_loading(i, j, k-1, ρ, ρᵗ, ρqʳ)) / 2
+@inline function lower_enthalpy_coefficient(i, j, k, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+    loading = (nonprecipitating_loading(i, j, k, ρ, ρqʳ) + nonprecipitating_loading(i, j, k-1, ρ, ρqʳ)) / 2
     ϑ = @inbounds θᵨ[i, j, k-1] / θ[i, j, k-1]
-    return @inbounds enthalpy_factor(i, j, k-1, ρ, ρᵗ, Π, cᵖᵈ, cᵖᵛ) - loading * cᵖᵈ * ϑ * (Π[i, j, k-1] - Πᶠ[i, j, k])
+    return @inbounds enthalpy_factor(i, j, k-1, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ) - loading * cᵖᵈ * ϑ * (Π[i, j, k-1] - Πᶠ[i, j, k])
 end
 
 @inline rain_enthalpy_difference(i, j, k, ρ, ρqʳ, T, cˡ, ℒˡ₀) =
     rain_enthalpy(i, j, k-1, ρ, ρqʳ, T, cˡ, ℒˡ₀) - rain_enthalpy(i, j, k, ρ, ρqʳ, T, cˡ, ℒˡ₀)
 
-# One backward Euler step of the enthalpy of the layers, Δπ c̃ Π θ / g, with the composition and
+# One backward Euler step of the enthalpy of the layers, Δp ĉᵖ Π θ / g, with the composition and
 # the pressure of the start of the step in the coefficients, by the Thomas algorithm for the
 # unknown θ̃. Row `k`, multiplied by g:
 #
-#   Δπ c̃ Π (θ̃[k] - θ[k]) = g Δt {Cᶜ⁺ (a⁺⁺ θ̃[k+1] - a⁻⁺ θ̃[k] + R⁺) - Cᶜ⁻ (a⁺⁻ θ̃[k] - a⁻⁻ θ̃[k-1] + R⁻)} + g S ,
+#   Δp ĉᵖ Π (θ̃[k] - θ[k]) = g Δt {Cᶜ⁺ (a⁺⁺ θ̃[k+1] - a⁻⁺ θ̃[k] + R⁺) - Cᶜ⁻ (a⁺⁻ θ̃[k] - a⁻⁻ θ̃[k-1] + R⁻)} + g S ,
 #
 # with S the sources in J m⁻²: the fluxes of the ground into the lowest layer, the heating of
 # `_step_turbulent_kinetic_energy!` and the work of the surface stress. Every column of the
-# matrix sums to Δπ c̃ Π > 0 and its off-diagonal entries are not positive.
+# matrix sums to Δp ĉᵖ Π > 0 and its off-diagonal entries are not positive.
 #
-# The enthalpy Δπ c̃ Π θ̃ / g of each layer is then expressed as the potential temperature of the
-# layer with the water it now holds, under the pressure of the water now above it, as
-# `_sediment_rain!` does: the column loses or gains enthalpy by its sources only.
+# The enthalpy Δp ĉᵖ Π θ̃ / g of each layer is then expressed as the potential temperature of the
+# layer with the water it now holds, at the pressure of the surface that has taken up the vapor
+# of the ground (`change_column_surface_pressure!`): the column loses or gains enthalpy by its
+# sources only.
 #
 # The step is three kernels, each with few arrays: a device may limit the number of arrays of a
 # kernel (31 on Metal), and the grid brings its own.
@@ -883,7 +889,7 @@ end
     end
 end
 
-@kernel function _solve_enthalpy!(θ̃, γ, grid, ρ, ρᵗ, ρqʳ, A, B, πˢ, θ, θᵨ, Π, Πᶠ, T, C, heating, constants, g, Δt)
+@kernel function _solve_enthalpy!(θ̃, γ, grid, ρ, ρqᵗ, ρqʳ, A, B, pˢ, θ, θᵨ, Π, Πᶠ, T, C, heating, constants, g, Δt)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -895,12 +901,12 @@ end
     @inbounds begin
         # Forward elimination
         C⁺ = C[i, j, 2]
-        a⁺ = upper_enthalpy_coefficient(i, j, 2, ρ, ρᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-        a⁻ = lower_enthalpy_coefficient(i, j, 2, ρ, ρᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+        a⁺ = upper_enthalpy_coefficient(i, j, 2, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+        a⁻ = lower_enthalpy_coefficient(i, j, 2, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
         R⁺ = rain_enthalpy_difference(i, j, 2, ρ, ρqʳ, T, cˡ, ℒˡ₀)
 
-        Δπ = layer_pressure_thickness(i, j, 1, A, B, πˢ)
-        M = Δπ * enthalpy_factor(i, j, 1, ρ, ρᵗ, Π, cᵖᵈ, cᵖᵛ)
+        Δp = layer_pressure_thickness(i, j, 1, A, B, pˢ)
+        M = Δp * enthalpy_factor(i, j, 1, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ)
         S = heating[i, j, 1]
 
         β = M + g * Δt * C⁺ * a⁻
@@ -916,12 +922,12 @@ end
             last = k == Nz
             m = ifelse(last, k, k + 1)
             C⁺ = C[i, j, k+1]
-            a⁺ = upper_enthalpy_coefficient(i, j, m, ρ, ρᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-            a⁻ = lower_enthalpy_coefficient(i, j, m, ρ, ρᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+            a⁺ = upper_enthalpy_coefficient(i, j, m, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+            a⁻ = lower_enthalpy_coefficient(i, j, m, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
             R⁺ = rain_enthalpy_difference(i, j, m, ρ, ρqʳ, T, cˡ, ℒˡ₀)
 
-            Δπ = layer_pressure_thickness(i, j, k, A, B, πˢ)
-            M = Δπ * enthalpy_factor(i, j, k, ρ, ρᵗ, Π, cᵖᵈ, cᵖᵛ)
+            Δp = layer_pressure_thickness(i, j, k, A, B, pˢ)
+            M = Δp * enthalpy_factor(i, j, k, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ)
             lower = - g * Δt * C⁻ * a⁻⁻
             diagonal = M + g * Δt * (C⁺ * a⁻ + C⁻ * a⁺⁻)
             right = M * θ[i, j, k] + g * heating[i, j, k] + g * Δt * (C⁺ * R⁺ - C⁻ * R⁻)
@@ -938,32 +944,40 @@ end
     end
 end
 
-# The potential temperature of the enthalpy of each layer, at its new pressure and with its new water
-@kernel function _express_enthalpy_as_potential_temperature!(ρθ, grid, θ̃, ρ, ρᵗ, ρqˣ, A, B, πˢ, Π, cᵖᵈ, cᵖᵛ, pˢᵗ, κ, g)
+# The enthalpy of each layer per unit of the coordinate, given to `change_column_surface_pressure!`,
+# which expresses it as the potential temperature at the new pressure and with the new water.
+#
+# The vapor δm of the ground enters with the kinetic energy of the air it joins. The mixing of
+# the velocities has given it to the lowest layer at the velocity of the start of the step, δm 𝒦ⁿ₁,
+# and the change of the surface pressure then gives every layer its share ΔB δm at the velocity
+# it now has, while the lowest layer gives its δm back: the kinetic energy of the column changes
+# by δm 𝒦ⁿ₁ + δm (Σ ΔB 𝒦⁺ - 𝒦⁺₁). Both terms cross the ground with the vapor, and the ledger of
+# the surface energy books them, so that no energy is taken from the enthalpy for them.
+@kernel function _express_enthalpy_as_potential_temperature!(ρθ, column_enthalpy, surface_energy, vapor_kinetic_energy,
+                                                             grid, θ̃, ρqᵗ, scaled, ρqˣ, vapor_exchange, 𝒦ⁿ, u, v,
+                                                             dynamics, constants, κ, g)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
+    ρ = dynamics.density
+    Π = dynamics.exner_function
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+
+    @inbounds for k in 1:Nz
+        column_enthalpy[i, j, k] = ρ[i, j, k] * enthalpy_factor(i, j, k, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ) * θ̃[i, j, k]
+    end
 
     @inbounds begin
-        ΣW = zero(grid)
-        p⁺ = interface_pressure(i, j, Nz+1, A, B, πˢ)
-        Πᶠ⁺ = (p⁺ / pˢᵗ)^κ
-
-        for k in Nz:-1:1
-            Δπ = layer_pressure_thickness(i, j, k, A, B, πˢ)
-            𝓗 = Δπ * enthalpy_factor(i, j, k, ρ, ρᵗ, Π, cᵖᵈ, cᵖᵛ) * θ̃[i, j, k]
-
-            W = g * Δzᶜᶜᶜ(i, j, k, grid) * sum_at(i, j, k, ρqˣ)
-            ΣW += W
-            p⁻ = interface_pressure(i, j, k, A, B, πˢ) + ΣW
-            Πᶠ⁻ = (p⁻ / pˢᵗ)^κ
-            Π⁺ = (p⁻ * Πᶠ⁻ - p⁺ * Πᶠ⁺) / ((1 + κ) * (Δπ + W))
-
-            ρθ[i, j, k] = ρ[i, j, k] * 𝓗 / ((Δπ * cᵖᵈ + W * cᵖᵛ) * Π⁺)
-
-            p⁺ = p⁻
-            Πᶠ⁺ = Πᶠ⁻
-        end
+        δm = vapor_exchange[i, j, 1]
+        δpˢ = g * δm
+        B = dynamics.surface_pressure_coefficient
+        kinetic = δm * (𝒦ⁿ[i, j, 1] - specific_kinetic_energy(i, j, 1, grid, u, v)) +
+                  surface_pressure_kinetic_energy(i, j, grid, δpˢ, B, u, v, g)
+        surface_energy[i, j, 1] += kinetic
+        vapor_kinetic_energy[i, j, 1] += kinetic
     end
+
+    change_column_surface_pressure!(i, j, grid, δpˢ, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
 end
 
 function launch_energy_mixing!(mixing, model, Δt)
@@ -989,15 +1003,14 @@ function launch_energy_mixing!(mixing, model, Δt)
 
     launch!(arch, grid, :xy, _step_turbulent_kinetic_energy!,
             model.tracers[TKE_NAME], scratch.specific_turbulent_kinetic_energy, scratch.implicit_mass, γ,
-            scratch.heating, conversions, grid, scratch.total_density, moisture.total_density, C.energy, C.momentum,
-            closure_fields.Lᵉ, closure_fields.Kᶜ, closure_fields.N², u, v, scratch.x_velocity, scratch.y_velocity,
-            scratch.kinetic_energy, Δt)
+            scratch.heating, conversions, grid, scratch.total_density, dynamics.density, C.energy, C.momentum,
+            closure_fields.Lᵉ, closure_fields.Kᶜ, closure_fields.N², u, v, scratch.x_velocity, scratch.y_velocity, Δt)
 
     ρ = dynamics.density
-    ρᵗ = moisture.total_density
+    ρqᵗ = scratch.initial_water_density
     A = dynamics.pressure_coefficient
     B = dynamics.surface_pressure_coefficient
-    πˢ = dynamics.surface_pressure
+    pˢ = dynamics.surface_pressure
     Π = dynamics.exner_function
     θ̃ = scratch.potential_temperature
     g = constants.gravitational_acceleration
@@ -1010,13 +1023,14 @@ function launch_energy_mixing!(mixing, model, Δt)
             scratch.x_velocity, scratch.y_velocity, fluxes.x_stress, fluxes.y_stress, cᵖᵛ, Δt)
 
     launch!(arch, grid, :xy, _solve_enthalpy!,
-            θ̃, γ, grid, ρ, ρᵗ, water.ρqʳ, A, B, πˢ, model.formulation.potential_temperature,
+            θ̃, γ, grid, ρ, ρqᵗ, water.ρqʳ, A, B, pˢ, model.formulation.potential_temperature,
             moisture.density_potential_temperature, Π, dynamics.interface_exner_function, model.temperature,
             C.scalar, scratch.heating, constants, g, Δt)
 
     launch!(arch, grid, :xy, _express_enthalpy_as_potential_temperature!,
-            model.formulation.potential_temperature_density, grid, θ̃, ρ, ρᵗ, water_densities(model), A, B, πˢ, Π,
-            cᵖᵈ, cᵖᵛ, dynamics.standard_pressure, κ, g)
+            model.formulation.potential_temperature_density, moisture.column_enthalpy, ledger.surface_energy,
+            ledger.surface_vapor_kinetic_energy, grid, θ̃, ρqᵗ, column_mass_densities(model), water_densities(model),
+            scratch.vapor_exchange, scratch.kinetic_energy, u, v, dynamics, constants, κ, g)
 
     return nothing
 end
@@ -1054,7 +1068,7 @@ function fill_mixing_halos!(model)
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(model.microphysical_fields, boundary_condition_args(model)...)
     fill_halo_regions!(dynamics.pressure)
-    fill_halo_regions!(dynamics.moisture.total_surface_pressure)
+    fill_halo_regions!(dynamics.surface_pressure)
     return nothing
 end
 

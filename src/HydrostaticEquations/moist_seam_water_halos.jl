@@ -14,14 +14,14 @@
 # The winds and the thermodynamics keep the interpolation of the grid. For the water only, the
 # halos are filled again here, after every diagnosis of the state (every stage of a time step):
 #
-#   1. the mixing ratio per unit dry mass r = ρc / ρ, which is what the model transports, is
+#   1. the mass fraction per unit total mass r = ρc / ρ, which is what the model transports, is
 #      interpolated with the stencils and weights of the grid, and the result is limited to the
-#      range of the mixing ratios of its own stencil. A value between the smallest and the largest
-#      of its donors is not negative if they are not, and a uniform mixing ratio is reproduced
-#      exactly, whatever the dry mass does;
-#   2. the halo of the water density is that mixing ratio times the dry density of the halo cell,
-#      ρc = ρ r, the halo of the total density is ρ + Σ ρc, and the halos of the mass fractions are
-#      ρc / (ρ + Σ ρc), so that the mixing ratio that `MixingRatio` forms in a halo cell is r again.
+#      range of the mass fractions of its own stencil. A value between the smallest and the
+#      largest of its donors is not negative if they are not, and a uniform mass fraction is
+#      reproduced exactly, whatever the mass of the layers does;
+#   2. the halo of the water density is that mass fraction times the density of the halo cell,
+#      ρc = ρ r, and the halos of the mass fractions are ρc / ρ, so that the specific value that
+#      `MixingRatio` reads in a halo cell is the limited interpolant.
 #
 # Only halo cells are written. No owned cell is changed, so nothing is clipped and no mass is
 # moved: what the limiter changes is the value a panel sees of the other panel's water where the
@@ -40,7 +40,7 @@ using Oceananigans.MultiRegion: YinYangGrid, YinYangInterpolationTable, yin_yang
 
 @inline safe_ratio(a, b) = ifelse(b == 0, zero(a), a / ifelse(b == 0, one(b), b))
 
-# The Lagrange interpolant of r = ρc / ρ at receiver `n`, limited to the range of r over its stencil
+# The Lagrange interpolant of the mass fraction r = ρc / ρ at receiver `n`, limited to the range of r over its stencil
 @inline function limited_mixing_ratio_interpolation(ρc, ρ, table::YinYangInterpolationTable{S}, n, k) where S
     FT = eltype(ρc)
     @inbounds begin
@@ -74,20 +74,19 @@ end
     end
 end
 
-@inline set_mass_fractions_at!(i, j, k, ::Tuple{}, ::Tuple{}, ρᵗ) = nothing
+@inline set_mass_fractions_at!(i, j, k, ::Tuple{}, ::Tuple{}, ρ) = nothing
 
-@inline function set_mass_fractions_at!(i, j, k, q::Tuple, ρq::Tuple, ρᵗ)
-    @inbounds first(q)[i, j, k] = safe_ratio(first(ρq)[i, j, k], ρᵗ)
-    return set_mass_fractions_at!(i, j, k, Base.tail(q), Base.tail(ρq), ρᵗ)
+@inline function set_mass_fractions_at!(i, j, k, q::Tuple, ρq::Tuple, ρ)
+    @inbounds first(q)[i, j, k] = safe_ratio(first(ρq)[i, j, k], ρ)
+    return set_mass_fractions_at!(i, j, k, Base.tail(q), Base.tail(ρq), ρ)
 end
 
-@kernel function _fill_total_density_seam_halo!(ρᵗ, q, ρ, ρq, table)
+@kernel function _fill_mass_fraction_seam_halo!(q, ρ, ρq, table)
     n, k = @index(Global, NTuple)
     @inbounds begin
         i = table.receivers.i[n]
         j = table.receivers.j[n]
-        ρᵗ[i, j, k] = ρ[i, j, k] + sum_at(i, j, k, ρq)
-        set_mass_fractions_at!(i, j, k, q, ρq, ρᵗ[i, j, k])
+        set_mass_fractions_at!(i, j, k, q, ρq, ρ[i, j, k])
     end
 end
 
@@ -104,9 +103,9 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Fill the horizontal halos of the water of `model`, an `AtmosphereModel` with moist
 `HydrostaticDynamics`, across the seam of a `YinYangGrid`: the densities of water from an
-interpolation of the mixing ratio per unit dry mass that is limited to the range of its donors,
-and the total density and the mass fractions consistently with them. On any other grid the halos
-are those of the grid, and nothing is done. The halos of the dry density must be filled.
+interpolation of the mass fraction that is limited to the range of its donors, and the mass
+fractions consistently with them. On any other grid the halos are those of the grid, and nothing
+is done. The halos of the density must be filled.
 """
 fill_water_seam_halos!(model) = fill_water_seam_halos!(model, model.grid)
 fill_water_seam_halos!(model, grid) = nothing
@@ -114,7 +113,6 @@ fill_water_seam_halos!(model, grid) = nothing
 function fill_water_seam_halos!(model, grid::YinYangGrid)
     dynamics = model.dynamics
     ρ = dynamics.density
-    ρᵗ = dynamics.moisture.total_density
     ρq = water_densities(model)
     q = water_mass_fractions(model)
     table = interpolation_table(yin_yang_interpolation(grid), Center(), Center())
@@ -131,9 +129,8 @@ function fill_water_seam_halos!(model, grid::YinYangGrid)
                                            data(ρc, receiver), ρʳ, data(ρc, donor), data(ρ, donor), table)
         end
 
-        launch_yin_yang_interpolation!(panel, ks, table, _fill_total_density_seam_halo!,
-                                       data(ρᵗ, receiver), map(f -> data(f, receiver), q), ρʳ,
-                                       map(f -> data(f, receiver), ρq), table)
+        launch_yin_yang_interpolation!(panel, ks, table, _fill_mass_fraction_seam_halo!,
+                                       map(f -> data(f, receiver), q), ρʳ, map(f -> data(f, receiver), ρq), table)
     end
 
     return nothing

@@ -53,6 +53,12 @@ function total_mass(model, ρc)
     return sum(layer_mass(i, j, k, grid) * ρc[i, j, k] / ρ[i, j, k] for i in 1:Nx, j in 1:Ny, k in 1:Nz)
 end
 
+# Σ Δp / g over the domain, per unit area of a cell: the mass of the air and of its water
+function column_mass(model)
+    grid = model.grid
+    Nx, Ny, Nz = size(grid)
+    return sum(layer_mass(i, j, k, grid) for i in 1:Nx, j in 1:Ny, k in 1:Nz)
+end
 
 flux_limited_weno() = WENO(order=5, bounds=BoundsPreservation(0, 1; flux_limiter=true))
 
@@ -74,6 +80,8 @@ flux_limited_weno() = WENO(order=5, bounds=BoundsPreservation(0, 1; flux_limiter
     water(model) = total_mass(model, model.moisture_density) + total_mass(model, model.microphysical_fields.ρqʳ)
     surface_rain = model.dynamics.moisture.ledger.surface_rain
     water₀, tracer₀ = water(model), total_mass(model, model.tracers.c)
+    mass₀ = column_mass(model)
+    dry₀ = mass₀ - water₀
     largest = map(f -> maximum(interior(f)), fields)
     lowest = map(f -> minimum(interior(f)), fields)
 
@@ -86,9 +94,12 @@ flux_limited_weno() = WENO(order=5, bounds=BoundsPreservation(0, 1; flux_limiter
     rained = sum(interior(surface_rain))
     water_residual = (water(model) + rained - water₀) / water₀
     tracer_residual = total_mass(model, model.tracers.c) / tracer₀ - 1
+    # The coordinate is the total mass: the rain through the ground lowers it, and the dry air is what is left
+    mass_residual = (column_mass(model) + rained - mass₀) / mass₀
+    dry_residual = (column_mass(model) - water(model)) / dry₀ - 1
     r = interior(model.tracers.c) ./ interior(model.dynamics.density)
     @info "Moist convex stages on a PressureLevelGrid, 24 steps of 1200 s: minima $lowest of maxima $largest; " *
-          "water $water_residual, tracer $tracer_residual, tracer mixing ratio $(extrema(r)), rain $rained"
+          "water $water_residual, mass $mass_residual, dry air $dry_residual, tracer $tracer_residual, tracer mixing ratio $(extrema(r)), rain $rained"
 
     @test all(isfinite, interior(model.dynamics.surface_pressure))
     @test all(lowest .≥ .- rounding_bound .* largest)
@@ -96,4 +107,7 @@ flux_limited_weno() = WENO(order=5, bounds=BoundsPreservation(0, 1; flux_limiter
     @test maximum(r) ≤ 1 + rounding_bound
     @test abs(water_residual) ≤ budget_bound
     @test abs(tracer_residual) ≤ budget_bound
+    @test abs(mass_residual) ≤ budget_bound
+    @test abs(dry_residual) ≤ budget_bound
+    @test rained > 0
 end

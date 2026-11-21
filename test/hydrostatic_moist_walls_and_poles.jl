@@ -60,8 +60,7 @@ end
     set!(model; pˢ = 1e5, θ = (λ, φ, z) -> 290 + 40z, qᵗ = (λ, φ, z) -> 0.015 * (1 - z)^3)
     Nx, Ny, Nz = size(model.grid)
     ρ = model.dynamics.density
-    ρᵗ = model.dynamics.moisture.total_density
-    r = MixingRatio(specific_prognostic_moisture(model), ρᵗ, ρ)
+    r = MixingRatio(specific_prognostic_moisture(model), ρ)
 
     # Of a boundary without flux only the first halo cell is filled: the others have no mass
     @test ρ[1, 0, 1] == ρ[1, 1, 1] > 0
@@ -73,7 +72,7 @@ end
     @test all(isfinite(r[i, j, k]) for i in 1:Nx, j in -2:Ny+3, k in 1:Nz)
     @test all(r[i, j, k] == 0 for i in 1:Nx, j in (-2, -1, Ny+2, Ny+3), k in 1:Nz)
     q = specific_prognostic_moisture(model)
-    @test all(r[i, j, k] == q[i, j, k] * (ρᵗ[i, j, k] / ρ[i, j, k]) for i in 1:Nx, j in 0:Ny+1, k in 1:Nz)
+    @test all(r[i, j, k] == q[i, j, k] for i in 1:Nx, j in 0:Ny+1, k in 1:Nz)
     @test r[1, 1, 1] > 0
 end
 

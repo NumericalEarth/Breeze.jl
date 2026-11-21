@@ -27,6 +27,10 @@ using Breeze.Thermodynamics: Thermodynamics, adjustment_saturation_specific_humi
 const columns_directory = joinpath(@__DIR__, "hydrostatic_moist_columns")
 column_state(name) = read_column(joinpath(columns_directory, name * ".csv"))
 
+# A backward Euler step of the mass fractions with the layer masses for weights keeps the column
+# sum of the water to the rounding of one tridiagonal solve and of the products ρ r of Nz layers,
+# per step
+water_mixing_rounding(model, steps) = 4 * steps * size(model.grid, 3) * eps(eltype(model.grid))
 const budget_relative = 1e-12              # closed-column water and energy, over O(10²) applications
 const reevaluation_relative = 1e-9         # N² against the same formulas evaluated from the model's fields
 const parcel_oracle_relative = 0.10        # N² against the reversible displacement of a parcel ...
@@ -311,7 +315,7 @@ end
             @test abs(energy) ≤ budget_relative
             @test abs(water) ≤ budget_relative
             @test abs(enthalpy_alone) > energy_control
-            @test column_dry_mass(model)[1, 1] == M₀
+            @test abs(column_dry_mass(model)[1, 1] - M₀) ≤ dry_mass_rounding(model) * πˢ₀ / model.thermodynamic_constants.gravitational_acceleration
             @test model.dynamics.surface_pressure[1, 1, 1] == πˢ₀
             @test column_values(model.microphysical_fields.ρqʳ) == ρqʳ₀
             @test lowest_water ≥ 0
@@ -340,9 +344,11 @@ end
 
         precipitation = model.dynamics.moisture.ledger
         rain = precipitation.surface_rain[1, 1, 1]
+        # The enthalpy alone: the precipitation takes its enthalpy and geopotential from it, and its
+        # kinetic energy from the kinetic energy of the column
         sources = (ledger_value(mixing, :turbulent_kinetic_energy_sinks) - ledger_value(mixing, :buoyancy_source) +
                    ledger_value(mixing, :surface_stress_work) - ledger_value(mixing, :water_kinetic_energy) -
-                   precipitation.precipitation_energy[1, 1, 1])
+                   precipitation.precipitation_energy[1, 1, 1] + precipitation.precipitation_kinetic_energy[1, 1, 1])
 
         enthalpy = (column_energy(model)[1, 1] - H₀ - sources) / H₀
         water = (column_water(model)[1, 1] - W₀ + rain) / W₀
@@ -435,7 +441,11 @@ end
         @test ΔW ≈ 30 * 600 * 1e-4 rtol=1e-12
         @test abs(ΔW - ledger_value(mixing, :surface_vapor)) ≤ budget_relative * W₀
         @test abs(ΔE - ledger_value(mixing, :surface_energy)) ≤ budget_relative * E₀
-        @test ledger_value(mixing, :surface_energy) ≈ 30 * 600 * (25 + 1e-4 * cᵖᵛ * 301) rtol=1e-12
+        # The energy through the ground is the prescribed heat and the enthalpy of the vapor, plus the
+        # kinetic energy that the vapor joins the air with, which the ledger reports beside it
+        kinetic = ledger_value(mixing, :surface_vapor_kinetic_energy)
+        @test ledger_value(mixing, :surface_energy) - kinetic ≈ 30 * 600 * (25 + 1e-4 * cᵖᵛ * 301) rtol=1e-12
+        @test kinetic > 0
         @test ledger_value(mixing, :surface_stress_work) > 0
         @test minimum(model.tracers.ρe) ≥ 0
     end
@@ -477,9 +487,10 @@ end
         arguments = (model.grid, model.clock, Oceananigans.fields(model),
                      Breeze.AtmosphereModels.dynamics_thermodynamic_fields(model.dynamics))
         evaluate(condition) = Oceananigans.BoundaryConditions.getbc(condition, 1, 1, arguments...)
+        # The density of the coordinate is that of the air and all its water, so qᵗ = Σ ρq / ρ
         ρ = model.dynamics.density[1, 1, 1]
-        ρᵗ = model.dynamics.moisture.total_density[1, 1, 1]
-        ĉᵖ = (constants.dry_air.heat_capacity * ρ + constants.vapor.heat_capacity * (ρᵗ - ρ)) / ρᵗ
+        qᵗ = sum(ρq[1, 1, 1] for ρq in Breeze.HydrostaticEquations.water_densities(model)) / ρ
+        ĉᵖ = constants.dry_air.heat_capacity + qᵗ * (constants.vapor.heat_capacity - constants.dry_air.heat_capacity)
         expected = (x_stress = evaluate(exchange.x_drag), y_stress = evaluate(exchange.y_drag),
                     sensible_heat_flux = ĉᵖ * model.dynamics.exner_function[1, 1, 1] * evaluate(exchange.sensible_heat),
                     vapor_flux = evaluate(exchange.vapor))
@@ -536,16 +547,18 @@ end
         return model, mixing, total_column_energy(model) - E₀, column_water(model)[1, 1] - W₀, E₀
     end
 
-    wet, mixing, ΔE, ΔW, E₀ = moistened(3e-4)
+    wet, wet_mixing, ΔE, ΔW, E₀ = moistened(3e-4)
     control, _, ΔE_control, ΔW_control, _ = moistened(0)
     constants = wet.thermodynamic_constants
     cᵖᵛ = constants.vapor.heat_capacity
     μ = wet.microphysical_fields
 
-    # The vapor brings its enthalpy cᵖᵛ Tˢ and nothing else: condensation is not a source of energy
-    @test abs(ΔE - cᵖᵛ * 300 * ΔW) ≤ budget_relative * E₀
+    # The vapor brings its enthalpy cᵖᵛ Tˢ and the kinetic energy it joins the air with, and nothing
+    # else: condensation is not a source of energy
+    @test abs(ΔE - cᵖᵛ * 300 * ΔW - ledger_value(wet_mixing, :surface_vapor_kinetic_energy)) ≤ budget_relative * E₀
     @test abs(ΔE_control) ≤ budget_relative * E₀
-    @test ΔW_control == 0
+    # Without a flux the mixing moves water between layers only, which keeps its sum to rounding
+    @test abs(ΔW_control) ≤ water_mixing_rounding(control, 36) * column_water(control)[1, 1]
 
     # The moistened column makes cloud that the control does not
     cloud = maximum(μ.qᶜˡ)
@@ -953,8 +966,9 @@ end
         regional = getregion(model, r)
         ledger = getregion(mixing.ledger, r)
         value(name) = Array(interior(getproperty(ledger, name)))[:, :, 1]
-        sources = (value(:surface_energy) .+ value(:turbulent_kinetic_energy_sinks) .- value(:buoyancy_source) .+
-                   value(:surface_stress_work) .- value(:water_kinetic_energy))
+        # The enthalpy alone: the kinetic energy that the vapor brings goes to the kinetic energy of the column
+        sources = (value(:surface_energy) .- value(:surface_vapor_kinetic_energy) .+ value(:turbulent_kinetic_energy_sinks) .-
+                   value(:buoyancy_source) .+ value(:surface_stress_work) .- value(:water_kinetic_energy))
         enthalpy = column_energy(regional)
         water = column_water(regional)
         water_residual = max(water_residual, maximum(abs, (water .- water₀[r] .- value(:surface_vapor)) ./ water₀[r]))

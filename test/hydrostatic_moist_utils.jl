@@ -48,15 +48,36 @@ function moist_column_model(column; Φˢ=0, microphysics=warm_rain_microphysics(
                            momentum_advection = VectorInvariant())
 end
 
-# Set the prognostic state of a column from mixing ratios per unit dry mass and the dry-mass
-# surface pressure, which are what the model carries: no pressure enters, so nothing is iterated.
-function set_column_state!(model, πˢ, θ, rᵉ, rʳ)
-    set!(model.dynamics.surface_pressure, πˢ)
-    set!(model)
+# The surface pressure and the mass fractions of the total-mass coordinate for a column state of
+# the derivation, given by its dry-mass surface pressure πˢ and its mixing ratios per unit dry
+# mass: the surface pressure is the weight of the dry air and of all the water, pˢ = πˢ + Σ rᵗ Δπ,
+# and the mass fractions are q = r / (1 + rᵗ). The layer masses of the two coordinates agree in
+# the column sum only, so the state is the same column up to the distribution of its mass.
+function total_column_state(model, πˢ, rᵉ, rʳ)
+    A = Array(interior(model.dynamics.pressure_coefficient))[:]
+    B = Array(interior(model.dynamics.surface_pressure_coefficient))[:]
     Nz = size(model.grid, 3)
+    rᵗ = rᵉ .+ rʳ
+    Δπ = [(A[k] - A[k+1]) + (B[k] - B[k+1]) * πˢ for k in 1:Nz]
+    return (pˢ = πˢ + sum(rᵗ .* Δπ), qᵉ = rᵉ ./ (1 .+ rᵗ), qʳ = rʳ ./ (1 .+ rᵗ))
+end
+
+# Set the prognostic state of a column from its total surface pressure, its potential temperature
+# and its mass fractions, which are what the model carries: no pressure enters, so nothing is iterated.
+function set_total_column_state!(model, pˢ, θ, qᵉ, qʳ)
+    set!(model.dynamics.surface_pressure, pˢ)
+    set!(model)
     ρ = Array(interior(model.dynamics.density))
-    shape(a) = reshape(a, 1, 1, Nz)
-    set!(model; ρθ = ρ .* shape(θ), ρqᵉ = ρ .* shape(rᵉ), ρqʳ = ρ .* shape(rʳ))
+    shape(a) = reshape(a, 1, 1, size(model.grid, 3))
+    set!(model; ρθ = ρ .* shape(θ), ρqᵉ = ρ .* shape(qᵉ), ρqʳ = ρ .* shape(qʳ))
+    return nothing
+end
+
+# Set the prognostic state of a column from the dry-mass surface pressure and the mixing ratios
+# per unit dry mass of a column state of the derivation (`total_column_state`)
+function set_column_state!(model, πˢ, θ, rᵉ, rʳ)
+    state = total_column_state(model, πˢ, rᵉ, rʳ)
+    set_total_column_state!(model, state.pˢ, θ, state.qᵉ, state.qʳ)
     return nothing
 end
 
@@ -108,12 +129,18 @@ function column_water(model)
             for i in 1:Nx, j in 1:Ny]
 end
 
-# Dry mass of the column per unit area, in kg m⁻²
+# The dry mass of a column is the total mass of the coordinate less its water, a difference of
+# sums of Nz layers: it is kept to the rounding of those sums, relative to the column mass.
+dry_mass_rounding(model) = 4 * size(model.grid, 3) * eps(eltype(model.grid))
+
+# Dry mass of the column per unit area, in kg m⁻²: the total mass less the water
 function column_dry_mass(model)
     grid = host_grid(model.grid)
     Nx, Ny, Nz = size(grid)
     ρ = host(model.dynamics.density)
-    return [sum(ρ[i, j, k] * Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid) for k in 1:Nz) for i in 1:Nx, j in 1:Ny]
+    water = map(host, Breeze.HydrostaticEquations.water_densities(model))
+    return [sum((ρ[i, j, k] - sum(ρq[i, j, k] for ρq in water)) * Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid) for k in 1:Nz)
+            for i in 1:Nx, j in 1:Ny]
 end
 
 # A slice of moist or dry `HydrostaticDynamics`, periodic in x, in pure sigma coordinates

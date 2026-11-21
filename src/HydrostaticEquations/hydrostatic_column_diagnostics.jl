@@ -133,6 +133,39 @@ end
 #
 # with ⁻ and ⁺ the lower and upper interfaces, so that Σ Δp Π telescopes to a function of pˢ
 # alone. The layer pressure is the pressure whose Exner function is Π.
+#
+# The numerator is a difference of nearly equal numbers in a thin layer: with δ = Δp / p⁻ its
+# rounding error is that of the face terms divided by δ, which in single precision is several Pa
+# of layer pressure and differs between architectures whose power functions differ in the last
+# bit. Since p Πᶠ = pˢᵗ (p / pˢᵗ)^(1 + κ) and p⁺ = p⁻ (1 - δ), the same mean is
+#
+#   Π = Πᶠ⁻ [1 - (1 - δ)^(1 + κ)] / [(1 + κ) δ]
+#     = Πᶠ⁻ Σₙ (-δ)ⁿ κ (κ - 1) ⋯ (κ - n + 1) / (n + 1)! ,
+#
+# the binomial series, which has no cancellation. It is summed for thin layers, δ ≤ 1/4, with the
+# number of terms that single or double precision needs there; thicker layers, where the
+# difference loses at most two bits, keep the difference of the face terms.
+@inline exner_series_terms(::Type{Float32}) = 12
+@inline exner_series_terms(::Type{Float64}) = 28
+@inline exner_series_terms(::Type{FT}) where FT = 28
+
+@inline function layer_exner_function(p⁻, Πᶠ⁻, p⁺, Πᶠ⁺, Δp, κ)
+    FT = typeof(Πᶠ⁻)
+    δ = Δp / p⁻
+    thin = δ ≤ convert(FT, 1) / 4
+
+    term = one(FT)
+    series = one(FT)
+    for n in 1:exner_series_terms(FT)
+        term *= - δ * (κ + 1 - n) / (n + 1)
+        series += term
+    end
+
+    difference = (p⁻ * Πᶠ⁻ - p⁺ * Πᶠ⁺) / ((1 + κ) * Δp)
+
+    return ifelse(thin, Πᶠ⁻ * series, difference)
+end
+
 @kernel function _compute_layer_mass_and_exner_functions!(ρ, p, Π, Πᶠ, grid, A, B, pˢ, pˢᵗ, κ, g)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
@@ -146,7 +179,7 @@ end
             p⁺ = interface_pressure(i, j, k+1, A, B, pˢ)
             Πᶠ⁺ = (p⁺ / pˢᵗ)^κ
             Δp = layer_pressure_thickness(i, j, k, A, B, pˢ)
-            Πᵏ = (p⁻ * Πᶠ⁻ - p⁺ * Πᶠ⁺) / ((1 + κ) * Δp)
+            Πᵏ = layer_exner_function(p⁻, Πᶠ⁻, p⁺, Πᶠ⁺, Δp, κ)
 
             ρ[i, j, k] = coordinate_layer_density(i, j, k, grid, ρ, Δp, g)
             Π[i, j, k] = Πᵏ

@@ -349,25 +349,30 @@ end
 launch_linearization_derivatives!(substepper, model) =
     launch_linearization_derivatives!(substepper, model, model.dynamics.moisture)
 
-# Dry air. The method of a moist model is in `moist_hydrostatic_dynamics.jl`.
-function launch_linearization_derivatives!(substepper, model, ::Nothing)
+# Dry air, and moist air in its total-mass coordinate, whose z-face pressures are A + B pˢ alike
+function launch_linearization_derivatives!(substepper, model, moisture)
     grid = model.grid
     arch = grid.architecture
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = dry_air_gas_constant(constants) / cᵖᵈ
-    (; θ, Π, Πᶠ, dΠdpˢ, dΠᶠdpˢ, dΦdpˢ) = substepper.linearization
+    (; Π, Πᶠ, dΠdpˢ, dΠᶠdpˢ, dΦdpˢ) = substepper.linearization
 
     launch!(arch, grid, :xy, _compute_exner_function_derivatives!, dΠdpˢ, dΠᶠdpˢ, grid,
             dynamics.pressure_coefficient, dynamics.surface_pressure_coefficient,
             dynamics.surface_pressure, Π, Πᶠ, κ)
 
-    # ∂Φ/∂pˢ at fixed θ: the hydrostatic integral is linear in the Exner functions
+    # ∂Φ/∂pˢ at fixed θ (θᵨ with water): the hydrostatic integral is linear in the Exner functions
+    θ = hydrostatic_integral_potential_temperature(substepper.linearization, moisture)
     launch!(arch, grid, :xy, _compute_geopotential!, dΦdpˢ, grid, ZeroField(eltype(grid)), θ, dΠdpˢ, dΠᶠdpˢ, cᵖᵈ)
 
     return nothing
 end
+
+# The potential temperature of the frozen hydrostatic integral: θ of dry air, θᵨ of moist air
+hydrostatic_integral_potential_temperature(linearization, ::Nothing) = linearization.θ
+hydrostatic_integral_potential_temperature(linearization, moisture) = linearization.θᵨ
 
 #####
 ##### The linear gravity-wave operator

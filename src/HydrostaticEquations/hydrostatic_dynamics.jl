@@ -93,15 +93,14 @@ pressures. A flux of energy through a boundary, supplied under `ρE`, enters `ρ
 A model built with `microphysics = OneMomentCloudMicrophysics(cloud_formation =
 SaturationAdjustment(equilibrium = WarmPhaseEquilibrium()))` and `formulation =
 LiquidIcePotentialTemperatureFormulation(exner_exponent = DryExponent())` carries vapor, cloud
-liquid and rain. The coordinate, continuity and every prognostic weight remain those of dry
-air: the prognostic surface pressure, which keeps the name `pˢ` among the prognostic fields, is
-then the dry-mass surface pressure `πˢ`, and `ρ` the mass of dry air. The pressure is the weight
-of the dry air and of all the water above, so the total surface pressure
-`pˢ = πˢ + Σ g Δz ρqˣ` is diagnosed (`surface_pressure(dynamics)`); `set!(model; pˢ=...)` takes
-the total surface pressure and finds the dry one. Water is carried as a mixing ratio per unit
-dry mass by the mass fluxes that carry `θ`. The pressure-gradient force and the hydrostatic
-integral use the density potential temperature `θᵨ = T Rᵐ / (Rᵈ Π)` in place of `θ`, an energy
-source enters `ρθ` divided by `(cᵖᵈ + rᵗ cᵖᵛ) Π` with `rᵗ` the mixing ratio of all water, and the
+liquid and rain. The coordinate, continuity and every prognostic weight are those of the total
+mass, dry air and water together: the prognostic surface pressure `pˢ` is the total surface
+pressure, and `ρ` the total layer mass, so the equations hold as they are without dry air. Water
+is carried as a mass fraction per unit total mass by the mass fluxes that carry `θ`; water that
+leaves or enters the column through the ground changes `pˢ` by its weight. The pressure-gradient
+force and the hydrostatic integral use the density potential temperature `θᵨ = T Rᵐ / (Rᵈ Π)` in
+place of `θ`, an energy source enters `ρθ` divided by `ĉᵖ Π` with
+`ĉᵖ = cᵖᵈ + qᵗ (cᵖᵛ - cᵖᵈ)` and `qᵗ` the mass fraction of all water, and the
 tendency of `ρθ` includes the expansion work that the first law requires of `θ` with the dry
 exponent. Cloud forms by saturation adjustment in every stage. Rain forms, evaporates and falls
 once per time step after the dynamics (first-order operator splitting), with rates and a fall

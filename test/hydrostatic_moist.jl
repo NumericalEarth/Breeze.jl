@@ -242,7 +242,7 @@ end
 
     water₀, energy₀, dry₀ = column_water(model)[1], column_energy(model)[1], column_dry_mass(model)[1]
     pˢ₀ = model.dynamics.moisture.total_surface_pressure[1, 1, 1]
-    πˢ₀ = model.dynamics.surface_pressure[1, 1, 1]
+    mass₀ = pˢ₀ / g
 
     for _ in 1:144
         time_step!(model, 300)
@@ -267,8 +267,11 @@ end
     @test abs(pressure_residual) ≤ ledger_relative
     @test abs(energy_residual) ≤ ledger_relative
     @test abs(control) > precipitation_energy_control
-    @test column_dry_mass(model)[1] == dry₀
-    @test model.dynamics.surface_pressure[1, 1, 1] == πˢ₀
+    # The coordinate is the total mass: its surface pressure is the one the rain lowers, and the
+    # dry air is what is left of it
+    @test model.dynamics.surface_pressure === model.dynamics.moisture.total_surface_pressure
+    @test pˢ < pˢ₀
+    @test abs(column_dry_mass(model)[1] - dry₀) ≤ dry_mass_rounding(model) * mass₀
     @test minimum(model.microphysical_fields.ρqʳ) ≥ 0
     @test minimum(model.moisture_density) ≥ 0
     @test ledger.rain_frictional_heating[1, 1, 1] > 0
@@ -312,7 +315,16 @@ end
     @test abs(result.water_residual) ≤ ledger_relative
     @test abs(result.energy_residual) ≤ ledger_relative
     @test result.courant > 10                       # far beyond what an explicit step allows
-    @test result.courant ≈ physical_courant rtol=1e-6
+    # The layers of the model hold the total mass ΔB pˢ / g, those of the derivation (1 + rᵗ) Δπ / g:
+    # a depth differs from the derivation's by (1 + r̄ᵗ) / (1 + rᵗ) with r̄ᵗ = pˢ / πˢ - 1, and the
+    # fall speed by as much again through the density, so the Courant numbers agree to twice that
+    _, header = column_state("moist_tropical_heavy_rain")
+    πˢ = header["dry_surface_pressure_Pa"]
+    rᵗ = column.r_e .+ column.r_r
+    r̄ᵗ = total_column_state(result.model, πˢ, column.r_e, column.r_r).pˢ / πˢ - 1
+    coordinate_rtol = 2 * maximum(abs.((1 + r̄ᵗ) ./ (1 .+ rᵗ) .- 1))
+    @info "T4d: Courant number against the derivation's, tolerance of the coordinate $coordinate_rtol"
+    @test result.courant ≈ physical_courant rtol=coordinate_rtol
     @test abs(label_courant / physical_courant - 1) > 0.5
 end
 
@@ -338,31 +350,27 @@ function layer_entropies(model)
                           model.thermodynamic_constants) for k in 1:size(model.grid, 3)]
 end
 
-# dθ/dπˢ of every layer from the expansion work of the model, for mixing ratios held fixed
-function potential_temperature_response(model, πˢ, θ, rᵉ, rʳ)
-    set_column_state!(model, πˢ, θ, rᵉ, rʳ)
+# dθ/dpˢ of every layer from the expansion work of the model. A layer of the total-mass
+# coordinate is material when the surface pressure changes at fixed mass fractions: its mass ΔB pˢ / g
+# changes with that of every other layer, and no water moves between them.
+function potential_temperature_response(model, pˢ, θ, qᵉ, qʳ)
+    set_total_column_state!(model, pˢ, θ, qᵉ, qʳ)
     grid = model.grid
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
-    g = constants.gravitational_acceleration
     κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
     μ = model.microphysical_fields
     Nz = size(grid, 3)
     B = dynamics.surface_pressure_coefficient
 
-    Gρθ, Gρqᵉ, Gρqʳ = CenterField(grid), CenterField(grid), CenterField(grid)
-    Gπˢ = Field{Center, Center, Nothing}(grid)
-    set!(Gπˢ, 1)
-    for k in 1:Nz # ρ = Δπ / (g Δz), so ∂ρ/∂πˢ = ΔB / (g Δz)
-        ∂ρ = (B[1, 1, k] - B[1, 1, k+1]) / (g * Δzᶜᶜᶜ(1, 1, k, grid))
-        Gρqᵉ[1, 1, k] = rᵉ[k] * ∂ρ
-        Gρqʳ[1, 1, k] = rʳ[k] * ∂ρ
-    end
+    Gρθ = CenterField(grid)
+    Gpˢ = Field{Center, Center, Nothing}(grid)
+    set!(Gpˢ, 1)
 
     launch!(CPU(), grid, :xy, HydrostaticEquations._add_expansion_work!, Gρθ, grid, dynamics.density,
             model.velocities.u, model.velocities.v, dynamics.vertical_mass_flux, dynamics.exner_function,
-            dynamics.interface_exner_function, dynamics.moisture.interface_pressure, B, Gπˢ, (Gρqᵉ, Gρqʳ),
-            model.formulation.potential_temperature, model.temperature, μ.qᵛ, μ.qˡ, constants, κ, g)
+            dynamics.interface_exner_function, dynamics.moisture.interface_pressure, B, Gpˢ,
+            model.formulation.potential_temperature, model.temperature, μ.qᵛ, μ.qˡ, constants, κ)
 
     return [Gρθ[1, 1, k] / dynamics.density[1, 1, k] for k in 1:Nz]
 end
@@ -370,31 +378,33 @@ end
 @testset "T7d: expansion work conserves moist entropy" begin
     column, header = column_state("midlatitude_frontal")
     model = moist_column_model(column)
-    rᵉ, rʳ = column.r_e, 0 .* column.r_r
-    πˢ₀, πˢ₁ = header["dry_surface_pressure_Pa"], 0.7e5
+    # The column of the derivation in the total-mass coordinate, lifted to a total surface pressure of 700 hPa
+    state = total_column_state(model, header["dry_surface_pressure_Pa"], column.r_e, 0 .* column.r_r)
+    qᵉ, qʳ = state.qᵉ, state.qʳ
+    pˢ₀, pˢ₁ = state.pˢ, 0.7e5
     steps = 400 # the tolerance is that of the limit of small steps
-    δ = (πˢ₁ - πˢ₀) / steps
+    δ = (pˢ₁ - pˢ₀) / steps
 
-    set_column_state!(model, πˢ₀, column.theta, rᵉ, rʳ)
+    set_total_column_state!(model, pˢ₀, column.theta, qᵉ, qʳ)
     s₀ = layer_entropies(model)
     p₀ = Array(interior(model.dynamics.pressure))[1, 1, :]
     cloudy₀ = Array(interior(model.microphysical_fields.qᶜˡ))[1, 1, :] .> 0
 
     θ = copy(column.theta)
-    for n in 0:steps-1 # fourth-order Runge-Kutta in πˢ
-        πˢ = πˢ₀ + n * δ
-        k₁ = potential_temperature_response(model, πˢ, θ, rᵉ, rʳ)
-        k₂ = potential_temperature_response(model, πˢ + δ / 2, θ .+ δ / 2 .* k₁, rᵉ, rʳ)
-        k₃ = potential_temperature_response(model, πˢ + δ / 2, θ .+ δ / 2 .* k₂, rᵉ, rʳ)
-        k₄ = potential_temperature_response(model, πˢ + δ, θ .+ δ .* k₃, rᵉ, rʳ)
+    for n in 0:steps-1 # fourth-order Runge-Kutta in pˢ
+        pˢ = pˢ₀ + n * δ
+        k₁ = potential_temperature_response(model, pˢ, θ, qᵉ, qʳ)
+        k₂ = potential_temperature_response(model, pˢ + δ / 2, θ .+ δ / 2 .* k₁, qᵉ, qʳ)
+        k₃ = potential_temperature_response(model, pˢ + δ / 2, θ .+ δ / 2 .* k₂, qᵉ, qʳ)
+        k₄ = potential_temperature_response(model, pˢ + δ, θ .+ δ .* k₃, qᵉ, qʳ)
         θ .+= δ / 6 .* (k₁ .+ 2 .* k₂ .+ 2 .* k₃ .+ k₄)
     end
 
-    set_column_state!(model, πˢ₁, θ, rᵉ, rʳ)
+    set_total_column_state!(model, pˢ₁, θ, qᵉ, qʳ)
     s = layer_entropies(model)
     p = Array(interior(model.dynamics.pressure))[1, 1, :]
     cloudy₁ = Array(interior(model.microphysical_fields.qᶜˡ))[1, 1, :] .> 0
-    set_column_state!(model, πˢ₁, column.theta, rᵉ, rʳ)
+    set_total_column_state!(model, pˢ₁, column.theta, qᵉ, qʳ)
     s_without = layer_entropies(model)
 
     folds = abs.(log.(p ./ p₀))
