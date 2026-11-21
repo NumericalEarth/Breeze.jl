@@ -120,3 +120,62 @@ const restart_timesteppers = (("SSPRungeKutta3", (;)),
         name == "ρqᵛ" || @test evolved_since_checkpoint > 1e-6 * scale
     end
 end
+
+#####
+##### Restart on a pressure-level grid
+#####
+#
+# The density of a `PressureLevelGrid` is history: it converts the prognostic densities to specific
+# values and is re-diagnosed from them, so the checkpoint carries it with the dynamics. Expected,
+# before the first run: bitwise, as above. Measured: not bitwise. The pickup calls `update_state!`
+# once more than the uninterrupted run, and the re-diagnosis of the density is idempotent only to
+# a rounding (the specific values (ρ⁺ / ρ) ρc / ρ⁺ and ρc / ρ differ in the last place), which the
+# four restarted steps amplify to a few hundred eps (largest: u, 1.6e-13 relative). The tolerance
+# is 4096 eps of each field's largest value; a missing density in the checkpoint gives differences
+# of order one.
+
+using Breeze.PressureLevelDiscretization: PressureLevelVerticalDiscretization
+
+function build_pressure_level(; kw...)
+    Nz = 6
+    A, B = hybrid_coefficients(Nz)
+    grid = RectilinearGrid(default_arch, FT; size=(8, 6, Nz), halo=(3, 3, 3), x=(0, 8e5), y=(0, 6e5),
+                           z=PressureLevelVerticalDiscretization(A, B; gravitational_acceleration=g),
+                           topology=(Periodic, Periodic, Bounded))
+    kˣ, kʸ = 2π / 8e5, 2π / 6e5
+    mountain(x, y) = g * 1000 * exp(-((x - 4e5) / 1.5e5)^2 - ((y - 3e5) / 1.5e5)^2)
+    model = hydrostatic_model(grid; dynamics=HydrostaticDynamics(surface_geopotential=mountain), coriolis=FPlane(FT; f=1e-4),
+                              tracers=(:c,), thermodynamic_constants=reference_model_constants(), kw...)
+    set!(model; pˢ = (x, y) -> isentropic_surface_pressure(mountain(x, y), 300) + 200 * cos(kˣ * x) * cos(kʸ * y),
+                θ = (x, y, z) -> 290 + 5e-3 * z + 2 * sin(kˣ * x) * sin(kʸ * y),
+                u = (x, y, z) -> 5 * (1 + sin(kˣ * x) / 2),
+                v = (x, y, z) -> 2 * sin(kˣ * x) * cos(kʸ * y))
+    set!(model; c = Field(1 * model.dynamics.density))
+    return model
+end
+
+function run_pressure_level(dir, restart; kw...)
+    model = build_pressure_level(; kw...)
+    stop = restart ? spin_up_steps : spin_up_steps + restart_steps
+    simulation = Simulation(model; Δt, stop_iteration=stop, verbose=false)
+    restart && (simulation.output_writers[:checkpointer] = Checkpointer(model; schedule=IterationInterval(spin_up_steps), dir))
+    run!(simulation)
+    restart || return snapshot(model), Array(interior(model.dynamics.density))
+
+    model = build_pressure_level(; kw...)
+    simulation = Simulation(model; Δt, stop_iteration=spin_up_steps + restart_steps, verbose=false)
+    run!(simulation; pickup=joinpath(dir, "checkpoint_iteration$(spin_up_steps).jld2"))
+    return snapshot(model), Array(interior(model.dynamics.density))
+end
+
+@testset "Restart from a checkpoint on a PressureLevelGrid [$name]" for (name, timestepper) in restart_timesteppers[1:2]
+    continuous, ρ = mktempdir(dir -> run_pressure_level(dir, false; timestepper...))
+    restarted, ρʳ = mktempdir(dir -> run_pressure_level(dir, true; timestepper...))
+    @test keys(continuous) == keys(restarted)
+    for name in sort(collect(keys(continuous)))
+        @info "Restart on a PressureLevelGrid, $name: largest difference $(maximum(abs, restarted[name] .- continuous[name]))"
+        restart_rounding = 4096 * eps(FT) * maximum(abs, continuous[name])
+        @test maximum(abs, restarted[name] .- continuous[name]) ≤ restart_rounding
+    end
+    @test maximum(abs, ρʳ .- ρ) ≤ 4096 * eps(FT) * maximum(abs, ρ)
+end

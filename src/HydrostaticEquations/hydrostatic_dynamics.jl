@@ -380,6 +380,32 @@ function AtmosphereModels.validate_velocity_boundary_conditions(dynamics::Hydros
     return nothing
 end
 
+#####
+##### Restart state of a pressure-level grid
+#####
+
+# The density of a pressure-level grid converts its prognostic densities to specific values and is
+# re-diagnosed from them (`rediagnose_layer_density!`): it is history, and a restart carries it.
+# On other grids the layer mass follows from the surface pressure and nothing is carried.
+coordinate_restart_state(ρ) = coordinate_restart_state(ρ.grid, ρ)
+coordinate_restart_state(grid, ρ) = nothing
+coordinate_restart_state(::PressureLevelGrid, ρ) = Oceananigans.prognostic_state(ρ)
+
+function restore_coordinate_state!(ρ, from)
+    Oceananigans.restore_prognostic_state!(ρ, from)
+    fill_halo_regions!(ρ)
+    return nothing
+end
+
+AtmosphereModels.dynamics_restart_state(dynamics::HydrostaticDynamics) = coordinate_restart_state(dynamics.density)
+
+function AtmosphereModels.restore_dynamics_restart_state!(dynamics::HydrostaticDynamics, from)
+    restore_coordinate_state!(dynamics.density, from)
+    return dynamics
+end
+
+AtmosphereModels.restore_dynamics_restart_state!(dynamics::HydrostaticDynamics, ::Nothing) = dynamics
+
 AtmosphereModels.validate_timestepper(::Val{:SSPRungeKutta3}, ::HydrostaticDynamics) = nothing
 
 AtmosphereModels.validate_timestepper(::Val{:GravityWaveMultirateInfinitesimalStep}, ::HydrostaticDynamics) = nothing

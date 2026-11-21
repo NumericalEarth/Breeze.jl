@@ -1266,12 +1266,25 @@ function rain_out_column_physics!(microphysics, model::MoistHydrostaticModel; Δ
 end
 
 # The precipitation ledger accumulates over the integration, so a restart carries it on
+# (on a pressure-level grid, with the density of the grid)
 AtmosphereModels.dynamics_restart_state(dynamics::MoistHydrostaticDynamics) =
-    Oceananigans.prognostic_state(dynamics.moisture.ledger)
+    moist_restart_state(dynamics.density.grid, dynamics)
+
+moist_restart_state(grid, dynamics) = Oceananigans.prognostic_state(dynamics.moisture.ledger)
+moist_restart_state(::PressureLevelGrid, dynamics) = (ledger = Oceananigans.prognostic_state(dynamics.moisture.ledger),
+                                                      density = coordinate_restart_state(dynamics.density))
 
 function AtmosphereModels.restore_dynamics_restart_state!(dynamics::MoistHydrostaticDynamics, from::NamedTuple)
-    Oceananigans.restore_prognostic_state!(dynamics.moisture.ledger, from)
+    restore_moist_restart_state!(dynamics.density.grid, dynamics, from)
     return dynamics
+end
+
+restore_moist_restart_state!(grid, dynamics, from) = Oceananigans.restore_prognostic_state!(dynamics.moisture.ledger, from)
+
+function restore_moist_restart_state!(::PressureLevelGrid, dynamics, from)
+    Oceananigans.restore_prognostic_state!(dynamics.moisture.ledger, from.ledger)
+    restore_coordinate_state!(dynamics.density, from.density)
+    return nothing
 end
 
 """
