@@ -1005,7 +1005,9 @@ end
 end
 
 @testset "Mass of precipitated water on a Yin-Yang grid: every column, with the kinetic energy" begin
-    grid = YinYangGrid(CPU(), Float64; size=(24, 8, 6), z=(0, 1), halo=(4, 4, 3))
+    # The smallest panels whose overlap and halo stay off the poles, as in the Yin-Yang mixing test
+    Nx, Ny = 48, 16
+    grid = YinYangGrid(CPU(), Float64; size=(Nx, Ny, 6), z=(0, 1), halo=(4, 4, 3))
     model = sphere_model(grid)
     set_sphere_state!(model)
     update_state!(model; compute_tendencies=false)
@@ -1024,7 +1026,7 @@ end
                 (Azᶜᶠᶜ(i, j, k, rg) * v[i, j, k]^2 + Azᶜᶠᶜ(i, j+1, k, rg) * v[i, j+1, k]^2) / 2) / (2 * Azᶜᶜᶜ(i, j, k, rg))
         return P * Δt * sum((B[i, j, k] - B[i, j, k+1]) * 𝒦(k) for k in 1:size(rg, 3))
     end
-    expected = [[expected_kinetic(getregion(model, r), i, j) for i in 1:24, j in 1:8] for r in 1:2]
+    expected = [[expected_kinetic(getregion(model, r), i, j) for i in 1:Nx, j in 1:Ny] for r in 1:2]
 
     Breeze.AtmosphereModels.precipitation_mass_change!(model.dynamics, model, Δt, surface_precipitation)
 

@@ -37,9 +37,24 @@ const precipitation_energy_control = 1e-9        # leaving the precipitation ent
 const entropy_drift = 1e-6                       # J kg⁻¹ K⁻¹ per e-folding of pressure
 const entropy_drift_control = 1e-2               # without the expansion work the drift must exceed this
 const refinement_order = (0.6, 1.6)
-# Rᵐ T - κ H as the model writes it, with Rᵈ = κ cᵖᵈ taken out, against the difference of the
-# two terms: their sum cancels to O(10⁻²) of either, so the rounding is ~10² eps
-const expansion_work_rounding = 1e3 * eps(Float64)
+# Rounding bound of the expansion-work coefficient as the model evaluates it in Float64, against
+# its exact value. The model writes Rᵐ T - κ H = a - b + c with Rᵈ = κ cᵖᵈ taken out analytically,
+#   a = T qᵛ (Rᵛ - κ cᵖᵛ),  b = T κ (qˡ cˡ + qⁱ cⁱ),  c = κ (ℒˡ₀ qˡ + ℒⁱ₀ qⁱ),
+# each a product of a few rounded factors (≤ 4 eps), summed with two additions; the sum carries
+# 4 eps (|a| + |b| + |c|) of error against |a - b + c|. The factor θ / H adds ≤ 8 eps (H is a sum of
+# positive terms and one subtraction of ℒq ≪ cᵖᵐ T). So the relative bound is
+#   8 eps (1 + (|a| + |b| + |c|) / |a - b + c|),
+# with the conditioning ratio computed from the terms themselves.
+function expansion_work_rounding(q, T, κ, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵛ, cˡ, cⁱ = constants.vapor.heat_capacity, constants.liquid.heat_capacity, constants.ice.heat_capacity
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
+    a = T * q.vapor * (Rᵛ - κ * cᵖᵛ)
+    b = T * κ * (q.liquid * cˡ + q.ice * cⁱ)
+    c = κ * (ℒˡ₀ * q.liquid + ℒⁱ₀ * q.ice)
+    return 8 * eps(Float64) * (1 + (abs(a) + abs(b) + abs(c)) / abs(a - b + c))
+end
 
 
 #####
@@ -295,12 +310,17 @@ end
     update_state!(model)
     ledger = model.dynamics.moisture.ledger
 
+    # The dry mass before the microphysics acts. Between the microphysics taking water out of the
+    # layers and the hook lowering the surface pressure, the coordinate still holds that mass, and
+    # total minus water counts it as dry air: the dry mass of that intermediate state is P Δt too large.
+    dry₀ = column_dry_mass(model)[1]
+
     # The microphysics takes the water P Δt out of the lowest layer; the hook then takes its mass
     P, Δt = 2e-3, 600
     model.microphysical_fields.ρqʳ[1, 1, 1] -= P * Δt / Δzᶜᶜᶜ(1, 1, 1, model.grid)
     update_state!(model)
     pˢ₀ = model.dynamics.surface_pressure[1, 1, 1]
-    dry₀ = column_dry_mass(model)[1]
+    @test abs(column_dry_mass(model)[1] - dry₀ - P * Δt) ≤ dry_mass_rounding(model) * pˢ₀ / g # the intermediate state
     kinetic(model) = sum(model.dynamics.density[1, 1, k] * Δzᶜᶜᶜ(1, 1, k, model.grid) * model.velocities.u[1, 1, k]^2 / 2 for k in 1:Nz)
     K₀ = kinetic(model)
     surface_precipitation = Field{Center, Center, Nothing}(model.grid)
@@ -366,13 +386,31 @@ end
 
 @testset "Expansion-work coefficient of mixed-phase air" begin
     constants = ThermodynamicConstants(Float64)
-    κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    Rᵈ, Rᵛ = dry_air_gas_constant(constants), vapor_gas_constant(constants)
+    cᵖᵈ, cᵖᵛ = constants.dry_air.heat_capacity, constants.vapor.heat_capacity
+    cˡ, cⁱ = constants.liquid.heat_capacity, constants.ice.heat_capacity
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
+    κ = Rᵈ / cᵖᵈ
     θ, T = 280.0, 255.0
+
+    # The definition (θ / H) (Rᵐ T - κ H), evaluated in BigFloat: its two terms cancel to ~10⁻³ of
+    # either, which Float64 cannot resolve, but 256 bits can
+    function reference(q)
+        big_q = map(big, (q.vapor, q.liquid, q.ice))
+        qᵛ, qˡ, qⁱ = big_q
+        qᵈ = 1 - qᵛ - qˡ - qⁱ
+        Rᵐ = qᵈ * big(Rᵈ) + qᵛ * big(Rᵛ)
+        cᵖᵐ = qᵈ * big(cᵖᵈ) + qᵛ * big(cᵖᵛ) + qˡ * big(cˡ) + qⁱ * big(cⁱ)
+        H = cᵖᵐ * big(T) - big(ℒˡ₀) * qˡ - big(ℒⁱ₀) * qⁱ
+        return big(θ) / H * (Rᵐ * big(T) - big(Rᵈ) / big(cᵖᵈ) * H)
+    end
+
     for q in (MoistureMassFractions(0.004, 0.0, 0.0), MoistureMassFractions(0.002, 0.001, 0.0),
               MoistureMassFractions(0.001, 0.0, 0.002), MoistureMassFractions(0.002, 0.001, 0.0015))
-        H = mixture_heat_capacity(q, constants) * T - condensate_latent_energy(q, constants)
-        direct = θ / H * (mixture_gas_constant(q, constants) * T - κ * H)
-        @test HydrostaticEquations.expansion_work_coefficient(θ, T, q, κ, constants) ≈ direct rtol=expansion_work_rounding
+        𝒲 = HydrostaticEquations.expansion_work_coefficient(θ, T, q, κ, constants)
+        exact = reference(q)
+        @test abs(𝒲 - exact) ≤ expansion_work_rounding(q, T, κ, constants) * abs(exact)
     end
     @test HydrostaticEquations.expansion_work_coefficient(θ, T, MoistureMassFractions(0.0, 0.0, 0.0), κ, constants) == 0
 end
