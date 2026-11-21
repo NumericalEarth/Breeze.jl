@@ -31,6 +31,7 @@ export TKEBasedTurbulenceClosure,
        BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
        closure_parameters, with_parameters,
+       per_column_closure, set_per_column_coefficients!, PerColumnCoefficient,
        DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
        StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale
 
@@ -39,6 +40,7 @@ using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans
+using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!
 using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.Fields: CenterField, XFaceField, YFaceField, ZFaceField, ZeroField
@@ -266,6 +268,7 @@ end
 include("turbulence_closure_statistics.jl")
 include("static_stability.jl")
 include("tke_based_turbulence_closure.jl")
+include("per_column_coefficients.jl")
 include("shear.jl")
 include("richardson_number_stability_functions.jl")
 include("turbulent_richardson_stability_functions.jl")

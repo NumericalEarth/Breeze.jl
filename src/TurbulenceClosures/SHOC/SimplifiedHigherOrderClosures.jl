@@ -37,7 +37,7 @@ using Oceananigans: Oceananigans
 using Oceananigans.Architectures: device
 using Oceananigans.BoundaryConditions: BoundaryConditions, BoundaryCondition, Flux, Bottom,
                                        fill_halo_regions!, total_boundary_flux
-using Oceananigans.Fields: Field, CenterField, ZFaceField
+using Oceananigans.Fields: Field, CenterField, ZFaceField, interior
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.Grids: AbstractGrid, Center, Face, Flat, znode, peripheral_node
 using Oceananigans.Operators: Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ
@@ -46,7 +46,7 @@ using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure, getclosure
 using Oceananigans.Utils: Utils, launch!, prettysummary
 
 using Breeze.AtmosphereModels: AtmosphereModels
-using Breeze.TurbulenceClosures: TurbulenceClosures, TurbulenceClosureStatistics, convert_eltype,
+using Breeze.TurbulenceClosures: TurbulenceClosures, TurbulenceClosureStatistics, PerColumnCoefficient, convert_eltype,
                                  GradientLimitedMixingLength, HardMinimum, HarmonicBlend, fill_mixing_length!, mixing_lengthᶜᶜᶜ,
                                  RationalStabilityFunction, TurbulentRichardsonStabilityFunction, local_stability_functions
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS

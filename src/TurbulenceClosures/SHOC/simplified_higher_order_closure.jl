@@ -238,6 +238,10 @@ const SHOC = SimplifiedHigherOrderClosure
 # (on `ReactantState` they are traced scalars during automatic differentiation).
 Adapt.@adapt_structure SimplifiedHigherOrderClosure
 
+# The closure of column (i, j): each `PerColumnCoefficient` replaced by its value there
+@inline Oceananigans.TurbulenceClosures.getclosure(i, j, closure::SimplifiedHigherOrderClosure) =
+    TurbulenceClosures.column_closure(i, j, closure)
+
 const SHOCClosureArray = AbstractArray{<:SimplifiedHigherOrderClosure}
 
 """Either a single `SimplifiedHigherOrderClosure` or an ensemble array of them."""
@@ -337,6 +341,13 @@ surface_field(grid) = Field{Center, Center, Nothing}(grid)
 function surface_field(grid, value)
     field = surface_field(grid)
     fill!(parent(field), value)
+    return field
+end
+
+# A per-column surface value fills each column with its own
+function surface_field(grid, value::PerColumnCoefficient)
+    field = surface_field(grid)
+    interior(field) .= reshape(value.values, size(value.values)..., 1)
     return field
 end
 
