@@ -89,9 +89,11 @@ moist_formulation() = LiquidIcePotentialTemperatureFormulation(exner_exponent=Dr
 # fields directly (same values, same summation order).
 host(field) = Array(interior(field))
 host_grid(grid) = Oceananigans.Architectures.on_architecture(CPU(), grid)
+# A phase that the scheme does not have is a `ZeroField`: zeros of the shape of `like`
+host_or_zero(field, like) = field isa Oceananigans.Fields.ZeroField ? zero(like) : host(field)
 
 # Enthalpy of the column plus the geopotential of its mass at the ground, per unit area in
-# J m⁻²: Σ Δp (cᵖᵐ T - ℒˡ₀ qˡ) / g + Φˢ pˢ / g, from the diagnosed temperature and composition
+# J m⁻²: Σ Δp (cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ) / g + Φˢ pˢ / g, from the diagnosed temperature and composition
 # rather than from the potential temperature that the model carries.
 function column_energy(model)
     grid = host_grid(model.grid)
@@ -99,8 +101,10 @@ function column_energy(model)
     constants = model.thermodynamic_constants
     g = constants.gravitational_acceleration
     ρᵗ = host(dynamics.moisture.total_density)
-    qᵛ = host(model.microphysical_fields.qᵛ)
-    qˡ = host(model.microphysical_fields.qˡ)
+    water = Breeze.HydrostaticEquations.hydrostatic_water_fields(model.microphysics, model.microphysical_fields)
+    qᵛ = host(water.qᵛ)
+    qˡ = host_or_zero(water.qˡ, qᵛ)
+    qⁱ = host_or_zero(water.qⁱ, qᵛ)
     T = host(model.temperature)
     Φˢ = host(dynamics.surface_geopotential)
     pˢ = host(dynamics.moisture.total_surface_pressure)
@@ -109,7 +113,7 @@ function column_energy(model)
 
     for i in 1:Nx, j in 1:Ny
         for k in 1:Nz
-            q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k])
+            q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k], qⁱ[i, j, k])
             H = mixture_heat_capacity(q, constants) * T[i, j, k] - condensate_latent_energy(q, constants)
             energy[i, j] += ρᵗ[i, j, k] * Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid) * H
         end
@@ -123,9 +127,9 @@ end
 function column_water(model)
     grid = host_grid(model.grid)
     Nx, Ny, Nz = size(grid)
-    ρqᵉ = host(model.moisture_density)
-    ρqʳ = host(model.microphysical_fields.ρqʳ)
-    return [sum((ρqᵉ[i, j, k] + ρqʳ[i, j, k]) * Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid) for k in 1:Nz)
+    # Every prognostic water density: the moisture density and those of the scheme
+    ρq = map(host, Breeze.HydrostaticEquations.water_densities(model))
+    return [sum(sum(ρqˣ[i, j, k] for ρqˣ in ρq) * Oceananigans.Operators.Δzᶜᶜᶜ(i, j, k, grid) for k in 1:Nz)
             for i in 1:Nx, j in 1:Ny]
 end
 

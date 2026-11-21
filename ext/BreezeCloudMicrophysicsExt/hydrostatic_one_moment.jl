@@ -14,7 +14,8 @@
 
 HydrostaticEquations.supports_hydrostatic_dynamics(::WP1M) = true
 
-HydrostaticEquations.hydrostatic_water_fields(::WP1M, μ) = (; qᵛ=μ.qᵛ, qˡ=μ.qˡ, qᶜˡ=μ.qᶜˡ, ρqʳ=μ.ρqʳ, wʳ=μ.wʳ)
+HydrostaticEquations.hydrostatic_water_fields(::WP1M, μ) = (; qᵛ=μ.qᵛ, qˡ=μ.qˡ, qⁱ=ZeroField(eltype(μ.qᵛ)), qᶜˡ=μ.qᶜˡ, ρqʳ=μ.ρqʳ,
+                                                               ρqˢ=ZeroField(eltype(μ.qᵛ)), wʳ=μ.wʳ)
 
 # The rain autoconversion of the default parameters does not depend on the vertical velocity,
 # which here would be the velocity through the coordinate surfaces: it is given none.

@@ -194,7 +194,8 @@ supports_hydrostatic_dynamics(::Nothing) = true
 # The interface of a supported scheme, extended where the scheme is defined:
 #
 #   hydrostatic_water_fields(microphysics, microphysical_fields)
-#       the mass fractions (qᵛ, qˡ, qᶜˡ) of vapor, of all liquid and of cloud liquid, the density
+#       the mass fractions (qᵛ, qˡ, qⁱ, qᶜˡ) of vapor, of all liquid, of all ice and of cloud liquid
+#       (a `ZeroField` for a phase the scheme does not have), the density `ρqˢ` of snow (likewise), the density
 #       `ρqʳ` of rain and its sedimentation velocity `wʳ`, as fields
 #   rain_source_rates(microphysics, ρ, qᶜˡ, qʳ, q, T, constants)
 #       the rates of change of the rain mass fraction by conversion of cloud liquid (≥ 0) and by
@@ -318,14 +319,14 @@ validate_new_layer_mass(model::MoistHydrostaticModel) = validate_layer_mass(mode
     return Rᵐ / Rᵈ * (ĉᵖ / cᵖᵐ + ℒq / (cᵖᵐ * safe_Πθ))
 end
 
-@kernel function _compute_density_potential_temperature!(θᵨ, grid, θ, Π, qᵛ, qˡ, constants)
+@kernel function _compute_density_potential_temperature!(θᵨ, grid, θ, Π, qᵛ, qˡ, qⁱ, constants)
     i, j, k = @index(Global, NTuple)
-    compute_cell_density_potential_temperature!(i, j, k, θᵨ, θ, Π, qᵛ, qˡ, constants)
+    compute_cell_density_potential_temperature!(i, j, k, θᵨ, θ, Π, qᵛ, qˡ, qⁱ, constants)
 end
 
-@inline function compute_cell_density_potential_temperature!(i, j, k, θᵨ, θ, Π, qᵛ, qˡ, constants)
+@inline function compute_cell_density_potential_temperature!(i, j, k, θᵨ, θ, Π, qᵛ, qˡ, qⁱ, constants)
     @inbounds begin
-        q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k])
+        q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k], qⁱ[i, j, k])
         θᵨ[i, j, k] = density_potential_temperature_factor(θ[i, j, k], Π[i, j, k], q, constants) * θ[i, j, k]
     end
     return nothing
@@ -336,19 +337,19 @@ end
     @inbounds cᵖᵈ * θᵨ[i, j, k] * (Πᶠ[i, j, k] - Πᶠ[i, j, k+1]) / g
 
 # Density of the air of layer `k` in kg m⁻³: the equation of state at the layer pressure
-@inline function physical_density(i, j, k, p, T, qᵛ, qˡ, constants)
-    q = @inbounds MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k])
+@inline function physical_density(i, j, k, p, T, qᵛ, qˡ, qⁱ, constants)
+    q = @inbounds MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k], qⁱ[i, j, k])
     return @inbounds Thermodynamics.density(T[i, j, k], p[i, j, k], q, constants)
 end
 
 # The sedimentation velocity of rain through the z-face `k`, the lower face of its donor layer
 # `k`: the grid's vertical coordinate is a label, so a fall speed V in m s⁻¹ crosses the layer at
 # - V Δz / (physical depth), in units of that coordinate per second.
-@kernel function _compute_rain_sedimentation_velocity!(wʳ, grid, microphysics, ρ, ρqʳ, θᵨ, Πᶠ, p, T, qᵛ, qˡ,
+@kernel function _compute_rain_sedimentation_velocity!(wʳ, grid, microphysics, ρ, ρqʳ, θᵨ, Πᶠ, p, T, qᵛ, qˡ, qⁱ,
                                                        constants, cᵖᵈ, g)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρᵖʰ = physical_density(i, j, k, p, T, qᵛ, qˡ, constants)
+        ρᵖʰ = physical_density(i, j, k, p, T, qᵛ, qˡ, qⁱ, constants)
         V = positive_rain_fall_speed(microphysics, ρᵖʰ, ρqʳ[i, j, k] / ρ[i, j, k])
         depth = physical_layer_depth(i, j, k, θᵨ, Πᶠ, cᵖᵈ, g)
         safe_depth = ifelse(depth > 0, depth, one(depth))
@@ -489,7 +490,7 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydr
     water = hydrostatic_water_fields(model.microphysics, model.microphysical_fields)
 
     @apply_regionally launch!(arch, grid, :xyz, _compute_density_potential_temperature!,
-                              θᵨ, grid, θ, dynamics.exner_function, water.qᵛ, water.qˡ, constants)
+                              θᵨ, grid, θ, dynamics.exner_function, water.qᵛ, water.qˡ, water.qⁱ, constants)
 
     @apply_regionally launch!(arch, grid, :xy, _compute_geopotential!,
                               dynamics.geopotential, grid, dynamics.surface_geopotential,
@@ -506,7 +507,7 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydr
         @apply_regionally launch!(arch, grid, :xyz, _compute_rain_sedimentation_velocity!,
                                   water.wʳ, grid, model.microphysics, dynamics.density, water.ρqʳ,
                                   θᵨ, dynamics.interface_exner_function, dynamics.pressure, model.temperature,
-                                  water.qᵛ, water.qˡ, constants, cᵖᵈ, g)
+                                  water.qᵛ, water.qˡ, water.qⁱ, constants, cᵖᵈ, g)
 
     # The halos that the limiter and the tendencies read, filled together where the fields share a
     # location and boundary conditions: the potential temperatures, the geopotential and the mass
@@ -668,16 +669,18 @@ AtmosphereModels.compute_microphysical_tendencies!(::MoistHydrostaticModel) = no
 @inline mass_flux_δxΠ(i, j, k, grid, ρ, u, Π) = mass_flux_x(i, j, k, grid, ρ, u) * δxᶠᵃᵃ(i, j, k, grid, Π)
 @inline mass_flux_δyΠ(i, j, k, grid, ρ, v, Π) = mass_flux_y(i, j, k, grid, ρ, v) * δyᵃᶠᵃ(i, j, k, grid, Π)
 
-# 𝒲 = (θ / H) (Rᵐ T - κ H) with H = cᵖᵐ T - ℒˡ₀ qˡ, written with Rᵈ = κ cᵖᵈ taken out so that
-# it vanishes exactly without water: Rᵐ T - κ H = T [qᵛ (Rᵛ - κ cᵖᵛ) - κ qˡ cˡ] + κ ℒˡ₀ qˡ.
+# 𝒲 = (θ / H) (Rᵐ T - κ H) with H = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ, written with Rᵈ = κ cᵖᵈ taken out so
+# that it vanishes exactly without water:
+#   Rᵐ T - κ H = T [qᵛ (Rᵛ - κ cᵖᵛ) - κ (qˡ cˡ + qⁱ cⁱ)] + κ (ℒˡ₀ qˡ + ℒⁱ₀ qⁱ).
 @inline function expansion_work_coefficient(θ, T, q, κ, constants)
     Rᵛ = vapor_gas_constant(constants)
     cᵖᵛ = constants.vapor.heat_capacity
     cˡ = constants.liquid.heat_capacity
+    cⁱ = constants.ice.heat_capacity
     ℒq = condensate_latent_energy(q, constants)
     H = mixture_heat_capacity(q, constants) * T - ℒq
     safe_H = ifelse(H == 0, one(H), H)
-    return θ / safe_H * (T * (q.vapor * (Rᵛ - κ * cᵖᵛ) - κ * q.liquid * cˡ) + κ * ℒq)
+    return θ / safe_H * (T * (q.vapor * (Rᵛ - κ * cᵖᵛ) - κ * (q.liquid * cˡ + q.ice * cⁱ)) + κ * ℒq)
 end
 
 # The first law, DH/Dt = α Dp/Dt, gives Dθ/Dt = 𝒲 D(ln p)/Dt for the potential temperature with
@@ -689,7 +692,7 @@ end
 # with ∂ₜΠ = [(Πᶠ⁻ - Π) ∂ₜp⁻ + (Π - Πᶠ⁺) ∂ₜp⁺] / Δp from the tendencies of the total pressures
 # of the two faces, ∂ₜpᶠ = B ∂ₜpˢ. The pressure change by water through the ground is accounted
 # for by the column physics, in the enthalpy it leaves in each layer.
-@kernel function _add_expansion_work!(Gρθ, grid, ρ, u, v, ρw, Π, Πᶠ, pᶠ, B, Gpˢ, θ, T, qᵛ, qˡ, constants, κ)
+@kernel function _add_expansion_work!(Gρθ, grid, ρ, u, v, ρw, Π, Πᶠ, pᶠ, B, Gpˢ, θ, T, qᵛ, qˡ, qⁱ, constants, κ)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -709,7 +712,7 @@ end
             vertical = ρw[i, j, k+1] * (Πᶠ[i, j, k+1] - Πᵏ) + ρw[i, j, k] * (Πᵏ - Πᶠ[i, j, k])
             ρ_DΠDt = ρ[i, j, k] * ∂ₜΠ + (horizontal + vertical) / Δz
 
-            q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k])
+            q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k], qⁱ[i, j, k])
             𝒲 = expansion_work_coefficient(θ[i, j, k], T[i, j, k], q, κ, constants)
             Gρθ[i, j, k] += 𝒲 * ρ_DΠDt / (κ * Πᵏ)
 
@@ -736,7 +739,7 @@ function AtmosphereModels.compute_dynamics_tendency!(model::MoistHydrostaticMode
             model.timestepper.Gⁿ.ρθ, grid, ρ, u, v, dynamics.vertical_mass_flux,
             dynamics.exner_function, dynamics.interface_exner_function, dynamics.moisture.interface_pressure,
             dynamics.surface_pressure_coefficient, Gpˢ,
-            model.formulation.potential_temperature, model.temperature, water.qᵛ, water.qˡ, constants, κ)
+            model.formulation.potential_temperature, model.temperature, water.qᵛ, water.qˡ, water.qⁱ, constants, κ)
 
     # The expansion work has read the transport of the water. A time stepper that transports the
     # scalars with the mass flux of its stages now takes it out of their tendencies.
@@ -828,14 +831,14 @@ with them.
     return to_rain, rain_kept
 end
 
-@inline function apply_cell_rain_sources!(i, j, k, ρqᵉ, ρqʳ, microphysics, ρ, p, T, qᵛ, qˡ, qᶜˡ, constants, Δt)
+@inline function apply_cell_rain_sources!(i, j, k, ρqᵉ, ρqʳ, microphysics, ρ, p, T, qᵛ, qˡ, qⁱ, qᶜˡ, constants, Δt)
     @inbounds begin
         ρᵏ = ρ[i, j, k]
         ρqʳᵏ = ρqʳ[i, j, k]
         qʳ = ρqʳᵏ / ρᵏ
         qᶜˡᵏ = qᶜˡ[i, j, k]
         Tᵏ = T[i, j, k]
-        q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k])
+        q = MoistureMassFractions(qᵛ[i, j, k], qˡ[i, j, k], qⁱ[i, j, k])
         ρᵖʰ = Thermodynamics.density(Tᵏ, p[i, j, k], q, constants)
 
         conversion, evaporation = rain_source_rates(microphysics, ρᵖʰ, qᶜˡᵏ, qʳ, q, Tᵏ, constants)
@@ -894,7 +897,9 @@ end
     return 𝒦 * δpˢ / g
 end
 
-# The enthalpy of a layer per unit of the coordinate, ĉᵖ Π ρθ with ĉᵖ ρ = cᵖᵈ (ρ - ρqᵗ) + cᵖᵛ ρqᵗ
+# The enthalpy of a layer per unit of the coordinate, ĉᵖ Π ρθ with ĉᵖ ρ = cᵖᵈ (ρ - ρqᵗ) + cᵖᵛ ρqᵗ.
+# With the liquid-ice potential temperature, ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ for any partition
+# of the water among its phases, so this holds with ice and needs only the total water.
 @inline layer_enthalpy_density(ρ, ρqᵗ, Π, θ, cᵖᵈ, cᵖᵛ) = (cᵖᵈ * (ρ - ρqᵗ) + cᵖᵛ * ρqᵗ) * Π * θ
 
 """
@@ -982,7 +987,7 @@ end
 # (`surface_pressure_kinetic_energy`): the rain carries it through the ground, and the ledger
 # books it with the enthalpy and the geopotential of the rain.
 @inline function sediment_column_rain!(i, j, grid, ρθ, ρqʳ, scaled, ρqˣ, ledger, column_enthalpy, microphysics,
-                                       dynamics, velocities, θ, θᵨ, p, T, qᵛ, qˡ, constants, κ, g, Δt, inflow_fall_speed)
+                                       dynamics, velocities, θ, θᵨ, p, T, qᵛ, qˡ, qⁱ, constants, κ, g, Δt, inflow_fall_speed)
     Nz = size(grid, 3)
 
     ρ = dynamics.density
@@ -1007,7 +1012,7 @@ end
             ρqʳᵏ = ρqʳ[i, j, k]
             Tᵏ = T[i, j, k]
 
-            ρᵖʰ = physical_density(i, j, k, p, T, qᵛ, qˡ, constants)
+            ρᵖʰ = physical_density(i, j, k, p, T, qᵛ, qˡ, qⁱ, constants)
             # The fall speed of the rain of the layer before this sweep, or with `inflow_fall_speed`
             # of that rain together with what enters it from above in this sweep
             ρqʳᵛ = ifelse(inflow_fall_speed, ρqʳᵏ + inflow / (g * Δz), ρqʳᵏ)
@@ -1077,7 +1082,7 @@ end
         AtmosphereModels.compute_cell_thermodynamic_variables!(i, j, k, grid, temperature, qᵛᵉ, formulation, dynamics,
                                                                constants, microphysics, microphysical_fields, ρqᵉ)
 
-        compute_cell_density_potential_temperature!(i, j, k, θᵨ, θ, Π, water.qᵛ, water.qˡ, constants)
+        compute_cell_density_potential_temperature!(i, j, k, θᵨ, θ, Π, water.qᵛ, water.qˡ, water.qⁱ, constants)
     end
 
     compute_column_geopotential!(i, j, grid, dynamics.geopotential, dynamics.surface_geopotential, θᵨ, Π, Πᶠ, cᵖᵈ)
@@ -1120,11 +1125,11 @@ end
             if apply_sources
                 for k in 1:Nz
                     apply_cell_rain_sources!(i, j, k, ρqᵉ, ρqʳ, microphysics, ρ, p, temperature,
-                                             water.qᵛ, water.qˡ, water.qᶜˡ, constants, Δt)
+                                             water.qᵛ, water.qˡ, water.qⁱ, water.qᶜˡ, constants, Δt)
                 end
             else
                 sediment_column_rain!(i, j, grid, ρθ, ρqʳ, scaled, ρqˣ, ledger, moisture.column_enthalpy, microphysics,
-                                      dynamics, velocities, θ, θᵨ, p, temperature, water.qᵛ, water.qˡ, constants, κ, g, Δt,
+                                      dynamics, velocities, θ, θᵨ, p, temperature, water.qᵛ, water.qˡ, water.qⁱ, constants, κ, g, Δt,
                                       inflow_fall_speed)
             end
 
@@ -1237,12 +1242,14 @@ end
 # each layer in place of its rain and a fall that keeps nothing, so every layer passes on all it
 # holds and all that enters it (no Courant number, no λ = ∞). The enthalpy, pressure and ledger
 # bookkeeping is that of the sedimentation of rain: the condensate leaving a layer carries
-# hˡ = cˡ T - ℒˡ₀ at the temperature of that layer after condensation, the layers it crossed are
+# cˡ T - ℒˡ₀ per unit mass of its liquid and cⁱ T - ℒⁱ₀ per unit mass of its ice, at the temperature
+# of that layer after condensation (each phase falls as it condensed), the layers it crossed are
 # expressed again at their new pressure, and the column loses hˡ + Φˢ per unit mass reaching the
 # ground; the potential energy the fall releases is the frictional heating of the ledger.
 #
 # The scheme provides `rainout_condensate(microphysics, i, j, k, grid, formulation, dynamics, constants, ρqᵛ)`,
-# the density of the condensate of layer k (same measure as ρqᵛ) and the temperature after condensation.
+# the densities of the liquid and of the ice that layer k condenses (same measure as ρqᵛ) and the
+# temperature after condensation.
 function rainout_condensate end
 
 @kernel function _rain_out_columns!(ρθ, ρqᵛ, precipitation_rate, scaled, ρqˣ, ledger, column_enthalpy, grid, microphysics,
@@ -1259,10 +1266,13 @@ function rainout_condensate end
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     cˡ = constants.liquid.heat_capacity
+    cⁱ = constants.ice.heat_capacity
     ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
 
     @inbounds begin
-        inflow = zero(grid)
+        liquid_inflow = zero(grid) # weights of the liquid and of the ice entering through the upper face
+        ice_inflow = zero(grid)
         enthalpy_inflow = zero(grid)
         friction = zero(grid)
 
@@ -1270,16 +1280,20 @@ function rainout_condensate end
             Δz = Δzᶜᶜᶜ(i, j, k, grid)
             ρqᵛᵏ = ρqᵛ[i, j, k]
 
-            ρc, T₁ = rainout_condensate(microphysics, i, j, k, grid, formulation, dynamics, constants, ρqᵛ)
+            ρcˡ, ρcⁱ, T₁ = rainout_condensate(microphysics, i, j, k, grid, formulation, dynamics, constants, ρqᵛ)
+            ρc = ρcˡ + ρcⁱ
 
-            # Instant fall: the layer keeps nothing and passes on its condensate and all that enters it
-            outflow = inflow + g * Δz * ρc
-            hˡ = cˡ * T₁ - ℒˡ₀
-            crossed = (inflow != 0) | (outflow != 0)
+            # Instant fall: the layer keeps nothing and passes on its condensate and all that enters
+            # it, each phase as it is, at the temperature of the layer
+            liquid_outflow = liquid_inflow + g * Δz * ρcˡ
+            ice_outflow = ice_inflow + g * Δz * ρcⁱ
+            outflow = liquid_outflow + ice_outflow
+            enthalpy_outflow = liquid_outflow * (cˡ * T₁ - ℒˡ₀) + ice_outflow * (cⁱ * T₁ - ℒⁱ₀)
+            crossed = (liquid_inflow + ice_inflow != 0) | (outflow != 0)
 
             # Enthalpy of the layer per unit of the coordinate, before (all of its water) and after
             ℋ = layer_enthalpy_density(ρ[i, j, k], sum_at(i, j, k, ρqˣ), Π[i, j, k], θ[i, j, k], cᵖᵈ, cᵖᵛ)
-            ℋ⁺ = ℋ + (enthalpy_inflow - outflow * hˡ) / (g * Δz)
+            ℋ⁺ = ℋ + (enthalpy_inflow - enthalpy_outflow) / (g * Δz)
 
             column_enthalpy[i, j, k] = ifelse(crossed, ℋ⁺, zero(ℋ⁺))
             ρqᵛ[i, j, k] = ifelse(ρc > 0, ρqᵛᵏ - ρc, ρqᵛᵏ)
@@ -1289,9 +1303,12 @@ function rainout_condensate end
             Φ⁻ = ifelse(k == 1, Φˢ[i, j, 1], Φ[i, j, below])
             friction += outflow / g * (Φ[i, j, k] - Φ⁻)
 
-            inflow = outflow
-            enthalpy_inflow = outflow * hˡ
+            liquid_inflow = liquid_outflow
+            ice_inflow = ice_outflow
+            enthalpy_inflow = enthalpy_outflow
         end
+
+        inflow = liquid_inflow + ice_inflow
 
         kinetic_outflow = - surface_pressure_kinetic_energy(i, j, grid, - inflow, dynamics.surface_pressure_coefficient,
                                                             velocities.u, velocities.v, g)

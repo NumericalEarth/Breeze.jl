@@ -13,8 +13,8 @@ using Breeze.HydrostaticEquations: HydrostaticEquations, warm_rain_column_physic
                                    HydrostaticConservationFixer, GridScaleHyperdiffusion, VerticalDiffusion,
                                    VerletSubsteps
 using Breeze.Thermodynamics: saturation_vapor_pressure, PlanarLiquidSurface, dry_air_gas_constant, vapor_gas_constant,
-                             absolute_zero_latent_heat, TetensFormula
-using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
+                             absolute_zero_latent_heat, TetensFormula, mixture_gas_constant
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, MixedPhaseEquilibrium, WarmPhaseEquilibrium
 using Breeze.AtmosphereModels: VerticalBorrowing
 
 #####
@@ -37,6 +37,9 @@ const precipitation_energy_control = 1e-9        # leaving the precipitation ent
 const entropy_drift = 1e-6                       # J kg⁻¹ K⁻¹ per e-folding of pressure
 const entropy_drift_control = 1e-2               # without the expansion work the drift must exceed this
 const refinement_order = (0.6, 1.6)
+# Rᵐ T - κ H as the model writes it, with Rᵈ = κ cᵖᵈ taken out, against the difference of the
+# two terms: their sum cancels to O(10⁻²) of either, so the rounding is ~10² eps
+const expansion_work_rounding = 1e3 * eps(Float64)
 
 
 #####
@@ -318,6 +321,63 @@ end
 end
 
 #####
+##### T4m: mixed-phase instantaneous precipitation: the falling condensate carries the enthalpy of its phases
+#####
+
+function rained_out_column(equilibrium)
+    column, _ = column_state("midlatitude_frontal")
+    microphysics = Breeze.Microphysics.InstantaneousPrecipitation(Float64; equilibrium)
+    model = moist_column_model(column; microphysics)
+    # A cold, moist column, supersaturated over ice in its upper layers
+    set!(model; pˢ = 1e5, θ = z -> 262 + 30z, qᵗ = z -> 0.008 * (1 - z)^2)
+    water₀, energy₀ = column_water(model)[1], column_energy(model)[1]
+    pˢ₀ = model.dynamics.surface_pressure[1, 1, 1]
+    HydrostaticEquations.rain_out_column_physics!(model.microphysics, model; Δt=600)
+    ledger = model.dynamics.moisture.ledger
+    rain = ledger.surface_rain[1, 1, 1]
+    return (; model, rain, pˢ₀, energy₀,
+              water_residual = (column_water(model)[1] - water₀ + rain) / water₀,
+              energy_residual = (column_energy(model)[1] - energy₀ + ledger.precipitation_energy[1, 1, 1]) / abs(energy₀),
+              specific_energy = ledger.precipitation_energy[1, 1, 1] / rain)
+end
+
+@testset "T4m: mixed-phase rain-out, ledgers and the enthalpy of ice" begin
+    mixed = rained_out_column(MixedPhaseEquilibrium(Float64))
+    warm = rained_out_column(WarmPhaseEquilibrium())
+    g = mixed.model.thermodynamic_constants.gravitational_acceleration
+    pˢ = mixed.model.dynamics.surface_pressure[1, 1, 1]
+    ℒᶠ = absolute_zero_latent_heat(mixed.model.thermodynamic_constants, mixed.model.thermodynamic_constants.ice) -
+         absolute_zero_latent_heat(mixed.model.thermodynamic_constants, mixed.model.thermodynamic_constants.liquid)
+    @info "T4m: precipitation $(mixed.rain) kg m⁻² (warm phase $(warm.rain)); residuals: water $(mixed.water_residual), " *
+          "energy $(mixed.energy_residual); energy per unit precipitation: mixed $(mixed.specific_energy), warm $(warm.specific_energy) J kg⁻¹"
+
+    @test mixed.rain > 0
+    @test abs(mixed.water_residual) ≤ ledger_relative
+    @test abs(mixed.energy_residual) ≤ ledger_relative
+    @test abs(warm.energy_residual) ≤ ledger_relative
+    @test abs(pˢ - mixed.pˢ₀ + g * mixed.rain) / mixed.pˢ₀ ≤ dry_mass_rounding(mixed.model)
+    # Ice leaves with less enthalpy than liquid at the same temperature, by up to the latent heat of fusion
+    @test warm.specific_energy - mixed.specific_energy > 0.01 * ℒᶠ
+end
+
+#####
+##### The expansion-work coefficient with ice: (θ / H) (Rᵐ T - κ H), H = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ
+#####
+
+@testset "Expansion-work coefficient of mixed-phase air" begin
+    constants = ThermodynamicConstants(Float64)
+    κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    θ, T = 280.0, 255.0
+    for q in (MoistureMassFractions(0.004, 0.0, 0.0), MoistureMassFractions(0.002, 0.001, 0.0),
+              MoistureMassFractions(0.001, 0.0, 0.002), MoistureMassFractions(0.002, 0.001, 0.0015))
+        H = mixture_heat_capacity(q, constants) * T - condensate_latent_energy(q, constants)
+        direct = θ / H * (mixture_gas_constant(q, constants) * T - κ * H)
+        @test HydrostaticEquations.expansion_work_coefficient(θ, T, q, κ, constants) ≈ direct rtol=expansion_work_rounding
+    end
+    @test HydrostaticEquations.expansion_work_coefficient(θ, T, MoistureMassFractions(0.0, 0.0, 0.0), κ, constants) == 0
+end
+
+#####
 ##### T4d, T4e: implicit sedimentation alone, far beyond the explicit Courant limit
 #####
 
@@ -399,7 +459,7 @@ function potential_temperature_response(model, pˢ, θ, qᵉ, qʳ)
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
     κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
-    μ = model.microphysical_fields
+    water = HydrostaticEquations.hydrostatic_water_fields(model.microphysics, model.microphysical_fields)
     Nz = size(grid, 3)
     B = dynamics.surface_pressure_coefficient
 
@@ -410,7 +470,7 @@ function potential_temperature_response(model, pˢ, θ, qᵉ, qʳ)
     launch!(CPU(), grid, :xy, HydrostaticEquations._add_expansion_work!, Gρθ, grid, dynamics.density,
             model.velocities.u, model.velocities.v, dynamics.vertical_mass_flux, dynamics.exner_function,
             dynamics.interface_exner_function, dynamics.moisture.interface_pressure, B, Gpˢ,
-            model.formulation.potential_temperature, model.temperature, μ.qᵛ, μ.qˡ, constants, κ)
+            model.formulation.potential_temperature, model.temperature, water.qᵛ, water.qˡ, water.qⁱ, constants, κ)
 
     return [Gρθ[1, 1, k] / dynamics.density[1, 1, k] for k in 1:Nz]
 end

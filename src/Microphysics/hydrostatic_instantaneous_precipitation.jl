@@ -17,8 +17,10 @@ using Oceananigans.Fields: ZeroField
 HydrostaticEquations.supports_hydrostatic_dynamics(::IP) = true
 
 # No liquid between time steps and no rain field: the fall speed is not computed (`wʳ = nothing`)
-HydrostaticEquations.hydrostatic_water_fields(::IP, μ) =
-    (; qᵛ = μ.qᵛ, qˡ = ZeroField(eltype(μ.qᵛ)), qᶜˡ = ZeroField(eltype(μ.qᵛ)), ρqʳ = ZeroField(eltype(μ.qᵛ)), wʳ = nothing)
+function HydrostaticEquations.hydrostatic_water_fields(::IP, μ)
+    zero_field = ZeroField(eltype(μ.qᵛ))
+    return (; qᵛ = μ.qᵛ, qˡ = zero_field, qⁱ = zero_field, qᶜˡ = zero_field, ρqʳ = zero_field, ρqˢ = zero_field, wʳ = nothing)
+end
 
 HydrostaticEquations.apply_column_physics!(ip::IP, model) = HydrostaticEquations.rain_out_column_physics!(ip, model)
 
@@ -27,13 +29,18 @@ AtmosphereModels.microphysics_model_update!(ip::IP, model::MoistHydrostaticModel
     HydrostaticEquations.time_step_column_physics!(ip, model)
 
 # The condensate of layer k: the supersaturation that the saturation adjustment of the scheme
-# condenses at the layer pressure with θ fixed, as a density of the measure of ρqᵛ, and the
-# temperature after condensation (which the condensate carries away)
+# condenses at the layer pressure with θ fixed, split into liquid and ice as the adjustment
+# partitions it (all liquid under a warm-phase equilibrium), as densities of the measure of ρqᵛ,
+# and the temperature after condensation (which the condensate carries away)
 @inline function HydrostaticEquations.rainout_condensate(ip::IP, i, j, k, grid, formulation, dynamics, constants, ρqᵛ)
     ρ = @inbounds total_density(dynamics)[i, j, k]
     qᵗ = @inbounds ρqᵛ[i, j, k] / ρ
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, MoistureMassFractions(qᵗ))
     𝒰₁ = adjust_thermodynamic_state(𝒰₀, ip.saturation_adjustment, constants)
-    qᵛ⁺ = 𝒰₁.moisture_mass_fractions.vapor
-    return ρ * max(0, qᵗ - qᵛ⁺), temperature(𝒰₁, constants)
+    q⁺ = 𝒰₁.moisture_mass_fractions
+    ρc = ρ * max(0, qᵗ - q⁺.vapor)
+    condensate = q⁺.liquid + q⁺.ice
+    ice_fraction = ifelse(condensate > 0, q⁺.ice / ifelse(condensate > 0, condensate, one(condensate)), zero(condensate))
+    ρcⁱ = ρc * ice_fraction
+    return ρc - ρcⁱ, ρcⁱ, temperature(𝒰₁, constants)
 end

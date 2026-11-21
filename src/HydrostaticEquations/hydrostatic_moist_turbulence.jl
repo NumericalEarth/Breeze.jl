@@ -821,39 +821,48 @@ end
 @inline enthalpy_factor(i, j, k, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ) =
     @inbounds (cᵖᵈ + ρqᵗ[i, j, k] / ρ[i, j, k] * (cᵖᵛ - cᵖᵈ)) * Π[i, j, k]
 
-# Mass of the air and of the water that does not fall, per unit total mass: 1 - qʳ
-@inline nonprecipitating_loading(i, j, k, ρ, ρqʳ) = @inbounds 1 - ρqʳ[i, j, k] / ρ[i, j, k]
+# `ρqᵖ = (rain = ρqʳ, snow = ρqˢ)`: the densities of the water that falls, liquid and ice (a
+# `ZeroField` for a phase that the scheme does not have)
 
-# Enthalpy of the rain of a layer per unit total mass, qʳ (cˡ T - ℒˡ₀), which the turbulence does
-# not carry
-@inline rain_enthalpy(i, j, k, ρ, ρqʳ, T, cˡ, ℒˡ₀) = @inbounds ρqʳ[i, j, k] / ρ[i, j, k] * (cˡ * T[i, j, k] - ℒˡ₀)
+# Mass of the air and of the water that does not fall, per unit total mass: 1 - qʳ - qˢ
+@inline nonprecipitating_loading(i, j, k, ρ, ρqᵖ) = @inbounds 1 - (ρqᵖ.rain[i, j, k] + ρqᵖ.snow[i, j, k]) / ρ[i, j, k]
+
+# Enthalpy of the falling water of a layer per unit total mass, qʳ (cˡ T - ℒˡ₀) + qˢ (cⁱ T - ℒⁱ₀),
+# which the turbulence does not carry: each phase with its own heat capacity and latent energy
+@inline function precipitation_enthalpy(i, j, k, ρ, ρqᵖ, T, constants)
+    cˡ = constants.liquid.heat_capacity
+    cⁱ = constants.ice.heat_capacity
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
+    return @inbounds (ρqᵖ.rain[i, j, k] * (cˡ * T[i, j, k] - ℒˡ₀) + ρqᵖ.snow[i, j, k] * (cⁱ * T[i, j, k] - ℒⁱ₀)) / ρ[i, j, k]
+end
 
 # The flux of enthalpy through the z-face `k`, between the layers `k - 1` and `k`, is down the
 # gradient of the static energy of the air and of the water that does not fall, per unit total mass:
 #
-#   F = - Cᶜ [χ[k] - χ[k-1] + (1 - q̄ʳ) g Δh - (χʳ[k] - χʳ[k-1])] ,    χ = ĉᵖ Π θ ,
+#   F = - Cᶜ [χ[k] - χ[k-1] + (1 - q̄ᵖ) g Δh - (χʳ[k] - χʳ[k-1])] ,    χ = ĉᵖ Π θ ,
 #
 # with g Δh = cᵖᵈ [θᵨ[k-1] (Π[k-1] - Πᶠ) + θᵨ[k] (Πᶠ - Π[k])] the geopotential between the two
-# layers and χʳ the enthalpy of the rain. With θᵨ = ϑ θ it is linear in θ,
+# layers and χʳ the enthalpy of the falling water (`precipitation_enthalpy`). With θᵨ = ϑ θ it is linear in θ,
 #
 #   F = - Cᶜ (a⁺ θ[k] - a⁻ θ[k-1] + R) ,
-#   a⁺ = ĉᵖ Π[k] + (1 - q̄ʳ) cᵖᵈ ϑ[k] (Πᶠ - Π[k]) ,    a⁻ = ĉᵖ Π[k-1] - (1 - q̄ʳ) cᵖᵈ ϑ[k-1] (Π[k-1] - Πᶠ) ,
+#   a⁺ = ĉᵖ Π[k] + (1 - q̄ᵖ) cᵖᵈ ϑ[k] (Πᶠ - Π[k]) ,    a⁻ = ĉᵖ Π[k-1] - (1 - q̄ᵖ) cᵖᵈ ϑ[k-1] (Π[k-1] - Πᶠ) ,
 #
 # and without water a⁺ = a⁻ = cᵖᵈ Πᶠ: the flux of the dry `VerticalDiffusion` times cᵖᵈ Πᶠ.
-@inline function upper_enthalpy_coefficient(i, j, k, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-    loading = (nonprecipitating_loading(i, j, k, ρ, ρqʳ) + nonprecipitating_loading(i, j, k-1, ρ, ρqʳ)) / 2
+@inline function upper_enthalpy_coefficient(i, j, k, ρ, ρqᵗ, ρqᵖ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+    loading = (nonprecipitating_loading(i, j, k, ρ, ρqᵖ) + nonprecipitating_loading(i, j, k-1, ρ, ρqᵖ)) / 2
     ϑ = @inbounds θᵨ[i, j, k] / θ[i, j, k]
     return @inbounds enthalpy_factor(i, j, k, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ) + loading * cᵖᵈ * ϑ * (Πᶠ[i, j, k] - Π[i, j, k])
 end
 
-@inline function lower_enthalpy_coefficient(i, j, k, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-    loading = (nonprecipitating_loading(i, j, k, ρ, ρqʳ) + nonprecipitating_loading(i, j, k-1, ρ, ρqʳ)) / 2
+@inline function lower_enthalpy_coefficient(i, j, k, ρ, ρqᵗ, ρqᵖ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+    loading = (nonprecipitating_loading(i, j, k, ρ, ρqᵖ) + nonprecipitating_loading(i, j, k-1, ρ, ρqᵖ)) / 2
     ϑ = @inbounds θᵨ[i, j, k-1] / θ[i, j, k-1]
     return @inbounds enthalpy_factor(i, j, k-1, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ) - loading * cᵖᵈ * ϑ * (Π[i, j, k-1] - Πᶠ[i, j, k])
 end
 
-@inline rain_enthalpy_difference(i, j, k, ρ, ρqʳ, T, cˡ, ℒˡ₀) =
-    rain_enthalpy(i, j, k-1, ρ, ρqʳ, T, cˡ, ℒˡ₀) - rain_enthalpy(i, j, k, ρ, ρqʳ, T, cˡ, ℒˡ₀)
+@inline precipitation_enthalpy_difference(i, j, k, ρ, ρqᵖ, T, constants) =
+    precipitation_enthalpy(i, j, k-1, ρ, ρqᵖ, T, constants) - precipitation_enthalpy(i, j, k, ρ, ρqᵖ, T, constants)
 
 # One backward Euler step of the enthalpy of the layers, Δp ĉᵖ Π θ / g, with the composition and
 # the pressure of the start of the step in the coefficients, by the Thomas algorithm for the
@@ -889,21 +898,19 @@ end
     end
 end
 
-@kernel function _solve_enthalpy!(θ̃, γ, grid, ρ, ρqᵗ, ρqʳ, A, B, pˢ, θ, θᵨ, Π, Πᶠ, T, C, heating, constants, g, Δt)
+@kernel function _solve_enthalpy!(θ̃, γ, grid, ρ, ρqᵗ, ρqᵖ, A, B, pˢ, θ, θᵨ, Π, Πᶠ, T, C, heating, constants, g, Δt)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
 
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
-    cˡ = constants.liquid.heat_capacity
-    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
 
     @inbounds begin
         # Forward elimination
         C⁺ = C[i, j, 2]
-        a⁺ = upper_enthalpy_coefficient(i, j, 2, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-        a⁻ = lower_enthalpy_coefficient(i, j, 2, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-        R⁺ = rain_enthalpy_difference(i, j, 2, ρ, ρqʳ, T, cˡ, ℒˡ₀)
+        a⁺ = upper_enthalpy_coefficient(i, j, 2, ρ, ρqᵗ, ρqᵖ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+        a⁻ = lower_enthalpy_coefficient(i, j, 2, ρ, ρqᵗ, ρqᵖ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+        R⁺ = precipitation_enthalpy_difference(i, j, 2, ρ, ρqᵖ, T, constants)
 
         Δp = layer_pressure_thickness(i, j, 1, A, B, pˢ)
         M = Δp * enthalpy_factor(i, j, 1, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ)
@@ -922,9 +929,9 @@ end
             last = k == Nz
             m = ifelse(last, k, k + 1)
             C⁺ = C[i, j, k+1]
-            a⁺ = upper_enthalpy_coefficient(i, j, m, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-            a⁻ = lower_enthalpy_coefficient(i, j, m, ρ, ρqᵗ, ρqʳ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
-            R⁺ = rain_enthalpy_difference(i, j, m, ρ, ρqʳ, T, cˡ, ℒˡ₀)
+            a⁺ = upper_enthalpy_coefficient(i, j, m, ρ, ρqᵗ, ρqᵖ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+            a⁻ = lower_enthalpy_coefficient(i, j, m, ρ, ρqᵗ, ρqᵖ, θ, θᵨ, Π, Πᶠ, cᵖᵈ, cᵖᵛ)
+            R⁺ = precipitation_enthalpy_difference(i, j, m, ρ, ρqᵖ, T, constants)
 
             Δp = layer_pressure_thickness(i, j, k, A, B, pˢ)
             M = Δp * enthalpy_factor(i, j, k, ρ, ρqᵗ, Π, cᵖᵈ, cᵖᵛ)
@@ -1023,7 +1030,7 @@ function launch_energy_mixing!(mixing, model, Δt)
             scratch.x_velocity, scratch.y_velocity, fluxes.x_stress, fluxes.y_stress, cᵖᵛ, Δt)
 
     launch!(arch, grid, :xy, _solve_enthalpy!,
-            θ̃, γ, grid, ρ, ρqᵗ, water.ρqʳ, A, B, pˢ, model.formulation.potential_temperature,
+            θ̃, γ, grid, ρ, ρqᵗ, (rain = water.ρqʳ, snow = water.ρqˢ), A, B, pˢ, model.formulation.potential_temperature,
             moisture.density_potential_temperature, Π, dynamics.interface_exner_function, model.temperature,
             C.scalar, scratch.heating, constants, g, Δt)
 
