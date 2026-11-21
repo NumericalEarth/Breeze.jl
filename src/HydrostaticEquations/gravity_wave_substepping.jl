@@ -681,9 +681,9 @@ function layer_mass_flux_divergence end
 
 # The increment is in the units of the stage: per unit volume, or the mass per unit area of a
 # pressure-level grid (see `PressureLevelDiscretization.scalar_layer_mass`)
-@kernel function _add_perturbation_transport!(δρc, grid, advection, ρᴸ, ∫𝐮′, cᴸ)
+@kernel function _add_perturbation_transport!(δρc, grid, advection, ρᴸ, ∫𝐮′, cᴸ, sign)
     i, j, k = @index(Global, NTuple)
-    @inbounds δρc[i, j, k] -= layer_mass_flux_divergence(i, j, k, grid, advection, ρᴸ, ∫𝐮′, cᴸ)
+    @inbounds δρc[i, j, k] -= sign * layer_mass_flux_divergence(i, j, k, grid, advection, ρᴸ, ∫𝐮′, cᴸ)
 end
 
 """
@@ -695,14 +695,14 @@ specific value carried by the mass fluxes that changed the layer mass. For the p
 temperature the substeps apply the same fluxes one at a time; for a scalar that does not act on
 the gravity waves, applying their sum once is the same.
 """
-function add_perturbation_transport!(δρc, substepper::GravityWaveSubstepper, model, name)
+function add_perturbation_transport!(δρc, substepper::GravityWaveSubstepper, model, name, sign=1)
     grid = model.grid
     (; u, v, w) = substepper.integrated_velocities
 
     @apply_regionally launch!(grid.architecture, grid, :xyz, _add_perturbation_transport!,
                               δρc, grid, substepper.advection, substepper.linearization.ρ,
                               coordinate_transport_velocities(grid, u, v, w, substepper.integrated_velocities.ρw),
-                              substepper.specific_scalars[name])
+                              substepper.specific_scalars[name], convert(eltype(grid), sign))
 
     return nothing
 end

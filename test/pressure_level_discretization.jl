@@ -281,16 +281,11 @@ end
         @test isapprox(mass(model), M⁰; rtol = budget_tolerance)
         @test isapprox(tracer_mass(model), C⁰; rtol = budget_tolerance)
 
-        # A uniform specific value stays uniform: c = M / (Δp / g) to the rounding of the stages
-        uniform_tolerance = 1e3 * eps(FT)
+        # A uniform specific value stays uniform: c = M / (Δp / g) to the rounding of the
+        # conversions and of the ρ re-diagnosis, a few eps per stage
+        uniform_tolerance = 16eps(FT)
         c = [model.tracers.c[i, j, k] / dynamics.density[i, j, k] for i in 1:6, j in 1:5, k in 1:Nz]
-        # OPEN (step 2.5): the gravity-wave multirate step leaves c uniform only to ~1e-6 on the
-        # pressure-level grid (exact on the label grid), while the air and tracer budgets close
-        if timestepper === :SSPRungeKutta3
-            @test maximum(abs, c .- 1) < uniform_tolerance
-        else
-            @test_broken maximum(abs, c .- 1) < uniform_tolerance
-        end
+        @test maximum(abs, c .- 1) < uniform_tolerance
     end
 end
 

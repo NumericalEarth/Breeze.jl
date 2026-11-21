@@ -401,9 +401,39 @@ function store_slow_tendencies!(timestepper::GravityWaveMultirateInfinitesimalSt
     # depth of the start of this stage: pˢ⁻ ← pˢ first (`initialize_stage!` repeats it)
     store_previous_surface_pressure!(model.grid)
     convert_tendencies_to_layer_mass!(model.grid, S, keys(timestepper.substepper.specific_scalars))
+    i > 1 && subtract_fast_scalar_transport!(model.grid, timestepper.scalar_stages, timestepper, model, i)
 
     return nothing
 end
+
+# The slow tendencies of the surface pressure hold the fast operator applied to ΔYᵢ₋₁ on the
+# metrics of stage `i`. On the label grid the fast operator is frozen over the step, and the
+# scalars take the same term out when the stage completes, as transport by the integrated
+# velocity less `Δt βᵢⱼ ΔYⱼ₋₁`. On a pressure-level grid the operator follows the surface pressure
+# of the stage, and a stage that recombines the slow tendencies of earlier stages would take it
+# out on the wrong metrics: the scalars subtract it here instead, with their slow tendencies, on
+# the metrics of the stage that stores them.
+subtract_fast_scalar_transport!(grid, scalar_stages, timestepper, model, i) = nothing
+
+function subtract_fast_scalar_transport!(grid::PressureLevelGrid, ::RecombinedScalarStages, timestepper, model, i)
+    substepper = timestepper.substepper
+    ΔYᵢ₋₁ = stage_increment(timestepper, i - 1)
+    ∫𝐮′ = substepper.integrated_velocities
+    copy_parent!(∫𝐮′.u, ΔYᵢ₋₁.u)
+    copy_parent!(∫𝐮′.v, ΔYᵢ₋₁.v)
+    compute_integrated_vertical_velocity!(substepper, model)
+
+    S = stage_slow_tendencies(timestepper, i)
+    for name in keys(substepper.specific_scalars)
+        add_perturbation_transport!(S[name], substepper, model, name, -1)
+    end
+
+    return nothing
+end
+
+# Whether the scalars take the fast part of the slow tendencies out through the integrated velocity
+corrects_integrated_velocity(grid, scalar_stages) = true
+corrects_integrated_velocity(::PressureLevelGrid, ::RecombinedScalarStages) = false
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -466,7 +496,7 @@ function complete_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, mod
 
     ∫𝐮′ = substepper.integrated_velocities
     for j in tendency_stages(storage, i)
-        j > 1 || continue
+        j > 1 && corrects_integrated_velocity(model.grid, timestepper.scalar_stages) || continue
         ΔYⱼ₋₁ = stage_increment(timestepper, j - 1)
         add_scaled!(∫𝐮′.u, ΔYⱼ₋₁.u, - Δt * β[i, j])
         add_scaled!(∫𝐮′.v, ΔYⱼ₋₁.v, - Δt * β[i, j])
