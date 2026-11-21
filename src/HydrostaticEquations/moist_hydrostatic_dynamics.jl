@@ -1183,6 +1183,50 @@ function warm_rain_column_physics!(microphysics, model::MoistHydrostaticModel;
 end
 
 #####
+##### The mass of the water that a generic microphysics precipitates through the ground
+#####
+
+# The water P Δt that has left column (i, j) through the ground lowers its surface pressure by its
+# weight. Every layer keeps its enthalpy and the mass per unit area of its water and tracers
+# (`change_column_surface_pressure!`); the ledger books the water, and the kinetic energy that the
+# held velocities lose with the mass, P Δt Σ ΔB 𝒦, which the water carries out. The enthalpy of
+# the water is not booked here: the microphysics that took the water out of the layers did so.
+@kernel function _change_mass_by_precipitation!(ρθ, column_enthalpy, scaled, ρqˣ, ledger, grid, dynamics, velocities,
+                                                surface_precipitation, constants, κ, g, Δt)
+    i, j = @index(Global, NTuple)
+
+    @inbounds begin
+        outflow = g * Δt * surface_precipitation[i, j, 1]
+        kinetic_outflow = - surface_pressure_kinetic_energy(i, j, grid, - outflow, dynamics.surface_pressure_coefficient,
+                                                            velocities.u, velocities.v, g)
+        ledger.surface_rain[i, j, 1] += outflow / g
+        ledger.precipitation_energy[i, j, 1] += kinetic_outflow
+        ledger.precipitation_kinetic_energy[i, j, 1] += kinetic_outflow
+    end
+
+    change_column_surface_pressure!(i, j, grid, - outflow, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
+end
+
+function AtmosphereModels.precipitation_mass_change!(::MoistHydrostaticDynamics, model, Δt, surface_precipitation)
+    (isfinite(Δt) && Δt > 0) || return nothing
+    grid = model.grid
+    dynamics = model.dynamics
+    constants = model.thermodynamic_constants
+    κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    g = constants.gravitational_acceleration
+
+    @apply_regionally launch!(grid.architecture, grid, :xy, _change_mass_by_precipitation!,
+                              model.formulation.potential_temperature_density, dynamics.moisture.column_enthalpy,
+                              column_mass_densities(model), water_densities(model), dynamics.moisture.ledger, grid,
+                              dynamics, horizontal_velocities(model), surface_precipitation, constants, κ, g,
+                              convert(eltype(grid), Δt))
+
+    update_state!(model)
+
+    return nothing
+end
+
+#####
 ##### Instantaneous rain-out: condensation and the fall of the condensate within the time step
 #####
 #

@@ -637,3 +637,15 @@ p = ρ R^m T
 where ``R^m`` is the mixture gas constant.
 """
 compute_auxiliary_dynamics_variables!(model) = nothing  # default: no-op
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Change the mass of the dynamics of `model` by the water that has left each column through the
+ground over `Δt`, at the rate `surface_precipitation` (a two-dimensional field in kg m⁻² s⁻¹,
+positive out of the air). The microphysics has already taken that water, with its enthalpy, out
+of the densities of the layers. A dynamics whose mass does not follow its water does nothing,
+which is the default. A dynamics whose coordinate is the total mass lowers it by the weight of
+the water, and its ledger books the water and the kinetic energy that the water carries out.
+"""
+precipitation_mass_change!(dynamics, model, Δt, surface_precipitation) = nothing

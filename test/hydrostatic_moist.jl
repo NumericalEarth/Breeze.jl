@@ -278,6 +278,46 @@ end
 end
 
 #####
+##### T4f: the mass of the water that a generic microphysics precipitates (`precipitation_mass_change!`)
+#####
+
+@testset "T4f: precipitation_mass_change! lowers the total mass and books the kinetic energy" begin
+    column, header = column_state("moist_tropical")
+    model = moist_column_model(column)
+    constants = model.thermodynamic_constants
+    g = constants.gravitational_acceleration
+    set_column_state!(model, header["dry_surface_pressure_Pa"], column.theta, column.r_e, column.r_r)
+    Nz = size(model.grid, 3)
+    interior(model.velocities.u) .= reshape([10 + k for k in 1:Nz], 1, 1, Nz)
+    update_state!(model)
+    ledger = model.dynamics.moisture.ledger
+
+    # The microphysics takes the water P Δt out of the lowest layer; the hook then takes its mass
+    P, Δt = 2e-3, 600
+    model.microphysical_fields.ρqʳ[1, 1, 1] -= P * Δt / Δzᶜᶜᶜ(1, 1, 1, model.grid)
+    update_state!(model)
+    pˢ₀ = model.dynamics.surface_pressure[1, 1, 1]
+    dry₀ = column_dry_mass(model)[1]
+    kinetic(model) = sum(model.dynamics.density[1, 1, k] * Δzᶜᶜᶜ(1, 1, k, model.grid) * model.velocities.u[1, 1, k]^2 / 2 for k in 1:Nz)
+    K₀ = kinetic(model)
+    surface_precipitation = Field{Center, Center, Nothing}(model.grid)
+    set!(surface_precipitation, P)
+
+    Breeze.AtmosphereModels.precipitation_mass_change!(model.dynamics, model, Δt, surface_precipitation)
+
+    pˢ = model.dynamics.surface_pressure[1, 1, 1]
+    @test abs(pˢ - pˢ₀ + g * P * Δt) / pˢ₀ ≤ dry_mass_rounding(model)
+    @test ledger.surface_rain[1, 1, 1] == P * Δt
+    @test abs(column_dry_mass(model)[1] - dry₀) ≤ dry_mass_rounding(model) * pˢ₀ / g
+    @test ledger.precipitation_kinetic_energy[1, 1, 1] > 0
+    @test abs(kinetic(model) - K₀ + ledger.precipitation_kinetic_energy[1, 1, 1]) ≤ ledger_relative * K₀
+    @test ledger.precipitation_energy[1, 1, 1] == ledger.precipitation_kinetic_energy[1, 1, 1]
+
+    # A dynamics whose mass does not follow its water is left as it is
+    @test isnothing(Breeze.AtmosphereModels.precipitation_mass_change!(nothing, model, Δt, surface_precipitation))
+end
+
+#####
 ##### T4d, T4e: implicit sedimentation alone, far beyond the explicit Courant limit
 #####
 
