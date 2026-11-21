@@ -39,7 +39,10 @@ using Oceananigans.Advection:
     upwind_face_flux_z,
     face_factor,
     transport_x,
-    transport_y
+    transport_y,
+    bounded_face_flux_x,
+    bounded_face_flux_y,
+    bounded_face_flux_z
 
 using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, CenterField
@@ -48,7 +51,7 @@ using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.Fields: Field, ZeroField
 using Oceananigans.Grids: Center, AbstractGrid, Flat
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, Az⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
-using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
+using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization, ExplicitTimeDiscretization
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_discretization
 using DocStringExtensions: TYPEDEF
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
@@ -62,7 +65,8 @@ using ..AtmosphereModels:
     total_density,
     transport_velocities
 
-using ..HydrostaticEquations: HydrostaticEquations, XMomentumDensity, YMomentumDensity, mass_flux_x, mass_flux_y
+using ..HydrostaticEquations: HydrostaticEquations, XMomentumDensity, YMomentumDensity, mass_flux_x, mass_flux_y,
+                              CoordinateMassFlux
 using ..PressureLevelDiscretization: PressureLevelGrid
 
 const AIVA = AdaptiveImplicitVerticalAdvection
@@ -97,13 +101,29 @@ const AIVA = AdaptiveImplicitVerticalAdvection
 @inline tracer_mass_flux_x(i, j, k, grid::PressureLevelGrid, ρ, ::Nothing, u, c) = zero(grid)
 
 # On a pressure-level grid the vertical transport is the mass flux of continuity through the
-# coordinate surfaces itself, ρw per unit area (`hydrostatic_transport_velocities`), so the vertical
-# tracer flux is Az ρw ĉ, without ℑz(ρ)
-@inline tracer_mass_flux_z(i, j, k, grid::PressureLevelGrid, ρ, args...) = _advective_tracer_flux_z(i, j, k, grid, args...)
+# coordinate surfaces, carried with the coordinate velocity in a `CoordinateMassFlux`: indexed, it is
+# the velocity w (what the explicit scale of adaptive implicit vertical advection, the Courant
+# numbers and the sedimentation read); the fluxes take its mass flux ρw per unit area, Az ρw ĉ,
+# without ℑz(ρ). The scale of the explicit part is that of the velocity.
+@inline explicit_mass_flux_scale(i, j, k, grid, advection, W) =
+    explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, advection, time_discretization(advection), W)
+@inline explicit_mass_flux_scale(i, j, k, grid, advection::FluxFormAdvection, W) =
+    explicit_mass_flux_scale(i, j, k, grid, advection.z, W)
 
-@inline function OceananigansAdvection.transport_z(i, j, k, grid::PressureLevelGrid, advection, ρ, ρw)
-    td = advection.time_discretization
-    return @inbounds Azᶜᶜᶠ(i, j, k, grid) * explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, advection, td, ρw) * ρw[i, j, k]
+@inline tracer_mass_flux_z(i, j, k, grid, ρ, ::Nothing, W::CoordinateMassFlux, c) = zero(grid)
+@inline tracer_mass_flux_z(i, j, k, grid, ρ, advection, W::CoordinateMassFlux, c) =
+    explicit_mass_flux_scale(i, j, k, grid, advection, W) *
+    _advective_tracer_flux_z(i, j, k, grid, explicit_scheme(advection), W.mass_flux, c)
+
+# The scheme with an explicit time discretization: the explicit part is scaled above
+@inline explicit_scheme(advection) = advection
+@inline explicit_scheme(advection::FluxFormAdvection) = FluxFormAdvection(advection.x, advection.y, explicit_scheme(advection.z))
+@inline explicit_scheme(advection::WENO{N, FT, WCT, <:AdaptiveVerticallyImplicitDiscretization}) where {N, FT, WCT} =
+    WENO{N, FT, WCT}(advection.bounds, advection.buffer_scheme, advection.advecting_velocity_scheme, ExplicitTimeDiscretization())
+
+@inline function OceananigansAdvection.transport_z(i, j, k, grid, advection, ρ, W::CoordinateMassFlux)
+    s = explicit_mass_flux_scale(i, j, k, grid, advection, W)
+    return @inbounds Azᶜᶜᶠ(i, j, k, grid) * s * W.mass_flux[i, j, k]
 end
 @inline tracer_mass_flux_y(i, j, k, grid::PressureLevelGrid, ρ, ::Nothing, v, c) = zero(grid)
 
@@ -209,11 +229,32 @@ end
     return ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Azᶜᶜᶠ(i, j, k, grid) * w̃ * ĉ
 end
 
-# On a pressure-level grid `w` is the mass flux ρw through the coordinate surfaces
-@inline function clamped_face_flux_z(i, j, k, grid::PressureLevelGrid, advection, ρ, ρw, c)
+# The bounded fluxes of Oceananigans' flux limiter (its antidiffusive fluxes are these less the upwind
+# fluxes, which take `transport_x/y/z`): on a pressure-level grid, the same mass fluxes times the
+# bounded face value, so that the antidiffusive flux of a uniform scalar vanishes
+@inline function OceananigansAdvection.bounded_face_flux_x(i, j, k, grid::PressureLevelGrid, advection::BoundsPreservingWENO, ρ, u, c)
+    ũ = @inbounds u[i, j, k]
+    ĉ = upwind_face_value_x(i, j, k, grid, advection, advection.bounds.upwind_face_values, advection.bounds.reconstruction_limiter, ũ, c)
+    return transport_x(i, j, k, grid, advection, ρ, u) * ĉ
+end
+
+@inline function OceananigansAdvection.bounded_face_flux_y(i, j, k, grid::PressureLevelGrid, advection::BoundsPreservingWENO, ρ, v, c)
+    ṽ = @inbounds v[i, j, k]
+    ĉ = upwind_face_value_y(i, j, k, grid, advection, advection.bounds.upwind_face_values, advection.bounds.reconstruction_limiter, ṽ, c)
+    return transport_y(i, j, k, grid, advection, ρ, v) * ĉ
+end
+
+@inline function OceananigansAdvection.bounded_face_flux_z(i, j, k, grid, advection::BoundsPreservingWENO, ρ, W::CoordinateMassFlux, c)
+    ρw̃ = @inbounds explicit_mass_flux_scale(i, j, k, grid, advection, W) * W.mass_flux[i, j, k]
+    ĉ = upwind_face_value_z(i, j, k, grid, advection, advection.bounds.upwind_face_values, advection.bounds.reconstruction_limiter, ρw̃, c)
+    return Azᶜᶜᶠ(i, j, k, grid) * ρw̃ * ĉ
+end
+
+# The bounded flux through a coordinate surface of a pressure-level grid: the mass flux, scaled to
+# its explicit part with the velocity, times the bounded face value
+@inline function clamped_face_flux_z(i, j, k, grid, advection, ρ, W::CoordinateMassFlux, c)
     b = advection.bounds
-    td = advection.time_discretization
-    ρw̃ = @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, advection, td, ρw) * ρw[i, j, k]
+    ρw̃ = @inbounds explicit_mass_flux_scale(i, j, k, grid, advection, W) * W.mass_flux[i, j, k]
     ĉ = bounded_face_value(advection, upwind_face_value_z(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ρw̃, c), z_donor(i, j, k, c, ρw̃))
     return Azᶜᶜᶠ(i, j, k, grid) * ρw̃ * ĉ
 end

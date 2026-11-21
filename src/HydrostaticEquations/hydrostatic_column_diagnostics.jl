@@ -355,12 +355,31 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The velocities that transport the scalars of `HydrostaticDynamics` on `grid`: `(u, v, w)`, or on a
-[`PressureLevelGrid`](@ref Breeze.PressureLevelDiscretization.PressureLevelGrid) `(u, v, ρw)` with the
-mass flux `ρw` through the coordinate surfaces per unit area, which the vertical fluxes of the
-pressure-level grid take in place of `ℑz(ρ) w`.
+[`PressureLevelGrid`](@ref Breeze.PressureLevelDiscretization.PressureLevelGrid) `(u, v, W)` with
+`W` a [`CoordinateMassFlux`](@ref): the velocity `w` through the coordinate surfaces with the mass
+flux `ρw` per unit area that the vertical fluxes of the pressure-level grid carry in place of `ℑz(ρ) w`.
 """
 coordinate_transport_velocities(grid, u, v, w, ρw) = (; u, v, w)
-coordinate_transport_velocities(grid::PressureLevelGrid, u, v, w, ρw) = (; u, v, w = ρw)
+coordinate_transport_velocities(grid::PressureLevelGrid, u, v, w, ρw) = (; u, v, w = CoordinateMassFlux(w, ρw))
+
+"""
+$(TYPEDEF)
+
+The vertical transport through the coordinate surfaces of a pressure-level grid: indexed, the
+velocity `w` through them, which Courant numbers and the explicit scale of adaptive implicit
+vertical advection read; its `mass_flux`, ρw per unit area from continuity, is what the vertical
+fluxes of the scalars carry (methods in Breeze.Advection), so that they are the mass flux exactly.
+"""
+struct CoordinateMassFlux{FT, W, M} <: AbstractArray{FT, 3}
+    velocity :: W   # w through the coordinate surfaces, m s⁻¹
+    mass_flux :: M  # ρw through them, per unit area, kg m⁻² s⁻¹
+
+    CoordinateMassFlux(w::W, ρw::M) where {W, M} = new{eltype(w), W, M}(w, ρw)
+end
+
+Base.size(W::CoordinateMassFlux) = size(W.velocity)
+Base.@propagate_inbounds Base.getindex(W::CoordinateMassFlux, i, j, k) = W.velocity[i, j, k]
+Adapt.adapt_structure(to, W::CoordinateMassFlux) = CoordinateMassFlux(Adapt.adapt(to, W.velocity), Adapt.adapt(to, W.mass_flux))
 
 AtmosphereModels.transport_velocities(model::HydrostaticModel) =
     coordinate_transport_velocities(model.grid, model.velocities.u, model.velocities.v, model.velocities.w,

@@ -15,7 +15,10 @@ using Breeze.PressureLevelDiscretization: PressureLevelVerticalDiscretization, P
                                           layer_pressure_thickness, interface_pressure, layer_mass,
                                           previous_layer_mass, scalar_layer_mass, layer_mass_tendency,
                                           scalar_density_from_layer_mass, store_previous_surface_pressure!
-using Breeze.HydrostaticEquations: layer_mass_flux_divergence
+using Breeze.HydrostaticEquations: layer_mass_flux_divergence, CoordinateMassFlux
+using Breeze.Advection: tracer_mass_flux_z
+using Oceananigans.Advection: transport_z
+using Oceananigans.Operators: Azᶜᶜᶠ
 using Breeze.AtmosphereModels: div_ρUc
 
 # Hybrid coefficients of Nz layers with a top at 200 Pa: pure pressure above η = 0.2, terrain following below
@@ -198,6 +201,18 @@ end
         # Positivity: with first-order upwind fluxes within the Courant limit, a forward Euler step
         # in M leaves every cell non-negative, exactly
         @test all(≥(0), M¹)
+
+        # The vertical transport of the pressure-level grid: indexed, the coordinate velocity;
+        # its fluxes, the mass flux Az ρw ĉ exactly (a uniform c = 1 is reconstructed exactly)
+        w = ZFaceField(grid); ρw = ZFaceField(grid); one_c = CenterField(grid)
+        set!(w, (x, y, z) -> 0.1 * sin(2π * x / 1e5)); set!(ρw, (x, y, z) -> 0.07 * sin(2π * x / 1e5)); set!(one_c, 1)
+        fill_halo_regions!((w, ρw, one_c))
+        W = CoordinateMassFlux(w, ρw)
+        for scheme in (Centered(FT; order = 2), UpwindBiased(FT; order = 1), WENO(FT; order = 5, weight_computation = Oceananigans.Utils.NormalDivision)), j in 1:3, i in 1:4, k in 2:Nz
+            @test W[i, j, k] == w[i, j, k]
+            @test tracer_mass_flux_z(i, j, k, grid, ρ, scheme, W, one_c) == Azᶜᶜᶠ(i, j, k, grid) * ρw[i, j, k]
+            @test transport_z(i, j, k, grid, scheme, ρ, W) == Azᶜᶜᶠ(i, j, k, grid) * ρw[i, j, k]
+        end
 
         # Every conversion is the identity on a grid that is not a pressure-level grid, so the
         # stages there are unchanged
