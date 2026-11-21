@@ -95,6 +95,7 @@ end
 
 # Mass of layer `k` per unit area, Δp / g, at cell centers
 @inline layer_mass_per_area(i, j, k, grid, ρ) = @inbounds ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+@inline layer_mass_per_area(i, j, k, grid::PressureLevelGrid, ρ) = layer_mass(i, j, k, grid)
 
 #####
 ##### Conductances

@@ -50,7 +50,8 @@ using Oceananigans.Advection: VectorInvariant, VectorInvariantKEGradientEnergyCo
                               horizontal_advection_U, horizontal_advection_V,
                               bernoulli_head_U, bernoulli_head_V,
                               div_𝐯u, div_𝐯v, U_dot_∇u_hydrostatic_metric, U_dot_∇v_hydrostatic_metric,
-                              _advective_momentum_flux_Wu, _advective_momentum_flux_Wv,
+                              _advective_momentum_flux_Uu, _advective_momentum_flux_Vu, _advective_momentum_flux_Wu,
+                              _advective_momentum_flux_Uv, _advective_momentum_flux_Vv, _advective_momentum_flux_Wv,
                               _biased_interpolate_zᵃᵃᶠ, bias, update_advection!, update_adaptive_timestep!,
                               update_bounds_preserving_limiter!, update_flux_limiter!,
                               FluxLimitedWENO, flux_limiter_timestep
@@ -64,7 +65,7 @@ using Oceananigans.Grids: Grids, AbstractGrid, AbstractVerticalCoordinate, Stati
                            topology, znodes, minimum_xspacing, minimum_yspacing
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.MultiRegion: MultiRegion
-using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, Δrᶜᶜᶜ, ℑxyᶠᶠᵃ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ, Az⁻¹ᶜᶜᶜ, Δxᶜᶠᶜ, Δyᶠᶜᶜ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ, V⁻¹ᶜᶜᶜ, Vᶜᶜᶜ, Vᶠᶜᶜ, Vᶜᶠᶜ,
+using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, Δrᶜᶜᶜ, ℑxyᶠᶠᵃ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶜ, Azᶜᶜᶠ, Az⁻¹ᶜᶜᶜ, Δxᶜᶠᶜ, Δyᶠᶜᶜ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ, V⁻¹ᶜᶜᶜ, Vᶜᶜᶜ, Vᶠᶜᶜ, Vᶜᶠᶜ,
                               δxᶜᵃᵃ, δxᶠᵃᵃ, δyᵃᶜᵃ, δyᵃᶠᵃ, δzᵃᵃᶜ, δzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ,
                               ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!

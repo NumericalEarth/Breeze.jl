@@ -156,11 +156,18 @@ end
 @inline x_mass_flux_δz_u(i, j, k, grid, ρw, u) = ℑxᶠᵃᵃ(i, j, k, grid, Az_qᶜᶜᶠ, ρw) * δzᵃᵃᶠ(i, j, k, grid, u)
 @inline y_mass_flux_δz_v(i, j, k, grid, ρw, v) = ℑyᵃᶠᵃ(i, j, k, grid, Az_qᶜᶜᶠ, ρw) * δzᵃᵃᶠ(i, j, k, grid, v)
 
+# Mass of the cell of u and of v. On a pressure-level grid it is the average of the cell masses
+# Az Δp / g, the mass whose change the averaged mass fluxes of continuity give exactly.
+@inline x_velocity_cell_mass(i, j, k, grid, ρ) = ℑxᶠᵃᵃ(i, j, k, grid, ρ) * Vᶠᶜᶜ(i, j, k, grid)
+@inline y_velocity_cell_mass(i, j, k, grid, ρ) = ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Vᶜᶠᶜ(i, j, k, grid)
+@inline x_velocity_cell_mass(i, j, k, grid::PressureLevelGrid, ρ) = x_face_mass(i, j, k, grid, ρ)
+@inline y_velocity_cell_mass(i, j, k, grid::PressureLevelGrid, ρ) = y_face_mass(i, j, k, grid, ρ)
+
 @inline vertical_advection_u(i, j, k, grid, scheme, ρ, ρw, u) =
-    ℑzᵃᵃᶜ(i, j, k, grid, x_mass_flux_δz_u, ρw, u) / (ℑxᶠᵃᵃ(i, j, k, grid, ρ) * Vᶠᶜᶜ(i, j, k, grid))
+    ℑzᵃᵃᶜ(i, j, k, grid, x_mass_flux_δz_u, ρw, u) / x_velocity_cell_mass(i, j, k, grid, ρ)
 
 @inline vertical_advection_v(i, j, k, grid, scheme, ρ, ρw, v) =
-    ℑzᵃᵃᶜ(i, j, k, grid, y_mass_flux_δz_v, ρw, v) / (ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Vᶜᶠᶜ(i, j, k, grid))
+    ℑzᵃᵃᶜ(i, j, k, grid, y_mass_flux_δz_v, ρw, v) / y_velocity_cell_mass(i, j, k, grid, ρ)
 
 # Vertical advection w ∂z u with an upwind-biased `scheme`: the divergence of the flux of the
 # velocity reconstructed on the z-faces of the velocity cell from the side the mass flux comes
@@ -172,13 +179,13 @@ end
 @inline function vertical_advection_u(i, j, k, grid, scheme::AbstractUpwindBiasedAdvectionScheme, ρ, ρw, u)
     δz_ρwu = δzᵃᵃᶜ(i, j, k, grid, _advective_momentum_flux_Wu, scheme, ρw, u)
     δz_ρw = δzᵃᵃᶜ(i, j, k, grid, x_vertical_mass_flux, ρw)
-    return @inbounds (δz_ρwu - u[i, j, k] * δz_ρw) / (ℑxᶠᵃᵃ(i, j, k, grid, ρ) * Vᶠᶜᶜ(i, j, k, grid))
+    return @inbounds (δz_ρwu - u[i, j, k] * δz_ρw) / x_velocity_cell_mass(i, j, k, grid, ρ)
 end
 
 @inline function vertical_advection_v(i, j, k, grid, scheme::AbstractUpwindBiasedAdvectionScheme, ρ, ρw, v)
     δz_ρwv = δzᵃᵃᶜ(i, j, k, grid, _advective_momentum_flux_Wv, scheme, ρw, v)
     δz_ρw = δzᵃᵃᶜ(i, j, k, grid, y_vertical_mass_flux, ρw)
-    return @inbounds (δz_ρwv - v[i, j, k] * δz_ρw) / (ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Vᶜᶠᶜ(i, j, k, grid))
+    return @inbounds (δz_ρwv - v[i, j, k] * δz_ρw) / y_velocity_cell_mass(i, j, k, grid, ρ)
 end
 
 # Vector-invariant advection (ζ ẑ × 𝐮 + ∇K + w ∂z 𝐮): the vorticity flux and the gradient of the
@@ -222,6 +229,28 @@ end
 Base.@propagate_inbounds Base.getindex(ρu::XMomentumDensity, i, j, k) = (ρu.ρ[i-1, j, k] + ρu.ρ[i, j, k]) / 2 * ρu.u[i, j, k]
 Base.@propagate_inbounds Base.getindex(ρv::YMomentumDensity, i, j, k) = (ρv.ρ[i, j-1, k] + ρv.ρ[i, j, k]) / 2 * ρv.v[i, j, k]
 
+# On a pressure-level grid the flux of the momentum density through a face is the mass flux of
+# continuity, written in the layer mass Δp / g, rather than Ax ℑx(ρ) u with Ax = Δy ℑx(Δp / (g ρ)):
+# the fluxes of the scalars and of momentum, and the surface pressure tendency, then share one mass flux
+@inline Operators.Ax_qᶠᶜᶜ(i, j, k, grid::PressureLevelGrid, ρu::XMomentumDensity) = mass_flux_x(i, j, k, grid, ρu.ρ, ρu.u)
+@inline Operators.Ay_qᶜᶠᶜ(i, j, k, grid::PressureLevelGrid, ρv::YMomentumDensity) = mass_flux_y(i, j, k, grid, ρv.ρ, ρv.v)
+
+# Divergence of the flux of momentum out of the cell of u and of v, in kg m s⁻² (the volume times
+# `div_𝐯u`). On a pressure-level grid the face fluxes are summed directly, without multiplying the
+# divergence per unit volume back by the volume.
+@inline x_momentum_flux_divergence(i, j, k, grid, advection, momentum, u) = Vᶠᶜᶜ(i, j, k, grid) * div_𝐯u(i, j, k, grid, advection, momentum, u)
+@inline y_momentum_flux_divergence(i, j, k, grid, advection, momentum, v) = Vᶜᶠᶜ(i, j, k, grid) * div_𝐯v(i, j, k, grid, advection, momentum, v)
+
+@inline x_momentum_flux_divergence(i, j, k, grid::PressureLevelGrid, advection, momentum, u) =
+    ( δxᶠᵃᵃ(i, j, k, grid, _advective_momentum_flux_Uu, advection, momentum[1], u)
+      + δyᵃᶜᵃ(i, j, k, grid, _advective_momentum_flux_Vu, advection, momentum[2], u)
+      + δzᵃᵃᶜ(i, j, k, grid, _advective_momentum_flux_Wu, advection, momentum[3], u))
+
+@inline y_momentum_flux_divergence(i, j, k, grid::PressureLevelGrid, advection, momentum, v) =
+    ( δxᶜᵃᵃ(i, j, k, grid, _advective_momentum_flux_Uv, advection, momentum[1], v)
+      + δyᵃᶠᵃ(i, j, k, grid, _advective_momentum_flux_Vv, advection, momentum[2], v)
+      + δzᵃᵃᶜ(i, j, k, grid, _advective_momentum_flux_Wv, advection, momentum[3], v))
+
 # Divergence of the mass fluxes through the faces of the cells of u and of v, in kg s⁻¹
 @inline x_mass_flux_divergence(i, j, k, grid, ρu, ρv, ρw) =
     ( δxᶠᵃᵃ(i, j, k, grid, ℑxᶜᵃᵃ, Ax_qᶠᶜᶜ, ρu)
@@ -239,7 +268,7 @@ Base.@propagate_inbounds Base.getindex(ρv::YMomentumDensity, i, j, k) = (ρv.ρ
     momentum = (ρu, ρv, ρw)
     velocities = (u, v)
 
-    δ_ρ𝐮u = Vᶠᶜᶜ(i, j, k, grid) * div_𝐯u(i, j, k, grid, advection, momentum, u)
+    δ_ρ𝐮u = x_momentum_flux_divergence(i, j, k, grid, advection, momentum, u)
     δ_ρ𝐮 = x_mass_flux_divergence(i, j, k, grid, ρu, ρv, ρw)
     metric = U_dot_∇u_hydrostatic_metric(i, j, k, grid, advection, momentum, velocities)
 
@@ -253,7 +282,7 @@ end
     momentum = (ρu, ρv, ρw)
     velocities = (u, v)
 
-    δ_ρ𝐮v = Vᶜᶠᶜ(i, j, k, grid) * div_𝐯v(i, j, k, grid, advection, momentum, v)
+    δ_ρ𝐮v = y_momentum_flux_divergence(i, j, k, grid, advection, momentum, v)
     δ_ρ𝐮 = y_mass_flux_divergence(i, j, k, grid, ρu, ρv, ρw)
     metric = U_dot_∇v_hydrostatic_metric(i, j, k, grid, advection, momentum, velocities)
 

@@ -4,6 +4,12 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ, Δzᶠᶜᶜ, Δzᶜᶠᶜ, Δz⁻¹ᶜᶜᶜ
 using Oceananigans.Grids: znode
 using Test
+using Breeze.HydrostaticEquations: mass_flux_x, mass_flux_y, cell_mass, XMomentumDensity, YMomentumDensity,
+                                   x_velocity_cell_mass, x_face_mass, layer_mass_per_area
+using Breeze.Advection: tracer_mass_flux_x, tracer_mass_flux_y
+using Oceananigans.Operators: Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Azᶜᶜᶜ
+using Oceananigans.Advection: transport_x, transport_y
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 using Breeze.PressureLevelDiscretization: PressureLevelVerticalDiscretization, PressureLevelGrid,
                                           layer_pressure_thickness, interface_pressure, layer_mass
@@ -104,6 +110,36 @@ end
         @test cpu_grid isa PressureLevelGrid
         for j in 1:3, i in 1:4, k in 1:Nz
             @test Δzᶜᶜᶜ(i, j, k, cpu_grid) == Δzᶜᶜᶜ(i, j, k, grid)
+        end
+    end
+
+    # Every flux of the dynamics through a horizontal face is the one mass flux of continuity,
+    # written in Δp / g (step 2.2). These are identities of the same floating-point expression.
+    @testset "Mass-consistent operators" begin
+        ρ = grid.z.density
+        u = XFaceField(grid); v = YFaceField(grid); c = CenterField(grid)
+        set!(u, (x, y, z) -> 3 + sin(2π * x / 1e5))
+        set!(v, (x, y, z) -> -2 + cos(2π * y / 1e5))
+        set!(c, 1)
+        fill_halo_regions!((u, v, c))
+        ρu = XMomentumDensity(ρ, u); ρv = YMomentumDensity(ρ, v)
+
+        for scheme in (Centered(order = 2), UpwindBiased(order = 1)), j in 1:3, i in 1:4, k in 1:Nz
+            Fx = mass_flux_x(i, j, k, grid, ρ, u)
+            Fy = mass_flux_y(i, j, k, grid, ρ, v)
+            @test Ax_qᶠᶜᶜ(i, j, k, grid, ρu) == Fx
+            @test Ay_qᶜᶠᶜ(i, j, k, grid, ρv) == Fy
+            @test transport_x(i, j, k, grid, scheme, ρ, u) == Fx
+            @test transport_y(i, j, k, grid, scheme, ρ, v) == Fy
+            # A uniform c = 1 is reconstructed exactly by these schemes
+            @test tracer_mass_flux_x(i, j, k, grid, ρ, scheme, u, c) == Fx
+            @test tracer_mass_flux_y(i, j, k, grid, ρ, scheme, v, c) == Fy
+        end
+
+        for j in 1:3, i in 1:4, k in 1:Nz
+            @test cell_mass(i, j, k, grid, ρ) == Azᶜᶜᶜ(i, j, k, grid) * layer_mass(i, j, k, grid)
+            @test layer_mass_per_area(i, j, k, grid, ρ) == layer_mass(i, j, k, grid)
+            @test x_velocity_cell_mass(i, j, k, grid, ρ) == x_face_mass(i, j, k, grid, ρ)
         end
     end
 

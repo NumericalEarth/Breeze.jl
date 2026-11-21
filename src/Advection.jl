@@ -14,6 +14,11 @@ using Oceananigans.Advection:
     _biased_interpolate_xᶠᵃᵃ,
     _biased_interpolate_yᵃᶠᵃ,
     _biased_interpolate_zᵃᵃᶠ,
+    _symmetric_interpolate_xᶠᵃᵃ,
+    _symmetric_interpolate_yᵃᶠᵃ,
+    AbstractCenteredAdvectionScheme,
+    FluxFormAdvection,
+    bias,
     BoundsPreservation,
     BoundsPreservingWENO,
     FunctionStencil,
@@ -32,7 +37,9 @@ using Oceananigans.Advection:
     upwind_face_flux_x,
     upwind_face_flux_y,
     upwind_face_flux_z,
-    face_factor
+    face_factor,
+    transport_x,
+    transport_y
 
 using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, CenterField
@@ -40,7 +47,7 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.Fields: Field, ZeroField
 using Oceananigans.Grids: Center, AbstractGrid, Flat
-using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ, Axᶠᶜᶜ, Ayᶜᶠᶜ
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_discretization
 using DocStringExtensions: TYPEDEF
@@ -55,7 +62,8 @@ using ..AtmosphereModels:
     total_density,
     transport_velocities
 
-using ..HydrostaticEquations: HydrostaticEquations, XMomentumDensity, YMomentumDensity
+using ..HydrostaticEquations: HydrostaticEquations, XMomentumDensity, YMomentumDensity, mass_flux_x, mass_flux_y
+using ..PressureLevelDiscretization: PressureLevelGrid
 
 const AIVA = AdaptiveImplicitVerticalAdvection
 
@@ -68,6 +76,30 @@ const AIVA = AdaptiveImplicitVerticalAdvection
 
 @inline tracer_mass_flux_z(i, j, k, grid, ρ, args...) =
     ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _advective_tracer_flux_z(i, j, k, grid, args...)
+
+# On a pressure-level grid the horizontal tracer fluxes are the mass fluxes of continuity, written in the
+# layer mass Δp / g, times the face value that `advection` reconstructs: ℑx(ρ) Ax, with
+# Ax = Δy ℑx(Δp / (g ρ)), differs from that mass flux at second order. (Oceananigans' upwind fluxes
+# multiply by Axᶠᶜᶜ directly, so the face value is reconstructed here rather than through a transport.)
+@inline x_face_value(i, j, k, grid, scheme::AbstractUpwindBiasedAdvectionScheme, u, c) =
+    @inbounds _biased_interpolate_xᶠᵃᵃ(i, j, k, grid, scheme, bias(u[i, j, k]), c)
+@inline y_face_value(i, j, k, grid, scheme::AbstractUpwindBiasedAdvectionScheme, v, c) =
+    @inbounds _biased_interpolate_yᵃᶠᵃ(i, j, k, grid, scheme, bias(v[i, j, k]), c)
+@inline x_face_value(i, j, k, grid, scheme::AbstractCenteredAdvectionScheme, u, c) = _symmetric_interpolate_xᶠᵃᵃ(i, j, k, grid, scheme, c)
+@inline y_face_value(i, j, k, grid, scheme::AbstractCenteredAdvectionScheme, v, c) = _symmetric_interpolate_yᵃᶠᵃ(i, j, k, grid, scheme, c)
+@inline x_face_value(i, j, k, grid, scheme::FluxFormAdvection, u, c) = x_face_value(i, j, k, grid, scheme.x, u, c)
+@inline y_face_value(i, j, k, grid, scheme::FluxFormAdvection, v, c) = y_face_value(i, j, k, grid, scheme.y, v, c)
+
+@inline tracer_mass_flux_x(i, j, k, grid::PressureLevelGrid, ρ, advection, u, c) =
+    mass_flux_x(i, j, k, grid, ρ, u) * x_face_value(i, j, k, grid, advection, u, c)
+@inline tracer_mass_flux_y(i, j, k, grid::PressureLevelGrid, ρ, advection, v, c) =
+    mass_flux_y(i, j, k, grid, ρ, v) * y_face_value(i, j, k, grid, advection, v, c)
+@inline tracer_mass_flux_x(i, j, k, grid::PressureLevelGrid, ρ, ::Nothing, u, c) = zero(grid)
+@inline tracer_mass_flux_y(i, j, k, grid::PressureLevelGrid, ρ, ::Nothing, v, c) = zero(grid)
+
+# The transport of the flux limiter of Oceananigans: the same mass fluxes
+@inline OceananigansAdvection.transport_x(i, j, k, grid::PressureLevelGrid, advection, ρ, u) = mass_flux_x(i, j, k, grid, ρ, u)
+@inline OceananigansAdvection.transport_y(i, j, k, grid::PressureLevelGrid, advection, ρ, v) = mass_flux_y(i, j, k, grid, ρ, v)
 
 # Main operator
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection, ρ, U, c)
@@ -136,14 +168,14 @@ end
     b = advection.bounds
     ũ = @inbounds u[i, j, k]
     ĉ = bounded_face_value(advection, upwind_face_value_x(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ũ, c), x_donor(i, j, k, c, ũ))
-    return ℑxᶠᵃᵃ(i, j, k, grid, ρ) * Axᶠᶜᶜ(i, j, k, grid) * ũ * ĉ
+    return transport_x(i, j, k, grid, advection, ρ, u) * ĉ
 end
 
 @inline function clamped_face_flux_y(i, j, k, grid, advection, ρ, v, c)
     b = advection.bounds
     ṽ = @inbounds v[i, j, k]
     ĉ = bounded_face_value(advection, upwind_face_value_y(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ṽ, c), y_donor(i, j, k, c, ṽ))
-    return ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Ayᶜᶠᶜ(i, j, k, grid) * ṽ * ĉ
+    return transport_y(i, j, k, grid, advection, ρ, v) * ĉ
 end
 
 @inline function clamped_face_flux_z(i, j, k, grid, advection, ρ, w, c)

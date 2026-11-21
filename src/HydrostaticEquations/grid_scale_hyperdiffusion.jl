@@ -121,6 +121,7 @@ const YBoundedGrid = AbstractGrid{<:Any, <:Any, Bounded}
 #####
 
 @inline cell_mass(i, j, k, grid, ρ) = @inbounds ρ[i, j, k] * Vᶜᶜᶜ(i, j, k, grid) # (Center, Center, Center)
+@inline cell_mass(i, j, k, grid::PressureLevelGrid, ρ) = Azᶜᶜᶜ(i, j, k, grid) * layer_mass(i, j, k, grid) # Az Δp / g, exactly
 @inline x_face_mass(i, j, k, grid, ρ) = ℑxᶠᵃᵃ(i, j, k, grid, cell_mass, ρ)       # (Face, Center, Center)
 @inline y_face_mass(i, j, k, grid, ρ) = ℑyᵃᶠᵃ(i, j, k, grid, cell_mass, ρ)       # (Center, Face, Center)
 @inline corner_mass(i, j, k, grid, ρ) = ℑyᵃᶠᵃ(i, j, k, grid, x_face_mass, ρ)     # (Face, Face, Center)
