@@ -359,6 +359,12 @@ The velocities that transport the scalars of `HydrostaticDynamics` on `grid`: `(
 `W` a [`CoordinateMassFlux`](@ref): the velocity `w` through the coordinate surfaces with the mass
 flux `ρw` per unit area that the vertical fluxes of the pressure-level grid carry in place of `ℑz(ρ) w`.
 """
+# The vertical fluxes of a pressure-level grid read the mass flux ρw, also in the halos (the fractions
+# of a flux limiter, the reconstructions): its halos are filled with those of w. Nothing on other
+# grids, whose fluxes read w.
+fill_coordinate_mass_flux_halos!(grid, ρw) = nothing
+fill_coordinate_mass_flux_halos!(grid::PressureLevelGrid, ρw) = fill_halo_regions!(ρw)
+
 coordinate_transport_velocities(grid, u, v, w, ρw) = (; u, v, w)
 coordinate_transport_velocities(grid::PressureLevelGrid, u, v, w, ρw) = (; u, v, w = CoordinateMassFlux(w, ρw))
 

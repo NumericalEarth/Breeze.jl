@@ -134,6 +134,7 @@ function compute_stage_transport_velocities!(substepper::GravityWaveSubstepper, 
                               ∫𝐮′.ρw, ∫𝐮′.w, grid, dynamics.surface_pressure_coefficient, ρ, ∫𝐮′.u, ∫𝐮′.v)
 
     fill_halo_regions!(∫𝐮′.w)
+    fill_coordinate_mass_flux_halos!(grid, ∫𝐮′.ρw)
 
     return nothing
 end
