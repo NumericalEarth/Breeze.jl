@@ -194,6 +194,13 @@ end
 @inline mass_flux_x(i, j, k, grid, ρ, u) = @inbounds ℑxᶠᵃᵃ(i, j, k, grid, ρ) * Axᶠᶜᶜ(i, j, k, grid) * u[i, j, k]
 @inline mass_flux_y(i, j, k, grid, ρ, v) = @inbounds ℑyᵃᶠᵃ(i, j, k, grid, ρ) * Ayᶜᶠᶜ(i, j, k, grid) * v[i, j, k]
 
+# On a pressure-level grid the mass flux is written in the layer mass Δp / g, so that the
+# telescoping and positivity identities hold exactly in Δp rather than up to the rounding of ρ Δz
+@inline mass_flux_x(i, j, k, grid::PressureLevelGrid, ρ, u) =
+    @inbounds ℑxᶠᵃᵃ(i, j, k, grid, layer_mass) * Δyᶠᶜᶜ(i, j, k, grid) * u[i, j, k]
+@inline mass_flux_y(i, j, k, grid::PressureLevelGrid, ρ, v) =
+    @inbounds ℑyᵃᶠᵃ(i, j, k, grid, layer_mass) * Δxᶜᶠᶜ(i, j, k, grid) * v[i, j, k]
+
 # Horizontal divergence of the mass flux out of layer `k`, per unit area, in kg m⁻² s⁻¹
 @inline horizontal_mass_flux_divergence(i, j, k, grid, ρ, u, v) =
     Az⁻¹ᶜᶜᶜ(i, j, k, grid) * (δxᶜᵃᵃ(i, j, k, grid, mass_flux_x, ρ, u) +

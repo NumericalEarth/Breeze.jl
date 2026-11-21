@@ -110,3 +110,16 @@ end
 @inline Grids._node(i, j, k, grid::PLG, ℓx, ℓy::Nothing, ℓz::Nothing) = tuple(Grids.ξnode(i, j, k, grid, ℓx, ℓy, ℓz))
 @inline Grids._node(i, j, k, grid::PLG, ℓx::Nothing, ℓy, ℓz::Nothing) = tuple(Grids.ηnode(i, j, k, grid, ℓx, ℓy, ℓz))
 @inline Grids._node(i, j, k, grid::PLG, ℓx::Nothing, ℓy::Nothing, ℓz::Nothing) = tuple()
+
+#####
+##### Layer mass
+#####
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Mass per unit area of layer `k` of column `(i, j)` of a [`PressureLevelGrid`](@ref), in kg m⁻²:
+`Δp / g`. The conservation kernels of the dynamics are written in this mass rather than in
+`ρ Δz`, which equals it only up to rounding.
+"""
+@inline layer_mass(i, j, k, grid::PLG) = layer_pressure_thickness(i, j, k, grid) / grid.z.gravitational_acceleration

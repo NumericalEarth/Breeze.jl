@@ -64,7 +64,7 @@ using Oceananigans.Grids: Grids, AbstractGrid, AbstractVerticalCoordinate, Stati
                            topology, znodes, minimum_xspacing, minimum_yspacing
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.MultiRegion: MultiRegion
-using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, Δrᶜᶜᶜ, ℑxyᶠᶠᵃ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ, Az⁻¹ᶜᶜᶜ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ, V⁻¹ᶜᶜᶜ, Vᶜᶜᶜ, Vᶠᶜᶜ, Vᶜᶠᶜ,
+using Oceananigans.Operators: Operators, Δzᶜᶜᶜ, Δrᶜᶜᶜ, ℑxyᶠᶠᵃ, Axᶠᶜᶜ, Ayᶜᶠᶜ, Azᶜᶜᶠ, Az⁻¹ᶜᶜᶜ, Δxᶜᶠᶜ, Δyᶠᶜᶜ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ, V⁻¹ᶜᶜᶜ, Vᶜᶜᶜ, Vᶠᶜᶜ, Vᶜᶠᶜ,
                               δxᶜᵃᵃ, δxᶠᵃᵃ, δyᵃᶜᵃ, δyᵃᶠᵃ, δzᵃᵃᶜ, δzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ,
                               ℑxᶜᵃᵃ, ℑxᶠᵃᵃ, ℑyᵃᶜᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.TimeSteppers: update_state!
@@ -77,6 +77,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
                                copy_parent!, kernel_time_step, specific_prognostic_scalar_fields, flux_divergence,
                                owned_integral, owned_integral_value, thermodynamic_density_name,
                                radiation_flux_divergence, uses_level_pressure
+using Breeze.PressureLevelDiscretization: PressureLevelGrid, layer_mass
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 using Breeze.Thermodynamics: Thermodynamics, dry_air_gas_constant, vapor_gas_constant, MoistureMassFractions,
                              mixture_gas_constant, mixture_heat_capacity, vapor_equivalent_heat_capacity,

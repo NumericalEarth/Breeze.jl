@@ -6,7 +6,7 @@ using Oceananigans.Grids: znode
 using Test
 
 using Breeze.PressureLevelDiscretization: PressureLevelVerticalDiscretization, PressureLevelGrid,
-                                          layer_pressure_thickness, interface_pressure
+                                          layer_pressure_thickness, interface_pressure, layer_mass
 
 # Hybrid coefficients of Nz layers with a top at 200 Pa: pure pressure above η = 0.2, terrain following below
 function hybrid_coefficients(Nz; top_pressure = 200.0, p₀ = 1e5)
@@ -38,6 +38,15 @@ end
 
     g = grid.z.gravitational_acceleration
     top = A[end]
+
+    @testset "layer mass Δp / g" begin
+        for j in 1:3, i in 1:4
+            @test all(layer_mass(i, j, k, grid) == layer_pressure_thickness(i, j, k, grid) / g for k in 1:Nz)
+            # g Σ Δp / g telescopes to pˢ - p_top up to the rounding of Nz additions
+            column_weight = g * sum(layer_mass(i, j, k, grid) for k in 1:Nz)
+            @test isapprox(column_weight, pˢ[i, j, 1] - top; rtol = 4Nz * eps(FT))
+        end
+    end
 
     @testset "Σ Δp = pˢ - p_top and Δp > 0" begin
         for j in 1:3, i in 1:4
