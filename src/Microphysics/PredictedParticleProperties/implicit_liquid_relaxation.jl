@@ -85,7 +85,8 @@ so the relaxation keeps its bounds.
 # `cloud_relaxation` and `rain_relaxation` are the relaxation coefficients that the coupled
 # explicit rates were built with (`coupled_saturation_adjustment_rates`), at the same state.
 @inline function implicit_liquid_vapor_rates(liquid_stage, liquid_rates, p3, ρ, ℳ, state, constants,
-                                             cloud_water_adjustment, cloud_relaxation, rain_relaxation, Γ)
+                                             cloud_water_adjustment, cloud_relaxation, rain_relaxation, Γ,
+                                             distribution = nothing)
     FT = typeof(ρ)
     parameters = p3.process_rates
     τ = parameters.sink_limiting_timescale
@@ -129,8 +130,13 @@ so the relaxation keeps its bounds.
     rain_cond = ifelse(tiny_rain, zero(FT), max(0, rain_rate))
     rain_evap = ifelse(tiny_rain, max(0, ℳ.qʳ) / τ, max(0, -rain_rate))
 
+    # With a subgrid distribution, activation acts in the part of the cell above its threshold,
+    # at the mean vapor excess there (`activation_vapor`)
+    activating = activation_vapor(distribution, qᵛ, qᵛ⁺ˡ, activation_relative_threshold(p3.aerosol, p3))
     activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
-                                                   qᵛ, qᵛ⁺ˡ, ξˡ, T, ρ)
+                                                   activating.qᵛ, qᵛ⁺ˡ, ξˡ, T, ρ)
+    activation = (; mass = activation.mass * activating.fraction,
+                    number = activation.number * activating.fraction)
 
     a = stage.active
     return (; cond = ifelse(a, cloud_rate, liquid_rates.cond),
