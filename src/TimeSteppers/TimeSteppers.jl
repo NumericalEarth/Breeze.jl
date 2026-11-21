@@ -31,6 +31,9 @@ using Oceananigans.Utils: @apply_regionally
 using Breeze.Utils: @regional
 using Breeze.AtmosphereModels: kernel_time_step, copy_parent!
 using Breeze.RoundingTreatments: RoundToNearest, materialize_rounding, rounded_add, rounding_key
+using Breeze.AtmosphereModels: prognostic_momentum_field_names, prognostic_dynamics_field_names
+using Breeze.PressureLevelDiscretization: PressureLevelGrid, scalar_layer_mass, layer_mass_tendency,
+                                          scalar_density_from_layer_mass, store_previous_surface_pressure!
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -62,6 +65,7 @@ model.clock.last_Δt
 prepare_first_time_step!(model, Δt) = maybe_prepare_first_time_step!(model, Δt, [])
 
 include("ssp_runge_kutta_3.jl")
+include("layer_mass_scalar_stages.jl")
 include("acoustic_substep_helpers.jl")
 include("acoustic_runge_kutta_3.jl")
 include("multirate_infinitesimal_step_coefficients.jl")

@@ -674,9 +674,16 @@ function compute_integrated_vertical_velocity!(substepper::GravityWaveSubstepper
     return nothing
 end
 
+# The transport tendency of a scalar in the units in which a time stepper advances it: `div_ρUc`,
+# per unit volume, on most grids, and the rate of change of the mass per unit area of the scalar,
+# exactly, on a pressure-level grid (methods in Breeze.Advection)
+function layer_mass_flux_divergence end
+
+# The increment is in the units of the stage: per unit volume, or the mass per unit area of a
+# pressure-level grid (see `PressureLevelDiscretization.scalar_layer_mass`)
 @kernel function _add_perturbation_transport!(δρc, grid, advection, ρᴸ, ∫𝐮′, cᴸ)
     i, j, k = @index(Global, NTuple)
-    @inbounds δρc[i, j, k] -= div_ρUc(i, j, k, grid, advection, ρᴸ, ∫𝐮′, cᴸ)
+    @inbounds δρc[i, j, k] -= layer_mass_flux_divergence(i, j, k, grid, advection, ρᴸ, ∫𝐮′, cᴸ)
 end
 
 """

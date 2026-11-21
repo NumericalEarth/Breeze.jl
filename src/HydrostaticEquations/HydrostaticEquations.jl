@@ -78,7 +78,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
                                copy_parent!, kernel_time_step, specific_prognostic_scalar_fields, flux_divergence,
                                owned_integral, owned_integral_value, thermodynamic_density_name,
                                radiation_flux_divergence, uses_level_pressure
-using Breeze.PressureLevelDiscretization: PressureLevelGrid, layer_mass
+using Breeze.PressureLevelDiscretization: PressureLevelGrid, layer_mass, scalar_layer_mass, scalar_density_from_layer_mass
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 using Breeze.Thermodynamics: Thermodynamics, dry_air_gas_constant, vapor_gas_constant, MoistureMassFractions,
                              mixture_gas_constant, mixture_heat_capacity, vapor_equivalent_heat_capacity,

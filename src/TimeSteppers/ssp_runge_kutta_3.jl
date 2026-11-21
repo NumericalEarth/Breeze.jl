@@ -155,9 +155,15 @@ function launch_ssp_rk3_substep!(model, Δt, α)
     thermodynamic_name = thermodynamic_density_name(model.formulation)
     rounding = model.timestepper.rounding
 
+    # The stage starts from the present surface pressure (on a pressure-level grid, see
+    # `layer_mass_scalar_stages.jl`; nothing otherwise)
+    store_previous_surface_pressure!(grid)
+    scalar_names = layer_mass_scalar_names(model)
+
     for (field_number, (name, u, u⁰, G)) in enumerate(zip(names, prognostic, U⁰, Gⁿ))
         key = rounding_key(rounding, model.clock.iteration, model.clock.stage, field_number)
-        launch_ssp_rk3_substep!(rounding, arch, grid, u, u⁰, G, kernel_Δt, α, key)
+        scalar = Val(name ∈ scalar_names)
+        launch_scalar_ssp_rk3_substep!(grid, scalar, rounding, arch, u, u⁰, G, kernel_Δt, α, key)
 
         # Dynamics-specific prognostics (the compressible dry density, the kinematic driver's
         # density) are advanced explicitly and have no diffusivity to apply; momentum and every
@@ -264,6 +270,10 @@ function store_initial_state!(model)
     for (u⁰, u) in zip(U⁰, prognostic_fields(model))
         copy_parent!(u⁰, u)
     end
+
+    # On a pressure-level grid the stages recombine the masses of the scalars per unit area
+    store_initial_layer_masses!(model.grid, U⁰, layer_mass_scalar_names(model))
+
     return nothing
 end
 

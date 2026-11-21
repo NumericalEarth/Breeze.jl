@@ -142,12 +142,14 @@ end
 ##### The stage of a scalar
 #####
 
+# In the units of the stage: per unit volume, or on a pressure-level grid the mass per unit area,
+# with `ρc⁰` and `N` already in those units and `ρc` converted here (identities on other grids)
 @kernel function _advance_scalar_with_stage_transport!(ρc⁺, grid, advection, ρ, 𝐮̂, r, ρc, ρc⁰, N, weight, Δtˢ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        G = N[i, j, k] - div_ρUc(i, j, k, grid, advection, ρ, 𝐮̂, r)
-        ρc⁺[i, j, k] = (1 - weight) * ρc⁰[i, j, k] + weight * ρc[i, j, k] + Δtˢ * G
+        G = N[i, j, k] - layer_mass_flux_divergence(i, j, k, grid, advection, ρ, 𝐮̂, r)
+        ρc⁺[i, j, k] = (1 - weight) * ρc⁰[i, j, k] + weight * scalar_layer_mass(i, j, k, grid, ρc) + Δtˢ * G
     end
 end
 
@@ -189,14 +191,33 @@ with `ρc⁰` its value at the start of the time step, `weight` ``w``, `N` its t
 transport, ``𝐮̂`` the velocities that [`compute_stage_transport_velocities!`](@ref) left in
 `substepper`, and ``r̂`` the reconstruction of its mixing ratio per unit dry mass by its advection
 scheme, whose limiters are refreshed for the forward Euler step of length `Δtᵉ` ``= Δtˢ / w`` that
-the stage holds. `model` must hold the state the stage started from, and `scratch` is overwritten.
+the stage holds. `model` must hold the state the stage started from. The new state is left in
+`scratch`, from which [`complete_scalar_stage_transport!`](@ref) sets `ρc` once the surface
+pressure of the stage is complete.
 """
 function advance_scalar_with_stage_transport!(ρc, ρc⁰, scratch, N, model::MoistHydrostaticModel,
                                               substepper::GravityWaveSubstepper, name, weight, Δtˢ, Δtᵉ)
-    grid = model.grid
-
     @apply_regionally launch_scalar_stage_transport!(scratch, ρc, ρc⁰, N, model, substepper, name, weight, Δtˢ, Δtᵉ)
-    @apply_regionally launch!(grid.architecture, grid, :xyz, _copy_interior!, ρc, scratch)
-
     return nothing
 end
+
+@kernel function _set_from_layer_mass!(ρc, grid, M)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρc[i, j, k] = scalar_density_from_layer_mass(i, j, k, grid, M[i, j, k])
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Set the prognostic scalar `ρc` from the state `scratch` that
+[`advance_scalar_with_stage_transport!`](@ref) left: a copy, or on a pressure-level grid the
+density of the mass per unit area at the surface pressure of the end of the stage.
+"""
+function complete_scalar_stage_transport!(ρc, scratch)
+    grid = ρc.grid
+    @apply_regionally launch_scalar_from_layer_mass!(grid, ρc, scratch)
+    return nothing
+end
+
+launch_scalar_from_layer_mass!(grid, ρc, scratch) = launch!(grid.architecture, grid, :xyz, _copy_interior!, ρc, scratch)
+launch_scalar_from_layer_mass!(grid::PressureLevelGrid, ρc, M) = launch!(grid.architecture, grid, :xyz, _set_from_layer_mass!, ρc, grid, M)

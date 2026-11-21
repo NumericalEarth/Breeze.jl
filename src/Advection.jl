@@ -47,7 +47,7 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.Fields: Field, ZeroField
 using Oceananigans.Grids: Center, AbstractGrid, Flat
-using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, Az⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Azᶜᶜᶠ
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_discretization
 using DocStringExtensions: TYPEDEF
@@ -101,17 +101,30 @@ const AIVA = AdaptiveImplicitVerticalAdvection
 @inline OceananigansAdvection.transport_x(i, j, k, grid::PressureLevelGrid, advection, ρ, u) = mass_flux_x(i, j, k, grid, ρ, u)
 @inline OceananigansAdvection.transport_y(i, j, k, grid::PressureLevelGrid, advection, ρ, v) = mass_flux_y(i, j, k, grid, ρ, v)
 
-# Main operator
-@inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection, ρ, U, c)
-    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (
-        δxᶜᵃᵃ(i, j, k, grid, tracer_mass_flux_x, ρ, advection, U.u, c) +
-        δyᵃᶜᵃ(i, j, k, grid, tracer_mass_flux_y, ρ, advection, U.v, c) +
-        δzᵃᵃᶜ(i, j, k, grid, tracer_mass_flux_z, ρ, advection, U.w, c))
-end
+# Main operator: the volume-weighted divergence of the face fluxes. Every method of `div_ρUc` is
+# V⁻¹ times the sum of the fluxes out of the cell, `ρUc_flux_divergence`, which a mass-weighted
+# stage of a pressure-level grid takes without V⁻¹ (`layer_mass_flux_divergence`).
+@inline ρUc_flux_divergence(i, j, k, grid, advection, ρ, U, c) =
+    (δxᶜᵃᵃ(i, j, k, grid, tracer_mass_flux_x, ρ, advection, U.u, c) +
+     δyᵃᶜᵃ(i, j, k, grid, tracer_mass_flux_y, ρ, advection, U.v, c) +
+     δzᵃᵃᶜ(i, j, k, grid, tracer_mass_flux_z, ρ, advection, U.w, c))
+
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, advection, ρ, U, c) =
+    V⁻¹ᶜᶜᶜ(i, j, k, grid) * ρUc_flux_divergence(i, j, k, grid, advection, ρ, U, c)
 
 # Fallback for nothing advection
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, ::Nothing, ρ, U, c) = zero(grid)
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, ::BoundsPreservingWENO, ρ, U, ::ZeroField) = zero(grid)
+@inline ρUc_flux_divergence(i, j, k, grid, ::Nothing, ρ, U, c) = zero(grid)
+@inline ρUc_flux_divergence(i, j, k, grid, ::BoundsPreservingWENO, ρ, U, ::ZeroField) = zero(grid)
+
+# The transport tendency of a scalar in the units in which a time stepper advances it: `div_ρUc`
+# per unit volume on most grids, and on a pressure-level grid the divergence of the same face
+# fluxes per unit area, (δx F + δy F + δz F) / Az: the rate of change of the scalar's mass per unit
+# area M = (Δp / g) c, exactly, without the rounding of Δz V⁻¹.
+@inline HydrostaticEquations.layer_mass_flux_divergence(i, j, k, grid, advection, ρ, U, c) = AtmosphereModels.div_ρUc(i, j, k, grid, advection, ρ, U, c)
+@inline HydrostaticEquations.layer_mass_flux_divergence(i, j, k, grid::PressureLevelGrid, advection, ρ, U, c) =
+    Az⁻¹ᶜᶜᶜ(i, j, k, grid) * ρUc_flux_divergence(i, j, k, grid, advection, ρ, U, c)
 
 # The upwind face values that the θ kernel of Oceananigans #6534 caches are written only on the
 # faces where the velocities it was refreshed with (those of the model) carry flow, in their
@@ -224,12 +237,15 @@ for (dir, F) in ((:x, :clamped_face_flux_x), (:y, :clamped_face_flux_y), (:z, :c
 end
 
 # Is this immersed-boundary safe without having to extend it in ImmersedBoundaries.jl? I think so... (velocity on immmersed boundaries is masked to 0)
-@inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c)
+@inline function ρUc_flux_divergence(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c)
     div_x = clamped_face_flux_x_divergence(i, j, k, grid, advection, ρ, U.u, c)
     div_y = clamped_face_flux_y_divergence(i, j, k, grid, advection, ρ, U.v, c)
     div_z = clamped_face_flux_z_divergence(i, j, k, grid, advection, ρ, U.w, c)
-    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
+    return div_x + div_y + div_z
 end
+
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c) =
+    V⁻¹ᶜᶜᶜ(i, j, k, grid) * ρUc_flux_divergence(i, j, k, grid, advection, ρ, U, c)
 
 # PROVISIONAL (hydrostatic convex-MIS work; to be superseded by the flux-corrected transport of the
 # CompressibleDynamics port): WENO with a flux limiter (Oceananigans PR 6534). Every face carries the
@@ -237,10 +253,13 @@ end
 # `update_flux_limiter!` afford, which must have been computed with the same `ρ`, `U` and `c` and
 # with the time step of the forward Euler update. The limited fluxes scale the vertical velocity to
 # its explicit part themselves; that path is not tested under adaptive implicit vertical advection.
+@inline flux_limited_flux_divergence(i, j, k, grid, advection, ρ, U, c) =
+    (convex_limited_face_flux_x_divergence(i, j, k, grid, advection, ρ, U.u, c) +
+     convex_limited_face_flux_y_divergence(i, j, k, grid, advection, ρ, U.v, c) +
+     convex_limited_face_flux_z_divergence(i, j, k, grid, advection, ρ, U.w, c))
+
 @inline flux_limited_div_ρUc(i, j, k, grid, advection, ρ, U, c) =
-    V⁻¹ᶜᶜᶜ(i, j, k, grid) * (convex_limited_face_flux_x_divergence(i, j, k, grid, advection, ρ, U.u, c) +
-                              convex_limited_face_flux_y_divergence(i, j, k, grid, advection, ρ, U.v, c) +
-                              convex_limited_face_flux_z_divergence(i, j, k, grid, advection, ρ, U.w, c))
+    V⁻¹ᶜᶜᶜ(i, j, k, grid) * flux_limited_flux_divergence(i, j, k, grid, advection, ρ, U, c)
 
 const FluxLimitedAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplicitDiscretization, <:FluxLimitedBounds}
 
@@ -252,6 +271,13 @@ const FluxLimitedAVIDWENO = WENO{<:Any, <:Any, <:Any, <:AdaptiveVerticallyImplic
 
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, advection::FluxLimitedAVIDWENO, ρ, U, c) =
     flux_limited_div_ρUc(i, j, k, grid, advection, ρ, U, c)
+
+@inline ρUc_flux_divergence(i, j, k, grid, ::FluxLimitedWENO, ρ, U, ::ZeroField) = zero(grid)
+@inline ρUc_flux_divergence(i, j, k, grid, ::FluxLimitedAVIDWENO, ρ, U, ::ZeroField) = zero(grid)
+@inline ρUc_flux_divergence(i, j, k, grid, advection::FluxLimitedWENO, ρ, U, c) =
+    flux_limited_flux_divergence(i, j, k, grid, advection, ρ, U, c)
+@inline ρUc_flux_divergence(i, j, k, grid, advection::FluxLimitedAVIDWENO, ρ, U, c) =
+    flux_limited_flux_divergence(i, j, k, grid, advection, ρ, U, c)
 
 # The horizontal part of `div_ρUc`, from the same face fluxes
 @inline AtmosphereModels.horizontal_div_ρUc(i, j, k, grid, advection, ρ, U, c) =
@@ -293,16 +319,20 @@ Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
 
 # Disambiguates against the `ZeroField` shortcut above.
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, ::BoundsPreservingAVIDWENO, ρ, U, ::ZeroField) = zero(grid)
+@inline ρUc_flux_divergence(i, j, k, grid, ::BoundsPreservingAVIDWENO, ρ, U, ::ZeroField) = zero(grid)
 
 # Without the s-scaled velocity the bounded path transported 1 + (1 - s) times: a full
 # explicit flux plus the implicit remainder (issue #913). Horizontal fluxes stay explicit.
-@inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingAVIDWENO, ρ, U, c)
+@inline function ρUc_flux_divergence(i, j, k, grid, advection::BoundsPreservingAVIDWENO, ρ, U, c)
     wᵉ = ExplicitVerticalVelocity(grid, advection, time_discretization(advection), U.w)
     div_x = clamped_face_flux_x_divergence(i, j, k, grid, advection, ρ, U.u, c)
     div_y = clamped_face_flux_y_divergence(i, j, k, grid, advection, ρ, U.v, c)
     div_z = clamped_face_flux_z_divergence(i, j, k, grid, advection, ρ, wᵉ, c)
-    return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (div_x + div_y + div_z)
+    return div_x + div_y + div_z
 end
+
+@inline AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingAVIDWENO, ρ, U, c) =
+    V⁻¹ᶜᶜᶜ(i, j, k, grid) * ρUc_flux_divergence(i, j, k, grid, advection, ρ, U, c)
 
 # The vertical velocity the bounded flux functions below transport with: the velocity itself
 # for an explicit scheme, its s-scaled explicit fraction under adaptive implicit vertical

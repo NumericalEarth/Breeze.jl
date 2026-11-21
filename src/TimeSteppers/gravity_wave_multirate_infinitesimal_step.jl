@@ -6,6 +6,7 @@ using Breeze.HydrostaticEquations: HydrostaticEquations, HydrostaticDynamics, Gr
                                    compute_integrated_vertical_velocity!, add_perturbation_transport!,
                                    gravity_wave_seam_budgets, correct_completed_stage!,
                                    compute_stage_transport_velocities!, advance_scalar_with_stage_transport!,
+                                   complete_scalar_stage_transport!,
                                    withhold_scalar_transport!
 
 #####
@@ -395,6 +396,10 @@ function store_slow_tendencies!(timestepper::GravityWaveMultirateInfinitesimalSt
     # ΔY₀ = 0, on which the linear operator vanishes
     i > 1 && subtract_fast_tendencies!(S, timestepper.substepper, model)
 
+    # On a pressure-level grid the scalars that the substeps do not advance take their tendencies
+    # in the units of the stages, the mass per unit area (see `layer_mass_scalar_stages.jl`)
+    convert_tendencies_to_layer_mass!(model.grid, S, keys(timestepper.substepper.specific_scalars))
+
     return nothing
 end
 
@@ -408,6 +413,9 @@ function initialize_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, i
     (; α, β, γ, d) = timestepper.tableau
     substepper = timestepper.substepper
     storage = timestepper.storage
+
+    # The stage starts from the present surface pressure (on a pressure-level grid; nothing otherwise)
+    store_previous_surface_pressure!(timestepper.U⁰.pˢ.grid)
 
     for name in gravity_wave_prognostic_names
         U′ = substepper.perturbations[name]
@@ -464,16 +472,44 @@ function complete_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, mod
 
     complete_scalar_stage!(timestepper.scalar_stages, timestepper, model, i, Δt)
 
+    # The surface pressure first: on a pressure-level grid the densities of the scalars are those
+    # of their masses at the surface pressure of the end of the stage
     for name in gravity_wave_prognostic_names
         copy_parent!(ΔYᵢ[name], substepper.perturbations[name])
-        set_sum!(prognostic[name], U⁰[name], ΔYᵢ[name])
+        set_gravity_wave_prognostic_sum!(Val(name), prognostic[name], U⁰[name], ΔYᵢ[name])
     end
+
+    set_completed_scalars!(timestepper.scalar_stages, timestepper, model, i)
 
     return nothing
 end
 
+set_gravity_wave_prognostic_sum!(name, u, U⁰, ΔY) = set_sum!(u, U⁰, ΔY)
+set_gravity_wave_prognostic_sum!(::Val{:ρθ}, ρθ, U⁰, ΔY) = set_substepped_scalar_sum!(ρθ, U⁰, ΔY)
+
+# The scalars that `complete_scalar_stage!` advanced, set once the surface pressure of the stage is
+# complete: from the increment of the stage, or from the state the convex stage left in the
+# storage of that increment
+function set_completed_scalars!(::RecombinedScalarStages, timestepper, model, i)
+    U⁰ = timestepper.U⁰
+    prognostic = prognostic_fields(model)
+    for name in keys(timestepper.substepper.specific_scalars)
+        set_scalar_sum!(prognostic[name], U⁰[name], stage_increment(timestepper, i)[name])
+    end
+    return nothing
+end
+
+function set_completed_scalars!(::ConvexScalarStages, timestepper, model, i)
+    prognostic = prognostic_fields(model)
+    for name in keys(timestepper.substepper.specific_scalars)
+        complete_scalar_stage_transport!(prognostic[name], stage_increment(timestepper, i)[name])
+    end
+    return nothing
+end
+
 # The increment ``Σ_j (α_{ij} + γ_{ij}) ΔY_j + Δt Σ_j β_{ij} G_j`` of the full tendencies, and the
-# transport of the specific value at the start of the step by the net velocity perturbation
+# transport of the specific value at the start of the step by the net velocity perturbation, in the
+# units of the stages; `set_completed_scalars!` sets the scalars from it.
 function complete_scalar_stage!(::RecombinedScalarStages, timestepper, model, i, Δt)
     (; α, β, γ) = timestepper.tableau
     substepper = timestepper.substepper
@@ -496,7 +532,6 @@ function complete_scalar_stage!(::RecombinedScalarStages, timestepper, model, i,
         end
 
         add_perturbation_transport!(δρc, substepper, model, name)
-        set_sum!(prognostic[name], U⁰[name], δρc)
     end
 
     return nothing
@@ -504,7 +539,8 @@ end
 
 # One transport by the mass flux of the stage, from the state the stage started from: see
 # `moist_stage_scalar_transport.jl`. The slow tendencies of the scalars hold everything but
-# their transport, and the storage of their increment is the scratch of the update.
+# their transport, and the storage of their increment holds the new state until
+# `set_completed_scalars!` sets the scalars from it.
 function complete_scalar_stage!(::ConvexScalarStages, timestepper, model, i, Δt)
     (; α, β, γ) = timestepper.tableau
     substepper = timestepper.substepper

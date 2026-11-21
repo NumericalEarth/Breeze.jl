@@ -123,3 +123,46 @@ Mass per unit area of layer `k` of column `(i, j)` of a [`PressureLevelGrid`](@r
 `ρ Δz`, which equals it only up to rounding.
 """
 @inline layer_mass(i, j, k, grid::PLG) = layer_pressure_thickness(i, j, k, grid) / grid.z.gravitational_acceleration
+
+# Layer mass at the surface pressure of the start of the stage
+@inline previous_layer_mass(i, j, k, grid::PLG) = previous_layer_pressure_thickness(i, j, k, grid) / grid.z.gravitational_acceleration
+
+#####
+##### Mass-weighted scalar stages
+#####
+#
+# A time stepper advances a prognostic scalar density ρc of a pressure-level grid through the mass
+# of the scalar in a cell per unit area, M = (Δp / g) c, which it recombines linearly. The three
+# conversions below are identities on every other grid, so that the stages there are unchanged:
+#
+#   - `scalar_layer_mass`: M of the state the stage starts from, (Δp⁻ / g) ρc / ρ, with Δp⁻ at
+#     the surface pressure of the start of the stage;
+#   - `layer_mass_tendency`: a tendency G per unit volume in M units, Δz⁻ G, with Δz⁻ the depth
+#     of the cell at the start of the stage, the one G was computed on. Δz⁻ G differs from the
+#     tendency Δp⁻ / (g ρ) G that a mass-weighted operator would give by the rounding of Δz⁻, a few
+#     eps; transport is converted exactly by `layer_mass_flux_divergence` (Advection);
+#   - `scalar_density_from_layer_mass`: ρc = ρ M / (Δp / g) at the current surface pressure.
+
+@inline scalar_layer_mass(i, j, k, grid, ρc) = @inbounds ρc[i, j, k]
+@inline scalar_layer_mass(i, j, k, grid::PLG, ρc) =
+    @inbounds previous_layer_mass(i, j, k, grid) * ρc[i, j, k] / grid.z.density[i, j, k]
+
+@inline layer_mass_tendency(i, j, k, grid, G) = G
+@inline layer_mass_tendency(i, j, k, grid::PLG, G) = previous_layer_depthᶜᶜᶜ(i, j, k, grid) * G
+
+@inline scalar_density_from_layer_mass(i, j, k, grid, M) = M
+@inline scalar_density_from_layer_mass(i, j, k, grid::PLG, M) =
+    @inbounds grid.z.density[i, j, k] * M / layer_mass(i, j, k, grid)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Store the surface pressure of `grid` as that of the start of a stage, `pˢ⁻ ← pˢ`, on a
+[`PressureLevelGrid`](@ref). Nothing on any other grid.
+"""
+store_previous_surface_pressure!(grid) = nothing
+
+function store_previous_surface_pressure!(grid::PLG)
+    copyto!(parent(grid.z.previous_surface_pressure), parent(grid.z.surface_pressure))
+    return nothing
+end
