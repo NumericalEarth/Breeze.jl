@@ -404,7 +404,7 @@ number ``τ² (S² + S²ᵐⁱⁿ)`` in the turbulent Richardson number of
 where the shear vanishes.
 
 `subgrid_distribution` is `nothing` by default. A [`DoubleGaussian`](@ref) adds the subgrid
-distribution of θˡ, qᵗ and w from the closure's ``ℓ``, ``e`` and ``Kᶜ``; with it the shear and
+distribution of θˡⁱ, qᵗ and w from the closure's ``ℓ``, ``e`` and ``Kᶜ``; with it the shear and
 buoyancy production of the TKE equation are the energy conversions of the fluxes the closure
 applies to the mean state, and the dissipated energy heats the air. `solver` solves the coupling of
 the static stability with the saturated fraction of the distribution.

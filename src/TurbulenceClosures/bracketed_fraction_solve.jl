@@ -95,11 +95,11 @@ end
 @inline local_moment_time_scale(ts::EddyTurnoverTimeScale, ℓ, u, N², 𝕊ᴰ) = 2 * ℓ / (ts.ℂᵠ * u)
 @inline local_moment_time_scale(ts::DissipationTimeScale, ℓ, u, N², 𝕊ᴰ) = 2 * ℓ / (ts.ℂᵠ * 𝕊ᴰ * u)
 
-# SHOC's saturation excess of the mean state at a level, s = qᵗ - qˢ (1 + β qᵗ) / (1 + β qˢ)
+# SHOC's saturation excess of the mean state at a level, s = qᵗ - qᵛ⁺ (1 + β qᵗ) / (1 + β qᵛ⁺)
 @inline function mean_saturation_excess(sat, thermodynamics, c, θ, qᵗ, p)
     Tˡ = plume_liquid_water_temperature(sat, thermodynamics, c, θ, qᵗ, p)
-    qˢ, β, _, _ = plume_saturation(sat, thermodynamics, c, Tˡ, qᵗ, p)
-    return qᵗ - qˢ * (1 + β * qᵗ) / (1 + β * qˢ)
+    qᵛ⁺, β, _, _ = plume_saturation(sat, thermodynamics, c, Tˡ, qᵗ, p)
+    return qᵗ - qᵛ⁺ * (1 + β * qᵗ) / (1 + β * qᵛ⁺)
 end
 
 @inline standard_normal_cdf(x) = (1 + erf(x / sqrt(convert(typeof(x), 2)))) / 2

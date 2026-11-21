@@ -44,7 +44,7 @@ using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocit
 """
 $(TYPEDEF)
 
-The time scale `τ` of the second moments (`θˡ′² = ℂᵛ₁ τ Kᶜ (∂z θˡ)²`, ...) and of the third-moment
+The time scale `τ` of the second moments (`θˡ′² = ℂᵛ₁ τ Kᶜ (∂z θˡⁱ)²`, ...) and of the third-moment
 diagnosis, at the faces, from the closure's mixing length `ℓ`, turbulent velocity `√e` and
 static stability `N²` there: the return-to-isotropy time scale of SHOC's
 `RichardsonStabilityFunctions` limited by stratification as SHOC's
@@ -104,7 +104,7 @@ end
 """
 $(TYPEDEF)
 
-The time scale `τ` of the second moments from the variance budget of a scalar `φ` (θˡ or qᵗ) in
+The time scale `τ` of the second moments from the variance budget of a scalar `φ` (θˡⁱ or qᵗ) in
 local equilibrium, production equal to dissipation, with a scalar-variance dissipation time
 tied to the dissipation time of the closure's TKE,
 
@@ -221,7 +221,7 @@ end
 """
 $(TYPEDEF)
 
-The subgrid distribution of θˡ, qᵗ and w of [`TKEBasedTurbulenceClosure`](@ref) (`subgrid_distribution`): the
+The subgrid distribution of θˡⁱ, qᵗ and w of [`TKEBasedTurbulenceClosure`](@ref) (`subgrid_distribution`): the
 components of `SimplifiedHigherOrderClosure` for the second moments, the third moment and its
 limiter, the assumed PDF and its saturation, evaluated on the mixing length, turbulent kinetic
 energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref).
@@ -247,7 +247,7 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT}
     clipping :: CP
     "SHOC's constants the components read (`ggr`, `basetemp`, `mintke`, …)"
     constants :: C
-    "Maximum flux correlation of w with θˡ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
+    "Maximum flux correlation of w with θˡⁱ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
     ℂʳ :: R
     "Vertical transport of θˡ′², qᵗ′² and θˡ′qᵗ′ ([`ScalarVarianceTransport`](@ref)), or `nothing` for the local diagnosis"
     variance_transport :: VT
@@ -273,7 +273,7 @@ than 0.06, with 4.58 no less than 0.01. Large-eddy simulations of cumulus have a
 5 in the cloud layer, where the saturated updrafts cover 0.5 to 5 % (harness
 `notes/cumulus-skewness.md`).
 
-`ℂʳ` is the maximum flux correlation: where the down-gradient variance ``a′²`` of ``a = θˡ`` or
+`ℂʳ` is the maximum flux correlation: where the down-gradient variance ``a′²`` of ``a = θˡⁱ`` or
 ``qᵗ`` is too small for the down-gradient flux, ``(w′a′)² > (ℂʳ)² w′² a′²``, the variance is raised
 smoothly to ``(w′a′)² / ((ℂʳ)² w′²)`` (see `bound_flux_correlation`), and ``θˡ′qᵗ′`` is scaled with
 the variances. It must satisfy ``0 < (ℂʳ)² < 1 - ℂᵍ₁`` (≈ 0.6 with ``ℂᵍ₁ = 0.4`` of
@@ -283,7 +283,7 @@ own diffusivity, ``0.1 τ e``, corresponds to ``(ℂʳ)² = 0.15``. The default,
 `time_scale` is [`StratificationLimitedMomentTimeScale`](@ref) (the default, SHOC's),
 [`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref). The latter two derive `τ` from
 the scalar-variance budget with the same `ℓ`, `√e` and `Ri` as `Kᶜ`, so that the squared
-correlation of `w` with θˡ and qᵗ is a function of `Ri` alone, bounded by a bound on `ℂᵠ`.
+correlation of `w` with θˡⁱ and qᵗ is a function of `Ri` alone, bounded by a bound on `ℂᵠ`.
 """
 function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              time_scale = DissipationTimeScale(FT; ℂᵠ = 1.3),
@@ -498,11 +498,11 @@ $(TYPEDEF)
 
 The `fraction` of [`SaturationWeightedStaticStability`](@ref) given by the closure's own
 [`DoubleGaussian`](@ref) distribution: the saturated fraction is the ratio of the subgrid condensate
-flux to the flux of the saturation excess `s = c_q qᵗ - c_θ θˡ` (linearized at the level),
+flux to the flux of the saturation excess `s = c_q qᵗ - c_θ θˡⁱ` (linearized at the level),
 
     aᴺ = w′qᶜ′ / w′s′,    w′s′ = -Kᶜ ∂z s̄,
 
-so that the static stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²ˢ`, with `N²ᶜ = (g / θ)(∂z θˡ + A_q ∂z qᵗ)` the
+so that the static stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²ˢ`, with `N²ᶜ = (g / θ)(∂z θˡⁱ + A_q ∂z qᵗ)` the
 stratification of the conserved variables and `N²ˢ = N²ᶜ + (g / θ) A_c ∂z s̄` the saturated one, is
 `N²ᶜ - Bˡ / Kᶜ`, `Bˡ = (g / θ) A_c w′qᶜ′`: minus the buoyancy flux of the distribution divided by
 `Kᶜ` (`Bˡ / Kᶜ` is left out where `Kᶜ` vanishes). It is evaluated in that form. For the
@@ -691,7 +691,7 @@ end
 
 # Raise θˡ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
 # small for the down-gradient fluxes (|correlation with w| > ℂʳ), and scale θˡ′qᵗ′ with them so that
-# the θˡ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
+# the θˡⁱ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
 # correlation) is often above 1 - ℂᵍ₁ = 0.6, where the components of the double-Gaussian PDF have no
 # width and its cloud fraction is all or nothing in each component (0, a, 1 - a or 1); the bound needs
 # 0 < (ℂʳ)² < 1 - ℂᵍ₁. SHOC's own diffusivity, 0.1 τ e, gives (ℂʳ)² = 0.15.
@@ -953,7 +953,7 @@ end
 solve_static_stability!(static_stability, buoyancy_flux, args...) = nothing
 solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args...) = cloud_buoyancy_stability!(buoyancy_flux, args...)
 
-# N²ᵇ = (g / θ)(∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces (`condensate_flux_stabilityᶜᶜᶠ`), then the
+# N²ᵇ = (g / θ)(∂z θˡⁱ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces (`condensate_flux_stabilityᶜᶜᶠ`), then the
 # mixing length and the diffusivities again from it
 @inline relax_stability(N², N²ᵇ, ::Nothing) = N²ᵇ
 @inline relax_stability(N², N²ᵇ, ω) = (1 - ω) * N² + ω * N²ᵇ
@@ -1016,12 +1016,12 @@ function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_f
     return nothing
 end
 
-# SHOC's linearization of the saturation excess at a level, s′ = c_q qᵗ′ - c_θ θˡ′, and A_c
+# SHOC's linearization of the saturation excess at a level, s′ = c_q qᵗ′ - c_θ θˡⁱ′, and A_c
 @inline function saturation_excess_coefficients(sat, thermodynamics, c, θ, qᵗ, p)
     Tˡ = plume_liquid_water_temperature(sat, thermodynamics, c, θ, qᵗ, p)
-    qˢ, β, cp_over_L, Π = plume_saturation(sat, thermodynamics, c, Tˡ, qᵗ, p)
-    opbq = 1 + β * qˢ
-    c_θ = ((1 + β * qᵗ) / (opbq * opbq)) * cp_over_L * β * qˢ * Π
+    qᵛ⁺, β, cp_over_L, Π = plume_saturation(sat, thermodynamics, c, Tˡ, qᵗ, p)
+    opbq = 1 + β * qᵛ⁺
+    c_θ = ((1 + β * qᵗ) / (opbq * opbq)) * cp_over_L * β * qᵛ⁺ * Π
     c_q = 1 / opbq
     _, A_c = buoyancy_flux_coefficients(sat, thermodynamics, c, p, θ, qᵗ, zero(θ))
     return c_q, c_θ, A_c

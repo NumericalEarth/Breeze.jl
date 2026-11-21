@@ -661,7 +661,7 @@ end
     condensing_fraction(tₑ * (cell_phase_relaxation_rate(i, j, k, grid, s) + cell_phase_relaxation_rate(i, j, k-1, grid, s)) / 2)
 
 # aʷ = w′qˡ′ / w′s′ at the center k: the condensate flux of the distribution there over the flux of the
-# saturation excess s = c_q qᵗ - c_θ θˡ formed from the face moments interpolated to the center, which
+# saturation excess s = c_q qᵗ - c_θ θˡⁱ formed from the face moments interpolated to the center, which
 # are those the distribution at the center was built from. A ratio of collocated quantities (the
 # distribution's own (qˡ₁ - qˡ₂) / (s₁ - s₂)), so the diffusivity cancels; kept in [0, 1].
 @inline function center_condensate_flux_fraction(i, j, k, m, cl, c_q, c_θ)

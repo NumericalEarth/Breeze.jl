@@ -16,7 +16,7 @@
 $(TYPEDEF)
 
 The Analytic Double Gaussian 1 of Larson et al. (2002) as E3SM `shoc.F90` computes it
-(`shoc_assumed_pdf`): two Gaussian plumes in vertical velocity, θˡ and qᵗ whose weights, means
+(`shoc_assumed_pdf`): two Gaussian plumes in vertical velocity, θˡⁱ and qᵗ whose weights, means
 and widths follow from the first three moments of vertical velocity and the second moments of
 the scalars, each condensing where it is saturated. The Fortran switches are kept: where the
 vertical velocity variance is below `w_tol²` or a scalar variance below its tolerance squared,
@@ -45,7 +45,7 @@ struct DoubleGaussianPDF{FT} <: AbstractSHOCComponent
     ℂᵍ₃ :: FT
     "Plume separation above which total water is fully skewed (literal `0.4`)"
     ℂᵍ₄ :: FT
-    "Standard deviation of θˡ below which it is uniform, K"
+    "Standard deviation of θˡⁱ below which it is uniform, K"
     thl_tol :: FT
     "Standard deviation of qᵗ below which it is uniform, kg kg⁻¹"
     rt_tol :: FT
@@ -99,7 +99,7 @@ equal-spread mixture
 so choosing `ℂᵍ(Sk)` is choosing a kurtosis–skewness relation. The realizability of the scalar
 components requires `r² < 1 - ℂᵍ(Sk)`. The
 scalar skewness follows (it is not imposed). SHOC's rule instead matches an imposed scalar
-skewness (zero for θˡ, a ramp of `ℂᵍ₂ Sk_w` for qᵗ), which for `|Sk_w| ≳ 1.25` asks for a negative
+skewness (zero for θˡⁱ, a ramp of `ℂᵍ₂ Sk_w` for qᵗ), which for `|Sk_w| ≳ 1.25` asks for a negative
 variance in the narrow component, clipped to zero: a component of no width, whose cloud is all
 or nothing. The equal share needs `r² ≤ 1 - ℂᵍ`; beyond it the within-component variance is zero
 (the flux-correlation bound `ℂʳ` of [`DoubleGaussian`](@ref) keeps `r` below it). The
@@ -114,7 +114,7 @@ struct EqualWidthDoubleGaussianPDF{FT} <: AbstractSHOCComponent
     ℂᵍˢ :: FT
     "Curvature of the within-component fraction in the skewness of w (in the sigmoid's argument)"
     ℂᵍˢˢ :: FT
-    "Standard deviation of θˡ below which it is uniform, K"
+    "Standard deviation of θˡⁱ below which it is uniform, K"
     thl_tol :: FT
     "Standard deviation of qᵗ below which it is uniform, kg kg⁻¹"
     rt_tol :: FT
@@ -485,11 +485,11 @@ end
     Π = plume_exner_function(thermodynamics, qw, pval)
     T = Π * thl
     Rᵐ = mixture_gas_constant(MoistureMassFractions(qw), constants)
-    qˢ = saturation_specific_humidity(T, pval / (Rᵐ * T), constants, PlanarLiquidSurface())
+    qᵛ⁺ˡ = saturation_specific_humidity(T, pval / (Rᵐ * T), constants, PlanarLiquidSurface())
     _, log_slope = condensate_latent_heat_and_log_slope(WarmPhaseEquilibrium(), constants, T)
-    ∂qˢ∂θ = qˢ * log_slope * Π
-    σ = zero_safe_sqrt(max(0, vq + ∂qˢ∂θ * ∂qˢ∂θ * vθ - 2 * ∂qˢ∂θ * r * σθ * σq))
-    return qw - qˢ, σ
+    ∂qᵛ⁺ˡ∂θ = qᵛ⁺ˡ * log_slope * Π
+    σ = zero_safe_sqrt(max(0, vq + ∂qᵛ⁺ˡ∂θ * ∂qᵛ⁺ˡ∂θ * vθ - 2 * ∂qᵛ⁺ˡ∂θ * r * σθ * σq))
+    return qw - qᵛ⁺ˡ, σ
 end
 
 # A PDF without a component form here supplies no spread: the microphysics' grid-mean rate
