@@ -302,6 +302,10 @@ using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulatio
 include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")
 using .TerrainFollowingDiscretization
 
+# PressureLevelDiscretization: the hybrid sigma-pressure vertical coordinate of HydrostaticDynamics.
+# Not exported until NumericalEarth and Breeze are reconciled (D408); use it qualified.
+include("PressureLevelDiscretization/PressureLevelDiscretization.jl")
+
 # Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
