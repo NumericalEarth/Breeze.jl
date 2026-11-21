@@ -624,3 +624,71 @@ end
         @test all(isfinite, column(model.tracers.ρe))
     end
 end
+
+@testset "VarianceStabilityFunctions: θˡⁱ′² = 𝕊ᵛ₁ ℓ² (∂z θˡⁱ)², qᵗ′² = 𝕊ᵛ₂ ℓ² (∂z qᵗ)², θˡⁱ′qᵗ′ = ρᵛ √(𝕊ᵛ₁ 𝕊ᵛ₂) ℓ² ∂z θˡⁱ ∂z qᵗ" begin
+    moments(model) = (m = model.closure_fields.subgrid_cloud.moments; Array.(interior.((m.θˡ′², m.qᵗ′², m.θˡ′qᵗ′, m.w′θˡ′, m.w′qᵗ′, m.τ))))
+    sf = TurbulentRichardsonStabilityFunction()
+
+    @test DoubleGaussian().variance_stability_functions === nothing
+    @test DoubleGaussian(Float32; variance_stability_functions = VarianceStabilityFunctions()).variance_stability_functions.ℂᵛ₁⁰ isa Float32
+    @test_throws ArgumentError VarianceStabilityFunctions(; ℂᵛ₁⁺ = 0)
+    @test_throws ArgumentError VarianceStabilityFunctions(; ℂᵛ₃ᵐ = 1.1)
+    @test_throws ArgumentError TKEBasedTurbulenceClosure(; stability_functions = RationalStabilityFunction(),
+        subgrid_distribution = DoubleGaussian(; variance_stability_functions = VarianceStabilityFunctions()))
+    @test_throws ArgumentError VarianceStabilityFunctions(sf, DissipationTimeScale(), DowngradientSecondMoments(; ℂᵛ₃ = 2))
+
+    # The defaults are those that reproduce the default distribution
+    d = DoubleGaussian()
+    vs = VarianceStabilityFunctions(sf, d.time_scale, d.second_moments)
+    @test all(name -> getfield(vs, name) ≈ getfield(VarianceStabilityFunctions(), name), fieldnames(VarianceStabilityFunctions))
+
+    # The coefficients are those of the closure, calibratable
+    closure = TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian(; variance_stability_functions = vs))
+    names = (:ℂᵛ₁⁻, :ℂᵛ₁⁰, :ℂᵛ₁⁺, :ℂᵛ₂⁻, :ℂᵛ₂⁰, :ℂᵛ₂⁺, :ℂᵛ₃⁻, :ℂᵛ₃ᵐ, :ℂᵛ₃⁺)
+    @test all(name -> name ∈ keys(closure_parameters(closure)), names)
+    @test with_parameters(closure; ℂᵛ₂⁺ = 0.7).subgrid_distribution.variance_stability_functions.ℂᵛ₂⁺ == 0.7
+
+    # Reproduce the down-gradient diagnosis ℂᵛ τ Kᶜ ∂z a ∂z b to rounding, alone, with the flux-correlation
+    # bound and with the transport of the variances
+    sm = DowngradientSecondMoments(; ℂᵛ₁ = 1.5, ℂᵛ₂ = 0.7, ℂᵛ₃ = 0.8)
+    for time_scale in (DissipationTimeScale(; ℂᵠ = 1.3), EddyTurnoverTimeScale(; ℂᵠ = 1)),
+        options in ((;), (; ℂʳ = 0.5), (; variance_transport = ScalarVarianceTransport()))
+        reference = tke_p3_column(DoubleGaussian(; time_scale, second_moments = sm, options...))
+        reproduced = tke_p3_column(DoubleGaussian(; time_scale, second_moments = sm, options...,
+                                                  variance_stability_functions = VarianceStabilityFunctions(sf, time_scale, sm)))
+        update_state!(reference)
+        update_state!(reproduced)
+        for (a, b) in zip(moments(reference), moments(reproduced))
+            @test isapprox(a, b; rtol = 1e-12, atol = 1e-30)
+        end
+        @test column(reference.closure_fields.subgrid_cloud.cloud.aᶜ) ≈ column(reproduced.closure_fields.subgrid_cloud.cloud.aᶜ) rtol=1e-10
+    end
+
+    # Realizability: |θˡⁱ′qᵗ′| ≤ √(θˡⁱ′² qᵗ′²) for any coefficients within their intervals, and the correlation follows ρᵛ
+    for (ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺) in ((1, 1, 1), (-1, -1, -1), (0.9, -1, 0.3), (-0.5, 1, 1), (0, 0, 0))
+        vs = VarianceStabilityFunctions(; ℂᵛ₁⁺ = 2, ℂᵛ₂⁻ = 0.1, ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺)
+        model = tke_p3_column(DoubleGaussian(; variance_stability_functions = vs))
+        update_state!(model)
+        θ, q, θq = moments(model)
+        @test minimum(θ) ≥ 0 && minimum(q) ≥ 0
+        @test all(θq .^ 2 .≤ θ .* q .* (1 + 1e-12) .+ 1e-30)
+        for _ in 1:3
+            time_step!(model, 10)
+        end
+        @test all(isfinite, column(model.tracers.ρe))
+    end
+    for v in range(-1, 1, length = 41)
+        _, _, ρᵛ = Breeze.TurbulenceClosures.variance_stability_functions(VarianceStabilityFunctions(; ℂᵛ₃⁻ = -1, ℂᵛ₃ᵐ = 1, ℂᵛ₃⁺ = -1), v)
+        @test -1 ≤ ρᵛ ≤ 1
+    end
+
+    # Larger stable variance: larger variances where the column is stratified, the fluxes unchanged
+    base = tke_p3_column(DoubleGaussian(; variance_stability_functions = VarianceStabilityFunctions()))
+    larger = tke_p3_column(DoubleGaussian(; variance_stability_functions = VarianceStabilityFunctions(; ℂᵛ₁⁺ = 1.2, ℂᵛ₂⁺ = 1.2)))
+    update_state!(base)
+    update_state!(larger)
+    θ₀, _, _, wθ₀ = moments(base)
+    θ₁, _, _, wθ₁ = moments(larger)
+    @test all(θ₁ .≥ θ₀ .* (1 - 1e-12)) && any(θ₁ .> θ₀ .* 1.01)
+    @test wθ₁ == wθ₀
+end

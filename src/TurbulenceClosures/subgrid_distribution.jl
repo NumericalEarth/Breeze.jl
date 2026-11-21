@@ -228,7 +228,7 @@ energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT}
+struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT, VS}
     "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
@@ -251,6 +251,8 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT}
     ℂʳ :: R
     "Vertical transport of θˡ′², qᵗ′² and θˡ′qᵗ′ ([`ScalarVarianceTransport`](@ref)), or `nothing` for the local diagnosis"
     variance_transport :: VT
+    "Stability functions of the local scalar variances and covariance ([`VarianceStabilityFunctions`](@ref)), or `nothing` for `ℂᵛ τ Kᶜ ∂z a ∂z b`"
+    variance_stability_functions :: VS
 end
 
 Adapt.@adapt_structure DoubleGaussian
@@ -284,6 +286,11 @@ own diffusivity, ``0.1 τ e``, corresponds to ``(ℂʳ)² = 0.15``. The default,
 [`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref). The latter two derive `τ` from
 the scalar-variance budget with the same `ℓ`, `√e` and `Ri` as `Kᶜ`, so that the squared
 correlation of `w` with θˡ and qᵗ is a function of `Ri` alone, bounded by a bound on `ℂᵠ`.
+
+`variance_stability_functions` is `nothing` (the default), for the local diagnosis
+``ℂᵛ τ Kᶜ ∂_z a ∂_z b``, whose stability function is ``(2ℂᵛ/ℂᵠ) 𝕊ᶜ/𝕊ᴰ`` with
+[`DissipationTimeScale`](@ref), or [`VarianceStabilityFunctions`](@ref), which give θˡⁱ′², qᵗ′² and
+θˡⁱ′qᵗ′ stability functions of their own, ``𝕊ᵛ₁ ℓ² (∂_z θˡⁱ)²``, …; the fluxes are unchanged.
 """
 function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              time_scale = DissipationTimeScale(FT; ℂᵠ = 1.3),
@@ -296,12 +303,15 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              clipping = SmoothClipping(),
                              constants = SHOCConstants(FT),
                              ℂʳ = nothing,
-                             variance_transport = nothing)
+                             variance_transport = nothing,
+                             variance_stability_functions = nothing)
     validate_distribution_saturation(saturation)
     ℂʳ = isnothing(ℂʳ) ? nothing : convert(FT, ℂʳ)
     variance_transport = convert_component(FT, variance_transport)
+    variance_stability_functions = convert_component(FT, variance_stability_functions)
     return DoubleGaussian(time_scale, second_moments, third_moment, stratification_number_bound,
-                               skewness, assumed_pdf, saturation, clipping, constants, ℂʳ, variance_transport)
+                               skewness, assumed_pdf, saturation, clipping, constants, ℂʳ, variance_transport,
+                               variance_stability_functions)
 end
 
 # The distribution of this closure saturates with the thermodynamics of the model that holds it.
@@ -316,7 +326,8 @@ validate_distribution_saturation(::FixedConstantsLiquidSaturation) =
 convert_eltype(::Type{FT}, d::DoubleGaussian) where FT =
     DoubleGaussian(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
-                         d.assumed_pdf, d.saturation, d.clipping, d.constants, d.ℂʳ, d.variance_transport))...)
+                         d.assumed_pdf, d.saturation, d.clipping, d.constants, d.ℂʳ, d.variance_transport,
+                         d.variance_stability_functions))...)
 
 convert_component(FT, ::Nothing) = nothing
 convert_component(FT, c) = convert_eltype(FT, c)
@@ -786,9 +797,14 @@ end
             τ = moment_time_scaleᶜᶜᶠ(i, j, k, grid, d.time_scale, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ, ℓ, u)
             τ = ifelse(isfinite(τ), τ, zero(FT))
 
+            Δθ = θ[i, j, k] - θ[i, j, k-1]
+            Δq = qᵗ[i, j, k] - qᵗ[i, j, k-1]
             θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′, _, _, _ =
-                interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / Δz, θ[i, j, k] - θ[i, j, k-1], qᵗ[i, j, k] - qᵗ[i, j, k-1],
-                                         zero(FT), zero(FT), zero(FT))
+                interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / Δz, Δθ, Δq, zero(FT), zero(FT), zero(FT))
+
+            # With variance stability functions, the local variances and covariance of their own
+            θˡ′², qᵗ′², θˡ′qᵗ′ = local_scalar_second_moments(d.variance_stability_functions, i, j, k, grid, closure, velocities,
+                                                             closure_fields, e, Δθ, Δq, Δz, θˡ′², qᵗ′², θˡ′qᵗ′)
 
             # The flux of θˡⁱ that the turbulence carries includes the heating budget flux (zero without one)
             w′θˡ′ += applied_heating_flux(cl, i, j, k)

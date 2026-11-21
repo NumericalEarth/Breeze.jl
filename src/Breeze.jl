@@ -262,7 +262,7 @@ export
     UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
     ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness, DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation, HardClipping, SmoothClipping, BulkRichardsonBoundaryLayerDepth, SHOCConstants,
     closure_parameters, with_parameters,
-    DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, SinglePass, DampedFixedPoint, BracketedFractionSolve, StratificationLimitedMomentTimeScale, SecantIteration, BisectionIteration, LaggedStability, DissipationTimeScale, EddyTurnoverTimeScale,
+    DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, SinglePass, DampedFixedPoint, BracketedFractionSolve, StratificationLimitedMomentTimeScale, SecantIteration, BisectionIteration, LaggedStability, DissipationTimeScale, EddyTurnoverTimeScale, VarianceStabilityFunctions,
     LagrangianParticles, ParticleBoundaryConditions, ReflectingBoundary, AbsorbingBoundary,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
