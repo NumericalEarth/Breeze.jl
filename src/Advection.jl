@@ -39,10 +39,7 @@ using Oceananigans.Advection:
     upwind_face_flux_z,
     face_factor,
     transport_x,
-    transport_y,
-    bounded_face_flux_x,
-    bounded_face_flux_y,
-    bounded_face_flux_z
+    transport_y
 
 using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, CenterField
@@ -244,7 +241,7 @@ end
     return transport_y(i, j, k, grid, advection, ρ, v) * ĉ
 end
 
-@inline function OceananigansAdvection.bounded_face_flux_z(i, j, k, grid, advection::BoundsPreservingWENO, ρ, W::CoordinateMassFlux, c)
+@inline function OceananigansAdvection.bounded_face_flux_z(i, j, k, grid::PressureLevelGrid, advection::BoundsPreservingWENO, ρ, W::CoordinateMassFlux, c)
     ρw̃ = @inbounds explicit_mass_flux_scale(i, j, k, grid, advection, W) * W.mass_flux[i, j, k]
     ĉ = upwind_face_value_z(i, j, k, grid, advection, advection.bounds.upwind_face_values, advection.bounds.reconstruction_limiter, ρw̃, c)
     return Azᶜᶜᶠ(i, j, k, grid) * ρw̃ * ĉ
