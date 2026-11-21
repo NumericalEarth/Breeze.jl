@@ -163,17 +163,17 @@ end
     τ = ifelse(isfinite(τ), τ, zero(FT))
 
     # The second moments at the face
-    θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′, _, _, _ =
+    θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′, _, _, _ =
         interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / input.Δz, input.Δθ, input.Δq,
                                  zero(FT), zero(FT), zero(FT))
-    θˡ′², qᵗ′², θˡ′qᵗ′ = bound_flux_correlation(d.ℂʳ, input.w′²ᶠ, θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
+    θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′ = bound_flux_correlation(d.ℂʳ, input.w′²ᶠ, θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′)
 
     @inbounds begin
         # The second moments of the trial at face k and the stored ones of the faces below and above;
         # w′³ of each center is the stored one (it is diagnosed at the centers from the moments of the
         # distribution's own evaluation and held fixed across the trials of the face)
-        trial = (θˡ′², w′θˡ′, θˡ′qᵗ′, w′qᵗ′, qᵗ′²)
-        stored(n) = @inbounds (m.θˡ′²[i, j, n], m.w′θˡ′[i, j, n], m.θˡ′qᵗ′[i, j, n], m.w′qᵗ′[i, j, n], m.qᵗ′²[i, j, n])
+        trial = (θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)
+        stored(n) = @inbounds (m.θˡⁱ′²[i, j, n], m.w′θˡⁱ′[i, j, n], m.θˡⁱ′qᵗ′[i, j, n], m.w′qᵗ′[i, j, n], m.qᵗ′²[i, j, n])
 
         # The assumed PDF at the center below (face k is its upper face) and above (its lower face)
         Bˡ⁻, C⁻ = center_liquid_buoyancy(i, j, k-1, grid, d, cp, c, cl, w, θ, qᵗ, p, thermodynamics, stored(k-1), trial)

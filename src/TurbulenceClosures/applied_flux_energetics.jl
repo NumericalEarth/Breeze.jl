@@ -668,10 +668,10 @@ end
     FT = typeof(c_q)
     @inbounds begin
         w′qᵗ′ = (m.w′qᵗ′[i, j, k] + m.w′qᵗ′[i, j, k+1]) / 2
-        w′θˡ′ = (m.w′θˡ′[i, j, k] + m.w′θˡ′[i, j, k+1]) / 2
+        w′θˡⁱ′ = (m.w′θˡⁱ′[i, j, k] + m.w′θˡⁱ′[i, j, k+1]) / 2
         w′qˡ′ = cl.w′qˡ′[i, j, k]
     end
-    w′s′ = c_q * w′qᵗ′ - c_θ * w′θˡ′
+    w′s′ = c_q * w′qᵗ′ - c_θ * w′θˡⁱ′
     resolved = abs(w′s′) > sqrt(floatmin(FT))
     return clamp(ifelse(resolved, w′qˡ′ / ifelse(resolved, w′s′, one(FT)), zero(FT)), zero(FT), one(FT))
 end

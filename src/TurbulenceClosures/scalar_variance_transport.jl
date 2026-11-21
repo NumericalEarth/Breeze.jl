@@ -1,5 +1,5 @@
 #####
-##### The scalar second moments θˡ′², qᵗ′² and θˡ′qᵗ′ from their steady budget with vertical transport
+##### The scalar second moments θˡⁱ′², qᵗ′² and θˡⁱ′qᵗ′ from their steady budget with vertical transport
 #####
 ##### The local diagnosis of the distribution, X = ℂᵛ τ Kᶜ ∂z a ∂z b, is the steady budget without transport,
 ##### X / τᵈ = 2 ℂᵛ Kᶜ ∂z a ∂z b with the dissipation time τᵈ = τ / 2 (`DissipationTimeScale`: τ = 2 τᵠ). With
@@ -12,9 +12,9 @@
 ##### third moment w′a′b′, or zero.
 #####
 ##### The matrix has a positive diagonal, non-positive off-diagonals and is strictly diagonally dominant
-##### by rows: it is an M-matrix, its inverse G is non-negative, so θˡ′² and qᵗ′² are non-negative where
-##### their productions are (T = 0). The local moments have correlation ±1 (θˡ′qᵗ′² = θˡ′² qᵗ′²); with
-##### G ≥ 0, Cauchy–Schwarz on the sums Σₖ Gⱼₖ sₖ ∂θₖ ∂qₖ gives (θˡ′qᵗ′)² ≤ θˡ′² qᵗ′² after the solve,
+##### by rows: it is an M-matrix, its inverse G is non-negative, so θˡⁱ′² and qᵗ′² are non-negative where
+##### their productions are (T = 0). The local moments have correlation ±1 (θˡⁱ′qᵗ′² = θˡⁱ′² qᵗ′²); with
+##### G ≥ 0, Cauchy–Schwarz on the sums Σₖ Gⱼₖ sₖ ∂θₖ ∂qₖ gives (θˡⁱ′qᵗ′)² ≤ θˡⁱ′² qᵗ′² after the solve,
 ##### with the correlation below 1 where gradients of different ratio mix. With T ≠ 0 neither holds by
 ##### construction.
 #####
@@ -22,7 +22,7 @@
 """
 $(TYPEDEF)
 
-The vertical transport of the scalar second moments `θˡ′²`, `qᵗ′²` and `θˡ′qᵗ′` of a
+The vertical transport of the scalar second moments `θˡⁱ′²`, `qᵗ′²` and `θˡⁱ′qᵗ′` of a
 [`DoubleGaussian`](@ref) (`variance_transport`). At each interior face the moments solve the
 steady budget
 
@@ -64,7 +64,7 @@ convert_eltype(::Type{FT}, t::ScalarVarianceTransport) where FT = ScalarVariance
 scalar_variance_transport_fields(grid, ::Nothing) = NamedTuple()
 scalar_variance_transport_fields(grid, ::ScalarVarianceTransport) = (variance_transport_work = ZFaceField(grid),)
 
-# The third moments w′θˡ′², w′qᵗ′², w′θˡ′qᵗ′ at the center k
+# The third moments w′θˡⁱ′², w′qᵗ′², w′θˡⁱ′qᵗ′ at the center k
 @inline component_scalar_third_moments(::Val{false}, d, m, cl, i, j, k) = (zero(eltype(cl.w′²)), zero(eltype(cl.w′²)), zero(eltype(cl.w′²)))
 
 @inline function component_scalar_third_moments(::Val{true}, d, m, cl, i, j, k)
@@ -74,7 +74,7 @@ scalar_variance_transport_fields(grid, ::ScalarVarianceTransport) = (variance_tr
         Sk = w′³ / (w′² * sqrt(w′²))
         w′²ᵇ = (1 - within_component_share(d.assumed_pdf, Sk)) * w′²
         r = w′³ / (w′²ᵇ * w′²ᵇ)
-        w′θ = (m.w′θˡ′[i, j, k] + m.w′θˡ′[i, j, k+1]) / 2
+        w′θ = (m.w′θˡⁱ′[i, j, k] + m.w′θˡⁱ′[i, j, k+1]) / 2
         w′q = (m.w′qᵗ′[i, j, k] + m.w′qᵗ′[i, j, k+1]) / 2
     end
     return r * w′θ * w′θ, r * w′q * w′q, r * w′θ * w′q
@@ -91,10 +91,10 @@ end
         zᶜ = znode(i, j, k, grid, ccc...)
         zˡ = znode(i, j, k, grid, ccf...)
         zᵘ = znode(i, j, k+1, grid, ccf...)
-        w′θˡ′ᶜ = linear_interp(zᵘ, zˡ, m.w′θˡ′[i, j, k+1], m.w′θˡ′[i, j, k], zᶜ)
-        lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡ′²[i, j, k], m.w′θˡ′[i, j, k])
-        upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡ′²[i, j, k+1], m.w′θˡ′[i, j, k+1])
-        cl.w′³[i, j, k] = center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡ′ᶜ, lower, upper)
+        w′θˡⁱ′ᶜ = linear_interp(zᵘ, zˡ, m.w′θˡⁱ′[i, j, k+1], m.w′θˡⁱ′[i, j, k], zᶜ)
+        lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k])
+        upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡⁱ′²[i, j, k+1], m.w′θˡⁱ′[i, j, k+1])
+        cl.w′³[i, j, k] = center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡⁱ′ᶜ, lower, upper)
     end
     return nothing
 end
@@ -130,23 +130,23 @@ end
             lower = -r * a⁻
             upper = -r * a
             pivot = 1 + r * (a + a⁻) - lower * c′
-            dθ = (m.θˡ′²[i, j, k] - r * (Tθ - Tθ⁻) - lower * dθ) / pivot
+            dθ = (m.θˡⁱ′²[i, j, k] - r * (Tθ - Tθ⁻) - lower * dθ) / pivot
             dq = (m.qᵗ′²[i, j, k] - r * (Tq - Tq⁻) - lower * dq) / pivot
-            dθq = (m.θˡ′qᵗ′[i, j, k] - r * (Tθq - Tθq⁻) - lower * dθq) / pivot
+            dθq = (m.θˡⁱ′qᵗ′[i, j, k] - r * (Tθq - Tθq⁻) - lower * dθq) / pivot
             c′ = upper / pivot
             work[i, j, k] = c′
-            m.θˡ′²[i, j, k] = dθ
+            m.θˡⁱ′²[i, j, k] = dθ
             m.qᵗ′²[i, j, k] = dq
-            m.θˡ′qᵗ′[i, j, k] = dθq
+            m.θˡⁱ′qᵗ′[i, j, k] = dθq
             a⁻ = a
             Tθ⁻ = Tθ
             Tq⁻ = Tq
             Tθq⁻ = Tθq
         end
         for k in Nz-1:-1:2
-            m.θˡ′²[i, j, k] -= work[i, j, k] * m.θˡ′²[i, j, k+1]
+            m.θˡⁱ′²[i, j, k] -= work[i, j, k] * m.θˡⁱ′²[i, j, k+1]
             m.qᵗ′²[i, j, k] -= work[i, j, k] * m.qᵗ′²[i, j, k+1]
-            m.θˡ′qᵗ′[i, j, k] -= work[i, j, k] * m.θˡ′qᵗ′[i, j, k+1]
+            m.θˡⁱ′qᵗ′[i, j, k] -= work[i, j, k] * m.θˡⁱ′qᵗ′[i, j, k+1]
         end
     end
     return nothing
