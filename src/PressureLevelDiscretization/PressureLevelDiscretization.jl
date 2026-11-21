@@ -37,7 +37,8 @@ using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using Oceananigans: Oceananigans, Center, Face
 using Oceananigans.Architectures: CPU, on_architecture
 using Oceananigans.Grids: Grids, AbstractVerticalCoordinate, AbstractUnderlyingGrid, Bounded, new_data
-using Oceananigans.Operators: Operators, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ
+using Oceananigans.Operators: Operators
+using OffsetArrays: OffsetArray
 
 include("pressure_level_vertical_discretization.jl")
 include("pressure_level_metrics.jl")

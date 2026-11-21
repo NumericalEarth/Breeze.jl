@@ -165,7 +165,7 @@ function launch_scalar_stage_transport!(ρc⁺, ρc, ρc⁰, N, model, substeppe
     advection = model.advection[name]
     ρ = model.dynamics.density
     ∫𝐮′ = substepper.integrated_velocities
-    𝐮̂ = (u = ∫𝐮′.u, v = ∫𝐮′.v, w = ∫𝐮′.w)
+    𝐮̂ = coordinate_transport_velocities(grid, ∫𝐮′.u, ∫𝐮′.v, ∫𝐮′.w, ∫𝐮′.ρw)
     r = DryMassMixingRatio(ρc, ρ)
 
     # The limiters of the scheme, for the forward Euler step of the stage

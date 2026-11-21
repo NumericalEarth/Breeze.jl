@@ -250,7 +250,7 @@ end
             Δπ = layer_pressure_thickness(i, j, k, A, B, πˢ)
             Δp = Δπ + g * Δz * ρqᵗ
             Πᵏ = (p⁻ * Πᶠ⁻ - p⁺ * Πᶠ⁺) / ((1 + κ) * Δp)
-            ρᵏ = Δπ / (g * Δz)
+            ρᵏ = coordinate_layer_density(i, j, k, grid, ρ, Δπ, g)
 
             ρ[i, j, k] = ρᵏ
             ρᵗ[i, j, k] = ρᵏ + ρqᵗ
@@ -504,6 +504,8 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydr
     @apply_regionally launch!(arch, grid, :xy, _compute_geopotential!,
                               dynamics.geopotential, grid, dynamics.surface_geopotential,
                               θᵨ, dynamics.exner_function, dynamics.interface_exner_function, cᵖᵈ)
+
+    rediagnose_layer_density!(grid, model, θᵨ, (moisture.total_density,))
 
     @apply_regionally launch!(arch, grid, :xy, _compute_vertical_mass_flux!,
                               dynamics.vertical_mass_flux, w, grid,

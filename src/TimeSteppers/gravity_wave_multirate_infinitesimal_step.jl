@@ -397,7 +397,9 @@ function store_slow_tendencies!(timestepper::GravityWaveMultirateInfinitesimalSt
     i > 1 && subtract_fast_tendencies!(S, timestepper.substepper, model)
 
     # On a pressure-level grid the scalars that the substeps do not advance take their tendencies
-    # in the units of the stages, the mass per unit area (see `layer_mass_scalar_stages.jl`)
+    # in the units of the stages, the mass per unit area (see `layer_mass_scalar_stages.jl`), at the
+    # depth of the start of this stage: pˢ⁻ ← pˢ first (`initialize_stage!` repeats it)
+    store_previous_surface_pressure!(model.grid)
     convert_tendencies_to_layer_mass!(model.grid, S, keys(timestepper.substepper.specific_scalars))
 
     return nothing

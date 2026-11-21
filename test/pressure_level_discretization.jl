@@ -226,3 +226,89 @@ end
                                                    topology = (Periodic, Periodic, Bounded))
     end
 end
+
+# A HydrostaticDynamics model on the pressure-level grid (step 2.4): the dynamics works on the arrays
+# of the grid, the scalars are transported by the mass fluxes of continuity, and the density of the
+# grid is diagnosed from the hydrostatic integral
+@testset "HydrostaticDynamics on a PressureLevelGrid" begin
+    FT = Float64
+    Nz = 8
+    A, B = hybrid_coefficients(Nz)
+    grid = RectilinearGrid(CPU(), FT; size = (6, 5, Nz), halo = (3, 3, 3), x = (0, 6e5), y = (0, 5e5),
+                           z = PressureLevelVerticalDiscretization(A, B), topology = (Periodic, Periodic, Bounded))
+
+    dry_model(timestepper; kw...) = AtmosphereModel(grid; dynamics = HydrostaticDynamics(surface_pressure = 1e5),
+                                                    momentum_advection = Oceananigans.Advection.VectorInvariant(),
+                                                    tracers = :c, timestepper, kw...)
+
+    for (timestepper, kw) in ((:SSPRungeKutta3, (;)),
+                              (:GravityWaveMultirateInfinitesimalStep,
+                               (; timestepper_kwargs = (; tableau = :MIS3C, inner_solver = Breeze.HydrostaticEquations.VerletSubsteps()))))
+        model = dry_model(timestepper; kw...)
+        dynamics = model.dynamics
+
+        @test parent(dynamics.surface_pressure) === parent(grid.z.surface_pressure)
+        @test parent(dynamics.density) === parent(grid.z.density)
+        @test [interior(dynamics.surface_pressure_coefficient)[1, 1, k] for k in 1:Nz+1] == [grid.z.surface_pressure_coefficient[k] for k in 1:Nz+1]
+
+        set!(model; θ = (x, y, z) -> 290 + 10 * sin(2π * x / 6e5), u = (x, y, z) -> 10 * cos(2π * x / 6e5),
+             v = (x, y, z) -> 5 * sin(2π * y / 5e5))
+        # Tracers are set as densities: a uniform specific value c = 1
+        set!(model; c = Field(1 * dynamics.density))
+
+        # ρ = Δp / (g Δz) with the depth of the geopotential, Δz = cᵖᵈ θ ΔΠᶠ / g, to the rounding of the quotients
+        constants = model.thermodynamic_constants
+        cᵖᵈ = constants.dry_air.heat_capacity; g = constants.gravitational_acceleration
+        θ = model.formulation.potential_temperature; Πᶠ = dynamics.interface_exner_function
+        density_rounding = 8eps(FT)
+        @test all(isapprox(dynamics.density[i, j, k],
+                           layer_pressure_thickness(i, j, k, grid) / (cᵖᵈ * θ[i, j, k] * (Πᶠ[i, j, k] - Πᶠ[i, j, k+1]));
+                           rtol = density_rounding) for i in 1:6, j in 1:5, k in 1:Nz)
+
+        mass(model) = sum(layer_mass(i, j, k, grid) for i in 1:6, j in 1:5, k in 1:Nz)
+        tracer_mass(model) = sum(layer_mass(i, j, k, grid) * model.tracers.c[i, j, k] / dynamics.density[i, j, k]
+                                 for i in 1:6, j in 1:5, k in 1:Nz)
+        M⁰ = mass(model); C⁰ = tracer_mass(model)
+
+        for _ in 1:3
+            time_step!(model, 60)
+        end
+
+        @test maximum(abs, interior(dynamics.surface_pressure) .- 1e5) > 0   # the columns have moved
+        # The air and the tracer are conserved on the doubly periodic domain, to the rounding of
+        # the sums and of the steps (a few eps per stage of each of the Nx Ny Nz cells)
+        budget_tolerance = 16 * Nz * eps(FT)
+        @test isapprox(mass(model), M⁰; rtol = budget_tolerance)
+        @test isapprox(tracer_mass(model), C⁰; rtol = budget_tolerance)
+
+        # A uniform specific value stays uniform: c = M / (Δp / g) to the rounding of the stages
+        uniform_tolerance = 1e3 * eps(FT)
+        c = [model.tracers.c[i, j, k] / dynamics.density[i, j, k] for i in 1:6, j in 1:5, k in 1:Nz]
+        # OPEN (step 2.5): the gravity-wave multirate step leaves c uniform only to ~1e-6 on the
+        # pressure-level grid (exact on the label grid), while the air and tracer budgets close
+        if timestepper === :SSPRungeKutta3
+            @test maximum(abs, c .- 1) < uniform_tolerance
+        else
+            @test_broken maximum(abs, c .- 1) < uniform_tolerance
+        end
+    end
+end
+
+# Moist HydrostaticDynamics with warm-rain one-moment microphysics builds and steps on the grid
+@testset "Moist HydrostaticDynamics on a PressureLevelGrid" begin
+    include(joinpath(@__DIR__, "hydrostatic_moist_utils.jl"))
+    Nz = 8
+    A, B = hybrid_coefficients(Nz)
+    grid = RectilinearGrid(CPU(), Float64; size = (6, 5, Nz), halo = (3, 3, 3), x = (0, 6e5), y = (0, 5e5),
+                           z = PressureLevelVerticalDiscretization(A, B), topology = (Periodic, Periodic, Bounded))
+    model = AtmosphereModel(grid; dynamics = HydrostaticDynamics(surface_pressure = 1e5), microphysics = warm_rain_microphysics(),
+                            formulation = moist_formulation(), momentum_advection = Oceananigans.Advection.VectorInvariant())
+    @test parent(model.dynamics.density) === parent(grid.z.density)
+    set!(model; θ = 300, u = (x, y, z) -> 10 * cos(2π * x / 6e5), qᵗ = 0.005)
+    for _ in 1:3
+        time_step!(model, 60)
+    end
+    @test model.clock.iteration == 3
+    @test all(isfinite, interior(model.dynamics.surface_pressure))
+    @test all(>(0), interior(model.dynamics.density))
+end

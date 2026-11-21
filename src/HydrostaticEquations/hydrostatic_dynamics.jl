@@ -217,6 +217,27 @@ end
 
 hybrid_coefficients(grid, A, B, top_pressure) = collect(A), collect(B)
 
+# A pressure-level grid holds the hybrid coefficients, the surface pressure and the density: the
+# dynamics takes its coefficients and works on its arrays, so that the metrics of the grid are
+# those of the state
+grid_hybrid_coefficients(grid, dynamics) =
+    hybrid_coefficients(grid, dynamics.pressure_coefficient, dynamics.surface_pressure_coefficient, dynamics.top_pressure)
+
+function grid_hybrid_coefficients(grid::PressureLevelGrid, dynamics)
+    isnothing(dynamics.pressure_coefficient) ||
+        throw(ArgumentError("HydrostaticDynamics on a PressureLevelGrid takes its hybrid coefficients from the grid: " *
+                            "do not give pressure_coefficient and surface_pressure_coefficient."))
+    Nz = size(grid, 3)
+    z = on_architecture(CPU(), grid.z)
+    return [z.pressure_coefficient[k] for k in 1:Nz+1], [z.surface_pressure_coefficient[k] for k in 1:Nz+1]
+end
+
+coordinate_surface_pressure(grid) = Field{Center, Center, Nothing}(grid)
+coordinate_surface_pressure(grid::PressureLevelGrid) = Field{Center, Center, Nothing}(grid; data = grid.z.surface_pressure)
+
+coordinate_density(grid) = CenterField(grid)
+coordinate_density(grid::PressureLevelGrid) = CenterField(grid; data = grid.z.density)
+
 function validate_hybrid_coefficients(grid, A, B, standard_pressure)
     Nz = size(grid, 3)
 
@@ -268,8 +289,7 @@ function AtmosphereModels.materialize_dynamics(dynamics::HydrostaticDynamics, gr
 
     FT = eltype(grid)
 
-    A, B = hybrid_coefficients(grid, dynamics.pressure_coefficient,
-                               dynamics.surface_pressure_coefficient, dynamics.top_pressure)
+    A, B = grid_hybrid_coefficients(grid, dynamics)
     standard_pressure = convert(FT, dynamics.standard_pressure)
     validate_hybrid_coefficients(grid, A, B, standard_pressure)
     top_pressure = convert(FT, A[end])
@@ -277,15 +297,16 @@ function AtmosphereModels.materialize_dynamics(dynamics::HydrostaticDynamics, gr
     pressure_coefficient = z_face_column_field(grid, A)
     surface_pressure_coefficient = z_face_column_field(grid, B)
 
-    surface_pressure = Field{Center, Center, Nothing}(grid)
+    surface_pressure = coordinate_surface_pressure(grid)
     set!(surface_pressure, dynamics.surface_pressure)
     fill_halo_regions!(surface_pressure)
+    store_previous_surface_pressure!(grid)
 
     surface_geopotential = Field{Center, Center, Nothing}(grid)
     set!(surface_geopotential, dynamics.surface_geopotential)
     fill_halo_regions!(surface_geopotential)
 
-    density = CenterField(grid)
+    density = coordinate_density(grid)
     pressure = CenterField(grid)
     exner_function = CenterField(grid)
     interface_exner_function = ZFaceField(grid)

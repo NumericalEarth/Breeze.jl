@@ -148,7 +148,7 @@ end
             Δp = layer_pressure_thickness(i, j, k, A, B, pˢ)
             Πᵏ = (p⁻ * Πᶠ⁻ - p⁺ * Πᶠ⁺) / ((1 + κ) * Δp)
 
-            ρ[i, j, k] = Δp / (g * Δzᶜᶜᶜ(i, j, k, grid))
+            ρ[i, j, k] = coordinate_layer_density(i, j, k, grid, ρ, Δp, g)
             Π[i, j, k] = Πᵏ
             p[i, j, k] = pˢᵗ * Πᵏ^(1 / κ)
             Πᶠ[i, j, k+1] = Πᶠ⁺
@@ -270,6 +270,8 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Hydrostat
                               dynamics.geopotential, grid, dynamics.surface_geopotential,
                               θ, dynamics.exner_function, dynamics.interface_exner_function, cᵖᵈ)
 
+    rediagnose_layer_density!(grid, model, θ)
+
     @apply_regionally launch!(arch, grid, :xy, _compute_vertical_mass_flux!,
                               dynamics.vertical_mass_flux, w, grid,
                               dynamics.surface_pressure_coefficient, dynamics.density, u, v)
@@ -282,6 +284,87 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Hydrostat
 
     return nothing
 end
+
+#####
+##### The density of a pressure-level grid
+#####
+
+# The layer mass ρ that the coordinate kernels write. On the label grid it is diagnosed from the
+# pressure thickness and the fixed spacing; on a pressure-level grid ρ is the physical density of
+# the grid, which sets its depths and is diagnosed from the geopotential instead
+# (`rediagnose_layer_density!`): it is kept here.
+@inline coordinate_layer_density(i, j, k, grid, ρ, Δp, g) = Δp / (g * Δzᶜᶜᶜ(i, j, k, grid))
+@inline coordinate_layer_density(i, j, k, grid::PressureLevelGrid, ρ, Δp, g) = @inbounds ρ[i, j, k]
+
+# The scalars that are densities: every prognostic field but the surface pressure, the velocities
+# and the tracers, which `update_state!` holds as specific values while the density is diagnosed
+# (`tracer_density_to_specific!`) and converts back with the new density
+hydrostatic_scalar_densities(model) =
+    Tuple(field for (name, field) in pairs(prognostic_fields(model)) if name ∉ (:pˢ, :u, :v, keys(model.tracers)...))
+
+@inline scale_densities!(i, j, k, ::Tuple{}, factor) = nothing
+
+@inline function scale_densities!(i, j, k, fields::Tuple, factor)
+    @inbounds first(fields)[i, j, k] *= factor
+    scale_densities!(i, j, k, Base.tail(fields), factor)
+    return nothing
+end
+
+# ρ = Δp / (g Δz) with Δz = cᵖᵈ θᵨ ΔΠᶠ / g the depth of the layer from the hydrostatic integral, the
+# depth of the geopotential. The densities are carried with ρ at a fixed specific value.
+@kernel function _rediagnose_layer_density!(ρ, grid, densities, θᵨ, Πᶠ, cᵖᵈ, g)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        Δz = physical_layer_depth(i, j, k, θᵨ, Πᶠ, cᵖᵈ, g)
+        ρ⁺ = grid_layer_pressure_thickness(i, j, k, grid) / (g * Δz)
+        scale_densities!(i, j, k, densities, ρ⁺ / ρ[i, j, k])
+        ρ[i, j, k] = ρ⁺
+    end
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+On a [`PressureLevelGrid`](@ref Breeze.PressureLevelDiscretization.PressureLevelGrid), diagnose the
+density of the grid, which sets its physical depths, from the hydrostatic integral with the
+density potential temperature `θᵨ`: `ρ = Δp / (g Δz)` with `Δz = cᵖᵈ θᵨ ΔΠᶠ / g`. Every scalar
+density of `model` (and `extra_densities`) is carried with it at a fixed specific value. Nothing on
+any other grid, whose layer mass is diagnosed with the surface pressure.
+
+The specific values change by a rounding: `(ρ⁺ / ρ) ρc / ρ⁺` differs from `ρc / ρ` in the last place.
+"""
+rediagnose_layer_density!(grid, model, θᵨ, extra_densities=()) = nothing
+
+function rediagnose_layer_density!(grid::PressureLevelGrid, model, θᵨ, extra_densities=())
+    dynamics = model.dynamics
+    constants = model.thermodynamic_constants
+    cᵖᵈ = constants.dry_air.heat_capacity
+    g = constants.gravitational_acceleration
+    densities = (hydrostatic_scalar_densities(model)..., extra_densities...)
+
+    launch!(grid.architecture, grid, :xyz, _rediagnose_layer_density!,
+            dynamics.density, grid, densities, θᵨ, dynamics.interface_exner_function, cᵖᵈ, g)
+
+    fill_halo_regions!(dynamics.density)
+    foreach(fill_halo_regions!, densities)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The velocities that transport the scalars of `HydrostaticDynamics` on `grid`: `(u, v, w)`, or on a
+[`PressureLevelGrid`](@ref Breeze.PressureLevelDiscretization.PressureLevelGrid) `(u, v, ρw)` with the
+mass flux `ρw` through the coordinate surfaces per unit area, which the vertical fluxes of the
+pressure-level grid take in place of `ℑz(ρ) w`.
+"""
+coordinate_transport_velocities(grid, u, v, w, ρw) = (; u, v, w)
+coordinate_transport_velocities(grid::PressureLevelGrid, u, v, w, ρw) = (; u, v, w = ρw)
+
+AtmosphereModels.transport_velocities(model::HydrostaticModel) =
+    coordinate_transport_velocities(model.grid, model.velocities.u, model.velocities.v, model.velocities.w,
+                                    model.dynamics.vertical_mass_flux)
 
 # The horizontal velocities are prognostic: only their halos need filling
 function AtmosphereModels.compute_velocities!(model::HydrostaticModel)

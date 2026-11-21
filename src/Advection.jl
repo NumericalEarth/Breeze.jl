@@ -95,6 +95,16 @@ const AIVA = AdaptiveImplicitVerticalAdvection
 @inline tracer_mass_flux_y(i, j, k, grid::PressureLevelGrid, ρ, advection, v, c) =
     mass_flux_y(i, j, k, grid, ρ, v) * y_face_value(i, j, k, grid, advection, v, c)
 @inline tracer_mass_flux_x(i, j, k, grid::PressureLevelGrid, ρ, ::Nothing, u, c) = zero(grid)
+
+# On a pressure-level grid the vertical transport is the mass flux of continuity through the
+# coordinate surfaces itself, ρw per unit area (`hydrostatic_transport_velocities`), so the vertical
+# tracer flux is Az ρw ĉ, without ℑz(ρ)
+@inline tracer_mass_flux_z(i, j, k, grid::PressureLevelGrid, ρ, args...) = _advective_tracer_flux_z(i, j, k, grid, args...)
+
+@inline function OceananigansAdvection.transport_z(i, j, k, grid::PressureLevelGrid, advection, ρ, ρw)
+    td = advection.time_discretization
+    return @inbounds Azᶜᶜᶠ(i, j, k, grid) * explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, advection, td, ρw) * ρw[i, j, k]
+end
 @inline tracer_mass_flux_y(i, j, k, grid::PressureLevelGrid, ρ, ::Nothing, v, c) = zero(grid)
 
 # The transport of the flux limiter of Oceananigans: the same mass fluxes
@@ -197,6 +207,15 @@ end
     w̃ = @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, advection, td, w) * w[i, j, k]
     ĉ = bounded_face_value(advection, upwind_face_value_z(i, j, k, grid, advection, nothing, b.reconstruction_limiter, w̃, c), z_donor(i, j, k, c, w̃))
     return ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Azᶜᶜᶠ(i, j, k, grid) * w̃ * ĉ
+end
+
+# On a pressure-level grid `w` is the mass flux ρw through the coordinate surfaces
+@inline function clamped_face_flux_z(i, j, k, grid::PressureLevelGrid, advection, ρ, ρw, c)
+    b = advection.bounds
+    td = advection.time_discretization
+    ρw̃ = @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, advection, td, ρw) * ρw[i, j, k]
+    ĉ = bounded_face_value(advection, upwind_face_value_z(i, j, k, grid, advection, nothing, b.reconstruction_limiter, ρw̃, c), z_donor(i, j, k, c, ρw̃))
+    return Azᶜᶜᶠ(i, j, k, grid) * ρw̃ * ĉ
 end
 
 @inline function convex_limited_face_flux_x(i, j, k, grid, advection, ρ, u, c)

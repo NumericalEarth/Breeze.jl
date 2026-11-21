@@ -114,7 +114,7 @@ function coefficients_with_halos(FT, c, Hz)
     for k in Nz+2:Nz+1+Hz                                  # above the top: c[k] = c[k-1] - Δ(k-1)
         faces[k + offset] = faces[k - 1 + offset] - mirror(k - 1)
     end
-    return Oceananigans.Grids.OffsetArrays.OffsetArray(faces, -offset)
+    return OffsetArray(faces, -offset)
 end
 
 function Grids.generate_coordinate(FT, topo, size, halo, coordinate::PLVD, coordinate_name, dim::Int, arch)

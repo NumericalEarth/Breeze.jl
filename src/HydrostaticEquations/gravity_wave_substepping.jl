@@ -701,7 +701,8 @@ function add_perturbation_transport!(δρc, substepper::GravityWaveSubstepper, m
 
     @apply_regionally launch!(grid.architecture, grid, :xyz, _add_perturbation_transport!,
                               δρc, grid, substepper.advection, substepper.linearization.ρ,
-                              (; u, v, w), substepper.specific_scalars[name])
+                              coordinate_transport_velocities(grid, u, v, w, substepper.integrated_velocities.ρw),
+                              substepper.specific_scalars[name])
 
     return nothing
 end
