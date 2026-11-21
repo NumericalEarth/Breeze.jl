@@ -207,16 +207,12 @@ The twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per
 `balancer.time_stepping`); microphysics, closure, the implicit diffusion solver, the sponge, and
 forcing are removed; the time stepper's `Gⁿ`/`U⁰` tendency storage *aliases* the production stepper's
 same-named arrays (moisture key re-mapped from the microphysics name, e.g. `:ρqᵉ`, to the
-moistureless `:ρqᵛ`); and a fresh `Clock` at the production time is used, so boundary conditions
-that read the time see the production instant while the balance's clock reset does not touch the
+moistureless `:ρqᵛ`); and a copy of the production clock is used, so boundary conditions that
+read the time see the production instant while the balance's clock reset does not touch the
 production clock.
 """
 adiabatic_balance_twin(model::AtmosphereModel, balancer::AdiabaticBalancer = AdiabaticBalancer()) =
     assemble_adiabatic_twin(model, adiabatic_twin_dynamics(model.dynamics, balancer.time_stepping))
-
-# A fresh clock at the production time, of the production clock's type: the twin's boundary
-# conditions evaluate at the production instant, and its reset leaves the production clock alone.
-twin_clock(clock::Clock{TT, KT}) where {TT, KT} = Clock{TT}(; time = clock.time, kernel_time_type = KT)
 
 # Rewrap a prognostic scalar `twin_field` with its surface fluxes stripped to no-flux (see
 # [`adiabatic_scalar_bcs`](@ref)), sharing the production `data`, indices, and operand so no memory
@@ -289,7 +285,7 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
 
     # closure = nothing: turbulent diffusion is dissipative (irreversible), so it is excluded from the
     # adiabatic excursion. `closure_fields` is carried along but unused when closure is nothing.
-    return AtmosphereModel(arch, grid, twin_clock(model.clock),
+    return AtmosphereModel(arch, grid, deepcopy(model.clock),
                            twin_dynamics, formulation, constants,
                            twin_momentum, twin_moisture_density, model.temperature,
                            model.pressure_solver, model.velocities, twin_tracers,
