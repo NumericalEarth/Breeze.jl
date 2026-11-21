@@ -4,7 +4,7 @@ using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
-using Oceananigans.TimeSteppers: TimeSteppers, tick_stage!
+using Oceananigans.TimeSteppers: TimeSteppers, next_time, tick_stage!
 using Oceananigans.Utils: launch!, time_difference_in_seconds
 
 using KernelAbstractions: @kernel, @index
@@ -1172,8 +1172,9 @@ function TimeSteppers.time_step!(model::AtmosphereModel{<:ParcelDynamics, <:Any,
     c¹ = ts.α¹              # = 1
     c² = ts.α² * (c¹ + 1)   # = 1/2
 
-    # Compute the next time step a priori to reduce floating point error accumulation
-    tⁿ⁺¹ = model.clock.time + Δt
+    # Compute the next time a priori to reduce floating point error accumulation; `next_time`
+    # also serves a calendar clock, whose `time` cannot take a `Δt` in seconds directly.
+    tⁿ⁺¹ = next_time(model.clock, Δt)
 
     # Store initial state for SSP RK3 stages
     store_initial_parcel_state!(U⁰, state)
