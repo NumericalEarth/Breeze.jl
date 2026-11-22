@@ -74,6 +74,16 @@ end
 AtmosphereModels.interior_minimum(field::AbstractField{<:Any, <:Any, <:Any, <:SingleColumnGrid}) =
     AtmosphereModels.data_minimum(interior(field))
 
+# TODO: a field reduced along a `Flat` dimension of size N > 1 (a profile shared by the columns of
+# an ensemble, `Field{Nothing, Nothing, Center}`) stores N rows (`length(::Nothing, ::Flat, N) = N`
+# in Oceananigans' `Grids/grid_utils.jl`) but is read from the first: `getindex` of an
+# `XYReducedField` is `data[1, 1, k]`. `set!(field, function)` and `interior(field) .= profile`
+# fill that row correctly. `set!(field, array)` does not: `set_to_array!` copies the array linearly
+# into the (N, 1, Nz) interior (`copyto!`), so the profile read by every column is the array
+# strided by N, and zero above level Nz / N. Fix in Oceananigans by giving a reduced dimension one
+# row of storage whatever the topology, or by setting a reduced field from an array of its reduced
+# shape, `(1, 1, Nz)` or `(Nz,)`.
+
 #####
 ##### Per-column closures
 #####

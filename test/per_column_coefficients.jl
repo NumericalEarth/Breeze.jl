@@ -9,6 +9,7 @@ using Breeze
 using Breeze.TurbulenceClosures: column_closure
 using Oceananigans
 using Oceananigans.Grids: ColumnEnsembleSize
+using Adapt: adapt
 using Test
 
 const Nz = 12
@@ -92,5 +93,45 @@ tke_closure(FT, ℂⁱ, ℂᴰ⁰; kw...) =
         closures = [with_parameters(SimplifiedHigherOrderClosure(FT; surface_temperature_flux=0.05); ℂᶜ=ℂᶜ, ℂʷ₂=ℂʷ₂)
                     for (ℂᶜ, ℂʷ₂) in ((0.1, 7.0), (0.2, 5.0))]
         test_per_column_equals_single_columns(FT, closures)
+    end
+    @testset "SimplifiedHigherOrderClosure with SmoothClipping: per column equals single columns" begin
+        # Rebuilding the closure of a column (`getclosure`, also in GPU kernels) must not check the width
+        @test adapt(nothing, SmoothClipping{FT}(-one(FT))).width == -one(FT)
+        closures = [with_parameters(SimplifiedHigherOrderClosure(FT; clipping=SmoothClipping(FT), surface_temperature_flux=0.05); ℂᶜ=ℂᶜ)
+                    for ℂᶜ in (0.1, 0.2)]
+        test_per_column_equals_single_columns(FT, closures)
+    end
+
+    @testset "A profile shared by the columns forces every column alike" begin
+        function forced_increment(N₁)
+            grid = column_grid(FT, N₁)
+            reference_state = ReferenceState(grid, ThermodynamicConstants(FT); base_pressure=101325, potential_temperature=290)
+            cooling = Field{Nothing, Nothing, Center}(grid)
+            set!(cooling, z -> -1e-5 * (1 + z / 1000))
+            drying = Field{Nothing, Nothing, Center}(grid)
+            interior(drying, 1, 1, :) .= [-1e-8 * k for k in 1:Nz]
+            model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
+                                    microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium()),
+                                    forcing = (; θ = Forcing(cooling), qᵉ = Forcing(drying),
+                                                 u = SubsidenceForcing(z -> -1e-3 * z / 2000)))
+            set!(model; θ = z -> 290 + 3e-3 * z, qᵗ = 0.01, u = z -> 5 + z / 1000)
+            fields = Oceananigans.prognostic_fields(model)
+            before = map(name -> Array(interior(fields[name])), (:ρθ, :ρqᵉ, :ρu))
+            time_step!(model, 10)
+            return map((name, b) -> Array(interior(fields[name])) .- b, (:ρθ, :ρqᵉ, :ρu), before)
+        end
+        # Oceananigans' `set!` of a reduced field from an array copies it linearly into the interior,
+        # which on an ensemble has a row per column (see the TODO in `src/single_column_mode.jl`)
+        grid = column_grid(FT, 2)
+        profile = Field{Nothing, Nothing, Center}(grid)
+        set!(profile, collect(FT, 1:Nz))
+        @test_broken [profile[1, 1, k] for k in 1:Nz] == 1:Nz
+
+        single = forced_increment(1)
+        ensemble = forced_increment(3)
+        for (e, s) in zip(ensemble, single)
+            @test any(!iszero, s)
+            @test all(e[i, 1, :] == s[1, 1, :] for i in 1:3)
+        end
     end
 end

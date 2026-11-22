@@ -72,29 +72,25 @@ $(TYPEDFIELDS)
 struct SmoothClipping{FT} <: AbstractClippingPolicy
     "The smoothing length of a bound over the scale of the bounded quantity; positive"
     width :: FT
-
-    function SmoothClipping{FT}(width) where FT
-        check_smoothing_width(width)
-        return new{FT}(width)
-    end
 end
 
-SmoothClipping(width::FT) where FT = SmoothClipping{FT}(width)
+check_smoothing_width(width) =
+    width > 0 || throw(ArgumentError("The width of SmoothClipping must be positive, but width = $width."))
+
+# A checked width; a traced scalar (which cannot be tested) takes the unchecked default constructor
+SmoothClipping(width::AbstractFloat) = (check_smoothing_width(width); SmoothClipping{typeof(width)}(width))
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `SmoothClipping{FT}` with the smoothing `width`.
 """
-SmoothClipping(FT::DataType = Oceananigans.defaults.FloatType; width = 1e-2) = SmoothClipping{FT}(convert(FT, width))
+SmoothClipping(FT::DataType = Oceananigans.defaults.FloatType; width = 1e-2) = SmoothClipping(convert(FT, width))
 
-check_smoothing_width(width::AbstractFloat) =
-    width > 0 || throw(ArgumentError("The width of SmoothClipping must be positive, but width = $width."))
-
-# A traced scalar cannot be tested when the closure is rebuilt inside a compiled function
-check_smoothing_width(width) = nothing
-
-Adapt.@adapt_structure SmoothClipping
+# `adapt` rebuilds the policy with the unchecked constructor: it is called inside kernels too (where
+# `getclosure` rebuilds the closure of a column), and a check there formats a message, which a GPU
+# kernel cannot compile.
+Adapt.adapt_structure(to, policy::SmoothClipping) = (width = adapt(to, policy.width); SmoothClipping{typeof(width)}(width))
 
 @inline smooth_max(a, b, δ) = (a + b + sqrt((a - b) * (a - b) + δ * δ)) / 2
 @inline smooth_min(a, b, δ) = (a + b - sqrt((a - b) * (a - b) + δ * δ)) / 2
