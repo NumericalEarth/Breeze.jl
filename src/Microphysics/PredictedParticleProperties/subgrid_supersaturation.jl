@@ -58,7 +58,7 @@ vanishes when the cloud liquid is the distribution's equilibrium condensate.
 $(TYPEDFIELDS)
 
 ```jldoctest
-julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation
+julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, CloudCondensationOnly
 
 julia> using Breeze.AtmosphereModels: PrescribedStatistics
 
