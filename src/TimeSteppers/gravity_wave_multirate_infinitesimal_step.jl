@@ -308,7 +308,7 @@ stage_increment(ts::GravityWaveMultirateInfinitesimalStep, j) = ts.stage_increme
 # waves. The time step is that of the last step, as the stepper keeps no current one; before the
 # first step it is not finite and the budgets fall back to their fixed timescales.
 # A scheme that runs through the generic interface on moist `HydrostaticDynamics` reads this, for
-# its sink budgets and for the limit of its sedimentation flux.
+# its sink budgets and for the implicit fall of its condensate.
 @inline function AtmosphereModels.stage_time_step(ts::GravityWaveMultirateInfinitesimalStep, clock)
     Δt = clock.last_Δt
     C = ts.tableau.strong_stability_coefficient

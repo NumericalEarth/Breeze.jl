@@ -140,8 +140,7 @@ end
             V = HydrostaticEquations.positive_rain_fall_speed(microphysics, ρᵏ, ρqʳᵏ / ρᵏ)
             λ = V * Δt / Δz
             M = ρqʳᵏ * Δz
-            M⁺ = (M + inflow) / (1 + λ)
-            outflow = λ * M⁺
+            M⁺, outflow = AM.implicit_upwind_fall(M, inflow, λ)
             eˡ = cˡ * Tᵏ - ℒˡ₀
             crossed = (inflow != 0) | (outflow != 0)
 

@@ -830,7 +830,8 @@ end
 # (plvd_logs/3c_1M_ENERGY_DERIVATION.txt).
 #
 # Sedimentation is built here from what the scheme declares (`model.sedimentation`: the fall
-# velocity at the lower face of its donor cell, the density that falls and its liquid fraction).
+# velocity at the lower face of its donor cell, the density that falls and its liquid fraction),
+# with fluxes that are implicit over the stage (`fall_through_cell!`).
 # The coordinate mass of a layer is fixed through the stages, so the water F that crosses a face
 # changes the water of the two layers and nothing else; it carries the enthalpy of its phase at
 # the temperature of the layer it leaves, hˡ = cˡ T - ℒˡ₀ or hⁱ = cⁱ T - ℒⁱ₀. With ℋ = Π (ĉᵖ ρθ) and
@@ -848,45 +849,49 @@ end
     return f * (cˡ * T - ℒˡ₀) + (1 - f) * (cⁱ * T - ℒⁱ₀)
 end
 
-# The fall speed V of `condensate` out of cell `k` in m s⁻¹, positive downward, and its Courant
-# number over the forward Euler step `Δtᵉ` of the coming stage (`Δtᵉ = 0`: not known)
-@inline function sedimentation_speed(i, j, k, grid, condensate, Δtᵉ)
-    V = @inbounds max(0, - condensate.velocity[i, j, k])
-    return V, V * Δtᵉ / Δzᶜᶜᶜ(i, j, k, grid)
-end
+# The fall of every condensate through cell `k`, implicit over the forward Euler step `Δtᵉ` of the
+# coming stage (backward Euler with the donor-cell flux, `AtmosphereModels.implicit_upwind_fall`,
+# swept from the model top down): with W = ρq Δz the mass of a condensate in the cell, r = V / Δz its
+# fall rate and F⁺ its flux through the upper face (`inflows`, from the cell above),
+#
+#   W⁺ = (W + Δtᵉ F⁺) / (1 + r Δtᵉ) ,   F⁻ = r W⁺ ,
+#
+# and the tendency of its density is (F⁺ - F⁻) / Δz. A forward Euler step of length Δtᵉ with that
+# tendency leaves W⁺, and a shorter one a mean of W and W⁺, so the stages keep the condensate
+# non-negative at any Courant number, and it falls through as many layers in a step as its speed
+# takes it. What is negative does not fall. Before the first time step Δtᵉ is not known and is
+# zero, which makes the flux the explicit one, r W.
+#
+# Adds the tendencies to `G` and returns the fluxes of the condensates through the lower face (the
+# inflows of the cell below), the sums over the condensates of the fluxes through the lower and
+# upper faces, (F⁻, F⁺), of the enthalpy that those carry at the temperature of the cell they
+# leave, (𝒬⁻, 𝒬⁺), and the largest Courant number.
+@inline no_inflows(grid, ::Tuple{}) = ()
+@inline no_inflows(grid, condensates::Tuple) = (zero(grid), no_inflows(grid, Base.tail(condensates))...)
 
-# The mass flux of `condensate` through the lower face of cell `k`, in kg m⁻² s⁻¹, positive
-# downward: donor cell, and no more over the forward Euler step `Δtᵉ` of the coming stage than the
-# cell holds (a limit on the rate out of one reservoir: what leaves the cell enters the next, or
-# the ground). Nothing falls through the model top, `k = Nz + 1`, and what is negative does not fall.
-@inline function sedimentation_mass_flux(i, j, k, grid, condensate, Δtᵉ)
-    Nz = size(grid, 3)
-    kᶜ = min(k, Nz)
-    V, courant = sedimentation_speed(i, j, kᶜ, grid, condensate, Δtᵉ)
-    ρq = @inbounds max(0, condensate.density[i, j, kᶜ])
-    limited = ifelse(courant > 1, V / courant, V)
-    return ifelse(k > Nz, zero(ρq), limited * ρq)
-end
+@inline fall_through_cell!(i, j, k, grid, ::Tuple{}, ::Tuple{}, ::Tuple{}, Δz, Δtᵉ, T, T⁺, constants) =
+    ((), zero(grid), zero(grid), zero(grid), zero(grid), zero(grid))
 
-# Add the sedimentation of every condensate to the tendencies `G` of their densities at cell `k`,
-# and return the sums over them of the mass fluxes through the lower and upper faces of the cell,
-# (F⁻, F⁺), of the enthalpy that those carry, (𝒬⁻, 𝒬⁺), and the largest Courant number.
-@inline add_condensate_sedimentation!(i, j, k, grid, ::Tuple{}, ::Tuple{}, Δz, Δtᵉ, T, T⁺, constants) =
-    (zero(grid), zero(grid), zero(grid), zero(grid), zero(grid))
-
-@inline function add_condensate_sedimentation!(i, j, k, grid, G::Tuple, condensates::Tuple, Δz, Δtᵉ, T, T⁺, constants)
+@inline function fall_through_cell!(i, j, k, grid, G::Tuple, condensates::Tuple, inflows::Tuple, Δz, Δtᵉ, T, T⁺, constants)
     condensate = first(condensates)
-    F⁻ = sedimentation_mass_flux(i, j, k, grid, condensate, Δtᵉ)
-    F⁺ = sedimentation_mass_flux(i, j, k + 1, grid, condensate, Δtᵉ)
+    F⁺ = first(inflows)
+
+    @inbounds begin
+        rate = max(0, - condensate.velocity[i, j, k]) / Δz
+        W = max(0, condensate.density[i, j, k]) * Δz
+    end
+
+    courant = rate * Δtᵉ
+    W⁺, _ = AtmosphereModels.implicit_upwind_fall(W, Δtᵉ * F⁺, courant)
+    F⁻ = rate * W⁺
     @inbounds first(G)[i, j, k] += (F⁺ - F⁻) / Δz
 
     h⁻ = condensate_enthalpy(condensate.liquid_fraction, T, constants)
     h⁺ = condensate_enthalpy(condensate.liquid_fraction, T⁺, constants)
-    _, courant = sedimentation_speed(i, j, k, grid, condensate, Δtᵉ)
 
-    ΣF⁻, ΣF⁺, Σ𝒬⁻, Σ𝒬⁺, largest = add_condensate_sedimentation!(i, j, k, grid, Base.tail(G), Base.tail(condensates),
-                                                                Δz, Δtᵉ, T, T⁺, constants)
-    return (ΣF⁻ + F⁻, ΣF⁺ + F⁺, Σ𝒬⁻ + F⁻ * h⁻, Σ𝒬⁺ + F⁺ * h⁺, max(largest, courant))
+    outflows, ΣF⁻, ΣF⁺, Σ𝒬⁻, Σ𝒬⁺, largest = fall_through_cell!(i, j, k, grid, Base.tail(G), Base.tail(condensates),
+                                                              Base.tail(inflows), Δz, Δtᵉ, T, T⁺, constants)
+    return ((F⁻, outflows...), ΣF⁻ + F⁻, ΣF⁺ + F⁺, Σ𝒬⁻ + F⁻ * h⁻, Σ𝒬⁺ + F⁺ * h⁺, max(largest, courant))
 end
 
 # One term of a sum over the stages of a time step, in its two registers. The first stage sets
@@ -915,11 +920,12 @@ end
 
     @inbounds begin
         largest = zero(grid)
+        inflows = no_inflows(grid, condensates)  # nothing falls through the model top
 
-        for k in 1:Nz
+        for k in Nz:-1:1
             Δz = Δzᶜᶜᶜ(i, j, k, grid)
-            F⁻, F⁺, 𝒬⁻, 𝒬⁺, courant = add_condensate_sedimentation!(i, j, k, grid, G, condensates, Δz, Δtᵉ,
-                                                                     T[i, j, k], T[i, j, min(k + 1, Nz)], constants)
+            inflows, F⁻, F⁺, 𝒬⁻, 𝒬⁺, courant = fall_through_cell!(i, j, k, grid, G, condensates, inflows, Δz, Δtᵉ,
+                                                                 T[i, j, k], T[i, j, min(k + 1, Nz)], constants)
 
             Πᵏ = Π[i, j, k]
             ĉᵖ = cᵖᵈ + Δcᵖ * sum_at(i, j, k, ρqˣ) / ρ[i, j, k]
@@ -939,8 +945,8 @@ end
     end
 end
 
-# The forward Euler step of the coming stage, for the limit of the sedimentation flux: zero while
-# it is not known (before the first time step), which leaves the flux as it is
+# The forward Euler step of the coming stage, over which the fall is implicit: zero while it is not
+# known (before the first time step), which makes the flux the explicit one
 function sedimentation_euler_step(model)
     Δtᵉ = AtmosphereModels.stage_time_step(model.timestepper, model.clock)
     known = isfinite(Δtᵉ) && Δtᵉ > 0
@@ -1269,8 +1275,7 @@ end
             λ = V * Δt / physical_layer_depth(i, j, k, θᵨ, Πᶠ, cᵖᵈ, g)
 
             Wʳ = g * Δz * ρqʳᵏ
-            Wʳ⁺ = (Wʳ + inflow) / (1 + λ)
-            outflow = λ * Wʳ⁺
+            Wʳ⁺, outflow = AtmosphereModels.implicit_upwind_fall(Wʳ, inflow, λ)
             hˡ = cˡ * Tᵏ - ℒˡ₀
             crossed = (inflow != 0) | (outflow != 0)
 

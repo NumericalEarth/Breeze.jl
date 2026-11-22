@@ -453,16 +453,19 @@ function mixed_phase_stage_budgets(model; steps, Δt)
     energy₀ = column_energy(model)[1] + column_kinetic_energy(model)
     pˢ₀ = model.dynamics.surface_pressure[1, 1, 1]
     ice₀ = maximum(μ.qⁱ)
+    lowest_layer_rain₀ = μ.ρqʳ[1, 1, 1] * Δzᶜᶜᶜ(1, 1, 1, model.grid)
     lowest = map(minimum, waters)
+    first_step_rain = zero(water₀)
 
-    for _ in 1:steps
+    for step in 1:steps
         time_step!(model, Δt)
         lowest = map((least, ρq) -> min(least, minimum(ρq)), lowest, waters)
+        step == 1 && (first_step_rain = ledger.surface_rain[1, 1, 1])
     end
 
     rain = ledger.surface_rain[1, 1, 1]
     energy = column_energy(model)[1] + column_kinetic_energy(model)
-    return (; rain, ice₀, lowest, pˢ₀,
+    return (; rain, ice₀, lowest, pˢ₀, lowest_layer_rain₀, first_step_rain,
               water_residual = (column_water(model)[1] - water₀ + rain) / water₀,
               pressure_residual = (model.dynamics.surface_pressure[1, 1, 1] - pˢ₀ + g * rain) / pˢ₀,
               dry_residual = (column_dry_mass(model)[1] - dry₀) / (pˢ₀ / g),
@@ -483,8 +486,7 @@ const mixed_phase_steppers = (
     @test Breeze.HydrostaticEquations.requires_pressure_level_grid(model.microphysics)
     @test :ρqʳ ∈ keys(model.sedimentation) && :ρqˢⁿ ∈ keys(model.sedimentation)
 
-    # Rain falls at up to ~8 m s⁻¹ through layers of ~400 m: the Courant number of a stage stays
-    # below one, so the fall speed is that of the scheme
+    # Rain falls at up to ~8 m s⁻¹ through layers of ~400 m: the Courant number of a stage stays below one
     budgets = mixed_phase_stage_budgets(model; steps = 60, Δt = 20)
     @info "T4n [$name]: precipitation $(budgets.rain) kg m⁻²; residuals: water $(budgets.water_residual), " *
           "pˢ $(budgets.pressure_residual), dry mass $(budgets.dry_residual), energy $(budgets.energy_residual); " *
@@ -500,6 +502,33 @@ const mixed_phase_steppers = (
     @test abs(budgets.energy_residual) ≤ ledger_relative
     @test abs(budgets.control) > precipitation_energy_control
     @test budgets.kinetic > 0
+    @test all(budgets.lowest .≥ 0)
+    @test all(isfinite, interior(model.temperature))
+end
+
+# The fall is implicit in every stage (backward Euler, upwind), so it holds far beyond the Courant
+# number of an explicit fall. The lowest layer passes λ / (1 + λ) of its rain to the ground over the
+# forward Euler step of a stage; the first stage of SSPRungeKutta3 starts from the initial state and
+# has the weight 1/6 in the step, and the other stages add to it. With Δt = 600 s, a layer of ~400 m
+# and a fall speed above 1 m s⁻¹, λ ≥ 1.5 and λ / (1 + λ) ≥ 0.6: the first step takes at least a tenth
+# of the rain of the lowest layer to the ground (plvd_logs/3c_1M_ENERGY_DERIVATION.txt, A4).
+const first_step_fallout_fraction = 0.1
+
+@testset "T4n: implicit fall at a large time step, ledgers and positivity" begin
+    model = mixed_phase_columns(; timestepper = :SSPRungeKutta3)
+    budgets = mixed_phase_stage_budgets(model; steps = 6, Δt = 600)
+    @info "T4n [Δt = 600 s]: precipitation $(budgets.rain) kg m⁻², $(budgets.first_step_rain) in the first step of " *
+          "$(budgets.lowest_layer_rain₀) in the lowest layer; residuals: water $(budgets.water_residual), " *
+          "pˢ $(budgets.pressure_residual), dry mass $(budgets.dry_residual), energy $(budgets.energy_residual); " *
+          "lowest ρqᵉ, ρqʳ, ρqˢⁿ $(budgets.lowest); largest sedimentation Courant number $(budgets.courant)"
+
+    @test budgets.courant > 1
+    @test budgets.lowest_layer_rain₀ > 0
+    @test budgets.first_step_rain ≥ first_step_fallout_fraction * budgets.lowest_layer_rain₀
+    @test abs(budgets.water_residual) ≤ ledger_relative
+    @test abs(budgets.pressure_residual) ≤ dry_mass_rounding(model)
+    @test abs(budgets.dry_residual) ≤ dry_mass_rounding(model)
+    @test abs(budgets.energy_residual) ≤ ledger_relative
     @test all(budgets.lowest .≥ 0)
     @test all(isfinite, interior(model.temperature))
 end

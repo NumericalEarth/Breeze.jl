@@ -1243,6 +1243,25 @@ launch region and is held at zero by the impenetrable top boundary condition.
     return nothing
 end
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+One layer of the column-implicit fall of a sedimenting mass: backward Euler in time with the upwind
+(donor-cell) flux. Given the content `W` of the layer, the `inflow` through its upper face over the
+step (both in the same units, a mass or a weight per unit area) and the Courant number
+`λ = V Δt / Δz` of the fall through the layer, return the content `W⁺ = (W + inflow) / (1 + λ)` that
+the step leaves and the outflow `λ W⁺` through its lower face over the step.
+
+Swept from the top of a column down, with each outflow the inflow of the layer below, this solves
+the lower-bidiagonal system `W⁺ₖ = Wₖ + inflowₖ - λₖ W⁺ₖ`. For non-negative `W`, `inflow` and `λ` the
+content stays non-negative at any Courant number, and what leaves a layer enters the next or the
+ground, so the fall is positive and conservative without a limit on the time step.
+"""
+@inline function implicit_upwind_fall(W, inflow, λ)
+    W⁺ = (W + inflow) / (1 + λ)
+    return W⁺, λ * W⁺
+end
+
 #####
 ##### Sedimenting condensates
 #####
