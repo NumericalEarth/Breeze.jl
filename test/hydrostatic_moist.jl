@@ -356,15 +356,10 @@ function cold_pressure_level_column(microphysics; Nz = 16, top_pressure = 2.5e4,
                            topology=(Flat, Flat, Bounded))
     model = AtmosphereModel(grid; dynamics = HydrostaticDynamics(), microphysics,
                             formulation = moist_formulation(), momentum_advection = VectorInvariant())
-    # A cold, moist column with a wind, supersaturated over ice aloft
-    set!(model.dynamics.surface_pressure, p₀)
-    set!(model)
-    ρ = Array(interior(model.dynamics.density))[1, 1, :]
-    σ = [(k - 1) / (Nz - 1) for k in 1:Nz]
-    shape(a) = reshape(a, 1, 1, Nz)
-    set!(model; ρθ = shape(ρ .* (262 .+ 30 .* σ)), ρqᵛ = shape(ρ .* 0.008 .* (1 .- σ) .^ 2))
-    interior(model.velocities.u) .= shape(10 .+ 20 .* σ)
-    update_state!(model)
+    # A cold, moist column with a wind, supersaturated over ice. On a PressureLevelGrid the density is
+    # that of the state (it is not Δp / (g Δz) of a label spacing), so the state is set in one call
+    # from θ and qᵗ, with heights in meters, as in hydrostatic_pressure_level_moist.jl
+    set!(model; pˢ = p₀, θ = z -> 262 + 3e-3 * z, qᵗ = z -> 0.008 * exp(-z / 2500), u = z -> 10 + 2e-3 * z)
     return model
 end
 
