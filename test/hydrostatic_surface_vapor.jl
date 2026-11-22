@@ -71,9 +71,17 @@ end
         @test maximum(abs, T¹ .- T⁰[r]) < 0.1
     end
 
-    # Without water through the ground nothing changes
+    # Without water through the ground the hook changes nothing but what update_state! itself does
+    # (the overlap of the panels is interpolated again, and the layer density re-diagnosed)
     fill!(E, 0)
-    state = [copy(Array(interior(getregion(model.formulation.potential_temperature_density, r)))) for r in 1:2]
+    Oceananigans.TimeSteppers.update_state!(model)
+    reference = deepcopy(model)
+    Oceananigans.TimeSteppers.update_state!(reference)
     surface_vapor_mass_change!(model.dynamics, model, E)
-    @test all(Array(interior(getregion(model.formulation.potential_temperature_density, r))) == state[r] for r in 1:2)
+    for r in 1:2
+        @test Array(interior(getregion(model.formulation.potential_temperature_density, r))) ==
+              Array(interior(getregion(reference.formulation.potential_temperature_density, r)))
+        @test Array(interior(getregion(model.dynamics.surface_pressure, r))) ==
+              Array(interior(getregion(reference.dynamics.surface_pressure, r)))
+    end
 end
