@@ -34,6 +34,9 @@ struct HalfSaturatedFraction end
 @inline Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ::HalfSaturatedFraction, buoyancy, tracers, closure_fields) =
     one(eltype(grid)) / 2
 
+shoc_components(c) = (mixing_length = c.mixing_length, stability_functions = c.stability_functions,
+                      static_stability = c.static_stability, subgrid_distribution = c.subgrid_distribution)
+
 # The two paths: the DoubleGaussian distribution, and none with the microphysics-like fraction
 closure_paths = (distribution = (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
                                  subgrid_distribution = DoubleGaussian()),
@@ -44,7 +47,12 @@ closure_paths = (distribution = (static_stability = SaturationWeightedStaticStab
                                         subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷᴸ = 8, ℂʷᵀ = 0.3),
                                                                               skewness = TanhSaturatedSkewness())),
                  budget_third_moment_one_amplitude = (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
-                                                      subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷᴸ = Inf, ℂʷᵀ = 0.3))))
+                                                      subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷᴸ = Inf, ℂʷᵀ = 0.3))),
+                 # SimplifiedHigherOrderClosure: its stability functions give the TKE the share ℂᴾ = 0.1 of the shear
+                 # production and heat the air by the rest
+                 shoc = shoc_components(SimplifiedHigherOrderClosure()),
+                 # and with ℂᴾ = 1, all of it
+                 shoc_whole_shear = shoc_components(SimplifiedHigherOrderClosure(stability_functions = ColumnStabilityDamping(; ℂᴾ = 1))))
 # A cooling of 5 K h⁻¹ over the top 100 m of the moist layer of `moist_tke_column` and a warming of 1 K h⁻¹ below
 # 300 m, as the prescribed heating of a `HeatingBudgetFlux` (the tendency of θˡⁱ, K s⁻¹)
 function cloud_top_cooling(grid)
@@ -62,6 +70,10 @@ heating_paths = (heating_budget_flux = grid -> (static_stability = SaturationWei
                                                                subgrid_distribution = nothing,
                                                                heating_budget_flux = HeatingBudgetFlux(ℂᑫ = 0.7, ℂᑫᴸ = 4, heating = PrescribedHeating(cloud_top_cooling(grid)))))
 all_paths = (keys(closure_paths)..., keys(heating_paths)...)
+
+# The budgets of the whole step take the TKE to receive the whole shear production, which with ℂᴾ < 1 it receives
+# in part (the rest heats the air in the stage tendency: tested below at the level of the tendencies)
+whole_shear_paths = filter(!=(:shoc), all_paths)
 path_keywords(path, grid) = haskey(closure_paths, path) ? closure_paths[path] : heating_paths[path](grid)
 
 # The fields of the heating budget flux, zero without one
@@ -276,7 +288,7 @@ end
 StageRecorder(record) = StageRecorder(Oceananigans.UpdateStateCallsite(), record)
 (recorder::StageRecorder)(model) = recorder.record(model)
 
-@testset "TKE energy budget of the whole step ($path)" for path in all_paths
+@testset "TKE energy budget of the whole step ($path)" for path in whole_shear_paths
     model = moist_tke_column(; path)
     Δt = 10
     α = (model.timestepper.α¹, model.timestepper.α², model.timestepper.α³)
@@ -374,7 +386,7 @@ function multirate_step_weights(tableau)
     return ω
 end
 
-@testset "TKE energy budget of the whole multirate infinitesimal step ($path, $FT, surface fluxes = $surface_fluxes)" for path in all_paths, FT in (Float64, Float32), surface_fluxes in (false, true)
+@testset "TKE energy budget of the whole multirate infinitesimal step ($path, $FT, surface fluxes = $surface_fluxes)" for path in whole_shear_paths, FT in (Float64, Float32), surface_fluxes in (false, true)
     model = moist_tke_column(; path, FT, surface_fluxes, timestepper = :MultirateInfinitesimalStep)
     @test model.timestepper isa MultirateInfinitesimalStep
     @test isnothing(model.timestepper.substepper)
@@ -594,4 +606,29 @@ end
     @test_throws ArgumentError HeatingBudgetFlux(ℂᑫ = 1.5)
     @test_throws ArgumentError HeatingBudgetFlux(ℂᑫᴸ = Inf)
     @test_throws ArgumentError TKEBasedTurbulenceClosure(; heating_budget_flux = HeatingBudgetFlux())
+end
+
+@testset "SimplifiedHigherOrderClosure: the shear production not given to the TKE heats the air" begin
+    shoc = moist_tke_column(; path = :shoc, surface_fluxes = true)
+    whole = moist_tke_column(; path = :shoc, surface_fluxes = true,
+                             closure_keywords = (; stability_functions = ColumnStabilityDamping(; ℂᴾ = 1)))
+    @test shoc.closure isa SimplifiedHigherOrderClosure
+    @test shoc.closure.stability_functions.ℂᴾ == 0.1
+    for model in (shoc, whole)
+        Oceananigans.TimeSteppers.update_state!(model)
+        map(G -> fill!(parent(G), 0), model.timestepper.Gⁿ)
+        Breeze.AtmosphereModels.compute_closure_tendencies!(model.timestepper.Gⁿ, model.closure_fields, model.closure, model)
+    end
+    cl = shoc.closure_fields.subgrid_cloud.cloud
+    ρ = budget_column(shoc.dynamics.reference_state.density)
+    P = budget_column(cl.P)
+    ĉᵖΠ = budget_column(cl.ĉᵖΠ)
+    Gᵉ(model) = budget_column(model.timestepper.Gⁿ.ρe)
+    Gᶿ(model) = budget_column(model.timestepper.Gⁿ.ρθ)
+    # The same state: ℂᴾ changes only the partition of P between the TKE and the internal energy
+    @test budget_column(shoc.tracers.ρe) == budget_column(whole.tracers.ρe)
+    @test maximum(abs, P) > 0
+    scale = maximum(abs, ρ .* P)
+    @test Gᵉ(whole) .- Gᵉ(shoc) ≈ 0.9 .* ρ .* P rtol=1e-10 atol=1e-12 * scale
+    @test ĉᵖΠ .* (Gᶿ(shoc) .- Gᶿ(whole)) ≈ 0.9 .* ρ .* P rtol=1e-10 atol=1e-12 * scale
 end
