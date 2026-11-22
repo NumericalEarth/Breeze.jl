@@ -1613,6 +1613,44 @@ function AtmosphereModels.precipitation_mass_change!(::MoistHydrostaticDynamics,
     return nothing
 end
 
+# Water vapor through the ground (a coupler's surface flux over a step): the vapor is added to the
+# lowest layer with its enthalpy cᵖᵛ T₁ at the temperature of that layer, and the column then takes
+# the weight g E of the water in its surface pressure, as precipitation leaves it
+@kernel function _change_mass_by_surface_vapor!(ρθ, column_enthalpy, scaled, ρqˣ, ρqᵛ, grid, dynamics, T,
+                                                evaporation, constants, κ, g)
+    i, j = @index(Global, NTuple)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+
+    @inbounds begin
+        E = evaporation[i, j, 1]
+        Δz = Δzᶜᶜᶜ(i, j, 1, grid)
+        ρ₁ = dynamics.density[i, j, 1]
+        ℋ = layer_enthalpy_density(ρ₁, sum_at(i, j, 1, ρqˣ), dynamics.exner_function[i, j, 1], ρθ[i, j, 1] / ρ₁, cᵖᵈ, cᵖᵛ)
+        ρqᵛ[i, j, 1] += E / Δz
+        column_enthalpy[i, j, 1] = ifelse(E == 0, zero(ℋ), ℋ + cᵖᵛ * T[i, j, 1] * E / Δz)
+    end
+
+    change_column_surface_pressure!(i, j, grid, g * E, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
+end
+
+function AtmosphereModels.surface_vapor_mass_change!(::MoistHydrostaticDynamics, model, evaporation)
+    grid = model.grid
+    dynamics = model.dynamics
+    constants = model.thermodynamic_constants
+    κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    g = constants.gravitational_acceleration
+
+    @apply_regionally launch!(grid.architecture, grid, :xy, _change_mass_by_surface_vapor!,
+                              model.formulation.potential_temperature_density, dynamics.moisture.column_enthalpy,
+                              column_mass_densities(model), water_densities(model), model.moisture_density, grid,
+                              dynamics, model.temperature, evaporation, constants, κ, g)
+
+    update_state!(model)
+
+    return nothing
+end
+
 # The precipitation ledger accumulates over the integration, so a restart carries it on
 # (on a pressure-level grid, with the density of the grid)
 AtmosphereModels.dynamics_restart_state(dynamics::MoistHydrostaticDynamics) =

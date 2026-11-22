@@ -666,6 +666,23 @@ precipitation_mass_change!(dynamics, model, Δt, surface_precipitation; in_place
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
+Add to `model` the water vapor `evaporation` that entered each column through the ground over a
+coupling step (a two-dimensional field in kg m⁻², negative for deposition, already limited to the
+vapor of the lowest layer), at the temperature of the lowest layer, into the moisture density of
+the lowest layer.
+
+The mirror of `precipitation_mass_change!` for water that enters through the ground: a
+dynamics whose coordinate is the total mass of the column (moist `HydrostaticDynamics`) changes the
+surface pressure by `g` times the water, expresses every layer at its new pressure and keeps the
+enthalpy of the column plus that of the vapor. Dynamics without a method here do not take surface
+water through this function, and throw.
+"""
+surface_vapor_mass_change!(dynamics, model, evaporation) =
+    throw(ArgumentError("$(summary(dynamics)) does not take surface water through surface_vapor_mass_change!"))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
 Called by the time steppers once per time step, after the operator-split update of the
 microphysics (`microphysics_model_update!`), whatever the scheme. A dynamics that checks or
 completes its state at the end of a step extends this. Nothing by default.
