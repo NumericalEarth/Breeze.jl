@@ -252,7 +252,7 @@ substepped_potential_temperature(timestepper) = false
 carried_microphysical_densities(microphysics, microphysical_fields) = ()
 
 has_pressure_levels(grid) = grid isa PressureLevelGrid
-has_pressure_levels(grid::MultiRegion.MultiRegionGrid) = all(getregion(grid, r) isa PressureLevelGrid for r in 1:regions(grid))
+has_pressure_levels(grid::MultiRegion.MultiRegionGrid) = all(getregion(grid, r) isa PressureLevelGrid for r in regions(grid))
 
 # The interface of a supported scheme, extended where the scheme is defined:
 #
