@@ -119,14 +119,19 @@ tke_closure(FT, ℂⁱ, ℂᴰ⁰; kw...) =
     end
 
     @testset "SimplifiedHigherOrderClosure: per column equals single columns" begin
-        closures = [with_parameters(SimplifiedHigherOrderClosure(FT; surface_temperature_flux=0.05); ℂᶜ=ℂᶜ, ℂʷ₂=ℂʷ₂)
-                    for (ℂᶜ, ℂʷ₂) in ((0.1, 7.0), (0.2, 5.0))]
+        closures = [with_parameters(SimplifiedHigherOrderClosure(FT); ℂᶜ=ℂᶜ, ℂʷ₂=ℂʷ₂, ℂˡ₁=ℂˡ₁)
+                    for (ℂᶜ, ℂʷ₂, ℂˡ₁) in ((0.1, 7.0, 0.5), (0.2, 5.0, 0.4))]
+        @test all(closure -> closure isa SimplifiedHigherOrderClosure, closures)
+        ensemble = per_column_closure(column_grid(FT, 2), reshape(closures, 2, 1))
+        @test ensemble isa SimplifiedHigherOrderClosure
+        @test ensemble.stability_functions.ℂᶜ isa PerColumnCoefficient
         test_per_column_equals_single_columns(FT, closures)
     end
     @testset "SimplifiedHigherOrderClosure with SmoothClipping: per column equals single columns" begin
         # Rebuilding the closure of a column (`getclosure`, also in GPU kernels) must not check the width
         @test adapt(nothing, SmoothClipping{FT}(-one(FT))).width == -one(FT)
-        closures = [with_parameters(SimplifiedHigherOrderClosure(FT; clipping=SmoothClipping(FT), surface_temperature_flux=0.05); ℂᶜ=ℂᶜ)
+        distribution = Breeze.TurbulenceClosures.shoc_distribution(FT; clipping = SmoothClipping(FT))
+        closures = [with_parameters(SimplifiedHigherOrderClosure(FT; subgrid_distribution = distribution); ℂᶜ=ℂᶜ)
                     for ℂᶜ in (0.1, 0.2)]
         test_per_column_equals_single_columns(FT, closures)
     end

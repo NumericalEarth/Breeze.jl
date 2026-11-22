@@ -1,7 +1,8 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 #####
-##### SHOC with P3: P3 condenses its own cloud liquid, and SHOC mixes it with total water
+##### SHOC with P3: P3 condenses its own cloud liquid, which the closure diffuses with Kᶜ like every scalar, and
+##### may condense over the closure's double Gaussian (TurbulenceClosureStatistics)
 #####
 
 using Breeze
@@ -16,7 +17,6 @@ using Oceananigans
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 using Oceananigans.TimeSteppers: update_state!
-using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 using Test
 
 # Rain falls several cells per step
@@ -54,39 +54,24 @@ end
     @test subgrid_statisticsᶜᶜᶜ(1, 1, 1, grid, NoSubgridCorrelation(), nothing, nothing) isa DiracStatistics
 end
 
-@testset "With P3, SHOC mixes total water and the cloud liquid" begin
-    Δt = 60
+@testset "With P3, SHOC diffuses the cloud liquid in the stages" begin
+    Δt = 30
     cloud(z) = ifelse(600 < z < 800, 1.2e-4, 0.0)
-
-    # The same total water, held partly as cloud liquid and all as vapor
     model = shoc_p3_column()
     μ = model.microphysical_fields
     set!(μ.ρqᶜˡ, cloud)
     set!(model.moisture_density, Array(interior(model.moisture_density)) .- Array(interior(μ.ρqᶜˡ)))
     update_state!(model)
-
-    all_vapor = shoc_p3_column()
-    set!(all_vapor.moisture_density, reshape(non_precipitating_water(model), 1, 1, :))
-    update_state!(all_vapor)
-    @test non_precipitating_water(all_vapor) ≈ non_precipitating_water(model)
-
-    water = non_precipitating_water(model)
     cloud_liquid = column(μ.ρqᶜˡ)
-    vapor = column(model.moisture_density)
-
-    step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
-    step_closure_prognostics!(all_vapor.closure_fields, all_vapor.closure, all_vapor, Δt)
-
-    # The cloud liquid is diffused, and each species' column water is conserved (no surface flux)
-    @test column(μ.ρqᶜˡ) != cloud_liquid
-    @test maximum(column(μ.ρqᶜˡ)) < maximum(cloud_liquid)
-    @test sum(column(μ.ρqᶜˡ)) ≈ sum(cloud_liquid) rtol=1e-12
-    @test sum(column(model.moisture_density)) ≈ sum(vapor) rtol=1e-12
+    for _ in 1:5
+        time_step!(model, Δt)
+    end
+    @test all(isfinite, column(model.moisture_density))
+    @test all(isfinite, column(μ.ρqᶜˡ))
     @test all(column(model.moisture_density) .>= 0)
-
-    # Total water is mixed as SHOC mixes it when all of it is vapor
-    @test non_precipitating_water(model) ≈ non_precipitating_water(all_vapor) rtol=1e-12
-    @test sum(non_precipitating_water(model)) ≈ sum(water) rtol=1e-12
+    @test all(column(μ.ρqᶜˡ) .>= 0)
+    @test column(μ.ρqᶜˡ) != cloud_liquid
+    @test all(≥(0), column(model.tracers.ρe))
 end
 
 @testset "TurbulenceClosureStatistics: the saturated fraction is SHOC's cloud fraction" begin
@@ -96,6 +81,6 @@ end
     model_fields = supersaturation_statistics_model_fields(model)
     f⁺ = @allowscalar [saturated_fraction(supersaturation_statistics(TurbulenceClosureStatistics(), 1, 1, k, grid,
                                                                        model.closure, fields, model_fields)) for k in 1:size(grid, 3)]
-    @test f⁺ == column(fields.diagnostics.shoc_cldfrac)
+    @test f⁺ == column(fields.subgrid_cloud.cloud.aᶜ)
     @test maximum(f⁺) > 0
 end
