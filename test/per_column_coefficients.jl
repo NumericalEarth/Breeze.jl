@@ -7,6 +7,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.TurbulenceClosures: column_closure
+using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, AllProcesses
 using Oceananigans
 using Oceananigans.Grids: ColumnEnsembleSize
 using Adapt: adapt
@@ -20,36 +21,38 @@ function column_grid(FT, N₁)
 end
 
 # `closure` is a closure, or a function of the grid that returns one
-function integrate_columns(FT, closure, N₁; steps = 10, Δt = 10)
+default_microphysics(FT) = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+
+function integrate_columns(FT, closure, N₁; steps = 10, Δt = 10, microphysics = default_microphysics(FT))
     grid = column_grid(FT, N₁)
     reference_state = ReferenceState(grid, ThermodynamicConstants(FT); base_pressure=101325, potential_temperature=290)
     closure = closure isa Function ? closure(grid) : closure
     boundary_conditions = (; ρθ = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(0.1))),
                              ρqᵗ = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(5e-5))))
-    model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), closure, boundary_conditions,
-                            microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium()))
+    model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), closure, boundary_conditions, microphysics)
     set!(model; θ = z -> 290 + 3e-3 * max(z - 800, 0), qᵗ = z -> 0.014 - 2e-6 * z, u = 5)
     set!(model.tracers.ρe, reference_state.density * FT(0.1))
     for _ in 1:steps
         time_step!(model, Δt)
     end
     fields = Oceananigans.prognostic_fields(model)
-    return map(name -> Array(interior(fields[name])), (:ρθ, :ρqᵉ, :ρu, :ρe))
+    names = (:ρe, :ρu, :ρθ, filter(name -> name ∉ (:ρe, :ρu, :ρv, :ρw, :ρθ), keys(fields))...)
+    return map(name -> Array(interior(fields[name])), names)
 end
 
-function test_per_column_equals_single_columns(FT, closures)
+function test_per_column_equals_single_columns(FT, closures; kw...)
     N₁ = length(closures)
     matrix = reshape(collect(closures), N₁, 1)
-    ensemble = integrate_columns(FT, grid -> per_column_closure(grid, matrix), N₁)
+    ensemble = integrate_columns(FT, grid -> per_column_closure(grid, matrix), N₁; kw...)
     tolerance = 10 * eps(FT)
     for (n, closure) in enumerate(closures)
-        single = integrate_columns(FT, closure, 1)
+        single = integrate_columns(FT, closure, 1; kw...)
         for (e, s) in zip(ensemble, single)
             @test isapprox(e[n, 1, :], s[1, 1, :]; rtol = tolerance)
         end
     end
     # The members differ: the test is not one of identical columns
-    @test ensemble[4][1, 1, :] != ensemble[4][N₁, 1, :]
+    @test ensemble[1][1, 1, :] != ensemble[1][N₁, 1, :]
 end
 
 tke_closure(FT, ℂⁱ, ℂᴰ⁰; kw...) =
@@ -87,6 +90,32 @@ tke_closure(FT, ℂⁱ, ℂᴰ⁰; kw...) =
         closure(ℂⁱ, ℂᴰ⁰) = tke_closure(FT, ℂⁱ, ℂᴰ⁰; subgrid_distribution = DoubleGaussian(FT),
                                        static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()))
         test_per_column_equals_single_columns(FT, [closure(1.2, 2.0), closure(1.8, 3.0)])
+    end
+
+    @testset "DoubleGaussian with VarianceStabilityFunctions and ℂᵐ, P3 with AllProcesses: per column equals single columns" begin
+        # The coefficients of the variance stability functions and the mixing time ℂᵐ, which the
+        # microphysics reads through ωᵐ, vary from column to column
+        stability(ℂᵛ₁⁰, ℂᵛ₃ᵐ) = VarianceStabilityFunctions(FT; ℂᵛ₁⁰, ℂᵛ₂⁰ = ℂᵛ₁⁰, ℂᵛ₃ᵐ)
+        closure(ℂᵛ₁⁰, ℂᵛ₃ᵐ, ℂᵐ) =
+            tke_closure(FT, 1.4, 2.0; static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                        subgrid_distribution = DoubleGaussian(FT; variance_stability_functions = stability(ℂᵛ₁⁰, ℂᵛ₃ᵐ), ℂᵐ))
+        closures = [closure(0.5, 0.9, 0.5), closure(0.9, 0.6, 2.0)]
+
+        grid = column_grid(FT, 2)
+        ensemble = per_column_closure(grid, reshape(closures, 2, 1))
+        vs = ensemble.subgrid_distribution.variance_stability_functions
+        @test vs.ℂᵛ₁⁰ isa PerColumnCoefficient
+        @test Array(vs.ℂᵛ₃ᵐ.values) == FT[0.9; 0.6;;]
+        @test Array(ensemble.subgrid_distribution.ℂᵐ.values) == FT[0.5; 2.0;;]
+        updated = reshape([closure(0.7, 0.3, 1.0), closure(1.1, -0.2, 3.0)], 2, 1)
+        set_per_column_coefficients!(ensemble, updated)
+        @test Array(vs.ℂᵛ₃ᵐ.values) == FT[0.3; -0.2;;]
+        @test Array(ensemble.subgrid_distribution.ℂᵐ.values) == FT[1.0; 3.0;;]
+        @test all(column_closure(i, 1, ensemble) === updated[i, 1] for i in 1:2)
+
+        condensation = SubgridCondensation(TurbulenceClosureStatistics(); processes = AllProcesses())
+        microphysics = PredictedParticlePropertiesMicrophysics(FT; condensation)
+        test_per_column_equals_single_columns(FT, closures; microphysics)
     end
 
     @testset "SimplifiedHigherOrderClosure: per column equals single columns" begin
