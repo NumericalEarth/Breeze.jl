@@ -890,11 +890,14 @@ area_sum(grid, field) = sum(Azᶜᶜᶜ(i, j, 1, grid) * field[i, j, 1] for i in
 grid_water(model) = sum(Azᶜᶜᶜ(i, j, 1, model.grid) * column_water(model)[i, j] for i in 1:size(model.grid, 1), j in 1:size(model.grid, 2))
 
 @testset "Moist HydrostaticDynamics on a latitude-longitude grid" begin
-    # The moist model of the base cannot be built on a `LatitudeLongitudeGrid`, with or without the
+    # On macOS the moist model cannot be built on a `LatitudeLongitudeGrid`, with or without the
     # mixing ("Model grid and tracers grid are not identical"; derivations/moist_closure/logs/probe04.log),
-    # so the energy closure with the areas of a sphere cannot be tested on one yet.
+    # so the energy closure with the areas of a sphere is tested on an unequal-area grid instead.
     grid = LatitudeLongitudeGrid(CPU(), Float64; size=(12, 8, 10), longitude=(-180, 180), latitude=(-60, 60), z=(0, 1))
-    @test_broken sphere_model(grid) isa AtmosphereModel
+    # Platform-dependent: the model builds on Linux x86-64 (GCP jobs 19745 and 20013, alone and in
+    # a batch, at c6024f37 and 67c3ecd1) and fails on macOS aarch64 (laptop, c6024f37) with the
+    # grid-identity error above, a comparison of grids whose coordinates are computed in floating point
+    @test sphere_model(grid) isa AtmosphereModel broken=Sys.isapple()
 end
 
 @testset "Mixing on a grid of unequal cell areas: energy with area weights" begin
@@ -1026,7 +1029,9 @@ end
                 (Azᶜᶠᶜ(i, j, k, rg) * v[i, j, k]^2 + Azᶜᶠᶜ(i, j+1, k, rg) * v[i, j+1, k]^2) / 2) / (2 * Azᶜᶜᶜ(i, j, k, rg))
         return P * Δt * sum((B[i, j, k] - B[i, j, k+1]) * 𝒦(k) for k in 1:size(rg, 3))
     end
-    expected = [[expected_kinetic(getregion(model, r), i, j) for i in 1:Nx, j in 1:Ny] for r in 1:2]
+    # Each panel's interior includes its overlap: the owned range of a region is that of its own grid
+    panel_size(r) = size(getregion(model, r).grid)
+    expected = [[expected_kinetic(getregion(model, r), i, j) for i in 1:panel_size(r)[1], j in 1:panel_size(r)[2]] for r in 1:2]
 
     Breeze.AtmosphereModels.precipitation_mass_change!(model.dynamics, model, Δt, surface_precipitation)
 
