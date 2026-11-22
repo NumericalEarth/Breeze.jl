@@ -62,11 +62,13 @@ E3SM `shoc.F90` and its published coefficients.
 - `stability_functions`: [`ColumnStabilityDamping`](@ref), SHOC's return-to-isotropy time scale damped by the
   stability of the column, which gives `Kᶜ = ℂᶜ τ e`, `Kᵘ = ℂᵘ τ e` and the dissipation `ε = 𝕊ᴰ e^{3/2} / ℓ`;
 - `subgrid_distribution`: SHOC's double Gaussian ([`shoc_distribution`](@ref Breeze.TurbulenceClosures.shoc_distribution));
-- `static_stability`: `SaturationWeightedStaticStability(CondensateFluxFraction(latent_static_stability = false))`:
-  the buoyancy production of the TKE is the conversion of the fluxes the closure applies with the latent part of
-  the subgrid condensation that the distribution implies (the counterpart of the buoyancy flux of the assumed PDF
-  of `shoc.F90`), while the mixing length and the stability functions read the stratification of a displacement
-  without phase change (`DryStaticStability`, the counterpart of the Brunt–Väisälä frequency of `shoc.F90`);
+- `static_stability`: `SaturationWeightedStaticStability(CondensateFluxFraction())`, the treatment of
+  [`TKEBasedTurbulenceClosure`](@ref): the static stability that the mixing length and the stability functions
+  read and the buoyancy production of the TKE both carry the latent part of the subgrid condensation that the
+  distribution implies (`N² = N²ᶜ + (b_qˡ - b_qᵛ) aʷ ∂z s̄`, the counterpart of the buoyancy flux of the assumed PDF
+  of `shoc.F90`). `shoc.F90` itself reads the stratification of its grid-mean virtual potential temperature, with the
+  mean liquid of its PDF, for the mixing length and the time scale;
+  `CondensateFluxFraction(latent_static_stability = false)` keeps the latent part in the buoyancy production only;
 
 The other keyword arguments are those of [`TKEBasedTurbulenceClosure`](@ref), and every component may be
 replaced. Replacing the mixing length, the stability functions or the subgrid distribution by a component of
@@ -119,7 +121,7 @@ function SimplifiedHigherOrderClosure(time_discretization = VerticallyImplicitTi
                                       FT = Oceananigans.defaults.FloatType;
                                       mixing_length = BlendedMixingLength(Float64),
                                       stability_functions = ColumnStabilityDamping(Float64),
-                                      static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(latent_static_stability = false)),
+                                      static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
                                       subgrid_distribution = shoc_distribution(Float64),
                                       kw...)
 
