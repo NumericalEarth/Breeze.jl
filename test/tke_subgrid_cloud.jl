@@ -9,7 +9,7 @@ using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation, Sub
 using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: representable_skewness
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment, linear_interp,
-                                                              FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
+                                                              ModelThermodynamicsSaturation,
                                                               shoc_saturation_thermodynamics
 
 using Oceananigans
@@ -293,10 +293,8 @@ end
 end
 
 @testset "The distribution with the saturation of the model" begin
-    # The distribution of this closure saturates with the model's thermodynamics only; the fixed
-    # constants of shoc.F90 are SimplifiedHigherOrderClosure's
+    # The distribution of this closure saturates with the model's thermodynamics
     @test DoubleGaussian().saturation isa ModelThermodynamicsSaturation
-    @test_throws ArgumentError DoubleGaussian(; saturation = FixedConstantsLiquidSaturation())
     for saturation in (ModelThermodynamicsSaturation(),)
         model = tke_p3_column(DoubleGaussian(; saturation); static_stability = fraction_stability)
         μ = model.microphysical_fields
