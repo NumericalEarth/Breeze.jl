@@ -763,6 +763,16 @@ function return_to_isotropy_time_scaleᶜᶜᶠ end
 
 const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ConstantStabilityFunctions}
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The fraction `ℂᴾ` of the shear production `P` (the kinetic energy the momentum fluxes take from the mean flow)
+that the TKE equation receives: one, unless `stability_functions` hold a shear production coefficient of their
+own. With the energetics of the applied fluxes (a subgrid distribution) the rest, `(1 - ℂᴾ) P`, heats the air,
+so that the energy budget still closes (`add_shear_production_heating!`).
+"""
+@inline shear_production_fraction(stability_functions) = 1
+
 # The three stability functions of the diffusivities at (Center, Center, Face). Stability functions that also read a
 # value of the column (`column_stability_field`) extend this method, which has the closure fields.
 @inline diffusivity_stability_functionsᶜᶜᶠ(i, j, k, grid, closure, velocities, e, closure_fields) =
@@ -1191,7 +1201,8 @@ centers — to the tendency of the `ρe` tracer. Under an explicit time discreti
     # shear in both slots: averaging with the start of the full step changes the RHS
     # integrated by Runge–Kutta and can make production negative when the shear reverses.
     u, v = velocities.u, velocities.v
-    P = tke_shear_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields, u, v)
+    P = shear_production_fraction(closure_ij.stability_functions) *
+        tke_shear_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields, u, v)
     B = tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields)
     B⁺ = max(0, B)
 
@@ -1217,6 +1228,7 @@ function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, clos
             model.velocities, model.tracers[TKE_NAME], ρ)
 
     add_dissipative_heating!(Gⁿ, closure_fields.subgrid_cloud, closure_fields, closure, model)
+    add_shear_production_heating!(Gⁿ, closure_stability_functions(closure), closure_fields.subgrid_cloud, closure_fields, closure, model)
     draw_latent_conversion!(Gⁿ, closure_fields.subgrid_cloud, model)
     add_heating_budget_flux_tendency!(Gⁿ, closure_fields.subgrid_cloud, heating_budget_flux(closure), model)
 

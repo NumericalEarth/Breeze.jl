@@ -42,8 +42,14 @@ is not included.
 | `ℂᴰ₃` | literal `0.19`   | 0.19   | dissipation, see `𝕊ᴰ` |
 | `ℂᴰ₄` | literal `0.51`   | 0.51   | dissipation, see `𝕊ᴰ` |
 | `ℂᴰ₅` | literal `0.7`    | 0.7    | dissipation, see `𝕊ᴰ` |
+| `ℂᴾ`  | `Ck_sh`          | 0.1    | fraction of the shear production `Kᵘ S²` that the TKE receives |
 
 The five `ℂᴰ` enter only through the product `𝕊ᴰ`, so a calibration can determine no more than one of them.
+
+`shoc.F90` produces TKE from shear at `Ck_sh Kᵘ S²` with `Ck_sh = 0.1`, while the momentum fluxes take
+`Kᵘ S²` from the kinetic energy of the mean flow. Here the TKE receives the fraction `ℂᴾ` of the kinetic energy
+the momentum fluxes (and the surface stress) take from the mean flow, and the rest, `(1 - ℂᴾ) Kᵘ S²`, heats the
+air, so that energy is conserved; `ℂᴾ = 1` gives the TKE all of it.
 
 $(TYPEDFIELDS)
 """
@@ -74,6 +80,8 @@ struct ColumnStabilityDamping{FT}
     maximum_time_scale :: FT
     "Pressure above which the static stability is integrated over the column, Pa (`troppres`)"
     stability_integration_pressure :: FT
+    "Fraction of the shear production that the TKE receives (`Ck_sh`); the rest heats the air"
+    ℂᴾ :: FT
 end
 
 """
@@ -85,7 +93,7 @@ ColumnStabilityDamping(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
     component_from_keywords(ColumnStabilityDamping, FT,
                             (ℂᵘ = 0.1, ℂᶜ = 0.1, ℂᵝ₁ = 0.001, ℂᵝ₂ = 0.08, ℂᵝ₃ = 2.65, ℂᵝ₄ = 0.02,
                              ℂᴰ₁ = 0.1, ℂᴰ₂ = 0.15, ℂᴰ₃ = 0.19, ℂᴰ₄ = 0.51, ℂᴰ₅ = 0.7,
-                             maximum_time_scale = 20000, stability_integration_pressure = 80000), kw)
+                             maximum_time_scale = 20000, stability_integration_pressure = 80000, ℂᴾ = 0.1), kw)
 
 Adapt.@adapt_structure ColumnStabilityDamping
 
@@ -98,7 +106,8 @@ function TurbulenceClosures.show_stability_function_lines(io::IO, sf::ColumnStab
     print(io, prefix, "├── ℂᵘ: ", prettysummary(sf.ℂᵘ), ", ℂᶜ: ", prettysummary(sf.ℂᶜ), '\n',
               prefix, "├── ℂᵝ₁: ", prettysummary(sf.ℂᵝ₁), ", ℂᵝ₂: ", prettysummary(sf.ℂᵝ₂),
                       ", ℂᵝ₃: ", prettysummary(sf.ℂᵝ₃), ", ℂᵝ₄: ", prettysummary(sf.ℂᵝ₄), '\n',
-              prefix, "└── 𝕊ᴰ: ", prettysummary(shoc_dissipation_coefficient(sf)))
+              prefix, "├── 𝕊ᴰ: ", prettysummary(shoc_dissipation_coefficient(sf)), '\n',
+              prefix, "└── ℂᴾ: ", prettysummary(sf.ℂᴾ))
     return nothing
 end
 
@@ -113,6 +122,8 @@ The dissipation coefficient `𝕊ᴰ = (ℂᴰ₃ + ℂᴰ₄) / ℂᴰ₅ × �
 end
 
 const ColumnStabilityDampingClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ColumnStabilityDamping}
+
+@inline TurbulenceClosures.shear_production_fraction(sf::ColumnStabilityDamping) = sf.ℂᴾ
 
 @inline TurbulenceClosures.dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ColumnStabilityDampingClosure, args...) =
     shoc_dissipation_coefficient(closure.stability_functions)

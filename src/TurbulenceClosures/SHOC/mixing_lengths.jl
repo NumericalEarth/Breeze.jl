@@ -86,14 +86,14 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The blended length at height `z` above the surface, with turbulent velocity `u = √e`, asymptotic length
 `l∞`, stable stratification `N²⁺ ≥ 0` and squared horizontal grid spacing `Δʰ²`. The sum of inverse squares
 is multiplied through by `A = ℂˡ₅ u κ z`, so that the length is `√(A / D) ℂˡ₂ / ℂˡ₁` with
-`D = 1 + κ z / l∞ + ℂˡ₃ ℂˡ₅ κ z N²⁺ / u + (ℂˡ₁ / ℂˡ₂)² A (1 / ℓᵐᵃˣ² + 1 / Δʰ²)`, finite and zero at `z = 0`.
+`D = 1 + κ z / l∞ + ℂˡ₃ ℂˡ₅ κ z N²⁺ / u + (ℂˡ₂ / ℂˡ₁)² A (1 / ℓᵐᵃˣ² + 1 / Δʰ²)`, finite and zero at `z = 0`.
 """
 @inline function blended_length(ml::BlendedMixingLength, z, u, l∞, N²⁺, Δʰ²)
     κz = ml.von_karman_constant * z
     A = ml.ℂˡ₅ * u * κz
     r = ml.ℂˡ₁ / ml.ℂˡ₂
     bounds = 1 / (ml.maximum_length * ml.maximum_length) + 1 / Δʰ²
-    D = 1 + κz / l∞ + ml.ℂˡ₃ * ml.ℂˡ₅ * κz * N²⁺ / u + r * r * A * bounds
+    D = 1 + κz / l∞ + ml.ℂˡ₃ * ml.ℂˡ₅ * κz * N²⁺ / u + A * bounds / (r * r)
     return sqrt(A / D) / r
 end
 

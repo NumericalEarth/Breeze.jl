@@ -597,6 +597,35 @@ function add_dissipative_heating!(Gⁿ, fields::SubgridCloudFields{<:AppliedFlux
 end
 
 #####
+##### The share of the shear production that the TKE does not receive
+#####
+##### With stability functions whose shear production coefficient ℂᴾ is below one (`shear_production_fraction`),
+##### the stage tendency of the TKE carries ℂᴾ P and the air is heated by (1 - ℂᴾ) P, ρ ĉᵖ Π ∂t θˡⁱ += ρ (1 - ℂᴾ) P,
+##### with the same stage P: the stage gives the TKE and the internal energy together the shear conversion P, so
+##### the corrections after the solves (which top up the TKE to what the solves converted) are unchanged and the
+##### energy budget closes as with ℂᴾ = 1.
+#####
+
+# Stability functions without a coefficient of their own give the TKE the whole shear production
+add_shear_production_heating!(Gⁿ, stability_functions, fields, closure_fields, closure, model) = nothing
+
+@kernel function _add_shear_production_heating!(Gρθ, grid, closure, cl, ρ)
+    i, j, k = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    ℂᴾ = shear_production_fraction(closure_ij.stability_functions)
+    @inbounds Gρθ[i, j, k] += ρ[i, j, k] * (1 - ℂᴾ) * cl.P[i, j, k] / cl.ĉᵖΠ[i, j, k] * !inactive_cell(i, j, k, grid)
+end
+
+function add_shear_production_heating!(Gⁿ, ::ColumnStabilityDamping, fields::SubgridCloudFields{<:AppliedFluxEnergetics},
+                                       closure_fields, closure, model)
+    grid = model.grid
+    name = AtmosphereModels.thermodynamic_density_name(model.formulation)
+    launch!(grid.architecture, grid, :xyz, _add_shear_production_heating!, Gⁿ[name], grid, closure, fields.cloud,
+            total_density(model.dynamics))
+    return nothing
+end
+
+#####
 ##### The latent correction of the static stability and of the buoyancy production
 #####
 ##### A displacement that condenses as it goes feels the saturated stratification N²ˢ; one
@@ -729,7 +758,8 @@ end
         cl.aᴺ[i, j, k] = ifelse(interior, aᴺ, zero(FT))
         cl.c_θ[i, j, k] = ifelse(interior, c_θ, zero(FT))
         cl.ΔN²ᴸ[i, j, k] = ifelse(interior, ΔN²ᴸ, zero(FT))
-        N²[i, j, k] = ifelse(interior, relax_stability(N²[i, j, k], N²ᵉ, ω), N²[i, j, k])
+        corrects = interior & closure_ij.static_stability.fraction.latent_static_stability
+        N²[i, j, k] = ifelse(corrects, relax_stability(N²[i, j, k], N²ᵉ, ω), N²[i, j, k])
     end
 end
 

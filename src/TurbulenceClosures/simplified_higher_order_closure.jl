@@ -62,11 +62,11 @@ E3SM `shoc.F90` and its published coefficients.
 - `stability_functions`: [`ColumnStabilityDamping`](@ref), SHOC's return-to-isotropy time scale damped by the
   stability of the column, which gives `Kᶜ = ℂᶜ τ e`, `Kᵘ = ℂᵘ τ e` and the dissipation `ε = 𝕊ᴰ e^{3/2} / ℓ`;
 - `subgrid_distribution`: SHOC's double Gaussian ([`shoc_distribution`](@ref Breeze.TurbulenceClosures.shoc_distribution));
-- `static_stability`: the static stability weighted by the condensate flux fraction of the distribution,
-  `SaturationWeightedStaticStability(CondensateFluxFraction())`, so that the buoyancy production of the TKE is
-  the conversion of the fluxes the closure applies with the latent part of the subgrid condensation that the
-  distribution implies;
-- `minimum_tke`: `mintke` of `shoc.F90`, `4 × 10⁻⁴` m² s⁻², the floor of `e` inside `√e`.
+- `static_stability`: `SaturationWeightedStaticStability(CondensateFluxFraction(latent_static_stability = false))`:
+  the buoyancy production of the TKE is the conversion of the fluxes the closure applies with the latent part of
+  the subgrid condensation that the distribution implies (the counterpart of the buoyancy flux of the assumed PDF
+  of `shoc.F90`), while the mixing length and the stability functions read the stratification of a displacement
+  without phase change (`DryStaticStability`, the counterpart of the Brunt–Väisälä frequency of `shoc.F90`);
 
 The other keyword arguments are those of [`TKEBasedTurbulenceClosure`](@ref), and every component may be
 replaced. Replacing the mixing length, the stability functions or the subgrid distribution by a component of
@@ -76,11 +76,13 @@ How this differs from the operator-split `shoc.F90` step:
 
 - the TKE, θˡⁱ, total water and momentum are stepped by the model's time stepper, with the vertical diffusion
   and the sinks of the TKE implicit in each stage;
-- the shear and buoyancy production of the TKE are the energy the applied fluxes take from the mean state
-  (the shear production coefficient is 1, where `shoc.F90` has `Ck_sh = 0.1`), and the work of the surface
-  stress enters the lowest level, where `shoc.F90` adds `u★³`; the dissipated energy heats the air;
+- the shear and buoyancy production of the TKE are the energy the applied fluxes take from the mean state: the
+  TKE receives the fraction `ℂᴾ = Ck_sh = 0.1` of the kinetic energy the momentum fluxes and the surface stress
+  take from the mean flow and the rest heats the air (`shoc.F90` produces `Ck_sh Kᵘ S²` and discards the rest),
+  and the surface stress acts through its work on the lowest level, where `shoc.F90` adds `u★³`; the dissipated
+  energy heats the air;
 - the surface fluxes are the model's boundary conditions;
-- the bounds of `shoc.F90` on the TKE (`mintke`, `maxtke`), the mixing length (`minlen`, `maxlen`) and the time
+- the bounds of `shoc.F90` on the TKE (`mintke = 4 × 10⁻⁴` m² s⁻², `maxtke`), the mixing length (`minlen`, `maxlen`) and the time
   scale (`maxiso`) are not imposed as clips: the TKE stays positive through its implicit sinks, and the upper
   bounds of the length and the time scale are sums of inverse squares;
 - the cold-surface fallback of the diffusivities and the boundary layer depth (a diagnostic of `shoc.F90`
@@ -99,13 +101,12 @@ function SimplifiedHigherOrderClosure(time_discretization = VerticallyImplicitTi
                                       FT = Oceananigans.defaults.FloatType;
                                       mixing_length = BlendedMixingLength(Float64),
                                       stability_functions = ColumnStabilityDamping(Float64),
-                                      static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                      static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(latent_static_stability = false)),
                                       subgrid_distribution = shoc_distribution(Float64),
-                                      minimum_tke = 4e-4,
                                       kw...)
 
     return TKEBasedTurbulenceClosure(time_discretization, FT; mixing_length, stability_functions, static_stability,
-                                     subgrid_distribution, minimum_tke, kw...)
+                                     subgrid_distribution, kw...)
 end
 
 SimplifiedHigherOrderClosure(FT::DataType; kw...) =

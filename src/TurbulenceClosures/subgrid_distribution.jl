@@ -553,16 +553,30 @@ depend on `N²`: a fixed point, solved by the closure's `solver` ([`SinglePass`]
 the distribution of the update exists, the static stability is `initial_stability`
 (`DryStaticStability()` by default).
 
+With `latent_static_stability = false` the latent part enters the buoyancy production of the TKE only: the
+static stability that the mixing length and the stability functions read stays `initial_stability`, the
+stratification of a displacement without phase change, as in `shoc.F90`, whose Brunt–Väisälä frequency is that
+of the virtual potential temperature while its buoyancy production is the buoyancy flux of its distribution.
+
 $(TYPEDFIELDS)
 """
 struct CondensateFluxFraction{S}
     "Static stability of the first evaluation of an update, before the distribution exists"
     initial_stability :: S
+    "Whether the static stability is the latent-corrected one (`true`), or the latent part enters only the buoyancy production (`false`)"
+    latent_static_stability :: Bool
 end
 
-CondensateFluxFraction() = CondensateFluxFraction(DryStaticStability())
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Base.show(io::IO, f::CondensateFluxFraction) = print(io, "CondensateFluxFraction(", summary(f.initial_stability), ")")
+Return a [`CondensateFluxFraction`](@ref).
+"""
+CondensateFluxFraction(initial_stability = DryStaticStability(); latent_static_stability = true) =
+    CondensateFluxFraction(initial_stability, latent_static_stability)
+
+Base.show(io::IO, f::CondensateFluxFraction) =
+    print(io, "CondensateFluxFraction(", summary(f.initial_stability), f.latent_static_stability ? "" : ", latent_static_stability = false", ")")
 
 const CondensateFluxFractionStability = SaturationWeightedStaticStability{<:CondensateFluxFraction}
 
