@@ -95,5 +95,6 @@ include("one_moment_helpers.jl")
 include("two_moment_microphysics.jl")
 include("two_moment_helpers.jl")
 include("hydrostatic_one_moment.jl")
+include("hydrostatic_mixed_phase_one_moment.jl")
 
 end # module BreezeCloudMicrophysicsExt

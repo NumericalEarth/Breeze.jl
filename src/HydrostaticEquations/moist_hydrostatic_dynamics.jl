@@ -642,8 +642,10 @@ Base.@propagate_inbounds function Base.getindex(r::MixingRatio, i, j, k)
     return ifelse(ρ == 0, zero(ρ), r.specific[i, j, k])
 end
 
-# The condensate of the supported schemes does not fall in the stages: rain sedimentation is
-# part of the column physics, once per time step, so no sedimentation velocity is added here.
+# Transport and forcing only. The condensate of a scheme that runs through the generic interface
+# falls in the stages too, with a flux of its own that `add_sedimentation_tendencies!` adds
+# afterwards (not with the transport velocity: the transport carries a mixing ratio with the mass
+# flux of continuity). The rain of the other schemes falls in their column physics, once per time step.
 @inline function AtmosphereModels.scalar_tendency(i, j, k, grid,
                                                   c,
                                                   id,
@@ -669,8 +671,10 @@ end
              + c_forcing(i, j, k, grid, clock, model_fields))
 end
 
-# The microphysics of a hydrostatic model acts once per time step, after the dynamics, and adds
-# nothing to the tendencies of the stages
+# The microphysical tendencies are not added where every `AtmosphereModel` adds them, after the
+# scalar tendencies: a time stepper that transports the scalars in its stages rebuilds those
+# tendencies afterwards (`leave_scalar_transport_to_stages!`). `compute_dynamics_tendency!` adds
+# them once that is done (`add_stage_microphysical_tendencies!`).
 AtmosphereModels.compute_microphysical_tendencies!(::MoistHydrostaticModel) = nothing
 
 #####
@@ -757,6 +761,154 @@ function AtmosphereModels.compute_dynamics_tendency!(model::MoistHydrostaticMode
     # scalars with the mass flux of its stages now takes it out of their tendencies.
     leave_scalar_transport_to_stages!(model.timestepper, model)
 
+    # The microphysics of the stages, on tendencies that now hold everything else
+    add_stage_microphysical_tendencies!(model.microphysics, model)
+
+    return nothing
+end
+
+#####
+##### Microphysics in the stages: sedimentation and the generic sources
+#####
+#
+# A scheme that runs through the generic microphysics interface (`requires_pressure_level_grid`)
+# acts in the stages, as on any dynamics: its sources are those of `compute_microphysical_tendencies!`,
+# per unit volume, which the stages of a pressure-level grid take as masses per unit area. The
+# sources move water between the prognostic densities of one cell and need no tendency of θ: the
+# enthalpy of a layer, ρ ĉᵖ Π θ, depends on its total water alone, whatever its phases
+# (plvd_logs/3c_1M_ENERGY_DERIVATION.txt).
+#
+# Sedimentation is built here from what the scheme declares (`model.sedimentation`: the fall
+# velocity at the lower face of its donor cell, the density that falls and its liquid fraction).
+# The coordinate mass of a layer is fixed through the stages, so the water F that crosses a face
+# changes the water of the two layers and nothing else; it carries the enthalpy of its phase at
+# the temperature of the layer it leaves, hˡ = cˡ T - ℒˡ₀ or hⁱ = cⁱ T - ℒⁱ₀. With ℋ = Π (ĉᵖ ρθ) and
+# ĉᵖ ρ = cᵖᵈ ρ + (cᵖᵛ - cᵖᵈ) ρqᵗ, the tendency of ρθ that changes the enthalpy of a layer by what the
+# water carries in and out of it, 𝒬⁺ - 𝒬⁻, is
+#
+#   Δz ∂ₜ(ρθ) = [𝒬⁺ - 𝒬⁻ - (cᵖᵛ - cᵖᵈ) Π θ (F⁺ - F⁻)] / (ĉᵖ Π) .
+
+# The enthalpy per unit mass of condensate with the liquid fraction `f` at the temperature `T`
+@inline function condensate_enthalpy(f, T, constants)
+    cˡ = constants.liquid.heat_capacity
+    cⁱ = constants.ice.heat_capacity
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
+    return f * (cˡ * T - ℒˡ₀) + (1 - f) * (cⁱ * T - ℒⁱ₀)
+end
+
+# The fall speed V of `condensate` out of cell `k` in m s⁻¹, positive downward, and its Courant
+# number over the forward Euler step `Δtᵉ` of the coming stage (`Δtᵉ = 0`: not known)
+@inline function sedimentation_speed(i, j, k, grid, condensate, Δtᵉ)
+    V = @inbounds max(0, - condensate.velocity[i, j, k])
+    return V, V * Δtᵉ / Δzᶜᶜᶜ(i, j, k, grid)
+end
+
+# The mass flux of `condensate` through the lower face of cell `k`, in kg m⁻² s⁻¹, positive
+# downward: donor cell, and no more over the forward Euler step `Δtᵉ` of the coming stage than the
+# cell holds (a limit on the rate out of one reservoir: what leaves the cell enters the next, or
+# the ground). Nothing falls through the model top, `k = Nz + 1`, and what is negative does not fall.
+@inline function sedimentation_mass_flux(i, j, k, grid, condensate, Δtᵉ)
+    Nz = size(grid, 3)
+    kᶜ = min(k, Nz)
+    V, courant = sedimentation_speed(i, j, kᶜ, grid, condensate, Δtᵉ)
+    ρq = @inbounds max(0, condensate.density[i, j, kᶜ])
+    limited = ifelse(courant > 1, V / courant, V)
+    return ifelse(k > Nz, zero(ρq), limited * ρq)
+end
+
+# Add the sedimentation of every condensate to the tendencies `G` of their densities at cell `k`,
+# and return the sums over them of the mass fluxes through the lower and upper faces of the cell,
+# (F⁻, F⁺), of the enthalpy that those carry, (𝒬⁻, 𝒬⁺), and the largest Courant number.
+@inline add_condensate_sedimentation!(i, j, k, grid, ::Tuple{}, ::Tuple{}, Δz, Δtᵉ, T, T⁺, constants) =
+    (zero(grid), zero(grid), zero(grid), zero(grid), zero(grid))
+
+@inline function add_condensate_sedimentation!(i, j, k, grid, G::Tuple, condensates::Tuple, Δz, Δtᵉ, T, T⁺, constants)
+    condensate = first(condensates)
+    F⁻ = sedimentation_mass_flux(i, j, k, grid, condensate, Δtᵉ)
+    F⁺ = sedimentation_mass_flux(i, j, k + 1, grid, condensate, Δtᵉ)
+    @inbounds first(G)[i, j, k] += (F⁺ - F⁻) / Δz
+
+    h⁻ = condensate_enthalpy(condensate.liquid_fraction, T, constants)
+    h⁺ = condensate_enthalpy(condensate.liquid_fraction, T⁺, constants)
+    _, courant = sedimentation_speed(i, j, k, grid, condensate, Δtᵉ)
+
+    ΣF⁻, ΣF⁺, Σ𝒬⁻, Σ𝒬⁺, largest = add_condensate_sedimentation!(i, j, k, grid, Base.tail(G), Base.tail(condensates),
+                                                                Δz, Δtᵉ, T, T⁺, constants)
+    return (ΣF⁻ + F⁻, ΣF⁺ + F⁺, Σ𝒬⁻ + F⁻ * h⁻, Σ𝒬⁺ + F⁺ * h⁺, max(largest, courant))
+end
+
+@kernel function _add_sedimentation_tendencies!(Gρθ, G, ledger, grid, condensates, ρ, ρqˣ, θ, Π, T, constants, Δtᵉ)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    Δcᵖ = constants.vapor.heat_capacity - cᵖᵈ
+
+    @inbounds begin
+        largest = zero(grid)
+
+        for k in 1:Nz
+            Δz = Δzᶜᶜᶜ(i, j, k, grid)
+            F⁻, F⁺, 𝒬⁻, 𝒬⁺, courant = add_condensate_sedimentation!(i, j, k, grid, G, condensates, Δz, Δtᵉ,
+                                                                     T[i, j, k], T[i, j, min(k + 1, Nz)], constants)
+
+            Πᵏ = Π[i, j, k]
+            ĉᵖ = cᵖᵈ + Δcᵖ * sum_at(i, j, k, ρqˣ) / ρ[i, j, k]
+            R = (𝒬⁺ - 𝒬⁻ - Δcᵖ * Πᵏ * θ[i, j, k] * (F⁺ - F⁻)) / (ĉᵖ * Πᵏ)
+            Gρθ[i, j, k] += R / Δz
+
+            largest = max(largest, courant)
+        end
+
+        ledger.maximum_sedimentation_courant[i, j, 1] = max(ledger.maximum_sedimentation_courant[i, j, 1], largest)
+    end
+end
+
+# The forward Euler step of the coming stage, for the limit of the sedimentation flux: zero while
+# it is not known (before the first time step), which leaves the flux as it is
+function sedimentation_euler_step(model)
+    Δtᵉ = AtmosphereModels.stage_time_step(model.timestepper, model.clock)
+    known = isfinite(Δtᵉ) && Δtᵉ > 0
+    return convert(eltype(model.grid), known ? Δtᵉ : zero(Δtᵉ))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Add the sedimentation of the condensate of `model`, an `AtmosphereModel` with moist
+`HydrostaticDynamics` on a pressure-level grid, to the tendencies of the densities that fall and of
+the potential temperature density. Nothing when nothing sediments.
+"""
+function add_sedimentation_tendencies!(model)
+    sedimentation = model.sedimentation
+    isempty(sedimentation) && return nothing
+
+    grid = model.grid
+    dynamics = model.dynamics
+    Gⁿ = model.timestepper.Gⁿ
+    G = map(name -> Gⁿ[name], keys(sedimentation))
+
+    launch!(grid.architecture, grid, :xy, _add_sedimentation_tendencies!,
+            Gⁿ.ρθ, G, dynamics.moisture.ledger, grid, values(sedimentation), dynamics.density, water_densities(model),
+            model.formulation.potential_temperature, dynamics.exner_function, model.temperature,
+            model.thermodynamic_constants, sedimentation_euler_step(model))
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Add the tendencies of `microphysics` to those of the stage of `model` that is being built: the
+sedimentation of its condensate, then its sources (`compute_microphysical_tendencies!`), whose
+sink budgets read every other tendency of the stage, the sedimentation included. Nothing for a
+scheme that does not run through the generic interface (see `requires_pressure_level_grid`),
+which acts in its own column physics once per time step.
+"""
+function add_stage_microphysical_tendencies!(microphysics, model)
+    requires_pressure_level_grid(microphysics) || return nothing
+    add_sedimentation_tendencies!(model)
+    AtmosphereModels.compute_microphysical_tendencies!(microphysics, model)
     return nothing
 end
 

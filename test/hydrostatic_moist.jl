@@ -683,7 +683,9 @@ end
     warm_adjustment = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
     @test_throws "has not been adapted" build(microphysics=warm_adjustment)
     @test_throws "has not been adapted" build(microphysics=OneMomentCloudMicrophysics())
-    @test_throws "has not been adapted" build(microphysics=OneMomentCloudMicrophysics(cloud_formation=SaturationAdjustment()))
+    # Mixed-phase one-moment microphysics runs through the generic interface, which reads Δz as a
+    # physical depth: it is rejected on this grid of labels, by name
+    @test_throws "requires a PressureLevelGrid" build(microphysics=OneMomentCloudMicrophysics(cloud_formation=SaturationAdjustment()))
     @test_throws ArgumentError build(microphysics=DCMIP2016KesslerMicrophysics())
 
     # Thermodynamics
