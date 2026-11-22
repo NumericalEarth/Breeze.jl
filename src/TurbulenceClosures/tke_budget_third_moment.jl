@@ -185,8 +185,12 @@ third_moment_passes(::TKEBudgetThirdMoment{N}) where N = N
 
 SimplifiedHigherOrderClosures.component_constructor(::Type{<:TKEBudgetThirdMoment{N}}) where N = TKEBudgetThirdMoment{N}
 
+# The scalars are adapted one by one and the location passes through unchanged, so that the adapted closure infers
+# (inside a kernel, `getclosure` adapts the closure of each column)
 Adapt.adapt_structure(to, tm::TKEBudgetThirdMoment{N}) where N =
-    TKEBudgetThirdMoment{N}(map(name -> adapt(to, getfield(tm, name)), fieldnames(typeof(tm)))...)
+    TKEBudgetThirdMoment{N}(adapt(to, tm.ℂʷᵉ), adapt(to, tm.ℂʷᵋ), adapt(to, tm.ℂʷᴸ), adapt(to, tm.ℂʷʳ), adapt(to, tm.ℂʷᵇ),
+                            adapt(to, tm.ℂʷˡ), adapt(to, tm.ℂʷᵍ), adapt(to, tm.ℂʷᴺ), adapt(to, tm.ℂʷᵀ),
+                            adapt(to, tm.stratification_damping_width), adapt(to, tm.ℂʷᵒ), tm.location)
 
 SimplifiedHigherOrderClosures.type_parameter_summary(tm::TKEBudgetThirdMoment{N, FT}) where {N, FT} = string("{", N, ", ", FT, "}")
 

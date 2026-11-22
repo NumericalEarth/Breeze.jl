@@ -169,3 +169,21 @@ tke_closure(FT, ℂⁱ, ℂᴰ⁰; kw...) =
         end
     end
 end
+
+# The closure of a column infers for either location of the third moment (a closure that does not infer cannot be
+# adapted inside a GPU kernel, where `getclosure` selects each column's)
+@testset "Per-column closures with the third moment at faces and at centers infer" begin
+    grid = RectilinearGrid(size=ColumnEnsembleSize(Nz=4, ensemble=(2, 1)), z=(0, 1000), topology=(Flat, Flat, Bounded))
+    for location in (Face(), Center())
+        closures = (TKEBasedTurbulenceClosure(subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(; location))),
+                    SimplifiedHigherOrderClosure(subgrid_distribution = Breeze.TurbulenceClosures.shoc_distribution(third_moment = AlgebraicThirdMoment(; location))))
+        for closure in closures
+            @test closure.subgrid_distribution.third_moment.location === location
+            @inferred Breeze.TurbulenceClosures.column_closure(1, 1, closure)
+            @inferred adapt(Array, closure)
+            per_column = per_column_closure(grid, [closure for _ in 1:2, _ in 1:1])
+            column = @inferred Breeze.TurbulenceClosures.column_closure(2, 1, per_column)
+            @test column.subgrid_distribution.third_moment.location === location
+        end
+    end
+end
