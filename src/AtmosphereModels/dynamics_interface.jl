@@ -654,8 +654,14 @@ instantaneous precipitation), passes the rates of that removal as `in_place_cond
 `surface_precipitation = nothing`: the water through the ground is then the column sum of the
 removal. At fixed density the removed mass is replaced by dry air at the same temperature, which
 a total-mass coordinate corrects for here.
+
+A dynamics whose stages move sedimenting condensate at fixed coordinate mass passes what its
+stages accumulated as `stage_fallout` (the water through every z-face, the enthalpy it carried and
+what the stages added to the thermodynamic variable, weighted as the stages are in the state at the
+end of the step), again with `surface_precipitation = nothing`: the water through the ground is
+that through the lowest face.
 """
-precipitation_mass_change!(dynamics, model, Δt, surface_precipitation; in_place_condensate=nothing) = nothing
+precipitation_mass_change!(dynamics, model, Δt, surface_precipitation; in_place_condensate=nothing, stage_fallout=nothing) = nothing
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

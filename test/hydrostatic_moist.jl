@@ -412,6 +412,99 @@ end
 end
 
 #####
+##### T4n: mixed-phase one-moment microphysics in the stages, on a PressureLevelGrid: rain and snow
+##### fall in every stage at fixed coordinate mass, and the end of the step takes the mass of what
+##### reached the ground and makes the enthalpy exact (plvd_logs/3c_1M_ENERGY_DERIVATION.txt)
+#####
+
+# Columns of a PressureLevelGrid that hold cloud, rain and snow, above freezing in the lowest few
+# hundred meters and below it aloft, with a wind. `columns = nothing` is a single column; a number
+# is a slice of that many identical columns, periodic in x, in which nothing moves along x.
+function mixed_phase_columns(; columns = nothing, Nz = 16, top_pressure = 2.5e4, p₀ = 1e5, kw...)
+    η = range(1, top_pressure / p₀, length = Nz + 1)
+    B = [max(0, (e - 0.4) / 0.6) for e in η]
+    A = [e * p₀ - b * p₀ for (e, b) in zip(η, B)]
+    A[1] = 0; B[1] = 1; B[end] = 0; A[end] = top_pressure
+    z = PressureLevelVerticalDiscretization(A, B)
+    grid = isnothing(columns) ?
+        RectilinearGrid(CPU(), Float64; size=Nz, x=0, y=0, z, topology=(Flat, Flat, Bounded)) :
+        RectilinearGrid(CPU(), Float64; size=(columns, Nz), x=(0, columns * 1e5), z, topology=(Periodic, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics = HydrostaticDynamics(), microphysics = mixed_phase_microphysics(),
+                            formulation = moist_formulation(), momentum_advection = VectorInvariant(), kw...)
+
+    height(coordinates...) = last(coordinates)
+    between(z, lower, upper) = lower < z < upper
+    rain(coordinates...) = between(height(coordinates...), 0, 2000) * 5e-4
+    snow(coordinates...) = between(height(coordinates...), 1000, 4000) * 5e-4
+    set!(model; pˢ = p₀, θ = (c...) -> 275 + 3e-3 * height(c...), u = (c...) -> 10 + 2e-3 * height(c...))
+    set!(model; qᵗ = (c...) -> 0.008 * exp(-height(c...) / 2500), qʳ = rain, qˢⁿ = snow)
+    return model
+end
+
+function mixed_phase_stage_budgets(model; steps, Δt)
+    constants = model.thermodynamic_constants
+    g = constants.gravitational_acceleration
+    ledger = model.dynamics.moisture.ledger
+    μ = model.microphysical_fields
+    waters = (model.moisture_density, μ.ρqʳ, μ.ρqˢⁿ)
+
+    water₀ = column_water(model)[1]
+    dry₀ = column_dry_mass(model)[1]
+    energy₀ = column_energy(model)[1] + column_kinetic_energy(model)
+    pˢ₀ = model.dynamics.surface_pressure[1, 1, 1]
+    ice₀ = maximum(μ.qⁱ)
+    lowest = map(minimum, waters)
+
+    for _ in 1:steps
+        time_step!(model, Δt)
+        lowest = map((least, ρq) -> min(least, minimum(ρq)), lowest, waters)
+    end
+
+    rain = ledger.surface_rain[1, 1, 1]
+    energy = column_energy(model)[1] + column_kinetic_energy(model)
+    return (; rain, ice₀, lowest, pˢ₀,
+              water_residual = (column_water(model)[1] - water₀ + rain) / water₀,
+              pressure_residual = (model.dynamics.surface_pressure[1, 1, 1] - pˢ₀ + g * rain) / pˢ₀,
+              dry_residual = (column_dry_mass(model)[1] - dry₀) / (pˢ₀ / g),
+              energy_residual = (energy - energy₀ + ledger.precipitation_energy[1, 1, 1]) / abs(energy₀),
+              control = (energy - energy₀) / abs(energy₀),
+              kinetic = ledger.precipitation_kinetic_energy[1, 1, 1],
+              courant = maximum(ledger.maximum_sedimentation_courant))
+end
+
+const mixed_phase_steppers = (
+    ("SSPRungeKutta3, one column", (; timestepper = :SSPRungeKutta3)),
+    ("convex GravityWaveMultirateInfinitesimalStep, identical columns",
+     (; columns = 8, timestepper = :GravityWaveMultirateInfinitesimalStep,
+        timestepper_kwargs = (; tableau = :ConvexLinearMIS3, inner_solver = VerletSubsteps(), moist_gravity_wave_operator = true))))
+
+@testset "T4n: mixed-phase one-moment microphysics in the stages, ledgers [$name]" for (name, kw) in mixed_phase_steppers
+    model = mixed_phase_columns(; kw...)
+    @test Breeze.HydrostaticEquations.requires_pressure_level_grid(model.microphysics)
+    @test :ρqʳ ∈ keys(model.sedimentation) && :ρqˢⁿ ∈ keys(model.sedimentation)
+
+    # Rain falls at up to ~8 m s⁻¹ through layers of ~400 m: the Courant number of a stage stays
+    # below one, so the fall speed is that of the scheme
+    budgets = mixed_phase_stage_budgets(model; steps = 60, Δt = 20)
+    @info "T4n [$name]: precipitation $(budgets.rain) kg m⁻²; residuals: water $(budgets.water_residual), " *
+          "pˢ $(budgets.pressure_residual), dry mass $(budgets.dry_residual), energy $(budgets.energy_residual); " *
+          "energy without the precipitation ledger $(budgets.control); kinetic $(budgets.kinetic) J m⁻²; " *
+          "lowest ρqᵉ, ρqʳ, ρqˢⁿ $(budgets.lowest); largest sedimentation Courant number $(budgets.courant)"
+
+    @test budgets.rain > 0
+    @test budgets.ice₀ > 0
+    @test budgets.courant < 1
+    @test abs(budgets.water_residual) ≤ ledger_relative
+    @test abs(budgets.pressure_residual) ≤ dry_mass_rounding(model)
+    @test abs(budgets.dry_residual) ≤ dry_mass_rounding(model)
+    @test abs(budgets.energy_residual) ≤ ledger_relative
+    @test abs(budgets.control) > precipitation_energy_control
+    @test budgets.kinetic > 0
+    @test all(budgets.lowest .≥ 0)
+    @test all(isfinite, interior(model.temperature))
+end
+
+#####
 ##### The expansion-work coefficient with ice: (θ / H) (Rᵐ T - κ H), H = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ
 #####
 

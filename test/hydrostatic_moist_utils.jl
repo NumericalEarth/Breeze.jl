@@ -36,6 +36,14 @@ warm_rain_microphysics(FT=Float64; kw...) =
                                                                           solver = SecantSolver(FT; abstol=1e-11, maxiter=50)),
                                kw...)
 
+# Mixed-phase one-moment microphysics with saturation adjustment, which runs on `HydrostaticDynamics`
+# through the generic microphysics interface, on a `PressureLevelGrid`. The adjustment is solved to
+# rounding for the same reason as above.
+mixed_phase_microphysics(FT=Float64; kw...) =
+    OneMomentCloudMicrophysics(FT; cloud_formation = SaturationAdjustment(FT; equilibrium = Breeze.Microphysics.MixedPhaseEquilibrium(FT),
+                                                                          solver = SecantSolver(FT; abstol=1e-11, maxiter=50)),
+                               kw...)
+
 # A single column of moist `HydrostaticDynamics` with the hybrid coefficients of a column state
 function moist_column_model(column; Φˢ=0, microphysics=warm_rain_microphysics(), timestepper=:SSPRungeKutta3)
     Nz = length(column.k)

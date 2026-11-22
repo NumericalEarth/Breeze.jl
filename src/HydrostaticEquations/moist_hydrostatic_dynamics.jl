@@ -46,13 +46,14 @@ mutable struct StateValidation
     interval :: Int
 end
 
-struct HydrostaticMoisture{T, I, S, D, E, L, C, V}
+struct HydrostaticMoisture{T, I, S, D, E, L, F, C, V}
     density_potential_temperature :: T  # θᵨ = ϑ θ at cell centers
     interface_pressure :: I             # total pressure pᶠ = A + B pˢ at z-faces
     total_surface_pressure :: S         # pˢ, the prognostic surface pressure itself
     total_density :: D                  # ρ, the layer mass of the coordinate itself
     column_enthalpy :: E                # scratch of the column physics: the enthalpy a layer is given
     ledger :: L                         # accumulated fluxes through the ground (two-dimensional)
+    fallout :: F                        # sedimentation of the stages of a time step (`stage_fallout`), or nothing
     column_physics :: C                 # ColumnPhysicsDispatch, or nothing inside kernels
     state_validation :: V               # StateValidation, or nothing inside kernels
 end
@@ -65,6 +66,7 @@ Adapt.adapt_structure(to, moisture::HydrostaticMoisture) =
                         adapt(to, moisture.total_density),
                         adapt(to, moisture.column_enthalpy),
                         adapt(to, moisture.ledger),
+                        adapt(to, moisture.fallout),
                         nothing,
                         nothing)
 
@@ -88,14 +90,30 @@ function precipitation_ledger(grid)
             maximum_sedimentation_courant = Field{Center, Center, Nothing}(grid)) # V Δt / (physical depth)
 end
 
+# What the sedimentation of the stages of one time step moves, with the weights of the stages in the
+# state at the end of the step (plvd_logs/3c_1M_ENERGY_DERIVATION.txt, section 5): the water through
+# every z-face and the enthalpy it carries, per unit area and time, and what the stages add to the
+# potential temperature of every layer, per unit area and time (K kg m⁻² s⁻¹). The tendencies of the
+# first stage of a step are built before the step before it is complete, so they have registers of
+# their own, from which the second stage starts the sums.
+function stage_fallout(grid)
+    return (water_flux = ZFaceField(grid),                              # kg m⁻² s⁻¹, positive downward
+            enthalpy_flux = ZFaceField(grid),                           # W m⁻²
+            potential_temperature_increment = CenterField(grid),        # K kg m⁻² s⁻¹
+            first_stage_water_flux = ZFaceField(grid),
+            first_stage_enthalpy_flux = ZFaceField(grid),
+            first_stage_potential_temperature_increment = CenterField(grid))
+end
+
 # The total surface pressure and the total density are those of the coordinate: the same fields
-function HydrostaticMoisture(grid, surface_pressure, density)
+function HydrostaticMoisture(grid, surface_pressure, density, fallout)
     return HydrostaticMoisture(CenterField(grid),
                                ZFaceField(grid),
                                surface_pressure,
                                density,
                                CenterField(grid),
                                precipitation_ledger(grid),
+                               fallout,
                                ColumnPhysicsDispatch(true),
                                StateValidation(1))
 end
@@ -131,6 +149,9 @@ apply_column_physics!(microphysics, model) = warm_rain_column_physics!(microphys
 
 with_moisture(dynamics, ::Nothing, grid) = dynamics
 
+# A scheme that runs through the generic interface acts in the stages, where its condensate falls
+moist_stage_fallout(microphysics, grid) = requires_pressure_level_grid(microphysics) ? stage_fallout(grid) : nothing
+
 with_moisture(dynamics, microphysics, grid) =
     HydrostaticDynamics(dynamics.pressure_coefficient,
                         dynamics.surface_pressure_coefficient,
@@ -146,7 +167,8 @@ with_moisture(dynamics, microphysics, grid) =
                         dynamics.vertical_diffusion,
                         dynamics.top_pressure,
                         dynamics.standard_pressure,
-                        HydrostaticMoisture(grid, dynamics.surface_pressure, dynamics.density),
+                        HydrostaticMoisture(grid, dynamics.surface_pressure, dynamics.density,
+                                            moist_stage_fallout(microphysics, grid)),
                         dynamics.height_coordinate)
 
 # A model with a microphysics scheme carries water, and its dynamics the diagnostics of the
@@ -191,7 +213,36 @@ requires_pressure_level_grid(microphysics) = false
 
 # The end of the time step, whatever the scheme and whoever applies its column physics: the state is
 # checked here, once, and not in each of the `update_state!`s of the step
-AtmosphereModels.end_of_microphysics_update!(::MoistHydrostaticDynamics, model) = validate_time_step_state(model)
+function AtmosphereModels.end_of_microphysics_update!(dynamics::MoistHydrostaticDynamics, model)
+    remove_stage_fallout!(dynamics.moisture.fallout, model)
+    validate_time_step_state(model)
+    return nothing
+end
+
+remove_stage_fallout!(::Nothing, model) = nothing
+
+# The water that the sedimentation of the stages took through the ground over the time step just
+# taken leaves the coordinate, with the enthalpy of every layer that sedimentation touched made exact
+function remove_stage_fallout!(fallout, model)
+    isempty(model.sedimentation) && return nothing
+    AtmosphereModels.precipitation_mass_change!(model.dynamics, model, model.clock.last_Δt, nothing; stage_fallout=fallout)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the weights with which the tendencies of each stage of `timestepper` enter the state at
+the end of a time step, as fractions of the time step: the state of a variable whose stages are
+recombined linearly changes by `Δt Σₛ bₛ Gₛ`. The tendencies of stage `s` are those built while
+`clock.stage == s`. Extended by the time steppers of `HydrostaticDynamics`.
+"""
+function stage_tendency_weights end
+
+# Whether `timestepper` advances the potential temperature density in substeps, as an increment per
+# unit volume that it converts to a mass per unit area with the depth of the start of its last stage
+# (`set_substepped_scalar_sum!`), rather than with the depth of the stage of each tendency
+substepped_potential_temperature(timestepper) = false
 
 # Diagnostic fields of a scheme that are densities per unit volume of the coordinate and must keep
 # their mass per unit area when a PressureLevelGrid re-diagnoses its density
@@ -838,7 +889,25 @@ end
     return (ΣF⁻ + F⁻, ΣF⁺ + F⁺, Σ𝒬⁻ + F⁻ * h⁻, Σ𝒬⁺ + F⁺ * h⁺, max(largest, courant))
 end
 
-@kernel function _add_sedimentation_tendencies!(Gρθ, G, ledger, grid, condensates, ρ, ρqˣ, θ, Π, T, constants, Δtᵉ)
+# One term of a sum over the stages of a time step, in its two registers. The first stage sets
+# `first_stage`; the second starts `total` from it; the later ones add to `total`. `scale` multiplies
+# the sum once the last term is in (one otherwise).
+@inline function accumulate_stage!(total, first_stage, i, j, k, term, stage, scale)
+    @inbounds begin
+        before = ifelse(stage == 1, zero(term), ifelse(stage == 2, first_stage[i, j, k], total[i, j, k]))
+        value = (before + term) * scale
+        first_stage[i, j, k] = ifelse(stage == 1, value, first_stage[i, j, k])
+        total[i, j, k] = ifelse(stage == 1, total[i, j, k], value)
+    end
+    return nothing
+end
+
+# `weight` is that of the stage being built in the state at the end of the step, `stage` its number.
+# With `per_volume` the increment of the potential temperature is summed per unit volume, and with
+# `to_layer_mass` (the last stage) the sum is multiplied by the depth of the layer (see
+# `substepped_potential_temperature`).
+@kernel function _add_sedimentation_tendencies!(Gρθ, G, fallout, ledger, grid, condensates, ρ, ρqˣ, θ, Π, T, constants, Δtᵉ,
+                                                weight, stage, per_volume, to_layer_mass)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
     cᵖᵈ = constants.dry_air.heat_capacity
@@ -856,6 +925,12 @@ end
             ĉᵖ = cᵖᵈ + Δcᵖ * sum_at(i, j, k, ρqˣ) / ρ[i, j, k]
             R = (𝒬⁺ - 𝒬⁻ - Δcᵖ * Πᵏ * θ[i, j, k] * (F⁺ - F⁻)) / (ĉᵖ * Πᵏ)
             Gρθ[i, j, k] += R / Δz
+
+            # What the stage moves through the lower face of the cell, and adds to its potential temperature
+            accumulate_stage!(fallout.water_flux, fallout.first_stage_water_flux, i, j, k, weight * F⁻, stage, one(Δz))
+            accumulate_stage!(fallout.enthalpy_flux, fallout.first_stage_enthalpy_flux, i, j, k, weight * 𝒬⁻, stage, one(Δz))
+            accumulate_stage!(fallout.potential_temperature_increment, fallout.first_stage_potential_temperature_increment,
+                              i, j, k, weight * ifelse(per_volume, R / Δz, R), stage, ifelse(to_layer_mass, Δz, one(Δz)))
 
             largest = max(largest, courant)
         end
@@ -885,13 +960,21 @@ function add_sedimentation_tendencies!(model)
 
     grid = model.grid
     dynamics = model.dynamics
-    Gⁿ = model.timestepper.Gⁿ
+    timestepper = model.timestepper
+    Gⁿ = timestepper.Gⁿ
     G = map(name -> Gⁿ[name], keys(sedimentation))
 
+    # The stage whose tendencies these are, and its weight in the state at the end of the step
+    weights = stage_tendency_weights(timestepper)
+    stage = model.clock.stage
+    weight = convert(eltype(grid), weights[stage])
+    per_volume = substepped_potential_temperature(timestepper)
+    to_layer_mass = per_volume && stage == length(weights)
+
     launch!(grid.architecture, grid, :xy, _add_sedimentation_tendencies!,
-            Gⁿ.ρθ, G, dynamics.moisture.ledger, grid, values(sedimentation), dynamics.density, water_densities(model),
-            model.formulation.potential_temperature, dynamics.exner_function, model.temperature,
-            model.thermodynamic_constants, sedimentation_euler_step(model))
+            Gⁿ.ρθ, G, dynamics.moisture.fallout, dynamics.moisture.ledger, grid, values(sedimentation), dynamics.density,
+            water_densities(model), model.formulation.potential_temperature, dynamics.exner_function, model.temperature,
+            model.thermodynamic_constants, sedimentation_euler_step(model), weight, stage, per_volume, to_layer_mass)
 
     return nothing
 end
@@ -1430,8 +1513,70 @@ end
     change_column_surface_pressure!(i, j, grid, - weight, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
 end
 
+# Water that the sedimentation of the stages took through the ground, at fixed coordinate mass
+# (plvd_logs/3c_1M_ENERGY_DERIVATION.txt). `fallout` holds, with the weights of the stages, the water
+# 𝒲 through every z-face, the enthalpy 𝒬 it carried, and what the stages added to ρθ Δz of every
+# layer, Θ. The enthalpy of a layer is bilinear in its water and its ρθ, so the stages changed it by
+# what the water carried only to first order in the time step. Each layer that sedimentation
+# touched is given its enthalpy exactly: that of the layer without the increments of sedimentation,
+#
+#   ℋ★ = Π [cᵖᵈ ρ + (cᵖᵛ - cᵖᵈ) (ρqᵗ - Δt (𝒲⁺ - 𝒲⁻) / Δz)] (ρθ - Δt Θ / Δz) / ρ ,
+#
+# plus what the water carried in and out, Δt (𝒬⁺ - 𝒬⁻) / Δz. The column then loses the weight of the
+# water through the ground (`change_column_surface_pressure!`), and its energy changes by
+#
+#   - Δt 𝒬₁ - Φˢ P Δt - P Δt Σ ΔB 𝒦 ,   P = 𝒲₁ ,
+#
+# which the ledger books: each phase leaves with its enthalpy at the temperature of the lowest
+# layer at the stage it fell, the mass with the geopotential of the ground, and the kinetic energy
+# of the held velocities.
+@kernel function _change_mass_by_stage_fallout!(ρθ, column_enthalpy, scaled, ρqˣ, ledger, grid, dynamics, velocities,
+                                                fallout, constants, κ, g, Δt)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    ρ = dynamics.density
+    Π = dynamics.exner_function
+    Φˢ = dynamics.surface_geopotential
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+
+    @inbounds begin
+        𝒲⁺ = zero(grid)  # nothing falls through the model top
+        𝒬⁺ = zero(grid)
+
+        for k in Nz:-1:1
+            Δz = Δzᶜᶜᶜ(i, j, k, grid)
+            𝒲⁻ = fallout.water_flux[i, j, k]
+            𝒬⁻ = fallout.enthalpy_flux[i, j, k]
+            Θ = fallout.potential_temperature_increment[i, j, k]
+
+            ρᵏ = ρ[i, j, k]
+            ρqᵗ★ = sum_at(i, j, k, ρqˣ) - Δt * (𝒲⁺ - 𝒲⁻) / Δz
+            θ★ = (ρθ[i, j, k] - Δt * Θ / Δz) / ρᵏ
+            ℋ★ = layer_enthalpy_density(ρᵏ, ρqᵗ★, Π[i, j, k], θ★, cᵖᵈ, cᵖᵛ)
+
+            touched = (𝒲⁺ != 0) | (𝒲⁻ != 0) | (Θ != 0)
+            column_enthalpy[i, j, k] = ifelse(touched, ℋ★ + Δt * (𝒬⁺ - 𝒬⁻) / Δz, zero(ℋ★))
+
+            𝒲⁺ = 𝒲⁻
+            𝒬⁺ = 𝒬⁻
+        end
+
+        # The lower face of the lowest layer is the ground
+        weight = g * Δt * 𝒲⁺
+        enthalpy_outflow = Δt * 𝒬⁺
+        kinetic_outflow = - surface_pressure_kinetic_energy(i, j, grid, - weight, dynamics.surface_pressure_coefficient,
+                                                            velocities.u, velocities.v, g)
+        ledger.surface_rain[i, j, 1] += weight / g
+        ledger.precipitation_energy[i, j, 1] += enthalpy_outflow + weight * Φˢ[i, j, 1] / g + kinetic_outflow
+        ledger.precipitation_kinetic_energy[i, j, 1] += kinetic_outflow
+    end
+
+    change_column_surface_pressure!(i, j, grid, - weight, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
+end
+
 function AtmosphereModels.precipitation_mass_change!(::MoistHydrostaticDynamics, model, Δt, surface_precipitation;
-                                                     in_place_condensate=nothing)
+                                                     in_place_condensate=nothing, stage_fallout=nothing)
     (isfinite(Δt) && Δt > 0) || return nothing
     grid = model.grid
     dynamics = model.dynamics
@@ -1443,7 +1588,11 @@ function AtmosphereModels.precipitation_mass_change!(::MoistHydrostaticDynamics,
     ledger = dynamics.moisture.ledger
     Δt = convert(eltype(grid), Δt)
 
-    if isnothing(in_place_condensate)
+    if !isnothing(stage_fallout)
+        @apply_regionally launch!(grid.architecture, grid, :xy, _change_mass_by_stage_fallout!,
+                                  ρθ, column_enthalpy, column_mass_densities(model), water_densities(model), ledger, grid,
+                                  dynamics, horizontal_velocities(model), stage_fallout, constants, κ, g, Δt)
+    elseif isnothing(in_place_condensate)
         @apply_regionally launch!(grid.architecture, grid, :xy, _change_mass_by_precipitation!,
                                   ρθ, column_enthalpy, column_mass_densities(model), water_densities(model), ledger, grid,
                                   dynamics, horizontal_velocities(model), surface_precipitation, constants, κ, g, Δt)

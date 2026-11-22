@@ -307,14 +307,42 @@ stage_increment(ts::GravityWaveMultirateInfinitesimalStep, j) = ts.stage_increme
 # species of every stage non-negative. This is not the substep interval `dᵢ Δt` of the gravity
 # waves. The time step is that of the last step, as the stepper keeps no current one; before the
 # first step it is not finite and the budgets fall back to their fixed timescales.
-# Moist `HydrostaticDynamics` builds no microphysical tendencies within the stages
-# (its column physics is applied once per step, see `time_step_column_physics!`), so nothing reads
-# this yet but a microphysics scheme that does.
+# A scheme that runs through the generic interface on moist `HydrostaticDynamics` reads this, for
+# its sink budgets and for the limit of its sedimentation flux.
 @inline function AtmosphereModels.stage_time_step(ts::GravityWaveMultirateInfinitesimalStep, clock)
     Δt = clock.last_Δt
     C = ts.tableau.strong_stability_coefficient
     return ifelse(C > 0, Δt / C, Δt)
 end
+
+# The weights of the stage tendencies in the state at the end of a time step. A Shu-Osher stage
+# u⁽ᵐ⁾ = (1 - α) u⁰ + α [u⁽ᵐ⁻¹⁾ + Δt G] carries the tendencies of the stages before it with the weight α.
+HydrostaticEquations.stage_tendency_weights(ts::SSPRungeKutta3) = (ts.α³ * ts.α² * ts.α¹, ts.α³ * ts.α², ts.α³)
+
+# A variable without a fast tendency takes ΔYᵢ = Σₗ (αᵢₗ + γᵢₗ) ΔYₗ + Δt Σⱼ βᵢⱼ Sⱼ over the stages that the
+# storage of the coefficient set reads (the convex scalar stages are the same recursion), so the
+# weight of Sⱼ in ΔYᵢ is bᵢⱼ = βᵢⱼ + Σₗ (αᵢₗ + γᵢₗ) bₗⱼ, and the state at the end of the step is Uⁿ + ΔYₛ.
+function HydrostaticEquations.stage_tendency_weights(ts::GravityWaveMultirateInfinitesimalStep)
+    (; α, β, γ) = ts.tableau
+    storage = ts.storage
+    stages = number_of_stages(ts.tableau)
+    b = zeros(eltype(β), stages, stages)
+
+    for i in 1:stages
+        for j in tendency_stages(storage, i)
+            b[i, j] += β[i, j]
+        end
+
+        for l in increment_stages(storage, i), j in 1:l
+            b[i, j] += (α[i, l] + γ[i, l]) * b[l, j]
+        end
+    end
+
+    return b[stages, :]
+end
+
+# The substeps advance ρθ as an increment per unit volume (`set_substepped_scalar_sum!`)
+HydrostaticEquations.substepped_potential_temperature(::GravityWaveMultirateInfinitesimalStep) = true
 
 # What the substeps of a stage move through the seam of a Yin-Yang grid
 HydrostaticEquations.stage_seam_budgets(timestepper::GravityWaveMultirateInfinitesimalStep, model) =
