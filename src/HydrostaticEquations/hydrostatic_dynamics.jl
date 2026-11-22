@@ -237,6 +237,19 @@ coordinate_surface_pressure(grid::PressureLevelGrid) = Field{Center, Center, Not
 coordinate_density(grid) = CenterField(grid)
 coordinate_density(grid::PressureLevelGrid) = CenterField(grid; data = grid.z.density)
 
+# On a multi-region grid every region has its own coordinate: the fields of the dynamics are built on
+# the arrays of the grid of each region, so that the metrics of every region are those of its state.
+# Their halos across the seams are filled as those of any field of the grid, which fills the halos
+# of the arrays of the grids with them.
+grid_surface_pressure(grid) = grid.z.surface_pressure
+grid_density(grid) = grid.z.density
+
+coordinate_surface_pressure(grid::MultiRegionPressureLevelGrid) =
+    Field{Center, Center, Nothing}(grid; data = construct_regionally(grid_surface_pressure, grid))
+
+coordinate_density(grid::MultiRegionPressureLevelGrid) =
+    CenterField(grid; data = construct_regionally(grid_density, grid))
+
 function validate_hybrid_coefficients(grid, A, B, standard_pressure)
     Nz = size(grid, 3)
 

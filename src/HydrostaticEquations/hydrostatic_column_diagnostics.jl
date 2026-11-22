@@ -375,8 +375,10 @@ function rediagnose_layer_density!(grid::PressureLevelGrid, model, θᵨ, extra_
     g = constants.gravitational_acceleration
     densities = (hydrostatic_scalar_densities(model)..., extra_densities...)
 
-    launch!(grid.architecture, grid, :xyz, _rediagnose_layer_density!,
-            dynamics.density, grid, densities, θᵨ, dynamics.interface_exner_function, cᵖᵈ, g)
+    # Region by region on a multi-region grid, each with the pressure thickness of its own grid
+    arch = grid.architecture
+    @apply_regionally launch!(arch, grid, :xyz, _rediagnose_layer_density!,
+                              dynamics.density, grid, densities, θᵨ, dynamics.interface_exner_function, cᵖᵈ, g)
 
     fill_halo_regions!(dynamics.density)
     foreach(fill_halo_regions!, densities)
@@ -415,6 +417,8 @@ struct CoordinateMassFlux{FT, W, M} <: AbstractArray{FT, 3}
 
     CoordinateMassFlux(w::W, ρw::M) where {W, M} = new{eltype(w), W, M}(w, ρw)
 end
+
+@regional CoordinateMassFlux
 
 Base.size(W::CoordinateMassFlux) = size(W.velocity)
 Base.@propagate_inbounds Base.getindex(W::CoordinateMassFlux, i, j, k) = W.velocity[i, j, k]

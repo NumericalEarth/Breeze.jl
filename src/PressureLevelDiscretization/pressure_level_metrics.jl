@@ -166,3 +166,9 @@ function store_previous_surface_pressure!(grid::PLG)
     copyto!(parent(grid.z.previous_surface_pressure), parent(grid.z.surface_pressure))
     return nothing
 end
+
+# Every region has its own surface pressures (the halos, filled across the seams, are copied with them)
+function store_previous_surface_pressure!(grid::MultiRegionPressureLevelGrid)
+    @apply_regionally store_previous_surface_pressure!(grid)
+    return nothing
+end

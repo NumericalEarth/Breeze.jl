@@ -75,6 +75,27 @@ Any `AbstractUnderlyingGrid` whose vertical coordinate is a
 """
 const PressureLevelGrid = AbstractUnderlyingGrid{<:Any, <:Any, <:Any, <:Bounded, <:PLVD}
 
+"""
+    MultiRegionPressureLevelGrid
+
+A `MultiRegionGrid` (such as a `YinYangGrid`) whose regions are [`PressureLevelGrid`](@ref)s. It is
+itself a `PressureLevelGrid` by its type, but it holds no coordinate of its own: every region has
+its own surface pressure, previous surface pressure and density, and `grid.z` is that of the first
+region alone. Anything that reads or writes the state of the coordinate outside a kernel must
+therefore act region by region (`@apply_regionally`, `construct_regionally`), and has a method for
+this alias that does.
+
+TODO (upstream Oceananigans): `Base.getproperty(::MultiRegionGrid, name)` forwards to the first
+region, so `grid.z.surface_pressure` on a multi-region grid is silently the array of one region,
+and `Field(grid; data = that_array)` is accepted and shares it among all regions
+(`validate_field_data` checks its size region by region, not that it is a `MultiRegionObject`).
+A vertical discretization that carries state (this one, and `MutableVerticalDiscretization` on a
+multi-region grid) needs Oceananigans to either reject both or provide the regional accessors that
+this file and its callers write by hand: a `MultiRegionObject` of the regional coordinate arrays,
+and a regional `store_previous_surface_pressure!`-like update.
+"""
+const MultiRegionPressureLevelGrid = MultiRegionGrid{<:Any, <:Any, <:Any, <:Bounded, <:PLVD}
+
 Grids.coordinate_summary(::Bounded, z::PLVD, name) = "hybrid sigma-pressure"
 
 function Grids.validate_dimension_specification(T, ξ::PLVD, dir, N, FT)

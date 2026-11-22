@@ -51,6 +51,12 @@ function store_initial_layer_masses!(grid::PressureLevelGrid, U⁰, names)
     return nothing
 end
 
+# On a multi-region grid, region by region: every region has its own surface pressure and density
+function store_initial_layer_masses!(grid::MultiRegionPressureLevelGrid, U⁰, names)
+    @apply_regionally store_initial_layer_masses!(grid, U⁰, names)
+    return nothing
+end
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -65,6 +71,11 @@ function convert_tendencies_to_layer_mass!(grid::PressureLevelGrid, G, names)
     for name in names
         launch!(grid.architecture, grid, :xyz, _convert_tendency_to_layer_mass!, G[name], grid)
     end
+    return nothing
+end
+
+function convert_tendencies_to_layer_mass!(grid::MultiRegionPressureLevelGrid, G, names)
+    @apply_regionally convert_tendencies_to_layer_mass!(grid, G, names)
     return nothing
 end
 
@@ -119,6 +130,11 @@ function set_scalar_sum!(grid::PressureLevelGrid, ρc, U⁰, δ)
     return nothing
 end
 
+function set_scalar_sum!(grid::MultiRegionPressureLevelGrid, ρc, U⁰, δ)
+    @apply_regionally set_scalar_sum!(grid, ρc, U⁰, δ)
+    return nothing
+end
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -136,5 +152,10 @@ set_substepped_scalar_sum!(grid, ρc, U⁰, δ) = set_sum!(ρc, U⁰, δ)
 
 function set_substepped_scalar_sum!(grid::PressureLevelGrid, ρc, U⁰, δ)
     launch!(grid.architecture, grid, :xyz, _set_from_layer_mass_increment!, ρc, grid, U⁰, δ)
+    return nothing
+end
+
+function set_substepped_scalar_sum!(grid::MultiRegionPressureLevelGrid, ρc, U⁰, δ)
+    @apply_regionally set_substepped_scalar_sum!(grid, ρc, U⁰, δ)
     return nothing
 end

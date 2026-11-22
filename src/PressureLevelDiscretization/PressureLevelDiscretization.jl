@@ -26,6 +26,7 @@ Public API:
   - [`PressureLevelVerticalDiscretization`](@ref) — pass as the `z` argument to
     `RectilinearGrid` / `LatitudeLongitudeGrid` (and, through its panels, to a `YinYangGrid`).
   - [`PressureLevelGrid`](@ref) — the alias of grids with this vertical discretization.
+  - [`MultiRegionPressureLevelGrid`](@ref) — the alias of multi-region grids whose regions have it.
   - [`layer_pressure_thickness`](@ref), [`interface_pressure`](@ref) — the pressure metrics.
 """
 module PressureLevelDiscretization
@@ -37,6 +38,8 @@ using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using Oceananigans: Oceananigans, Center, Face
 using Oceananigans.Architectures: CPU, on_architecture
 using Oceananigans.Grids: Grids, AbstractVerticalCoordinate, AbstractUnderlyingGrid, Bounded, new_data
+using Oceananigans.MultiRegion: MultiRegionGrid
+using Oceananigans.Utils: @apply_regionally
 using Oceananigans.Operators: Operators
 using OffsetArrays: OffsetArray
 

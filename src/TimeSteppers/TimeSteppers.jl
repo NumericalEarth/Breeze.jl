@@ -32,7 +32,7 @@ using Breeze.Utils: @regional
 using Breeze.AtmosphereModels: kernel_time_step, copy_parent!
 using Breeze.RoundingTreatments: RoundToNearest, materialize_rounding, rounded_add, rounding_key
 using Breeze.AtmosphereModels: prognostic_momentum_field_names, prognostic_dynamics_field_names
-using Breeze.PressureLevelDiscretization: PressureLevelGrid, scalar_layer_mass, layer_mass_tendency,
+using Breeze.PressureLevelDiscretization: PressureLevelGrid, MultiRegionPressureLevelGrid, scalar_layer_mass, layer_mass_tendency,
                                           scalar_density_from_layer_mass, store_previous_surface_pressure!
 
 """
