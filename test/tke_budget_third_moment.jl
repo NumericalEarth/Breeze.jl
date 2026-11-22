@@ -195,15 +195,19 @@ end
     aᶜ, Bˡ = column(cl₀.aᶜ), column(cl₀.Bˡ)
     partly_cloudy = findall(k -> 0.01 < aᶜ[k] < 0.99 && Bˡ[k] > 0, eachindex(aᶜ))
     @test length(partly_cloudy) >= 3
+    # w′³ᵇ lives at the faces: the source of the two centers next to the face, averaged, times ℓ of the face
     ℓᵐ = Array(interior(unskewed.closure_fields.ℓᵐ))[1, 1, :]
-    ℓ = (ℓᵐ[1:end-1] .+ ℓᵐ[2:end]) ./ 2
-    expected = ℂʷˡ .* ℓ .* (1 .- aᶜ) .* max.(Bˡ, 0)
+    L = (1 .- aᶜ) .* max.(Bˡ, 0)
+    Nz = length(aᶜ)
+    expected = [k == 1 || k == Nz + 1 ? 0.0 : ℂʷˡ * ℓᵐ[k] * (L[k] + L[k-1]) / 2 for k in 1:Nz+1]
     w′³ᵇ = column(cl.w′³ᵇ)
     @test w′³ᵇ ≈ expected rtol = 1e-10
     @test all(w′³ᵇ .>= 0)
-    @test all(w′³ᵇ[partly_cloudy] .> 0)
+    @test all(k -> w′³ᵇ[k] > 0 && w′³ᵇ[k+1] > 0, partly_cloudy)
     @test count(Bˡ .<= 0) >= 3
-    @test all(w′³ᵇ[Bˡ .<= 0] .== 0) # no upward flux of liquid, no latent source
+    no_source = [k for k in 2:Nz if Bˡ[k] <= 0 && Bˡ[k-1] <= 0]
+    @test !isempty(no_source)
+    @test all(w′³ᵇ[no_source] .== 0) # no upward flux of liquid, no latent source
     # The skewness of the distribution the stage uses is positive in the partly cloudy layer and inside the bound
     Sk = column(cl.w′³) ./ column(cl.w′²) .^ 1.5
     @test all(Sk[partly_cloudy] .> 0)
@@ -217,7 +221,9 @@ end
     clᵒ = overcast.closure_fields.subgrid_cloud.cloud
     saturated = findall(>(1 - 1e-9), column(clᵒ.aᶜ))
     @test length(saturated) >= 3
-    @test maximum(abs, column(clᵒ.w′³ᵇ)[saturated]) <= 1e-8 * maximum(w′³ᵇ)
+    saturated_faces = [k for k in saturated if k - 1 ∈ saturated] # faces between two saturated centers
+    @test !isempty(saturated_faces)
+    @test maximum(abs, column(clᵒ.w′³ᵇ)[saturated_faces]) <= 1e-8 * maximum(w′³ᵇ)
 end
 
 @testset "TKEBudgetThirdMoment: the closure fields are a function of the prognostic state (passes = $passes)" for passes in (1, 2)

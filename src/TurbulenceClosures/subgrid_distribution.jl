@@ -639,7 +639,8 @@ end
 
 function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names, heating_budget_flux = nothing)
     energetics = AppliedFluxEnergetics(solver)
-    moments = (τ = ZFaceField(grid), w′³ = ZFaceField(grid), θˡⁱ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡⁱ′qᵗ′ = ZFaceField(grid),
+    moments = (τ = ZFaceField(grid), third_moment_location_fields(grid, third_moment_location(distribution.third_moment))...,
+               θˡⁱ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡⁱ′qᵗ′ = ZFaceField(grid),
                w′θˡⁱ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid),
                scalar_variance_transport_fields(grid, distribution.variance_transport)...)
     cloud = (w′² = CenterField(grid), w′³ = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
@@ -736,9 +737,9 @@ end
 @inline subgrid_third_moment(::Nothing, d, c, args...) = zero(eltype(args[1]))
 @inline subgrid_third_moment(tm, d, c, args...) = third_moment(tm, d.stratification_number_bound, c, args...)
 
-# The third moment at the face k before its limiter: from the local arguments of the algebraic diagnosis, or from
-# fields stored at the face (`TKEBudgetThirdMoment`, tke_budget_third_moment.jl)
-@inline face_third_moment_diagnosis(tm, i, j, k, d, cl, c³, algebraic_arguments) =
+# The third moment at the face or the center k before its limiter: from the local arguments of the algebraic diagnosis,
+# or from fields stored at that location (`TKEBudgetThirdMoment`, tke_budget_third_moment.jl)
+@inline third_moment_diagnosis(tm, i, j, k, d, cl, c³, algebraic_arguments) =
     subgrid_third_moment(tm, d, c³, algebraic_arguments...)
 
 # Raise θˡⁱ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
@@ -778,8 +779,8 @@ end
 # the mixing length are those of the face; w′² and θˡⁱ are interpolated to it from the centers k - 1 and k; the
 # gradients of center quantities (w′², e) are compact across the face, over the distance of the two centers, and
 # those of face quantities (θˡⁱ′², w′θˡⁱ′) are taken across the faces k - 1 and k + 1, over the thicknesses of the
-# two cells between them. The bound of the skewness uses w′² at the face. `c³` carries the gravitational
-# acceleration.
+# two cells between them. It is returned before its limiter: the skewness is a ratio formed at the centers.
+# `c³` carries the gravitational acceleration.
 @inline function face_third_moment(i, j, k, grid, d, closure, closure_fields, m, cl, c³, θ, e)
     FT = grid_float_type(grid)
     c = d.constants
@@ -805,15 +806,28 @@ end
                                cl.w′²[i, j, k] - cl.w′²[i, j, k-1],
                                max(e[i, j, k], eᵐⁱⁿ) - max(e[i, j, k-1], eᵐⁱⁿ),
                                m.w′θˡⁱ′[i, j, k])
-        w′³ = face_third_moment_diagnosis(d.third_moment, i, j, k, d, cl, c³, algebraic_arguments)
+        w′³ = third_moment_diagnosis(d.third_moment, i, j, k, d, cl, c³, algebraic_arguments)
     end
-    return limit_third_moment(d.skewness, cp, w′², w′³)
+    return w′³
 end
 
-# w′³ at the faces (zero at the bottom and the top), then interpolated linearly to the centers, where the PDF forms
-# the skewness, as `shoc.F90` interpolates its interface w′³ to the levels. Diagnosing w′³ at the centers instead
-# needs the gradients of the center quantities w′² and e across two cells, which decouples odd and even levels.
-@inline function third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+# Where the third moment is diagnosed (`Face()` or `Center()`): the `location` of the third-moment component, the faces
+# without one
+third_moment_location(tm) = tm.location
+third_moment_location(::Nothing) = Face()
+
+# The face field of w′³ of a third moment diagnosed at the faces; the centers hold w′³ in `cloud.w′³` either way
+third_moment_location_fields(grid, ::Face) = (w′³ = ZFaceField(grid),)
+third_moment_location_fields(grid, ::Center) = NamedTuple()
+
+# `Face()`: w′³ at the faces (zero at the bottom and the top), then interpolated linearly to the centers, as `shoc.F90`
+# interpolates its interface w′³ to the levels, and limited there, where the PDF forms the skewness w′³ / (w′²)^{3/2}
+# with the center w′² (`shoc.F90` limits at the interfaces; the bound of a ratio formed at the centers holds there). `Center()`: w′³ at the centers,
+# which needs the gradients of the center quantities w′² and e across two cells.
+@inline third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e) =
+    third_moment_profile!(third_moment_location(d.third_moment), m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+
+@inline function third_moment_profile!(::Face, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
     ccc = (Center(), Center(), Center())
@@ -828,8 +842,61 @@ end
             zᶜ = znode(i, j, k, grid, ccc...)
             zˡ = znode(i, j, k, grid, ccf...)
             zᵘ = znode(i, j, k+1, grid, ccf...)
-            cl.w′³[i, j, k] = linear_interp(zᵘ, zˡ, m.w′³[i, j, k+1], m.w′³[i, j, k], zᶜ)
+            w′³ = linear_interp(zᵘ, zˡ, m.w′³[i, j, k+1], m.w′³[i, j, k], zᶜ)
+            cl.w′³[i, j, k] = limit_third_moment(d.skewness, d.clipping, cl.w′²[i, j, k], w′³)
         end
+    end
+    return nothing
+end
+
+# The third moment diagnosed at the center k (`Center()`), where the PDF forms the skewness w′³ / (w′²)^{3/2}. The second moments of the faces
+# k and k+1 are differenced across the cell (compact), w′² and e across the neighbouring centers, and the
+# coefficients are the averages of the two faces. `lower` and `upper` are (τ, ℓ, N², θˡⁱ′², w′θˡⁱ′) at the
+# faces k and k+1; `w′θˡⁱ′ᶜ` is the flux interpolated to the center; `c³` carries the gravitational acceleration.
+@inline function center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡⁱ′ᶜ, lower, upper)
+    FT = grid_float_type(grid)
+    Nz = size(grid, 3)
+    c = d.constants
+    cp = d.clipping
+    eᵐⁱⁿ = closure.minimum_tke
+    ccc = (Center(), Center(), Center())
+    τˡ, ℓˡ, N²ˡ, θˡⁱ′²ˡ, w′θˡⁱ′ˡ = lower
+    τᵘ, ℓᵘ, N²ᵘ, θˡⁱ′²ᵘ, w′θˡⁱ′ᵘ = upper
+    @inbounds begin
+        kᵘ = min(k + 1, Nz)
+        kˡ = max(k - 1, 1)
+        ℓ = (ℓˡ + ℓᵘ) / 2
+        N² = (N²ˡ + N²ᵘ) / 2
+        u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
+        τ³ = third_moment_time_scale(d.time_scale, (τˡ + τᵘ) / 2, ℓ, u, N²)
+        τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
+        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * c.mintke
+        w′² = cl.w′²[i, j, k]
+        Δzʷ = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
+        thedz = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
+        algebraic_arguments = (τ³, N², clip_below(cp, w′², w′²ᵐⁱⁿ, c.mintke), θ[i, j, k],
+                               thedz, 1 / Δzᶜᶜᶜ(i, j, k, grid),
+                               θˡⁱ′²ᵘ - θˡⁱ′²ˡ,
+                               w′θˡⁱ′ᵘ - w′θˡⁱ′ˡ,
+                               cl.w′²[i, j, kᵘ] - cl.w′²[i, j, kˡ],
+                               max(e[i, j, kᵘ], eᵐⁱⁿ) - max(e[i, j, kˡ], eᵐⁱⁿ),
+                               w′θˡⁱ′ᶜ)
+        w′³ = third_moment_diagnosis(d.third_moment, i, j, k, d, cl, c³, algebraic_arguments)
+    end
+    return limit_third_moment(d.skewness, cp, w′², w′³)
+end
+
+@inline function third_moment_profile!(::Center, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+    ccc = (Center(), Center(), Center())
+    ccf = (Center(), Center(), Face())
+    @inbounds for k in 1:size(grid, 3)
+        zᶜ = znode(i, j, k, grid, ccc...)
+        zˡ = znode(i, j, k, grid, ccf...)
+        zᵘ = znode(i, j, k+1, grid, ccf...)
+        w′θˡⁱ′ᶜ = linear_interp(zᵘ, zˡ, m.w′θˡⁱ′[i, j, k+1], m.w′θˡⁱ′[i, j, k], zᶜ)
+        lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k])
+        upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡⁱ′²[i, j, k+1], m.w′θˡⁱ′[i, j, k+1])
+        cl.w′³[i, j, k] = center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡⁱ′ᶜ, lower, upper)
     end
     return nothing
 end

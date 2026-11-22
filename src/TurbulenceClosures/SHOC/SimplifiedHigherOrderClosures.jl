@@ -29,7 +29,7 @@ using SpecialFunctions: erf
 
 using Oceananigans: Oceananigans
 using Oceananigans.Fields: Field
-using Oceananigans.Grids: AbstractGrid, Center, Flat
+using Oceananigans.Grids: AbstractGrid, Center, Face, Flat
 using Oceananigans.Operators: Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ
 using Oceananigans.TurbulenceClosures: getclosure, height_above_bottomᶜᶜᶠ, height_above_bottomᶜᶜᶜ
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: turbulent_velocityᶜᶜᶜ, ℑbzᵃᵃᶜ

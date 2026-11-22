@@ -84,7 +84,7 @@ The stratification number enters the expression through the closure's
 
 $(TYPEDFIELDS)
 """
-struct AlgebraicThirdMoment{FT} <: AbstractSHOCComponent
+struct AlgebraicThirdMoment{FT, L} <: AbstractSHOCComponent
     "Coefficient `c` of the diagnostic third moment of vertical velocity (`c_diag_3rd_mom`)"
     ℂʷ₂ :: FT
     "Numerator of `a₀` (literal `0.52`)"
@@ -105,18 +105,31 @@ struct AlgebraicThirdMoment{FT} <: AbstractSHOCComponent
     ℂʷ₁₀ :: FT
     "Weight of `f₄` in `ω₂` (literal `5/4`)"
     ℂʷ₁₁ :: FT
+    "Where the third moment is diagnosed: `Face()` (the default, as `shoc.F90`) or `Center()`"
+    location :: L
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `AlgebraicThirdMoment{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
-argument.
+argument. `location` is where the third moment is diagnosed: at the faces (`Face()`, the default), with the
+stencils of `shoc.F90`, and interpolated to the centers where the assumed PDF reads it, or at the centers
+(`Center()`).
 """
-AlgebraicThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(AlgebraicThirdMoment, FT,
-                            (ℂʷ₂ = 7, ℂʷ₃ = 0.52, ℂʷ₄ = 0.87, ℂʷ₅ = 0.5, ℂʷ₆ = 0.6, ℂʷ₇ = 2.4, ℂʷ₈ = 0.6, ℂʷ₉ = 1.2,
-                             ℂʷ₁₀ = 1.5, ℂʷ₁₁ = 1.25), kw)
+function AlgebraicThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; location = Face(), kw...)
+    defaults = (ℂʷ₂ = 7, ℂʷ₃ = 0.52, ℂʷ₄ = 0.87, ℂʷ₅ = 0.5, ℂʷ₆ = 0.6, ℂʷ₇ = 2.4, ℂʷ₈ = 0.6, ℂʷ₉ = 1.2, ℂʷ₁₀ = 1.5, ℂʷ₁₁ = 1.25)
+    names = keys(defaults)
+    all(name -> name ∈ names, keys(kw)) ||
+        throw(ArgumentError("$(setdiff(keys(kw), names)) are not fields of AlgebraicThirdMoment; its fields are $(names) and location."))
+    validate_third_moment_location(location)
+    values = map(value -> convert(FT, value), Tuple(merge(defaults, NamedTuple(kw))))
+    return AlgebraicThirdMoment(values..., location)
+end
+
+validate_third_moment_location(::Union{Face, Center}) = nothing
+validate_third_moment_location(location) =
+    throw(ArgumentError("The location of a third moment is Face() or Center(), not $(location)."))
 
 Adapt.@adapt_structure AlgebraicThirdMoment
 
