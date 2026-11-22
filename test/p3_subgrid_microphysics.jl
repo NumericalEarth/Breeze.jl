@@ -284,3 +284,37 @@ end
         @test all(isfinite, Array(interior(model.microphysical_fields.ρqᶜˡ)))
     end
 end
+
+# Perfectly correlated scalar moments: with VarianceStabilityFunctions the local covariance of θˡⁱ and qᵗ is
+# ρᵛ √(θˡⁱ′² qᵗ′²), so ℂᵛ₃ = ±1 makes the joint distribution of the components degenerate (the saturation excess of
+# a component can have no spread). The column must stay finite there and near there, and the distribution P3 reads
+# must stay realizable.
+@testset "P3 subgrid microphysics: a column at perfectly and nearly perfectly correlated θˡⁱ and qᵗ" begin
+    grid = RectilinearGrid(CPU(); size=24, z=(0, 1800), topology=(Flat, Flat, Bounded))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(); base_pressure=101325, potential_temperature=289)
+    condensation = SubgridCondensation(TurbulenceClosureStatistics(); processes = AllProcesses())
+    microphysics = PredictedParticlePropertiesMicrophysics(; condensation)
+    boundary_conditions = (; ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.2 * 1.5e-2)),
+                             ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.2 * 1.5e-5)))
+    for ρᵛ in (1, -1, 0.999, -0.999)
+        variance_stability_functions = VarianceStabilityFunctions(; ℂᵛ₃⁻ = ρᵛ, ℂᵛ₃ᵐ = ρᵛ, ℂᵛ₃⁺ = ρᵛ)
+        closure = TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian(; variance_stability_functions,
+                                                                                       variance_transport = ScalarVarianceTransport()),
+                                              static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()))
+        model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), microphysics, closure, boundary_conditions)
+        # A stratocumulus-topped mixed layer, saturated below its inversion
+        set!(model; θ = z -> z < 840 ? 289.0 : 297.5 + cbrt(z - 840), qᵗ = z -> z < 840 ? 9.5e-3 : 1.5e-3, u = 7,
+                    ρe = z -> 1.2 * 0.5 * exp(-z / 900))
+        for _ in 1:20
+            time_step!(model, 60)
+        end
+        fields = Oceananigans.prognostic_fields(model)
+        @test all(name -> all(isfinite, Array(interior(fields[name]))), keys(fields))
+        cloud = model.closure_fields.subgrid_cloud.cloud
+        @test any(Array(interior(model.microphysical_fields.qᶜˡ)) .> 0)
+        @test all(σ -> all(x -> isfinite(x) && x ≥ 0, Array(interior(σ))), (cloud.σ₁, cloud.σ₂))
+        moments = model.closure_fields.subgrid_cloud.moments
+        θ², q², θq = map(f -> Array(interior(f)), (moments.θˡⁱ′², moments.qᵗ′², moments.θˡⁱ′qᵗ′))
+        @test all(θq .^ 2 .≤ θ² .* q² .* (1 + 1e-10) .+ floatmin())
+    end
+end
