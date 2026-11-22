@@ -21,6 +21,7 @@ using Breeze.Microphysics:
     InstantaneousPrecipitation,
     SaturationAdjustment,
     WarmPhaseEquilibrium,
+    MixedPhaseEquilibrium,
     adjust_thermodynamic_state,
     equilibrated_moisture_mass_fractions,
     rainout_state
@@ -244,4 +245,40 @@ end
         @test ρq1 ≈ ρq0 rtol = roundtrip_tolerance
         @test all(prate .== 0)
     end
+end
+
+# The liquid and ice shares of the removed water sum to the total, cell by cell, on every dynamics
+function cold_ip_model(kind)
+    grid = RectilinearGrid(CPU(), Float64; size=4, z=(0, 4000), topology=(Flat, Flat, Bounded))
+    constants = ThermodynamicConstants(Float64)
+    microphysics = InstantaneousPrecipitation(Float64; equilibrium = MixedPhaseEquilibrium(Float64))
+    if kind === :compressible
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
+                                        reference_potential_temperature = z -> 255.0)
+        model = AtmosphereModel(grid; dynamics, microphysics, thermodynamic_constants = constants)
+        set!(model; ρ = model.dynamics.reference_state.density, θ = 255.0, qᵗ = 0.01)
+    else
+        reference_state = ReferenceState(grid, constants; base_pressure = 1e5, potential_temperature = 255.0)
+        model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), microphysics,
+                                thermodynamic_constants = constants)
+        set!(model; θ = 255.0, qᵗ = 0.01)
+    end
+    update_state!(model)
+    return model
+end
+
+@testset "InstantaneousPrecipitation: liquid + ice rates = removed water [$kind]" for kind in (:compressible, :anelastic)
+    model = cold_ip_model(kind)
+    model.clock.last_Δt = 1.0
+    microphysics_model_update!(model.microphysics, model)
+
+    total = Array(interior(model.microphysical_fields.precipitation_rate))
+    liquid = Array(interior(compute!(Breeze.AtmosphereModels.precipitation_rate(model, :liquid))))
+    ice = Array(interior(Breeze.AtmosphereModels.precipitation_rate(model, :ice)))
+    # One subtraction and one addition of numbers no larger than the total
+    rate_split_rounding = 4 * eps(Float64)
+    @test all(total .> 0)
+    @test maximum(abs, liquid .+ ice .- total) ≤ rate_split_rounding * maximum(total)
+    @test all(ice .≥ 0) && all(liquid .≥ -rate_split_rounding * maximum(total))
+    @test sum(ice) > 0 # cold enough for ice under the mixed-phase equilibrium
 end

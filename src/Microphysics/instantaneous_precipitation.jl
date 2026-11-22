@@ -73,8 +73,10 @@ AtmosphereModels.ice_mass_fraction(::IP, model) = nothing
 @inline AtmosphereModels.microphysical_tendency(::IP, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 # Diagnostic vapor + a precipitation-rate field (kg m⁻³ s⁻¹ of condensed/removed water).
+# The ice share of the removed water is kept beside the total, so that a dynamics whose mass
+# follows its water can book the enthalpy of each phase (`precipitation_mass_change!`).
 AtmosphereModels.materialize_microphysical_fields(::IP, grid, bcs) =
-    (; qᵛ = CenterField(grid), precipitation_rate = CenterField(grid))
+    (; qᵛ = CenterField(grid), precipitation_rate = CenterField(grid), ice_precipitation_rate = CenterField(grid))
 
 # Prognostic vapor only; no stored condensate (all moisture is vapor between steps).
 @inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::IP, ρ, qᵛ, μ)
@@ -92,8 +94,10 @@ end
 # update_state! re-condense after the kernel and double-count the latent heat.
 @inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::IP, qᵛ, constants) = 𝒰
 
-AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:liquid}) = model.microphysical_fields.precipitation_rate
-AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:ice}) = nothing
+# The total removed water is `precipitation_rate`; its liquid and ice shares sum to it
+AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:liquid}) =
+    Field(model.microphysical_fields.precipitation_rate - model.microphysical_fields.ice_precipitation_rate)
+AtmosphereModels.precipitation_rate(model, ::IP, ::Val{:ice}) = model.microphysical_fields.ice_precipitation_rate
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -143,6 +147,12 @@ function AtmosphereModels.microphysics_model_update!(microphysics::IP, model)
     # The kernel mutated prognostic fields in the interior only; refill halos and recompute
     # diagnostics and tendencies so the post-update state is consistent for the next step.
     update_state!(model)
+
+    # The water has left the air: a dynamics whose mass follows its water takes its mass, with
+    # the condensate that each cell lost in place (nothing to do for the others)
+    # (the surface rate is then the column sum of the removal, which the dynamics computes)
+    in_place_condensate = (total = μ.precipitation_rate, ice = μ.ice_precipitation_rate)
+    AtmosphereModels.precipitation_mass_change!(model.dynamics, model, kernel_Δt, nothing; in_place_condensate)
 
     return nothing
 end
@@ -201,6 +211,9 @@ end
         # (qᵛ⁺ = qᵗ), avoiding a round-trip ρ·(ρqᵛ₀/ρ) that would leave a spurious tiny precip rate.
         condensed_water_density = ρ * max(0, qᵗ - qᵛ⁺)
         precipitation_rate = condensed_water_density / Δt
+        # The ice share of what condensed, as the adjustment partitioned it
+        condensate = q.liquid + q.ice
+        ice_fraction = ifelse(condensate > 0, q.ice / ifelse(condensate > 0, condensate, one(condensate)), zero(condensate))
 
         ρqᵛ[i, j, k]  = ρqᵛ⁺
         ρθˡⁱ[i, j, k] = ρᵈ * θᶠ    # ρθ = ρᵈθ (dry-coupled)
@@ -208,5 +221,6 @@ end
         # The rate of this step, zero where nothing condensed: a cell that has stopped condensing must not
         # keep reporting the rate of an earlier step (the kernel runs once per time step).
         μ.precipitation_rate[i, j, k] = precipitation_rate
+        μ.ice_precipitation_rate[i, j, k] = precipitation_rate * ice_fraction
     end
 end

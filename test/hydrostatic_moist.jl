@@ -16,6 +16,7 @@ using Breeze.Thermodynamics: saturation_vapor_pressure, PlanarLiquidSurface, dry
                              absolute_zero_latent_heat, TetensFormula, mixture_gas_constant
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, MixedPhaseEquilibrium, WarmPhaseEquilibrium
 using Breeze.AtmosphereModels: VerticalBorrowing
+using Breeze.PressureLevelDiscretization: PressureLevelVerticalDiscretization
 
 #####
 ##### Tests of moist `HydrostaticDynamics`: rows T1 to T10 of the frozen list of the moist derivation
@@ -341,43 +342,78 @@ end
 end
 
 #####
-##### T4m: mixed-phase instantaneous precipitation: the falling condensate carries the enthalpy of its phases
+##### T4m: mixed-phase instantaneous precipitation through the generic microphysics, on a
+##### PressureLevelGrid: the exact energy closure of a removal at fixed density
+##### (plvd_logs/3c_0M_ENERGY_DERIVATION.txt)
 #####
 
-function rained_out_column(equilibrium)
-    column, _ = column_state("midlatitude_frontal")
-    microphysics = Breeze.Microphysics.InstantaneousPrecipitation(Float64; equilibrium)
-    model = moist_column_model(column; microphysics)
-    # A cold, moist column, supersaturated over ice in its upper layers
-    set!(model; pˢ = 1e5, θ = z -> 262 + 30z, qᵗ = z -> 0.008 * (1 - z)^2)
-    water₀, energy₀ = column_water(model)[1], column_energy(model)[1]
-    pˢ₀ = model.dynamics.surface_pressure[1, 1, 1]
-    HydrostaticEquations.rain_out_column_physics!(model.microphysics, model; Δt=600)
-    ledger = model.dynamics.moisture.ledger
-    rain = ledger.surface_rain[1, 1, 1]
-    return (; model, rain, pˢ₀, energy₀,
-              water_residual = (column_water(model)[1] - water₀ + rain) / water₀,
-              energy_residual = (column_energy(model)[1] - energy₀ + ledger.precipitation_energy[1, 1, 1]) / abs(energy₀),
-              specific_energy = ledger.precipitation_energy[1, 1, 1] / rain)
+function cold_pressure_level_column(microphysics; Nz = 16, top_pressure = 2.5e4, p₀ = 1e5)
+    η = range(1, top_pressure / p₀, length = Nz + 1)
+    B = [max(0, (e - 0.4) / 0.6) for e in η]
+    A = [e * p₀ - b * p₀ for (e, b) in zip(η, B)]
+    A[1] = 0; B[1] = 1; B[end] = 0; A[end] = top_pressure
+    grid = RectilinearGrid(CPU(), Float64; size=Nz, x=0, y=0, z = PressureLevelVerticalDiscretization(A, B),
+                           topology=(Flat, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics = HydrostaticDynamics(), microphysics,
+                            formulation = moist_formulation(), momentum_advection = VectorInvariant())
+    # A cold, moist column with a wind, supersaturated over ice aloft
+    set!(model.dynamics.surface_pressure, p₀)
+    set!(model)
+    ρ = Array(interior(model.dynamics.density))[1, 1, :]
+    σ = [(k - 1) / (Nz - 1) for k in 1:Nz]
+    shape(a) = reshape(a, 1, 1, Nz)
+    set!(model; ρθ = shape(ρ .* (262 .+ 30 .* σ)), ρqᵛ = shape(ρ .* 0.008 .* (1 .- σ) .^ 2))
+    interior(model.velocities.u) .= shape(10 .+ 20 .* σ)
+    update_state!(model)
+    return model
 end
 
-@testset "T4m: mixed-phase rain-out, ledgers and the enthalpy of ice" begin
-    mixed = rained_out_column(MixedPhaseEquilibrium(Float64))
-    warm = rained_out_column(WarmPhaseEquilibrium())
-    g = mixed.model.thermodynamic_constants.gravitational_acceleration
-    pˢ = mixed.model.dynamics.surface_pressure[1, 1, 1]
-    ℒᶠ = absolute_zero_latent_heat(mixed.model.thermodynamic_constants, mixed.model.thermodynamic_constants.ice) -
-         absolute_zero_latent_heat(mixed.model.thermodynamic_constants, mixed.model.thermodynamic_constants.liquid)
-    @info "T4m: precipitation $(mixed.rain) kg m⁻² (warm phase $(warm.rain)); residuals: water $(mixed.water_residual), " *
-          "energy $(mixed.energy_residual); energy per unit precipitation: mixed $(mixed.specific_energy), warm $(warm.specific_energy) J kg⁻¹"
+function column_kinetic_energy(model)
+    u = model.velocities.u
+    return sum(model.dynamics.density[1, 1, k] * Δzᶜᶜᶜ(1, 1, k, model.grid) * u[1, 1, k]^2 / 2 for k in 1:size(model.grid, 3))
+end
 
-    @test mixed.rain > 0
-    @test abs(mixed.water_residual) ≤ ledger_relative
-    @test abs(mixed.energy_residual) ≤ ledger_relative
-    @test abs(warm.energy_residual) ≤ ledger_relative
-    @test abs(pˢ - mixed.pˢ₀ + g * mixed.rain) / mixed.pˢ₀ ≤ dry_mass_rounding(mixed.model)
-    # Ice leaves with less enthalpy than liquid at the same temperature, by up to the latent heat of fusion
-    @test warm.specific_energy - mixed.specific_energy > 0.01 * ℒᶠ
+@testset "T4m: mixed-phase rain-out on a PressureLevelGrid, exact energy closure" begin
+    microphysics = Breeze.Microphysics.InstantaneousPrecipitation(Float64; equilibrium = MixedPhaseEquilibrium(Float64))
+    model = cold_pressure_level_column(microphysics)
+    constants = model.thermodynamic_constants
+    g = constants.gravitational_acceleration
+    cᵖᵈ = constants.dry_air.heat_capacity
+    ledger = model.dynamics.moisture.ledger
+
+    water₀ = column_water(model)[1]
+    dry₀ = column_dry_mass(model)[1]
+    energy₀ = column_energy(model)[1] + column_kinetic_energy(model)
+    pˢ₀ = model.dynamics.surface_pressure[1, 1, 1]
+
+    Δt = 600.0
+    model.clock.last_Δt = Δt
+    Breeze.AtmosphereModels.microphysics_model_update!(model.microphysics, model)
+
+    μ = model.microphysical_fields
+    rain = ledger.surface_rain[1, 1, 1]
+    energy = column_energy(model)[1] + column_kinetic_energy(model)
+    energy_residual = (energy - energy₀ + ledger.precipitation_energy[1, 1, 1]) / abs(energy₀)
+    # What the closure would miss without the correction of the hook: the dry air at T that the
+    # removal at fixed density puts in place of the condensate
+    spurious = sum(Δt * μ.precipitation_rate[1, 1, k] * Δzᶜᶜᶜ(1, 1, k, model.grid) * cᵖᵈ * model.temperature[1, 1, k]
+                   for k in 1:size(model.grid, 3))
+    @info "T4m: precipitation $rain kg m⁻², of which ice $(Δt * sum(μ.ice_precipitation_rate[1, 1, k] * Δzᶜᶜᶜ(1, 1, k, model.grid) for k in 1:size(model.grid, 3))); " *
+          "energy residual $energy_residual; uncorrected it would be $(spurious / abs(energy₀)); kinetic $(ledger.precipitation_kinetic_energy[1, 1, 1]) J m⁻²"
+
+    @test rain > 0
+    @test sum(interior(μ.ice_precipitation_rate)) > 0
+    @test abs(column_water(model)[1] - water₀ + rain) ≤ ledger_relative * water₀
+    @test abs(model.dynamics.surface_pressure[1, 1, 1] - pˢ₀ + g * rain) ≤ dry_mass_rounding(model) * pˢ₀
+    @test abs(column_dry_mass(model)[1] - dry₀) ≤ dry_mass_rounding(model) * pˢ₀ / g
+    @test abs(energy_residual) ≤ ledger_relative
+    @test ledger.precipitation_kinetic_energy[1, 1, 1] > 0
+    @test spurious / abs(energy₀) > 1e3 * ledger_relative
+    @test minimum(model.moisture_density) ≥ 0
+
+    # The label grid holds no physical depths: the generic scheme is rejected there
+    column, _ = column_state("midlatitude_frontal")
+    @test_throws ArgumentError moist_column_model(column; microphysics)
 end
 
 #####

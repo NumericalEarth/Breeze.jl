@@ -647,5 +647,12 @@ positive out of the air). The microphysics has already taken that water, with it
 of the densities of the layers. A dynamics whose mass does not follow its water does nothing,
 which is the default. A dynamics whose coordinate is the total mass lowers it by the weight of
 the water, and its ledger books the water and the kinetic energy that the water carries out.
+
+A scheme that removes condensate from the cells where it formed, at fixed density (such as
+instantaneous precipitation), passes the rates of that removal as `in_place_condensate =
+(total = ..., ice = ...)` (three-dimensional, kg m⁻³ s⁻¹, the ice a share of the total) and
+`surface_precipitation = nothing`: the water through the ground is then the column sum of the
+removal. At fixed density the removed mass is replaced by dry air at the same temperature, which
+a total-mass coordinate corrects for here.
 """
-precipitation_mass_change!(dynamics, model, Δt, surface_precipitation) = nothing
+precipitation_mass_change!(dynamics, model, Δt, surface_precipitation; in_place_condensate=nothing) = nothing

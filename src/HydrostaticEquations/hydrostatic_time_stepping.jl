@@ -163,6 +163,10 @@ function AtmosphereModels.initialize_model_thermodynamics!(model::HydrostaticMod
     supports_hydrostatic_dynamics(model.microphysics) ||
         unsupported_by_hydrostatic_dynamics("the microphysics $(summary(model.microphysics)), which has not " *
                                             "been adapted to its vertical coordinate,")
+    requires_pressure_level_grid(model.microphysics) && !has_pressure_levels(model.grid) &&
+        throw(ArgumentError("HydrostaticDynamics with $(summary(model.microphysics)) requires a PressureLevelGrid " *
+                            "(z = PressureLevelVerticalDiscretization(A, B)): the scheme reads Δz as a physical " *
+                            "depth, and on this grid Δz is a label of the coordinate."))
     validate_moist_hydrostatic_model(model)
     validate_dry_forcing(model)
     validate_dry_boundary_conditions(model)
