@@ -67,7 +67,7 @@ end
 # The placed liquid and droplet number (relative to the cell's) at the points s
 function placed_liquid(d, s)
     q = ifelse.(s .> 0, d.χ * d.qᶜˡ .* s ./ d.positive_excess, d.subsaturated_liquid)
-    N = ifelse.(s .> 0, d.χ / d.f⁺, (1 - d.χ) / (1 - d.f⁺))
+    N = ifelse.(s .> 0, d.χ / d.f⁺, d.subsaturated_share)
     return q, N
 end
 
@@ -105,22 +105,63 @@ end
     for (statistics, s̄, qᶜˡ) in cases
         d₁ = cell_placement(statistics, s̄, qᶜˡ; placement = SaturatedPartLiquid())
         @test d₁.χ == 1
-        # Without mixing all of the liquid is in the saturated part, up to its equilibrium condensate
+        # Without mixing all of the liquid is in the saturated part, up to its equilibrium condensate;
+        # the liquid beyond it is spread uniformly over the cell
         d = cell_placement(statistics, s̄, qᶜˡ)
-        @test d.χ ≈ min(1, d.positive_excess / (d.ξˡ * qᶜˡ))
+        @test d.f⁺ + d.f⁻ ≈ 1
+        @test d.χ ≈ 1 - d.f⁻ * max(0, 1 - d.positive_excess / (d.ξˡ * qᶜˡ))
         # Mixing moves it toward the uniform placement, χ = f⁺, and never past it
         χs = [cell_placement(statistics, s̄, qᶜˡ; ωᵐ).χ for ωᵐ in (1e-4, 1e-3, 1e-2, 1e-1, 1e3)]
         @test issorted(χs; rev = true)
         @test all(d.f⁺ - 1e-12 .≤ χs .≤ 1)
-        @test χs[end] ≈ min(d.f⁺, d.positive_excess / (d.ξˡ * qᶜˡ)) rtol = 1e-3
+        @test χs[end] ≈ d.f⁺ rtol = 1e-3
         # Without liquid all of it (none) is in the saturated part
         @test cell_placement(statistics, s̄, 0.0; ωᵐ = 1e-2).χ == 1
     end
 
-    # The balance of exchange and evaporation of the subsaturated liquid: ωᵐ (χ - f⁺) q̄ = ωˡ (1 - χ) |⟨s⁻⟩| / (1 - f⁺)
+    # The balance of exchange and evaporation of the subsaturated liquid: ωᵐ (χ - f⁺) q̄ = ωˡ ψ |⟨s⁻⟩|
     d = cell_placement(gaussian(5e-4), 1e-4, 1e-4; ωᵐ = 5e-3)
     @test d.χ < 1
-    @test 5e-3 * (d.χ - d.f⁺) * 1e-4 ≈ 0.05 * (1 - d.χ) * (-d.negative_excess) / (1 - d.f⁺) rtol = 1e-12
+    @test 5e-3 * (d.χ - d.f⁺) * 1e-4 ≈ 0.05 * d.subsaturated_share * (-d.negative_excess) rtol = 1e-12
+    @test 1 - d.χ ≈ d.f⁻ * d.subsaturated_share
+end
+
+# A vanishing subsaturated part (f⁻ → 0, the narrow components of perfectly correlated scalar moments
+# in a saturated cell): the placement is continuous into f⁻ = 0, the subsaturated liquid stays
+# below the cell mean, and the rates stay bounded, with liquid beyond the saturated part's
+# equilibrium condensate (ξˡ q̄ᶜˡ > ⟨s⁺⟩) and within it.
+@testset "P3 subgrid microphysics: the placement as the subsaturated part vanishes" begin
+    σ = 1.5e-5
+    for qᶜˡ in (1.4e-4, 0.9e-4), ωᵐ in (0.0, 1e-2), placement in (MixingEvaporationBalance(), SaturatedPartLiquid())
+        # mean excess from 3σ to 40σ: f⁻ from 1e-3 to below floatmin, then exactly 0
+        placements = [cell_placement(gaussian(σ), n * σ, qᶜˡ; ωᵐ, placement, ωˡ = 0.1) for n in (3, 5, 8, 10, 20, 30, 40)]
+        for d in placements
+            @test 0 ≤ d.f⁻ ≤ 1 && d.f⁺ + d.f⁻ ≈ 1
+            @test d.negative_excess ≤ 0
+            @test 0 ≤ d.subsaturated_share ≤ 1
+            @test 0 ≤ d.subsaturated_liquid ≤ qᶜˡ
+            @test d.f⁺ - 1e-12 ≤ d.χ ≤ 1
+            Γ = placed_condensation_correlation(d, 0.0)
+            @test isfinite(Γ)
+            # the condensation rate at the placement differs from the grid mean by at most the
+            # vapor excess of the saturated part and the liquid there
+            @test abs(Γ) ≤ 10 * (d.positive_excess + d.ξˡ * qᶜˡ)
+            @test all(isfinite, (placed_cloud_liquid_moment(d, 2.47, 1e-6, -1.79), placed_cloud_liquid_moment(d, 1.15, 1e-8),
+                                 vapor_excess_exceedance(d, 1e-6)...))
+        end
+        @test placements[end].f⁻ == 0
+        @test placements[end].χ == 1
+        # Continuity into f⁻ = 0: where the subsaturated part is small, the placement and its rates are
+        # those of the same cell without a subsaturated part, all of the liquid in the saturated part
+        for d in placements
+            d.f⁻ < 1e-12 || continue
+            d₀ = merge(d, (; f⁻ = 0.0, negative_excess = 0.0, χ = 1.0, λ = d.ξˡ * qᶜˡ / d.positive_excess,
+                             subsaturated_share = 0.0, subsaturated_liquid = 0.0))
+            @test d.χ ≈ 1 atol = 1e-12
+            @test placed_condensation_correlation(d, 0.0) ≈ placed_condensation_correlation(d₀, 0.0) rtol = 1e-9
+            @test placed_cloud_liquid_moment(d, 2.47, 1e-6, -1.79) ≈ placed_cloud_liquid_moment(d₀, 2.47, 1e-6, -1.79) rtol = 1e-9
+        end
+    end
 end
 
 @testset "P3 subgrid microphysics: partial moments of the placed cloud liquid" begin
@@ -137,8 +178,10 @@ end
         d = cell_placement(statistics, 1e-4, 2e-4; ωᵐ)
         s, w = riemann(d)
         q, N = placed_liquid(d, s)
+        # (the 24-point Gauss-Legendre rule of the saturated part integrates s^β, whose higher
+        # derivatives are singular at s = 0, to about 1e-6)
         for (β, γ) in ((2.47, -1.79), (1.15, 0.0))
-            @test placed_cloud_liquid_moment(d, β, 0.0, γ) ≈ sum(w .* q .^ β .* N .^ γ) rtol = 1e-6
+            @test placed_cloud_liquid_moment(d, β, 0.0, γ) ≈ sum(w .* q .^ β .* N .^ γ) rtol = 3e-6
         end
     end
 

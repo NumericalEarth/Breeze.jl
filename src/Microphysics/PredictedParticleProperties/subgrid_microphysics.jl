@@ -11,12 +11,18 @@
 # subsaturated part has ⟨s⁻⟩ = s̄ - ⟨s⁺⟩ ≤ 0.
 #
 # Placement of the cloud liquid. A fraction χ of it lies in the saturated part, shaped as the
-# equilibrium condensate, and 1 - χ is spread uniformly over the subsaturated part:
+# equilibrium condensate, and 1 - χ is spread uniformly over the subsaturated part, which covers
+# f⁻ = ⟨1; s ≤ 0⟩ = 1 - f⁺ of the cell. The placement is carried by ψ = q⊖ / q̄ᶜˡ, the liquid of the
+# subsaturated part relative to the cell mean, so that 1 - χ = f⁻ ψ:
 #
-#   qᶜˡ(s) = χ q̄ᶜˡ s / ⟨s⁺⟩ for s > 0,   qᶜˡ(s) = q⊖ = (1 - χ) q̄ᶜˡ / (1 - f⁺) for s ≤ 0.
+#   qᶜˡ(s) = χ q̄ᶜˡ s / ⟨s⁺⟩ for s > 0,   qᶜˡ(s) = q⊖ = ψ q̄ᶜˡ for s ≤ 0.
+#
+# f⁻ and ⟨s⁻⟩ are evaluated from the lower tails of the mixture, not as 1 - f⁺ and s̄ - ⟨s⁺⟩, and
+# nothing is divided by f⁻: where the subsaturated part is small, both are small differences of
+# numbers near 1 and s̄.
 #
 # Droplet number is placed with the liquid in the same proportions, uniformly in each part:
-# Nᶜˡ = χ N̄ᶜˡ / f⁺ in the saturated part and (1 - χ) N̄ᶜˡ / (1 - f⁺) in the subsaturated part.
+# Nᶜˡ = χ N̄ᶜˡ / f⁺ in the saturated part and ψ N̄ᶜˡ in the subsaturated part.
 # Rain, ice, its liquid coating and the ice number fill the cell, independently of s.
 #
 # The local vapor excess over liquid is δ(s) = s - ξˡ qᶜˡ(s): (1 - λ) s in the saturated part,
@@ -29,26 +35,33 @@
 # so locally ε(s) = ε̄ (Nᶜˡ(s) / N̄ᶜˡ)^{2/3} (qᶜˡ(s) / q̄ᶜˡ)^{1/3} with ε̄ the cell's, and cloud liquid
 # changes at (ε(s) / ξˡ) δ(s). With ωˡ = ε̄ / ξˡ the cell's phase relaxation rate, the cell mean is
 #
-#   R = ωˡ [ χ (f⁺)^{-2/3} (1 - λ) ⟨s^{4/3}; s > 0⟩ / ⟨s⁺⟩^{1/3}
-#            + (1 - χ) / (1 - f⁺) (⟨s⁻⟩ - ξˡ (1 - χ) q̄ᶜˡ) ],
+#   R = ωˡ [ χ (f⁺)^{-2/3} (1 - λ) ⟨s^{4/3}; s > 0⟩ / ⟨s⁺⟩^{1/3} + ψ (⟨s⁻⟩ - ξˡ f⁻ ψ q̄ᶜˡ) ],
 #
-# (the subsaturated part scales both N and qᶜˡ by (1 - χ)/(1 - f⁺)), written for the rest of P3 as
+# (the subsaturated part scales both N and qᶜˡ by ψ), written for the rest of P3 as
 # R = ωˡ (δqᵛ⁺ˡ + Γ) with Γ = R / ωˡ - δqᵛ⁺ˡ. ⟨s^{4/3}; s > 0⟩ is a Gauss-Legendre quadrature.
 #
-# The fraction χ (`MixingEvaporationBalance`). Turbulence exchanges air between the two parts at
+# The placement ψ (`MixingEvaporationBalance`). Turbulence exchanges air between the two parts at
 # the closure's rate ωᵐ = √e / (ℂᵐ ℓ), carrying liquid from the saturated part to the
-# subsaturated part at ωᵐ [(1 - f⁺) χ - f⁺ (1 - χ)] q̄ᶜˡ = ωᵐ (χ - f⁺) q̄ᶜˡ, the exchange that would
-# make the liquid uniform. In the subsaturated part the liquid evaporates at its local droplets'
-# rate, ωˡ (1 - χ) / (1 - f⁺) |⟨s⁻⟩| to leading order in ξˡ q⊖ / |s|. The steady state of the
-# liquid of the subsaturated part, exchange = evaporation, is linear in χ:
+# subsaturated part at ωᵐ [f⁻ χ - f⁺ (1 - χ)] q̄ᶜˡ = ωᵐ f⁻ (1 - ψ) q̄ᶜˡ, the exchange that would make
+# the liquid uniform. In the subsaturated part the liquid evaporates at its local droplets' rate,
+# ωˡ ψ |⟨s⁻⟩| to leading order in ξˡ q⊖ / |s|. The steady state of the liquid of the subsaturated
+# part, exchange = evaporation, is
 #
-#   χ = (ωˡ |⟨s⁻⟩| + f⁺ (1 - f⁺) ωᵐ q̄ᶜˡ) / (ωˡ |⟨s⁻⟩| + (1 - f⁺) ωᵐ q̄ᶜˡ),
+#   ψᵇ = f⁻ ωᵐ q̄ᶜˡ / (ωˡ |⟨s⁻⟩| + f⁻ ωᵐ q̄ᶜˡ),
 #
-# which is f⁺ ≤ χ ≤ 1: 1 without mixing or without liquid, f⁺ (uniform liquid) when mixing is fast
-# against evaporation. Liquid in the saturated part beyond its equilibrium condensate ⟨s⁺⟩ / ξˡ
-# would leave that part subsaturated, so χ ξˡ q̄ᶜˡ ≤ ⟨s⁺⟩ (λ ≤ 1), and the liquid beyond it lies in
-# the subsaturated part. Where there is no subsaturated part (f⁺ = 1) χ = 1.
-# `SaturatedPartLiquid` fixes χ = 1.
+# which is 0 ≤ ψᵇ ≤ 1: 0 without mixing or without liquid, 1 (uniform liquid, χ = f⁺) when mixing
+# is fast against evaporation. Liquid beyond the equilibrium condensate ⟨s⁺⟩ / ξˡ of the saturated
+# part cannot be at equilibrium anywhere in the cell; it is spread uniformly over the cell, as the
+# uniform part ε = q̄ᶜˡ - ⟨s⁺⟩ / ξˡ of the liquid, so that the subsaturated part holds at least
+# ψᵉ = ε / q̄ᶜˡ:
+#
+#   ψ = max(ψᵇ, ψᵉ),   ψᵉ = max(0, 1 - ⟨s⁺⟩ / (ξˡ q̄ᶜˡ)).
+#
+# The saturated part then holds its equilibrium condensate and its share f⁺ ε of the excess
+# (λ = f⁺ ξˡ q̄ᶜˡ / ⟨s⁺⟩ + f⁻ ≥ 1), and the placement is continuous as either part vanishes: χ → 1
+# with f⁻ → 0, χ → 0 with f⁺ → 0, and q⊖ ≤ q̄ᶜˡ throughout. (Placing all of ε in the subsaturated
+# part instead makes q⊖ = ε / f⁻ and its evaporation diverge as the subsaturated part vanishes.)
+# `SaturatedPartLiquid` fixes ψ = 0 (χ = 1).
 #
 # The other processes at the same placement:
 #
@@ -82,10 +95,10 @@ struct SaturatedPartLiquid end
 """
 $(TYPEDEF)
 
-The fraction ``χ`` of the cloud liquid in the saturated part of the distribution is the steady
-state of the liquid in the subsaturated part, between its exchange with the saturated part at the
-closure's mixing rate ``ωᵐ`` and its evaporation at the droplets' rate, bounded by the equilibrium
-condensate of the saturated part. See [`AllProcesses`](@ref).
+The cloud liquid of the subsaturated part of the distribution is the steady state between its
+exchange with the saturated part at the closure's mixing rate ``ωᵐ`` and its evaporation at the
+droplets' rate; liquid beyond the equilibrium condensate of the saturated part is spread uniformly
+over the cell. See [`AllProcesses`](@ref).
 """
 struct MixingEvaporationBalance end
 
@@ -227,6 +240,24 @@ end
 
 @inline mixture_interval_moments(d::NamedTuple, l, u, bounded) = mixture_interval_moments(d.a, d.m, d.σ, l, u, bounded)
 
+# The probability and first moment of one Gaussian over s ≤ 0, from its lower tail: accurate where
+# they are small, unlike 1 - P(s > 0) and s̄ - ⟨s; s > 0⟩. A zero spread is the point mass at the mean.
+@inline function gaussian_lower_moments(m, σ)
+    FT = typeof(m)
+    σ₊ = max(σ, floatmin(FT) / eps(FT))
+    z = m / σ₊
+    P = gaussian_upper_tail(z)
+    M = min(0, m * P - σ₊ * gaussian_density(z))
+    return P, M
+end
+
+@inline function mixture_lower_moments(a, m, σ)
+    moments = map(gaussian_lower_moments, m, σ)
+    P = sum(map((aᵢ, Mᵢ) -> aᵢ * Mᵢ[1], a, moments))
+    M = sum(map((aᵢ, Mᵢ) -> aᵢ * Mᵢ[2], a, moments))
+    return P, M
+end
+
 #####
 ##### Partial moments by Gauss-Legendre quadrature
 #####
@@ -286,36 +317,37 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the placement of the cloud liquid in the mixture `(a, m, σ)` of the saturation excess about
 the grid mean `s̄`, read by every P3 process of [`AllProcesses`](@ref): the mixture, the
-psychrometric correction `ξˡ`, the cloud liquid `qᶜˡ`, the saturated fraction `f⁺`, ``⟨s⁺⟩``
-(`positive_excess`) and ``⟨s⁻⟩`` (`negative_excess`), the fraction `χ` of the liquid in the
-saturated part, the scale ``λ = χ ξˡ qᶜˡ / ⟨s⁺⟩`` of the local vapor excess there, the uniform
-liquid ``q⊖`` (`subsaturated_liquid`) of the subsaturated part, the saturation `qᵛ⁺ˡ`, and `degenerate`, true when every
+psychrometric correction `ξˡ`, the cloud liquid `qᶜˡ`, the saturated and subsaturated fractions
+`f⁺` and `f⁻` (from the upper and the lower tails), ``⟨s⁺⟩`` (`positive_excess`), ``⟨s⁻⟩``
+(`negative_excess`) and `s̄` (`mean_excess`), the fraction `χ = 1 - f⁻ ψ` of the liquid in the
+saturated part, the scale ``λ = χ ξˡ qᶜˡ / ⟨s⁺⟩`` of the local vapor excess there, the liquid
+``q⊖ = ψ qᶜˡ`` (`subsaturated_liquid`) of the subsaturated part and its share ``ψ``
+(`subsaturated_share`) of the cell mean, the saturation `qᵛ⁺ˡ`, and `degenerate`, true when every
 spread is zero (the grid mean). `ωˡ` is the cloud's phase relaxation rate and `ωᵐ` the exchange
 rate of air between the two parts.
 """
 @inline function placed_cloud_liquid(placement, a, m, σ, s̄, ξˡ, q̄ᶜˡ, qᵛ⁺ˡ, ωˡ, ωᵐ)
     FT = typeof(s̄)
     f⁺, s⁺ = mixture_interval_moments(a, m, σ, zero(FT), zero(FT), false)
-    s⁻ = min(0, s̄ - s⁺)
-    χ = saturated_liquid_fraction(placement, f⁺, s⁺, s⁻, ξˡ, q̄ᶜˡ, ωˡ, ωᵐ)
+    f⁻, s⁻ = mixture_lower_moments(a, m, σ)
+    ψ = subsaturated_liquid_share(placement, f⁻, s⁺, s⁻, ξˡ, q̄ᶜˡ, ωˡ, ωᵐ)
+    χ = 1 - f⁻ * ψ
     λ = safe_ratio(χ * ξˡ * q̄ᶜˡ, s⁺, zero(FT))
-    subsaturated_liquid = safe_ratio((1 - χ) * q̄ᶜˡ, 1 - f⁺, zero(FT))
     degenerate = sum(σ) == 0
-    return (; a, m, σ, ξˡ, qᶜˡ = q̄ᶜˡ, f⁺, positive_excess = s⁺, negative_excess = s⁻,
-              χ, λ, subsaturated_liquid, qᵛ⁺ˡ, degenerate)
+    return (; a, m, σ, ξˡ, qᶜˡ = q̄ᶜˡ, f⁺, f⁻, positive_excess = s⁺, negative_excess = s⁻, mean_excess = s̄,
+              χ, λ, subsaturated_share = ψ, subsaturated_liquid = ψ * q̄ᶜˡ, qᵛ⁺ˡ, degenerate)
 end
 
-@inline saturated_liquid_fraction(::SaturatedPartLiquid, f⁺, s⁺, s⁻, ξˡ, q̄ᶜˡ, ωˡ, ωᵐ) = one(f⁺)
+@inline subsaturated_liquid_share(::SaturatedPartLiquid, f⁻, s⁺, s⁻, ξˡ, q̄ᶜˡ, ωˡ, ωᵐ) = zero(f⁻)
 
-@inline function saturated_liquid_fraction(::MixingEvaporationBalance, f⁺, s⁺, s⁻, ξˡ, q̄ᶜˡ, ωˡ, ωᵐ)
-    FT = typeof(f⁺)
+@inline function subsaturated_liquid_share(::MixingEvaporationBalance, f⁻, s⁺, s⁻, ξˡ, q̄ᶜˡ, ωˡ, ωᵐ)
+    FT = typeof(f⁻)
     evaporation = ωˡ * (-s⁻)
-    exchange = (1 - f⁺) * ωᵐ * q̄ᶜˡ
-    χᵇ = safe_ratio(evaporation + f⁺ * exchange, evaporation + exchange, one(FT))
-    # No more liquid in the saturated part than its equilibrium condensate ⟨s⁺⟩ / ξˡ
-    χᵉ = safe_ratio(s⁺, ξˡ * q̄ᶜˡ, one(FT))
-    χ = min(χᵇ, χᵉ, one(FT))
-    return ifelse(f⁺ < 1, χ, one(FT))
+    exchange = f⁻ * ωᵐ * q̄ᶜˡ
+    ψᵇ = safe_ratio(exchange, evaporation + exchange, zero(FT))
+    # The liquid beyond the saturated part's equilibrium condensate ⟨s⁺⟩ / ξˡ, spread over the cell
+    ψᵉ = max(0, 1 - safe_ratio(s⁺, ξˡ * q̄ᶜˡ, one(FT)))
+    return max(ψᵇ, ψᵉ)
 end
 
 """
@@ -326,7 +358,7 @@ population and placement `d` (see [`placed_cloud_liquid`](@ref)) is ``ωˡ (δq�
 grid-mean vapor excess ``δqᵛ⁺ˡ = s̄ - ξˡ q̄ᶜˡ``:
 
 ```math
-δqᵛ⁺ˡ + Γ = χ (f⁺)^{-2/3} (1 - λ) ⟨s^{4/3}; s > 0⟩ / ⟨s⁺⟩^{1/3} + (1 - χ) / (1 - f⁺) (⟨s⁻⟩ - ξˡ (1 - χ) q̄ᶜˡ).
+δqᵛ⁺ˡ + Γ = χ (f⁺)^{-2/3} (1 - λ) ⟨s^{4/3}; s > 0⟩ / ⟨s⁺⟩^{1/3} + ψ (⟨s⁻⟩ - ξˡ f⁻ ψ q̄ᶜˡ),
 ```
 
 `Γ` is returned unchanged where `d` is `nothing` or degenerate.
@@ -340,9 +372,9 @@ grid-mean vapor excess ``δqᵛ⁺ˡ = s̄ - ξˡ q̄ᶜˡ``:
                                    positive_power(d.f⁺, convert(FT, 2//3)) * positive_power(s⁺, convert(FT, 1//3)),
                                    zero(FT))
     saturated = d.χ * (1 - d.λ) * saturated_density
-    subsaturated = safe_ratio(1 - d.χ, 1 - d.f⁺, zero(FT)) * (d.negative_excess - d.ξˡ * (1 - d.χ) * d.qᶜˡ)
-    s̄ = s⁺ + d.negative_excess
-    vapor_excess = s̄ - d.ξˡ * d.qᶜˡ
+    ψ = d.subsaturated_share
+    subsaturated = ψ * (d.negative_excess - d.ξˡ * d.f⁻ * ψ * d.qᶜˡ)
+    vapor_excess = d.mean_excess - d.ξˡ * d.qᶜˡ
     return ifelse(d.degenerate, Γ, saturated + subsaturated - vapor_excess)
 end
 
@@ -353,7 +385,7 @@ Return the cell mean of ``qᶜˡ(s)^β (Nᶜˡ(s) / N̄ᶜˡ)^γ`` over the part
 ``qᶜˡ(s) ≥`` `threshold`, at the placement `d` (see [`placed_cloud_liquid`](@ref)):
 
 ```math
-(χ / f⁺)^γ (χ q̄ᶜˡ / ⟨s⁺⟩)^β Σᵢ aᵢ ∫_{sᵗ}^∞ s^β N(s; mᵢ, σᵢ²) ds + (1 - f⁺) ((1 - χ)/(1 - f⁺))^γ q⊖^β [q⊖ ≥ qᵗ],
+(χ / f⁺)^γ (χ q̄ᶜˡ / ⟨s⁺⟩)^β Σᵢ aᵢ ∫_{sᵗ}^∞ s^β N(s; mᵢ, σᵢ²) ds + f⁻ ψ^γ q⊖^β [q⊖ ≥ qᵗ],
 ```
 
 with ``sᵗ = qᵗ ⟨s⁺⟩ / (χ q̄ᶜˡ)``. Without cloud liquid, or where `d` is degenerate, the result is
@@ -373,9 +405,10 @@ the grid-mean ``q̄ᶜˡ^β`` gated at the threshold.
     saturated = (saturated_liquidₛ / (f⁺ₛ * q̄ₛ))^γ * (saturated_liquidₛ / s⁺ₛ)^β * mixture_partial_moment(d, β, sᵗ)
     saturated = ifelse(saturated_present, saturated, zero(FT))
 
-    subsaturated_present = (d.subsaturated_liquid > 0) & (d.f⁺ < 1)
+    subsaturated_present = (d.subsaturated_liquid > 0) & (d.f⁻ > 0)
     subsaturated_liquidₛ = ifelse(subsaturated_present, d.subsaturated_liquid, one(FT))
-    subsaturated = (1 - d.f⁺) * (subsaturated_liquidₛ / q̄ₛ)^γ * subsaturated_liquidₛ^β
+    ψₛ = ifelse(subsaturated_present, d.subsaturated_share, one(FT))
+    subsaturated = d.f⁻ * ψₛ^γ * subsaturated_liquidₛ^β
     subsaturated = ifelse(subsaturated_present & (d.subsaturated_liquid >= threshold), subsaturated, zero(FT))
 
     resolved = (q̄ > 0) & !d.degenerate
