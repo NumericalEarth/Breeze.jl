@@ -228,7 +228,7 @@ energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT, VS}
+struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT, VS, FT}
     "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
@@ -253,6 +253,8 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT, VS}
     variance_transport :: VT
     "Stability functions of the local scalar variances and covariance ([`VarianceStabilityFunctions`](@ref)), or `nothing` for `ℂᵛ τ Kᶜ ∂z a ∂z b`"
     variance_stability_functions :: VS
+    "Mixing time of air between the saturated and subsaturated parts of the distribution, in eddy turnover times ℓ / √e"
+    ℂᵐ :: FT
 end
 
 Adapt.@adapt_structure DoubleGaussian
@@ -291,6 +293,12 @@ correlation of `w` with θˡ and qᵗ is a function of `Ri` alone, bounded by a 
 ``ℂᵛ τ Kᶜ ∂_z a ∂_z b``, whose stability function is ``(2ℂᵛ/ℂᵠ) 𝕊ᶜ/𝕊ᴰ`` with
 [`DissipationTimeScale`](@ref), or [`VarianceStabilityFunctions`](@ref), which give θˡⁱ′², qᵗ′² and
 θˡⁱ′qᵗ′ stability functions of their own, ``𝕊ᵛ₁ ℓ² (∂_z θˡⁱ)²``, …; the fluxes are unchanged.
+
+`ℂᵐ` sets the rate ``ωᵐ = √e / (ℂᵐ ℓ)`` at which air is exchanged between the saturated and the
+subsaturated parts of the distribution, which the microphysics reads to place cloud liquid between
+them (`AllProcesses` of P3's `SubgridCondensation`). The default, 1, is one eddy turnover time
+``ℓ / √e``: the time an eddy of the mixing length takes to carry air across the boundary of the
+saturated part.
 """
 function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              time_scale = DissipationTimeScale(FT; ℂᵠ = 1.3),
@@ -304,14 +312,15 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              constants = SHOCConstants(FT),
                              ℂʳ = nothing,
                              variance_transport = nothing,
-                             variance_stability_functions = nothing)
+                             variance_stability_functions = nothing,
+                             ℂᵐ = 1)
     validate_distribution_saturation(saturation)
     ℂʳ = isnothing(ℂʳ) ? nothing : convert(FT, ℂʳ)
     variance_transport = convert_component(FT, variance_transport)
     variance_stability_functions = convert_component(FT, variance_stability_functions)
     return DoubleGaussian(time_scale, second_moments, third_moment, stratification_number_bound,
                                skewness, assumed_pdf, saturation, clipping, constants, ℂʳ, variance_transport,
-                               variance_stability_functions)
+                               variance_stability_functions, convert(FT, ℂᵐ))
 end
 
 # The distribution of this closure saturates with the thermodynamics of the model that holds it.
@@ -327,7 +336,7 @@ convert_eltype(::Type{FT}, d::DoubleGaussian) where FT =
     DoubleGaussian(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
                          d.assumed_pdf, d.saturation, d.clipping, d.constants, d.ℂʳ, d.variance_transport,
-                         d.variance_stability_functions))...)
+                         d.variance_stability_functions, d.ℂᵐ))...)
 
 convert_component(FT, ::Nothing) = nothing
 convert_component(FT, c) = convert_eltype(FT, c)
@@ -884,6 +893,10 @@ end
                                            component_vapor_excess(d.assumed_pdf, thermodynamics, cp, zᵘ, zˡ, zᶜ,
                                                                   p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ))
             cl.aᶜ[i, j, k] = C
+            # The exchange rate of air between the saturated and subsaturated parts, √e / (ℂᵐ ℓ)
+            ℓᶜ = (closure_fields.ℓᵐ[i, j, k] + closure_fields.ℓᵐ[i, j, k+1]) / 2
+            uᶜ = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
+            cl.ωᵐ[i, j, k] = ifelse(ℓᶜ > 0, uᶜ / (d.ℂᵐ * ifelse(ℓᶜ > 0, ℓᶜ, one(FT))), zero(FT))
             cl.qˡ[i, j, k] = qˡ
             cl.qˡ′²[i, j, k] = qˡ′²
             cl.w′qˡ′[i, j, k] = w′qˡ′
@@ -1188,7 +1201,7 @@ end
 # weight `a` of the updraft component, and each component's mean `μ₁`, `μ₂` and spread `σ₁`, `σ₂`.
 # The saturated fraction `f⁺` is the distribution's own cloud fraction `aᶜ`.
 vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
-                                       σ₁ = CenterField(grid), σ₂ = CenterField(grid))
+                                       σ₁ = CenterField(grid), σ₂ = CenterField(grid), ωᵐ = CenterField(grid))
 
 @inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂))
     @inbounds begin
@@ -1205,7 +1218,8 @@ end
     @inbounds begin
         a = components.a₁[i, j, k]
         return (; a = (a, 1 - a), μ = (components.μ₁[i, j, k], components.μ₂[i, j, k]),
-                  σ = (components.σ₁[i, j, k], components.σ₂[i, j, k]), f⁺ = components.aᶜ[i, j, k])
+                  σ = (components.σ₁[i, j, k], components.σ₂[i, j, k]), f⁺ = components.aᶜ[i, j, k],
+                  ωᵐ = components.ωᵐ[i, j, k])
     end
 end
 

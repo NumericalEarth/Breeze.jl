@@ -27,7 +27,13 @@ than a grid-mean vapor state.
 - Tuple `(nucleated_mass_rate, nucleated_number_rate)`: mass rate [kg/kg/s]
   and number rate [1/kg/s]
 """
-@inline function deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ)
+@inline deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ) =
+    deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ, nothing, qᵛ⁺ⁱ)
+
+# `distribution` is the subgrid distribution of `subgrid_process_distribution` (or `nothing`), and
+# `qᵛ⁺ˡ` the saturation over liquid it is centred on: nucleation acts in the fraction of the cell
+# where the excess over ice reaches its threshold (`nucleating_fraction`).
+@inline function deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ, distribution, qᵛ⁺ˡ)
     FT = typeof(T)
     parameters = p3.process_rates
 
@@ -43,11 +49,9 @@ than a grid-mean vapor state.
 
     # Ice supersaturation, evaluated cloud-side; in the `SCF = 1` limit `qᵛ` is
     # both the grid-mean and the cloud-side value.
-    Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, floors.saturation_mass_fraction)
-
-    # Conditions for nucleation
-    # The supersaturation threshold is inclusive
-    nucleation_active = (T < ℂⁿᵘᶜˡ₁) & (Sⁱ >= ℂⁿᵘᶜˡ₂)
+    # The threshold is inclusive.
+    fraction = nucleating_fraction(distribution, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floors.saturation_mass_fraction)
+    nucleation_active = (T < ℂⁿᵘᶜˡ₁) & (fraction > 0)
 
     # Cooper (1986): N_ice = c_nuc × exp(b_nuc × (T₀ - T)) [1/m³]
     # Default c_nuc = 5.0 /m³ = 0.005 /L from Cooper (1986), divided by ρ for [1/kg]
@@ -58,7 +62,7 @@ than a grid-mean vapor state.
     equilibrium_number = min(cooper_number, ℂⁿᵘᶜˡ₃ / ρ)
 
     # Nucleation rate: relaxation toward equilibrium
-    nucleated_number_rate = max(0, equilibrium_number - nⁱ) / ℂⁿᵘᶜˡ₄
+    nucleated_number_rate = max(0, equilibrium_number - nⁱ) / ℂⁿᵘᶜˡ₄ * fraction
 
     # Mass nucleation rate
     nucleated_mass_rate = nucleated_number_rate * ℂᶠᵒʳᵐ₁

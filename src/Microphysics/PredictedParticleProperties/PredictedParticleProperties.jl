@@ -49,6 +49,8 @@ export
     PredictedParticlePropertiesMicrophysics,
     GridMeanCondensation,
     SubgridCondensation,
+    CloudCondensationOnly,
+    AllProcesses,
     DiffusionalGrowthRelaxation,
     CondensationTimescaleRelaxation,
     P3Microphysics,
@@ -243,6 +245,7 @@ include("rain_quadrature.jl")
 #####
 
 include("subgrid_supersaturation.jl")
+include("subgrid_microphysics.jl")
 include("process_rate_helpers.jl")
 include("tabulated_kernels.jl")
 include("cloud_droplet_activation_rates.jl")

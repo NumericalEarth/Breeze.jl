@@ -14,8 +14,9 @@
 #
 # Γ enters the vapor exchange of cloud liquid only: its diffusional growth and decay, the seed
 # mass with which prescribed-number droplets start that growth, and the saturation-adjustment
-# caps on those two rates. Rain, ice, aerosol activation and every collection process keep
-# their grid-mean form. Evaporation stays limited by the cloud liquid present (the clamp
+# caps on those two rates. With `processes = AllProcesses()` the distribution also enters
+# activation, ice nucleation, autoconversion and accretion (`subgrid_microphysics.jl`); otherwise
+# rain, ice, aerosol activation and every collection process keep their grid-mean form. Evaporation stays limited by the cloud liquid present (the clamp
 # -qᶜˡ / τ in `coupled_saturation_adjustment_rates`).
 
 """
@@ -57,21 +58,33 @@ vanishes when the cloud liquid is the distribution's equilibrium condensate.
 $(TYPEDFIELDS)
 
 ```jldoctest
-julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation
+julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, CloudCondensationOnly
 
 julia> using Breeze.AtmosphereModels: PrescribedStatistics
 
 julia> SubgridCondensation(PrescribedStatistics(1e-4))
-SubgridCondensation{PrescribedStatistics{Float64}}(PrescribedStatistics{Float64}(0.0001))
+SubgridCondensation{PrescribedStatistics{Float64}, CloudCondensationOnly}(PrescribedStatistics{Float64}(0.0001), CloudCondensationOnly())
 ```
 """
-struct SubgridCondensation{S}
+struct SubgridCondensation{S, P}
     "Source of the subgrid statistics of the vapor excess, passed to `supersaturation_statistics`"
     statistics :: S
+    "Which processes read the distribution: `CloudCondensationOnly()` or `AllProcesses()`"
+    processes :: P
 end
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return [`SubgridCondensation`](@ref) with the subgrid statistics `statistics`. With
+`processes = CloudCondensationOnly()` the distribution enters cloud condensation only; with
+[`AllProcesses`](@ref) it also enters activation, ice nucleation, autoconversion and accretion.
+"""
+SubgridCondensation(statistics; processes = CloudCondensationOnly()) =
+    SubgridCondensation(statistics, validate_subgrid_processes(processes))
+
 Adapt.adapt_structure(to, condensation::SubgridCondensation) =
-    SubgridCondensation(Adapt.adapt(to, condensation.statistics))
+    SubgridCondensation(Adapt.adapt(to, condensation.statistics), condensation.processes)
 
 #####
 ##### The cell-averaged excess over zero of a Gaussian vapor excess
@@ -166,6 +179,9 @@ Return the subgrid statistics of cell `(i, j, k)` that the `condensation` option
 @inline seed_vapor(aerosol, Γ, qᵛ) = qᵛ
 @inline seed_vapor(::Nothing, ::Nothing, qᵛ) = qᵛ
 @inline seed_vapor(::Nothing, Γ, qᵛ) = qᵛ + Γ
+@inline seed_vapor(aerosol, Γ, qᵛ, ::Nothing) = seed_vapor(aerosol, Γ, qᵛ)
+# With `AllProcesses` activation reads the distribution instead (`activation_vapor`)
+@inline seed_vapor(aerosol, Γ, qᵛ, distribution) = qᵛ
 
 #####
 ##### The `condensation` keyword of P3

@@ -8,6 +8,7 @@ include(joinpath(dirname(@__DIR__), "setup.jl"))
 
 using Breeze
 using Breeze.TurbulenceClosures: TurbulenceClosures
+using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, AllProcesses
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Oceananigans.Grids: ColumnEnsembleSize
@@ -259,4 +260,38 @@ end
             @test derivatives[name] ≈ finite_difference rtol=1e-2 atol=1e-10 * abs(Float64(Reactant.to_number(loss_value)))
         end
     end
+end
+
+#####
+##### P3 with the closure's subgrid distribution in every process (`SubgridCondensation` with `AllProcesses`), so that
+##### a calibration can differentiate through activation, nucleation, autoconversion and accretion: forward and gradient
+#####
+
+@testset "reactant_tke_p3_subgrid_microphysics" begin
+    Δt = 1.0
+    Ns = 2
+
+    grid = RectilinearGrid(ReactantState(); size=ColumnEnsembleSize(Nz=8, ensemble=(2, 1), Hz=3),
+                           z=(0, 2000), topology=(Flat, Flat, Bounded))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(); base_pressure=101325, potential_temperature=290)
+    dynamics = AnelasticDynamics(reference_state)
+    condensation = SubgridCondensation(TurbulenceClosureStatistics(); processes = AllProcesses())
+    microphysics = PredictedParticlePropertiesMicrophysics(; condensation)
+    closure = TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian())
+    initial_θ() = (θ = CenterField(grid); set!(θ, z -> 290 + 3e-3 * z); θ)
+
+    model = AtmosphereModel(grid; dynamics, microphysics, closure)
+    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true tke_loss(model, initial_θ(), Δt, Ns)
+    value = @with_stack_size compiled(model, initial_θ(), Δt, Ns)
+    @test isfinite(value) && value > 0
+
+    model = AtmosphereModel(grid; dynamics, microphysics, closure)
+    θ_init = initial_θ()
+    dθ_init = CenterField(grid); set!(dθ_init, 0)
+    dmodel = Enzyme.make_zero(model)
+    compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_tke_loss(
+        model, dmodel, θ_init, dθ_init, Δt, Ns)
+    dθ, loss_value = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
+    @test isfinite(loss_value)
+    @test all(isfinite, @allowscalar Array(interior(dθ)))
 end
