@@ -177,6 +177,14 @@ end
 @inline cloud_phase_relaxation_rate(::CondensationTimescaleRelaxation, p3, coefficients) =
     1 / convert(typeof(coefficients.ξˡ), p3.cloud.condensation_timescale)
 
+# The phase relaxation rate ωˡ = εˡ / ξˡ of the cloud liquid of a cell, as the coupled solver forms it
+@inline function p3_cloud_phase_relaxation_rate(p3, qᵛ⁺ˡ, qᶜˡ, T, ρ, transport, cloud, constants)
+    ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+    cloud_relaxation = cloud_relaxation_coefficient(p3.cloud_relaxation, p3, ξˡ, qᶜˡ, ρ, transport.Dᵛ,
+                                                    cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ)
+    return cloud_phase_relaxation_rate(p3.cloud_relaxation, p3, (; cloud_relaxation, ξˡ))
+end
+
 @inline function rain_vapor_relaxation_coefficient(p3, qʳ, nʳ, ρ, transport)
     FT = typeof(qʳ)
     qʳ₊ = max(0, qʳ)

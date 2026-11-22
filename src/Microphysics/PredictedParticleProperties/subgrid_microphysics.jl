@@ -3,34 +3,65 @@
 #####
 #
 # With `SubgridCondensation(statistics; processes = AllProcesses())` the one distribution that
-# sets the condensation of cloud liquid (`subgrid_supersaturation.jl`) also sets every P3 process
-# that is nonlinear in the local state. The distribution is that of the saturation excess of total
-# water s, a mixture of Gaussians with weights aᵢ, means mᵢ = s̄ + μᵢ - Σⱼ aⱼ μⱼ (about P3's own
-# grid mean s̄ = δqᵛ⁺ˡ + ξˡ q̄ᶜˡ) and spreads σᵢ. Each cell-mean rate is the expectation of the
-# local rate over it, with these placements of the hydrometeors:
+# sets the condensation of cloud liquid also sets every P3 process that is nonlinear in the local
+# state, through one placement of the cloud liquid (`placed_cloud_liquid`). The distribution is
+# that of the saturation excess of total water s, a mixture of Gaussians with weights aᵢ, means
+# mᵢ = s̄ + μᵢ - Σⱼ aⱼ μⱼ about P3's own grid mean s̄ = δqᵛ⁺ˡ + ξˡ q̄ᶜˡ, and spreads σᵢ. Its
+# saturated part s > 0 covers f⁺ = ⟨1; s > 0⟩ of the cell and has ⟨s⁺⟩ = ⟨s; s > 0⟩; the
+# subsaturated part has ⟨s⁻⟩ = s̄ - ⟨s⁺⟩ ≤ 0.
 #
-#   * cloud liquid lies where s > 0, as the equilibrium condensate scaled to the cloud liquid
-#     present: qᶜˡ(s) = q̄ᶜˡ s⁺ / ⟨s⁺⟩ (λ s⁺ / ξˡ with λ = ξˡ q̄ᶜˡ / ⟨s⁺⟩, as for Γ). The local vapor
-#     excess over liquid is then δ(s) = s - ξˡ qᶜˡ(s) = s for s ≤ 0 and (1 - λ) s for s > 0, whose
-#     mean is the grid-mean δqᵛ⁺ˡ;
-#   * the droplet number concentration Nᶜˡ is uniform where liquid is present;
-#   * rain, ice, its liquid coating and the ice number are spread over the whole cell,
-#     independently of s (random overlap with the cloud).
+# Placement of the cloud liquid. A fraction χ of it lies in the saturated part, shaped as the
+# equilibrium condensate, and 1 - χ is spread uniformly over the subsaturated part:
 #
-# The vapor exchange of rain, the deposition and sublimation of ice and the condensation and
-# evaporation of its liquid coating are linear in δ, so with these placements their cell means
-# are their grid-mean rates, exactly: they are unchanged. What changes is
+#   qᶜˡ(s) = χ q̄ᶜˡ s / ⟨s⁺⟩ for s > 0,   qᶜˡ(s) = q⊖ = (1 - χ) q̄ᶜˡ / (1 - f⁺) for s ≤ 0.
 #
-#   * activation, in the part of the cell where δ exceeds the activation threshold: the tail
-#     fraction P, times the rate at the tail-mean supersaturation;
+# Droplet number is placed with the liquid in the same proportions, uniformly in each part:
+# Nᶜˡ = χ N̄ᶜˡ / f⁺ in the saturated part and (1 - χ) N̄ᶜˡ / (1 - f⁺) in the subsaturated part.
+# Rain, ice, its liquid coating and the ice number fill the cell, independently of s.
+#
+# The local vapor excess over liquid is δ(s) = s - ξˡ qᶜˡ(s): (1 - λ) s in the saturated part,
+# λ = χ ξˡ q̄ᶜˡ / ⟨s⁺⟩, and s - ξˡ q⊖ in the subsaturated part. Its cell mean is the grid-mean
+# δqᵛ⁺ˡ for any χ. So the vapor exchange of rain, ice and the ice coating, linear in δ, keeps its
+# grid-mean rate exactly, and only what is nonlinear in the local state changes.
+#
+# Condensation of cloud liquid, at the local droplet population. Droplets of gamma size
+# distribution relax the vapor at ε = 2π ρ Dᵛ N (μᶜˡ + 1)/λᶜˡ ∝ N^{2/3} qᶜˡ^{1/3} at a fixed shape,
+# so locally ε(s) = ε̄ (Nᶜˡ(s) / N̄ᶜˡ)^{2/3} (qᶜˡ(s) / q̄ᶜˡ)^{1/3} with ε̄ the cell's, and cloud liquid
+# changes at (ε(s) / ξˡ) δ(s). With ωˡ = ε̄ / ξˡ the cell's phase relaxation rate, the cell mean is
+#
+#   R = ωˡ [ χ (f⁺)^{-2/3} (1 - λ) ⟨s^{4/3}; s > 0⟩ / ⟨s⁺⟩^{1/3}
+#            + (1 - χ) / (1 - f⁺) (⟨s⁻⟩ - ξˡ (1 - χ) q̄ᶜˡ) ],
+#
+# (the subsaturated part scales both N and qᶜˡ by (1 - χ)/(1 - f⁺)), written for the rest of P3 as
+# R = ωˡ (δqᵛ⁺ˡ + Γ) with Γ = R / ωˡ - δqᵛ⁺ˡ. ⟨s^{4/3}; s > 0⟩ is a Gauss-Legendre quadrature.
+#
+# The fraction χ (`MixingEvaporationBalance`). Turbulence exchanges air between the two parts at
+# the closure's rate ωᵐ = √e / (ℂᵐ ℓ), carrying liquid from the saturated part to the
+# subsaturated part at ωᵐ [(1 - f⁺) χ - f⁺ (1 - χ)] q̄ᶜˡ = ωᵐ (χ - f⁺) q̄ᶜˡ, the exchange that would
+# make the liquid uniform. In the subsaturated part the liquid evaporates at its local droplets'
+# rate, ωˡ (1 - χ) / (1 - f⁺) |⟨s⁻⟩| to leading order in ξˡ q⊖ / |s|. The steady state of the
+# liquid of the subsaturated part, exchange = evaporation, is linear in χ:
+#
+#   χ = (ωˡ |⟨s⁻⟩| + f⁺ (1 - f⁺) ωᵐ q̄ᶜˡ) / (ωˡ |⟨s⁻⟩| + (1 - f⁺) ωᵐ q̄ᶜˡ),
+#
+# which is f⁺ ≤ χ ≤ 1: 1 without mixing or without liquid, f⁺ (uniform liquid) when mixing is fast
+# against evaporation. Liquid in the saturated part beyond its equilibrium condensate ⟨s⁺⟩ / ξˡ
+# would leave that part subsaturated, so χ ξˡ q̄ᶜˡ ≤ ⟨s⁺⟩ (λ ≤ 1), and the liquid beyond it lies in
+# the subsaturated part. Where there is no subsaturated part (f⁺ = 1) χ = 1.
+# `SaturatedPartLiquid` fixes χ = 1.
+#
+# The other processes at the same placement:
+#
+#   * activation, in the part of the cell where δ exceeds the activation threshold: that fraction
+#     times the rate at its mean vapor excess;
 #   * deposition nucleation, in the part where the excess over ice δ + qᵛ⁺ˡ - qᵛ⁺ⁱ reaches its
-#     threshold: the fraction of the cell that nucleates times the grid-mean (ungated) rate;
-#   * autoconversion and accretion, which are powers of qᶜˡ(s): partial moments of the mixture,
-#     by Gauss-Legendre quadrature.
+#     threshold: that fraction times the grid-mean (ungated) rate;
+#   * KK2000 autoconversion and accretion, powers of the local qᶜˡ and Nᶜˡ: partial moments of the
+#     mixture in the saturated part (Gauss-Legendre quadrature) plus the uniform subsaturated part.
 #
-# Each rate is still one number per process. Every source is paired with its sink as on the grid
-# mean, so mass and energy are conserved as before. With all spreads zero the grid-mean rates are
-# returned unchanged.
+# Each rate is still one number per process, and every source is paired with its sink as on the
+# grid mean, so mass and energy are conserved as before. With all spreads zero the grid-mean rates
+# are returned unchanged.
 
 """
 $(TYPEDEF)
@@ -43,12 +74,37 @@ struct CloudCondensationOnly end
 """
 $(TYPEDEF)
 
+All of the cloud liquid lies in the saturated part of the distribution (``χ = 1``), shaped as the
+equilibrium condensate. See [`AllProcesses`](@ref).
+"""
+struct SaturatedPartLiquid end
+
+"""
+$(TYPEDEF)
+
+The fraction ``χ`` of the cloud liquid in the saturated part of the distribution is the steady
+state of the liquid in the subsaturated part, between its exchange with the saturated part at the
+closure's mixing rate ``ωᵐ`` and its evaporation at the droplets' rate, bounded by the equilibrium
+condensate of the saturated part. See [`AllProcesses`](@ref).
+"""
+struct MixingEvaporationBalance end
+
+"""
+$(TYPEDEF)
+
 The subgrid distribution of [`SubgridCondensation`](@ref) enters every P3 process that is
-nonlinear in the local state: besides cloud condensation, droplet activation, deposition nucleation
-of ice, autoconversion and accretion. Cloud liquid is placed where the saturation excess ``s > 0``,
-as ``qᶜˡ(s) = q̄ᶜˡ s⁺ / ⟨s⁺⟩``, with a uniform droplet number concentration; rain and ice fill the
-cell independently of ``s``. The vapor exchange of rain and ice, being linear in the local vapor
-excess, keeps its grid-mean rate under this placement.
+nonlinear in the local state: the condensation of cloud liquid at its local droplet population,
+droplet activation, deposition nucleation of ice, autoconversion and accretion. All read one
+placement of the cloud liquid: a fraction ``χ`` in the saturated part ``s > 0``, as
+``χ q̄ᶜˡ s / ⟨s⁺⟩``, and ``1 - χ`` spread over the subsaturated part, with the droplet number
+placed in the same proportions. Rain and ice fill the cell independently of ``s``; their vapor
+exchange, linear in the local vapor excess, keeps its grid-mean rate.
+
+`liquid_placement` sets ``χ``: [`MixingEvaporationBalance`](@ref) (the default), the steady state of
+mixing and evaporation, which reads the mixing rate `ωᵐ` of the statistics (0 when they have
+none), or [`SaturatedPartLiquid`](@ref), ``χ = 1``.
+
+$(TYPEDFIELDS)
 
 ```jldoctest
 julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, AllProcesses
@@ -56,10 +112,15 @@ julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensatio
 julia> using Breeze.AtmosphereModels: PrescribedStatistics
 
 julia> SubgridCondensation(PrescribedStatistics(1e-4); processes = AllProcesses()).processes
-AllProcesses()
+AllProcesses{MixingEvaporationBalance}(MixingEvaporationBalance())
 ```
 """
-struct AllProcesses end
+struct AllProcesses{P}
+    "How the cloud liquid is placed between the saturated and subsaturated parts"
+    liquid_placement :: P
+end
+
+AllProcesses(; liquid_placement = MixingEvaporationBalance()) = AllProcesses(liquid_placement)
 
 validate_subgrid_processes(processes::CloudCondensationOnly) = processes
 validate_subgrid_processes(processes::AllProcesses) = processes
@@ -89,16 +150,21 @@ end
     return a, m, σ
 end
 
+# The exchange rate of air between the saturated and subsaturated parts, if the statistics have one
+@inline mixing_rate(statistics::NamedTuple{names}, FT) where names = mixing_rate(Val(:ωᵐ ∈ names), statistics, FT)
+@inline mixing_rate(::Val{true}, statistics, FT) = convert(FT, statistics.ωᵐ)
+@inline mixing_rate(::Val{false}, statistics, FT) = zero(FT)
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the subgrid distribution that the P3 processes other than cloud condensation read, or
+Return the subgrid distribution and placement of cloud liquid that the P3 processes read, or
 `nothing` when they use their grid-mean forms: for [`GridMeanCondensation`](@ref) and for
 [`SubgridCondensation`](@ref) with `processes = CloudCondensationOnly()`. With
-[`AllProcesses`](@ref) the result holds the mixture of the saturation excess about P3's grid mean
-``s̄ = qᵛ - qᵛ⁺ˡ + ξˡ qᶜˡ`` (weights `a`, means `m`, spreads `σ`), the psychrometric correction
-`ξˡ`, the cloud liquid `qᶜˡ`, the liquid scale ``λ = ξˡ qᶜˡ / ⟨s⁺⟩`` with ``⟨s⁺⟩ = s̄ + Γ``, the
-saturation `qᵛ⁺ˡ`, and `degenerate`, true when every spread is zero.
+[`AllProcesses`](@ref) the arguments are the statistics of the cell, its vapor, saturation and cloud
+liquid, the temperature, the thermodynamic constants, and the scheme, density, transport properties
+and cloud droplet distribution from which the cloud's phase relaxation rate `ωˡ` is formed; the result is [`placed_cloud_liquid`](@ref) of the mixture about P3's grid mean
+``s̄ = qᵛ - qᵛ⁺ˡ + ξˡ qᶜˡ``.
 """
 @inline subgrid_process_distribution(::GridMeanCondensation, args...) = nothing
 
@@ -107,17 +173,16 @@ saturation `qᵛ⁺ˡ`, and `degenerate`, true when every spread is zero.
 
 @inline subgrid_process_distribution(::CloudCondensationOnly, args...) = nothing
 
-@inline function subgrid_process_distribution(::AllProcesses, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, constants, Γ)
+@inline function subgrid_process_distribution(processes::AllProcesses, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, constants,
+                                              p3, ρ, transport, cloud)
     FT = typeof(qᵛ)
     ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+    ωˡ = p3_cloud_phase_relaxation_rate(p3, qᵛ⁺ˡ, qᶜˡ, T, ρ, transport, cloud, constants)
     q̄ᶜˡ = max(0, qᶜˡ)
     s̄ = qᵛ - qᵛ⁺ˡ + ξˡ * q̄ᶜˡ
     a, m, σ = shifted_mixture(statistics, s̄)
-    mean_positive_excess = max(0, s̄ + Γ)
-    has_liquid = (q̄ᶜˡ > 0) & (mean_positive_excess > 0)
-    λ = ifelse(has_liquid, ξˡ * q̄ᶜˡ / ifelse(has_liquid, mean_positive_excess, one(FT)), zero(FT))
-    degenerate = sum(σ) == 0
-    return (; a, m, σ, ξˡ, qᶜˡ = q̄ᶜˡ, λ, qᵛ⁺ˡ, degenerate)
+    ωᵐ = mixing_rate(statistics, FT)
+    return placed_cloud_liquid(processes.liquid_placement, a, m, σ, s̄, ξˡ, q̄ᶜˡ, qᵛ⁺ˡ, ωˡ, ωᵐ)
 end
 
 #####
@@ -148,49 +213,22 @@ end
     φᵘ = ifelse(bounded, gaussian_density(zᵘ), zero(FT))
     P = max(0, gaussian_upper_tail(zˡ) - tailᵘ)
     M = m * P + σ₊ * (gaussian_density(zˡ) - φᵘ)
-    # Empty interval
     nonempty = !bounded | (u > l)
     return ifelse(nonempty, P, zero(FT)), ifelse(nonempty, M, zero(FT))
 end
 
-# The same over the mixture
-@inline function mixture_interval_moments(distribution, l, u, bounded)
-    moments = map((mᵢ, σᵢ) -> gaussian_interval_moments(mᵢ, σᵢ, l, u, bounded), distribution.m, distribution.σ)
-    P = sum(map((aᵢ, Mᵢ) -> aᵢ * Mᵢ[1], distribution.a, moments))
-    M = sum(map((aᵢ, Mᵢ) -> aᵢ * Mᵢ[2], distribution.a, moments))
+# The same over the mixture `(a, m, σ)`
+@inline function mixture_interval_moments(a, m, σ, l, u, bounded)
+    moments = map((mᵢ, σᵢ) -> gaussian_interval_moments(mᵢ, σᵢ, l, u, bounded), m, σ)
+    P = sum(map((aᵢ, Mᵢ) -> aᵢ * Mᵢ[1], a, moments))
+    M = sum(map((aᵢ, Mᵢ) -> aᵢ * Mᵢ[2], a, moments))
     return P, M
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return the fraction `P` of the cell where the local vapor excess over liquid ``δ(s)`` exceeds
-`threshold` [kg kg⁻¹], and the mean of ``δ`` over that part times `P`. ``δ(s) = s`` where
-``s ≤ 0`` and ``(1 - λ) s`` where ``s > 0``, with the liquid scale ``λ`` of `distribution` (see
-[`subgrid_process_distribution`](@ref)); the set ``δ > c`` is the union of a clear interval
-``c < s ≤ 0`` and a cloudy interval of ``s > 0``, whose bounds follow from the sign of ``1 - λ``.
-"""
-@inline function vapor_excess_exceedance(distribution, threshold)
-    FT = typeof(threshold)
-    c = threshold
-    r = 1 - distribution.λ
-    # Clear part: c < s ≤ 0
-    P⁻, M⁻ = mixture_interval_moments(distribution, min(c, zero(FT)), zero(FT), true)
-    # Cloudy part, s > 0 and r s > c:
-    #   r > 0:          s > max(c, 0) / r
-    #   r ≤ 0, c < 0:   0 < s < c / r (unbounded when r = 0)
-    #   r ≤ 0, c ≥ 0:   empty
-    r₊ = ifelse(r > 0, r, one(FT))
-    r₋ = ifelse(r < 0, r, -one(FT))
-    lower = ifelse(r > 0, max(c, zero(FT)) / r₊, zero(FT))
-    upper = ifelse(r > 0, zero(FT), ifelse(c < 0, c / r₋, zero(FT)))
-    bounded = (r < 0) | ((r == 0) & (c >= 0))
-    P⁺, M⁺ = mixture_interval_moments(distribution, lower, upper, bounded)
-    return P⁻ + P⁺, M⁻ + r * M⁺
-end
+@inline mixture_interval_moments(d::NamedTuple, l, u, bounded) = mixture_interval_moments(d.a, d.m, d.σ, l, u, bounded)
 
 #####
-##### Partial moments of the placed cloud liquid, by Gauss-Legendre quadrature
+##### Partial moments by Gauss-Legendre quadrature
 #####
 
 # The positive nodes and weights of the 24-point Gauss-Legendre rule on [-1, 1]
@@ -233,110 +271,220 @@ end
     return ifelse(positive, ifelse(positive, s, one(s))^β, zero(s))
 end
 
-@inline mixture_partial_moment(distribution, β, l) =
-    sum(map((aᵢ, mᵢ, σᵢ) -> aᵢ * gaussian_partial_moment(β, mᵢ, σᵢ, l),
-            distribution.a, distribution.m, distribution.σ))
+@inline mixture_partial_moment(d, β, l) =
+    sum(map((aᵢ, mᵢ, σᵢ) -> aᵢ * gaussian_partial_moment(β, mᵢ, σᵢ, l), d.a, d.m, d.σ))
+
+# a / b where b > 0, and `fallback` otherwise
+@inline safe_ratio(a, b, fallback) = ifelse(b > 0, a / ifelse(b > 0, b, one(b)), fallback)
+
+#####
+##### The placement of the cloud liquid
+#####
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the cell mean of ``qᶜˡ(s)^β`` over the part of the cell where ``qᶜˡ(s) ≥`` `threshold`,
-for the placed cloud liquid ``qᶜˡ(s) = q̄ᶜˡ s⁺ / ⟨s⁺⟩`` of `distribution` (see
-[`subgrid_process_distribution`](@ref)):
+Return the placement of the cloud liquid in the mixture `(a, m, σ)` of the saturation excess about
+the grid mean `s̄`, read by every P3 process of [`AllProcesses`](@ref): the mixture, the
+psychrometric correction `ξˡ`, the cloud liquid `qᶜˡ`, the saturated fraction `f⁺`, ``⟨s⁺⟩``
+(`positive_excess`) and ``⟨s⁻⟩`` (`negative_excess`), the fraction `χ` of the liquid in the
+saturated part, the scale ``λ = χ ξˡ qᶜˡ / ⟨s⁺⟩`` of the local vapor excess there, the uniform
+liquid ``q⊖`` (`subsaturated_liquid`) of the subsaturated part, the saturation `qᵛ⁺ˡ`, and `degenerate`, true when every
+spread is zero (the grid mean). `ωˡ` is the cloud's phase relaxation rate and `ωᵐ` the exchange
+rate of air between the two parts.
+"""
+@inline function placed_cloud_liquid(placement, a, m, σ, s̄, ξˡ, q̄ᶜˡ, qᵛ⁺ˡ, ωˡ, ωᵐ)
+    FT = typeof(s̄)
+    f⁺, s⁺ = mixture_interval_moments(a, m, σ, zero(FT), zero(FT), false)
+    s⁻ = min(0, s̄ - s⁺)
+    χ = saturated_liquid_fraction(placement, f⁺, s⁺, s⁻, ξˡ, q̄ᶜˡ, ωˡ, ωᵐ)
+    λ = safe_ratio(χ * ξˡ * q̄ᶜˡ, s⁺, zero(FT))
+    subsaturated_liquid = safe_ratio((1 - χ) * q̄ᶜˡ, 1 - f⁺, zero(FT))
+    degenerate = sum(σ) == 0
+    return (; a, m, σ, ξˡ, qᶜˡ = q̄ᶜˡ, f⁺, positive_excess = s⁺, negative_excess = s⁻,
+              χ, λ, subsaturated_liquid, qᵛ⁺ˡ, degenerate)
+end
+
+@inline saturated_liquid_fraction(::SaturatedPartLiquid, f⁺, s⁺, s⁻, ξˡ, q̄ᶜˡ, ωˡ, ωᵐ) = one(f⁺)
+
+@inline function saturated_liquid_fraction(::MixingEvaporationBalance, f⁺, s⁺, s⁻, ξˡ, q̄ᶜˡ, ωˡ, ωᵐ)
+    FT = typeof(f⁺)
+    evaporation = ωˡ * (-s⁻)
+    exchange = (1 - f⁺) * ωᵐ * q̄ᶜˡ
+    χᵇ = safe_ratio(evaporation + f⁺ * exchange, evaporation + exchange, one(FT))
+    # No more liquid in the saturated part than its equilibrium condensate ⟨s⁺⟩ / ξˡ
+    χᵉ = safe_ratio(s⁺, ξˡ * q̄ᶜˡ, one(FT))
+    χ = min(χᵇ, χᵉ, one(FT))
+    return ifelse(f⁺ < 1, χ, one(FT))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return ``Γ`` such that the cell-mean condensation rate of cloud liquid at its local droplet
+population and placement `d` (see [`placed_cloud_liquid`](@ref)) is ``ωˡ (δqᵛ⁺ˡ + Γ)``, with the
+grid-mean vapor excess ``δqᵛ⁺ˡ = s̄ - ξˡ q̄ᶜˡ``:
 
 ```math
-⟨qᶜˡ(s)^β ; qᶜˡ ≥ qᵗ⟩ = (q̄ᶜˡ / ⟨s⁺⟩)^β Σᵢ aᵢ ∫_{sᵗ}^∞ s^β N(s; mᵢ, σᵢ²) ds,  sᵗ = qᵗ ⟨s⁺⟩ / q̄ᶜˡ.
+δqᵛ⁺ˡ + Γ = χ (f⁺)^{-2/3} (1 - λ) ⟨s^{4/3}; s > 0⟩ / ⟨s⁺⟩^{1/3} + (1 - χ) / (1 - f⁺) (⟨s⁻⟩ - ξˡ (1 - χ) q̄ᶜˡ).
 ```
 
-``⟨s⁺⟩`` is the same quadrature at ``β = 1``, so that the placed liquid sums to ``q̄ᶜˡ``.
-Without cloud liquid, or without a saturated part, the result is the grid-mean power
-``q̄ᶜˡ^β`` gated at the threshold.
+`Γ` is returned unchanged where `d` is `nothing` or degenerate.
 """
-@inline function placed_cloud_liquid_moment(distribution, β, threshold)
+@inline placed_condensation_correlation(::Nothing, Γ) = Γ
+
+@inline function placed_condensation_correlation(d, Γ)
+    FT = typeof(d.qᶜˡ)
+    s⁺ = d.positive_excess
+    saturated_density = safe_ratio(mixture_partial_moment(d, convert(FT, 4//3), zero(FT)),
+                                   positive_power(d.f⁺, convert(FT, 2//3)) * positive_power(s⁺, convert(FT, 1//3)),
+                                   zero(FT))
+    saturated = d.χ * (1 - d.λ) * saturated_density
+    subsaturated = safe_ratio(1 - d.χ, 1 - d.f⁺, zero(FT)) * (d.negative_excess - d.ξˡ * (1 - d.χ) * d.qᶜˡ)
+    s̄ = s⁺ + d.negative_excess
+    vapor_excess = s̄ - d.ξˡ * d.qᶜˡ
+    return ifelse(d.degenerate, Γ, saturated + subsaturated - vapor_excess)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the cell mean of ``qᶜˡ(s)^β (Nᶜˡ(s) / N̄ᶜˡ)^γ`` over the part of the cell where
+``qᶜˡ(s) ≥`` `threshold`, at the placement `d` (see [`placed_cloud_liquid`](@ref)):
+
+```math
+(χ / f⁺)^γ (χ q̄ᶜˡ / ⟨s⁺⟩)^β Σᵢ aᵢ ∫_{sᵗ}^∞ s^β N(s; mᵢ, σᵢ²) ds + (1 - f⁺) ((1 - χ)/(1 - f⁺))^γ q⊖^β [q⊖ ≥ qᵗ],
+```
+
+with ``sᵗ = qᵗ ⟨s⁺⟩ / (χ q̄ᶜˡ)``. Without cloud liquid, or where `d` is degenerate, the result is
+the grid-mean ``q̄ᶜˡ^β`` gated at the threshold.
+"""
+@inline function placed_cloud_liquid_moment(d, β, threshold, γ = zero(β))
     FT = typeof(threshold)
-    q̄ = distribution.qᶜˡ
-    s⁺ = mixture_partial_moment(distribution, one(FT), zero(FT))
-    resolved = (q̄ > 0) & (s⁺ > 0) & !distribution.degenerate
-    s⁺ₛ = ifelse(resolved, s⁺, one(FT))
-    q̄ₛ = ifelse(resolved, q̄, one(FT))
-    sᵗ = max(0, threshold) * s⁺ₛ / q̄ₛ
-    subgrid = (q̄ₛ / s⁺ₛ)^β * mixture_partial_moment(distribution, β, sᵗ)
+    q̄ = d.qᶜˡ
+    s⁺ = d.positive_excess
+    saturated_liquid = d.χ * q̄
+    saturated_present = (saturated_liquid > 0) & (s⁺ > 0) & (d.f⁺ > 0)
+    s⁺ₛ = ifelse(saturated_present, s⁺, one(FT))
+    saturated_liquidₛ = ifelse(saturated_present, saturated_liquid, one(FT))
+    f⁺ₛ = ifelse(saturated_present, d.f⁺, one(FT))
+    sᵗ = max(0, threshold) * s⁺ₛ / saturated_liquidₛ
+    q̄ₛ = ifelse(q̄ > 0, q̄, one(FT))
+    saturated = (saturated_liquidₛ / (f⁺ₛ * q̄ₛ))^γ * (saturated_liquidₛ / s⁺ₛ)^β * mixture_partial_moment(d, β, sᵗ)
+    saturated = ifelse(saturated_present, saturated, zero(FT))
+
+    subsaturated_present = (d.subsaturated_liquid > 0) & (d.f⁺ < 1)
+    subsaturated_liquidₛ = ifelse(subsaturated_present, d.subsaturated_liquid, one(FT))
+    subsaturated = (1 - d.f⁺) * (subsaturated_liquidₛ / q̄ₛ)^γ * subsaturated_liquidₛ^β
+    subsaturated = ifelse(subsaturated_present & (d.subsaturated_liquid >= threshold), subsaturated, zero(FT))
+
+    resolved = (q̄ > 0) & !d.degenerate
     grid_mean = ifelse(q̄ >= threshold, positive_power(q̄, β), zero(FT))
-    return ifelse(resolved, subgrid, grid_mean)
+    return ifelse(resolved, saturated + subsaturated, grid_mean)
 end
 
 #####
-##### The rates that read the distribution
+##### The rates that read the placement
 #####
 
-# Autoconversion: KK2000 at the local cloud liquid, gated locally at its threshold
+# Autoconversion: KK2000 at the local cloud liquid and droplet number, gated locally at its threshold
 @inline subgrid_autoconversion_rate(::Nothing, p3, qᶜˡ, Nᶜˡ, ρ, qʳ) =
     rain_autoconversion_rate(p3, qᶜˡ, Nᶜˡ, ρ, qʳ)
 
-@inline subgrid_autoconversion_rate(distribution, p3, qᶜˡ, Nᶜˡ, ρ, qʳ) =
-    subgrid_autoconversion_rate(p3.warm_rain_scheme, distribution, p3, qᶜˡ, Nᶜˡ, ρ, qʳ)
+@inline subgrid_autoconversion_rate(d, p3, qᶜˡ, Nᶜˡ, ρ, qʳ) =
+    subgrid_autoconversion_rate(p3.warm_rain_scheme, d, p3, qᶜˡ, Nᶜˡ, ρ, qʳ)
 
-@inline function subgrid_autoconversion_rate(::KhairoutdinovKogan2000, distribution, p3, qᶜˡ, Nᶜˡ, ρ, qʳ)
+@inline function subgrid_autoconversion_rate(::KhairoutdinovKogan2000, d, p3, qᶜˡ, Nᶜˡ, ρ, qʳ)
     parameters = p3.process_rates
     ℂᵃᵘᵗᵒ₁ = parameters.autoconversion_coefficient
     ℂᵃᵘᵗᵒ₂ = parameters.autoconversion_exponent_cloud
     ℂᵃᵘᵗᵒ₃ = parameters.autoconversion_exponent_droplet
     ℂᵃᵘᵗᵒ₄ = parameters.autoconversion_threshold
     scaled_cloud_number = Nᶜˡ / parameters.autoconversion_reference_concentration
-    subgrid = ℂᵃᵘᵗᵒ₁ * placed_cloud_liquid_moment(distribution, ℂᵃᵘᵗᵒ₂, ℂᵃᵘᵗᵒ₄) * scaled_cloud_number^ℂᵃᵘᵗᵒ₃
-    return ifelse(distribution.degenerate, rain_autoconversion_rate(p3, qᶜˡ, Nᶜˡ, ρ, qʳ), subgrid)
+    moment = placed_cloud_liquid_moment(d, ℂᵃᵘᵗᵒ₂, ℂᵃᵘᵗᵒ₄, ℂᵃᵘᵗᵒ₃)
+    subgrid = ℂᵃᵘᵗᵒ₁ * moment * scaled_cloud_number^ℂᵃᵘᵗᵒ₃
+    return ifelse(d.degenerate, rain_autoconversion_rate(p3, qᶜˡ, Nᶜˡ, ρ, qʳ), subgrid)
 end
 
 # Accretion: KK2000 at the local cloud liquid and the cell's rain, active where both are present
 @inline subgrid_accretion_rate(::Nothing, p3, qᶜˡ, qʳ, ρ) = rain_accretion_rate(p3, qᶜˡ, qʳ, ρ)
 
-@inline subgrid_accretion_rate(distribution, p3, qᶜˡ, qʳ, ρ) =
-    subgrid_accretion_rate(p3.warm_rain_scheme, distribution, p3, qᶜˡ, qʳ, ρ)
+@inline subgrid_accretion_rate(d, p3, qᶜˡ, qʳ, ρ) =
+    subgrid_accretion_rate(p3.warm_rain_scheme, d, p3, qᶜˡ, qʳ, ρ)
 
-@inline function subgrid_accretion_rate(::KhairoutdinovKogan2000, distribution, p3, qᶜˡ, qʳ, ρ)
+@inline function subgrid_accretion_rate(::KhairoutdinovKogan2000, d, p3, qᶜˡ, qʳ, ρ)
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
     ℂᵃᶜᶜʳ₁ = parameters.accretion_coefficient
     ℂᵃᶜᶜʳ₂ = parameters.accretion_exponent
     qʳ₊ = max(0, qʳ)
     rain_present = qʳ₊ >= p3.minimum_mass_mixing_ratio
-    moment = placed_cloud_liquid_moment(distribution, ℂᵃᶜᶜʳ₂, p3.minimum_mass_mixing_ratio)
+    moment = placed_cloud_liquid_moment(d, ℂᵃᶜᶜʳ₂, p3.minimum_mass_mixing_ratio)
     subgrid = ifelse(rain_present, ℂᵃᶜᶜʳ₁ * moment * qʳ₊^ℂᵃᶜᶜʳ₂, zero(FT))
-    return ifelse(distribution.degenerate, rain_accretion_rate(p3, qᶜˡ, qʳ, ρ), subgrid)
+    return ifelse(d.degenerate, rain_accretion_rate(p3, qᶜˡ, qʳ, ρ), subgrid)
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `(; qᵛ, fraction)`: the vapor that droplet activation sees and the fraction of the cell
-that activates. On the grid mean (`distribution = nothing`) they are `qᵛ` and 1. With a subgrid
-distribution, activation acts in the part of the cell where the local vapor excess over liquid
-exceeds the activation threshold ``ℂᶠᵒʳᵐ₃ qᵛ⁺ˡ``: `fraction` is that part and `qᵛ` is
-``qᵛ⁺ˡ`` plus the mean vapor excess over it (see [`vapor_excess_exceedance`](@ref)).
+Return the fraction `P` of the cell where the local vapor excess over liquid ``δ(s)`` exceeds
+`threshold` [kg kg⁻¹], and the mean of ``δ`` over that part times `P`, at the placement `d` (see
+[`placed_cloud_liquid`](@ref)). ``δ(s) = s - ξˡ q⊖`` where ``s ≤ 0`` and ``(1 - λ) s`` where
+``s > 0``; the set ``δ > c`` is the union of an interval of ``s ≤ 0`` and an interval of
+``s > 0`` whose bounds follow from the sign of ``1 - λ``.
 """
+@inline function vapor_excess_exceedance(d, threshold)
+    FT = typeof(threshold)
+    c = threshold
+    shift = d.ξˡ * d.subsaturated_liquid
+    r = 1 - d.λ
+    # Subsaturated part: c + ξˡ q⊖ < s ≤ 0, where δ = s - ξˡ q⊖
+    P⁻, M⁻ = mixture_interval_moments(d, min(c + shift, zero(FT)), zero(FT), true)
+    # Saturated part, s > 0 and r s > c:
+    #   r > 0:          s > max(c, 0) / r
+    #   r ≤ 0, c < 0:   0 < s < c / r (unbounded when r = 0)
+    #   r ≤ 0, c ≥ 0:   empty
+    r₊ = ifelse(r > 0, r, one(FT))
+    r₋ = ifelse(r < 0, r, -one(FT))
+    lower = ifelse(r > 0, max(c, zero(FT)) / r₊, zero(FT))
+    upper = ifelse(r > 0, zero(FT), ifelse(c < 0, c / r₋, zero(FT)))
+    bounded = (r < 0) | ((r == 0) & (c >= 0))
+    P⁺, M⁺ = mixture_interval_moments(d, lower, upper, bounded)
+    return P⁻ + P⁺, M⁻ - shift * P⁻ + r * M⁺
+end
+
 # The activation threshold on the relative supersaturation over liquid
 @inline activation_relative_threshold(::Nothing, p3) = p3.process_rates.activation_supersaturation_threshold
 @inline activation_relative_threshold(aerosol, p3) = aerosol.activation_supersaturation_threshold
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `(; qᵛ, fraction)`: the vapor that droplet activation sees and the fraction of the cell
+that activates. On the grid mean (`d = nothing`) they are `qᵛ` and 1. With a placement, activation
+acts in the part of the cell where the local vapor excess over liquid exceeds the activation
+threshold ``ℂᶠᵒʳᵐ₃ qᵛ⁺ˡ``: `fraction` is that part and `qᵛ` is ``qᵛ⁺ˡ`` plus the mean vapor excess
+over it (see [`vapor_excess_exceedance`](@ref)).
+"""
 @inline activation_vapor(::Nothing, qᵛ, qᵛ⁺ˡ, relative_threshold) = (; qᵛ, fraction = one(qᵛ))
 
-@inline function activation_vapor(distribution, qᵛ, qᵛ⁺ˡ, relative_threshold)
+@inline function activation_vapor(d, qᵛ, qᵛ⁺ˡ, relative_threshold)
     FT = typeof(qᵛ)
-    P, M = vapor_excess_exceedance(distribution, relative_threshold * qᵛ⁺ˡ)
-    active = (P > 0) & !distribution.degenerate
+    P, M = vapor_excess_exceedance(d, relative_threshold * qᵛ⁺ˡ)
+    active = (P > 0) & !d.degenerate
     tail_excess = M / ifelse(active, P, one(FT))
     return (; qᵛ = ifelse(active, qᵛ⁺ˡ + tail_excess, qᵛ),
-              fraction = ifelse(distribution.degenerate, one(FT), P))
+              fraction = ifelse(d.degenerate, one(FT), P))
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the fraction of the cell where deposition nucleation of ice acts: where the local vapor
-excess over ice reaches `ℂⁿᵘᶜˡ₂` times `qᵛ⁺ⁱ`. On the grid mean (`distribution = nothing`) it is 1
-or 0. With a subgrid distribution the local excess over ice is ``δ(s) + qᵛ⁺ˡ - qᵛ⁺ⁱ``, the local
-vapor excess over liquid shifted by the difference of the saturations of the cell, so the fraction
-is that where ``δ(s) ≥ ℂⁿᵘᶜˡ₂ qᵛ⁺ⁱ - qᵛ⁺ˡ + qᵛ⁺ⁱ``.
+excess over ice reaches `ℂⁿᵘᶜˡ₂` times `qᵛ⁺ⁱ`. On the grid mean (`d = nothing`) it is 1 or 0. With
+a placement the local excess over ice is ``δ(s) + qᵛ⁺ˡ - qᵛ⁺ⁱ``, the local vapor excess over liquid
+shifted by the difference of the saturations of the cell, so the fraction is that where
+``δ(s) ≥ ℂⁿᵘᶜˡ₂ qᵛ⁺ⁱ - qᵛ⁺ˡ + qᵛ⁺ⁱ``.
 """
 @inline function nucleating_fraction(::Nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
     FT = typeof(qᵛ)
@@ -344,8 +492,8 @@ is that where ``δ(s) ≥ ℂⁿᵘᶜˡ₂ qᵛ⁺ⁱ - qᵛ⁺ˡ + qᵛ⁺ⁱ`
     return ifelse(Sⁱ >= ℂⁿᵘᶜˡ₂, one(FT), zero(FT))
 end
 
-@inline function nucleating_fraction(distribution, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
+@inline function nucleating_fraction(d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
     threshold = ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, floor) - qᵛ⁺ˡ + qᵛ⁺ⁱ
-    P, _ = vapor_excess_exceedance(distribution, threshold)
-    return ifelse(distribution.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor), P)
+    P, _ = vapor_excess_exceedance(d, threshold)
+    return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor), P)
 end
