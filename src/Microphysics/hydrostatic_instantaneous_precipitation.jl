@@ -30,5 +30,9 @@ function AtmosphereModels.microphysics_model_update!(ip::IP, model::MoistHydrost
     return nothing
 end
 
+# The rates of the removal are densities of the volume of the coordinate: carried with the density
+# of a PressureLevelGrid, they keep the mass per unit area of the water that left
+HydrostaticEquations.carried_microphysical_densities(::IP, μ) = (μ.precipitation_rate, μ.ice_precipitation_rate)
+
 # On HydrostaticDynamics the generic update needs a grid whose Δz is a physical depth
 HydrostaticEquations.requires_pressure_level_grid(::IP) = true

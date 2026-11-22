@@ -194,6 +194,13 @@ supports_hydrostatic_dynamics(::Nothing) = true
 # which it is on a `PressureLevelGrid` only (the grid of the label coordinate holds labels)
 requires_pressure_level_grid(microphysics) = false
 
+# Diagnostic fields of a scheme that are densities per unit volume of the coordinate and must keep
+# their mass per unit area when a PressureLevelGrid re-diagnoses its density
+# (`rediagnose_layer_density!` carries them at a fixed specific value, as the prognostic densities).
+# The rates of an in-place removal of condensate are: `precipitation_mass_change!` reads their mass
+# per unit area, ρc Δz = (ρc / ρ) Δp / g, after the `update_state!` of the scheme has re-diagnosed ρ.
+carried_microphysical_densities(microphysics, microphysical_fields) = ()
+
 has_pressure_levels(grid) = grid isa PressureLevelGrid
 has_pressure_levels(grid::MultiRegion.MultiRegionGrid) = all(getregion(grid, r) isa PressureLevelGrid for r in 1:regions(grid))
 
@@ -502,7 +509,7 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::MoistHydr
                               dynamics.geopotential, grid, dynamics.surface_geopotential,
                               θᵨ, dynamics.exner_function, dynamics.interface_exner_function, cᵖᵈ)
 
-    rediagnose_layer_density!(grid, model, θᵨ)
+    rediagnose_layer_density!(grid, model, θᵨ, carried_microphysical_densities(model.microphysics, model.microphysical_fields))
 
     @apply_regionally launch!(arch, grid, :xy, _compute_vertical_mass_flux!,
                               dynamics.vertical_mass_flux, w, grid,
