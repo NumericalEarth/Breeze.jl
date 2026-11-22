@@ -168,8 +168,9 @@ end
 # from another grid (`cpu_face_constructor_z`) carries that grid's arrays, which are copied
 function initialize_state!(pˢ, pˢ⁻, ρ, coordinate::PLVD{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing, <:NamedTuple}, A, B, FT)
     reference = coordinate.density
-    fill!(pˢ, reference.surface_pressure)
-    fill!(pˢ⁻, reference.surface_pressure)
+    # Parents: the generic methods for OffsetArrays index a device array element by element (job 20341)
+    fill!(parent(pˢ), reference.surface_pressure)
+    fill!(parent(pˢ⁻), reference.surface_pressure)
     Ac = on_architecture(CPU(), A); Bc = on_architecture(CPU(), B)
     ρc = on_architecture(CPU(), ρ)
     for k in axes(ρc, 3)
@@ -177,7 +178,7 @@ function initialize_state!(pˢ, pˢ⁻, ρ, coordinate::PLVD{<:Any, <:Any, <:Any
         p = (Ac[k₊] + Ac[k₊ + 1]) / 2 + (Bc[k₊] + Bc[k₊ + 1]) / 2 * reference.surface_pressure
         ρc[:, :, k] .= max(p, Ac[lastindex(Ac)] / 2) / (reference.gas_constant * reference.temperature)
     end
-    copyto!(ρ, on_architecture(Oceananigans.Architectures.architecture(ρ), ρc))
+    copyto!(parent(ρ), parent(on_architecture(Oceananigans.Architectures.architecture(ρ), ρc)))
     return nothing
 end
 
