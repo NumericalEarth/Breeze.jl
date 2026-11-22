@@ -123,11 +123,6 @@ the model (see [`state_validation_interval!`](@ref)). Called by the time stepper
 """
 function time_step_column_physics!(microphysics, model::MoistHydrostaticModel)
     column_physics_in_time_step(model) && apply_column_physics!(microphysics, model)
-
-    # The end of the time step, whoever applies the column physics: the state is checked here, once,
-    # and not in each of the `update_state!`s of the step
-    validate_time_step_state(model)
-
     return nothing
 end
 
@@ -193,6 +188,10 @@ supports_hydrostatic_dynamics(::Nothing) = true
 # A scheme that runs through the generic microphysics interface reads Δz as a physical depth,
 # which it is on a `PressureLevelGrid` only (the grid of the label coordinate holds labels)
 requires_pressure_level_grid(microphysics) = false
+
+# The end of the time step, whatever the scheme and whoever applies its column physics: the state is
+# checked here, once, and not in each of the `update_state!`s of the step
+AtmosphereModels.end_of_microphysics_update!(::MoistHydrostaticDynamics, model) = validate_time_step_state(model)
 
 # Diagnostic fields of a scheme that are densities per unit volume of the coordinate and must keep
 # their mass per unit area when a PressureLevelGrid re-diagnoses its density

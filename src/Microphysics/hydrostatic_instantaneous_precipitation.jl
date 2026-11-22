@@ -10,7 +10,7 @@
 # bookkeeping of a removal at fixed density (plvd_logs/3c_0M_ENERGY_DERIVATION.txt). The scheme
 # runs on a PressureLevelGrid only. 2M and other schemes are not adapted to HydrostaticDynamics.
 
-using Breeze.HydrostaticEquations: HydrostaticEquations, MoistHydrostaticModel
+using Breeze.HydrostaticEquations: HydrostaticEquations
 using Oceananigans.Fields: ZeroField
 
 HydrostaticEquations.supports_hydrostatic_dynamics(::IP) = true
@@ -21,14 +21,9 @@ function HydrostaticEquations.hydrostatic_water_fields(::IP, μ)
     return (; qᵛ = μ.qᵛ, qˡ = zero_field, qⁱ = zero_field, qᶜˡ = zero_field, ρqʳ = zero_field, ρqˢ = zero_field, wʳ = nothing)
 end
 
-# The generic update of the scheme acts on HydrostaticDynamics as on any dynamics: it condenses
-# in place, and `precipitation_mass_change!` takes the mass of the water. What the hydrostatic
-# core adds at the end of its time step is the check of its state.
-function AtmosphereModels.microphysics_model_update!(ip::IP, model::MoistHydrostaticModel)
-    invoke(AtmosphereModels.microphysics_model_update!, Tuple{IP, Any}, ip, model)
-    HydrostaticEquations.validate_time_step_state(model)
-    return nothing
-end
+# The generic update of the scheme acts on HydrostaticDynamics as on any dynamics: it condenses in
+# place, and `precipitation_mass_change!` takes the mass of the water. The time steppers then check
+# the hydrostatic state (`end_of_microphysics_update!`).
 
 # The rates of the removal are densities of the volume of the coordinate: carried with the density
 # of a PressureLevelGrid, they keep the mass per unit area of the water that left

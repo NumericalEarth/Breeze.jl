@@ -15,7 +15,7 @@ using Oceananigans.TimeSteppers:
 
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!,
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, SlowDynamics, microphysics_model_update!, end_of_microphysics_update!,
                                 compute_closure_tendencies!, refreshes_state_after_update, invalid_time_step,
                                 continuity_density, thermodynamic_density
 
@@ -402,6 +402,7 @@ function complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
+    end_of_microphysics_update!(model.dynamics, model)
 
     # After the step's last tendency build, which is the one inside the microphysics update for a
     # scheme that refreshes the state itself (`refreshes_state_after_update`): the transport density

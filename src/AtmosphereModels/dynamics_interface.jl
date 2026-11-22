@@ -656,3 +656,12 @@ removal. At fixed density the removed mass is replaced by dry air at the same te
 a total-mass coordinate corrects for here.
 """
 precipitation_mass_change!(dynamics, model, Δt, surface_precipitation; in_place_condensate=nothing) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Called by the time steppers once per time step, after the operator-split update of the
+microphysics (`microphysics_model_update!`), whatever the scheme. A dynamics that checks or
+completes its state at the end of a step extends this. Nothing by default.
+"""
+end_of_microphysics_update!(dynamics, model) = nothing

@@ -667,6 +667,7 @@ function OceananigansTimeSteppers.time_step!(model::GravityWaveMultirateModel, Î
     # The operator-split microphysics update, once per step on the state just refreshed, as
     # `:SSPRungeKutta3` applies it. Nothing without microphysics.
     microphysics_model_update!(model.microphysics, model)
+    end_of_microphysics_update!(model.dynamics, model)
 
     return nothing
 end
