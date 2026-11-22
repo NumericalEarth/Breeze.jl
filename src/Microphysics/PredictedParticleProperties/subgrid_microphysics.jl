@@ -107,7 +107,7 @@ none), or [`SaturatedPartLiquid`](@ref), ``χ = 1``.
 $(TYPEDFIELDS)
 
 ```jldoctest
-julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, AllProcesses
+julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, AllProcesses, MixingEvaporationBalance
 
 julia> using Breeze.AtmosphereModels: PrescribedStatistics
 
