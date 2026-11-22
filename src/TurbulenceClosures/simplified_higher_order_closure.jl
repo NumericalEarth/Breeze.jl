@@ -94,7 +94,25 @@ using Breeze
 closure = SimplifiedHigherOrderClosure()
 
 # output
-SHOW_OUTPUT
+SimplifiedHigherOrderClosure{VerticallyImplicitTimeDiscretization}
+├── mixing_length: BlendedMixingLength{Float64} (ℂˡ₁ = 0.5, ℂˡ₂ = 2.8284, ℂˡ₃ = 0.01, ℂˡ₄ = 0.1, ℂˡ₅ = 400.0)
+├── stability_functions: ColumnStabilityDamping{Float64}
+│   ├── ℂᵘ: 0.1, ℂᶜ: 0.1
+│   ├── ℂᵝ₁: 0.001, ℂᵝ₂: 0.08, ℂᵝ₃: 2.65, ℂᵝ₄: 0.02
+│   ├── 𝕊ᴰ: 1.97531
+│   └── ℂᴾ: 0.1
+├── static_stability: SaturationWeightedStaticStability
+├── subgrid_distribution: DoubleGaussian
+│   ├── time_scale: ReturnToIsotropyTimeScale()
+│   ├── second_moments: DowngradientSecondMoments{Float64}
+│   ├── third_moment: AlgebraicThirdMoment{Float64}
+│   ├── stratification_number_bound: RationalSaturatedStratificationNumber{Float64}
+│   ├── skewness: PolynomialSaturatedSkewness{Float64}
+│   ├── assumed_pdf: DoubleGaussianPDF{Float64}
+│   ├── saturation: ModelThermodynamicsSaturation{WarmPhaseEquilibrium}
+│   └── clipping: HardClipping
+├── minimum_tke: 1.0e-6
+└── solver: SinglePass()
 ```
 """
 function SimplifiedHigherOrderClosure(time_discretization = VerticallyImplicitTimeDiscretization(),

@@ -7,8 +7,8 @@ $(TYPEDEF)
 
 The statistics of the vapor excess over liquid from the model's turbulence closure (see
 [`AtmosphereModels.supersaturation_statistics`](@ref)): the components of the double-Gaussian
-subgrid distribution of a `TKEBasedTurbulenceClosure` with a `subgrid_distribution`, or of a
-`SimplifiedHigherOrderClosure`, as Gaussian components `(; a, μ, σ)` of the vapor excess. A
+subgrid distribution of a `TKEBasedTurbulenceClosure` with a `subgrid_distribution` (such as a
+`SimplifiedHigherOrderClosure`), as Gaussian components `(; a, μ, σ)` of the vapor excess. A
 closure without a subgrid distribution supplies no spread (`σ = 0`): the grid-mean rate.
 
 ```jldoctest

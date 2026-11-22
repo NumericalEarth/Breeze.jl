@@ -56,7 +56,7 @@ closure = SimplifiedHigherOrderClosure()
 keys(closure_parameters(closure))
 
 # output
-PARAMETERS_OUTPUT
+(:ℂˡ₁, :ℂˡ₂, :ℂˡ₃, :ℂˡ₄, :ℂˡ₅, :ℂᵘ, :ℂᶜ, :ℂᵝ₁, :ℂᵝ₂, :ℂᵝ₃, :ℂᵝ₄, :ℂᴰ₁, :ℂᴰ₂, :ℂᴰ₃, :ℂᴰ₄, :ℂᴰ₅, :ℂᴾ, :ℂᵛ₁, :ℂᵛ₂, :ℂᵛ₃, :ℂʷ₁, :ℂʷ₂, :ℂʷ₃, :ℂʷ₄, :ℂʷ₅, :ℂʷ₆, :ℂʷ₇, :ℂʷ₈, :ℂʷ₉, :ℂʷ₁₀, :ℂʷ₁₁, :ℂᵍ₁, :ℂᵍ₂, :ℂᵍ₃, :ℂᵍ₄, :ℂᵐ)
 ```
 """
 function closure_parameters(closure)

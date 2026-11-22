@@ -551,7 +551,7 @@ Whether `closure` itself applies the bottom boundary flux of the prognostic fiel
 case the tendencies of the Runge–Kutta stages leave that flux out (the boundary condition is left
 untouched: it stays the one place the flux is specified, and the closure reads it from there).
 The default is `false`; an operator-split closure that applies the surface fluxes inside its own
-implicit solve, such as `SimplifiedHigherOrderClosure`, adds a method.
+implicit solve, once per step in `step_closure_prognostics!`, adds a method.
 """
 closure_applies_bottom_flux(closure, model, name) = false
 

@@ -46,9 +46,8 @@ $(TYPEDEF)
 
 The time scale `τ` of the second moments (`θˡⁱ′² = ℂᵛ₁ τ Kᶜ (∂z θˡⁱ)²`, ...) and of the third-moment
 diagnosis, at the faces, from the closure's mixing length `ℓ`, turbulent velocity `√e` and
-static stability `N²` there: the return-to-isotropy time scale of SHOC's
-`RichardsonStabilityFunctions` limited by stratification as SHOC's
-`StratificationLimitedTimeScale`,
+static stability `N²` there: `ℂᵗ` eddy turnover times, limited by the buoyancy period in stable air and
+then by a `p`-norm of its rate and the buoyancy rate `N⁺ / ℂᴺ`,
 
     τ₀ = τᵉ / √(1 + τᵉ² N²⁺),    τᵉ = ℂᵗ ℓ / √e,
     τ  = τ₀ / (1 + (τ₀ N⁺ / ℂᴺ)ᵖ)^(1/p),    N⁺ = √(N²⁺ + Nₘᵢₙ²) - Nₘᵢₙ

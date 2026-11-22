@@ -789,10 +789,8 @@ so that the energy budget still closes (`add_shear_production_heating!`).
 #####
 ##### Computing the mixing length, column by column, into `closure_fields.ℓᵐ`
 #####
-##### The functions of this section are also called by closures other than
-##### `TKEBasedTurbulenceClosure` (`SimplifiedHigherOrderClosure` with a
-##### `GradientLimitedMixingLength`), so they must keep to this contract and not annotate the types
-##### of `closure` or `closure_fields`:
+##### The mixing lengths of this section and of other files (`BlendedMixingLength` of SHOC) keep to
+##### this contract:
 #####
 #####   * `closure` is read only for `closure.mixing_length` (and its coefficients) and for
 #####     `closure.minimum_tke`, the floor of `e` inside `turbulent_velocityᶜᶜᶜ`;
@@ -801,7 +799,9 @@ so that the energy budget still closes (`add_shear_production_heating!`).
 #####   * `N²` is an array at faces `1:Nz+1`;
 #####   * `fill_mixing_length!(ℓ, ℓˢ, i, j, grid, mixing_length, closure, e, N²)` writes the face
 #####     arrays `ℓ` and `ℓˢ` of column `(i, j)`, and `mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e,
-#####     closure_fields)` reads only `closure_fields.ℓˢ` and `closure_fields.N²`.
+#####     closure_fields)` reads only `closure_fields.ℓˢ` and `closure_fields.N²` (`ℓˢ` holds
+#####     whatever the center reconstruction needs: the stratification envelope, or for
+#####     `BlendedMixingLength` its asymptotic length `l∞` of the column).
 #####
 
 # The stored face field as a kernel function, for the boundary-aware reconstruction `ℑbzᵃᵃᶜ`
