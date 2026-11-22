@@ -18,9 +18,10 @@ The model fields, constants and overlying atmosphere from which [`layer_state`](
 columns being solved: the extension pressures are those of the batch whose first row follows
 `row_offset` rows of the grid.
 """
-struct ColumnState{G, P, T, D, M, MP, MF, O, X, XP, C}
+struct ColumnState{G, P, L, T, D, M, MP, MF, O, X, XP, C}
     grid :: G
     pressure :: P
+    level_pressures :: L  # `level_pressure_source` of the dynamics: the pressures of the z-faces, or nothing
     temperature :: T
     density :: D
     moisture :: M
@@ -36,6 +37,7 @@ end
 Adapt.adapt_structure(to, state::ColumnState) =
     ColumnState(adapt(to, state.grid),
                 adapt(to, state.pressure),
+                adapt(to, state.level_pressures),
                 adapt(to, state.temperature),
                 adapt(to, state.density),
                 adapt(to, state.moisture),
@@ -58,6 +60,7 @@ function ColumnState(rtm, model, row_offset)
     workspace = rtm.atmospheric_state
     return ColumnState(model.grid,
                        dynamics_pressure(model.dynamics),
+                       level_pressure_source(model.dynamics),
                        model.temperature,
                        total_density(model.dynamics),
                        specific_prognostic_moisture(model),
@@ -256,7 +259,7 @@ end
     g = constants.gravitational_acceleration
     Rᵈ = dry_air_gas_constant(constants)
     ϵ = constants.dry_air.molar_mass / constants.vapor.molar_mass
-    p = top_face_pressure(i, j, grid, state.pressure, state.density, g)
+    p = grid_interface_pressure(i, j, size(grid, 3) + 1, grid, state)
     @inbounds state.extension_pressure[c, 1] = p
 
     for m in 1:number_of_extension_layers(extension)
@@ -273,7 +276,16 @@ end
 ##### Interface pressures (for the host column atmosphere only; the column solvers need none)
 #####
 
-@inline function grid_interface_pressure(i, j, kᶠ, grid, state)
+@inline grid_interface_pressure(i, j, kᶠ, grid, state) =
+    grid_interface_pressure(i, j, kᶠ, grid, state, state.level_pressures)
+
+# Dynamics that carry the pressures of their z-faces (the coordinate surfaces of `HydrostaticDynamics`)
+@inline grid_interface_pressure(i, j, kᶠ, grid, state, level_pressures) =
+    level_pressure(i, j, kᶠ, grid, state.pressure, level_pressures)
+
+# Otherwise the interior faces average the layer pressures, and the lowest and the highest are
+# extrapolated hydrostatically from the layers next to them
+@inline function grid_interface_pressure(i, j, kᶠ, grid, state, ::Nothing)
     Nz = size(grid, 3)
     g = state.constants.gravitational_acceleration
     kᶠ == 1 && return bottom_face_pressure(i, j, grid, state.pressure, state.density, g)

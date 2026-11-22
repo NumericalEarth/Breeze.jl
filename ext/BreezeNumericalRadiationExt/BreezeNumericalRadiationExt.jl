@@ -22,6 +22,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, Surface
                                bottom_face_pressure, top_face_pressure,
                                overlying_atmosphere_faces,
                                dynamics_pressure, total_density, specific_prognostic_moisture,
+                               level_pressure, level_pressure_source,
                                grid_moisture_fractions
 using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS

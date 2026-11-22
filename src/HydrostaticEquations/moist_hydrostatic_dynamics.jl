@@ -1691,10 +1691,6 @@ function validate_moist_hydrostatic_model(model::MoistHydrostaticModel)
         unsupported_by_hydrostatic_dynamics("moisture with a negative_moisture_correction, which moves water " *
                                             "outside the ledger,")
 
-    isnothing(model.radiation) ||
-        unsupported_by_hydrostatic_dynamics("radiation with moisture: the pressures of the coordinate surfaces " *
-                                            "given to the radiative transfer are not those of moist air")
-
     isnothing(dynamics.hyperdiffusion) || unsupported_by_hydrostatic_dynamics("hyperdiffusion with moisture")
     isnothing(dynamics.vertical_diffusion) || unsupported_by_hydrostatic_dynamics("vertical_diffusion with moisture")
 

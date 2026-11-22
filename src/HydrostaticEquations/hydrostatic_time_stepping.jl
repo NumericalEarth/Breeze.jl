@@ -91,15 +91,13 @@ function validate_dry_state(model)
 end
 
 # Radiation heats the air through the flux divergence in the tendency of ρθ, and its level
-# pressures are those of the coordinate surfaces. The radiative transfer models index their
-# columns with the size of one grid, so they are not given a multi-region grid, and a model that
-# builds its level pressures from the layer pressures would leave out half of the lowest and of
-# the highest layer.
+# pressures are those of the coordinate surfaces: a model that builds its level pressures from the
+# layer pressures would leave out half of the lowest and of the highest layer. On a multi-region
+# grid the radiation is solved region by region by whatever holds it (a coupler's per-panel
+# models), which must then declare that it reads the level pressures of the dynamics.
 validate_hydrostatic_radiation(::Nothing, grid) = nothing
 
 function validate_hydrostatic_radiation(radiation, grid)
-    grid isa MultiRegion.MultiRegionGrids && unsupported_by_hydrostatic_dynamics("radiation on a multi-region grid")
-
     uses_level_pressure(radiation) ||
         unsupported_by_hydrostatic_dynamics("$(summary(radiation)), which does not take the pressures of " *
                                             "the coordinate surfaces from the dynamics,")
