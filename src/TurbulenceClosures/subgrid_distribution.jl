@@ -639,7 +639,7 @@ end
 
 function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names, heating_budget_flux = nothing)
     energetics = AppliedFluxEnergetics(solver)
-    moments = (τ = ZFaceField(grid), θˡⁱ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡⁱ′qᵗ′ = ZFaceField(grid),
+    moments = (τ = ZFaceField(grid), w′³ = ZFaceField(grid), θˡⁱ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡⁱ′qᵗ′ = ZFaceField(grid),
                w′θˡⁱ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid),
                scalar_variance_transport_fields(grid, distribution.variance_transport)...)
     cloud = (w′² = CenterField(grid), w′³ = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
@@ -736,9 +736,9 @@ end
 @inline subgrid_third_moment(::Nothing, d, c, args...) = zero(eltype(args[1]))
 @inline subgrid_third_moment(tm, d, c, args...) = third_moment(tm, d.stratification_number_bound, c, args...)
 
-# The third moment at the center k before its limiter: from the local arguments of the algebraic
-# diagnosis, or from fields stored at the center (`TKEBudgetThirdMoment`, tke_budget_third_moment.jl)
-@inline center_third_moment_diagnosis(tm, i, j, k, d, cl, c³, ℓ, u, algebraic_arguments) =
+# The third moment at the face k before its limiter: from the local arguments of the algebraic diagnosis, or from
+# fields stored at the face (`TKEBudgetThirdMoment`, tke_budget_third_moment.jl)
+@inline face_third_moment_diagnosis(tm, i, j, k, d, cl, c³, algebraic_arguments) =
     subgrid_third_moment(tm, d, c³, algebraic_arguments...)
 
 # Raise θˡⁱ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
@@ -774,41 +774,64 @@ end
     return θ², q², θˡⁱ′qᵗ′ * sqrt(fθ * fq)
 end
 
-# w′³ at the center k, where the PDF forms the skewness w′³ / (w′²)^{3/2}. The second moments of the faces
-# k and k+1 are differenced across the cell (compact), w′² and e across the neighbouring centers, and the
-# coefficients are the averages of the two faces. `lower` and `upper` are (τ, ℓ, N², θˡⁱ′², w′θˡⁱ′) at the
-# faces k and k+1; `w′θˡⁱ′ᶜ` is the flux interpolated to the center; `c³` carries the gravitational acceleration.
-@inline function center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡⁱ′ᶜ, lower, upper)
+# w′³ at the interior face k, with the numerics of `diag_third_shoc_moments` of `shoc.F90`: the time scale, N² and
+# the mixing length are those of the face; w′² and θˡⁱ are interpolated to it from the centers k - 1 and k; the
+# gradients of center quantities (w′², e) are compact across the face, over the distance of the two centers, and
+# those of face quantities (θˡⁱ′², w′θˡⁱ′) are taken across the faces k - 1 and k + 1, over the thicknesses of the
+# two cells between them. The bound of the skewness uses w′² at the face. `c³` carries the gravitational
+# acceleration.
+@inline function face_third_moment(i, j, k, grid, d, closure, closure_fields, m, cl, c³, θ, e)
     FT = grid_float_type(grid)
-    Nz = size(grid, 3)
     c = d.constants
     cp = d.clipping
     eᵐⁱⁿ = closure.minimum_tke
     ccc = (Center(), Center(), Center())
-    τˡ, ℓˡ, N²ˡ, θˡⁱ′²ˡ, w′θˡⁱ′ˡ = lower
-    τᵘ, ℓᵘ, N²ᵘ, θˡⁱ′²ᵘ, w′θˡⁱ′ᵘ = upper
     @inbounds begin
-        kᵘ = min(k + 1, Nz)
-        kˡ = max(k - 1, 1)
-        ℓ = (ℓˡ + ℓᵘ) / 2
-        N² = (N²ˡ + N²ᵘ) / 2
-        u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
-        τ³ = third_moment_time_scale(d.time_scale, (τˡ + τᵘ) / 2, ℓ, u, N²)
+        zᵘ = znode(i, j, k, grid, ccc...)
+        zˡ = znode(i, j, k - 1, grid, ccc...)
+        zᶠ = znode(i, j, k, grid, Center(), Center(), Face())
+        ℓ = closure_fields.ℓᵐ[i, j, k]
+        N² = closure_fields.N²[i, j, k]
+        u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
+        τ³ = third_moment_time_scale(d.time_scale, m.τ[i, j, k], ℓ, u, N²)
         τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
         w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * c.mintke
-        w′² = cl.w′²[i, j, k]
-        Δzʷ = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
-        thedz = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
-        algebraic_arguments = (τ³, N², clip_below(cp, w′², w′²ᵐⁱⁿ, c.mintke), θ[i, j, k],
-                               thedz, 1 / Δzᶜᶜᶜ(i, j, k, grid),
-                               θˡⁱ′²ᵘ - θˡⁱ′²ˡ,
-                               w′θˡⁱ′ᵘ - w′θˡⁱ′ˡ,
-                               cl.w′²[i, j, kᵘ] - cl.w′²[i, j, kˡ],
-                               max(e[i, j, kᵘ], eᵐⁱⁿ) - max(e[i, j, kˡ], eᵐⁱⁿ),
-                               w′θˡⁱ′ᶜ)
-        w′³ = center_third_moment_diagnosis(d.third_moment, i, j, k, d, cl, c³, ℓ, u, algebraic_arguments)
+        w′² = clip_below(cp, linear_interp(zᵘ, zˡ, cl.w′²[i, j, k], cl.w′²[i, j, k-1], zᶠ), w′²ᵐⁱⁿ, c.mintke)
+        θᶠ = linear_interp(zᵘ, zˡ, θ[i, j, k], θ[i, j, k-1], zᶠ)
+        algebraic_arguments = (τ³, N², w′², θᶠ,
+                               1 / (zᵘ - zˡ), 1 / (Δzᶜᶜᶜ(i, j, k, grid) + Δzᶜᶜᶜ(i, j, k-1, grid)),
+                               m.θˡⁱ′²[i, j, k+1] - m.θˡⁱ′²[i, j, k-1],
+                               m.w′θˡⁱ′[i, j, k+1] - m.w′θˡⁱ′[i, j, k-1],
+                               cl.w′²[i, j, k] - cl.w′²[i, j, k-1],
+                               max(e[i, j, k], eᵐⁱⁿ) - max(e[i, j, k-1], eᵐⁱⁿ),
+                               m.w′θˡⁱ′[i, j, k])
+        w′³ = face_third_moment_diagnosis(d.third_moment, i, j, k, d, cl, c³, algebraic_arguments)
     end
     return limit_third_moment(d.skewness, cp, w′², w′³)
+end
+
+# w′³ at the faces (zero at the bottom and the top), then interpolated linearly to the centers, where the PDF forms
+# the skewness, as `shoc.F90` interpolates its interface w′³ to the levels. Diagnosing w′³ at the centers instead
+# needs the gradients of the center quantities w′² and e across two cells, which decouples odd and even levels.
+@inline function third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+    Nz = size(grid, 3)
+    FT = grid_float_type(grid)
+    ccc = (Center(), Center(), Center())
+    ccf = (Center(), Center(), Face())
+    @inbounds begin
+        m.w′³[i, j, 1] = zero(FT)
+        m.w′³[i, j, Nz+1] = zero(FT)
+        for k in 2:Nz
+            m.w′³[i, j, k] = face_third_moment(i, j, k, grid, d, closure, closure_fields, m, cl, c³, θ, e)
+        end
+        for k in 1:Nz
+            zᶜ = znode(i, j, k, grid, ccc...)
+            zˡ = znode(i, j, k, grid, ccf...)
+            zᵘ = znode(i, j, k+1, grid, ccf...)
+            cl.w′³[i, j, k] = linear_interp(zᵘ, zˡ, m.w′³[i, j, k+1], m.w′³[i, j, k], zᶜ)
+        end
+    end
+    return nothing
 end
 
 @inline function subgrid_distribution_column!(m, cl, i, j, grid, d, closure, closure_fields, θ, qᵗ, e, velocities, p, thermodynamics)
@@ -896,9 +919,12 @@ end
         m.qᵗ′²[i, j, 1] = m.qᵗ′²[i, j, k′]
         m.θˡⁱ′qᵗ′[i, j, 1] = m.θˡⁱ′qᵗ′[i, j, k′]
 
-        # The assumed PDF at the centers, from moments co-located there: the second moments are
-        # interpolated from the faces to the center, and w′³ is diagnosed at the center, so that the
-        # skewness w′³ / (w′²)^{3/2} the PDF forms is a ratio of quantities at one location
+        # The third moment at the faces and at the centers
+        third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+
+        # The assumed PDF at the centers, from moments co-located there: the second moments and w′³ are
+        # interpolated from the faces to the center, so that the skewness w′³ / (w′²)^{3/2} the PDF forms is a ratio
+        # of quantities at one location
         # (`@inbounds` does not reach into the body of a closure: a bounds check there is an early exit of the column
         # loop, which Reactant raises to a loop of unknown trip count that Enzyme cannot differentiate)
         interface_moments(k) = @inbounds (m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k], m.θˡⁱ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
@@ -914,11 +940,7 @@ end
             mˡ = interface_moments(k)
             mᵘ = interface_moments(k+1)
             mᶜ = map((yᵘ, yˡ, floor) -> hard_floor(linear_interp(zᵘ, zˡ, yᵘ, yˡ, zᶜ), floor), mᵘ, mˡ, floors)
-            lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k])
-            upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡⁱ′²[i, j, k+1], m.w′θˡⁱ′[i, j, k+1])
-            w′³ᶜ = center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, mᶜ[2], lower, upper)
-            cl.w′³[i, j, k] = w′³ᶜ
-            mᶜ = (w′³ᶜ, mᶜ...)
+            mᶜ = (cl.w′³[i, j, k], mᶜ...)
             C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, d.saturation, thermodynamics, cp, c, zᵘ, zˡ, zᶜ,
                                                    p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
             store_vapor_excess_components!(cl, i, j, k,

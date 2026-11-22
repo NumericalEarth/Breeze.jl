@@ -70,7 +70,8 @@
 """
 $(TYPEDEF)
 
-The third moment of vertical velocity at the cell centers from the vertical integral of the
+The third moment of vertical velocity at the cell faces (interpolated to the centers with the other moments of the
+distribution) from the vertical integral of the
 budget of turbulent kinetic energy, with a damped local third moment,
 
     w′³ = r (ℂʷᵉ Fᵉ + ℂʷᵋ Fᵋ) + τ₃ (√e (ℂʷᵇ B⁺ + ℂʷˡ (1 - aᶜ) Bˡ⁺) - ℂʷᵍ w′² ∂z w′²) / D,
@@ -81,7 +82,7 @@ where `P + B` is the shear and buoyancy production the TKE equation receives (th
 fluxes the closure applies), `B⁺ = max(B, 0)` (a buoyancy sink makes no skewness of its own), `aᶜ` the cloud fraction and
 `Bˡ⁺ = max(Bˡ, 0)` the part of the buoyancy flux that the liquid flux carries, `Bˡ = (b_qˡ - b_qᵛ) w′qˡ′`,
 both of the distribution without skewness,
-`ℓ` the closure's mixing length and `αᴺ` the stratification number at the cell center (`|ℂʷʳ| < 1`
+`ℓ` the closure's mixing length and `αᴺ` the stratification number at the face (`|ℂʷʳ| < 1`
 keeps `r` positive).
 
 The amplitude `cʸ` of each sink is fixed by the budget so that `Fʸ` vanishes at the ground and at
@@ -196,7 +197,7 @@ third_moment_fields(grid, third_moment) = NamedTuple()
 
 third_moment_fields(grid, ::TKEBudgetThirdMoment) =
     (Fᵉ = CenterField(grid), Fᵋ = CenterField(grid), uᵉ = CenterField(grid), uᵋ = CenterField(grid),
-     w′³ᵇ = CenterField(grid), Tᵉ = CenterField(grid), budget_work = CenterField(grid),
+     w′³ᵇ = ZFaceField(grid), Tᵉ = CenterField(grid), budget_work = CenterField(grid),
      NamedTuple(pass_name(name) => ZFaceField(grid) for name in PASS_CLOSURE_FIELD_NAMES)...)
 
 # The closure fields that a pass recomputes (the stability, the mixing lengths and the diffusivities). A pass
@@ -337,20 +338,15 @@ end
 # D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ) ≥ 1: one in unstable air, 1 + ℂʷᴺ αᴺ in stable air, with slope in (0, ℂʷᴺ)
 @inline stratification_damping(ℂʷᴺ, δ, αᴺ) = 1 + ℂʷᴺ * δ * smooth_positive_part(αᴺ / δ)
 
-# τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D at the center k; w′² ∂z w′² = ∂z (w′²)² / 2 is differenced across the
-# neighbouring centers (one-sided at the two ends of the column). With a `HeatingBudgetFlux` the buoyant source is
-# signed by origin: of B⁺, the part Gᶜ = min(Gᑫᶜ, B⁺) that the flux driven by cooling converts is carried by
-# downdrafts, and the source is ℂʷᵇ (B⁺ - Gᶜ) - ℂʷᑫ Gᶜ.
+# τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D at the interior face k; w′² ∂z w′² = ∂z (w′²)² / 2 is differenced across the
+# face, between the centers k - 1 and k (compact, as `shoc.F90` differences center quantities for its interface
+# third moment). With a `HeatingBudgetFlux` the buoyant source is signed by origin: of B⁺, the part
+# Gᶜ = min(Gᑫᶜ, B⁺) that the flux driven by cooling converts is carried by downdrafts, and the source is
+# ℂʷᵇ (B⁺ - Gᶜ) - ℂʷᑫ Gᶜ.
 @inline function damped_local_third_moment(i, j, k, grid, tm, w′², τ, u, αᴺ, B, Gᑫᶜ = zero(B), ℂʷᑫ = zero(B), latent_source = zero(B))
-    Nz = size(grid, 3)
-    kᵘ = min(k + 1, Nz)
-    kˡ = max(k - 1, 1)
-    # The distance between the centers kˡ and kᵘ as the spacings of the faces between them (the bounded faces excluded)
-    Δz = ifelse(k < Nz, Δzᶜᶜᶠ(i, j, k + 1, grid), zero(grid_float_type(grid))) +
-         ifelse(k > 1, Δzᶜᶜᶠ(i, j, k, grid), zero(grid_float_type(grid)))
-    w′²ᵘ = @inbounds w′²[i, j, kᵘ]
-    w′²ˡ = @inbounds w′²[i, j, kˡ]
-    w′²∂zw′² = ifelse(kᵘ > kˡ, (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δz), zero(Δz))
+    w′²ᵘ = @inbounds w′²[i, j, k]
+    w′²ˡ = @inbounds w′²[i, j, k-1]
+    w′²∂zw′² = (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δzᶜᶜᶠ(i, j, k, grid))
     B⁺ = max(0, B)
     Gᶜ = min(Gᑫᶜ, B⁺)
     buoyant_source = tm.ℂʷᵇ * (B⁺ - Gᶜ) - ℂʷᑫ * Gᶜ + tm.ℂʷˡ * latent_source
@@ -379,38 +375,42 @@ end
     belowᵉ = zero(grid_float_type(grid))
     belowᵋ = zero(grid_float_type(grid))
     @inbounds for k in 1:size(grid, 3)
+        # The third moment at the face k, below this center, from the fluxes there (the integral of the cells below)
+        k > 1 && diagnose_face_third_moment!(diagnose, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², ρ, belowᵉ, belowᵋ)
+
         ρΔz = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
         rᵉ = ρΔz * (cl.P[i, j, k] + cl.B[i, j, k] - cl.uᵉ[i, j, k])
         rᵋ = ρΔz * (cl.P[i, j, k] + cl.B[i, j, k] - cl.uᵋ[i, j, k])
-        Fᵉ = (belowᵉ + rᵉ / 2) / ρ[i, j, k]
-        Fᵋ = (belowᵋ + rᵋ / 2) / ρ[i, j, k]
-        cl.Fᵉ[i, j, k] = Fᵉ
-        cl.Fᵋ[i, j, k] = Fᵋ
+        cl.Fᵉ[i, j, k] = (belowᵉ + rᵉ / 2) / ρ[i, j, k]
+        cl.Fᵋ[i, j, k] = (belowᵋ + rᵋ / 2) / ρ[i, j, k]
         belowᵉ += rᵉ
         belowᵋ += rᵋ
 
         cl.Tᵉ[i, j, k] = tm.ℂʷᵀ * (cl.uᵉ[i, j, k] - cl.P[i, j, k] - cl.B[i, j, k])
-
-        diagnose_center_third_moment!(diagnose, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², Fᵉ, Fᵋ)
     end
 end
 
-# The third moment at the center, with ℓ, √e and N² as the distribution forms them there; one stratification number
-# αᴺ = τ₃² N² for the ratio and for the damping. Only in the passes of `diagnose_third_moment!` (`Val(true)`).
-@inline diagnose_center_third_moment!(::Val{false}, args...) = nothing
+# The third moment at the interior face k, with ℓ, √e and N² of the face; one stratification number αᴺ = τ₃² N² for
+# the ratio and for the damping. The fluxes at the face are the integrals ρF of the cells below it over the density
+# at the face; the buoyancy production and the latent source are averaged from the two centers. Only in the passes
+# of `diagnose_third_moment!` (`Val(true)`). Diagnosed at the faces, as `shoc.F90` diagnoses its third moment, and
+# interpolated to the centers with the other moments.
+@inline diagnose_face_third_moment!(::Val{false}, args...) = nothing
 
-@inline function diagnose_center_third_moment!(::Val{true}, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², Fᵉ, Fᵋ)
+@inline function diagnose_face_third_moment!(::Val{true}, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², ρ, ρFᵉ, ρFᵋ)
     @inbounds begin
-        ℓ = (ℓᵐ[i, j, k] + ℓᵐ[i, j, k+1]) / 2
-        u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure_ij, e)
+        ρᶠ = (ρ[i, j, k] + ρ[i, j, k-1]) / 2
+        ℓ = ℓᵐ[i, j, k]
+        u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
         τ = ℓ / u
-        αᴺ = τ * τ * (N²[i, j, k] + N²[i, j, k+1]) / 2
+        αᴺ = τ * τ * N²[i, j, k]
         r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
         ℂʷᑫ = cooling_third_moment_coefficient(closure_ij.heating_budget_flux, grid_float_type(grid))
-        cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * Fᵉ + tm.ℂʷᵋ * Fᵋ) +
-                           damped_local_third_moment(i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k],
-                                                     cooling_flux_conversion(cl, i, j, k), ℂʷᑫ,
-                                                     (1 - cl.aᶜ[i, j, k]) * max(cl.Bˡ[i, j, k], 0))
+        B = (cl.B[i, j, k] + cl.B[i, j, k-1]) / 2
+        Gᑫᶜ = (cooling_flux_conversion(cl, i, j, k) + cooling_flux_conversion(cl, i, j, k-1)) / 2
+        latent = ((1 - cl.aᶜ[i, j, k]) * max(cl.Bˡ[i, j, k], 0) + (1 - cl.aᶜ[i, j, k-1]) * max(cl.Bˡ[i, j, k-1], 0)) / 2
+        cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * ρFᵉ + tm.ℂʷᵋ * ρFᵋ) / ρᶠ +
+                           damped_local_third_moment(i, j, k, grid, tm, cl.w′², τ, u, αᴺ, B, Gᑫᶜ, ℂʷᑫ, latent)
     end
     return nothing
 end
@@ -464,10 +464,10 @@ compute_tke_budget!(fields::SubgridCloudFields, ::TKEBudgetDistribution, closure
     compute_tke_budget_flux!(fields, closure_fields, closure, model, tracers, Val(false))
 
 #####
-##### The third moment at the center k: the one diagnosed from the budget
+##### The third moment at the face k: the one diagnosed from the budget
 #####
 
-@inline center_third_moment_diagnosis(tm::TKEBudgetThirdMoment, i, j, k, d, cl, c³, ℓ, u, algebraic_arguments) =
+@inline face_third_moment_diagnosis(tm::TKEBudgetThirdMoment, i, j, k, d, cl, c³, algebraic_arguments) =
     @inbounds cl.w′³ᵇ[i, j, k]
 
 #####

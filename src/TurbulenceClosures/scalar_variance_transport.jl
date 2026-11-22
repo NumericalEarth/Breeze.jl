@@ -83,21 +83,8 @@ end
 # The third moment w′³ at the centers from the local moments, for the third-moment flux of the solve
 @inline local_center_third_moments!(::Val{false}, args...) = nothing
 
-@inline function local_center_third_moments!(::Val{true}, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
-    Nz = size(grid, 3)
-    ccc = (Center(), Center(), Center())
-    ccf = (Center(), Center(), Face())
-    @inbounds for k in 1:Nz
-        zᶜ = znode(i, j, k, grid, ccc...)
-        zˡ = znode(i, j, k, grid, ccf...)
-        zᵘ = znode(i, j, k+1, grid, ccf...)
-        w′θˡⁱ′ᶜ = linear_interp(zᵘ, zˡ, m.w′θˡⁱ′[i, j, k+1], m.w′θˡⁱ′[i, j, k], zᶜ)
-        lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k])
-        upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡⁱ′²[i, j, k+1], m.w′θˡⁱ′[i, j, k+1])
-        cl.w′³[i, j, k] = center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡⁱ′ᶜ, lower, upper)
-    end
-    return nothing
-end
+@inline local_center_third_moments!(::Val{true}, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e) =
+    third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
 
 @inline transport_scalar_variances!(::Nothing, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e) = nothing
 
