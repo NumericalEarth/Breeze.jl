@@ -202,3 +202,61 @@ end
     @test isfinite(loss_value)
     @test all(isfinite, @allowscalar Array(interior(dθ)))
 end
+
+#####
+##### The `DoubleGaussian` with `VarianceStabilityFunctions` (composed with `ScalarVarianceTransport` and the
+##### flux-correlation bound ℂʳ), its coefficients traced and rebound with `with_parameters`: forward, and the
+##### gradient with respect to them against central differences
+#####
+
+@testset "reactant_tke_variance_stability_functions" begin
+    Δt = 1.0
+    Ns = 2
+    PT = typeof(Reactant.ConcreteRNumber(0.0))
+
+    grid = RectilinearGrid(ReactantState(); size=ColumnEnsembleSize(Nz=8, ensemble=(2, 1), Hz=3),
+                           z=[2000 * (k / 8)^1.2 for k in 0:8], topology=(Flat, Flat, Bounded))
+    reference_state = ReferenceState(grid, ThermodynamicConstants(); base_pressure=101325, potential_temperature=290)
+    dynamics = AnelasticDynamics(reference_state)
+    microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+    distribution = DoubleGaussian(PT; ℂʳ = 0.5, variance_transport = ScalarVarianceTransport(PT),
+                                  variance_stability_functions = VarianceStabilityFunctions(PT))
+    closure = TKEBasedTurbulenceClosure(PT; static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                        subgrid_distribution = distribution)
+    trained() = map(Reactant.ConcreteRNumber, (ℂᵛ₁⁻ = 1.5, ℂᵛ₁⁰ = 0.7, ℂᵛ₁⁺ = 0.6, ℂᵛ₂⁰ = 0.7, ℂᵛ₂⁺ = 0.6,
+                                               ℂᵛ₃⁻ = 0.9, ℂᵛ₃ᵐ = 0.8, ℂᵛ₃⁺ = 0.7))
+    θ_init = CenterField(grid); set!(θ_init, z -> 290 + 3e-3 * z)
+
+    forward_model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
+    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true trained_loss(
+        forward_model, trained(), θ_init, Δt, Ns)
+    loss(coefficients) = Float64(Reactant.to_number(@with_stack_size compiled(forward_model, coefficients, θ_init, Δt, Ns)))
+
+    @testset "Forward" begin
+        value = loss(trained())
+        @test isfinite(value) && value > 0
+    end
+
+    @testset "Gradient with respect to the variance stability coefficients" begin
+        model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
+        dmodel = Enzyme.make_zero(model)
+        coefficients = trained()
+        dcoefficients = map(c -> Reactant.ConcreteRNumber(0.0), coefficients)
+        compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_trained_loss(
+            model, dmodel, coefficients, dcoefficients, θ_init, Δt, Ns)
+        derivatives, loss_value = @with_stack_size compiled_grad(model, dmodel, coefficients, dcoefficients, θ_init, Δt, Ns)
+        derivatives = map(d -> Float64(Reactant.to_number(d)), derivatives)
+        @info "Gradient of the TKE with respect to the variance stability coefficients" derivatives
+        @test isfinite(loss_value)
+        @test all(isfinite, derivatives)
+
+        h = 1e-3
+        values = map(c -> Float64(Reactant.to_number(c)), trained())
+        for name in keys(values)
+            shifted(δ) = map(Reactant.ConcreteRNumber, merge(values, NamedTuple{(name,)}((values[name] + δ,))))
+            finite_difference = (loss(shifted(h)) - loss(shifted(-h))) / 2h
+            @info "AD and FD" name derivatives[name] finite_difference
+            @test derivatives[name] ≈ finite_difference rtol=1e-2 atol=1e-10 * abs(Float64(Reactant.to_number(loss_value)))
+        end
+    end
+end

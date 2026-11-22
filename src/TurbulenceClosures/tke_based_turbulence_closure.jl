@@ -530,6 +530,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
     subgrid_distribution = convert_eltype(FT, subgrid_distribution)
     solver = convert_eltype(FT, solver)
     validate_subgrid_coupling(static_stability, subgrid_distribution, solver)
+    isnothing(subgrid_distribution) ||
+        validate_variance_stability_functions(stability_functions, subgrid_distribution.variance_stability_functions)
     heating_budget_flux = convert_eltype(FT, heating_budget_flux)
     validate_heating_budget_flux(heating_budget_flux, static_stability, subgrid_distribution)
 

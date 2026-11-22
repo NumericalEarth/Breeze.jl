@@ -33,7 +33,8 @@ export TKEBasedTurbulenceClosure,
        closure_parameters, with_parameters,
        per_column_closure, set_per_column_coefficients!, PerColumnCoefficient,
        DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
-       StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale
+       StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale,
+       VarianceStabilityFunctions
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
@@ -293,6 +294,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedH
 
 include("subgrid_distribution.jl")
 include("scalar_variance_transport.jl")
+include("variance_stability_functions.jl")
 include("applied_flux_energetics.jl")
 include("tke_budget_third_moment.jl")
 include("heating_budget_flux.jl")
