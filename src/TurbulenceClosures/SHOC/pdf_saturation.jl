@@ -176,17 +176,17 @@ end
     constants = thermodynamics.constants
     surface = equilibrated_surface(s.phase_equilibrium, Tl)
     # The saturation specific humidity of the model (the one the microphysics uses),
-    # qˢ = pᵛ⁺ / (ρ Rᵛ T), at the density ρ = p / (Rᵐ T) of the component's air with its total
+    # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T), at the density ρ = p / (Rᵐ T) of the component's air with its total
     # water as vapor
     Rᵐ = mixture_gas_constant(MoistureMassFractions(qw), constants)
     ρ = pval / (Rᵐ * Tl)
-    qs = saturation_specific_humidity(Tl, ρ, constants, surface)
+    qᵛ⁺ = saturation_specific_humidity(Tl, ρ, constants, surface)
 
     ℒ, log_slope = condensate_latent_heat_and_log_slope(s.phase_equilibrium, constants, Tl)
     cᵖ = plume_heat_capacity(constants, qw)
     # β q_s = (ℒ / ĉᵖ) ∂q_s/∂T at fixed p and composition: ∂ ln q_s / ∂T = ∂ ln e_s / ∂T
     beta = (ℒ / cᵖ) * log_slope
-    return qs, beta, cᵖ / ℒ, plume_exner_function(thermodynamics, qw, pval)
+    return qᵛ⁺, beta, cᵖ / ℒ, plume_exner_function(thermodynamics, qw, pval)
 end
 
 @inline function buoyancy_flux_coefficients(s::ModelThermodynamicsSaturation, thermodynamics, c, pval, thl, qw, ql)

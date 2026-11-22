@@ -13,7 +13,7 @@ coefficients:
 | `DoubleGaussianPDF` | `SmoothDoubleGaussianPDF` |
 |:--------------------|:--------------------------|
 | calm, `w'w' ≤ w_tol²`: no skewness, equal plumes at the mean | skewness `w'³ / (w'w' + w_tol²)^{3/2}`, which vanishes with `w'w'`; the plumes collapse onto the mean as `√w'w'` |
-| `√θˡ'²` and `√qᵗ'²` floored at their tolerance | `√(variance + tolerance²)` |
+| `√θˡⁱ'²` and `√qᵗ'²` floored at their tolerance | `√(variance + tolerance²)` |
 | uniform, variance ≤ tolerance²: plumes at the mean, no width | plume separation scaled by `variance / √(variance + tolerance²)`; the widths vanish with the variance |
 | in-plume variance from a ratio that is `0 / 0` where the plume means coincide, set to zero there | the same ratio with the common factor cancelled, which tends to one |
 | skewness of total water ramping linearly between the plume separations `ℂᵍ₃` and `ℂᵍ₄` | a cubic smooth step over the same interval |
@@ -37,7 +37,7 @@ struct SmoothDoubleGaussianPDF{FT} <: AbstractSHOCComponent
     ℂᵍ₃ :: FT
     "Plume separation above which total water is fully skewed (literal `0.4`)"
     ℂᵍ₄ :: FT
-    "Standard deviation of θˡ that regularizes its vanishing, K"
+    "Standard deviation of θˡⁱ that regularizes its vanishing, K"
     thl_tol :: FT
     "Standard deviation of qᵗ that regularizes its vanishing, kg kg⁻¹"
     rt_tol :: FT
@@ -55,7 +55,7 @@ struct SmoothDoubleGaussianPDF{FT} <: AbstractSHOCComponent
     minimum_saturation_spread :: FT
     "Floor of the width of a plume over the tolerance of its scalar, which keeps the derivative of the width finite"
     plume_width_floor :: FT
-    "Regularization of the in-plume correlation of θˡ and qᵗ: the fraction of `thl_tol × rt_tol` added to the product of the widths"
+    "Regularization of the in-plume correlation of θˡⁱ and qᵗ: the fraction of `thl_tol × rt_tol` added to the product of the widths"
     correlation_regularization :: FT
 end
 
@@ -203,7 +203,7 @@ end
     w1_1 = w1_1 * sqrtw2 + w_first
     w1_2 = w1_2 * sqrtw2 + w_first
 
-    # The correlation of θˡ and qᵗ within the plumes
+    # The correlation of θˡⁱ and qᵗ within the plumes
     testvar = a * sqrtqw2_1 * sqrtthl2_1 + (1 - a) * sqrtqw2_2 * sqrtthl2_2
     r_qwthl_1 = clip_between(cp, (qwthlsec - a * (qw1_1 - qw_first) * (thl1_1 - thl_first)
                                   - (1 - a) * (qw1_2 - qw_first) * (thl1_2 - thl_first)) /

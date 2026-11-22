@@ -197,10 +197,10 @@ end
 # The local scalar second moments at the interior face k from the differences Δθ, Δq across it and its
 # spacing Δz. Without variance stability functions: the down-gradient diagnosis, unchanged.
 @inline local_scalar_second_moments(::Nothing, i, j, k, grid, closure, velocities, closure_fields, e, Δθ, Δq, Δz,
-                                    θˡ′², qᵗ′², θˡ′qᵗ′) = (θˡ′², qᵗ′², θˡ′qᵗ′)
+                                    θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′) = (θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′)
 
 @inline function local_scalar_second_moments(vs::VarianceStabilityFunctions, i, j, k, grid, closure, velocities,
-                                             closure_fields, e, Δθ, Δq, Δz, θˡ′², qᵗ′², θˡ′qᵗ′)
+                                             closure_fields, e, Δθ, Δq, Δz, θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′)
     ℓᵐ = closure_fields.ℓᵐ
     αᴺ, αˢ = stratification_and_shear_numbersᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, ℓᵐ)
     v = variance_richardson_coordinate(closure.stability_functions, αᴺ, αˢ)

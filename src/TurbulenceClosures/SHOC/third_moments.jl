@@ -46,7 +46,7 @@ vertical gradients: the stationary third-moment equations of Canuto et al. (2001
 
     w'³ = (A₁ - ℂʷ₉ X₁ - ℂʷ₁₀ f₅) / (c - ℂʷ₉ X₀ + A₀),    c = ℂʷ₂
 
-where `f₀` to `f₅` are products of `τ`, the buoyancy parameter `g / θˡ`, the second moments and
+where `f₀` to `f₅` are products of `τ`, the buoyancy parameter `g / θˡⁱ`, the second moments and
 their gradients, and
 
     X₀ = a₂ αᴺ (1 - a₃ αᴺ) / (1 - (a₁ + a₃) αᴺ),          Y₀ = 2 a₂ αᴺ X₀ / (1 - a₃ αᴺ)

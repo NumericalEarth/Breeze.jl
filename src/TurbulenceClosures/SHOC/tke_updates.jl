@@ -13,7 +13,7 @@
 #####
 #####     implicit_scalar_solve!(tke_update, i, j, Nz, dtime, c, cp, host, diagnostics, scratch, thetal, qw, tke)
 #####
-##### which diffuses θˡ, qᵗ and the turbulent kinetic energy implicitly with the heat diffusivity.
+##### which diffuses θˡⁱ, qᵗ and the turbulent kinetic energy implicitly with the heat diffusivity.
 #####
 
 #####
@@ -49,7 +49,7 @@ production and the dissipation,
     e ← e + Δt (max(0, P + B) - ε),    ε = 𝕊ᴰ e^{3/2} / ℓ,    P = ℂᴾ Kᵘ |∂z u|²
 
 kept between the minimum and the maximum of the `SHOCConstants`; the diffusion of `e` shares the
-implicit solve of θˡ and qᵗ.
+implicit solve of θˡⁱ and qᵗ.
 
 $(TYPEDFIELDS)
 """
@@ -83,7 +83,7 @@ Adapt.@adapt_structure ForwardEulerTKE
     return tke_k, a_diss, nothing, tke_k
 end
 
-# One factorization for θˡ, qᵗ and the turbulent kinetic energy (the surface fluxes have been
+# One factorization for θˡⁱ, qᵗ and the turbulent kinetic energy (the surface fluxes have been
 # applied explicitly)
 @inline function implicit_scalar_solve!(::ForwardEulerTKE, i, j, Nz, dtime, c, cp, host, diagnostics, scratch,
                                         thetal, qw, tke)
@@ -164,7 +164,7 @@ component_fields(grid, ::ImplicitSinkTKE) = (; tke_sink_rate = CenterField(grid)
     return tke_estimate, a_diss, sink_rate, tke_source
 end
 
-# θˡ and qᵗ share a factorization; the turbulent kinetic energy has its own, with the sink on
+# θˡⁱ and qᵗ share a factorization; the turbulent kinetic energy has its own, with the sink on
 # the diagonal
 @inline function implicit_scalar_solve!(::ImplicitSinkTKE, i, j, Nz, dtime, c, cp, host, diagnostics, scratch,
                                         thetal, qw, tke)

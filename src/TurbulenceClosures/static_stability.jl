@@ -271,8 +271,8 @@ end
 # Mixing ratios, per unit mass of dry air: qᵈ excludes all water, including rain.
 @inline function saturation_mixing_ratioᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
     Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
-    qˢ = local_saturation_specific_humidity(i, j, k, buoyancy, Tᵢ, q)
-    return qˢ / (1 - q.vapor - q.liquid - q.ice)
+    qᵛ⁺ = local_saturation_specific_humidity(i, j, k, buoyancy, Tᵢ, q)
+    return qᵛ⁺ / (1 - q.vapor - q.liquid - q.ice)
 end
 
 @inline function total_water_mixing_ratioᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
@@ -297,8 +297,8 @@ end
 
 @inline function saturatedᶜᶜᶠ(i, j, k, grid, buoyancy, T, qᵛᵉ)
     qʷ = ℑzᵃᵃᶠ(i, j, k, grid, nonprecipitating_waterᶜᶜᶜ, buoyancy, T, qᵛᵉ)
-    qˢ = ℑzᵃᵃᶠ(i, j, k, grid, saturation_specific_humidityᶜᶜᶜ, buoyancy, T, qᵛᵉ)
-    return qʷ ≥ qˢ
+    qᵛ⁺ = ℑzᵃᵃᶠ(i, j, k, grid, saturation_specific_humidityᶜᶜᶜ, buoyancy, T, qᵛᵉ)
+    return qʷ ≥ qᵛ⁺
 end
 
 @inline function saturated_static_stabilityᶜᶜᶠ(i, j, k, grid, buoyancy, T, qᵛᵉ)
@@ -310,18 +310,18 @@ end
     ϵ = Rᵈ / Rᵛ
 
     Tᶠ = ℑzᵃᵃᶠ(i, j, k, grid, T)
-    rˢ = ℑzᵃᵃᶠ(i, j, k, grid, saturation_mixing_ratioᶜᶜᶜ, buoyancy, T, qᵛᵉ)
+    rᵛ⁺ = ℑzᵃᵃᶠ(i, j, k, grid, saturation_mixing_ratioᶜᶜᶜ, buoyancy, T, qᵛᵉ)
     equilibrium = microphysics_phase_equilibrium(buoyancy.microphysics)
     ℒ = latent_heat(Tᶠ, constants, equilibrated_surface(equilibrium, Tᶠ))
 
     ∂z_lnθ = ∂zᶜᶜᶠ(i, j, k, grid, log_dry_potential_temperatureᶜᶜᶜ, buoyancy, T, qᵛᵉ)
-    ∂z_rˢ = ∂zᶜᶜᶠ(i, j, k, grid, saturation_mixing_ratioᶜᶜᶜ, buoyancy, T, qᵛᵉ)
+    ∂z_rᵛ⁺ = ∂zᶜᶜᶠ(i, j, k, grid, saturation_mixing_ratioᶜᶜᶜ, buoyancy, T, qᵛᵉ)
     # All water contributes to density loading, even precipitation that does not
     # equilibrate with vapor during the parcel displacement.
     ∂z_rᵗ = ∂zᶜᶜᶠ(i, j, k, grid, total_water_mixing_ratioᶜᶜᶜ, buoyancy, T, qᵛᵉ)
 
     # The ratio of the saturated to the dry adiabatic lapse rate, Γₛ / Γ_d
-    A = (1 + ℒ * rˢ / (Rᵈ * Tᶠ)) / (1 + ϵ * ℒ^2 * rˢ / (cᵖᵈ * Rᵈ * Tᶠ^2))
+    A = (1 + ℒ * rᵛ⁺ / (Rᵈ * Tᶠ)) / (1 + ϵ * ℒ^2 * rᵛ⁺ / (cᵖᵈ * Rᵈ * Tᶠ^2))
 
-    return g * (A * (∂z_lnθ + ℒ / (cᵖᵈ * Tᶠ) * ∂z_rˢ) - ∂z_rᵗ)
+    return g * (A * (∂z_lnθ + ℒ / (cᵖᵈ * Tᶠ) * ∂z_rᵛ⁺) - ∂z_rᵗ)
 end

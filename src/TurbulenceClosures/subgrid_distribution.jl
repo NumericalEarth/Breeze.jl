@@ -3,11 +3,11 @@
 ##### SHOC's assumed double-Gaussian distribution on the closure's own mixing length, turbulent kinetic
 ##### energy and diffusivities, and what the closure does with it:
 #####
-#####   * the distribution: the second moments θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′ down the gradient,
+#####   * the distribution: the second moments θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′ down the gradient,
 #####     `ℂᵛ τ Kᶜ ∂z a ∂z b` and `-Kᶜ ∂z a`, with the closure's `Kᶜ` and a moment time scale `τ` built
 #####     from its `ℓ`, `e` and `N²`; `w′² = ℂʷ₁ (2/3) e`; the third moment w′³ and its limiter; and the
 #####     assumed double-Gaussian distribution with its saturation, which gives the cloud fraction aᶜ,
-#####     the cloud liquid, the condensate flux w′qᶜ′ and the buoyancy flux w′θᵥ′ = w′θˡ′ + A_q w′qᵗ′ + A_c w′qᶜ′.
+#####     the cloud liquid, the condensate flux w′qᶜ′ and the buoyancy flux w′θᵥ′ = w′θˡⁱ′ + A_q w′qᵗ′ + A_c w′qᶜ′.
 #####   * the energetics (`AppliedFluxEnergetics`, internal): the TKE equation takes its shear and
 #####     buoyancy production from the energy the fluxes the closure applies take from the mean state
 #####     (applied_flux_energetics.jl), and the dissipated energy heats the air.
@@ -44,7 +44,7 @@ using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocit
 """
 $(TYPEDEF)
 
-The time scale `τ` of the second moments (`θˡ′² = ℂᵛ₁ τ Kᶜ (∂z θˡ)²`, ...) and of the third-moment
+The time scale `τ` of the second moments (`θˡⁱ′² = ℂᵛ₁ τ Kᶜ (∂z θˡⁱ)²`, ...) and of the third-moment
 diagnosis, at the faces, from the closure's mixing length `ℓ`, turbulent velocity `√e` and
 static stability `N²` there: the return-to-isotropy time scale of SHOC's
 `RichardsonStabilityFunctions` limited by stratification as SHOC's
@@ -104,7 +104,7 @@ end
 """
 $(TYPEDEF)
 
-The time scale `τ` of the second moments from the variance budget of a scalar `φ` (θˡ or qᵗ) in
+The time scale `τ` of the second moments from the variance budget of a scalar `φ` (θˡⁱ or qᵗ) in
 local equilibrium, production equal to dissipation, with a scalar-variance dissipation time
 tied to the dissipation time of the closure's TKE,
 
@@ -221,7 +221,7 @@ end
 """
 $(TYPEDEF)
 
-The subgrid distribution of θˡ, qᵗ and w of [`TKEBasedTurbulenceClosure`](@ref) (`subgrid_distribution`): the
+The subgrid distribution of θˡⁱ, qᵗ and w of [`TKEBasedTurbulenceClosure`](@ref) (`subgrid_distribution`): the
 components of `SimplifiedHigherOrderClosure` for the second moments, the third moment and its
 limiter, the assumed PDF and its saturation, evaluated on the mixing length, turbulent kinetic
 energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref).
@@ -247,9 +247,9 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT, VS, FT}
     clipping :: CP
     "SHOC's constants the components read (`ggr`, `basetemp`, `mintke`, …)"
     constants :: C
-    "Maximum flux correlation of w with θˡ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
+    "Maximum flux correlation of w with θˡⁱ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
     ℂʳ :: R
-    "Vertical transport of θˡ′², qᵗ′² and θˡ′qᵗ′ ([`ScalarVarianceTransport`](@ref)), or `nothing` for the local diagnosis"
+    "Vertical transport of θˡⁱ′², qᵗ′² and θˡⁱ′qᵗ′ ([`ScalarVarianceTransport`](@ref)), or `nothing` for the local diagnosis"
     variance_transport :: VT
     "Stability functions of the local scalar variances and covariance ([`VarianceStabilityFunctions`](@ref)), or `nothing` for `ℂᵛ τ Kᶜ ∂z a ∂z b`"
     variance_stability_functions :: VS
@@ -277,9 +277,9 @@ than 0.06, with 4.58 no less than 0.01. Large-eddy simulations of cumulus have a
 5 in the cloud layer, where the saturated updrafts cover 0.5 to 5 % (harness
 `notes/cumulus-skewness.md`).
 
-`ℂʳ` is the maximum flux correlation: where the down-gradient variance ``a′²`` of ``a = θˡ`` or
+`ℂʳ` is the maximum flux correlation: where the down-gradient variance ``a′²`` of ``a = θˡⁱ`` or
 ``qᵗ`` is too small for the down-gradient flux, ``(w′a′)² > (ℂʳ)² w′² a′²``, the variance is raised
-smoothly to ``(w′a′)² / ((ℂʳ)² w′²)`` (see `bound_flux_correlation`), and ``θˡ′qᵗ′`` is scaled with
+smoothly to ``(w′a′)² / ((ℂʳ)² w′²)`` (see `bound_flux_correlation`), and ``θˡⁱ′qᵗ′`` is scaled with
 the variances. It must satisfy ``0 < (ℂʳ)² < 1 - ℂᵍ₁`` (≈ 0.6 with ``ℂᵍ₁ = 0.4`` of
 [`DoubleGaussianPDF`](@ref)); above that the components of the double-Gaussian PDF have no width. SHOC's
 own diffusivity, ``0.1 τ e``, corresponds to ``(ℂʳ)² = 0.15``. The default, `nothing`, imposes no bound.
@@ -287,7 +287,7 @@ own diffusivity, ``0.1 τ e``, corresponds to ``(ℂʳ)² = 0.15``. The default,
 `time_scale` is [`StratificationLimitedMomentTimeScale`](@ref) (the default, SHOC's),
 [`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref). The latter two derive `τ` from
 the scalar-variance budget with the same `ℓ`, `√e` and `Ri` as `Kᶜ`, so that the squared
-correlation of `w` with θˡ and qᵗ is a function of `Ri` alone, bounded by a bound on `ℂᵠ`.
+correlation of `w` with θˡⁱ and qᵗ is a function of `Ri` alone, bounded by a bound on `ℂᵠ`.
 
 `variance_stability_functions` is `nothing` (the default), for the local diagnosis
 ``ℂᵛ τ Kᶜ ∂_z a ∂_z b``, whose stability function is ``(2ℂᵛ/ℂᵠ) 𝕊ᶜ/𝕊ᴰ`` with
@@ -518,11 +518,11 @@ $(TYPEDEF)
 
 The `fraction` of [`SaturationWeightedStaticStability`](@ref) given by the closure's own
 [`DoubleGaussian`](@ref) distribution: the saturated fraction is the ratio of the subgrid condensate
-flux to the flux of the saturation excess `s = c_q qᵗ - c_θ θˡ` (linearized at the level),
+flux to the flux of the saturation excess `s = c_q qᵗ - c_θ θˡⁱ` (linearized at the level),
 
     aᴺ = w′qᶜ′ / w′s′,    w′s′ = -Kᶜ ∂z s̄,
 
-so that the static stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²ˢ`, with `N²ᶜ = (g / θ)(∂z θˡ + A_q ∂z qᵗ)` the
+so that the static stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²ˢ`, with `N²ᶜ = (g / θ)(∂z θˡⁱ + A_q ∂z qᵗ)` the
 stratification of the conserved variables and `N²ˢ = N²ᶜ + (g / θ) A_c ∂z s̄` the saturated one, is
 `N²ᶜ - Bˡ / Kᶜ`, `Bˡ = (g / θ) A_c w′qᶜ′`: minus the buoyancy flux of the distribution divided by
 `Kᶜ` (`Bˡ / Kᶜ` is left out where `Kᶜ` vanishes). It is evaluated in that form. For the
@@ -575,8 +575,8 @@ end
 $(TYPEDEF)
 
 The fields of the [`DoubleGaussian`](@ref) subgrid distribution in the closure fields of
-[`TKEBasedTurbulenceClosure`](@ref): the second moments at faces (`τ`, `θˡ′²`, `qᵗ′²`, `θˡ′qᵗ′`,
-`w′θˡ′`, `w′qᵗ′`) and the cloud at centers (`w′²`, `w′³`, cloud fraction `aᶜ`, liquid `qˡ`, its
+[`TKEBasedTurbulenceClosure`](@ref): the second moments at faces (`τ`, `θˡⁱ′²`, `qᵗ′²`, `θˡⁱ′qᵗ′`,
+`w′θˡⁱ′`, `w′qᵗ′`) and the cloud at centers (`w′²`, `w′³`, cloud fraction `aᶜ`, liquid `qˡ`, its
 variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, the part `Bˡ = (g / θ) A_c w′qˡ′` of its buoyancy
 flux carried by the condensate flux, and the shear and buoyancy production `P` and `B` of the TKE
 equation from the applied fluxes).
@@ -607,8 +607,8 @@ end
 
 function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names, heating_budget_flux = nothing)
     energetics = AppliedFluxEnergetics(solver)
-    moments = (τ = ZFaceField(grid), θˡ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡ′qᵗ′ = ZFaceField(grid),
-               w′θˡ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid),
+    moments = (τ = ZFaceField(grid), θˡⁱ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡⁱ′qᵗ′ = ZFaceField(grid),
+               w′θˡⁱ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid),
                scalar_variance_transport_fields(grid, distribution.variance_transport)...)
     cloud = (w′² = CenterField(grid), w′³ = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
@@ -709,9 +709,9 @@ end
 @inline center_third_moment_diagnosis(tm, i, j, k, d, cl, c³, ℓ, u, algebraic_arguments) =
     subgrid_third_moment(tm, d, c³, algebraic_arguments...)
 
-# Raise θˡ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
-# small for the down-gradient fluxes (|correlation with w| > ℂʳ), and scale θˡ′qᵗ′ with them so that
-# the θˡ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
+# Raise θˡⁱ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
+# small for the down-gradient fluxes (|correlation with w| > ℂʳ), and scale θˡⁱ′qᵗ′ with them so that
+# the θˡⁱ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
 # correlation) is often above 1 - ℂᵍ₁ = 0.6, where the components of the double-Gaussian PDF have no
 # width and its cloud fraction is all or nothing in each component (0, a, 1 - a or 1); the bound needs
 # 0 < (ℂʳ)² < 1 - ℂᵍ₁. SHOC's own diffusivity, 0.1 τ e, gives (ℂʳ)² = 0.15.
@@ -723,38 +723,38 @@ end
 # so smooth_max(a, 0) = a exactly, smooth_max ≥ max(a, b), and the excess, δ b / 2 at a = b,
 # decays as (δ b)² / (4 |a - b|) away from it. `floatmin` under the root keeps the derivative
 # finite where a = b = 0.
-@inline bound_flux_correlation(::Nothing, w′², θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′) = (θˡ′², qᵗ′², θˡ′qᵗ′)
+@inline bound_flux_correlation(::Nothing, w′², θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′) = (θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′)
 
 @inline function variance_floor_smooth_max(a, b, FT)
     δb = b / 10 # δ = 0.1
     return (a + b + sqrt((a - b) * (a - b) + δb * δb + floatmin(FT))) / 2
 end
 
-@inline function bound_flux_correlation(ℂʳ, w′², θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′)
-    FT = typeof(θˡ′²)
+@inline function bound_flux_correlation(ℂʳ, w′², θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′)
+    FT = typeof(θˡⁱ′²)
     d = ℂʳ * ℂʳ * w′²
     resolved = d > floatmin(FT)
     dₛ = ifelse(resolved, d, one(FT))
-    θ² = variance_floor_smooth_max(θˡ′², ifelse(resolved, w′θˡ′ * w′θˡ′ / dₛ, zero(FT)), FT)
+    θ² = variance_floor_smooth_max(θˡⁱ′², ifelse(resolved, w′θˡⁱ′ * w′θˡⁱ′ / dₛ, zero(FT)), FT)
     q² = variance_floor_smooth_max(qᵗ′², ifelse(resolved, w′qᵗ′ * w′qᵗ′ / dₛ, zero(FT)), FT)
-    fθ = ifelse(θˡ′² > 0, θ² / ifelse(θˡ′² > 0, θˡ′², one(FT)), one(FT))
+    fθ = ifelse(θˡⁱ′² > 0, θ² / ifelse(θˡⁱ′² > 0, θˡⁱ′², one(FT)), one(FT))
     fq = ifelse(qᵗ′² > 0, q² / ifelse(qᵗ′² > 0, qᵗ′², one(FT)), one(FT))
-    return θ², q², θˡ′qᵗ′ * sqrt(fθ * fq)
+    return θ², q², θˡⁱ′qᵗ′ * sqrt(fθ * fq)
 end
 
 # w′³ at the center k, where the PDF forms the skewness w′³ / (w′²)^{3/2}. The second moments of the faces
 # k and k+1 are differenced across the cell (compact), w′² and e across the neighbouring centers, and the
-# coefficients are the averages of the two faces. `lower` and `upper` are (τ, ℓ, N², θˡ′², w′θˡ′) at the
-# faces k and k+1; `w′θˡ′ᶜ` is the flux interpolated to the center; `c³` carries the gravitational acceleration.
-@inline function center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡ′ᶜ, lower, upper)
+# coefficients are the averages of the two faces. `lower` and `upper` are (τ, ℓ, N², θˡⁱ′², w′θˡⁱ′) at the
+# faces k and k+1; `w′θˡⁱ′ᶜ` is the flux interpolated to the center; `c³` carries the gravitational acceleration.
+@inline function center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡⁱ′ᶜ, lower, upper)
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
     c = d.constants
     cp = d.clipping
     eᵐⁱⁿ = closure.minimum_tke
     ccc = (Center(), Center(), Center())
-    τˡ, ℓˡ, N²ˡ, θˡ′²ˡ, w′θˡ′ˡ = lower
-    τᵘ, ℓᵘ, N²ᵘ, θˡ′²ᵘ, w′θˡ′ᵘ = upper
+    τˡ, ℓˡ, N²ˡ, θˡⁱ′²ˡ, w′θˡⁱ′ˡ = lower
+    τᵘ, ℓᵘ, N²ᵘ, θˡⁱ′²ᵘ, w′θˡⁱ′ᵘ = upper
     @inbounds begin
         kᵘ = min(k + 1, Nz)
         kˡ = max(k - 1, 1)
@@ -769,11 +769,11 @@ end
         thedz = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
         algebraic_arguments = (τ³, N², clip_below(cp, w′², w′²ᵐⁱⁿ, c.mintke), θ[i, j, k],
                                thedz, 1 / Δzᶜᶜᶜ(i, j, k, grid),
-                               θˡ′²ᵘ - θˡ′²ˡ,
-                               w′θˡ′ᵘ - w′θˡ′ˡ,
+                               θˡⁱ′²ᵘ - θˡⁱ′²ˡ,
+                               w′θˡⁱ′ᵘ - w′θˡⁱ′ˡ,
                                cl.w′²[i, j, kᵘ] - cl.w′²[i, j, kˡ],
                                max(e[i, j, kᵘ], eᵐⁱⁿ) - max(e[i, j, kˡ], eᵐⁱⁿ),
-                               w′θˡ′ᶜ)
+                               w′θˡⁱ′ᶜ)
         w′³ = center_third_moment_diagnosis(d.third_moment, i, j, k, d, cl, c³, ℓ, u, algebraic_arguments)
     end
     return limit_third_moment(d.skewness, cp, w′², w′³)
@@ -808,21 +808,21 @@ end
 
             Δθ = θ[i, j, k] - θ[i, j, k-1]
             Δq = qᵗ[i, j, k] - qᵗ[i, j, k-1]
-            θˡ′², qᵗ′², θˡ′qᵗ′, w′θˡ′, w′qᵗ′, _, _, _ =
+            θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′, _, _, _ =
                 interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / Δz, Δθ, Δq, zero(FT), zero(FT), zero(FT))
 
             # With variance stability functions, the local variances and covariance of their own
-            θˡ′², qᵗ′², θˡ′qᵗ′ = local_scalar_second_moments(d.variance_stability_functions, i, j, k, grid, closure, velocities,
-                                                             closure_fields, e, Δθ, Δq, Δz, θˡ′², qᵗ′², θˡ′qᵗ′)
+            θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′ = local_scalar_second_moments(d.variance_stability_functions, i, j, k, grid, closure, velocities,
+                                                             closure_fields, e, Δθ, Δq, Δz, θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′)
 
             # The flux of θˡⁱ that the turbulence carries includes the heating budget flux (zero without one)
-            w′θˡ′ += applied_heating_flux(cl, i, j, k)
+            w′θˡⁱ′ += applied_heating_flux(cl, i, j, k)
 
             m.τ[i, j, k] = τ
-            m.θˡ′²[i, j, k] = θˡ′²
+            m.θˡⁱ′²[i, j, k] = θˡⁱ′²
             m.qᵗ′²[i, j, k] = qᵗ′²
-            m.θˡ′qᵗ′[i, j, k] = θˡ′qᵗ′
-            m.w′θˡ′[i, j, k] = w′θˡ′
+            m.θˡⁱ′qᵗ′[i, j, k] = θˡⁱ′qᵗ′
+            m.w′θˡⁱ′[i, j, k] = w′θˡⁱ′
             m.w′qᵗ′[i, j, k] = w′qᵗ′
         end
 
@@ -831,16 +831,16 @@ end
         # that of the face above, too); the top face has none
         k′ = min(2, Nz)
         m.τ[i, j, 1] = m.τ[i, j, k′]
-        m.θˡ′²[i, j, 1] = m.θˡ′²[i, j, k′]
+        m.θˡⁱ′²[i, j, 1] = m.θˡⁱ′²[i, j, k′]
         m.qᵗ′²[i, j, 1] = m.qᵗ′²[i, j, k′]
-        m.θˡ′qᵗ′[i, j, 1] = m.θˡ′qᵗ′[i, j, k′]
-        m.w′θˡ′[i, j, 1] = m.w′θˡ′[i, j, k′]
+        m.θˡⁱ′qᵗ′[i, j, 1] = m.θˡⁱ′qᵗ′[i, j, k′]
+        m.w′θˡⁱ′[i, j, 1] = m.w′θˡⁱ′[i, j, k′]
         m.w′qᵗ′[i, j, 1] = m.w′qᵗ′[i, j, k′]
         m.τ[i, j, Nz+1] = 0
-        m.θˡ′²[i, j, Nz+1] = 0
+        m.θˡⁱ′²[i, j, Nz+1] = 0
         m.qᵗ′²[i, j, Nz+1] = 0
-        m.θˡ′qᵗ′[i, j, Nz+1] = 0
-        m.w′θˡ′[i, j, Nz+1] = 0
+        m.θˡⁱ′qᵗ′[i, j, Nz+1] = 0
+        m.w′θˡⁱ′[i, j, Nz+1] = 0
         m.w′qᵗ′[i, j, Nz+1] = 0
 
         # The vertical velocity variance at the centers
@@ -854,22 +854,22 @@ end
         # The variances no smaller than the fluxes allow at the largest correlation with w
         for k in 2:Nz
             w′²ᶠ = (cl.w′²[i, j, k] + cl.w′²[i, j, k-1]) / 2
-            θˡ′², qᵗ′², θˡ′qᵗ′ = bound_flux_correlation(d.ℂʳ, w′²ᶠ, m.θˡ′²[i, j, k], m.qᵗ′²[i, j, k], m.θˡ′qᵗ′[i, j, k],
-                                                       m.w′θˡ′[i, j, k], m.w′qᵗ′[i, j, k])
-            m.θˡ′²[i, j, k] = θˡ′²
+            θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′ = bound_flux_correlation(d.ℂʳ, w′²ᶠ, m.θˡⁱ′²[i, j, k], m.qᵗ′²[i, j, k], m.θˡⁱ′qᵗ′[i, j, k],
+                                                       m.w′θˡⁱ′[i, j, k], m.w′qᵗ′[i, j, k])
+            m.θˡⁱ′²[i, j, k] = θˡⁱ′²
             m.qᵗ′²[i, j, k] = qᵗ′²
-            m.θˡ′qᵗ′[i, j, k] = θˡ′qᵗ′
+            m.θˡⁱ′qᵗ′[i, j, k] = θˡⁱ′qᵗ′
         end
-        m.θˡ′²[i, j, 1] = m.θˡ′²[i, j, k′]
+        m.θˡⁱ′²[i, j, 1] = m.θˡⁱ′²[i, j, k′]
         m.qᵗ′²[i, j, 1] = m.qᵗ′²[i, j, k′]
-        m.θˡ′qᵗ′[i, j, 1] = m.θˡ′qᵗ′[i, j, k′]
+        m.θˡⁱ′qᵗ′[i, j, 1] = m.θˡⁱ′qᵗ′[i, j, k′]
 
         # The assumed PDF at the centers, from moments co-located there: the second moments are
         # interpolated from the faces to the center, and w′³ is diagnosed at the center, so that the
         # skewness w′³ / (w′²)^{3/2} the PDF forms is a ratio of quantities at one location
         # (`@inbounds` does not reach into the body of a closure: a bounds check there is an early exit of the column
         # loop, which Reactant raises to a loop of unknown trip count that Enzyme cannot differentiate)
-        interface_moments(k) = @inbounds (m.θˡ′²[i, j, k], m.w′θˡ′[i, j, k], m.θˡ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
+        interface_moments(k) = @inbounds (m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k], m.θˡⁱ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
         largeneg = convert(FT, -99999999.99)
         floors = (zero(FT), largeneg, largeneg, largeneg, zero(FT))
         for k in 1:Nz
@@ -882,8 +882,8 @@ end
             mˡ = interface_moments(k)
             mᵘ = interface_moments(k+1)
             mᶜ = map((yᵘ, yˡ, floor) -> hard_floor(linear_interp(zᵘ, zˡ, yᵘ, yˡ, zᶜ), floor), mᵘ, mˡ, floors)
-            lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡ′²[i, j, k], m.w′θˡ′[i, j, k])
-            upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡ′²[i, j, k+1], m.w′θˡ′[i, j, k+1])
+            lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k])
+            upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡⁱ′²[i, j, k+1], m.w′θˡⁱ′[i, j, k+1])
             w′³ᶜ = center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, mᶜ[2], lower, upper)
             cl.w′³[i, j, k] = w′³ᶜ
             mᶜ = (w′³ᶜ, mᶜ...)
@@ -982,7 +982,7 @@ end
 solve_static_stability!(static_stability, buoyancy_flux, args...) = nothing
 solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args...) = cloud_buoyancy_stability!(buoyancy_flux, args...)
 
-# N²ᵇ = (g / θ)(∂z θˡ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces (`condensate_flux_stabilityᶜᶜᶠ`), then the
+# N²ᵇ = (g / θ)(∂z θˡⁱ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces (`condensate_flux_stabilityᶜᶜᶠ`), then the
 # mixing length and the diffusivities again from it
 @inline relax_stability(N², N²ᵇ, ::Nothing) = N²ᵇ
 @inline relax_stability(N², N²ᵇ, ω) = (1 - ω) * N² + ω * N²ᵇ
@@ -1045,12 +1045,12 @@ function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_f
     return nothing
 end
 
-# SHOC's linearization of the saturation excess at a level, s′ = c_q qᵗ′ - c_θ θˡ′, and A_c
+# SHOC's linearization of the saturation excess at a level, s′ = c_q qᵗ′ - c_θ θˡⁱ′, and A_c
 @inline function saturation_excess_coefficients(sat, thermodynamics, c, θ, qᵗ, p)
     Tˡ = plume_liquid_water_temperature(sat, thermodynamics, c, θ, qᵗ, p)
-    qˢ, β, cp_over_L, Π = plume_saturation(sat, thermodynamics, c, Tˡ, qᵗ, p)
-    opbq = 1 + β * qˢ
-    c_θ = ((1 + β * qᵗ) / (opbq * opbq)) * cp_over_L * β * qˢ * Π
+    qᵛ⁺, β, cp_over_L, Π = plume_saturation(sat, thermodynamics, c, Tˡ, qᵗ, p)
+    opbq = 1 + β * qᵛ⁺
+    c_θ = ((1 + β * qᵗ) / (opbq * opbq)) * cp_over_L * β * qᵛ⁺ * Π
     c_q = 1 / opbq
     _, A_c = buoyancy_flux_coefficients(sat, thermodynamics, c, p, θ, qᵗ, zero(θ))
     return c_q, c_θ, A_c

@@ -149,9 +149,9 @@ end
         u = (sqrt(max(e[k], eᵐⁱⁿ)) + sqrt(max(e[k-1], eᵐⁱⁿ))) / 2
         τ = moment_time_scale(d.time_scale, ℓ[k], u, N²[k])
         @test column(m.τ)[k] ≈ τ rtol=1e-12
-        @test column(m.θˡ′²)[k] ≈ τ * Kᶜ[k] * ((θ[k] - θ[k-1]) / Δz)^2 rtol=1e-12
+        @test column(m.θˡⁱ′²)[k] ≈ τ * Kᶜ[k] * ((θ[k] - θ[k-1]) / Δz)^2 rtol=1e-12
         @test column(m.qᵗ′²)[k] ≈ τ * Kᶜ[k] * ((qᵗ[k] - qᵗ[k-1]) / Δz)^2 rtol=1e-12
-        @test column(m.w′θˡ′)[k] ≈ -Kᶜ[k] * (θ[k] - θ[k-1]) / Δz rtol=1e-12
+        @test column(m.w′θˡⁱ′)[k] ≈ -Kᶜ[k] * (θ[k] - θ[k-1]) / Δz rtol=1e-12
         @test column(m.w′qᵗ′)[k] ≈ -Kᶜ[k] * (qᵗ[k] - qᵗ[k-1]) / Δz rtol=1e-12
     end
     # The skewness at the centers, limited with the center w′²
@@ -189,10 +189,10 @@ end
             𝕊ᴰ = dissipation ? @allowscalar(dissipation_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N², eᶠ, cf.ℓᵐ)) : 1
             𝕊ᶜ = @allowscalar tracer_stability_functionᶜᶜᶠ(1, 1, k, grid, closure, model.velocities, cf.N², eᶠ, cf.ℓᵐ)
             @test column(m.τ)[k] ≈ 2 * ℓ[k] / (ℂᵠ * 𝕊ᴰ * u) rtol=1e-12
-            θ² = column(m.θˡ′²)[k]
+            θ² = column(m.θˡⁱ′²)[k]
             if θ² > 0
                 # With u² for e the squared correlation is a function of Ri alone, bounded by its largest value
-                ρ² = column(m.w′θˡ′)[k]^2 / (θ² * (2 / 3) * u^2)
+                ρ² = column(m.w′θˡⁱ′)[k]^2 / (θ² * (2 / 3) * u^2)
                 @test ρ² ≈ 3 * ℂᵠ * 𝕊ᶜ * 𝕊ᴰ / 4 rtol=1e-8
                 @test ρ² ≤ 3 * ℂᵠ * max_S / 4 * (1 + 1e-12)
                 n += 1
@@ -219,7 +219,7 @@ end
         qᵗ = (column(model.moisture_density) .+ column(model.microphysical_fields.ρqᶜˡ)) ./ ρ
         p = column(model.dynamics.reference_state.pressure)
         zc = znodes(grid, Center()); zf = znodes(grid, Face())
-        moments(k) = (column(m.θˡ′²)[k], column(m.w′θˡ′)[k], column(m.θˡ′qᵗ′)[k], column(m.w′qᵗ′)[k], column(m.qᵗ′²)[k])
+        moments(k) = (column(m.θˡⁱ′²)[k], column(m.w′θˡⁱ′)[k], column(m.θˡⁱ′qᵗ′)[k], column(m.w′qᵗ′)[k], column(m.qᵗ′²)[k])
         floors = (0.0, -99999999.99, -99999999.99, -99999999.99, 0.0)
         for k in 1:size(grid, 3)
             # The second moments interpolated to the center, with the third moment diagnosed there
@@ -594,7 +594,7 @@ rain_transport() = (ρqʳ = WENO(; order=5, bounds=(0.0, 1.0), time_discretizati
 end
 
 @testset "ScalarVarianceTransport: the steady budget of the scalar second moments with transport" begin
-    moments(model) = (m = model.closure_fields.subgrid_cloud.moments; Array.(interior.((m.θˡ′², m.qᵗ′², m.θˡ′qᵗ′))))
+    moments(model) = (m = model.closure_fields.subgrid_cloud.moments; Array.(interior.((m.θˡⁱ′², m.qᵗ′², m.θˡⁱ′qᵗ′))))
     local_model = tke_p3_column(DoubleGaussian())
     update_state!(local_model)
     θ₀, q₀, θq₀ = moments(local_model)
@@ -626,7 +626,7 @@ end
 end
 
 @testset "VarianceStabilityFunctions: θˡⁱ′² = 𝕊ᵛ₁ ℓ² (∂z θˡⁱ)², qᵗ′² = 𝕊ᵛ₂ ℓ² (∂z qᵗ)², θˡⁱ′qᵗ′ = ρᵛ √(𝕊ᵛ₁ 𝕊ᵛ₂) ℓ² ∂z θˡⁱ ∂z qᵗ" begin
-    moments(model) = (m = model.closure_fields.subgrid_cloud.moments; Array.(interior.((m.θˡ′², m.qᵗ′², m.θˡ′qᵗ′, m.w′θˡ′, m.w′qᵗ′, m.τ))))
+    moments(model) = (m = model.closure_fields.subgrid_cloud.moments; Array.(interior.((m.θˡⁱ′², m.qᵗ′², m.θˡⁱ′qᵗ′, m.w′θˡⁱ′, m.w′qᵗ′, m.τ))))
     sf = TurbulentRichardsonStabilityFunction()
 
     @test DoubleGaussian().variance_stability_functions === nothing

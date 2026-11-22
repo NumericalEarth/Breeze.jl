@@ -40,7 +40,7 @@
 ##### Integrated over a layer with one amplitude, ∫ ρ b_θ J dz = -∫ ρ b_θ (z - z̄) 𝒬 dz: the generation
 ##### of available potential energy against the mixed state.
 #####
-##### The distribution receives the total flux of θˡⁱ (w′θˡ′ of the moments includes Jᑫ), and the
+##### The distribution receives the total flux of θˡⁱ (w′θˡⁱ′ of the moments includes Jᑫ), and the
 ##### third moment of `TKEBudgetThirdMoment` receives G through P + B. Its damped local member is
 ##### signed by origin: Gᑫᶜ, the conversion of the flux that the cooling part min(𝒬, 0) alone would
 ##### drive (with ℂᑫ = 1), is carried by downdrafts, so

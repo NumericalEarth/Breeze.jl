@@ -4,7 +4,7 @@
 ##### SHOC is operator split from the dynamics, as in EAMxx: during the Runge–Kutta stages the
 ##### closure contributes no flux and no tendency, and once per time step, in
 ##### `step_closure_prognostics!`, every column takes one whole SHOC step (`shoc_column!`) over
-##### the full `Δt`. That step diffuses θˡ, qᵗ, u, v and the turbulent kinetic energy implicitly,
+##### the full `Δt`. That step diffuses θˡⁱ, qᵗ, u, v and the turbulent kinetic energy implicitly,
 ##### applies the surface fluxes, and diagnoses the second and third moments and the subgrid
 ##### cloud of the assumed PDF.
 #####
@@ -573,7 +573,7 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The last part of a SHOC step of every column: `shoc_cloud!`, then store θˡ, qᵗ and turbulent
+The last part of a SHOC step of every column: `shoc_cloud!`, then store θˡⁱ, qᵗ and turbulent
 kinetic energy back as densities.
 """
 @kernel function _step_shoc_cloud!(grid, thermodynamics, Δt, closure, fields, ρ, pressure, ρθ, ρqᵗ, ρu, ρv, ρw, ρe)

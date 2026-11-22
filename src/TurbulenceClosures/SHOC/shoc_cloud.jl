@@ -73,7 +73,7 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Diffuse the prognostic microphysical densities of column `(i, j)` implicitly over `dtime` with
-SHOC's heat diffusivity `tkh` of the step and no surface flux: the operator of SHOC's `θˡ` and
+SHOC's heat diffusivity `tkh` of the step and no surface flux: the operator of SHOC's `θˡⁱ` and
 `qw` solve, applied to the specific values.
 """
 @inline mix_microphysical_tracers!(i, j, Nz, dtime, closure, fields, ρ, ρqᵗ) = nothing

@@ -17,7 +17,7 @@
 $(TYPEDEF)
 
 The second moments of E3SM `shoc.F90` (`diag_second_shoc_moments`), diagnosed down the gradient:
-the fluxes are `-K ∂z` of the mean, the variances and the covariance of θˡ and qᵗ are
+the fluxes are `-K ∂z` of the mean, the variances and the covariance of θˡⁱ and qᵗ are
 `ℂᵛ τ Kᶜ ∂z a ∂z b`, and the vertical velocity variance is `ℂʷ₁ (2/3) e`.
 
 | coefficient | `shoc.F90` | default | meaning |
@@ -26,11 +26,11 @@ the fluxes are `-K ∂z` of the mean, the variances and the covariance of θˡ a
 | `ℂᵛ₂` | `qw2tune`    | 1   | scales the variance of total water |
 | `ℂᵛ₃` | `qwthl2tune` | 1   | scales the covariance of total water and liquid water potential temperature |
 | `ℂʷ₁` | `w2tune`     | 1   | scales the vertical velocity variance, `w'w' = ℂʷ₁ (2/3) e` |
-| `ℂᶠ`  | `a_const`    | 1.8 | surface variances and covariance, `θˡ'² = ℂᶠ₂ ℂᶠ (w'θˡ' / u_f)²` at the lowest interface |
-| `ℂᶠ₂` | literal `0.4` | 0.4 | surface variances of θˡ and qᵗ, see `ℂᶠ` |
-| `ℂᶠ₃` | literal `0.2` | 0.2 | surface covariance of θˡ and qᵗ, `ℂᶠ₃ ℂᶠ (w'θˡ' / u_f) (w'qᵗ' / u_f)` |
+| `ℂᶠ`  | `a_const`    | 1.8 | surface variances and covariance, `θˡⁱ'² = ℂᶠ₂ ℂᶠ (w'θˡⁱ' / u_f)²` at the lowest interface |
+| `ℂᶠ₂` | literal `0.4` | 0.4 | surface variances of θˡⁱ and qᵗ, see `ℂᶠ` |
+| `ℂᶠ₃` | literal `0.2` | 0.2 | surface covariance of θˡⁱ and qᵗ, `ℂᶠ₃ ℂᶠ (w'θˡⁱ' / u_f) (w'qᵗ' / u_f)` |
 | `ℂᶠ₄` | literal `0.3` | 0.3 | weight of the convective velocity in the surface velocity scale, `u_f² = u★² + ℂᶠ₄ w★²` |
-| `ℂᶠ₅` | `z_const`     | 1   | depth of the convective velocity scale `w★³ = (g / θ₀) w'θˡ' ℂᶠ₅`, **in meters** |
+| `ℂᶠ₅` | `z_const`     | 1   | depth of the convective velocity scale `w★³ = (g / θ₀) w'θˡⁱ' ℂᶠ₅`, **in meters** |
 
 `ℂᶠ₅` is dimensional. `ℂᶠ` multiplies `ℂᶠ₂` and `ℂᶠ₃` and nothing else, and `ℂᶠ₅` enters only
 with `ℂᶠ₄`, as `ℂᶠ₄ ℂᶠ₅^{2/3}`. The fields after the coefficients are safeguards.
@@ -48,9 +48,9 @@ struct DowngradientSecondMoments{FT} <: AbstractSHOCComponent
     ℂʷ₁ :: FT
     "Surface variance coefficient (`a_const`)"
     ℂᶠ :: FT
-    "Surface variance factor of θˡ and qᵗ (literal `0.4`)"
+    "Surface variance factor of θˡⁱ and qᵗ (literal `0.4`)"
     ℂᶠ₂ :: FT
-    "Surface covariance factor of θˡ and qᵗ (literal `0.2`)"
+    "Surface covariance factor of θˡⁱ and qᵗ (literal `0.2`)"
     ℂᶠ₃ :: FT
     "Weight of the squared convective velocity in the surface velocity scale (literal `0.3`)"
     ℂᶠ₄ :: FT
