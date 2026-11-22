@@ -16,24 +16,20 @@ export TKEBasedTurbulenceClosure,
        SaturationWeightedStaticStability, MicrophysicsSaturatedFraction,
        GridMeanShear,
        SimplifiedHigherOrderClosure, SHOC,
-       smooth_shoc_components,
        BlendedMixingLength,
-       ColumnStabilityDamping, RichardsonStabilityFunctions, StratificationLimitedTimeScale,
-       ForwardEulerTKE, ImplicitSinkTKE,
-       PDFBuoyancyFlux, DowngradientBuoyancyFlux,
+       ColumnStabilityDamping,
        DowngradientSecondMoments,
        AlgebraicThirdMoment, TKEBudgetThirdMoment,
        HeatingBudgetFlux, RadiativeHeating, PrescribedHeating, heating_budget_flux_bounds,
        UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
        ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
-       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
+       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, ModelThermodynamicsSaturation,
        HardClipping, SmoothClipping,
-       BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
        closure_parameters, with_parameters,
        per_column_closure, set_per_column_coefficients!, PerColumnCoefficient,
        DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
-       StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale,
+       StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale, ReturnToIsotropyTimeScale,
        VarianceStabilityFunctions
 
 using Adapt: Adapt, adapt
@@ -276,19 +272,14 @@ include("turbulent_richardson_stability_functions.jl")
 include("surface_layer_similarity.jl")
 
 include("SHOC/SimplifiedHigherOrderClosures.jl")
-using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, SimplifiedHigherOrderClosure, SHOC,
-                                      smooth_shoc_components,
-                                      BlendedMixingLength,
-                                      ColumnStabilityDamping, RichardsonStabilityFunctions, StratificationLimitedTimeScale,
-                                      ForwardEulerTKE, ImplicitSinkTKE,
-                                      PDFBuoyancyFlux, DowngradientBuoyancyFlux,
+using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures,
+                                      BlendedMixingLength, ColumnStabilityDamping,
                                       DowngradientSecondMoments,
                                       AlgebraicThirdMoment,
                                       UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
                                       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
-                                      DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
+                                      DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, ModelThermodynamicsSaturation,
                                       HardClipping, SmoothClipping,
-                                      BulkRichardsonBoundaryLayerDepth,
                                       SHOCConstants,
                                       closure_parameters, with_parameters
 
@@ -299,5 +290,6 @@ include("applied_flux_energetics.jl")
 include("tke_budget_third_moment.jl")
 include("heating_budget_flux.jl")
 include("bracketed_fraction_solve.jl")
+include("simplified_higher_order_closure.jl")
 
 end # module TurbulenceClosures

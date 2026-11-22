@@ -179,15 +179,6 @@ end
     return (1 - 2a) * (1 - c) * sqrt((1 - c) / (a * (1 - a)))
 end
 
-# Saturation vapor pressure over liquid of Murphy and Koop (2005) (wv_sat_scream.F90, MurphyKoop_svp)
-@inline function murphy_koop_liquid_svp(t::FT) where FT
-    logt = log(t)
-    tmp = convert(FT, 54.842763) - (convert(FT, 6763.22) / t) - (convert(FT, 4.210) * logt) + (convert(FT, 0.000367) * t) +
-          (tanh(convert(FT, 0.0415) * (t - convert(FT, 218.8))) * (convert(FT, 53.878) - (convert(FT, 1331.22) / t) -
-          (convert(FT, 9.44523) * logt) + convert(FT, 0.014025) * t))
-    return exp(tmp)
-end
-
 # shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters share one form: the plume
 # means and variances of a scalar from its variance `sec`, its flux correlation with w, and the
 # skewness `skew` of the scalar (identically zero for thetal, where `dothetal_skew = false`).
@@ -269,10 +260,6 @@ end
     return x1_1, x1_2, x2, x2, σ, σ
 end
 
-# shoc_assumed_pdf_compute_qs for one plume, with the fixed constants of shoc.F90
-@inline plume_saturation(Tl, pval, p) =
-    plume_saturation(FixedConstantsLiquidSaturation(), nothing, p, Tl, zero(Tl), pval)[1:2]
-
 # shoc_assumed_pdf_compute_s, with `cp_over_L` and `Π` of the saturation component
 @inline function plume_condensate(qw1, qs1, beta, cp_over_L, Π, thl2, qw2, sqrtthl2, sqrtqw2, r_qwthl)
     FT = typeof(qw1)
@@ -314,8 +301,8 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The assumed PDF of level `k` (Analytic Double Gaussian 1 of Larson et al. 2002): return the
 subgrid cloud fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
-The plumes saturate by the saturation component `sat` (see [`FixedConstantsLiquidSaturation`](@ref)
-and [`ModelThermodynamicsSaturation`](@ref)), with the `thermodynamics` of the model.
+The plumes saturate by the saturation component `sat` ([`ModelThermodynamicsSaturation`](@ref)), with the
+`thermodynamics` of the model.
 """
 @inline function assumed_pdf(pdf::ComponentDoubleGaussianPDF, sat, thermodynamics, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first,
                              qw_first, wsec, moments_l, moments_u)
@@ -407,11 +394,6 @@ and [`ModelThermodynamicsSaturation`](@ref)), with the `thermodynamics` of the m
 
     return shoc_cldfrac, shoc_ql, shoc_ql2, wqls, wthv_sec
 end
-
-# The saturation of shoc.F90, when none is given
-@inline assumed_pdf(pdf, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first, wsec, moments_l, moments_u) =
-    assumed_pdf(pdf, FixedConstantsLiquidSaturation(), nothing, cp, c, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first,
-                wsec, moments_l, moments_u)
 
 #####
 ##### The components of the double Gaussian in the vapor excess over liquid, for the microphysics

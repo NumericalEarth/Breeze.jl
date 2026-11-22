@@ -1,54 +1,44 @@
 """
     SimplifiedHigherOrderClosures
 
-The Simplified Higher-Order Closure (SHOC) of Bogenschutz and Krueger (2013), re-expressed from
-E3SM's `shoc.F90` (pinned at E3SM `ba53243f`) as allocation-free column functions that run one
-thread per column on CPUs and GPUs, and wired into `AtmosphereModel` as
-[`SimplifiedHigherOrderClosure`](@ref). The closure is assembled from swappable components, one
-per relation of the scheme, each a keyword argument of the constructor; the defaults are those
-of `shoc.F90`.
+The relations of the Simplified Higher-Order Closure (SHOC) of Bogenschutz and Krueger (2013),
+re-expressed from E3SM's `shoc.F90` (pinned at E3SM `ba53243f`) as components of
+[`TKEBasedTurbulenceClosure`](@ref): the mixing length ([`BlendedMixingLength`](@ref)), the
+return-to-isotropy time scale and diffusivities as stability functions ([`ColumnStabilityDamping`](@ref)),
+and, for the subgrid distribution [`DoubleGaussian`](@ref), the second moments, the third moment and its
+limiters and the assumed double-Gaussian PDF with its saturation. [`SimplifiedHigherOrderClosure`](@ref) is
+the configuration of the TKE closure that assembles them with the coefficients of `shoc.F90`.
 """
 module SimplifiedHigherOrderClosures
 
-export SimplifiedHigherOrderClosure, SHOC,
-       smooth_shoc_components,
-       BlendedMixingLength,
-       ColumnStabilityDamping, RichardsonStabilityFunctions, StratificationLimitedTimeScale,
-       ForwardEulerTKE, ImplicitSinkTKE,
-       PDFBuoyancyFlux, DowngradientBuoyancyFlux,
+export BlendedMixingLength, ColumnStabilityDamping,
        DowngradientSecondMoments,
        AlgebraicThirdMoment,
        UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
        ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
-       FixedConstantsLiquidSaturation, ModelThermodynamicsSaturation,
+       ModelThermodynamicsSaturation,
        HardClipping, SmoothClipping,
-       BulkRichardsonBoundaryLayerDepth,
        SHOCConstants,
        closure_parameters, with_parameters
 
 using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
-using GPUArraysCore: @allowscalar
-using KernelAbstractions: KernelAbstractions, @kernel, @index
+using KernelAbstractions: @kernel, @index
 using SpecialFunctions: erf
 
 using Oceananigans: Oceananigans
-using Oceananigans.Architectures: device
-using Oceananigans.BoundaryConditions: BoundaryConditions, BoundaryCondition, Flux, Bottom,
-                                       fill_halo_regions!, total_boundary_flux
-using Oceananigans.Fields: Field, CenterField, ZFaceField, interior
-using Oceananigans.Models: boundary_condition_args
-using Oceananigans.Grids: AbstractGrid, Center, Face, Flat, znode, peripheral_node
-using Oceananigans.Operators: Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ
-using Oceananigans.TimeSteppers: ExplicitTimeDiscretization
-using Oceananigans.TurbulenceClosures: AbstractTurbulenceClosure, getclosure
-using Oceananigans.Utils: Utils, launch!, prettysummary
+using Oceananigans.Fields: Field
+using Oceananigans.Grids: AbstractGrid, Center, Flat
+using Oceananigans.Operators: Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ
+using Oceananigans.TurbulenceClosures: getclosure, height_above_bottomᶜᶜᶠ, height_above_bottomᶜᶜᶜ
+using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: turbulent_velocityᶜᶜᶜ, ℑbzᵃᵃᶜ
+using Oceananigans.Utils: launch!, prettysummary
 
 using Breeze.AtmosphereModels: AtmosphereModels
-using Breeze.TurbulenceClosures: TurbulenceClosures, TurbulenceClosureStatistics, PerColumnCoefficient, convert_eltype,
-                                 GradientLimitedMixingLength, HardMinimum, HarmonicBlend, fill_mixing_length!, mixing_lengthᶜᶜᶜ,
-                                 RationalStabilityFunction, TurbulentRichardsonStabilityFunction, local_stability_functions
+using Breeze.TurbulenceClosures: TurbulenceClosures, TKEBasedTurbulenceClosure, AbstractMixingLength,
+                                 HardMinimum, HarmonicBlend, TurbulentRichardsonStabilityFunction,
+                                 face_valueᶜᶜᶠ, grid_float_type
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equilibrated_surface, saturation_vapor_pressure,
                              PlanarLiquidSurface, PlanarIceSurface, dry_air_gas_constant, vapor_gas_constant,
@@ -58,21 +48,13 @@ using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equili
 include("shoc_constants.jl")
 include("clipping.jl")
 include("column_utilities.jl")
-include("boundary_layer_depth.jl")
 include("mixing_lengths.jl")
 include("turbulence_time_scales.jl")
-include("implicit_diffusion.jl")
-include("tke_updates.jl")
-include("buoyancy_sources.jl")
 include("second_moments.jl")
 include("third_moments.jl")
 include("pdf_saturation.jl")
 include("assumed_pdfs.jl")
 include("smooth_assumed_pdf.jl")
-include("shoc_column.jl")
-include("component_sets.jl")
-include("simplified_higher_order_closure.jl")
 include("shoc_parameters.jl")
-include("shoc_cloud.jl")
 
 end # module SimplifiedHigherOrderClosures

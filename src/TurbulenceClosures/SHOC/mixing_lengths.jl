@@ -1,34 +1,30 @@
 #####
-##### Slot: mixing length
+##### The mixing length of SHOC as a mixing length of `TKEBasedTurbulenceClosure`
 #####
-##### A mixing length component implements
-#####
-#####     mixing_length_column!(ml, cp, c, i, j, grid, Nz, tke_weighted_height, state, host, diagnostics, scratch)
-#####
-##### called once per column after the sweep that floors the turbulent kinetic energy and fills
-##### `brunt` (it returns whatever per-column value the level function needs), and
-#####
-#####     mixing_length(ml, cp, c, column, i, j, k, grid, tke_k, brunt_k, zt_k, host_scale, state, scratch)
-#####
-##### called level by level, which returns the length ℓ of level `k`. `cp` is the clipping policy
-##### and `c` the `SHOCConstants`.
+##### `BlendedMixingLength` is an `AbstractMixingLength`: the closure fills it column by column into
+##### `closure_fields.ℓᵐ` at the faces (`fill_mixing_length!`), and reconstructs it at the centers
+##### (`mixing_lengthᶜᶜᶜ`), where the dissipation lives with `e`. Its one number of the column, the
+##### asymptotic length `l∞`, is kept in `closure_fields.ℓˢ` (the field that holds what the center
+##### reconstruction needs), at every face of the column.
 #####
 
 """
 $(TYPEDEF)
 
-A mixing length that blends three lengths by the sum of their inverses: the distance to the
-surface `κ z`, an asymptotic length `l∞` (the fraction `ℂˡ₄` of the height weighted by `√e` over
-the column) and, in stable air, the buoyancy length `√e / N`,
+The mixing length of [Bogenschutz and Krueger (2013)](@cite Bogenschutz2013) as E3SM `shoc.F90` computes it
+(`compute_shoc_mix_shoc_length`): three lengths blended by the sum of their inverse squares, the distance to
+the surface `κ z`, an asymptotic length `l∞` (the fraction `ℂˡ₄` of the height weighted by `√e` over the
+column) and, in stable air, the buoyancy length `√e / N`,
 
-    ℓ = (ℂˡ₂ / ℂˡ₁) [1 / (ℂˡ₅ √e κ z) + 1 / (ℂˡ₅ √e l∞) + ℂˡ₃ N²⁺ / e]^(-1/2)
+    ℓ⁻² = (ℂˡ₁ / ℂˡ₂)² [1 / (ℂˡ₅ √e κ z) + 1 / (ℂˡ₅ √e l∞) + ℂˡ₃ N²⁺ / e] + 1 / ℓᵐᵃˣ² + 1 / Δʰ²,
 
-bounded by `minlen`, `maxlen` and the horizontal mesh size. Each level is a function of that
-level and of one number of the column, `l∞`.
-
-This is the length of [Bogenschutz and Krueger (2013)](@cite Bogenschutz2013) as E3SM `shoc.F90`
-computes it (`compute_shoc_mix_shoc_length`, `check_length_scale_shoc_length`), and the mixing
-default mixing length of `SimplifiedHigherOrderClosure`.
+with `N²⁺` the stable part of the stored static stability and `√e` the turbulent velocity of the closure
+(`e` floored at `minimum_tke`). `shoc.F90` bounds the length with `min(maxlen, ⋅)`, `max(minlen, ⋅)` and
+`min(√(Δx Δy), ⋅)` (`check_length_scale_shoc_length`). Here the upper bounds `ℓᵐᵃˣ` (`maximum_length`) and the
+horizontal grid spacing `Δʰ = √(Δx Δy)` (none along `Flat` directions) enter the same sum of inverse squares,
+which changes the length by the fraction `(ℓ / ℓᵐᵃˣ)² / 2` where it is far below them, and the lower bound
+`minlen` is not imposed: the length vanishes with `z` and with `√e`, and the dissipation `𝕊ᴰ e^{3/2} / ℓ`
+vanishes with them.
 
 | coefficient | `shoc.F90` | default | meaning |
 |:------------|:-----------|:--------|:--------|
@@ -36,11 +32,11 @@ default mixing length of `SimplifiedHigherOrderClosure`.
 | `ℂˡ₂` | literal `2.8284` | 2.8284 | prefactor of the mixing length (`2√2`, truncated as in the Fortran) |
 | `ℂˡ₃` | literal `0.01`   | 0.01   | weight of the stratification term `N² / e` |
 | `ℂˡ₄` | literal `0.1`    | 0.1    | the asymptotic length `l∞` as a fraction of the TKE-weighted mean height |
-| `ℂˡ₅` | `tscale`         | 400    | eddy turnover time scale, **in seconds** (the one dimensional coefficient of SHOC) |
+| `ℂˡ₅` | `tscale`         | 400    | eddy turnover time scale, **in seconds** (the one dimensional coefficient) |
 
 $(TYPEDFIELDS)
 """
-struct BlendedMixingLength{FT} <: AbstractSHOCComponent
+struct BlendedMixingLength{FT} <: AbstractMixingLength
     "Mixing length divisor (`length_fac`)"
     ℂˡ₁ :: FT
     "Mixing length prefactor (literal `2.8284`)"
@@ -51,124 +47,88 @@ struct BlendedMixingLength{FT} <: AbstractSHOCComponent
     ℂˡ₄ :: FT
     "Eddy turnover time scale of the mixing length, s (`tscale`)"
     ℂˡ₅ :: FT
-    "Maximum mixing length, m"
-    maxlen :: FT
-    "Minimum mixing length, m"
-    minlen :: FT
+    "Von Kármán constant of the distance to the surface (`vk`)"
+    von_karman_constant :: FT
+    "Largest mixing length, m (`maxlen`), in the sum of inverse squares"
+    maximum_length :: FT
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `BlendedMixingLength{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
-argument.
+Return `BlendedMixingLength{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword argument.
 """
 BlendedMixingLength(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
     component_from_keywords(BlendedMixingLength, FT,
-                            (ℂˡ₁ = 0.5, ℂˡ₂ = 2.8284, ℂˡ₃ = 0.01, ℂˡ₄ = 0.1, ℂˡ₅ = 400, maxlen = 20000, minlen = 20), kw)
+                            (ℂˡ₁ = 0.5, ℂˡ₂ = 2.8284, ℂˡ₃ = 0.01, ℂˡ₄ = 0.1, ℂˡ₅ = 400,
+                             von_karman_constant = 0.4, maximum_length = 20000), kw)
 
 Adapt.@adapt_structure BlendedMixingLength
 
-# The asymptotic length l∞ of the column
-@inline mixing_length_column!(ml::BlendedMixingLength, cp, c, i, j, grid, Nz, tke_weighted_height,
-                              state, host, diagnostics, scratch) = ml.ℂˡ₄ * tke_weighted_height
+TurbulenceClosures.convert_eltype(::Type{FT}, ml::BlendedMixingLength) where FT =
+    map_scalars(scalar -> convert(FT, scalar), ml)
 
-@inline function mixing_length(ml::BlendedMixingLength, cp, c, l_inf, i, j, k, grid, tke_k, brunt_k, zt_k,
-                               host_scale, state, scratch)
-    tscale = ml.ℂˡ₅ # turnover time scale [s]
-    brunt_scale = c.brunt_scale # scale of the squared buoyancy frequency for the clipping policy [s⁻²]
+Base.summary(ml::BlendedMixingLength{FT}) where FT = "BlendedMixingLength{$FT}"
 
-    tkes = sqrt(tke_k)
-    brunt2 = clip_negative(cp, brunt_k, brunt_scale)
+Base.show(io::IO, ml::BlendedMixingLength) =
+    print(io, summary(ml), " (ℂˡ₁ = ", prettysummary(ml.ℂˡ₁), ", ℂˡ₂ = ", prettysummary(ml.ℂˡ₂),
+              ", ℂˡ₃ = ", prettysummary(ml.ℂˡ₃), ", ℂˡ₄ = ", prettysummary(ml.ℂˡ₄), ", ℂˡ₅ = ", prettysummary(ml.ℂˡ₅), ")")
 
-    mix = clip_min(cp, ml.maxlen, (ml.ℂˡ₂ * sqrt(1 / ((1 / (tscale * tkes * c.vk * zt_k))
-                         + (1 / (tscale * tkes * l_inf)) + ml.ℂˡ₃ * (brunt2 / tke_k)))) / ml.ℂˡ₁, ml.minlen)
-    mix = clip_min(cp, ml.maxlen, mix, ml.minlen)
-    mix = clip_max(cp, ml.minlen, mix, ml.minlen)
-    mix = clip_min(cp, host_scale, mix, ml.minlen)
-
-    return mix
-end
-
-#####
-##### The gradient-limited mixing length of the TKE closure, reused
-#####
-#####     ℓ(z) = min(ℂˢ z, min over z′ of [ℓᵇ(z′) + ℂⁱ |z - z′|]),    ℓᵇ = √e / N where N² > 0
-#####
-##### `GradientLimitedMixingLength` is not a function of one level: it is the lower envelope, over
-##### the column, of the buoyancy penetration depth √e / N of every face carried away at the slope
-##### ℂⁱ, bounded by the wall length ℂˢ z. Level 1 is the lowest level here as in the grid (SHOC's
-##### arrays are not flipped in Breeze; E3SM counts from the top). Breeze's `fill_mixing_length!` computes the envelope of
-##### a column in two sweeps and `mixing_lengthᶜᶜᶜ` reconstructs the length of a level from it;
-##### both are called here as they are, with
-#####
-#####   * a `MixingLengthContext` in the place of the TKE closure, which gives them the mixing
-#####     length and the floor of `e` they read;
-#####   * SHOC's turbulent kinetic energy, with the level above the top set to the top level;
-#####   * the stratification N² at the interfaces from SHOC's own virtual potential temperature
-#####     (the gradient across each interior interface; zero at the surface and at the top), so that
-#####     it is consistent with `brunt` and with the state SHOC has just loaded;
-#####   * three scratch fields at interfaces: N², the envelope ℓˢ and the capped length ℓ.
-#####
-##### Only the formulation is shared with the TKE closure, not the coefficients: the closure holds
-##### its own `GradientLimitedMixingLength`, whose `ℂˢ` and `ℂⁱ` are scalars of the SHOC closure
-##### like any other (`closure_parameters`, `with_parameters`), to be calibrated for SHOC. The
-##### values published with `TKEBasedTurbulenceClosure` are only where `smooth_shoc_components` starts.
-#####
-##### The length has no eddy turnover time scale: every coefficient of a SHOC with it is
-##### non-dimensional. Its bounds are the hard `min` of the TKE closure in every clipping policy
-##### (continuous, with kinks), and it is infinite in the envelope where the air is not stable.
-#####
+# The squared horizontal grid spacing that bounds the length: none along a `Flat` direction
+@inline horizontal_spacing_squared(i, j, k, grid) = Δxᶜᶜᶜ(i, j, k, grid) * Δyᶜᶜᶜ(i, j, k, grid)
+@inline horizontal_spacing_squared(i, j, k, grid::AbstractGrid{<:Any, <:Flat}) = convert(grid_float_type(grid), Inf)
+@inline horizontal_spacing_squared(i, j, k, grid::AbstractGrid{<:Any, <:Any, <:Flat}) = convert(grid_float_type(grid), Inf)
+@inline horizontal_spacing_squared(i, j, k, grid::AbstractGrid{<:Any, <:Flat, <:Flat}) = convert(grid_float_type(grid), Inf)
 
 """
-$(TYPEDEF)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-What Breeze's mixing length functions read of a closure: the mixing length and the floor of the
-turbulent kinetic energy inside the turbulent velocity `√e`.
+The blended length at height `z` above the surface, with turbulent velocity `u = √e`, asymptotic length
+`l∞`, stable stratification `N²⁺ ≥ 0` and squared horizontal grid spacing `Δʰ²`. The sum of inverse squares
+is multiplied through by `A = ℂˡ₅ u κ z`, so that the length is `√(A / D) ℂˡ₂ / ℂˡ₁` with
+`D = 1 + κ z / l∞ + ℂˡ₃ ℂˡ₅ κ z N²⁺ / u + (ℂˡ₁ / ℂˡ₂)² A (1 / ℓᵐᵃˣ² + 1 / Δʰ²)`, finite and zero at `z = 0`.
 """
-struct MixingLengthContext{ML, FT}
-    mixing_length :: ML
-    minimum_tke :: FT
+@inline function blended_length(ml::BlendedMixingLength, z, u, l∞, N²⁺, Δʰ²)
+    κz = ml.von_karman_constant * z
+    A = ml.ℂˡ₅ * u * κz
+    r = ml.ℂˡ₁ / ml.ℂˡ₂
+    bounds = 1 / (ml.maximum_length * ml.maximum_length) + 1 / Δʰ²
+    D = 1 + κz / l∞ + ml.ℂˡ₃ * ml.ℂˡ₅ * κz * N²⁺ / u + r * r * A * bounds
+    return sqrt(A / D) / r
 end
 
-Adapt.@adapt_structure MixingLengthContext
-
-component_fields(grid, ::GradientLimitedMixingLength) =
-    (gradient_limited_length = ZFaceField(grid),
-     stratification_envelope = ZFaceField(grid),
-     interface_stratification = ZFaceField(grid))
-
-# The envelope of the column, from the turbulent kinetic energy floored by the sweep before
-@inline function mixing_length_column!(ml::GradientLimitedMixingLength, cp, c, i, j, grid, Nz, tke_weighted_height,
-                                       state, host, diagnostics, scratch)
-    tke, thv, zt = state.tke, host.thv, host.zt_grid
-    N² = scratch.interface_stratification
-
-    @inbounds begin
-        # The reconstruction of √e at the top face reads the level above the top
-        tke[i, j, Nz+1] = tke[i, j, Nz]
-
-        N²[i, j, 1] = 0
-        thv_l = thv[i, j, 1]
-        zt_l = zt[i, j, 1]
-        for k in 2:Nz
-            thv_u = thv[i, j, k]
-            zt_u = zt[i, j, k]
-            N²[i, j, k] = (2 * c.ggr / (thv_u + thv_l)) * (thv_u - thv_l) / (zt_u - zt_l)
-            thv_l, zt_l = thv_u, zt_u
-        end
-        N²[i, j, Nz+1] = 0
+# The asymptotic length l∞ = ℂˡ₄ ∫ √e z dz / ∫ √e dz over the column, from the cell centers
+@inline function asymptotic_length(i, j, grid, ml::BlendedMixingLength, closure, e)
+    FT = grid_float_type(grid)
+    numerator = zero(FT)
+    denominator = zero(FT)
+    for k in 1:size(grid, 3)
+        u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
+        uΔz = u * Δzᶜᶜᶜ(i, j, k, grid)
+        numerator += uΔz * height_above_bottomᶜᶜᶜ(i, j, k, grid)
+        denominator += uΔz
     end
-
-    context = MixingLengthContext(ml, c.mintke)
-    fill_mixing_length!(scratch.gradient_limited_length, scratch.stratification_envelope, i, j, grid, ml, context, tke, N²)
-
-    return context
+    return ml.ℂˡ₄ * numerator / denominator
 end
 
-@inline function mixing_length(ml::GradientLimitedMixingLength, cp, c, context, i, j, k, grid, tke_k, brunt_k, zt_k,
-                               host_scale, state, scratch)
-    envelope = (ℓˢ = scratch.stratification_envelope, N² = scratch.interface_stratification)
-    mix = mixing_lengthᶜᶜᶜ(i, j, k, grid, context, state.tke, envelope)
-    return min(host_scale, mix)
+@inline function TurbulenceClosures.fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml::BlendedMixingLength, closure, e, N²)
+    l∞ = asymptotic_length(i, j, grid, ml, closure, e)
+    for k in 1:size(grid, 3)+1
+        u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
+        N²⁺ = max(@inbounds(N²[i, j, k]), zero(l∞))
+        z = height_above_bottomᶜᶜᶠ(i, j, k, grid)
+        @inbounds ℓ[i, j, k] = blended_length(ml, z, u, l∞, N²⁺, horizontal_spacing_squared(i, j, k, grid))
+        @inbounds ℓˢ[i, j, k] = l∞
+    end
+    return nothing
+end
+
+# At a cell center: the blend of the center, with N² reconstructed from the two adjacent faces
+@inline function TurbulenceClosures.mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::BlendedMixingLength, closure, e, closure_fields)
+    FT = grid_float_type(grid)
+    u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
+    N²⁺ = max(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, closure_fields.N²), zero(FT))
+    l∞ = @inbounds closure_fields.ℓˢ[i, j, k]
+    z = height_above_bottomᶜᶜᶜ(i, j, k, grid)
+    return blended_length(ml, z, u, l∞, N²⁺, horizontal_spacing_squared(i, j, k, grid))
 end

@@ -195,22 +195,47 @@ for TS in (:DissipationTimeScale, :EddyTurnoverTimeScale)
     end
 end
 
-# The time scale of the second moments at face k, from the closure's ℓ, √e (u), N² and Ri there.
-# `e` and `ℓᵐ` (the specific TKE and the stored mixing length) are those the closure's shear reads,
-# so that `𝕊ᴰ` sees the same stratification and shear numbers as the diffusivities.
-@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts, closure, velocities, N², e, ℓᵐ, ℓ, u) =
-    moment_time_scale(ts, ℓ, u, @inbounds N²[i, j, k])
+#####
+##### The return-to-isotropy time scale of the stability functions
+#####
 
-@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::EddyTurnoverTimeScale, closure, velocities, N², e, ℓᵐ, ℓ, u) =
+"""
+$(TYPEDEF)
+
+The time scale `τ` of the second moments (`θˡⁱ′² = ℂᵛ₁ τ Kᶜ (∂z θˡⁱ)²`, ...) and of the third-moment diagnosis
+taken from the closure's stability functions: the return-to-isotropy time scale with which they form the
+diffusivities, `Kᶜ = ℂᶜ τ e` (SHOC's `isotropy`, [`ColumnStabilityDamping`](@ref)), so that the moments and the
+fluxes share one time scale. It needs stability functions that have one.
+"""
+struct ReturnToIsotropyTimeScale end
+
+convert_eltype(::Type{FT}, ts::ReturnToIsotropyTimeScale) where FT = ts
+Base.summary(::ReturnToIsotropyTimeScale) = "ReturnToIsotropyTimeScale()"
+Base.show(io::IO, ts::ReturnToIsotropyTimeScale) = print(io, summary(ts))
+
+validate_moment_time_scale(stability_functions, time_scale) = nothing
+validate_moment_time_scale(stability_functions, ::Nothing) = nothing
+
+# The time scale of the second moments at face k, from the closure's ℓ, √e (u), N² and Ri there.
+# `e` and the closure fields (with the stored mixing length) are those the closure's shear reads,
+# so that `𝕊ᴰ` sees the same stratification and shear numbers as the diffusivities.
+@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts, closure, velocities, closure_fields, e, ℓ, u) =
+    moment_time_scale(ts, ℓ, u, @inbounds closure_fields.N²[i, j, k])
+
+@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::EddyTurnoverTimeScale, closure, velocities, closure_fields, e, ℓ, u) =
     2 * ℓ / (ts.ℂᵠ * u)
 
-@inline function moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::DissipationTimeScale, closure, velocities, N², e, ℓᵐ, ℓ, u)
-    𝕊ᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, N², e, ℓᵐ)
+@inline function moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::DissipationTimeScale, closure, velocities, closure_fields, e, ℓ, u)
+    𝕊ᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
     return 2 * ℓ / (ts.ℂᵠ * 𝕊ᴰ * u)
 end
 
+@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ::ReturnToIsotropyTimeScale, closure, velocities, closure_fields, e, ℓ, u) =
+    return_to_isotropy_time_scaleᶜᶜᶠ(i, j, k, grid, closure.stability_functions, closure, closure_fields, ℓ, u)
+
 # The time scale of the third-moment diagnosis: the stored second-moment time scale, or its own
 @inline third_moment_time_scale(::StratificationLimitedMomentTimeScale, τ, ℓ, u, N²) = τ
+@inline third_moment_time_scale(::ReturnToIsotropyTimeScale, τ, ℓ, u, N²) = τ
 @inline third_moment_time_scale(ts::VarianceBudgetTimeScale, τ, ℓ, u, N²) =
     moment_time_scale(ts.third_moment_time_scale, ℓ, u, N²)
 
@@ -229,7 +254,7 @@ energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref
 $(TYPEDFIELDS)
 """
 struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT, VS, FT}
-    "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref))"
+    "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref), [`EddyTurnoverTimeScale`](@ref) or [`ReturnToIsotropyTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
     second_moments :: SM
@@ -324,13 +349,7 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
 end
 
 # The distribution of this closure saturates with the thermodynamics of the model that holds it.
-# The fixed constants of shoc.F90 (liquid-only Murphy–Koop saturation, fixed `lcond`, `cp`, `rgas`,
-# `basetemp`) belong to `SimplifiedHigherOrderClosure`, which reproduces the Fortran.
 validate_distribution_saturation(saturation) = nothing
-validate_distribution_saturation(::FixedConstantsLiquidSaturation) =
-    throw(ArgumentError("The DoubleGaussian of TKEBasedTurbulenceClosure saturates with the model's " *
-                        "thermodynamics (ModelThermodynamicsSaturation); FixedConstantsLiquidSaturation is " *
-                        "SimplifiedHigherOrderClosure's."))
 
 convert_eltype(::Type{FT}, d::DoubleGaussian) where FT =
     DoubleGaussian(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
@@ -803,7 +822,7 @@ end
             Kᵘ = closure_fields.Kᵘ[i, j, k]
             ℓ = closure_fields.ℓᵐ[i, j, k]
             u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
-            τ = moment_time_scaleᶜᶜᶠ(i, j, k, grid, d.time_scale, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ, ℓ, u)
+            τ = moment_time_scaleᶜᶜᶠ(i, j, k, grid, d.time_scale, closure, velocities, closure_fields, e, ℓ, u)
             τ = ifelse(isfinite(τ), τ, zero(FT))
 
             Δθ = θ[i, j, k] - θ[i, j, k-1]
@@ -953,8 +972,7 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergeti
     compute_buoyancy_derivatives!(fields, model)
     compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
     launch!(arch, grid, parameters, _set_lagged_stability!, closure_fields.N², N²₋)
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
-    launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
+    compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
     solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
     parent(N²₋) .= parent(closure_fields.N²)
@@ -1040,8 +1058,7 @@ function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_f
     d = closure.subgrid_distribution
     launch!(arch, grid, parameters, _solve_cloud_buoyancy_stability!, closure_fields.N², fields.solver_state, solver,
             P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, d.saturation, d.constants, fields.moments, cl)
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
-    launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
+    compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
 end
 
@@ -1135,8 +1152,7 @@ function cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, 
     d = closure.subgrid_distribution
     launch!(arch, grid, parameters, _cloud_buoyancy_stability!, closure_fields.N², grid, fields.moments, cl, s.θ, s.qᵗ, s.p,
             s.thermodynamics, d.saturation, d.constants, ω)
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
-    launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
+    compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
 end
 

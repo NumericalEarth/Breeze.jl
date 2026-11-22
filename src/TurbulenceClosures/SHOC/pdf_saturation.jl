@@ -18,26 +18,8 @@
 #####     plume_saturation(saturation, thermodynamics, c, T_l, q_w, p) -> (q_s, β, c_p / ℒ, Π)
 #####     buoyancy_flux_coefficients(saturation, thermodynamics, c, p, θ_l, q_w, q_c) -> (A_q, A_c)
 #####
-##### where `c` are the `SHOCConstants` and `thermodynamics` is what the model hands the closure
-##### (`nothing` outside a model).
+##### where `c` are the `SHOCConstants` and `thermodynamics` is what the model hands the closure.
 #####
-
-"""
-$(TYPEDEF)
-
-The saturation thermodynamics of E3SM `shoc.F90` (`shoc_assumed_pdf_compute_temperature`,
-`shoc_assumed_pdf_compute_qs`, `shoc_assumed_pdf_compute_s` and the buoyancy flux of
-`shoc_assumed_pdf`): saturation over liquid only, with the vapor pressure of Murphy and Koop
-(2005) and `q_s = 0.622 e_s / max(e_s, p - e_s)`; the fixed latent heat, heat capacity and gas
-constants of [`SHOCConstants`](@ref); the Exner function `(p / basepres)^(rgas / cp)`; and the
-reference temperature `basetemp` in the buoyancy flux,
-
-    β = (rgas / rv) (lcond / (rgas T_l)) (lcond / (cp T_l)),
-    A_q = ((1 - ε) / ε) basetemp,    A_c = (lcond / cp) / Π - basetemp / ε,    ε = rgas / rv.
-
-This is the default, and the saturation of the original configuration.
-"""
-struct FixedConstantsLiquidSaturation <: AbstractSHOCComponent end
 
 """
 $(TYPEDEF)
@@ -102,31 +84,6 @@ function shoc_saturation_thermodynamics(model)
     return (constants = model.thermodynamic_constants,
             standard_pressure = AtmosphereModels.standard_pressure(model.dynamics),
             exner_exponent = AtmosphereModels.liquid_ice_exner_exponent(model.formulation))
-end
-
-#####
-##### The fixed constants of shoc.F90
-#####
-
-@inline function plume_liquid_water_temperature(::FixedConstantsLiquidSaturation, thermodynamics, c, thl, qw, pval)
-    exner_inverse = (c.basepres / pval)^(c.rgas / c.cp)
-    return thl / exner_inverse
-end
-
-# shoc_assumed_pdf_compute_qs for one plume
-@inline function plume_saturation(::FixedConstantsLiquidSaturation, thermodynamics, c, Tl, qw, pval)
-    FT = typeof(Tl)
-    esval = murphy_koop_liquid_svp(Tl)
-    qs = convert(FT, 0.622) * esval / max(esval, pval - esval)
-    beta = (c.rgas / c.rv) * (c.lcond / (c.rgas * Tl)) * (c.lcond / (c.cp * Tl))
-    return qs, beta, c.cp / c.lcond, (pval / c.basepres)^(c.rgas / c.cp)
-end
-
-@inline function buoyancy_flux_coefficients(::FixedConstantsLiquidSaturation, thermodynamics, c, pval, thl, qw, ql)
-    epsterm = c.rgas / c.rv
-    A_q = ((1 - epsterm) / epsterm) * c.basetemp
-    A_c = (c.lcond / c.cp) * (c.basepres / pval)^(c.rgas / c.cp) - (1 / epsterm) * c.basetemp
-    return A_q, A_c
 end
 
 #####

@@ -42,7 +42,15 @@ using Oceananigans.Grids: znode
 using Oceananigans.Operators: Δzᶜᶜᶠ
 using Oceananigans.Models: boundary_condition_args
 
-using .SimplifiedHigherOrderClosures: bottom_boundary_flux
+using Oceananigans.BoundaryConditions: BoundaryCondition, Flux, Bottom, total_boundary_flux
+
+# The density-weighted flux through the bottom of column (i, j) that the boundary condition `bc` of the
+# prognostic field `c` prescribes: positive upward, into the domain. Only `Flux` boundary conditions carry one
+# (the default no-flux condition gives zero).
+@inline bottom_boundary_flux(bc::BoundaryCondition{<:Flux}, i, j, grid, c, args...) =
+    total_boundary_flux(bc, Bottom(), i, j, 1, grid, c, args...)
+
+@inline bottom_boundary_flux(bc, i, j, grid, c, args...) = zero(grid)
 
 using Breeze.Thermodynamics: mixture_heat_capacity, mixture_gas_constant, exner_exponent,
                              VaporEquivalentExponent, DryExponent
@@ -736,8 +744,7 @@ function cloud_buoyancy_stability_pass!(fields::SubgridCloudFields{<:AppliedFlux
     launch!(arch, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments, grid, closure,
             closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, tracers[TKE_NAME], d.thermodynamics,
             dist.saturation, dist.constants, ω)
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
-    launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
+    compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
 end
 

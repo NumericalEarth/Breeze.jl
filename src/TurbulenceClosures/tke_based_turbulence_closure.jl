@@ -532,6 +532,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
     validate_subgrid_coupling(static_stability, subgrid_distribution, solver)
     isnothing(subgrid_distribution) ||
         validate_variance_stability_functions(stability_functions, subgrid_distribution.variance_stability_functions)
+    isnothing(subgrid_distribution) || validate_moment_time_scale(stability_functions, subgrid_distribution.time_scale)
     heating_budget_flux = convert_eltype(FT, heating_budget_flux)
     validate_heating_budget_flux(heating_budget_flux, static_stability, subgrid_distribution)
 
@@ -626,7 +627,7 @@ stability ``N²``, the mixing length ``ℓ`` and the implicit linear coefficient
 mixing length is stored, because its nonlocal formulations are computed column by column rather than
 pointwise; `closure_fields.ℓᵐ` is the diagnostic of ``ℓ`` from the model state.
 """
-struct TKEClosureFields{K, N, L, KC, LC, SG}
+struct TKEClosureFields{K, N, L, KC, LC, SG, CS}
     Kᵘ :: K # eddy diffusivity for momentum, at (Center, Center, Face)
     Kᶜ :: K # eddy diffusivity for scalars, at (Center, Center, Face)
     Kᵉ :: K # eddy diffusivity for turbulent kinetic energy, at (Center, Center, Face)
@@ -639,9 +640,12 @@ struct TKEClosureFields{K, N, L, KC, LC, SG}
     tupled_tracer_diffusivities :: KC         # per-tracer diffusivity lookup, by closure-scalar position
     tupled_implicit_linear_coefficients :: LC # `Lᵉ` for the TKE tracer, zero for every other
     subgrid_cloud :: SG # the fields of the subgrid cloud formulation, or `nothing`
+    # One value per column that the stability functions read (`column_stability_field`), or `nothing`
+    column_stability :: CS
 end
 
-TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓᵐ, ℓˢ, Lᵉ, KC, LC) = TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓᵐ, ℓˢ, Lᵉ, KC, LC, nothing)
+TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓᵐ, ℓˢ, Lᵉ, KC, LC) = TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓᵐ, ℓˢ, Lᵉ, KC, LC, nothing, nothing)
+TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓᵐ, ℓˢ, Lᵉ, KC, LC, SG) = TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓᵐ, ℓˢ, Lᵉ, KC, LC, SG, nothing)
 
 Adapt.adapt_structure(to, fields::TKEClosureFields) =
     TKEClosureFields(adapt(to, fields.Kᵘ),
@@ -653,7 +657,8 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.Lᵉ),
                      adapt(to, fields.tupled_tracer_diffusivities),
                      adapt(to, fields.tupled_implicit_linear_coefficients),
-                     adapt(to, fields.subgrid_cloud))
+                     adapt(to, fields.subgrid_cloud),
+                     adapt(to, fields.column_stability))
 
 BoundaryConditions.fill_halo_regions!(fields::TKEClosureFields, args...; kw...) =
     fill_halo_regions!((fields.Kᵘ, fields.Kᶜ, fields.Kᵉ), args...; kw...)
@@ -680,7 +685,10 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_distribution(closure), closure_solver(closure), closure_static_stability(closure), tracer_names,
                                                heating_budget_flux(closure))
 
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients, subgrid_cloud)
+    column_stability = column_stability_field(grid, closure_stability_functions(closure))
+
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients, subgrid_cloud,
+                            column_stability)
 end
 
 # The subgrid cloud formulation of a closure or of an ensemble of closures (which share one)
@@ -690,6 +698,45 @@ closure_solver(closure::TKEBasedTurbulenceClosure) = closure.solver
 closure_solver(closure::TKEClosureArray) = first(closure).solver
 closure_static_stability(closure::TKEBasedTurbulenceClosure) = closure.static_stability
 closure_static_stability(closure::TKEClosureArray) = first(closure).static_stability
+closure_stability_functions(closure::TKEBasedTurbulenceClosure) = closure.stability_functions
+closure_stability_functions(closure::TKEClosureArray) = first(closure).stability_functions
+
+#####
+##### Stability functions that read one value of the whole column
+#####
+##### Stability functions are pointwise, except those that also read one number of the column (the
+##### damping of `ColumnStabilityDamping` by the stability integrated over the lower column). Such
+##### stability functions extend `column_stability_field` to allocate the field of that number and
+##### `compute_column_stability!` to fill it from the stored static stability, after the static
+##### stability and before the diffusivities, every time the diffusivities are formed.
+#####
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The field of one value per column that `stability_functions` read, or `nothing` (the default) for
+stability functions of the local state only.
+"""
+column_stability_field(grid, stability_functions) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Fill `column_stability` (of [`column_stability_field`](@ref)) from the static stability `N²` stored at the faces and
+the state of `model`. Nothing to do without a column value.
+"""
+compute_column_stability!(::Nothing, grid, closure, N², model) = nothing
+compute_column_stability!(λ, grid, closure, N², model) =
+    compute_column_stability!(closure_stability_functions(closure), λ, grid, closure, N², model)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The return-to-isotropy time scale of `stability_functions` at the face `k`, from the mixing length `ℓ`, the
+turbulent velocity `u` and the closure fields there, for the moments of a subgrid distribution with a
+`ReturnToIsotropyTimeScale`. Stability functions that have one extend it.
+"""
+function return_to_isotropy_time_scaleᶜᶜᶠ end
 
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
 @inline Oceananigans.TurbulenceClosures.diffusivity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
@@ -715,6 +762,13 @@ closure_static_stability(closure::TKEClosureArray) = first(closure).static_stabi
 #####
 
 const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ConstantStabilityFunctions}
+
+# The three stability functions of the diffusivities at (Center, Center, Face). Stability functions that also read a
+# value of the column (`column_stability_field`) extend this method, which has the closure fields.
+@inline diffusivity_stability_functionsᶜᶜᶠ(i, j, k, grid, closure, velocities, e, closure_fields) =
+    (momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ),
+     tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ),
+     tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ))
 
 @inline momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.ℂᵘ
 @inline tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.ℂᶜ
@@ -941,9 +995,7 @@ end
     ℓ = @inbounds ℓᵐ[i, j, k]
     K = ℓ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
 
-    𝕊ᵘ = momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
-    𝕊ᶜ = tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
-    𝕊ᵉ = tke_stability_functionᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, N², e, ℓᵐ)
+    𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ = diffusivity_stability_functionsᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, e, closure_fields)
 
     Kᵘ = min(𝕊ᵘ * K, closure_ij.maximum_viscosity)
     Kᶜ = min(𝕊ᶜ * K, closure_ij.maximum_tracer_diffusivity)
@@ -1086,11 +1138,22 @@ function compute_stability_and_diffusivities!(closure_fields, closure, model, tr
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
             closure_fields.N², grid, closure, tracers, buoyancy, closure_fields, saturated_fraction_fields(model))
 
+    compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+From the static stability stored in `closure_fields.N²`: the mixing length, column by column, the value of the
+column that the stability functions read, if any, and the diffusivities.
+"""
+function compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
+    grid = model.grid
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
-
-    launch!(arch, grid, parameters, _compute_tke_closure_fields!,
-            closure_fields, grid, closure, model.velocities, tracers)
-
+    compute_column_stability!(closure_fields.column_stability, grid, closure, closure_fields.N², model)
+    launch!(grid.architecture, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
     return nothing
 end
 

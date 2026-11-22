@@ -333,8 +333,7 @@ function cloud_buoyancy_stability!(buoyancy_flux::BracketedAppliedFluxEnergetics
     launch!(arch, grid, parameters, _bracketed_fraction_solve!, closure_fields.N², state, buoyancy_flux.stability_solver,
             grid, closure, fields.moments, fields.cloud, model.velocities, s.θ, s.qᵗ, s.e, s.p, s.thermodynamics, closure_fields.ℓˢ)
     # The column envelope of the mixing length, the diffusivities and the distribution, once
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
-    launch!(arch, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
+    compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
     launch!(arch, grid, parameters, _final_condensate_flux_fraction!, state.ãᴺᶠ, grid, closure, fields.cloud, closure_fields.Kᶜ,
             s.θ, s.qᵗ, s.p, s.thermodynamics)
