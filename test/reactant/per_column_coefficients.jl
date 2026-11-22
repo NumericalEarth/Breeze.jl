@@ -20,6 +20,10 @@ Reactant.set_default_backend(default_arch isa GPU ? "gpu" : "cpu")
 
 function column_tke(model, Δt, Nsteps)
     set!(model; θ = z -> 290 + 3e-3 * max(z - 800, 0), qᵗ=0.012, u=5, ρe=0.1)
+    # The eager first `time_step!` prepares itself (`clock.last_Δt = Δt`, then the tendencies), which a
+    # traced loop cannot: without this the traced first stage would apply the tendencies of `set!`,
+    # built before the stage interval is known (P3's explicit rates in place of its implicit relaxation).
+    Breeze.TimeSteppers.prepare_first_time_step!(model, Δt)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:Nsteps
         time_step!(model, Δt)
     end
@@ -75,16 +79,18 @@ updated_closures(values) = reshape([updated_closure(v...) for v in values], leng
     model = column_model(ReactantState(), first_ensemble; microphysics)
     @test model.closure.subgrid_distribution.ℂᵐ.values isa Reactant.ConcreteRArray
     @test model.closure.subgrid_distribution.variance_stability_functions.ℂᵛ₃ᵐ.values isa Reactant.ConcreteRArray
+    # The closure and P3 keep state that `set!` does not reset (lagged stability, the stage start of the implicit
+    # relaxation, ...), so each ensemble runs on a copy of the model as built, as a calibration runs each member
+    template = deepcopy(model)
     compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true column_tke(model, Δt, Ns)
 
     for closures in (first_ensemble, second_ensemble)
-        set_per_column_coefficients!(model.closure, closures)
-        traced = Array(@with_stack_size compiled(model, Δt, Ns))
+        member = deepcopy(template)
+        set_per_column_coefficients!(member.closure, closures)
+        traced = Array(@with_stack_size compiled(member, Δt, Ns))
         eager = Array(column_tke(column_model(CPU(), closures; microphysics), Δt, Ns))
         @test all(isfinite, traced)
-        # Traced and eager differ by about 1e-3 for this physics with one closure shared by every column too (with
-        # P3's CloudCondensationOnly as with AllProcesses, 2026-11-22): the bound is that difference, not per-column
-        @test isapprox(traced, eager; rtol=1e-2)
+        @test isapprox(traced, eager; rtol=1e-10)
         @test traced[1, 1, :] != traced[3, 1, :]
     end
 end
