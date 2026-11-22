@@ -24,7 +24,7 @@ using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using DocStringExtensions: TYPEDEF
 using Oceananigans.Architectures: CPU, child_architecture
 
-using Random123: philox
+using PhiloxRNG: philox4x32_10
 
 """
 $(TYPEDEF)
@@ -99,7 +99,7 @@ How the sum is rounded depends on the architecture: on CPUs a `Float32` sum is c
 `Float64`, its rounding error is computed with TwoSum ([`TwoSum`](@ref)). Both give the same
 statistics; they differ only in speed.
 
-The random numbers come from the counter-based Philox4x32-7 generator of Random123.jl, keyed by
+The random numbers come from the counter-based Philox4x32-10 generator of PhiloxRNG.jl, keyed by
 `(seed, iteration)` with counter `(i, j, k, stage, field)`,
 so there is no random-number state: runs are deterministic, bitwise reproducible, independent of
 the architecture's thread scheduling, and restart reproducibly from a checkpoint (which stores
@@ -165,12 +165,12 @@ for a kernel that updates several prognostics with one key argument.
 @inline offset_rounding_key((seed, iteration, stage_and_field)::NTuple{3, UInt32}, n) =
     (seed, iteration, stage_and_field + n % UInt32)
 
-# 32 random bits for the update at (i, j, k): one output word of Philox4x32-7
-# (Salmon et al. 2011, which passes BigCrush with 7 rounds, as in CUDA.jl's device generator).
+# 32 random bits for the update at (i, j, k): one output word of Philox4x32-10
+# (Salmon et al. 2011; 10 rounds is the standard, and passes BigCrush with margin).
 @inline function random_bits(i, j, k, key)
     seed, iteration, stage_and_field = key
     counter = (i % UInt32, j % UInt32, k % UInt32, stage_and_field)
-    return first(philox((seed, iteration), counter, Val(7)))
+    return first(philox4x32_10(counter, (seed, iteration)))
 end
 
 # A uniform random number in [0, 1) with 24 random bits, exactly representable in Float32.
