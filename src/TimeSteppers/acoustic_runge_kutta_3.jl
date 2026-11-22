@@ -5,6 +5,7 @@ using Oceananigans.Utils: time_difference_in_seconds
 
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
+    next_time,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
@@ -286,7 +287,9 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     β₂ = ts.β₂
     β₃ = ts.β₃
 
-    tⁿ⁺¹ = model.clock.time + Δt
+    # Compute the next time a priori to reduce floating point error accumulation; `next_time`
+    # also serves a calendar clock, whose `time` cannot take a `Δt` in seconds directly.
+    tⁿ⁺¹ = next_time(model.clock, Δt)
 
     # Snapshot outer-step-start state into U⁰ for use by all stages.
     # The substepper also seeds its stage-1 cache and time-averaged
