@@ -12,7 +12,8 @@ include(joinpath(dirname(@__DIR__), "setup.jl"))
 # `prepare_first_time_step!` or from `first_time_step!`: both compute the initial fluxes.
 
 using Breeze
-using Breeze.AtmosphereModels: validate_schedule
+using Breeze.AtmosphereModels: validate_schedule, update_radiation!,
+                               radiation_cache_validity, radiation_cache_is_valid, set_radiation_cache_validity!
 using Breeze.TimeSteppers: prepare_first_time_step!
 using Breeze.Microphysics: DCMIP2016KesslerMicrophysics
 using Breeze.Thermodynamics: TetensFormula
@@ -28,16 +29,20 @@ using CUDA
 
 Reactant.set_default_backend(default_arch isa GPU ? "gpu" : "cpu")
 
-struct CountingRadiation{S, F, C}
+struct CountingRadiation{S, F, C, V}
     schedule :: S
     flux_divergence :: F
     updates :: C
+    cache_valid :: V
 end
+
+Breeze.AtmosphereModels.radiation_cache_is_valid(radiation::CountingRadiation) = radiation_cache_is_valid(radiation.cache_valid)
 
 function Breeze.AtmosphereModels._update_radiation!(radiation::CountingRadiation, model)
     launch!(architecture(model.grid), model.grid, :xyz, _temperature_heating!,
             radiation.flux_divergence, model.temperature)
     radiation.updates .+= 1
+    set_radiation_cache_validity!(radiation.cache_valid, true)
     return nothing
 end
 
@@ -50,7 +55,7 @@ function scheduled_radiation_column(arch, schedule)
     grid = RectilinearGrid(arch; size=16, z=(0, 2400), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants(saturation_vapor_pressure=TetensFormula())
     reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)
-    radiation = CountingRadiation(schedule, CenterField(grid), on_architecture(arch, zeros(1)))
+    radiation = CountingRadiation(schedule, CenterField(grid), on_architecture(arch, zeros(1)), radiation_cache_validity(grid))
     model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants,
                             microphysics=DCMIP2016KesslerMicrophysics(maximum_sedimentation_substeps=4),
                             advection=nothing, radiation)
@@ -109,5 +114,26 @@ column_state(model) = map(f -> Array(interior(f)), (model.temperature, model.mic
                 @test traced ≈ expected rtol=1e-9
             end
         end
+    end
+
+    @testset "Missing cache is refreshed at an unscheduled stage" begin
+        model = scheduled_radiation_column(ReactantState(), IterationInterval(1))
+        model.clock.iteration = 10
+        model.clock.stage = 1
+        before = radiation_updates(model)
+        update! = Reactant.@compile update_radiation!(model.radiation, model)
+
+        set_radiation_cache_validity!(model.radiation.cache_valid, false)
+        update!(model.radiation, model)
+        @test radiation_updates(model) == before + 1
+        @test radiation_cache_is_valid(model.radiation)
+
+        update!(model.radiation, model)
+        @test radiation_updates(model) == before + 1
+
+        # The same compiled update must see later invalidations as well.
+        set_radiation_cache_validity!(model.radiation.cache_valid, false)
+        update!(model.radiation, model)
+        @test radiation_updates(model) == before + 2
     end
 end

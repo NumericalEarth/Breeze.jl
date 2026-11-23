@@ -178,6 +178,9 @@ with_batching(::Integer) = true
 function solve_radiation_batch!(rtm, solver, grid, as, lws, sws, scaling, batch_rows, j_offset)
     method = solver.radiation_method
 
+    solves_longwave_response(rtm) &&
+        solve_perturbed_surface_longwave!(rtm, solver, grid, as, lws, scaling, batch_rows, j_offset)
+
     solve_lw!(lws, as, longwave_lookups(solver.lookups, method)..., scaling)
     update_presentation!(solver.presented_flux_lw, solver.lws.flux)
 
@@ -187,4 +190,35 @@ function solve_radiation_batch!(rtm, solver, grid, as, lws, sws, scaling, batch_
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid, batch_rows, j_offset)
 
     return nothing
+end
+
+# Solve the batch's longwave fluxes at the perturbed surface temperature into the longwave responses,
+# then rewrite the surface temperature from the field so overlapping batches see the same value
+function solve_perturbed_surface_longwave!(rtm, solver, grid, as, lws, scaling, batch_rows, j_offset)
+    updates = rtm.approximate_updates
+
+    set_batch_surface_temperature!(as.t_sfc, rtm, grid, batch_rows, j_offset, perturbed_surface_temperature)
+    solve_lw!(lws, as, longwave_lookups(solver.lookups, solver.radiation_method)..., scaling)
+    set_batch_surface_temperature!(as.t_sfc, rtm, grid, batch_rows, j_offset, solved_surface_temperature)
+    update_presentation!(solver.presented_flux_lw, solver.lws.flux)
+
+    copy_rrtmgp_longwave_fluxes!(updates.upwelling_longwave_response, updates.downwelling_longwave_response,
+                                 solver, grid, batch_rows, j_offset)
+
+    return nothing
+end
+
+# Set the batch's solver surface temperature to `solver_surface_temperature(T₀, bounds)`
+function set_batch_surface_temperature!(t_sfc, rtm, grid, batch_rows, j_offset, solver_surface_temperature)
+    launch!(architecture(grid), grid, (grid.Nx, batch_rows), _set_batch_surface_temperature!,
+            t_sfc, rtm.surface_radiation.surface_temperature, surface_temperature_bounds(rtm),
+            grid, j_offset, solver_surface_temperature)
+    return nothing
+end
+
+@kernel function _set_batch_surface_temperature!(t_sfc, surface_temperature, T₀_bounds, grid, j_offset,
+                                                 solver_surface_temperature)
+    i, j = @index(Global, NTuple)
+    c = column_index(i, j, grid.Nx)  # batch-local column
+    @inbounds t_sfc[c] = solver_surface_temperature(surface_temperature[i, j + j_offset, 1], T₀_bounds)
 end

@@ -38,7 +38,7 @@ using Oceananigans.Utils: launch!, prettysummary
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.TurbulenceClosures: TurbulenceClosures, TKEBasedTurbulenceClosure, AbstractMixingLength,
                                  HardMinimum, HarmonicBlend, TurbulentRichardsonStabilityFunction,
-                                 face_valueᶜᶜᶠ, grid_float_type
+                                 face_valueᶜᶜᶠ, grid_float_type, column_kernel_parameters
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equilibrated_surface, saturation_vapor_pressure,
                              PlanarLiquidSurface, PlanarIceSurface, dry_air_gas_constant, vapor_gas_constant,

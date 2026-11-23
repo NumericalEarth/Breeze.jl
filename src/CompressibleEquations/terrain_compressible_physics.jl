@@ -29,6 +29,7 @@ using Oceananigans.Fields: Field, ZeroField, interior, set!
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶜ,
                               ∂x_zᶠᶜᶜ, ∂y_zᶜᶠᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!, NormalFlowBoundaryCondition, FieldBoundaryConditions
+using Oceananigans.Grids: halo_size, inflate_halo_size
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation,
                                               SlopeInsideInterpolation,
@@ -37,6 +38,7 @@ using Breeze.Thermodynamics: evaluate_profile, integrate_exner_column!,
                              newton_hydrostatic_pressure, moist_reference_constants,
                              moist_hydrostatic_pressure, VaporEquivalentExponent
 using Breeze.Solvers: FixedIterations
+using Breeze.AtmosphereModels: tendency_kernel_parameters, extended_tendency_faces
 
 #####
 ##### Terrain-aware type alias
@@ -494,6 +496,13 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
         β_stage == 1 ? substepper.final_stage_vertical_pressure_tendency_factor :
         substepper.vertical_pressure_tendency_factor
 
+    # The kernel reads Gⁿρu and Gⁿρv at face i + 1 and j + 1. On periodic dimensions that face is the
+    # image of face 1, so a local halo fill provides it; seams between ranks are computed instead (see
+    # `horizontal_momentum_tendency_kernel_parameters`), so no halos are communicated here. The fill
+    # comes after the boundary-flux and closure tendencies are added, so the image includes them.
+    fill_halo_regions!(Gⁿ.ρu; only_local_halos=true)
+    fill_halo_regions!(Gⁿ.ρv; only_local_halos=true)
+
     launch!(arch, grid, :xyz, _assemble_terrain_slow_vertical_momentum_tendency!,
             substepper.slow_vertical_momentum_tendency,
             Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
@@ -504,6 +513,33 @@ function assemble_slow_vertical_momentum_tendency!(substepper::AcousticSubsteppe
             model.momentum.ρw,
             grid, dynamics, g, vertical_pressure_tendency_factor, substepper.sponge, direction)
 
+    return nothing
+end
+
+# `_assemble_terrain_slow_vertical_momentum_tendency!` averages Gρu and Gρv onto cell centers, so
+# it reads them at face i + 1 and j + 1. Where that face is a seam between ranks, no interior launch
+# computes it, so the momentum tendencies are computed there too. Periodic images are filled as
+# halos in `assemble_slow_vertical_momentum_tendency!`.
+function AtmosphereModels.horizontal_momentum_tendency_kernel_parameters(model::TerrainCompressibleModel)
+    grid = model.grid
+    return (tendency_kernel_parameters(grid, Face(), Center()),
+            tendency_kernel_parameters(grid, Center(), Face()))
+end
+
+# Computing a momentum tendency at face N + 1 (at a seam between ranks) reaches one cell further
+# than the advection scheme and closure need for the interior.
+function AtmosphereModels.validate_dynamics_halo(::TerrainCompressibleDynamics, grid, momentum_advection, closure)
+    Hx, Hy, _ = halo_size(grid)
+    Rx, Ry, _ = inflate_halo_size(1, 1, 1, grid, momentum_advection, closure)
+    TX, TY, _ = topology(grid)
+    Ex = extended_tendency_faces(TX())
+    Ey = extended_tendency_faces(TY())
+    if Hx < Rx + Ex || Hy < Ry + Ey
+        throw(ArgumentError("A terrain-following CompressibleModel computes momentum tendencies one face " *
+                            "past the interior where a horizontal dimension is split between ranks, " *
+                            "so it needs a halo of at least $((Rx + Ex, Ry + Ey)) in (x, y); " *
+                            "the grid has $((Hx, Hy))."))
+    end
     return nothing
 end
 

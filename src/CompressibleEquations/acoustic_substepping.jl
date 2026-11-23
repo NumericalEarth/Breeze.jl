@@ -2406,19 +2406,19 @@ end
 # recovery and halo fill.
 #
 # Each sum is rounded with the round-off treatment `rounding` (see `RoundingTreatments`);
-# `key` seeds its random numbers, offset by one per prognostic.
+# `key` seeds its random numbers, offset by one per prognostic with `offset_rounding_key`.
 @kernel function _recover_full_state!(ρ, ρθ, m,
                                       ρ′, ρθ′, ρu′, ρv′, ρw′,
                                       ρᴸ, ρuᴸ, ρvᴸ, ρwᴸ, ρθᴸ,
                                       grid, dynamics, rounding, key, residual)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        ρᵐ⁺  = rounded_add(rounding, ρᴸ[i, j, k],  ρ′[i, j, k],  i, j, k, key + 0x00000001)
-        ρθᵐ⁺ = rounded_add(rounding, ρθᴸ[i, j, k], ρθ′[i, j, k], i, j, k, key + 0x00000002)
-        ρuᵐ⁺ = rounded_add(rounding, ρuᴸ[i, j, k], ρu′[i, j, k], i, j, k, key + 0x00000003)
-        ρvᵐ⁺ = rounded_add(rounding, ρvᴸ[i, j, k], ρv′[i, j, k], i, j, k, key + 0x00000004)
+        ρᵐ⁺  = rounded_add(rounding, ρᴸ[i, j, k],  ρ′[i, j, k],  i, j, k, offset_rounding_key(key, 1))
+        ρθᵐ⁺ = rounded_add(rounding, ρθᴸ[i, j, k], ρθ′[i, j, k], i, j, k, offset_rounding_key(key, 2))
+        ρuᵐ⁺ = rounded_add(rounding, ρuᴸ[i, j, k], ρu′[i, j, k], i, j, k, offset_rounding_key(key, 3))
+        ρvᵐ⁺ = rounded_add(rounding, ρvᴸ[i, j, k], ρv′[i, j, k], i, j, k, offset_rounding_key(key, 4))
         ρwᵐ⁺ = recovered_vertical_momentum(residual.ρw, rounding, i, j, k, grid, dynamics, ρwᴸ[i, j, k],
-                                           ρu′, ρv′, ρw′, key + 0x00000005)
+                                           ρu′, ρv′, ρw′, offset_rounding_key(key, 5))
 
         # The residuals are those of round-to-nearest sums: a stage that carries them rounds to nearest.
         store_rounding_error!(residual.ρ,  i, j, k, ρᴸ[i, j, k],  ρ′[i, j, k],  ρᵐ⁺)
@@ -2663,8 +2663,8 @@ function implicit_steps_in_place!(requests, implicit_solver::BatchedTridiagonalS
     one_by_one = batch_size == 1 || size(implicit_solver.grid, 3) < 2
 
     for batch in Iterators.partition(needed, one_by_one ? 1 : batch_size)
-        fields = Tuple(first(request) for request in batch)
-        columns = Tuple(implicit_step_column(request...) for request in batch)
+        fields = Tuple(Any[first(request) for request in batch])
+        columns = Tuple(Any[implicit_step_column(request...) for request in batch])
         if one_by_one
             args = implicit_step_arguments(shared, first(columns), first(fields))
             ϕ = first(fields)
@@ -2779,6 +2779,7 @@ function acoustic_substep!(model, substepper, stage, advection, n)
     # perturbation, applied to the predictor between Step B and Step C so the pressure
     # solve and recovery substitution see a transport-consistent ρθ′★ (issue #897).
     implicit_advection_substep!(model, substepper, advection, Δτ)
+    fill_halo_regions!(substepper.density_potential_temperature_predictor)
 
     launch!(arch, grid, KernelParameters(1:size(grid, 1), 1:size(grid, 2), 1:size(grid, 3) + 1),
             _build_vertical_rhs!,
@@ -2897,9 +2898,9 @@ function acoustic_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stag
     # recovery kernel reads them as Uᴸ AND writes the full state back to the
     # same fields; per-thread read-before-write makes this aliasing safe
     # because all reads are local to the same grid point. The sums are rounded with `rounding`;
-    # field number 0 keeps their keys apart from those of the scalar updates.
+    # field numbers from 0x8000 keep their keys apart from those of the scalar updates.
     ρᵡ = thermodynamic_density(model.formulation)
-    key = rounding_key(rounding, model.clock.iteration, model.clock.stage, 0)
+    key = rounding_key(rounding, model.clock.iteration, model.clock.stage, 0x8000)
     residual = recovered_state_residual(model.timestepper)
     launch!(arch, grid, :xyz, _recover_full_state!,
             model.dynamics.dry_density, ρᵡ,

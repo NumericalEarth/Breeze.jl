@@ -32,7 +32,7 @@ rest. Each of `cycles` cycles entails two symmetric forward/backward dynamics ex
 
 (default `weight = 2` → ⅓ dynamics + ⅔ snapshot). `ρw` is never snapshotted or nudged, so the
 balance the excursion imprints on it is exactly what is kept. `update_state!` after each nudge
-rebuilds the diagnostics; the clock is reset to `t = 0` on exit.
+rebuilds the diagnostics; the clock is restored to its initial time on exit.
 
 `balance_adiabatically!` performs *adiabatic* dynamics only. The caller must pass a model built
 without physics (`microphysics = nothing`), without an upper sponge, and without forcing — these run
@@ -43,6 +43,7 @@ model automatically.
 """
 function balance_adiabatically!(model::AtmosphereModel; Δt, cycles = 1, weight = 2)
     snapshot = snapshot_initial_fields(model)
+    t_init = model.clock.time
 
     for _ in 1:cycles
         # Half-cycle A: 0 → +Δt → 0, then nudge.
@@ -59,8 +60,9 @@ function balance_adiabatically!(model::AtmosphereModel; Δt, cycles = 1, weight 
     end
 
     # Full reset (time, iteration, stage, last_Δt, …): the excursion leaves these dirty, misfiring
-    # e.g. the filtered surface state's `isinf(last_Δt)` guard.
-    reset!(model.clock)
+    # e.g. the filtered surface state's `isinf(last_Δt)` guard. The time goes back to where it
+    # started rather than to zero, which a calendar clock does not have.
+    reset!(model.clock, t_init)
 
     return model
 end
@@ -216,7 +218,8 @@ The twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per
 `balancer.time_stepping`) and its time stepper from [`adiabatic_twin_timestepper`](@ref); microphysics, closure, the implicit diffusion solver, the sponge, and
 forcing are removed; the time stepper's `Gⁿ`/`U⁰` tendency storage *aliases* the production stepper's
 same-named arrays (moisture key re-mapped from the microphysics name, e.g. `:ρqᵉ`, to the
-moistureless `:ρqᵛ`); and a fresh `Clock` is used so the balance's clock reset does not touch the
+moistureless `:ρqᵛ`); and a copy of the production clock is used, so boundary conditions that
+read the time see the production instant while the balance's clock reset does not touch the
 production clock.
 """
 adiabatic_balance_twin(model::AtmosphereModel, balancer::AdiabaticBalancer = AdiabaticBalancer()) =
@@ -294,7 +297,7 @@ function assemble_adiabatic_twin(model::AtmosphereModel, twin_dynamics)
 
     # closure = nothing: turbulent diffusion is dissipative (irreversible), so it is excluded from the
     # adiabatic excursion. `closure_fields` is carried along but unused when closure is nothing.
-    return AtmosphereModel(arch, grid, Clock(grid),
+    return AtmosphereModel(arch, grid, deepcopy(model.clock),
                            twin_dynamics, formulation, constants,
                            twin_momentum, twin_moisture_density, model.temperature,
                            model.pressure_solver, model.velocities, twin_tracers,

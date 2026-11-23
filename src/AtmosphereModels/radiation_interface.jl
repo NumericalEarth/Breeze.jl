@@ -7,6 +7,7 @@
 
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Fields: ConstantField
+using GPUArraysCore: @allowscalar
 using InteractiveUtils: subtypes
 
 """
@@ -16,7 +17,7 @@ Update the radiative fluxes of `rtm` from the current model state when they are 
 computation itself is `_update_radiation!(rtm, model)`.
 
 `update_state!` runs several times per time step: after each Runge-Kutta stage, and again after an
-operator-split update such as Kessler microphysics. Radiation is updated
+operator-split update such as Kessler microphysics. Full radiation solves run
 
 - at initialization: by every `update_state!` between steps at iteration 0 (`clock.stage == 1`),
   that is model construction, `set!` and the preparation of the first step, which all see the
@@ -24,10 +25,14 @@ operator-split update such as Kessler microphysics. Radiation is updated
 - during time stepping: once per iteration `n > 0` at which `rtm.schedule` actuates, by the
   first-stage `update_state!` of the step that begins at `n` (the clock is then at stage 2 in
   Breeze's Runge-Kutta steppers). The new fluxes enter from the second stage of that step. Later
-  stages, the end of the step and operator-split updates do not update radiation.
+  stages, the end of the step and operator-split updates do not run scheduled solves.
 
 With `schedule = IterationInterval(80)` and `Δt = 7.5` s, the fluxes are computed from the initial
 state and then every 600 s, in the steps that begin at iterations 80, 160, …
+
+Every other `update_state!` updates the fluxes between solves instead (see
+[`update_radiation_between_solves!`](@ref)). A checkpoint restored without the radiation cache
+solves at the next `update_state!` outside a step, or else at the next first stage.
 
 Under Reactant the iteration is traced: `BreezeReactantExt` applies the scheduled update with a
 traced conditional, which requires a stateless schedule such as `IterationInterval`, and computes
@@ -36,7 +41,7 @@ the initial fluxes in `Breeze.TimeSteppers.prepare_first_time_step!`
 """
 function update_radiation!(rtm, model)
     isnothing(rtm) && return nothing
-    due = radiation_update_due(rtm.schedule, model.clock, model)
+    due = radiation_update_due(rtm.schedule, model.clock, model) | !radiation_cache_is_valid(rtm)
     conditionally_update_radiation!(due, rtm, model)
     return nothing
 end
@@ -47,7 +52,11 @@ function radiation_update_due(schedule, clock, model)
 end
 
 function conditionally_update_radiation!(due::Bool, rtm, model)
-    due && _update_radiation!(rtm, model)
+    if due
+        solve_scheduled_radiation!(rtm, model)
+    else
+        update_radiation_between_solves!(rtm, model)
+    end
     return nothing
 end
 
@@ -64,7 +73,7 @@ validate_schedule(schedule, arch) = schedule
 # Fallback: no radiation
 update_radiation!(::Nothing, model) = nothing
 
-# Internal function that actually computes radiation (implemented by extensions)
+# Internal function that actually computes radiation (see the `RadiativeTransferModel` method below)
 _update_radiation!(::Nothing, model) = nothing
 
 # Extract the radiation flux divergence field from radiation (nothing-safe)
@@ -75,7 +84,7 @@ radiation_flux_divergence(radiation) = radiation.flux_divergence
 @inline radiation_flux_divergence(i, j, k, grid, ::Nothing) = zero(eltype(grid))
 @inline radiation_flux_divergence(i, j, k, grid, flux_divergence) = @inbounds flux_divergence[i, j, k]
 
-struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S}
+struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S, U, V}
     solar_constant :: SC # a scalar or an (Nx, Ny) array of per-column values
     solar_position :: SOP # AbstractSolarPosition: how to obtain cos(θ_z) on each update
     surface_radiation :: SP
@@ -85,14 +94,85 @@ struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS,
     shortwave_solver :: SW
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
-    upwelling_shortwave_flux :: F # Zero for non-scattering gray optics
+    upwelling_shortwave_flux :: F
     downwelling_shortwave_flux :: F
     flux_divergence :: H # Center field: -dF_net/dz in W/m³
     liquid_effective_radius :: LER # Model for cloud liquid effective radius (Nothing for gray/clear-sky)
     ice_effective_radius :: IER    # Model for cloud ice effective radius (Nothing for gray/clear-sky)
     column_batches :: CB  # Number of column batches for the RRTMGP solve (Nothing for one unbatched solve)
     schedule :: S  # Update schedule (default: IterationInterval(1) = every step)
+    approximate_updates :: U # ApproximateRadiationUpdates, or Nothing
+    cache_valid :: V # false until the fluxes are solved, e.g. after a restart without them
 end
+
+# The constructor without the last two fields, for backends without updates between solves
+function RadiativeTransferModel(solar_constant::Union{Number, AbstractArray}, solar_position, surface_radiation, background_atmosphere,
+                                atmospheric_state, longwave_solver, shortwave_solver, up_lw, down_lw,
+                                up_sw, down_sw, divergence, liquid_radius, ice_radius, batches, schedule)
+    return RadiativeTransferModel(solar_constant, solar_position, surface_radiation, background_atmosphere,
+                                 atmospheric_state, longwave_solver, shortwave_solver, up_lw, down_lw,
+                                 up_sw, down_sw, divergence, liquid_radius, ice_radius, batches, schedule,
+                                 nothing, radiation_cache_validity(divergence.grid))
+end
+
+solve_scheduled_radiation!(rtm, model) = _update_radiation!(rtm, model)
+
+function solve_scheduled_radiation!(rtm::RadiativeTransferModel, model)
+    _update_radiation!(rtm, model)
+    set_radiation_cache_validity!(rtm.cache_valid, true)
+    return nothing
+end
+
+# A host `Ref`; `BreezeReactantExt` uses a device array that compiled updates can change
+radiation_cache_validity(grid::AbstractGrid) = radiation_cache_validity(architecture(grid))
+radiation_cache_validity(arch) = Ref(false)
+
+radiation_cache_is_valid(radiation) = true
+radiation_cache_is_valid(rtm::RadiativeTransferModel) = radiation_cache_is_valid(rtm.cache_valid)
+radiation_cache_is_valid(valid::Bool) = valid
+radiation_cache_is_valid(valid::Ref) = valid[]
+radiation_cache_is_valid(valid::AbstractArray) = @allowscalar only(valid)
+
+function set_radiation_cache_validity!(valid::Ref, value)
+    valid[] = value
+    return nothing
+end
+
+function set_radiation_cache_validity!(valid::AbstractArray, value)
+    fill!(valid, value)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Solve the radiative transfer of `rtm` for the current state of `model`, for every backend: set
+[`solver_cos_zenith`](@ref) (see [`update_solve_cos_zenith!`](@ref)), call
+[`solve_radiative_transfer!`](@ref), then [`complete_radiation_solve!`](@ref).
+"""
+function _update_radiation!(rtm::RadiativeTransferModel, model)
+    assert_bound_surface_temperature(rtm)
+    update_solve_cos_zenith!(solver_cos_zenith(rtm), rtm, model)
+    solve_radiative_transfer!(rtm, model)
+    complete_radiation_solve!(rtm, model)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The per-column solar cosine that the solver of `rtm` reads. Implemented by each backend.
+"""
+function solver_cos_zenith end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Solve the four flux fields of `rtm` for the current state of `model` and, when
+[`solves_longwave_response`](@ref), the longwave fluxes at the perturbed surface temperature into
+the longwave responses. Implemented by each backend and called by [`_update_radiation!`](@ref).
+"""
+function solve_radiative_transfer! end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
