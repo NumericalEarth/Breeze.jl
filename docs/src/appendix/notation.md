@@ -234,6 +234,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``aᶜ`` | `aᶜ` | | Cloud fraction (cloudy volume fraction) of the subgrid distribution |
 | ``a⁺`` | `a⁺` | | Supersaturated fraction of the subgrid distribution |
 | ``aʷ`` | `aʷ` | | Flux-weighted saturated fraction: the share of the flux of the saturation excess carried by saturated air |
+| ``N²ᵇ, N²ᶜ`` | `N²ᵇ`, `N²ᶜ` | | Stratification of a displacement without phase change, with the condensate ``qᶜ`` of the microphysics (``N²ᵇ = Σ b_χ ∂_z χ``) and of the conserved variables ``θˡⁱ``, ``qᵗ`` (``N²ᶜ``) |
+| ``q̄ˡ`` | `q̄ˡ` | | Mean liquid of the subgrid distribution; `MeanLiquidStratification` reads ``N² = N²ᵇ + (b_qˡ - b_qᵛ) ∂_z (q̄ˡ - qᶜ)`` |
 | ``b_χ`` | `b_θ`, `b_qᵛ`, `b_qˡ`, `b_qⁱ` | | Derivatives ``∂b/∂χ`` of the buoyancy with respect to the mixed variables ``χ ∈ \{θˡⁱ, qᵛ, qˡ, qⁱ\}``, from the model's thermodynamics |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
 | ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |
