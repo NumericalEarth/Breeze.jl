@@ -184,3 +184,25 @@ end
         @test mx[2] > lw[2]
     end
 end
+
+# The vapor excess of the components that the microphysics reads is defined wherever the assumed PDF is: it takes the
+# component temperature of the PDF, so with variances wide enough that a component's liquid-water temperature falls
+# below `Tl_min` both are finite (the vapor excess formed at Π θˡⁱ took a power of a negative temperature there)
+@testset "The component vapor excess is defined wherever the assumed PDF is" begin
+    FT = Float64
+    c = SHOCConstants(FT)
+    thermo = model_thermodynamics(FT)
+    warm = ModelThermodynamicsSaturation()
+    p, θˡ, qᵗ = 85000.0, 300.0, 0.012
+    for thl_sec in (0.25, 1e2, 1e5, 1e7), w3 in (-2.0, 0.0, 2.0)
+        moments = (w3, thl_sec, -0.25 * sqrt(thl_sec), -1.3e-5, 2.9e-5, 4e-9)
+        pdf = DoubleGaussianPDF(FT)
+        a = assumed_pdf(pdf, warm, thermo, HardClipping(), c, 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ, 1.0, moments, moments)
+        v = SimplifiedHigherOrderClosures.component_vapor_excess(pdf, thermo, HardClipping(), 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ,
+                                                               1.0, moments, moments)
+        @test all(isfinite, a)
+        @test all(isfinite, v)
+        @test 0 < v[1] < 1
+        @test v[4] ≥ 0 && v[5] ≥ 0
+    end
+end

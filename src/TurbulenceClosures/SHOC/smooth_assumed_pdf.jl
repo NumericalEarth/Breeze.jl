@@ -210,8 +210,8 @@ end
                                  (testvar + pdf.correlation_regularization * thl_tol * rt_tol), -1, 1, 1)
 
     # Liquid water temperature and saturation of the plumes
-    Tl1_1 = max(pdf.Tl_min, plume_liquid_water_temperature(sat, thermodynamics, c, thl1_1, qw1_1, pval))
-    Tl1_2 = max(pdf.Tl_min, plume_liquid_water_temperature(sat, thermodynamics, c, thl1_2, qw1_2, pval))
+    Tl1_1 = component_liquid_water_temperature(pdf, sat, thermodynamics, c, thl1_1, qw1_1, pval)
+    Tl1_2 = component_liquid_water_temperature(pdf, sat, thermodynamics, c, thl1_2, qw1_2, pval)
 
     qs1, beta1, cp_over_L1, Π1 = plume_saturation(sat, thermodynamics, c, Tl1_1, qw1_1, pval)
     qs2, beta2, cp_over_L2, Π2 = plume_saturation(sat, thermodynamics, c, Tl1_2, qw1_2, pval)

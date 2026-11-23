@@ -312,7 +312,6 @@ The plumes saturate by the saturation component `sat` ([`ModelThermodynamicsSatu
     thl_tol = pdf.thl_tol
     rt_tol = pdf.rt_tol
     w_tol_sqd = pdf.w_tol * pdf.w_tol
-    Tl_min = pdf.Tl_min
 
     # Interpolate the interface moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec of the
     # interfaces below, `moments_l`, and above, `moments_u`, the level) to the level
@@ -365,10 +364,8 @@ The plumes saturate by the saturation component `sat` ([`ModelThermodynamicsSatu
     r_qwthl_1 = ifelse(uncorrelated, zero(FT), r_qwthl_1)
 
     # shoc_assumed_pdf_compute_temperature
-    Tl1_1 = plume_liquid_water_temperature(sat, thermodynamics, p, thl1_1, qw1_1, pval)
-    Tl1_2 = plume_liquid_water_temperature(sat, thermodynamics, p, thl1_2, qw1_2, pval)
-    Tl1_1 = ifelse(Tl1_1 <= Tl_min, Tl_min, Tl1_1)
-    Tl1_2 = ifelse(Tl1_2 <= Tl_min, Tl_min, Tl1_2)
+    Tl1_1 = component_liquid_water_temperature(pdf, sat, thermodynamics, p, thl1_1, qw1_1, pval)
+    Tl1_2 = component_liquid_water_temperature(pdf, sat, thermodynamics, p, thl1_2, qw1_2, pval)
 
     # shoc_assumed_pdf_compute_qs
     qs1, beta1, cp_over_L1, Π1 = plume_saturation(sat, thermodynamics, p, Tl1_1, qw1_1, pval)
@@ -457,15 +454,24 @@ density ``ρᵢ = p / (Rᵐ Tᵢ)``, and the within-component spread
                          ifelse(uncorrelated, one(FT), testvar), -1, 1, 1)
     r = ifelse(uncorrelated, zero(FT), r)
 
-    μ₁, σ₁ = component_vapor_excess_moments(thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r)
-    μ₂, σ₂ = component_vapor_excess_moments(thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r)
+    μ₁, σ₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r)
+    μ₂, σ₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r)
     return a, μ₁, μ₂, σ₁, σ₂
 end
 
-@inline function component_vapor_excess_moments(thermodynamics, pval, thl, qw, vθ, vq, σθ, σq, r)
+# The liquid-water temperature of a component of the double Gaussian, the one definition every function of the PDF uses:
+# that of the saturation component `sat`, raised to `Tl_min` where it is below (`shoc_assumed_pdf_compute_temperature`)
+@inline function component_liquid_water_temperature(pdf, sat, thermodynamics, c, thl, qw, pval)
+    Tl = plume_liquid_water_temperature(sat, thermodynamics, c, thl, qw, pval)
+    return ifelse(Tl <= pdf.Tl_min, pdf.Tl_min, Tl)
+end
+
+# The moments of the vapor excess over liquid of a component, at the temperature of the component that `assumed_pdf`
+# condenses at, with the model's saturation over liquid (the formula the microphysics uses)
+@inline function component_vapor_excess_moments(pdf, thermodynamics, pval, thl, qw, vθ, vq, σθ, σq, r)
     constants = thermodynamics.constants
     Π = plume_exner_function(thermodynamics, qw, pval)
-    T = Π * thl
+    T = component_liquid_water_temperature(pdf, ModelThermodynamicsSaturation(), thermodynamics, nothing, thl, qw, pval)
     Rᵐ = mixture_gas_constant(MoistureMassFractions(qw), constants)
     qᵛ⁺ˡ = saturation_specific_humidity(T, pval / (Rᵐ * T), constants, PlanarLiquidSurface())
     _, log_slope = condensate_latent_heat_and_log_slope(WarmPhaseEquilibrium(), constants, T)
