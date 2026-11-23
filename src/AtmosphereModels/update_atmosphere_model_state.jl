@@ -4,7 +4,8 @@ using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Grids: topology
+using Oceananigans.Grids: topology, horizontally_extended_interior_kernel_parameters,
+                          TwoSided, Connected
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.OutputReaders: update_field_time_series!, extract_field_time_series
@@ -50,7 +51,7 @@ function update_atmosphere_state!(update_radiation_fluxes!, model, callbacks; co
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
-    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)..., async=true)
+    fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)...)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
     update_radiation_fluxes!(model.radiation, model)
@@ -217,11 +218,40 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
                    model.microphysical_fields,
                    model.thermodynamic_constants)
 
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
+    u_parameters, v_parameters = horizontal_momentum_tendency_kernel_parameters(model)
+    launch!(arch, grid, u_parameters, compute_x_momentum_tendency!, Gρu, grid, u_args)
+    launch!(arch, grid, v_parameters, compute_y_momentum_tendency!, Gρv, grid, v_args)
     compute_vertical_momentum_tendency!(model, Gρw, w_args)
 
     return nothing
+end
+
+# Kernel parameters for the `Gρu` and `Gρv` launches. Dynamics whose kernels read `Gρu` and `Gρv`
+# one face past the interior extend this to return `tendency_kernel_parameters`.
+horizontal_momentum_tendency_kernel_parameters(model) = (:xyz, :xyz)
+
+# Dynamics whose tendency kernels reach further than the advection scheme and closure check for
+# a large enough halo here, once the dynamics is materialized.
+validate_dynamics_halo(dynamics, grid, momentum_advection, closure) = nothing
+
+# Face-located tendencies are also computed at face N + 1 where the right side of a dimension is a
+# seam with a neighboring rank (`Connected`). Computing that face locally avoids exchanging it.
+# On a periodic dimension face N + 1 is the image of face 1 and is filled as a halo instead,
+# which needs no extra halo cell.
+extended_tendency_faces(::TwoSided{<:Any, Connected}) = 1
+extended_tendency_faces(topo) = 0
+
+tendency_range(::Face, topo, N) = 1:N+extended_tendency_faces(topo)
+tendency_range(ℓ, topo, N) = 1:N
+
+# `KernelParameters` for a tendency at `(ℓx, ℓy, Center())` that also cover face N + 1 in each
+# horizontal dimension whose right side is a seam between ranks.
+function tendency_kernel_parameters(grid, ℓx, ℓy)
+    Nx, Ny, Nz = size(grid)
+    TX, TY, _ = topology(grid)
+    return KernelParameters(tendency_range(ℓx, TX(), Nx),
+                            tendency_range(ℓy, TY(), Ny),
+                            1:Nz)
 end
 
 # Compute the vertical-momentum tendency `Gρw`. Extendable so that dynamics can omit vertical-velocity
@@ -260,7 +290,10 @@ function compute_auxiliary_variables!(model)
     # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
     if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
-        compute_closure_fields!(model.closure_fields, model.closure, model)
+        # Closure fields are computed one cell past the interior in x and y, from inputs whose
+        # halos are already filled, so that across a seam between ranks only local halos need filling.
+        closure_parameters = horizontally_extended_interior_kernel_parameters(model.grid)
+        compute_closure_fields!(model.closure_fields, model.closure, model; parameters=closure_parameters)
         fill_halo_regions!(model.closure_fields; only_local_halos=true)
     end
 
