@@ -105,11 +105,10 @@ end
         end
 
         @testset "Closure-field halos are filled [$formulation, $(FT)]" begin
-            # `compute_closure_fields!` writes the interior and the first horizontal halo cell,
-            # and nothing in the vertical halos, so without the `fill_halo_regions!` in
-            # `compute_auxiliary_variables!` those stay at their initial zero, and the stress next
-            # to the boundary interpolates that zero and comes out halved (Smagorinsky/AMD
-            # included). The fill must also agree with what was computed in the horizontal halos.
+            # `compute_closure_fields!` writes only the interior, so without the
+            # `fill_halo_regions!` in `compute_auxiliary_variables!` every closure-field halo
+            # stays at its initial zero. The stress in the outermost column of each direction
+            # then interpolates that zero and comes out halved (Smagorinsky/AMD included).
             model = AtmosphereModel(grid; dynamics, formulation, closure=SmagorinskyLilly())
             θ₀ = model.dynamics.reference_state.potential_temperature
             # Mean shear plus a horizontal wave, so νₑ varies along the halo faces and the

@@ -48,7 +48,7 @@ const steppers = ((:AcousticRungeKutta3, nothing), (:MultirateInfinitesimalStep,
 
 # The sweeps over the recombining coefficient sets, which repeat every integration with a time
 # stepper of its own, run the default set, and the others in the exhaustive tests
-# (BREEZE_TEST_EXHAUSTIVE, set on one CI runner).
+# (BREEZE_TEST_EXHAUSTIVE).
 const swept_coefficients = test_sweep((:SSPMIS43, :TVDMISB, :MIS4a))
 
 @testset "Post-loop scalar tendencies keep a uniform mass fraction uniform [$timestepper, $coefficients]" for (timestepper, coefficients) in steppers

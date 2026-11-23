@@ -26,7 +26,7 @@ all_float_types() = (Float32, Float64)
 
 # Sweeps over configurations that each compile their own model (time-stepper coefficient sets,
 # terrain formulations, lateral topologies) run one representative by default.
-# Set BREEZE_TEST_EXHAUSTIVE=true, as one CI runner does, to run every member.
+# Set BREEZE_TEST_EXHAUSTIVE=true to run every member.
 exhaustive_tests() = get(ENV, "BREEZE_TEST_EXHAUSTIVE", "false") == "true"
 
 # The members of `sweep` to test: all of them where exhaustive tests are requested, and otherwise
