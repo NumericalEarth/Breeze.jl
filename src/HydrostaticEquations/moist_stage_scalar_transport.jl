@@ -50,6 +50,10 @@ end
 
 Adapt.adapt_structure(to, r::LayerMassFraction) = LayerMassFraction(adapt(to, r.weighted), adapt(to, r.density))
 
+# Built on a multi-region grid by the seam budgets of the convex stages (`convex_stage_seam_budgets`), outside a
+# region-by-region launch
+@regional LayerMassFraction
+
 #####
 ##### The tendencies of the scalars other than transport
 #####
