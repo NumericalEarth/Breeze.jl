@@ -22,7 +22,7 @@
 using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation, BenchmarkResult
 using BreezeBenchmarks: checkpointing_label
-using BreezeBenchmarks: scalar_tendency_problem, model_tendency_problem, benchmark_tendency
+using BreezeBenchmarks: scalar_tendency_problem, scalar_tendency_ad_problem, model_tendency_problem, benchmark_tendency
 using JSON: JSON
 using BFloat16s: BFloat16
 using Oceananigans
@@ -48,7 +48,7 @@ using CloudMicrophysics: CloudMicrophysics
 const CMExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .CMExt: OneMomentCloudMicrophysics
 
-using Printf: @printf
+using Printf: @printf, @sprintf
 using Dates: DateTime, now, UTC
 
 #####
@@ -70,8 +70,9 @@ function parse_commandline()
     @add_arg_table! s begin
         "--mode"
             help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output, " *
-                   "'scalar_tendency' for the bare scalar WENO kernel, or 'model_tendency' for the full-model " *
-                   "compute_tendencies! (both have no Simulation and run vanilla vs Reactant)"
+                   "'scalar_tendency' for the bare scalar WENO kernel, 'scalar_tendency_ad' for its reverse-mode " *
+                   "gradient, or 'model_tendency' for the full-model compute_tendencies! (all have no Simulation " *
+                   "and run vanilla vs Reactant)"
             arg_type = String
             default = "benchmark"
 
@@ -471,22 +472,24 @@ function run_benchmarks(args; kernel_cases = [])
         # both backends so the Reactant-compiled XLA program can be compared
         # against the eager vanilla launch. Handled up front; the model-stepping
         # path below is skipped.
-        if mode == "scalar_tendency" || mode == "model_tendency"
+        if mode in ("scalar_tendency", "scalar_tendency_ad", "model_tendency")
             m = match(r"^WENO(\d+)$", adv_name)
             isnothing(m) && error("$mode mode supports WENO<order> advection, got $adv_name")
             order = parse(Int, m[1])
 
-            label = mode == "scalar_tendency" ? "ScalarTendency" : "ModelTendency"
+            label, problem = mode == "scalar_tendency"    ? ("ScalarTendency",   scalar_tendency_problem) :
+                             mode == "scalar_tendency_ad" ? ("ScalarTendencyAD", scalar_tendency_ad_problem) :
+                                                            ("ModelTendency",    model_tendency_problem)
             arch = make_backend_arch(backend_name, device)
             topology = make_topology(topo_name)
-            problem = mode == "scalar_tendency" ? scalar_tendency_problem : model_tendency_problem
 
             # Reactant additionally compares raise=true vs raise=false (the
             # latter keeps kernels as XLA custom calls instead of raising them to
             # StableHLO). raise=false needs the CUDA custom-call path, so it is
-            # skipped on TPU. Vanilla is eager — raise does not apply.
+            # skipped on TPU, and for AD, since differentiating an unraised kernel
+            # needs kernel AD. Vanilla is eager — raise does not apply.
             configs = if backend_name == "reactant"
-                raises = device == "TPU" ? (true,) : (true, false)
+                raises = device == "TPU" || mode == "scalar_tendency_ad" ? (true,) : (true, false)
                 [(r ? "reactant raise=true" : "reactant raise=false",
                   r ? "reactant-raise"      : "reactant-noraise",
                   r) for r in raises]
@@ -595,7 +598,7 @@ function run_benchmarks(args; kernel_cases = [])
                                      microphysics=micro_name,
                                      )
         else
-            error("Unknown mode: $mode. Use 'benchmark', 'simulate', 'scalar_tendency', or 'model_tendency'.")
+            error("Unknown mode: $mode. Use 'benchmark', 'simulate', 'scalar_tendency', 'scalar_tendency_ad', or 'model_tendency'.")
         end
         push!(results, result)
 
@@ -734,8 +737,8 @@ function generate_markdown_report(filename, entries)
 
         println(io, "## Results")
         println(io)
-        println(io, "| Benchmark | Float | Backend | Grid | Time/Step (ms) | Steps/s | Points/s | Compile (s) | Timestamp |")
-        println(io, "|-----------|-------|---------|------|----------------|---------|----------|-------------|-----------|")
+        println(io, "| Benchmark | Float | Backend | Grid | Time/Step (ms) | Host time/step (ms) | Host allocations/step | GC (ms) | Steps/s | Points/s | Compile (s) | Timestamp |")
+        println(io, "|-----------|-------|---------|------|----------------|---------------------|-----------------------|---------|---------|----------|-------------|-----------|")
 
         for entry in entries
             grid = entry["grid_size"]
@@ -744,12 +747,27 @@ function generate_markdown_report(filename, entries)
             backend = get(entry, "backend", "")
             compile_time = get(entry, "compile_time_seconds", 0.0)
 
-            @printf(io, "| `%s` | %s | %s | %s | %.2f | %.2f | %.2e | %.3f | %s |\n",
+            # Host-side cost of a step: when the host time is close to the time per step,
+            # the benchmark measures the host rather than the device. Entries from older
+            # results, simulations, and Reactant runs don't have (all of) these numbers.
+            host_time = get(entry, "host_time_per_step_seconds", 0.0)
+            host_time_str = host_time > 0 ? @sprintf("%.2f", 1000 * host_time) : "—"
+            host_allocations_str, gc_str = if haskey(entry, "allocated_bytes_per_step")
+                (Base.format_bytes(round(Int, entry["allocated_bytes_per_step"])),
+                 @sprintf("%.1f", 1000 * entry["gc_time_seconds"]))
+            else
+                ("—", "—")
+            end
+
+            @printf(io, "| `%s` | %s | %s | %s | %.2f | %s | %s | %s | %.2f | %.2e | %.3f | %s |\n",
                     entry["name"],
                     entry["float_type"],
                     backend,
                     grid_str,
                     entry["time_per_step_seconds"] * 1000,
+                    host_time_str,
+                    host_allocations_str,
+                    gc_str,
                     entry["steps_per_second"],
                     entry["grid_points_per_second"],
                     compile_time,

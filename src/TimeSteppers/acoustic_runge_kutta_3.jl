@@ -5,6 +5,7 @@ using Oceananigans.Utils: time_difference_in_seconds
 
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
+    next_time,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
@@ -81,6 +82,8 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R, ST} <: AcousticTimeStepper
     rounding :: R
     scalar_tendencies :: ST
 end
+
+AtmosphereModels.stage_abscissae(ts::AcousticRungeKutta3) = (ts.β₁, ts.β₂)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -331,7 +334,9 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     β₂ = ts.β₂
     β₃ = ts.β₃
 
-    tⁿ⁺¹ = model.clock.time + Δt
+    # Compute the next time a priori to reduce floating point error accumulation; `next_time`
+    # also serves a calendar clock, whose `time` cannot take a `Δt` in seconds directly.
+    tⁿ⁺¹ = next_time(model.clock, Δt)
 
     # Snapshot outer-step-start state into U⁰ for use by all stages.
     # The substepper also seeds its stage-1 cache and time-averaged
@@ -353,7 +358,7 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     acoustic_stage!(model, Δt, β₂, RoundToNearest(), callbacks)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
-    update_state!(model, callbacks; compute_tendencies = true)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
     cache_transport_velocity!(model)
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**). Every stage restarts from Uⁿ, so only this stage's
@@ -383,7 +388,7 @@ function complete_acoustic_time_step!(model, Δt, tⁿ⁺¹, callbacks)
     # Forwarding the callbacks through microphysics_model_update! would fix this and let the pass
     # always be skipped.
     skip_tendencies = skip_pre_microphysics_tendencies(model.microphysics, Δt, callbacks)
-    update_state!(model, callbacks; compute_tendencies = !skip_tendencies)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks; compute_tendencies = !skip_tendencies)
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.

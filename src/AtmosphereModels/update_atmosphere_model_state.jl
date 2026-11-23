@@ -4,13 +4,13 @@ using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Grids: Flat, topology
+using Oceananigans.Grids: topology, horizontally_extended_interior_kernel_parameters,
+                          TwoSided, Connected
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.OutputReaders: update_field_time_series!, extract_field_time_series
 using Oceananigans.TimeSteppers: TimeSteppers, Clock
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
-using Oceananigans.TurbulenceClosures.Smagorinskys: LagrangianAveragedDynamicSmagorinsky
 using Oceananigans.Units: Time
 using Oceananigans.Utils: launch!, KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
@@ -37,19 +37,24 @@ end
 # prognostic fields by a full `Δt` and so must run exactly once per step — the
 # time-steppers invoke it directly. (The tendency-interface microphysics still runs
 # every RK stage as part of `compute_tendencies!`.)
-function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true) =
+    update_atmosphere_state!(update_radiation!, model, callbacks; compute_tendencies)
+
+# `update_state!` after a step's first stage, which has already checked the radiation schedule
+update_state_between_radiation_solves!(model, callbacks=[]; compute_tendencies=true) =
+    update_atmosphere_state!(update_radiation_between_solves!, model, callbacks; compute_tendencies)
+
+function update_atmosphere_state!(update_radiation_fluxes!, model, callbacks; compute_tendencies)
     fix_negative_moisture!(model)  # fix negative moisture from advection
     compute_total_density!(model)  # diagnose total air density ρ = ρᵈ + Σρˣ (no-op unless compressible)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
-    # Synchronous: nothing completes an asynchronous fill here, so on a `Distributed` grid the halos
-    # of every prognostic that is not filled again below (the tracers) would never be received.
     fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)...)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
-    update_radiation!(model.radiation, model)
+    update_radiation_fluxes!(model.radiation, model)
     compute_forcings!(model)
 
     for callback in callbacks
@@ -212,11 +217,40 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
                    model.microphysical_fields,
                    model.thermodynamic_constants)
 
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
+    u_parameters, v_parameters = horizontal_momentum_tendency_kernel_parameters(model)
+    launch!(arch, grid, u_parameters, compute_x_momentum_tendency!, Gρu, grid, u_args)
+    launch!(arch, grid, v_parameters, compute_y_momentum_tendency!, Gρv, grid, v_args)
     compute_vertical_momentum_tendency!(model, Gρw, w_args)
 
     return nothing
+end
+
+# Kernel parameters for the `Gρu` and `Gρv` launches. Dynamics whose kernels read `Gρu` and `Gρv`
+# one face past the interior extend this to return `tendency_kernel_parameters`.
+horizontal_momentum_tendency_kernel_parameters(model) = (:xyz, :xyz)
+
+# Dynamics whose tendency kernels reach further than the advection scheme and closure check for
+# a large enough halo here, once the dynamics is materialized.
+validate_dynamics_halo(dynamics, grid, momentum_advection, closure) = nothing
+
+# Face-located tendencies are also computed at face N + 1 where the right side of a dimension is a
+# seam with a neighboring rank (`Connected`). Computing that face locally avoids exchanging it.
+# On a periodic dimension face N + 1 is the image of face 1 and is filled as a halo instead,
+# which needs no extra halo cell.
+extended_tendency_faces(::TwoSided{<:Any, Connected}) = 1
+extended_tendency_faces(topo) = 0
+
+tendency_range(::Face, topo, N) = 1:N+extended_tendency_faces(topo)
+tendency_range(ℓ, topo, N) = 1:N
+
+# `KernelParameters` for a tendency at `(ℓx, ℓy, Center())` that also cover face N + 1 in each
+# horizontal dimension whose right side is a seam between ranks.
+function tendency_kernel_parameters(grid, ℓx, ℓy)
+    Nx, Ny, Nz = size(grid)
+    TX, TY, _ = topology(grid)
+    return KernelParameters(tendency_range(ℓx, TX(), Nx),
+                            tendency_range(ℓy, TY(), Ny),
+                            1:Nz)
 end
 
 # Compute the vertical-momentum tendency `Gρw`. Extendable so that dynamics can omit vertical-velocity
@@ -255,71 +289,15 @@ function compute_auxiliary_variables!(model)
     # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
     if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
-        compute_extended_closure_fields!(model.closure_fields, model.closure, model)
-        # The local fill imposes the boundary conditions of the closure fields and the periodic
-        # images within a rank. Nothing is exchanged between ranks: the halo cells the tendencies
-        # read have just been computed.
+        # Closure fields are computed one cell past the interior in x and y, from inputs whose
+        # halos are already filled, so that across a seam between ranks only local halos need filling.
+        closure_parameters = horizontally_extended_interior_kernel_parameters(model.grid)
+        compute_closure_fields!(model.closure_fields, model.closure, model; parameters=closure_parameters)
         fill_halo_regions!(model.closure_fields; only_local_halos=true)
     end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
-    return nothing
-end
-
-#####
-##### Closure fields, computed one cell into the horizontal halos
-#####
-
-# The viscous and diffusive fluxes of an interior tendency read an eddy viscosity or diffusivity one
-# cell into the halo, corners included (`νᶠᶠᶜ` at `(1, 1)` averages the centers `(0:1, 0:1)`). On a
-# `Distributed` grid a closure field that is computed in the interior alone is stale there, because
-# its halos are filled locally and never received from a neighbouring rank. So, as Oceananigans'
-# `HydrostaticFreeSurfaceModel` does with `horizontally_extended_interior_kernel_parameters`, the
-# closure fields are computed over `0:Nx+1` and `0:Ny+1`, from the halos of the velocities,
-# thermodynamic variables and tracers, which are filled (and exchanged between ranks) before the
-# closure fields are computed. A closure's own stencil reaches one further cell, to index `-1` or
-# `N+2`, which is why these closures require a halo of at least two (`required_halo_size_x`).
-#
-# The ranges are written out, rather than taken from `horizontally_extended_interior_kernel_parameters`,
-# because on a grid with an active cells map that function returns a map of the active cells only,
-# whereas `:xyz` covers every cell and column kernels need the horizontal ranges.
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return the kernel parameters over which the fields of `closure` are computed on `grid`: the
-interior plus one cell into the halo in every horizontal direction that is not `Flat`.
-The fallback `:xyz` (the interior alone) applies to closures whose fields cannot be computed
-from the halos of the model state.
-"""
-function closure_fields_kernel_parameters(grid, closure)
-    Nx, Ny, Nz = size(grid)
-    TX, TY, _ = topology(grid)
-    ii = TX === Flat ? (1:Nx) : (0:Nx+1)
-    jj = TY === Flat ? (1:Ny) : (0:Ny+1)
-    return KernelParameters(ii, jj, 1:Nz)
-end
-
-# An array of closures (a per-column ensemble) is indexed by column, and has no halo columns.
-closure_fields_kernel_parameters(grid, ::AbstractArray) = :xyz
-
-# The Lagrangian-averaged coefficient is advanced in the interior by `step_closure_prognostics!`,
-# from its own previous values, so that its halos hold nothing a viscosity could be computed from.
-# TODO: on a `Distributed` grid this closure is wrong next to a rank boundary, in Oceananigans too:
-# `𝒥ᴸᴹ` and `𝒥ᴹᴹ` are time-stepped state whose halos must be exchanged after each update, as must
-# those of `Σ` and `Σ̄`, which Oceananigans fills with `only_local_halos=true` before filtering them.
-closure_fields_kernel_parameters(grid, ::LagrangianAveragedDynamicSmagorinsky) = :xyz
-
-compute_extended_closure_fields!(closure_fields, closure, model) =
-    compute_closure_fields!(closure_fields, closure, model;
-                            parameters = closure_fields_kernel_parameters(model.grid, closure))
-
-# Each closure of a tuple over its own region
-compute_extended_closure_fields!(::Tuple{}, ::Tuple{}, model) = nothing
-
-function compute_extended_closure_fields!(closure_fields::Tuple, closures::Tuple, model)
-    compute_extended_closure_fields!(first(closure_fields), first(closures), model)
-    compute_extended_closure_fields!(Base.tail(closure_fields), Base.tail(closures), model)
     return nothing
 end
 
