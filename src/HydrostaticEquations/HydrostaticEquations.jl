@@ -79,7 +79,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
                                owned_integral, owned_integral_value, thermodynamic_density_name,
                                radiation_flux_divergence, uses_level_pressure
 using Breeze.PressureLevelDiscretization: PressureLevelGrid, MultiRegionPressureLevelGrid,
-                                          layer_mass, scalar_layer_mass, scalar_density_from_layer_mass,
+                                          layer_mass, previous_layer_mass, scalar_layer_mass, scalar_density_from_layer_mass,
                                           store_previous_surface_pressure!
 using Breeze.PressureLevelDiscretization: layer_pressure_thickness as grid_layer_pressure_thickness
 using Oceananigans: prognostic_fields

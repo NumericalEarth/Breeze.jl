@@ -163,6 +163,84 @@ end
     @inbounds a[i, j, k] = b[i, j, k]
 end
 
+#####
+##### Adaptive implicit vertical transport of the scalars of a stage (AIVA), on a pressure-level grid
+#####
+##### See derivations/hamip/plvd_aiva_derivation.md (lead, D494). In the forward Euler step of length Δtᵉ that a
+##### convex stage holds, the vertical flux through a coordinate surface is split by the donor Courant number
+##### C = |ρw̃| Δtᵉ / μ_donor (μ the layer mass Δp / g at the start of the stage) into an explicit part s ρw̃, with
+##### s = min(1, cfl / C), transported by the scheme of the scalar, and an implicit part (1 - s) ρw̃, first-order
+##### upwind and backward Euler over Δtᵉ:
+#####
+#####     μᴱₖ rₖ + Δtᵉ (Φₖ₊₁ - Φₖ) = Rₖ ,   Φₖ = (1 - sₖ) ρw̃ₖ r_donor(k) ,
+#####
+##### with R the explicit forward Euler result and μᴱ = μⁱ⁻¹ - Δtᵉ (D + δρw̃) the layer mass at its end, from the
+##### same continuity that gives ρw̃. A uniform r stays uniform, the column content is that of R, and r is a convex
+##### combination of R / μˣ (μˣ the mass of the explicit step) when μᴱ, μˣ > 0, at any Courant number of the
+##### implicit part. The potential temperature and the momentum are not affected (open items of the derivation).
+
+# The cfl of the adaptive implicit vertical transport of a scheme, or nothing (extended in Breeze.Advection)
+stage_vertical_implicit_cfl(advection) = nothing
+# The scheme of the explicit part (extended in Breeze.Advection)
+stage_explicit_advection(advection) = advection
+
+# Scratch of the split, one set per grid (a region on a multi-region grid).
+# TODO: hold these in the GravityWaveSubstepper rather than in a cache keyed by grid.
+const stage_aiva_scratch = IdDict{Any, Any}()
+stage_aiva_fields(grid) = get!(() -> (ρw = ZFaceField(grid), w = ZFaceField(grid), s = ZFaceField(grid), γ = CenterField(grid)),
+                               stage_aiva_scratch, grid)
+
+@kernel function _split_stage_mass_flux!(sρw, sw, s, grid, ρw, w, Δtᵉ, cfl)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    @inbounds for k in 1:Nz+1
+        F = ρw[i, j, k]
+        donor = clamp(ifelse(F > 0, k - 1, k), 1, Nz)
+        C = abs(F) * Δtᵉ / previous_layer_mass(i, j, donor, grid)
+        sₖ = ifelse(C > cfl, cfl / C, one(C))
+        s[i, j, k] = sₖ
+        sρw[i, j, k] = sₖ * F
+        sw[i, j, k] = sₖ * w[i, j, k]
+    end
+end
+
+# The implicit part, solved per column from the explicit result of the stage Mⁱ (masses per unit area), in place
+@kernel function _implicit_stage_vertical_transport!(Mⁱ, γ, grid, M⁰, ρ, u, v, ρw, s, weight, Δtᵉ)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    @inbounds begin
+        # Forward sweep of the tridiagonal system, with Mⁱ holding the right-hand sides and then the solution
+        β = one(Δtᵉ)
+        for k in 1:Nz
+            μᴱ = previous_layer_mass(i, j, k, grid) -
+                 Δtᵉ * (horizontal_mass_flux_divergence(i, j, k, grid, ρ, u, v) + ρw[i, j, k+1] - ρw[i, j, k])
+            a⁻ = (1 - s[i, j, k]) * ρw[i, j, k]       # through the lower face
+            a⁺ = (1 - s[i, j, k+1]) * ρw[i, j, k+1]   # through the upper face
+            lower = - Δtᵉ * max(a⁻, 0)                # r of the layer below enters with upward flow
+            diagonal = μᴱ + Δtᵉ * max(a⁺, 0) + Δtᵉ * max(-a⁻, 0)
+            R = (Mⁱ[i, j, k] - (1 - weight) * M⁰[i, j, k]) / weight
+            if k == 1
+                β = diagonal
+                Mⁱ[i, j, k] = R / β
+            else
+                upper_previous = - Δtᵉ * max(-a⁻, 0)  # the upper coefficient of row k - 1
+                γ[i, j, k] = upper_previous / β
+                β = diagonal - lower * γ[i, j, k]
+                Mⁱ[i, j, k] = (R - lower * Mⁱ[i, j, k-1]) / β
+            end
+        end
+        for k in Nz-1:-1:1
+            Mⁱ[i, j, k] -= γ[i, j, k+1] * Mⁱ[i, j, k+1]
+        end
+        # Back to the masses of the stage: Mⁱ = (1 - w) M⁰ + w μᴱ r
+        for k in 1:Nz
+            μᴱ = previous_layer_mass(i, j, k, grid) -
+                 Δtᵉ * (horizontal_mass_flux_divergence(i, j, k, grid, ρ, u, v) + ρw[i, j, k+1] - ρw[i, j, k])
+            Mⁱ[i, j, k] = (1 - weight) * M⁰[i, j, k] + weight * μᴱ * Mⁱ[i, j, k]
+        end
+    end
+end
+
 function launch_scalar_stage_transport!(ρc⁺, ρc, ρc⁰, N, model, substepper, name, weight, Δtˢ, Δtᵉ)
     grid = model.grid
     arch = grid.architecture
@@ -179,6 +257,34 @@ function launch_scalar_stage_transport!(ρc⁺, ρc, ρc⁰, N, model, substeppe
 
     launch!(arch, grid, :xyz, _advance_scalar_with_stage_transport!,
             ρc⁺, grid, advection, ρ, 𝐮̂, r, ρc, ρc⁰, N, convert(FT, weight), convert(FT, Δtˢ))
+
+    return nothing
+end
+
+launch_split_stage_mass_flux!(scratch, grid, ∫𝐮′, Δtᵉ, cfl) =
+    launch!(grid.architecture, grid, :xy, _split_stage_mass_flux!, scratch.ρw, scratch.w, scratch.s, grid, ∫𝐮′.ρw, ∫𝐮′.w,
+            convert(eltype(grid), Δtᵉ), convert(eltype(grid), cfl))
+
+function launch_implicit_scalar_stage_transport!(scratch, ρc⁺, ρc, ρc⁰, N, model, substepper, name, weight, Δtˢ, Δtᵉ)
+    grid = model.grid
+    arch = grid.architecture
+    FT = eltype(grid)
+    advection = stage_explicit_advection(model.advection[name])
+    ρ = model.dynamics.density
+    ∫𝐮′ = substepper.integrated_velocities
+
+    𝐮̂ˢ = coordinate_transport_velocities(grid, ∫𝐮′.u, ∫𝐮′.v, scratch.w, scratch.ρw)
+    r = LayerMassFraction(ρc, ρ)
+
+    # The limiters of the scheme, for the explicit part of the forward Euler step of the stage
+    update_bounds_preserving_limiter!(advection, grid, r, 𝐮̂ˢ, Δtᵉ)
+    update_flux_limiter!(advection, grid, r, 𝐮̂ˢ, convert(FT, Δtᵉ), ρ)
+
+    launch!(arch, grid, :xyz, _advance_scalar_with_stage_transport!,
+            ρc⁺, grid, advection, ρ, 𝐮̂ˢ, r, ρc, ρc⁰, N, convert(FT, weight), convert(FT, Δtˢ))
+
+    launch!(arch, grid, :xy, _implicit_stage_vertical_transport!, ρc⁺, scratch.γ, grid, ρc⁰, ρ,
+            ∫𝐮′.u, ∫𝐮′.v, ∫𝐮′.ρw, scratch.s, convert(FT, weight), convert(FT, Δtᵉ))
 
     return nothing
 end
@@ -202,7 +308,22 @@ pressure of the stage is complete.
 """
 function advance_scalar_with_stage_transport!(ρc, ρc⁰, scratch, N, model::MoistHydrostaticModel,
                                               substepper::GravityWaveSubstepper, name, weight, Δtˢ, Δtᵉ)
-    @apply_regionally launch_scalar_stage_transport!(scratch, ρc, ρc⁰, N, model, substepper, name, weight, Δtˢ, Δtᵉ)
+    cfl = stage_vertical_implicit_cfl(model.advection[name])
+    if isnothing(cfl)
+        @apply_regionally launch_scalar_stage_transport!(scratch, ρc, ρc⁰, N, model, substepper, name, weight, Δtˢ, Δtᵉ)
+    else
+        grid = model.grid
+        has_pressure_levels(grid) ||
+            throw(ArgumentError("The adaptive implicit vertical transport of the convex stages requires a PressureLevelGrid."))
+        # The split of the stage mass flux, once per grid and with its halos, then the stage of the scalar
+        split = stage_aiva_fields(grid)
+        ∫𝐮′ = substepper.integrated_velocities
+        @apply_regionally launch_split_stage_mass_flux!(split, grid, ∫𝐮′, Δtᵉ, cfl)
+        fill_halo_regions!(split.w)
+        fill_halo_regions!(split.ρw)
+        @apply_regionally launch_implicit_scalar_stage_transport!(split, scratch, ρc, ρc⁰, N, model, substepper, name,
+                                                                  weight, Δtˢ, Δtᵉ)
+    end
     return nothing
 end
 

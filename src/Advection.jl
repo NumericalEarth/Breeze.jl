@@ -118,6 +118,13 @@ const AIVA = AdaptiveImplicitVerticalAdvection
 @inline explicit_scheme(advection::WENO{N, FT, WCT, <:AdaptiveVerticallyImplicitDiscretization}) where {N, FT, WCT} =
     WENO{N, FT, WCT}(advection.bounds, advection.buffer_scheme, advection.advecting_velocity_scheme, ExplicitTimeDiscretization())
 
+# The adaptive implicit vertical transport of the convex stages of HydrostaticDynamics (D494): the cfl of the
+# scheme, and the scheme of its explicit part
+HydrostaticEquations.stage_vertical_implicit_cfl(advection::WENO{N, FT, WCT, <:AdaptiveVerticallyImplicitDiscretization}) where {N, FT, WCT} =
+    time_discretization(advection).cfl
+HydrostaticEquations.stage_explicit_advection(advection::WENO{N, FT, WCT, <:AdaptiveVerticallyImplicitDiscretization}) where {N, FT, WCT} =
+    explicit_scheme(advection)
+
 @inline function OceananigansAdvection.transport_z(i, j, k, grid, advection, ρ, W::CoordinateMassFlux)
     s = explicit_mass_flux_scale(i, j, k, grid, advection, W)
     return @inbounds Azᶜᶜᶠ(i, j, k, grid) * s * W.mass_flux[i, j, k]
