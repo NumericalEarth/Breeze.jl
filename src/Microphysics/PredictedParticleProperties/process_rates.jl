@@ -302,8 +302,7 @@ end
     cond = vapor_rates.condensation
 
     # Cloud droplet activation
-    activating = activation_vapor(distribution, seed_vapor(p3.aerosol, Γ, qᵛ, distribution), qᵛ⁺ˡ,
-                                  activation_relative_threshold(p3.aerosol, p3))
+    activating = p3_activation_vapor(p3, Γ, qᵛ, qᵛ⁺ˡ, distribution)
     activation = compute_cloud_droplet_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ,
                                                   activating.qᵛ, qᵛ⁺ˡ, T, ρ, constants)
     ccn_activation_mass = activation.mass * activating.fraction

@@ -183,6 +183,14 @@ Return the subgrid statistics of cell `(i, j, k)` that the `condensation` option
 # With `AllProcesses` activation reads the distribution instead (`activation_vapor`)
 @inline seed_vapor(aerosol, Γ, qᵛ, distribution) = qᵛ
 
+# The vapor that droplet activation sees and the fraction of the cell that activates, shared by the
+# explicit rates (`p3_phase1_rates`) and the implicit relaxation over the stage
+# (`implicit_liquid_vapor_rates`), so that both start cloud where the subgrid distribution is
+# saturated though the grid mean is not.
+@inline p3_activation_vapor(p3, Γ, qᵛ, qᵛ⁺ˡ, distribution) =
+    activation_vapor(distribution, seed_vapor(p3.aerosol, Γ, qᵛ, distribution), qᵛ⁺ˡ,
+                     activation_relative_threshold(p3.aerosol, p3))
+
 #####
 ##### The `condensation` keyword of P3
 #####

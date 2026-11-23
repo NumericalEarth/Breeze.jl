@@ -134,6 +134,64 @@ end
     @test activated.ccn_activation_number == 0
 end
 
+#####
+##### Cloud starts from the subgrid distribution over the stage
+#####
+
+# A mean-subsaturated cell without cloud liquid whose subgrid distribution is saturated in part:
+# the droplets' relaxation rate is zero, so the seed of activation is what starts cloud. The
+# implicit relaxation over the stage must seed it as the explicit rates do.
+@testset "P3 subgrid supersaturation: cloud starts in a subsaturated cell without cloud [$processes]" for
+        processes in (PPP.CloudCondensationOnly(), PPP.AllProcesses())
+    constants = ThermodynamicConstants(Float64)
+    T = 285.0
+    qᵛ⁺ = cell_saturation(9.5e-3, 0.0, constants; T)
+    qᵛ = qᵛ⁺ - 3e-4
+    qᵛ⁺ˡ = cell_saturation(qᵛ, 0.0, constants; T)
+    @test qᵛ < qᵛ⁺ˡ
+    σ = 3e-3
+    p3 = P3Microphysics(Float64; condensation = SubgridCondensation(PrescribedStatistics(σ); processes))
+    plain = P3Microphysics(Float64)
+    seed = p3.cloud.number_concentration * PPP.activated_droplet_mass(p3.process_rates, Float64)
+    ρ = 1.0
+    𝒰 = cell_state(qᵛ, 0.0, constants; T)
+    ℳ = P3MicrophysicalState(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    rates(p3, stage) = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, nothing, T, 0.0, 0.0, gaussian(σ), stage)
+
+    @test rates(p3, nothing).ccn_activation_mass > 0  # the explicit rates
+    for Δt in (1.0, 10.0, 1e3, 1e5)
+        stage = PPP.LiquidRelaxationStage(Δt, 0.0, 0.0, true)
+        @test rates(plain, stage).ccn_activation_mass == 0  # the grid mean is subsaturated
+        implicit = rates(p3, stage)
+        @test 0 < Δt * implicit.ccn_activation_mass ≤ seed * (1 + 1e-12)
+        @test implicit.condensation == 0  # no droplets yet
+    end
+end
+
+@testset "P3 subgrid supersaturation: cloud forms in a subsaturated column without cloud [$processes]" for
+        processes in (PPP.CloudCondensationOnly(), PPP.AllProcesses())
+    grid = RectilinearGrid(default_arch, Float64; size = 32, z = (0, 3200), topology = (Flat, Flat, Bounded))
+    reference_state = ReferenceState(grid; base_pressure = 101500, potential_temperature = 290)
+    function liquid_after_steps(condensation)
+        model = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state),
+                                microphysics = P3Microphysics(Float64; condensation))
+        set!(model; θ = z -> 290 + 2e-3 * z + 2 * (1 + tanh((z - 1500) / 150)),
+                    qᵗ = z -> 8e-3 - 1e-6 * z - 2e-3 * (1 + tanh((z - 1500) / 150)))
+        liquid() = @allowscalar Array(interior(model.microphysical_fields.ρqᶜˡ))
+        @test all(iszero, liquid())
+        for _ in 1:20
+            time_step!(model, 10)
+        end
+        return liquid()
+    end
+    # The grid mean stays subsaturated: grid-mean P3 forms no cloud, subgrid condensation does
+    @test all(iszero, liquid_after_steps(GridMeanCondensation()))
+    subgrid = liquid_after_steps(SubgridCondensation(PrescribedStatistics(2e-3); processes))
+    @test all(isfinite, subgrid)
+    @test all(≥(0), subgrid)
+    @test maximum(subgrid) > 1e-5
+end
+
 @testset "P3 subgrid supersaturation: vapor caps" begin
     constants = ThermodynamicConstants(Float64)
     T, P = 285.0, 9e4
