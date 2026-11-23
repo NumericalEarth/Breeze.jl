@@ -125,9 +125,7 @@ function parse_commandline()
 
         "--timestepper"
             help = "Outer time stepper for compressible_splitexplicit dynamics: AcousticRungeKutta3 or " *
-                   "MultirateInfinitesimalStep. Defaults to AcousticRungeKutta3, not to the model's default " *
-                   "(MultirateInfinitesimalStep), whose stage storage does not fit 512x512x256 on the CI GPU " *
-                   "and whose step takes more than twice as long to trace with Reactant."
+                   "MultirateInfinitesimalStep."
             arg_type = String
             default = "AcousticRungeKutta3"
 

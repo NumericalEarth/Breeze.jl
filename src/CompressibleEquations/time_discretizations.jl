@@ -26,7 +26,7 @@ restart from the step-start state. There is a single concrete subtype:
     fractions ``β = (1/3, 1/2, 1)``.
 
 A concrete subtype is expected to provide a [`stage_fractions`](@ref) method returning
-its stage-fraction tuple. The default outer time stepper of
+its stage-fraction tuple. The other outer time stepper of
 [`SplitExplicitTimeDiscretization`](@ref),
 [`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep), is
 not described by this interface: its coefficients are a
@@ -291,11 +291,11 @@ $(TYPEDEF)
 
 Split-explicit time discretization for compressible dynamics.
 
-Outer integration is by default a multirate infinitesimal step method
-([`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep)).
-Passing `timestepper = :AcousticRungeKutta3` to `AtmosphereModel` selects the
-Wicker–Skamarock RK3 scheme ([Wicker and Skamarock 2002](@cite WickerSkamarock2002))
-with stage fractions ``β = (1/3, 1/2, 1)`` instead. Within each stage, an inner substep loop
+Outer integration is by default the Wicker–Skamarock RK3 scheme
+([Wicker and Skamarock 2002](@cite WickerSkamarock2002))
+with stage fractions ``β = (1/3, 1/2, 1)``; passing `timestepper = :MultirateInfinitesimalStep`
+to `AtmosphereModel` selects a multirate infinitesimal step
+([`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep)) instead. Within each stage, an inner substep loop
 evolves linearized acoustic perturbations, about the step-start state under a multirate
 infinitesimal step and about each stage-entry state under Wicker–Skamarock RK3.
 The vertically implicit solve uses an off-centered Crank-Nicolson
@@ -602,8 +602,8 @@ convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
 $(TYPEDEF)
 
 Time discretization for fully compressible dynamics that integrates slow
-terms with a multistage outer loop (a multirate infinitesimal step by default,
-or Wicker–Skamarock RK3) and acoustic terms with split-explicit inner substeps.
+terms with a multistage outer loop (Wicker–Skamarock RK3 by default,
+or a multirate infinitesimal step) and acoustic terms with split-explicit inner substeps.
 
 The constructor accepts `substeps` or an `acoustic_cfl` for choosing the
 number of acoustic substeps, a `forward_weight` for off-centering the acoustic

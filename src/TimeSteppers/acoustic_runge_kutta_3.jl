@@ -38,8 +38,7 @@ $(TYPEDEF)
 Wicker–Skamarock third-order Runge–Kutta time stepper
 ([Wicker and Skamarock (2002)](@cite WickerSkamarock2002)) with linearized
 acoustic substepping for fully compressible dynamics. Stage fractions
-``β = (1/3, 1/2, 1)``. Select it with `AtmosphereModel(grid; dynamics, timestepper = :AcousticRungeKutta3)`;
-the default for a split-explicit time discretization is [`MultirateInfinitesimalStep`](@ref).
+``β = (1/3, 1/2, 1)``. It is the default for a split-explicit time discretization.
 Each stage:
 
   1. Re-evaluates slow tendencies (advection + Coriolis + closure +
