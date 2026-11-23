@@ -638,6 +638,13 @@ end
     @test budget_column(shoc.tracers.ρe) == budget_column(whole.tracers.ρe)
     @test maximum(abs, P) > 0
     scale = maximum(abs, ρ .* P)
-    @test Gᵉ(whole) .- Gᵉ(shoc) ≈ 0.9 .* ρ .* P rtol=1e-10 atol=1e-12 * scale
-    @test ĉᵖΠ .* (Gᶿ(shoc) .- Gᶿ(whole)) ≈ 0.9 .* ρ .* P rtol=1e-10 atol=1e-12 * scale
+    # The stage tendency carries the shear production that the solves do not give before the TKE solve: with a time
+    # stepper that solves momentum first, only the work of the surface stress Pˢ (the conversion of the solved
+    # momentum reaches the TKE, ℂᴾ of it, and the air, the rest, before their solves)
+    injected = Breeze.TurbulenceClosures.solved_shear_before_tke_solve(shoc.closure_fields.subgrid_cloud, shoc.closure, shoc)
+    @test injected
+    Pᵉ = injected ? budget_column(cl.Pˢ) : P
+    scale = maximum(abs, ρ .* Pᵉ)
+    @test Gᵉ(whole) .- Gᵉ(shoc) ≈ 0.9 .* ρ .* Pᵉ rtol=1e-10 atol=1e-12 * scale
+    @test ĉᵖΠ .* (Gᶿ(shoc) .- Gᶿ(whole)) ≈ 0.9 .* ρ .* Pᵉ rtol=1e-10 atol=1e-12 * scale
 end

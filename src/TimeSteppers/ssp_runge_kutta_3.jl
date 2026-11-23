@@ -19,6 +19,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, compute_pressu
                                 thermodynamic_density_name,
                                 closure_before_stage_combination!, closure_before_implicit_solve!,
                                 closure_before_thermodynamic_solve!, closure_after_implicit_solves!
+
 using Oceananigans.Utils: launch!, time_difference_in_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -66,6 +67,9 @@ struct SSPRungeKutta3{FT, U0, TG, TI, R} <: AbstractTimeStepper
     implicit_solver :: TI
     rounding :: R
 end
+
+# The stage solves each prognostic in the order of the prognostic fields, momentum first, the thermodynamic variable last
+AtmosphereModels.momentum_solved_before_tracers(::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}) = true
 
 # A Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) sits at cₘ = αₘ (cₘ₋₁ + 1)
 AtmosphereModels.stage_abscissae(ts::SSPRungeKutta3) = (ts.α¹, ts.α² * (ts.α¹ + 1))

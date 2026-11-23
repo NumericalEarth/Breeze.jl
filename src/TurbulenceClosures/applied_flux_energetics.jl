@@ -280,6 +280,78 @@ end
 @inline tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, u, v) =
     @inbounds fields.cloud.P[i, j, k]
 
+# The shear production in the stage tendency: all of it, or, where the TKE receives the shear conversion of the solved
+# momentum before its own solve (`solved_shear_before_tke_solve`), only the work of the surface stress Pˢ
+@inline explicit_tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields, closure_fields, u, v, injected) =
+    tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields, closure_fields, u, v)
+
+@inline explicit_tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, u, v, injected) =
+    explicit_shear_conversion(fields.cloud, i, j, k, injected)
+
+@inline explicit_shear_conversion(cl, i, j, k, injected) = @inbounds ifelse(injected, cl.Pˢ[i, j, k], cl.P[i, j, k])
+
+#####
+##### The shear conversion of the solved momentum, given to the TKE before its solve
+#####
+##### Under the vertically implicit discretization with a time stepper that solves momentum before the tracers
+##### (`AtmosphereModels.momentum_solved_before_tracers`), the TKE receives, just before its own solve, the kinetic
+##### energy the stage's momentum solve took from the mean flow: Pⁱ = Pᵖ + Dᵘ, the conversion of the solved momentum
+##### fluxes and the dissipation of backward Euler itself, the fraction ℂᴾ to the TKE and the rest to the heat of the
+##### air before its solve. Its solve then diffuses the energy the mean flow gave up. Given instead in the stage tendency
+##### from the stage state, Kᵘ S² overshoots where the solve mixes the shear away within the stage (Kᵘ Δt / Δz² ≫ 1): the
+##### TKE solve diffuses that overshoot into the neighbouring cells before the correction after the solves takes it back
+##### from the cell alone, and the internal energy pays the rest, a pump of TKE at the scale of the grid.
+#####
+
+solved_shear_before_tke_solve(fields, closure, model) = false
+solved_shear_before_tke_solve(::SubgridCloudFields{<:AppliedFluxEnergetics}, closure, model) =
+    implicit_stage(closure, model) && AtmosphereModels.momentum_solved_before_tracers(model)
+
+@inline function solved_shear_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+    _, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+    @inbounds begin
+        ρᵢ = s.ρ[i, j, k]
+        Δt = cl.stage_time_step[1, 1, 1]
+        Δu = (s.ρu[i, j, k] - cl.ρu⁻[i, j, k]) / ρᵢ
+        Δv = (s.ρv[i, j, k] - cl.ρv⁻[i, j, k]) / ρᵢ
+    end
+    Dᵘ = (Δu * Δu + Δv * Δv) / (2 * Δt)
+    return Pᵖ, Dᵘ
+end
+
+@kernel function _give_solved_shear_conversion!(ρe, cl, grid, closure, s, Kᶜ, Kᵘ, u, v)
+    i, j, k = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    Pᵖ, Dᵘ = solved_shear_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+    Pⁱ = Pᵖ + Dᵘ
+    ℂᴾ = shear_production_fraction(closure_ij.stability_functions)
+    @inbounds begin
+        cl.Pⁱ[i, j, k] = Pⁱ
+        ρe[i, j, k] += cl.stage_time_step[1, 1, 1] * s.ρ[i, j, k] * ℂᴾ * Pⁱ * !inactive_cell(i, j, k, grid)
+    end
+end
+
+function give_solved_shear_conversion!(closure_fields, closure, model)
+    grid = model.grid
+    cl = closure_fields.subgrid_cloud.cloud
+    s = applied_flux_state(model)
+    fill_halo_regions!((model.momentum.ρu, model.momentum.ρv))
+    u = SpecificValue(model.momentum.ρu, s.ρ)
+    v = SpecificValue(model.momentum.ρv, s.ρ)
+    launch!(grid.architecture, grid, :xyz, _give_solved_shear_conversion!, model.tracers[TKE_NAME], cl, grid, closure, s,
+            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v)
+    return nothing
+end
+
+# The rest of the solved shear conversion, (1 - ℂᴾ) Pⁱ, heats the air before its solve
+@kernel function _heat_by_solved_shear_conversion!(ρθ, cl, grid, closure, ρ)
+    i, j, k = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    ℂᴾ = shear_production_fraction(closure_ij.stability_functions)
+    @inbounds ρθ[i, j, k] += cl.stage_time_step[1, 1, 1] * ρ[i, j, k] * (1 - ℂᴾ) * cl.Pⁱ[i, j, k] / cl.ĉᵖΠ[i, j, k] *
+                             !inactive_cell(i, j, k, grid)
+end
+
 #####
 ##### The floor of e in the buoyancy sink rate
 #####
@@ -374,6 +446,7 @@ end
 function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
                                                              closure::FlavorOfTKEClosure, model, Δt, α)
     implicit_stage(closure, model) || return nothing
+    fill!(closure_fields.subgrid_cloud.cloud.stage_time_step, α * Δt)
     grid = model.grid
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
@@ -424,11 +497,11 @@ function AtmosphereModels.build_closure_stage_storage(::TKEClosureFields{<:Any, 
     return (; exchange, recombined_exchange = CenterField(grid), momentum)
 end
 
-@kernel function _store_stage_exchange!(x, cl)
+@kernel function _store_stage_exchange!(x, cl, injected)
     i, j, k = @index(Global, NTuple)
     # the conversion of the heating budget flux is a stage-state conversion too: its flux is in the slow tendency of ρθ
     @inbounds x[i, j, k] = cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k] + heating_flux_conversion(cl, i, j, k) -
-                           cl.P[i, j, k] - max(cl.B[i, j, k], 0)
+                           explicit_shear_conversion(cl, i, j, k, injected) - max(cl.B[i, j, k], 0)
 end
 
 @inline weighted_sum(i, j, k, x::Tuple{Any}, b::Tuple{Any}) = @inbounds b[1] * x[1][i, j, k]
@@ -465,6 +538,7 @@ function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEC
                                                              closure::FlavorOfTKEClosure, model, Δt,
                                                              recombination::AtmosphereModels.StageRecombination)
     implicit_stage(closure, model) || return nothing
+    fill!(closure_fields.subgrid_cloud.cloud.stage_time_step, Δt)
     grid = model.grid
     arch = grid.architecture
     cl = closure_fields.subgrid_cloud.cloud
@@ -472,7 +546,7 @@ function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEC
     i = recombination.stage
 
     # The conversions of the stage state Yᵢ₋₁ are in hand: keep their exchange, and recombine
-    launch!(arch, grid, :xyz, _store_stage_exchange!, storage.exchange[i], cl)
+    launch!(arch, grid, :xyz, _store_stage_exchange!, storage.exchange[i], cl, solved_shear_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
     launch!(arch, grid, :xyz, _recombine_stage_exchange!, storage.recombined_exchange,
             storage.exchange[1:i], recombination.tendency_weights)
 
@@ -508,6 +582,9 @@ function AtmosphereModels.closure_before_implicit_solve!(closure_fields::TKEClos
     name === :ρv && (parent(cl.ρv⁻) .= parent(model.momentum.ρv))
     pre = closure_fields.subgrid_cloud.presolve
     name ∈ keys(pre) && (parent(pre[name]) .= parent(Oceananigans.prognostic_fields(model)[name]))
+    # Momentum is solved: the TKE receives what that solve converted before its own solve
+    name === TKE_NAME && solved_shear_before_tke_solve(closure_fields.subgrid_cloud, closure, model) &&
+        give_solved_shear_conversion!(closure_fields, closure, model)
     return nothing
 end
 
@@ -530,12 +607,15 @@ function AtmosphereModels.closure_before_thermodynamic_solve!(closure_fields::TK
     ρθ = distribution_potential_temperature_density(model)
     launch!(grid.architecture, grid, :xyz, _heat_by_implicit_dissipation!, ρθ,
             fields.cloud, grid, closure_fields.Lᵉ, model.tracers[TKE_NAME], total_density(model.dynamics), Δt)
+    solved_shear_before_tke_solve(fields, closure, model) &&
+        launch!(grid.architecture, grid, :xyz, _heat_by_solved_shear_conversion!, ρθ, fields.cloud, grid, closure,
+                total_density(model.dynamics))
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     name ∈ keys(fields.presolve) && (parent(fields.presolve[name]) .= parent(ρθ))
     return nothing
 end
 
-@kernel function _correct_tke_to_solved_conversions!(ρe, ρθ, cl, grid, s, Kᶜ, Kᵘ, u, v, Δt, X)
+@kernel function _correct_tke_to_solved_conversions!(ρe, ρθ, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, Δt, X, injected)
     i, j, k = @index(Global, NTuple)
     Bᵖ, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     @inbounds begin
@@ -547,7 +627,10 @@ end
         B = cl.B[i, j, k]
         # what the stage gave: P and B⁺ explicitly, -ωᴮ e implicitly; what the solves converted:
         # Pᵖ + Dᵘ + Pˢ and Bᵖ + Bˢ
-        given = cl.P[i, j, k] + max(B, 0) - cl.ωᴮ[i, j, k] * e
+        # with the solved shear conversion given before the solve, it is given (Pⁱ, equal to Pᵖ + Dᵘ here)
+        Pⁱ = ifelse(injected, cl.Pⁱ[i, j, k], zero(e))
+        Pᵍ = explicit_shear_conversion(cl, i, j, k, injected) + Pⁱ
+        given = Pᵍ + max(B, 0) - cl.ωᴮ[i, j, k] * e
         # the latent part was drawn from the internal energy in the stage tendency (stage value)
         # (so was the conversion of the heating budget flux, an explicit flux of the stage state)
         Gᑫ = heating_flux_conversion(cl, i, j, k)
@@ -555,7 +638,10 @@ end
         cl.Pᵖ[i, j, k] = Pᵖ + Dᵘ
         cl.Bᵖ[i, j, k] = Bᵖ
         # the stage's values, kept for the energy budget after `update_state!` recomputes the others
-        cl.given[i, j, k] = cl.P[i, j, k] + max(B, 0)
+        # what reached the TKE and the air other than through the TKE's solve and this correction: the stage tendency,
+        # and the share (1 - ℂᴾ) of the shear conversion given before the solve, which heated the air
+        ℂᴾ = shear_production_fraction(getclosure(i, j, closure).stability_functions)
+        cl.given[i, j, k] = explicit_shear_conversion(cl, i, j, k, injected) + (1 - ℂᴾ) * Pⁱ + max(B, 0)
         cl.stage_b_θ[i, j, k] = cl.b_θ[i, j, k]
         cl.stage_b_qᵛ[i, j, k] = cl.b_qᵛ[i, j, k]
         cl.stage_b_qˡ[i, j, k] = cl.b_qˡ[i, j, k]
@@ -567,7 +653,7 @@ end
         # Benefit: e stays non-negative and the total energy still closes. The TKE also receives the
         # kinetic energy the stage combination removed from the mean flow (`stage_combination`, per volume).
         active = !inactive_cell(i, j, k, grid)
-        net = net_stage_conversion(X, i, j, k, converted, given, Pᵖ + Dᵘ + Bᵖ + cl.ωᴮ[i, j, k] * e)
+        net = net_stage_conversion(X, i, j, k, converted, given, Pᵖ + Dᵘ - Pⁱ + Bᵖ + cl.ωᴮ[i, j, k] * e)
         ρe⁺ = ρe[i, j, k] + (Δt * ρᵢ * net + cl.stage_combination[i, j, k]) * active
         ρe⁺′ = ifelse(ρe⁺ < 0, min(ρe[i, j, k], zero(ρe⁺)), ρe⁺)
         shortfall = ρe⁺′ - ρe⁺ # ≥ 0: energy the TKE did not pay
@@ -594,9 +680,10 @@ function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClos
     fill_halo_regions!((model.momentum.ρu, model.momentum.ρv))
     u = SpecificValue(model.momentum.ρu, ρ)
     v = SpecificValue(model.momentum.ρv, ρ)
-    launch!(grid.architecture, grid, :xyz, _correct_tke_to_solved_conversions!, model.tracers[TKE_NAME], s.ρθ, cl, grid, s,
+    launch!(grid.architecture, grid, :xyz, _correct_tke_to_solved_conversions!, model.tracers[TKE_NAME], s.ρθ, cl, grid, closure, s,
             closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, Δt,
-            recombined_stage_exchange(AtmosphereModels.closure_stage_storage(model.timestepper)))
+            recombined_stage_exchange(AtmosphereModels.closure_stage_storage(model.timestepper)),
+            solved_shear_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
     launch!(grid.architecture, grid, :xyz, _cool_by_shortfall!, s.ρθ, cl)
     return nothing
 end
@@ -628,20 +715,22 @@ end
 ##### The share of the shear production that the TKE does not receive
 #####
 ##### With stability functions whose shear production coefficient ℂᴾ is below one (`shear_production_fraction`),
-##### the stage tendency of the TKE carries ℂᴾ P and the air is heated by (1 - ℂᴾ) P, ρ ĉᵖ Π ∂t θˡⁱ += ρ (1 - ℂᴾ) P,
-##### with the same stage P: the stage gives the TKE and the internal energy together the shear conversion P, so
-##### the corrections after the solves (which top up the TKE to what the solves converted) are unchanged and the
-##### energy budget closes as with ℂᴾ = 1.
+##### the TKE receives ℂᴾ of the shear conversion and the air is heated by the rest, ρ ĉᵖ Π ∂t θˡⁱ += ρ (1 - ℂᴾ) P: in
+##### the stage tendency for the part it carries (all of P, or the work of the surface stress where the conversion of
+##### the solved momentum is given before the TKE solve), and before the solves of the TKE and of θˡⁱ for that
+##### conversion. Together they receive the shear conversion, so the corrections after the solves (which top up the
+##### TKE to what the solves converted) are unchanged and the energy budget closes as with ℂᴾ = 1.
 #####
 
 # Stability functions without a coefficient of their own give the TKE the whole shear production
 add_shear_production_heating!(Gⁿ, stability_functions, fields, closure_fields, closure, model) = nothing
 
-@kernel function _add_shear_production_heating!(Gρθ, grid, closure, cl, ρ)
+@kernel function _add_shear_production_heating!(Gρθ, grid, closure, cl, ρ, injected)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     ℂᴾ = shear_production_fraction(closure_ij.stability_functions)
-    @inbounds Gρθ[i, j, k] += ρ[i, j, k] * (1 - ℂᴾ) * cl.P[i, j, k] / cl.ĉᵖΠ[i, j, k] * !inactive_cell(i, j, k, grid)
+    P = explicit_shear_conversion(cl, i, j, k, injected)
+    @inbounds Gρθ[i, j, k] += ρ[i, j, k] * (1 - ℂᴾ) * P / cl.ĉᵖΠ[i, j, k] * !inactive_cell(i, j, k, grid)
 end
 
 function add_shear_production_heating!(Gⁿ, ::ColumnStabilityDamping, fields::SubgridCloudFields{<:AppliedFluxEnergetics},
@@ -649,7 +738,7 @@ function add_shear_production_heating!(Gⁿ, ::ColumnStabilityDamping, fields::S
     grid = model.grid
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     launch!(grid.architecture, grid, :xyz, _add_shear_production_heating!, Gⁿ[name], grid, closure, fields.cloud,
-            total_density(model.dynamics))
+            total_density(model.dynamics), solved_shear_before_tke_solve(fields, closure, model))
     return nothing
 end
 

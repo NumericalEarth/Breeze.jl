@@ -1197,7 +1197,7 @@ part of the buoyancy flux, formed at faces where ``Kᶜ`` and ``N²`` live and r
 centers — to the tendency of the `ρe` tracer. Under an explicit time discretization the sinks
 ``ρ Lᵉ e`` are added too.
 """
-@kernel function _add_tke_tendencies!(Gρe, grid, closure, closure_fields, velocities, ρe, ρ)
+@kernel function _add_tke_tendencies!(Gρe, grid, closure, closure_fields, velocities, ρe, ρ, injected)
     i, j, k = @index(Global, NTuple)
 
     closure_ij = getclosure(i, j, closure)
@@ -1207,7 +1207,7 @@ centers — to the tendency of the `ρe` tracer. Under an explicit time discreti
     # integrated by Runge–Kutta and can make production negative when the shear reverses.
     u, v = velocities.u, velocities.v
     P = shear_production_fraction(closure_ij.stability_functions) *
-        tke_shear_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields, u, v)
+        explicit_tke_shear_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields, u, v, injected)
     B = tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields)
     B⁺ = max(0, B)
 
@@ -1230,7 +1230,7 @@ function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, clos
 
     launch!(arch, grid, :xyz, _add_tke_tendencies!,
             Gⁿ[TKE_NAME], grid, closure, closure_fields,
-            model.velocities, model.tracers[TKE_NAME], ρ)
+            model.velocities, model.tracers[TKE_NAME], ρ, solved_shear_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
 
     add_dissipative_heating!(Gⁿ, closure_fields.subgrid_cloud, closure_fields, closure, model)
     add_shear_production_heating!(Gⁿ, closure_stability_functions(closure), closure_fields.subgrid_cloud, closure_fields, closure, model)

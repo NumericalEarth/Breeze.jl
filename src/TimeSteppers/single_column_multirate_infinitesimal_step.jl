@@ -33,6 +33,9 @@ const FlatHorizontalGrid = AbstractGrid{<:Any, <:Flat, <:Flat, <:Bounded}
 const SingleColumnMultirateModel =
     AtmosphereModel{<:AnelasticDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep, <:FlatHorizontalGrid}
 
+# The stage solves each prognostic in the order of the prognostic fields, momentum first, the thermodynamic variable last
+AtmosphereModels.momentum_solved_before_tracers(::SingleColumnMultirateModel) = true
+
 function multirate_substepper(grid, ::AnelasticDynamics, prognostic_fields; kw...)
     grid isa FlatHorizontalGrid ||
         throw(ArgumentError("MultirateInfinitesimalStep supports AnelasticDynamics only on a single-column grid, " *

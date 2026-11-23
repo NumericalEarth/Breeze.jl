@@ -736,6 +736,15 @@ closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt) = nothi
 closure_before_implicit_solve!(closure_fields, closure, model, name) = nothing
 
 """
+    momentum_solved_before_tracers(model)
+
+Whether the vertically implicit solves of a stage of the time stepper of `model` solve momentum before the tracers
+(and every tracer's solve follows the solves of momentum), so that a closure can form, before the solve of one of its
+own tracers, what the momentum solve converted. `false` unless a time stepper says so.
+"""
+momentum_solved_before_tracers(model) = false
+
+"""
 $(TYPEDEF)
 
 How stage ``i`` of a multirate infinitesimal step recombines the states and the slow tendencies of
