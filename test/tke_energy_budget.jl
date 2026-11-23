@@ -83,7 +83,8 @@ budget_column(f::ZeroField, Nz) = zeros(Nz)
 budget_column(f, Nz) = budget_column(f)
 
 function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2400, path = :distribution, FT = Float64,
-                          e₀ = z -> 0.6 * exp(-z / 500), timestepper = :SSPRungeKutta3, closure_keywords = NamedTuple())
+                          e₀ = z -> 0.6 * exp(-z / 500), timestepper = :SSPRungeKutta3, timestepper_kwargs = NamedTuple(),
+                          closure_keywords = NamedTuple())
     grid = RectilinearGrid(CPU(), FT; size=Nz, z=(0, H), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)
@@ -96,7 +97,8 @@ function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2
          ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 5.2e-5)),
          ρu = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 0.08)),
          ρv = FieldBoundaryConditions(bottom = FluxBoundaryCondition(-1.17 * 0.02))) : NamedTuple()
-    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants, microphysics, closure, boundary_conditions, timestepper)
+    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants, microphysics, closure, boundary_conditions, timestepper,
+                            timestepper_kwargs)
 
     # BOMEX-like: a mixed layer, a conditionally unstable cloud layer moistened to saturation, an inversion
     θ₀(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4 + (z - 1480) * 5.8 / 520
@@ -390,12 +392,15 @@ function multirate_step_weights(tableau)
     return ω
 end
 
-@testset "TKE energy budget of the whole multirate infinitesimal step ($path, $FT, surface fluxes = $surface_fluxes)" for path in whole_shear_paths, FT in (Float64, Float32), surface_fluxes in (false, true)
-    model = moist_tke_column(; path, FT, surface_fluxes, timestepper = :MultirateInfinitesimalStep)
+# The default coefficient set, which keeps two registers, and one that accumulates the stage forcings
+@testset "TKE energy budget of the whole multirate infinitesimal step ($coefficients, $path, $FT, surface fluxes = $surface_fluxes)" for
+        coefficients in (:ConvexLinearMIS6, :SSPMIS43), path in whole_shear_paths, FT in (Float64, Float32), surface_fluxes in (false, true)
+    model = moist_tke_column(; path, FT, surface_fluxes, timestepper = :MultirateInfinitesimalStep,
+                             timestepper_kwargs = (; coefficients))
     @test model.timestepper isa MultirateInfinitesimalStep
     @test isnothing(model.timestepper.substepper)
     Δt = 10
-    tableau = Breeze.TimeSteppers.multirate_infinitesimal_step_tableau(:SSPMIS43) # the default, in Float64
+    tableau = Breeze.TimeSteppers.multirate_infinitesimal_step_tableau(coefficients) # in Float64
     (; β, d) = tableau
     s = length(d)
     ω = multirate_step_weights(tableau)
@@ -478,7 +483,7 @@ end
             # the shear production the TKE received over the step is the mean flow's loss
             @test sum(ω[i] * (stages[i].shear + stages[i].combination) for i in 1:s) ≈ -ΔKE rtol=1e-8 atol=(tight ? 1e-12 * scale : roundoff_KE)
             # stage 2 of SSPMIS43 extrapolates beyond the first stage's state, which adds kinetic energy
-            @test D[2] < 0
+            coefficients === :SSPMIS43 && @test D[2] < 0
             @info "multirate step $n ($FT)" ΔKE shear=sum(ω[i] * stages[i].shear for i in 1:s) recombination=sum(ω .* D) D
         end
     end
