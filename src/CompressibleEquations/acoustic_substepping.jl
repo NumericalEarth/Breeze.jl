@@ -1818,7 +1818,7 @@ end
 #
 # and δp = p₀ (exp(δ ln p) − 1). δρθ, δρᵛ and δρᵈ are exact differences of the prognostic densities,
 # δr and γ − γ₀ are formed from them without cancellation, and the logarithm and exponential are
-# those of `log_one_plus` and `exponential_minus_one`, so δp has the relative accuracy of the
+# `log1p` and `expm1`, so δp has the relative accuracy of the
 # arithmetic rather than that of p. It equals the difference of the diagnosed pressures up to the
 # rounding of those.
 @inline function clear_air_pressure_change(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
@@ -1856,10 +1856,10 @@ end
     γ = 1 / (1 - κ)
     δγ = γ * γ₀ * clear_air_exner_exponent_change(κ̂, r, r₀, δr, constants)
 
-    δlnm = log_one_plus(Rᵛ * δr / (Rᵈ + r₀ * Rᵛ))
-    δlnp = γ * (log_one_plus(δρᵡ / ρ̂ᵡ₀) + δlnm) + δγ * log(p̂₀ / pˢᵗ) / γ₀
+    δlnm = log1p(Rᵛ * δr / (Rᵈ + r₀ * Rᵛ))
+    δlnp = γ * (log1p(δρᵡ / ρ̂ᵡ₀) + δlnm) + δγ * log(p̂₀ / pˢᵗ) / γ₀
 
-    return p₀ * exponential_minus_one(δlnp)
+    return p₀ * expm1(δlnp)
 end
 
 # The Exner exponent of air with vapor mixing ratio r and no condensate (`exner_exponent`), where
@@ -1880,20 +1880,6 @@ end
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     return δr * (Rᵛ * cᵖᵈ - Rᵈ * cᵖᵛ) / ((cᵖᵈ + r * cᵖᵛ) * (cᵖᵈ + r₀ * cᵖᵛ))
-end
-
-# ln(1 + x) and exp(x) − 1 to the relative accuracy of the arithmetic for small x, from `log` and
-# `exp` alone (Kahan): the rounding of 1 + x, or of exp(x), is undone by the factor it is multiplied by.
-@inline function log_one_plus(x)
-    u = 1 + x
-    d = u - 1
-    return ifelse(d == 0, x, log(u) * x / ifelse(d == 0, one(d), d))
-end
-
-@inline function exponential_minus_one(x)
-    u = exp(x)
-    l = log(u)
-    return ifelse(l == 0, x, (u - 1) * x / ifelse(l == 0, one(l), l))
 end
 
 function StageEntryForceRemainder(direction, substepper::AcousticSubstepper, model, step_start)
@@ -2552,14 +2538,20 @@ end
 
 # Zero normal perturbations at walls and prescribed-flow faces.
 
-@kernel function _zero_x_wall_face!(ρu′, iᶠ)
+@kernel function _zero_x_wall_faces!(ρu′, Nx, left, right)
     j, k = @index(Global, NTuple)
-    @inbounds ρu′[iᶠ, j, k] = 0
+    @inbounds begin
+        left && (ρu′[1, j, k] = 0)
+        right && (ρu′[Nx + 1, j, k] = 0)
+    end
 end
 
-@kernel function _zero_y_wall_face!(ρv′, jᶠ)
+@kernel function _zero_y_wall_faces!(ρv′, Ny, left, right)
     i, k = @index(Global, NTuple)
-    @inbounds ρv′[i, jᶠ, k] = 0
+    @inbounds begin
+        left && (ρv′[i, 1, k] = 0)
+        right && (ρv′[i, Ny + 1, k] = 0)
+    end
 end
 
 # Whether a wall closes the left or the right side of a direction with topology `T`. The topology of
@@ -2578,10 +2570,10 @@ function enforce_wall_impenetrability!(substepper, model, grid, arch)
     ρv′ = substepper.momentum_perturbation.v
     # Auxiliary `nothing` BCs do not zero faces. Enforce zero perturbations explicitly
     # to match the topology-aware divergence and hold prescribed flow in the stage-entry state.
-    left_side_is_closed(TX)  && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
-    right_side_is_closed(TX) && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
-    left_side_is_closed(TY)  && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
-    right_side_is_closed(TY) && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
+    xl, xr = left_side_is_closed(TX), right_side_is_closed(TX)
+    yl, yr = left_side_is_closed(TY), right_side_is_closed(TY)
+    (xl || xr) && launch!(arch, grid, :yz, _zero_x_wall_faces!, ρu′, Nx, xl, xr)
+    (yl || yr) && launch!(arch, grid, :xz, _zero_y_wall_faces!, ρv′, Ny, yl, yr)
     return nothing
 end
 
