@@ -1030,7 +1030,7 @@ end
 
 WeightedSum(terms, weights) = WeightedSum{eltype(weights), typeof(terms), typeof(weights)}(terms, weights)
 
-Adapt.adapt_structure(to, s::WeightedSum) = WeightedSum(adapt(to, s.terms), s.weights)
+Adapt.adapt_structure(to, s::WeightedSum) = WeightedSum(adapt(to, s.terms), adapt(to, s.weights))
 
 Base.size(s::WeightedSum) = size(first(s.terms))
 
@@ -1180,7 +1180,7 @@ function assemble_transport_density_tendency!(::DiagonalStorage, ts, model, Δt)
     grid = model.grid
     terms, weights = transport_density_increment_forcing(ts.storage, ts, model, Δt)
     wβᵢ = β[i, i] / d[i]
-    all(iszero, weights) && isone(wβᵢ) && return nothing
+    all(is_known_zero, weights) && isone(wβᵢ) && return nothing
     launch!(architecture(grid), grid, :xyz, _combine_transport_density_tendency!,
             ts.substepper.transport_density_tendency, terms, weights, wβᵢ)
     return nothing
@@ -1476,7 +1476,7 @@ function predicted_stage_forcing(::DiagonalStorage, ts, model, name)
     S = previous_scalar_tendency(ts, name)
     Δt = convert(FT, ts.current_Δt[])
     terms, weights = increment_forcing(stage_increment_source(model, name), ts, model, Δt, name)
-    all(iszero, weights) && return S
+    all(is_known_zero, weights) && return S
     return PredictedStageForcing(S, one(FT), WeightedSum(terms, weights), one(FT), nothing, one(FT))
 end
 
@@ -1877,7 +1877,7 @@ function assemble_stage_forcing!(storage::DiagonalStorage, ts, model, Δt, name,
     updates = assembly_register_updates(storage, source, ts, model, Δt, name)
 
     # Nothing to do in stage 1, nor in any stage of Wicker–Skamarock RK3
-    forced = !all(iszero, weights)
+    forced = !all(is_known_zero, weights)
     forced || !isempty(updates) || return nothing
     terms, weights = forced ? (terms, weights) : ((), ())
 
@@ -1892,6 +1892,10 @@ prognostic_increment(source::IncrementFromState, ts, model, name) =
     StateIncrement(source.u, ts.Uⁿ[name], stage_residual(ts.residual, model, name))
 
 forcing_weight(tableau, Δt, i, j) = tableau.γ[i, j] / (tableau.d[i] * Δt)
+
+# Whether a stage weight is known to be zero, so its term can be skipped. A weight that holds a traced
+# time step (Reactant) is not known, and its term is added with whatever value it has.
+is_known_zero(w) = iszero(w)
 
 # The increments that force field `name` in the current stage and their weights wᵢⱼ, as the
 # registers hold them when the stage is assembled.

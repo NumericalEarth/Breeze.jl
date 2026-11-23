@@ -63,6 +63,9 @@ end
 # eager guard cannot branch on a traced value.
 @inline AtmosphereModels.invalid_time_step(::TracedRNumber) = false
 
+# A stage weight that holds a traced time step cannot be branched on, so its term is always added.
+TimeSteppers.is_known_zero(::TracedRNumber) = false
+
 # Reactant initializes through `first_time_step!`, and the eager guard branches on traced
 # clock fields; mirrors OceananigansReactantExt's no-ops for the upstream steppers.
 OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::CompressibleAcousticModel{<:ReactantState}, Δt, callbacks) = nothing
