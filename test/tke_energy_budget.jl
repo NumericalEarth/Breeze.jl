@@ -226,6 +226,10 @@ function stage_energy_budget(model, Δt; ρe = budget_column(model.tracers.ρe))
     after[:, 1] .+= budget_column(cl.shortfall_ρθ) # the solves' change, without the cooling after them
     before = ρφ(pre)
     Δhᵈ = -sum(Δzᶜ .* sum(Z .* (after .- before), dims=2))
+    # The rounding of Δhᵈ: the stored densities after the solves carry a relative rounding of ϵ, which the sum
+    # weights by Z. Where the conversions of θˡⁱ, vapor and condensate nearly cancel, Δhᵈ is small against the
+    # terms it is the sum of and this rounding, not the scheme, sets how well it matches the conversion.
+    Δhᵈ_rounding = eps(eltype(Z)) * sum(Δzᶜ .* sum(abs.(Z .* after) .+ abs.(Z .* before), dims=2))
 
     # the TKE: explicit stage sources were added before its solve; the solve and the correction after
     Δρe = sum(Δzᶜ .* (ρe .- budget_column(pre.ρe)))
@@ -239,7 +243,7 @@ function stage_energy_budget(model, Δt; ρe = budget_column(model.tracers.ρe))
     solved = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ)))
     given_rate = sum(ρ .* Δzᶜ .* budget_column(cl.given))
     stage_state_rate = sum(ρ .* Δzᶜ .* budget_column(cl.stage_surface))
-    return (; ΔKE, Δhᵈ, Δρe, given_explicitly, converted, dissipated, shortfall, combination, solved, given_rate, stage_state_rate,
+    return (; ΔKE, Δhᵈ, Δhᵈ_rounding, Δρe, given_explicitly, converted, dissipated, shortfall, combination, solved, given_rate, stage_state_rate,
             shear = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Pᵖ)), buoyancy = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.Bᵖ)))
 end
 
@@ -321,7 +325,7 @@ StageRecorder(record) = StageRecorder(Oceananigans.UpdateStateCallsite(), record
         for (m, s) in enumerate(stages)
             sscale = abs(s.ΔKE) + abs(s.Δhᵈ) + abs(s.dissipated)
             @test -s.ΔKE ≈ s.shear rtol=1e-8 atol=1e-12 * sscale
-            @test -s.Δhᵈ ≈ s.buoyancy rtol=1e-7 atol=1e-11 * sscale
+            @test -s.Δhᵈ ≈ s.buoyancy rtol=1e-7 atol=max(1e-11 * sscale, s.Δhᵈ_rounding)
             @test s.Δρe + s.given_explicitly ≈ s.converted - s.dissipated + s.shortfall + s.combination rtol=1e-9 atol=1e-11 * sscale
             # what the closure gave the TKE is the kinetic energy the combination removed
             @test s.combination ≈ D[m] rtol=1e-10 atol=1e-14 * scale
@@ -448,7 +452,7 @@ end
         for (i, b) in enumerate(stages)
             sscale = abs(b.ΔKE) + abs(b.Δhᵈ) + abs(b.dissipated)
             @test -b.ΔKE ≈ b.shear rtol=1e-8 atol=(tight ? 1e-12 * sscale : roundoff_KE)
-            tight && @test -b.Δhᵈ ≈ b.buoyancy rtol=1e-7 atol=1e-11 * sscale
+            tight && @test -b.Δhᵈ ≈ b.buoyancy rtol=1e-7 atol=max(1e-11 * sscale, b.Δhᵈ_rounding)
             # the TKE receives what the solves converted, the recombined exchange of the stage states, and
             # what the recombination removed from the mean flow, less what it dissipates
             @test b.Δρe ≈ b.solved + b.exchange - b.dissipated + b.shortfall + b.combination rtol=1e-9 atol=(tight ? 1e-11 * sscale : roundoff_TKE)
