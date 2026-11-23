@@ -15,7 +15,8 @@ export
     azimuthal_mean,
     azimuthal_mean!,
     # Interface functions extended by Microphysics
-    microphysics_phase_equilibrium
+    microphysics_phase_equilibrium,
+    condensate_phase_equilibrium
 
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 

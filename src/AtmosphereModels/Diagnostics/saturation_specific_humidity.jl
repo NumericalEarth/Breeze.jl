@@ -97,6 +97,21 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
+Return the phase equilibrium of the condensate that `microphysics` forms: [`WarmPhaseEquilibrium`](@ref) for a
+scheme whose condensate is liquid, [`MixedPhaseEquilibrium`](@ref) for one with ice. It is the equilibrium of the
+saturation adjustment of a scheme that has one (`microphysics_phase_equilibrium`), and for a scheme that forms ice
+by its own processes, liquid turning to ice between the temperatures at which its liquid freezes. A subgrid distribution of a
+turbulence closure condenses on it, so that the condensate it implies is that of the microphysics.
+
+`microphysics_phase_equilibrium` is the reference of the saturation diagnostics of the scheme, and differs where the
+scheme's own prognostics are defined over liquid: the vapor excess and the relative humidity of P3 are over liquid,
+while its condensate includes ice.
+"""
+@inline condensate_phase_equilibrium(μ) = microphysics_phase_equilibrium(μ)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
 Compute the *saturation total specific moisture* under the assumption that all moisture is vapor at saturation,
 ``qᵗ = qᵛ⁺``. With this assumption, the equation of state for moist air can be solved in closed form, yielding an
 expression for the saturation specific humidity in terms of temperature `T` and pressure `p` alone:
