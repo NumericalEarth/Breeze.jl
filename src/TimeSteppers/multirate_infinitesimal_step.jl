@@ -869,12 +869,12 @@ stage_assembly_parameters(::TerrainCompressibleAcousticModel, field) =
 # its weight (`stage_offsets`). The sum adds the small `w Z` to the state, as a stage update does,
 # so it takes a round-off treatment (see `start_state_rounding`); the random numbers of a
 # stochastic one are a function of the indices and the key, so every read returns the same value.
-struct StageStartState{T, U, Z, R} <: AbstractArray{T, 3}
+struct StageStartState{T, U, Z, R, K} <: AbstractArray{T, 3}
     Uⁿ :: U
     offset :: Z
     weight :: T
     rounding :: R
-    key :: UInt32
+    key :: K
 end
 
 Adapt.adapt_structure(to, s::StageStartState) =
