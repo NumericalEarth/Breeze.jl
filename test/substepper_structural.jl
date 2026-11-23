@@ -49,7 +49,7 @@ const CPD_STR = 1005.0
 @inline mass_flux_y(i, j, k, grid, ρ, v) = ℑyᵃᶠᵃ(i, j, k, grid, ρ) * @inbounds v[i, j, k]
 @inline mass_flux_z(i, j, k, grid, ρ, w) = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * @inbounds w[i, j, k]
 
-function _build_str_model(arch; ω = 0.55, substeps = nothing, damping = NoDivergenceDamping(), model_kwargs...)
+function _build_str_model(arch; ω = 0.55, substeps = nothing, damping = NoDivergenceDamping())
     grid = RectilinearGrid(arch;
                            size = (8, 8, NZ_STR), halo = (5, 5, 5),
                            x = (0, 100e3), y = (0, 100e3), z = (0, Lz_STR),
@@ -61,8 +61,7 @@ function _build_str_model(arch; ω = 0.55, substeps = nothing, damping = NoDiver
                                base_pressure = 1e5,
                                standard_pressure = 1e5)
     return AtmosphereModel(grid; dynamics = dyn,
-                                  thermodynamic_constants = constants,
-                                  model_kwargs...)
+                                  thermodynamic_constants = constants)
 end
 
 function _set_str_rest!(model)
@@ -301,11 +300,30 @@ end
 #####
 
 @testset "S5c — Flux boundary tendencies enter acoustic RK stages" begin
-    # The grid and time discretization of the testsets above, so that only what the boundary
-    # condition changes is compiled anew.
+    grid = RectilinearGrid(default_arch;
+                           size = (8, 8, 8), halo = (5, 5, 5),
+                           x = (0, 1), y = (0, 1), z = (0, 1),
+                           topology = (Periodic, Periodic, Bounded))
+
+    constants = ThermodynamicConstants(eltype(grid))
+    td = SplitExplicitTimeDiscretization(substeps = 6,
+                                         damping = NoDivergenceDamping())
+    dyn = CompressibleDynamics(td;
+                               reference_potential_temperature = z -> 300,
+                               base_pressure = 1e5,
+                               standard_pressure = 1e5)
+
     ρu_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.0))
-    model = _build_str_model(default_arch; boundary_conditions = (ρu = ρu_bcs,))
-    _set_str_rest!(model)
+    model = AtmosphereModel(grid; dynamics = dyn,
+                                  thermodynamic_constants = constants,
+                                  boundary_conditions = (ρu = ρu_bcs,))
+
+    ref = model.dynamics.reference_state
+    Rᵈ  = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
+    parent(model.dynamics.dry_density) .= parent(ref.density)
+    ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
+    parent(ρθ) .= parent(ref.pressure) ./ (Rᵈ .* parent(ref.exner_function))
+    update_state!(model)
 
     ρu₀ = sum(Array(interior(model.momentum.ρu)))
     time_step!(model, 1e-3)
@@ -590,8 +608,7 @@ end
 
 @testset "S10 — Transport-average mass flux matches the dry-density update (default ω = 0.65, $(nameof(typeof(damping))))" for damping in
         (NoDivergenceDamping(), ThermalDivergenceDamping(; coefficient = 0.1))
-    # The stages below are run by hand with the Wicker–Skamarock stage fractions.
-    model = _build_str_model(default_arch; ω = 0.65, substeps = 6, damping, timestepper = :AcousticRungeKutta3)
+    model = _build_str_model(default_arch; ω = 0.65, substeps = 6, damping)
     _set_str_rest!(model)
 
     ρθ_field = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
@@ -614,7 +631,7 @@ end
     freeze_linearization_state!(ts.substepper, model)
     ρᵈ⁰ = CenterField(grid)
     parent(ρᵈ⁰) .= parent(ρᵈ)
-    acoustic_rk3_substep!(model, Δt, ts.β₁, RoundToNearest(), ())
+    acoustic_rk3_substep!(model, Δt, ts.β₁)
 
     residual₁, Δρᵈ₁ = stage_mass_flux_residual(model, ρᵈ⁰, ρᵈ⁰, ts.β₁, Δt)
     @test Δρᵈ₁ > 0
@@ -625,7 +642,7 @@ end
     cache_transport_velocity!(model)
     ρᵈᴸ = CenterField(grid)
     parent(ρᵈᴸ) .= parent(ρᵈ)
-    acoustic_rk3_substep!(model, Δt, ts.β₂, RoundToNearest(), ())
+    acoustic_rk3_substep!(model, Δt, ts.β₂)
 
     residual₂, Δρᵈ₂ = stage_mass_flux_residual(model, ρᵈᴸ, ρᵈ⁰, ts.β₂, Δt)
     @test Δρᵈ₂ > 0

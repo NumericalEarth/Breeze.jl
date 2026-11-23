@@ -202,7 +202,7 @@ then update remaining scalars. The stage's updates are rounded with the round-of
 With `PostLoopScalarTendencies` the scalar tendencies are rebuilt between the loop and the
 scalar update, and `callbacks` with a `TendencyCallsite` fire again on them.
 """
-function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding, callbacks)
+function acoustic_rk3_substep!(model::AtmosphereModel, Δt, β, rounding = RoundToNearest(), callbacks = ())
     ts = model.timestepper
     substepper = ts.substepper
     U⁰ = stage_start_state(ts, model)
