@@ -99,8 +99,8 @@ so the relaxation keeps its bounds.
     ℒˡ = vaporization_latent_heat(constants, T)
     ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
 
-    # The saturation excess of total water and the cloud's equilibrium condensate. No model of
-    # condensation is attached to P3 here, so the hook is called with `nothing`.
+    # The saturation excess of total water and the cloud's equilibrium condensate, of the subgrid
+    # distribution where the `condensation` option supplies Γ.
     vapor_excess = qᵛ - qᵛ⁺ˡ
     saturation_excess = vapor_excess + ξˡ * max(0, ℳ.qᶜˡ)
     equilibrium_condensate = liquid_equilibrium_condensate(Γ, saturation_excess, ξˡ)
@@ -130,9 +130,12 @@ so the relaxation keeps its bounds.
     rain_cond = ifelse(tiny_rain, zero(FT), max(0, rain_rate))
     rain_evap = ifelse(tiny_rain, max(0, ℳ.qʳ) / τ, max(0, -rain_rate))
 
-    # With a subgrid distribution, activation acts in the part of the cell above its threshold,
-    # at the mean vapor excess there (`activation_vapor`)
-    activating = activation_vapor(distribution, qᵛ, qᵛ⁺ˡ, activation_relative_threshold(p3.aerosol, p3))
+    # Activation sees the vapor of the explicit rates (`p3_activation_vapor`): with a subgrid
+    # distribution, the mean vapor excess of the part of the cell above its threshold; with
+    # `CloudCondensationOnly`, prescribed-number droplets are seeded at the vapor that cloud liquid
+    # sees, qᵛ + Γ. Without cloud the droplets' relaxation rate is zero, so this seed is what
+    # starts cloud in a cell whose subgrid distribution is saturated and whose grid mean is not.
+    activating = p3_activation_vapor(p3, Γ, qᵛ, qᵛ⁺ˡ, distribution)
     activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
                                                    activating.qᵛ, qᵛ⁺ˡ, ξˡ, T, ρ)
     activation = (; mass = activation.mass * activating.fraction,
