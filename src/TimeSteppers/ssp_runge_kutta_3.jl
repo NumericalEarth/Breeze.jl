@@ -3,6 +3,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: prognostic_fields, fields
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
+    next_time,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
@@ -292,8 +293,9 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     # u^(1) sits at tⁿ + Δt but u^(2) at tⁿ + Δt/2; evaluating G(u^(2)) at tⁿ + Δt breaks third order
     c¹, c² = AtmosphereModels.stage_abscissae(ts)  # = 1, 1/2
 
-    # Compute the next time step a priori to reduce floating point error accumulation
-    tⁿ⁺¹ = model.clock.time + Δt
+    # Compute the next time a priori to reduce floating point error accumulation; `next_time`
+    # also serves a calendar clock, whose `time` cannot take a `Δt` in seconds directly.
+    tⁿ⁺¹ = next_time(model.clock, Δt)
 
     # Store u^(0) for use in stages 2 and 3
     store_initial_state!(model)
