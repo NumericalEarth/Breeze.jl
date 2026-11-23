@@ -226,7 +226,7 @@ end
         cl.P[i, j, k] = P + Pˢ
         cl.Bˢ[i, j, k] = Bˢ
         cl.Pˢ[i, j, k] = Pˢ
-        cl.ωᴮ[i, j, k] = -min(0, B) / max(e[i, j, k], buoyancy_sink_floor_value(grid_float_type(grid)))
+        cl.ωᴮ[i, j, k] = -min(0, B) / applied_flux_buoyancy_sink_tke(i, j, k, grid, e)
     end
 end
 
@@ -295,6 +295,34 @@ end
 @inline buoyancy_sink_floor(fields, closure, FT) = closure.minimum_tke
 @inline buoyancy_sink_floor(::SubgridCloudFields{<:AppliedFluxEnergetics}, closure, FT) = buoyancy_sink_floor_value(FT)
 @inline buoyancy_sink_floor_value(FT) = sqrt(floatmin(FT))
+
+# The TKE that the buoyancy sink rate ωᴮ = -B⁻ / e divides by. The plain closure: e at the center, floored at
+# `minimum_tke`. With the conversions of the applied fluxes, B at the center is the half-cell weighted sum of the
+# conversions at its two faces, each proportional to the diffusivity there and so to the TKE there; the sink rate
+# divides by the TKE interpolated to those faces with the same weights, so that it is a ratio of collocated
+# quantities: bounded by the diffusivity per unit TKE of the faces, whatever e at the center. (Dividing by e at the
+# center, a cell whose own e vanishes while a turbulent neighbour's face converts makes ωᴮ unbounded: its implicit
+# sink then absorbs the TKE that diffuses in during the solve, and the correction after the solves, which replaces
+# the implicit sink by the solved conversion, returns all of it to that cell.)
+@inline buoyancy_sink_tke(i, j, k, grid, fields, closure, e) = @inbounds max(e[i, j, k], buoyancy_sink_floor(fields, closure, grid_float_type(grid)))
+
+@inline buoyancy_sink_tke(i, j, k, grid, ::SubgridCloudFields{<:AppliedFluxEnergetics}, closure, e) =
+    applied_flux_buoyancy_sink_tke(i, j, k, grid, e)
+
+@inline positive_tkeᶜᶜᶜ(i, j, k, grid, e) = @inbounds max(e[i, j, k], zero(eltype(e)))
+
+@inline function applied_flux_buoyancy_sink_tke(i, j, k, grid, e)
+    FT = grid_float_type(grid)
+    Nz = size(grid, 3)
+    zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
+    wˡᵒʷ = ifelse(k > 1, zᶜ - znode(i, j, k, grid, Center(), Center(), Face()), zero(FT))
+    wᵘᵖ = ifelse(k < Nz, znode(i, j, k + 1, grid, Center(), Center(), Face()) - zᶜ, zero(FT))
+    # the boundary faces carry no conversion, and their halo values are not read
+    eˡᵒʷ = ifelse(k > 1, ℑzᵃᵃᶠ(i, j, max(k, 2), grid, positive_tkeᶜᶜᶜ, e), zero(FT))
+    eᵘᵖ = ifelse(k < Nz, ℑzᵃᵃᶠ(i, j, min(k + 1, Nz), grid, positive_tkeᶜᶜᶜ, e), zero(FT))
+    ē = (wˡᵒʷ * eˡᵒʷ + wᵘᵖ * eᵘᵖ) / (wˡᵒʷ + wᵘᵖ)
+    return max(ē, buoyancy_sink_floor_value(FT))
+end
 
 #####
 ##### Dissipative heating and the conversions of the solved state

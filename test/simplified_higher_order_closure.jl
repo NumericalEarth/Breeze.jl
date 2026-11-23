@@ -147,6 +147,23 @@ column_data(field) = Array(interior(field))
         end
     end
 
+    # The buoyancy sink rate ωᴮ = -B⁻ / e of a cell without TKE between turbulent cells: B at the center is formed from
+    # the conversions at its faces, whose diffusivities the turbulent neighbours give, so dividing by e at the center
+    # made ωᴮ ~ 10¹⁵⁰ s⁻¹; divided by the TKE of those faces it is the diffusivity per unit TKE there
+    @testset "The buoyancy sink rate next to a cell without TKE" begin
+        grid = RectilinearGrid(default_arch, FT; size = Nz, z = (0, 2400), topology = (Flat, Flat, Bounded))
+        model = shoc_boundary_layer_model(grid)
+        ρ = column_data(model.dynamics.reference_state.density)[1, 1, :]
+        interior(model.tracers.ρe)[1, 1, :] .= ρ .* [isodd(k) ? FT(0.5) : zero(FT) for k in 1:Nz]
+        Oceananigans.TimeSteppers.update_state!(model)
+        cloud = model.closure_fields.subgrid_cloud.cloud
+        @test minimum(column_data(cloud.B)) < 0
+        @test all(isfinite, column_data(cloud.ωᴮ))
+        @test maximum(column_data(cloud.ωᴮ)) < 1
+        @test all(isfinite, column_data(model.closure_fields.Lᵉ))
+        @test minimum(column_data(model.closure_fields.Lᵉ)) > -1
+    end
+
     @testset "Rebuilding and materializing the closure" begin
         grid = RectilinearGrid(default_arch, FT; size = Nz, z = (0, 2400), topology = (Flat, Flat, Bounded))
         model = shoc_boundary_layer_model(grid)
