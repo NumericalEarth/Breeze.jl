@@ -552,18 +552,19 @@ depend on `N²`: a fixed point, solved by the closure's `solver` ([`SinglePass`]
 the distribution of the update exists, the static stability is `initial_stability`
 (`DryStaticStability()` by default).
 
-With `latent_static_stability = false` the latent part enters the buoyancy production of the TKE only: the
-static stability that the mixing length and the stability functions read stays `initial_stability`, the
-stratification of a displacement without phase change, as in `shoc.F90`, whose Brunt–Väisälä frequency is that
-of the virtual potential temperature while its buoyancy production is the buoyancy flux of its distribution.
+The buoyancy production of the TKE always carries the latent part of the subgrid condensation. `stratification`
+chooses the static stability that the mixing length and the stability functions read once the distribution exists:
+[`LatentStratification`](@ref) (the default, the form above), [`MeanLiquidStratification`](@ref) (that of the
+grid-mean state with the distribution's mean liquid as its condensate, the Brunt–Väisälä frequency of `shoc.F90`) or
+[`InitialStratification`](@ref) (`initial_stability` itself).
 
 $(TYPEDFIELDS)
 """
-struct CondensateFluxFraction{S}
+struct CondensateFluxFraction{S, T}
     "Static stability of the first evaluation of an update, before the distribution exists"
     initial_stability :: S
-    "Whether the static stability is the latent-corrected one (`true`), or the latent part enters only the buoyancy production (`false`)"
-    latent_static_stability :: Bool
+    "Static stability once the distribution exists: `LatentStratification()`, `MeanLiquidStratification()` or `InitialStratification()`"
+    stratification :: T
 end
 
 """
@@ -571,11 +572,58 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`CondensateFluxFraction`](@ref).
 """
-CondensateFluxFraction(initial_stability = DryStaticStability(); latent_static_stability = true) =
-    CondensateFluxFraction(initial_stability, latent_static_stability)
+CondensateFluxFraction(initial_stability = DryStaticStability(); stratification = LatentStratification()) =
+    CondensateFluxFraction(initial_stability, stratification)
 
 Base.show(io::IO, f::CondensateFluxFraction) =
-    print(io, "CondensateFluxFraction(", summary(f.initial_stability), f.latent_static_stability ? "" : ", latent_static_stability = false", ")")
+    print(io, "CondensateFluxFraction(", summary(f.initial_stability), stratification_summary(f.stratification), ")")
+
+"""
+    LatentStratification()
+
+The static stability of [`CondensateFluxFraction`](@ref) once the distribution exists that carries the latent part of
+the subgrid condensation, `N² = N²ᶜ + (b_qˡ - b_qᵛ) [η aʷ ∂z s̄ + (1 - η) ∂z qᶜ]`: the share `aᴺ = η aʷ` of the flux of the
+saturation excess that condenses feels the saturated stratification. The static stability and the buoyancy production
+of the TKE are then one.
+"""
+struct LatentStratification end
+
+"""
+    MeanLiquidStratification()
+
+The static stability of [`CondensateFluxFraction`](@ref) once the distribution exists of the grid-mean state with the
+distribution's mean liquid `q̄ˡ` as its condensate, the stratification of a displacement without phase change,
+
+    N² = N²ᵇ + (b_qˡ - b_qᵛ) ∂z (q̄ˡ - qᶜ),
+
+`N²ᵇ` that of the state with the condensate `qᶜ` of the microphysics and `b_χ` the derivatives of the buoyancy of the
+dynamics: the Brunt–Väisälä frequency of the virtual potential temperature of `shoc.F90`, whose liquid is that of its
+assumed PDF. The latent part of the subgrid condensation enters the buoyancy production of the TKE only.
+"""
+struct MeanLiquidStratification end
+
+"""
+    InitialStratification()
+
+The static stability of [`CondensateFluxFraction`](@ref) stays its `initial_stability` once the distribution exists;
+the latent part of the subgrid condensation enters the buoyancy production of the TKE only.
+"""
+struct InitialStratification end
+
+Base.summary(::LatentStratification) = "LatentStratification()"
+Base.summary(::MeanLiquidStratification) = "MeanLiquidStratification()"
+Base.summary(::InitialStratification) = "InitialStratification()"
+
+# The default stratification, `LatentStratification()`, is not shown
+stratification_summary(::LatentStratification) = ""
+stratification_summary(stratification) = string(", ", summary(stratification))
+
+# The static stability at an interior face once the distribution exists: N²ᵉ = N²ᵇ - ΔN²ᴸ the latent one, N²ᵇ that of the
+# state with the condensate of the microphysics, bˡᵛ = b_qˡ - b_qᵛ at the face, Δq̄ˡ - Δqᶜ the differences across the face
+# of the distribution's mean liquid and of the microphysics' condensate, N²⁰ the static stability before the pass
+@inline condensate_flux_stratification(::LatentStratification, N²ᵉ, N²ᵇ, bˡᵛ, Δqˡ, Δqᶜ, Δz, N²⁰) = N²ᵉ
+@inline condensate_flux_stratification(::MeanLiquidStratification, N²ᵉ, N²ᵇ, bˡᵛ, Δqˡ, Δqᶜ, Δz, N²⁰) = N²ᵇ + bˡᵛ * (Δqˡ - Δqᶜ) / Δz
+@inline condensate_flux_stratification(::InitialStratification, N²ᵉ, N²ᵇ, bˡᵛ, Δqˡ, Δqᶜ, Δz, N²⁰) = N²⁰
 
 const CondensateFluxFractionStability = SaturationWeightedStaticStability{<:CondensateFluxFraction}
 
@@ -591,6 +639,11 @@ function validate_subgrid_coupling(static_stability, distribution, solver)
     if static_stability isa CondensateFluxFractionStability && isnothing(distribution)
         throw(ArgumentError("SaturationWeightedStaticStability(CondensateFluxFraction(...)) needs a subgrid_distribution, " *
                             "whose condensate flux gives the saturated fraction."))
+    end
+    if static_stability isa CondensateFluxFractionStability && !(static_stability.fraction.stratification isa LatentStratification) &&
+       !(solver isa Union{SinglePass, DampedFixedPoint, LaggedStability})
+        throw(ArgumentError("$(summary(static_stability.fraction.stratification)) is solved by SinglePass, DampedFixedPoint or " *
+                            "LaggedStability; $(summary(solver)) solves the coupling of the latent stratification only."))
     end
     if coupling_iterations(solver) > 0 && !(static_stability isa CondensateFluxFractionStability)
         throw(ArgumentError("A solver with iterations > 0 solves the coupling of the static stability with the " *

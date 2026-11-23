@@ -174,3 +174,52 @@ column_data(field) = Array(interior(field))
         @test_throws ArgumentError AtmosphereModel(grid; closure = SimplifiedHigherOrderClosure(FT), formulation = :StaticEnergy)
     end
 end
+
+# The static stability of SHOC: the grid-mean state with the distribution's mean liquid as its condensate
+@testset "MeanLiquidStratification" begin
+    grid = RectilinearGrid(CPU(), Float64; size = Nz, z = (0, 2400), topology = (Flat, Flat, Bounded))
+    closure = SimplifiedHigherOrderClosure()
+    @test closure.static_stability.fraction.stratification isa MeanLiquidStratification
+    @test SimplifiedHigherOrderClosure(static_stability = SaturationWeightedStaticStability(CondensateFluxFraction())) isa SimplifiedHigherOrderClosure
+    @test_throws ArgumentError SimplifiedHigherOrderClosure(solver = BracketedFractionSolve())
+    @test occursin("MeanLiquidStratification()", sprint(show, closure))
+
+    # On one state: against the stratification N²ᵇ of the state with the microphysics' condensate (the latent form plus
+    # its latent part, N²ᵇ = N² + ΔN²ᴸ), the difference at the interior faces is (b_qˡ - b_qᵛ) ∂z (q̄ˡ - qᶜ) with the stored
+    # derivatives, the distribution's liquid and the microphysics' condensate
+    stratification(s) = SimplifiedHigherOrderClosure(static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(stratification = s)))
+    mean_liquid = shoc_boundary_layer_model(grid; closure = stratification(MeanLiquidStratification()))
+    initial = shoc_boundary_layer_model(grid; closure = stratification(InitialStratification()))
+    latent = shoc_boundary_layer_model(grid; closure = stratification(LatentStratification()))
+    for model in (mean_liquid, initial, latent)
+        for _ in 1:20
+            time_step!(model, 30)
+        end
+    end
+    # the same state in all three before the closure fields are formed
+    for model in (initial, latent)
+        set!(model, θ = Field(mean_liquid.formulation.potential_temperature_density / mean_liquid.dynamics.reference_state.density),
+             qᵗ = Field(mean_liquid.moisture_density / mean_liquid.dynamics.reference_state.density))
+        parent(model.tracers.ρe) .= parent(mean_liquid.tracers.ρe)
+        parent(model.momentum.ρu) .= parent(mean_liquid.momentum.ρu)
+        Oceananigans.TimeSteppers.update_state!(model)
+    end
+    Oceananigans.TimeSteppers.update_state!(mean_liquid)
+    cl = mean_liquid.closure_fields.subgrid_cloud.cloud
+    @test maximum(column_data(cl.qˡ)) > 0
+    col(f) = vec(column_data(f))
+    bˡᵛ = col(cl.b_qˡ) .- col(cl.b_qᵛ)
+    qᶜ = col(mean_liquid.microphysical_fields.qˡ)
+    qˡ = col(cl.qˡ)
+    zc = collect(znodes(grid, Center()))
+    expected = [(bˡᵛ[k] + bˡᵛ[k-1]) / 2 * ((qˡ[k] - qᶜ[k]) - (qˡ[k-1] - qᶜ[k-1])) / (zc[k] - zc[k-1]) for k in 2:Nz]
+    N²ᵇ = col(latent.closure_fields.N²) .+ col(latent.closure_fields.subgrid_cloud.cloud.ΔN²ᴸ)
+    ΔN² = col(mean_liquid.closure_fields.N²)[2:Nz] .- N²ᵇ[2:Nz]
+    @test maximum(abs, expected) > 0
+    @test ΔN² ≈ expected rtol = 1e-8 atol = 1e-12
+    # the initial form keeps the static stability of the dynamics
+    @test !(col(latent.closure_fields.N²)[2:Nz] ≈ col(mean_liquid.closure_fields.N²)[2:Nz])
+    @test !(col(initial.closure_fields.N²)[2:Nz] ≈ col(mean_liquid.closure_fields.N²)[2:Nz])
+    # the buoyancy production carries the same latent part whatever the static stability reads
+    @test col(mean_liquid.closure_fields.subgrid_cloud.cloud.ΔN²ᴸ) ≈ col(initial.closure_fields.subgrid_cloud.cloud.ΔN²ᴸ)
+end

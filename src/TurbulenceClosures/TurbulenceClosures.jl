@@ -28,7 +28,7 @@ export TKEBasedTurbulenceClosure,
        SHOCConstants,
        closure_parameters, with_parameters,
        per_column_closure, set_per_column_coefficients!, PerColumnCoefficient,
-       DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
+       DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, LatentStratification, MeanLiquidStratification, InitialStratification, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
        StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale, ReturnToIsotropyTimeScale,
        VarianceStabilityFunctions
 

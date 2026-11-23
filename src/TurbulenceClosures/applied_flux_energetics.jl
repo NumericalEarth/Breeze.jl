@@ -758,8 +758,12 @@ end
         cl.aᴺ[i, j, k] = ifelse(interior, aᴺ, zero(FT))
         cl.c_θ[i, j, k] = ifelse(interior, c_θ, zero(FT))
         cl.ΔN²ᴸ[i, j, k] = ifelse(interior, ΔN²ᴸ, zero(FT))
-        corrects = interior & closure_ij.static_stability.fraction.latent_static_stability
-        N²[i, j, k] = ifelse(corrects, relax_stability(N²[i, j, k], N²ᵉ, ω), N²[i, j, k])
+        # The static stability the mixing length and the stability functions read: the latent one, that of the mean state
+        # with the distribution's mean liquid, or the initial one
+        N²⁰ = N²[i, j, k]
+        N²ˢ = condensate_flux_stratification(closure_ij.static_stability.fraction.stratification, N²ᵉ, N²ᵇ, bˡᵛ,
+                                             cl.qˡ[i, j, kₛ] - cl.qˡ[i, j, kₛ-1], qᶜ⁺ - qᶜ⁻, Δz, N²⁰)
+        N²[i, j, k] = ifelse(interior, relax_stability(N²⁰, N²ˢ, ω), N²⁰)
     end
 end
 

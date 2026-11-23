@@ -62,13 +62,13 @@ E3SM `shoc.F90` and its published coefficients.
 - `stability_functions`: [`ColumnStabilityDamping`](@ref), SHOC's return-to-isotropy time scale damped by the
   stability of the column, which gives `Kᶜ = ℂᶜ τ e`, `Kᵘ = ℂᵘ τ e` and the dissipation `ε = 𝕊ᴰ e^{3/2} / ℓ`;
 - `subgrid_distribution`: SHOC's double Gaussian ([`shoc_distribution`](@ref Breeze.TurbulenceClosures.shoc_distribution));
-- `static_stability`: `SaturationWeightedStaticStability(CondensateFluxFraction())`, the treatment of
-  [`TKEBasedTurbulenceClosure`](@ref): the static stability that the mixing length and the stability functions
-  read and the buoyancy production of the TKE both carry the latent part of the subgrid condensation that the
-  distribution implies (`N² = N²ᶜ + (b_qˡ - b_qᵛ) aʷ ∂z s̄`, the counterpart of the buoyancy flux of the assumed PDF
-  of `shoc.F90`). `shoc.F90` itself reads the stratification of its grid-mean virtual potential temperature, with the
-  mean liquid of its PDF, for the mixing length and the time scale;
-  `CondensateFluxFraction(latent_static_stability = false)` keeps the latent part in the buoyancy production only;
+- `static_stability`: `SaturationWeightedStaticStability(CondensateFluxFraction(stratification = MeanLiquidStratification()))`:
+  the mixing length and the stability functions read the stratification of the grid-mean state with the mean liquid of
+  the distribution as its condensate (the Brunt–Väisälä frequency of the virtual potential temperature of `shoc.F90`),
+  and the buoyancy production of the TKE carries the latent part of the subgrid condensation that the distribution
+  implies (the counterpart of the buoyancy flux of the assumed PDF of `shoc.F90`). The treatment of
+  [`TKEBasedTurbulenceClosure`](@ref), `CondensateFluxFraction()` ([`LatentStratification`](@ref)), puts the latent part
+  in the static stability as well.
 
 The other keyword arguments are those of [`TKEBasedTurbulenceClosure`](@ref), and every component may be
 replaced. Replacing the mixing length, the stability functions or the subgrid distribution by a component of
@@ -103,7 +103,7 @@ SimplifiedHigherOrderClosure{VerticallyImplicitTimeDiscretization}
 │   ├── ℂᵝ₁: 0.001, ℂᵝ₂: 0.08, ℂᵝ₃: 2.65, ℂᵝ₄: 0.02
 │   ├── 𝕊ᴰ: 1.97531
 │   └── ℂᴾ: 0.1
-├── static_stability: SaturationWeightedStaticStability
+├── static_stability: SaturationWeightedStaticStability(CondensateFluxFraction(DryStaticStability, MeanLiquidStratification()))
 ├── subgrid_distribution: DoubleGaussian
 │   ├── time_scale: ReturnToIsotropyTimeScale()
 │   ├── second_moments: DowngradientSecondMoments{Float64}
@@ -121,7 +121,7 @@ function SimplifiedHigherOrderClosure(time_discretization = VerticallyImplicitTi
                                       FT = Oceananigans.defaults.FloatType;
                                       mixing_length = BlendedMixingLength(Float64),
                                       stability_functions = ColumnStabilityDamping(Float64),
-                                      static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                      static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(stratification = MeanLiquidStratification())),
                                       subgrid_distribution = shoc_distribution(Float64),
                                       kw...)
 
@@ -143,6 +143,9 @@ function Base.summary(closure::SimplifiedHigherOrderClosure)
     return string("SimplifiedHigherOrderClosure{$TD}")
 end
 
+static_stability_summary(static_stability) = summary(static_stability)
+static_stability_summary(ss::SaturationWeightedStaticStability) = string(summary(ss), "(", sprint(show, ss.fraction), ")")
+
 function Base.show(io::IO, closure::SimplifiedHigherOrderClosure)
     d = closure.subgrid_distribution
     print(io, summary(closure), '\n',
@@ -150,7 +153,7 @@ function Base.show(io::IO, closure::SimplifiedHigherOrderClosure)
               "├── stability_functions: ", summary(closure.stability_functions), '\n')
     show_stability_function_lines(io, closure.stability_functions, "│   ")
     print(io, '\n',
-              "├── static_stability: ", summary(closure.static_stability), '\n',
+              "├── static_stability: ", static_stability_summary(closure.static_stability), '\n',
               "├── subgrid_distribution: DoubleGaussian", '\n',
               "│   ├── time_scale: ", summary(d.time_scale), '\n',
               "│   ├── second_moments: ", summary(d.second_moments), '\n',
