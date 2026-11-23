@@ -281,7 +281,7 @@ end
     @inbounds fields.cloud.P[i, j, k]
 
 # The shear production in the stage tendency: all of it, or, where the TKE receives the shear conversion of the solved
-# momentum before its own solve (`solved_shear_before_tke_solve`), only the work of the surface stress Pˢ
+# momentum before its own solve (`solved_conversions_before_tke_solve`), only the work of the surface stress Pˢ
 @inline explicit_tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields, closure_fields, u, v, injected) =
     tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields, closure_fields, u, v)
 
@@ -290,22 +290,36 @@ end
 
 @inline explicit_shear_conversion(cl, i, j, k, injected) = @inbounds ifelse(injected, cl.Pˢ[i, j, k], cl.P[i, j, k])
 
+@inline explicit_tke_buoyancy_production(fields, i, j, k, B, injected) = max(zero(B), B)
+@inline explicit_tke_buoyancy_production(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, i, j, k, B, injected) =
+    explicit_buoyancy_conversion(fields.cloud, i, j, k, B, injected)
+
 #####
-##### The shear conversion of the solved momentum, given to the TKE before its solve
+##### The conversions of the solved state, given to the TKE before its solve
 #####
-##### Under the vertically implicit discretization with a time stepper that solves momentum before the tracers
-##### (`AtmosphereModels.momentum_solved_before_tracers`), the TKE receives, just before its own solve, the kinetic
-##### energy the stage's momentum solve took from the mean flow: Pⁱ = Pᵖ + Dᵘ, the conversion of the solved momentum
-##### fluxes and the dissipation of backward Euler itself, the fraction ℂᴾ to the TKE and the rest to the heat of the
-##### air before its solve. Its solve then diffuses the energy the mean flow gave up. Given instead in the stage tendency
-##### from the stage state, Kᵘ S² overshoots where the solve mixes the shear away within the stage (Kᵘ Δt / Δz² ≫ 1): the
-##### TKE solve diffuses that overshoot into the neighbouring cells before the correction after the solves takes it back
-##### from the cell alone, and the internal energy pays the rest, a pump of TKE at the scale of the grid.
+##### Under the vertically implicit discretization with a time stepper that solves momentum, the tracers and the
+##### thermodynamic variable before the TKE (`AtmosphereModels.closure_prognostics_solved_last`), the TKE receives,
+##### just before its own solve, what the stage's other solves converted:
+#####
+#####   shear:     Pⁱ = Pᵖ + Dᵘ, the conversion of the solved momentum fluxes and the dissipation of backward Euler
+#####              itself, the fraction ℂᴾ to the TKE (the rest heats the air after the solves);
+#####   buoyancy:  Bⁱ = max(Bᵖ + Bᴸˢ, 0), the conversion of the solved scalar fluxes, Bᵖ = Σ b_χ F_χ, and its latent
+#####              part from the solved gradients, Bᴸˢ = Kᶜ η bˡᵛ (∂z qᶜ - aʷ ∂z s̄) (drawn from the internal energy
+#####              after the solves); its negative part stays with the implicit sink and the correction after the solves.
+#####
+##### Its solve then diffuses the energy the solves released. Formed instead from the stage state, Kᵘ S² and Kᶜ ΔN²ᴸ
+##### overshoot where the solves mix the gradients away within the stage (K Δt / Δz² ≫ 1): the TKE solve diffused that
+##### overshoot into the neighbouring cells before the correction after the solves took it back from the cell alone,
+##### and the internal energy paid the rest, a pump of TKE at the scale of the grid. The heating of the dissipation,
+##### of the share (1 - ℂᴾ) of Pⁱ, and the latent draw are applied to θˡⁱ after the solves, with the solved TKE.
 #####
 
-solved_shear_before_tke_solve(fields, closure, model) = false
-solved_shear_before_tke_solve(::SubgridCloudFields{<:AppliedFluxEnergetics}, closure, model) =
-    implicit_stage(closure, model) && AtmosphereModels.momentum_solved_before_tracers(model)
+solved_conversions_before_tke_solve(fields, closure, model) = false
+solved_conversions_before_tke_solve(::SubgridCloudFields{<:AppliedFluxEnergetics}, closure, model) =
+    implicit_stage(closure, model) && AtmosphereModels.closure_prognostics_solved_last(model)
+
+# The TKE is solved after the thermodynamic variable where the time stepper allows (`closure_prognostics_solved_last`)
+AtmosphereModels.solved_after_thermodynamic_variable(::FlavorOfTKEClosure, name) = name === TKE_NAME
 
 @inline function solved_shear_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     _, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
@@ -319,38 +333,79 @@ solved_shear_before_tke_solve(::SubgridCloudFields{<:AppliedFluxEnergetics}, clo
     return Pᵖ, Dᵘ
 end
 
-@kernel function _give_solved_shear_conversion!(ρe, cl, grid, closure, s, Kᶜ, Kᵘ, u, v)
-    i, j, k = @index(Global, NTuple)
-    closure_ij = getclosure(i, j, closure)
-    Pᵖ, Dᵘ = solved_shear_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
-    Pⁱ = Pᵖ + Dᵘ
-    ℂᴾ = shear_production_fraction(closure_ij.stability_functions)
+# The latent part of the buoyancy conversion at the interior face k from the solved state: Kᶜ ΔN²ᴸ with the gradients
+# of the solved θˡⁱ, total water and condensate and the stage's shares η, aᴺ = η aʷ and coefficients c_q, c_θ, bˡᵛ
+# (see `_latent_corrected_stability!`)
+@inline function solved_latent_conversionᶜᶜᶠ(i, j, k, grid, s, cl, Kᶜ, qʷ)
     @inbounds begin
-        cl.Pⁱ[i, j, k] = Pⁱ
-        ρe[i, j, k] += cl.stage_time_step[1, 1, 1] * s.ρ[i, j, k] * ℂᴾ * Pⁱ * !inactive_cell(i, j, k, grid)
+        ρ⁺ = s.ρ[i, j, k]
+        ρ⁻ = s.ρ[i, j, k-1]
+        θ⁺ = s.ρθ[i, j, k] / ρ⁺
+        θ⁻ = s.ρθ[i, j, k-1] / ρ⁻
+        qʷ⁺ = qʷ[i, j, k]
+        qʷ⁻ = qʷ[i, j, k-1]
+        qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, k] / ρ⁺
+        qᶜ⁻ = qʷ⁻ - s.ρqᵛᵉ[i, j, k-1] / ρ⁻
+        Δz = Δzᶜᶜᶠ(i, j, k, grid)
+        ∂z_s = (cl.c_q[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θ[i, j, k] * (θ⁺ - θ⁻)) / Δz
+        ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
+        bˡᵛ = (cl.b_qˡ[i, j, k] + cl.b_qˡ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        return Kᶜ[i, j, k] * bˡᵛ * (cl.η[i, j, k] * ∂z_qᶜ - cl.aᴺ[i, j, k] * ∂z_s)
     end
 end
 
-function give_solved_shear_conversion!(closure_fields, closure, model)
+# At the center k, from its two faces with the half-cell weights of `interior_conversionsᶜᶜᶜ`
+@inline function solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ)
+    Nz = size(grid, 3)
+    FT = grid_float_type(grid)
+    Lˡᵒʷ = ifelse(k > 1, solved_latent_conversionᶜᶜᶠ(i, j, max(k, 2), grid, s, cl, Kᶜ, qʷ), zero(FT))
+    Lᵘᵖ = ifelse(k < Nz, solved_latent_conversionᶜᶜᶠ(i, j, min(k + 1, Nz), grid, s, cl, Kᶜ, qʷ), zero(FT))
+    zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
+    wˡᵒʷ = ℑzᵃᵃᶠ(i, j, k, grid, s.ρ) * (zᶜ - znode(i, j, k, grid, Center(), Center(), Face()))
+    wᵘᵖ = ℑzᵃᵃᶠ(i, j, k + 1, grid, s.ρ) * (znode(i, j, k + 1, grid, Center(), Center(), Face()) - zᶜ)
+    ρΔz = @inbounds s.ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+    return (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
+end
+
+@kernel function _give_solved_conversions!(ρe, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, qʷ)
+    i, j, k = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    Pᵖ, Dᵘ = solved_shear_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+    Bᵖ, _, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+    Bᴸˢ = solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ)
+    Pⁱ = Pᵖ + Dᵘ
+    Bⁱ = max(Bᵖ + Bᴸˢ, zero(Bᵖ))
+    ℂᴾ = shear_production_fraction(closure_ij.stability_functions)
+    @inbounds begin
+        cl.Pⁱ[i, j, k] = Pⁱ
+        cl.Bⁱ[i, j, k] = Bⁱ
+        cl.Bᴸˢ[i, j, k] = Bᴸˢ
+        ρe[i, j, k] += cl.stage_time_step[1, 1, 1] * s.ρ[i, j, k] * (ℂᴾ * Pⁱ + Bⁱ) * !inactive_cell(i, j, k, grid)
+    end
+end
+
+function give_solved_conversions!(closure_fields, closure, model)
     grid = model.grid
     cl = closure_fields.subgrid_cloud.cloud
     s = applied_flux_state(model)
+    qʷ = distribution_state(model, nothing).qᵗ
     fill_halo_regions!((model.momentum.ρu, model.momentum.ρv))
     u = SpecificValue(model.momentum.ρu, s.ρ)
     v = SpecificValue(model.momentum.ρv, s.ρ)
-    launch!(grid.architecture, grid, :xyz, _give_solved_shear_conversion!, model.tracers[TKE_NAME], cl, grid, closure, s,
-            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v)
+    launch!(grid.architecture, grid, :xyz, _give_solved_conversions!, model.tracers[TKE_NAME], cl, grid, closure, s,
+            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, qʷ)
     return nothing
 end
 
-# The rest of the solved shear conversion, (1 - ℂᴾ) Pⁱ, heats the air before its solve
-@kernel function _heat_by_solved_shear_conversion!(ρθ, cl, grid, closure, ρ)
-    i, j, k = @index(Global, NTuple)
-    closure_ij = getclosure(i, j, closure)
-    ℂᴾ = shear_production_fraction(closure_ij.stability_functions)
-    @inbounds ρθ[i, j, k] += cl.stage_time_step[1, 1, 1] * ρ[i, j, k] * (1 - ℂᴾ) * cl.Pⁱ[i, j, k] / cl.ĉᵖΠ[i, j, k] *
-                             !inactive_cell(i, j, k, grid)
-end
+# The buoyancy production in the stage tendency: the positive part of all of it, or, where the conversions of the solved
+# state are given before the TKE solve, of the stage-state conversions of the surface fluxes and of the heating budget flux
+@inline explicit_buoyancy_conversion(cl, i, j, k, B, injected) =
+    @inbounds ifelse(injected, max(cl.Bˢ[i, j, k] + heating_flux_conversion(cl, i, j, k), zero(B)), max(B, zero(B)))
+
+# The stage-state conversions the correction after the solves counts as converted: with the conversions of the solved
+# state given before the TKE solve, the latent part is that of the solved state, not of the stage
+@inline stage_state_conversion(cl, i, j, k, injected) =
+    @inbounds cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + heating_flux_conversion(cl, i, j, k) + ifelse(injected, zero(cl.Bᴸ[i, j, k]), cl.Bᴸ[i, j, k])
 
 #####
 ##### The floor of e in the buoyancy sink rate
@@ -500,8 +555,9 @@ end
 @kernel function _store_stage_exchange!(x, cl, injected)
     i, j, k = @index(Global, NTuple)
     # the conversion of the heating budget flux is a stage-state conversion too: its flux is in the slow tendency of ρθ
-    @inbounds x[i, j, k] = cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k] + heating_flux_conversion(cl, i, j, k) -
-                           explicit_shear_conversion(cl, i, j, k, injected) - max(cl.B[i, j, k], 0)
+    @inbounds x[i, j, k] = stage_state_conversion(cl, i, j, k, injected) -
+                           explicit_shear_conversion(cl, i, j, k, injected) -
+                           explicit_buoyancy_conversion(cl, i, j, k, cl.B[i, j, k], injected)
 end
 
 @inline weighted_sum(i, j, k, x::Tuple{Any}, b::Tuple{Any}) = @inbounds b[1] * x[1][i, j, k]
@@ -546,7 +602,7 @@ function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEC
     i = recombination.stage
 
     # The conversions of the stage state Yᵢ₋₁ are in hand: keep their exchange, and recombine
-    launch!(arch, grid, :xyz, _store_stage_exchange!, storage.exchange[i], cl, solved_shear_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
+    launch!(arch, grid, :xyz, _store_stage_exchange!, storage.exchange[i], cl, solved_conversions_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
     launch!(arch, grid, :xyz, _recombine_stage_exchange!, storage.recombined_exchange,
             storage.exchange[1:i], recombination.tendency_weights)
 
@@ -583,8 +639,8 @@ function AtmosphereModels.closure_before_implicit_solve!(closure_fields::TKEClos
     pre = closure_fields.subgrid_cloud.presolve
     name ∈ keys(pre) && (parent(pre[name]) .= parent(Oceananigans.prognostic_fields(model)[name]))
     # Momentum is solved: the TKE receives what that solve converted before its own solve
-    name === TKE_NAME && solved_shear_before_tke_solve(closure_fields.subgrid_cloud, closure, model) &&
-        give_solved_shear_conversion!(closure_fields, closure, model)
+    name === TKE_NAME && solved_conversions_before_tke_solve(closure_fields.subgrid_cloud, closure, model) &&
+        give_solved_conversions!(closure_fields, closure, model)
     return nothing
 end
 
@@ -605,17 +661,17 @@ function AtmosphereModels.closure_before_thermodynamic_solve!(closure_fields::TK
     fields = closure_fields.subgrid_cloud
     grid = model.grid
     ρθ = distribution_potential_temperature_density(model)
-    launch!(grid.architecture, grid, :xyz, _heat_by_implicit_dissipation!, ρθ,
-            fields.cloud, grid, closure_fields.Lᵉ, model.tracers[TKE_NAME], total_density(model.dynamics), Δt)
-    solved_shear_before_tke_solve(fields, closure, model) &&
-        launch!(grid.architecture, grid, :xyz, _heat_by_solved_shear_conversion!, ρθ, fields.cloud, grid, closure,
-                total_density(model.dynamics))
+    # Without the conversions of the solved state given before the TKE solve, the TKE is solved before θˡⁱ: the
+    # dissipation its implicit sinks removed heats the air before the solve of θˡⁱ (with them, after the solves)
+    solved_conversions_before_tke_solve(fields, closure, model) ||
+        launch!(grid.architecture, grid, :xyz, _heat_by_implicit_dissipation!, ρθ,
+                fields.cloud, grid, closure_fields.Lᵉ, model.tracers[TKE_NAME], total_density(model.dynamics), Δt)
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     name ∈ keys(fields.presolve) && (parent(fields.presolve[name]) .= parent(ρθ))
     return nothing
 end
 
-@kernel function _correct_tke_to_solved_conversions!(ρe, ρθ, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, Δt, X, injected)
+@kernel function _correct_tke_to_solved_conversions!(ρe, ρθ, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, Lᵉ, Δt, X, injected)
     i, j, k = @index(Global, NTuple)
     Bᵖ, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     @inbounds begin
@@ -628,46 +684,57 @@ end
         # what the stage gave: P and B⁺ explicitly, -ωᴮ e implicitly; what the solves converted:
         # Pᵖ + Dᵘ + Pˢ and Bᵖ + Bˢ
         # with the solved shear conversion given before the solve, it is given (Pⁱ, equal to Pᵖ + Dᵘ here)
+        # and with the solved conversions given before the TKE solve, they are given too (Pⁱ and Bⁱ)
         Pⁱ = ifelse(injected, cl.Pⁱ[i, j, k], zero(e))
-        Pᵍ = explicit_shear_conversion(cl, i, j, k, injected) + Pⁱ
-        given = Pᵍ + max(B, 0) - cl.ωᴮ[i, j, k] * e
-        # the latent part was drawn from the internal energy in the stage tendency (stage value)
-        # (so was the conversion of the heating budget flux, an explicit flux of the stage state)
-        Gᑫ = heating_flux_conversion(cl, i, j, k)
-        converted = Pᵖ + Dᵘ + cl.Pˢ[i, j, k] + Bᵖ + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k] + Gᑫ
+        Bⁱ = ifelse(injected, cl.Bⁱ[i, j, k], zero(e))
+        Bᴸˢ = ifelse(injected, cl.Bᴸˢ[i, j, k], zero(e))
+        Pᵉ = explicit_shear_conversion(cl, i, j, k, injected)
+        Bᵉ = explicit_buoyancy_conversion(cl, i, j, k, B, injected)
+        given = Pᵉ + Pⁱ + Bᵉ + Bⁱ - cl.ωᴮ[i, j, k] * e
+        # the latent part of the stage state was drawn from the internal energy in the stage tendency, that of the
+        # solved state after the solves (as is the conversion of the heating budget flux, an explicit flux of the stage)
+        stage_state = stage_state_conversion(cl, i, j, k, injected)
+        converted = Pᵖ + Dᵘ + Bᵖ + Bᴸˢ + stage_state
+        # the dissipation the implicit sinks removed from the solved e, which heats the air
+        ε = (-Lᵉ[i, j, k] - cl.ωᴮ[i, j, k]) * e
         cl.Pᵖ[i, j, k] = Pᵖ + Dᵘ
         cl.Bᵖ[i, j, k] = Bᵖ
         # the stage's values, kept for the energy budget after `update_state!` recomputes the others
         # what reached the TKE and the air other than through the TKE's solve and this correction: the stage tendency,
         # and the share (1 - ℂᴾ) of the shear conversion given before the solve, which heated the air
         ℂᴾ = shear_production_fraction(getclosure(i, j, closure).stability_functions)
-        cl.given[i, j, k] = explicit_shear_conversion(cl, i, j, k, injected) + (1 - ℂᴾ) * Pⁱ + max(B, 0)
+        cl.given[i, j, k] = Pᵉ + Bᵉ + (1 - ℂᴾ) * Pⁱ
         cl.stage_b_θ[i, j, k] = cl.b_θ[i, j, k]
         cl.stage_b_qᵛ[i, j, k] = cl.b_qᵛ[i, j, k]
         cl.stage_b_qˡ[i, j, k] = cl.b_qˡ[i, j, k]
         cl.stage_b_qⁱ[i, j, k] = cl.b_qⁱ[i, j, k]
-        cl.stage_surface[i, j, k] = cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + cl.Bᴸ[i, j, k] + Gᑫ
+        cl.stage_surface[i, j, k] = stage_state
+        cl.Bᴸˢ[i, j, k] = Bᴸˢ
         # Where the TKE cannot pay what the solved fluxes converted (e ≈ 0 while the diffusivities,
         # floored at `minimum_tke`, still mix), the shortfall is taken from the internal energy
         # instead of driving e negative: the mixing of that floor is powered by the heat of the air.
         # Benefit: e stays non-negative and the total energy still closes. The TKE also receives the
         # kinetic energy the stage combination removed from the mean flow (`stage_combination`, per volume).
         active = !inactive_cell(i, j, k, grid)
-        net = net_stage_conversion(X, i, j, k, converted, given, Pᵖ + Dᵘ - Pⁱ + Bᵖ + cl.ωᴮ[i, j, k] * e)
+        net = net_stage_conversion(X, i, j, k, converted, given, Pᵖ + Dᵘ - Pⁱ + Bᵖ + Bᴸˢ - Bⁱ + cl.ωᴮ[i, j, k] * e)
         ρe⁺ = ρe[i, j, k] + (Δt * ρᵢ * net + cl.stage_combination[i, j, k]) * active
         ρe⁺′ = ifelse(ρe⁺ < 0, min(ρe[i, j, k], zero(ρe⁺)), ρe⁺)
         shortfall = ρe⁺′ - ρe⁺ # ≥ 0: energy the TKE did not pay
         ρe[i, j, k] = ρe⁺′
         cl.shortfall[i, j, k] = shortfall
-        cl.shortfall_ρθ[i, j, k] = shortfall / cl.ĉᵖΠ[i, j, k]
+        # What θˡⁱ receives after the solves: the internal energy pays the shortfall, and, with the solved conversions
+        # given before the TKE solve, receives the dissipation, the share (1 - ℂᴾ) of Pⁱ and gives the latent part
+        heating = ifelse(injected, Δt * ρᵢ * (ε + (1 - ℂᴾ) * Pⁱ - Bᴸˢ), zero(e))
+        cl.ε[i, j, k] = ifelse(injected, ε, cl.ε[i, j, k])
+        cl.after_solves_ρθ[i, j, k] = (heating - shortfall) / cl.ĉᵖΠ[i, j, k] * active
     end
 end
 
 # The cooling by the shortfall, after all the conversions of the solved state are formed (they read
 # θ at the neighbouring cells, so it cannot be applied in the same kernel)
-@kernel function _cool_by_shortfall!(ρθ, cl)
+@kernel function _apply_after_solves_heating!(ρθ, cl)
     i, j, k = @index(Global, NTuple)
-    @inbounds ρθ[i, j, k] -= cl.shortfall_ρθ[i, j, k]
+    @inbounds ρθ[i, j, k] += cl.after_solves_ρθ[i, j, k]
 end
 
 function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
@@ -681,10 +748,10 @@ function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClos
     u = SpecificValue(model.momentum.ρu, ρ)
     v = SpecificValue(model.momentum.ρv, ρ)
     launch!(grid.architecture, grid, :xyz, _correct_tke_to_solved_conversions!, model.tracers[TKE_NAME], s.ρθ, cl, grid, closure, s,
-            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, Δt,
+            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, closure_fields.Lᵉ, Δt,
             recombined_stage_exchange(AtmosphereModels.closure_stage_storage(model.timestepper)),
-            solved_shear_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
-    launch!(grid.architecture, grid, :xyz, _cool_by_shortfall!, s.ρθ, cl)
+            solved_conversions_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
+    launch!(grid.architecture, grid, :xyz, _apply_after_solves_heating!, s.ρθ, cl)
     return nothing
 end
 
@@ -738,7 +805,7 @@ function add_shear_production_heating!(Gⁿ, ::ColumnStabilityDamping, fields::S
     grid = model.grid
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     launch!(grid.architecture, grid, :xyz, _add_shear_production_heating!, Gⁿ[name], grid, closure, fields.cloud,
-            total_density(model.dynamics), solved_shear_before_tke_solve(fields, closure, model))
+            total_density(model.dynamics), solved_conversions_before_tke_solve(fields, closure, model))
     return nothing
 end
 
@@ -874,6 +941,8 @@ end
         cl.aʷ[i, j, k] = ifelse(interior, aʷ, zero(FT))
         cl.aᴺ[i, j, k] = ifelse(interior, aᴺ, zero(FT))
         cl.c_θ[i, j, k] = ifelse(interior, c_θ, zero(FT))
+        cl.c_q[i, j, k] = ifelse(interior, c_q, zero(FT))
+        cl.η[i, j, k] = ifelse(interior, η, zero(FT))
         cl.ΔN²ᴸ[i, j, k] = ifelse(interior, ΔN²ᴸ, zero(FT))
         # The static stability the mixing length and the stability functions read: the latent one, that of the mean state
         # with the distribution's mean liquid, or the initial one
@@ -905,9 +974,11 @@ end
     @inbounds Gρθ[i, j, k] -= ρ[i, j, k] * cl.Bᴸ[i, j, k] / cl.ĉᵖΠ[i, j, k] * !inactive_cell(i, j, k, grid)
 end
 
-draw_latent_conversion!(Gⁿ, fields, model) = nothing
+draw_latent_conversion!(Gⁿ, fields, closure, model) = nothing
 
-function draw_latent_conversion!(Gⁿ, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, model)
+function draw_latent_conversion!(Gⁿ, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure, model)
+    # with the conversions of the solved state given before the TKE solve, the latent part is drawn after the solves
+    solved_conversions_before_tke_solve(fields, closure, model) && return nothing
     grid = model.grid
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     launch!(grid.architecture, grid, :xyz, _draw_latent_conversion!, Gⁿ[name], grid, fields.cloud, total_density(model.dynamics))

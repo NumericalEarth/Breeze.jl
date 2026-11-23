@@ -34,7 +34,7 @@ const SingleColumnMultirateModel =
     AtmosphereModel{<:AnelasticDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep, <:FlatHorizontalGrid}
 
 # The stage solves each prognostic in the order of the prognostic fields, momentum first, the thermodynamic variable last
-AtmosphereModels.momentum_solved_before_tracers(::SingleColumnMultirateModel) = true
+AtmosphereModels.closure_prognostics_solved_last(::SingleColumnMultirateModel) = true
 
 function multirate_substepper(grid, ::AnelasticDynamics, prognostic_fields; kw...)
     grid isa FlatHorizontalGrid ||
@@ -108,6 +108,7 @@ function single_column_multirate_stage!(model, Δt, dᵢ)
 
         skip_vertical_diffusion(model, name) && continue
         name === thermodynamic_name && continue
+        AtmosphereModels.solved_after_thermodynamic_variable(model.closure, name) && continue
 
         closure_before_implicit_solve!(model.closure_fields, model.closure, model, name)
         implicit_stage_step!(model, name, u, Δt_stage)
@@ -116,6 +117,11 @@ function single_column_multirate_stage!(model, Δt, dᵢ)
     isnothing(ts.implicit_solver) || implicit_sedimentation_step!(model, Δt_stage, model.velocities)
     closure_before_thermodynamic_solve!(model.closure_fields, model.closure, model, Δt_stage)
     implicit_stage_step!(model, thermodynamic_name, prognostic[thermodynamic_name], Δt_stage)
+    for (name, u) in zip(keys(prognostic), prognostic)
+        AtmosphereModels.solved_after_thermodynamic_variable(model.closure, name) || continue
+        closure_before_implicit_solve!(model.closure_fields, model.closure, model, name)
+        implicit_stage_step!(model, name, u, Δt_stage)
+    end
     closure_after_implicit_solves!(model.closure_fields, model.closure, model, Δt_stage)
 
     # No-ops on a single column, where w ≡ 0; kept so the stage is that of the anelastic dynamics.

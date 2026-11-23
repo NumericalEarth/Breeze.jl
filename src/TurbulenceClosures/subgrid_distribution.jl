@@ -712,8 +712,8 @@ end
 # rate, the stored derivatives b_χ of the buoyancy and ĉᵖ Π, momentum before its solve, and the
 # conversions of the solved state and the dissipation of the last stage (diagnostics)
 function applied_flux_conversion_fields(grid, ::AppliedFluxEnergetics, tracer_names)
-    centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :P, :Pⁱ, :Bˢ, :Pˢ, :ωᴮ, :b_θ, :b_qᵛ, :b_qˡ, :b_qⁱ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_b_θ, :stage_b_qᵛ, :stage_b_qˡ, :stage_b_qⁱ, :stage_surface, :shortfall, :shortfall_ρθ, :stage_combination))
-    faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid), c_θ = ZFaceField(grid))
+    centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :Bᴸˢ, :Bⁱ, :P, :Pⁱ, :Bˢ, :Pˢ, :ωᴮ, :b_θ, :b_qᵛ, :b_qˡ, :b_qⁱ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_b_θ, :stage_b_qᵛ, :stage_b_qˡ, :stage_b_qⁱ, :stage_surface, :shortfall, :after_solves_ρθ, :stage_combination))
+    faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid), η = ZFaceField(grid), c_q = ZFaceField(grid), c_θ = ZFaceField(grid))
     return merge(centers, faces, (ρu⁻ = XFaceField(grid), ρv⁻ = YFaceField(grid),
                                   stage_time_step = Oceananigans.Fields.Field{Nothing, Nothing, Nothing}(grid)))
 end

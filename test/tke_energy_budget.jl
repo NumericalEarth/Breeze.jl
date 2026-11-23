@@ -225,7 +225,7 @@ function stage_energy_budget(model, Δt; ρe = budget_column(model.tracers.ρe))
                       budget_column(fields.ρqᶜˡ) .+ budget_column(fields.ρqʳ) .+ budget_column(fields.ρqʷⁱ),
                       budget_column(fields.ρqⁱ))
     after = ρφ(merge(Oceananigans.prognostic_fields(model), (; ρθ = model.formulation.potential_temperature_density)))
-    after[:, 1] .+= budget_column(cl.shortfall_ρθ) # the solves' change, without the cooling after them
+    after[:, 1] .-= budget_column(cl.after_solves_ρθ) # the solves' change, without what θˡⁱ receives after them
     before = ρφ(pre)
     Δhᵈ = -sum(Δzᶜ .* sum(Z .* (after .- before), dims=2))
     # The rounding of Δhᵈ: the stored densities after the solves carry a relative rounding of ϵ, which the sum
@@ -236,13 +236,14 @@ function stage_energy_budget(model, Δt; ρe = budget_column(model.tracers.ρe))
     # the TKE: explicit stage sources were added before its solve; the solve and the correction after
     Δρe = sum(Δzᶜ .* (ρe .- budget_column(pre.ρe)))
     given_explicitly = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.given))
-    converted = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ) .+ budget_column(cl.stage_surface)))
+    # the latent part of the solved state (zero where the latent part is that of the stage state, in `stage_surface`)
+    converted = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ) .+ budget_column(cl.Bᴸˢ) .+ budget_column(cl.stage_surface)))
     dissipated = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.ε))
     shortfall = sum(Δzᶜ .* budget_column(cl.shortfall)) # paid by the internal energy instead of the TKE
     combination = sum(Δzᶜ .* budget_column(cl.stage_combination)) # the kinetic energy the stage combination removed
     # what the solves alone converted, and the rates of the stage state: given to the TKE by its
     # tendency, and converted by the surface fluxes and the latent heat
-    solved = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ)))
+    solved = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ) .+ budget_column(cl.Bᴸˢ)))
     given_rate = sum(ρ .* Δzᶜ .* budget_column(cl.given))
     stage_state_rate = sum(ρ .* Δzᶜ .* budget_column(cl.stage_surface))
     return (; ΔKE, Δhᵈ, Δhᵈ_rounding, Δρe, given_explicitly, converted, dissipated, shortfall, combination, solved, given_rate, stage_state_rate,
@@ -597,9 +598,13 @@ end
     @test dynamic_enthalpy_loss > 0
     @test dynamic_enthalpy_loss ≈ sum(ρ .* Δzᶜ .* (Gᑫ .- Gᑫᴸ)) rtol=1e-7
 
-    # the TKE equation receives the conversion (here B > 0 with and without it wherever the flux is)
+    # the TKE equation receives the conversion (here B > 0 with and without it wherever the flux is): in the stage
+    # tendency, the positive part of B, or, where the conversions of the solved state are given before the TKE solve,
+    # of the stage-state conversions of the surface fluxes and of this flux (the rest after the other solves)
+    injected = Breeze.TurbulenceClosures.solved_conversions_before_tke_solve(with_flux.closure_fields.subgrid_cloud, with_flux.closure, with_flux)
+    explicit(c, B) = injected ? max.(budget_column(c.Bˢ) .+ heating_column(c, :Gᑫ, Nz), 0) : max.(B, 0)
     B = budget_column(cl.B); B⁰ = budget_column(cl⁰.B)
-    @test G.ρe .- G⁰.ρe ≈ ρ .* (max.(B, 0) .- max.(B⁰, 0)) rtol=1e-9 atol=1e-12 * maximum(abs, G.ρe)
+    @test G.ρe .- G⁰.ρe ≈ ρ .* (explicit(cl, B) .- explicit(cl⁰, B⁰)) rtol=1e-9 atol=1e-12 * maximum(abs, G.ρe)
     # and the internal energy pays the latent part: Σ Δz ĉᵖΠ (draw) = -Σ ρ Δz Gᑫᴸ
     @test sum(Δzᶜ .* budget_column(cl.ĉᵖΠ) .* latent_draw) ≈ sum(ρ .* Δzᶜ .* Gᑫᴸ) rtol=1e-12
 end
@@ -641,7 +646,7 @@ end
     # The stage tendency carries the shear production that the solves do not give before the TKE solve: with a time
     # stepper that solves momentum first, only the work of the surface stress Pˢ (the conversion of the solved
     # momentum reaches the TKE, ℂᴾ of it, and the air, the rest, before their solves)
-    injected = Breeze.TurbulenceClosures.solved_shear_before_tke_solve(shoc.closure_fields.subgrid_cloud, shoc.closure, shoc)
+    injected = Breeze.TurbulenceClosures.solved_conversions_before_tke_solve(shoc.closure_fields.subgrid_cloud, shoc.closure, shoc)
     @test injected
     Pᵉ = injected ? budget_column(cl.Pˢ) : P
     scale = maximum(abs, ρ .* Pᵉ)

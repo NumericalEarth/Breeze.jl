@@ -69,7 +69,7 @@ struct SSPRungeKutta3{FT, U0, TG, TI, R} <: AbstractTimeStepper
 end
 
 # The stage solves each prognostic in the order of the prognostic fields, momentum first, the thermodynamic variable last
-AtmosphereModels.momentum_solved_before_tracers(::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}) = true
+AtmosphereModels.closure_prognostics_solved_last(::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}) = true
 
 # A Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) sits at cₘ = αₘ (cₘ₋₁ + 1)
 AtmosphereModels.stage_abscissae(ts::SSPRungeKutta3) = (ts.α¹, ts.α² * (ts.α¹ + 1))
@@ -172,8 +172,10 @@ function ssp_rk3_substep!(model, Δt, α)
         # scalars with their position in the closure's scalar names (see `closure_scalar_index`).
         skip_vertical_diffusion(model, name) && continue
 
-        # The thermodynamic variable's solve waits for the tracers' solves (see below).
+        # The thermodynamic variable's solve waits for the tracers' solves (see below), and the closure's
+        # prognostics that ask for it wait for the thermodynamic variable's
         name === thermodynamic_name && continue
+        AtmosphereModels.solved_after_thermodynamic_variable(model.closure, name) && continue
 
         closure_before_implicit_solve!(model.closure_fields, model.closure, model, name)
         implicit_stage_step!(model, name, u, α * Δt)
@@ -186,6 +188,11 @@ function ssp_rk3_substep!(model, Δt, α)
     isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, α * Δt, model.velocities)
     closure_before_thermodynamic_solve!(model.closure_fields, model.closure, model, α * Δt)
     implicit_stage_step!(model, thermodynamic_name, prognostic[thermodynamic_name], α * Δt)
+    for (name, u) in zip(names, prognostic)
+        AtmosphereModels.solved_after_thermodynamic_variable(model.closure, name) || continue
+        closure_before_implicit_solve!(model.closure_fields, model.closure, model, name)
+        implicit_stage_step!(model, name, u, α * Δt)
+    end
     closure_after_implicit_solves!(model.closure_fields, model.closure, model, α * Δt)
 
     return nothing

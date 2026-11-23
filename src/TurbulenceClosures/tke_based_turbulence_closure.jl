@@ -1209,7 +1209,7 @@ centers — to the tendency of the `ρe` tracer. Under an explicit time discreti
     P = shear_production_fraction(closure_ij.stability_functions) *
         explicit_tke_shear_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields, u, v, injected)
     B = tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields)
-    B⁺ = max(0, B)
+    B⁺ = explicit_tke_buoyancy_production(closure_fields.subgrid_cloud, i, j, k, B, injected)
 
     ρᵢ = @inbounds ρ[i, j, k]
     e = @inbounds ρe[i, j, k] / ρᵢ
@@ -1230,11 +1230,11 @@ function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, clos
 
     launch!(arch, grid, :xyz, _add_tke_tendencies!,
             Gⁿ[TKE_NAME], grid, closure, closure_fields,
-            model.velocities, model.tracers[TKE_NAME], ρ, solved_shear_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
+            model.velocities, model.tracers[TKE_NAME], ρ, solved_conversions_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
 
     add_dissipative_heating!(Gⁿ, closure_fields.subgrid_cloud, closure_fields, closure, model)
     add_shear_production_heating!(Gⁿ, closure_stability_functions(closure), closure_fields.subgrid_cloud, closure_fields, closure, model)
-    draw_latent_conversion!(Gⁿ, closure_fields.subgrid_cloud, model)
+    draw_latent_conversion!(Gⁿ, closure_fields.subgrid_cloud, closure, model)
     add_heating_budget_flux_tendency!(Gⁿ, closure_fields.subgrid_cloud, heating_budget_flux(closure), model)
 
     return nothing
