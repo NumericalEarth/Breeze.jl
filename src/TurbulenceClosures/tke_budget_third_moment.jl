@@ -522,7 +522,7 @@ compute_tke_budget!(fields::SubgridCloudFields, ::TKEBudgetDistribution, closure
 ##### The third moment at its location k: the one diagnosed from the budget
 #####
 
-@inline third_moment_diagnosis(tm::TKEBudgetThirdMoment, i, j, k, d, cl, c³, algebraic_arguments) =
+@inline third_moment_diagnosis(tm::TKEBudgetThirdMoment, i, j, k, d, cl, g, algebraic_arguments) =
     @inbounds cl.w′³ᵇ[i, j, k]
 
 #####

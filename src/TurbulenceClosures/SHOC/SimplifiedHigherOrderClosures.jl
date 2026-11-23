@@ -18,7 +18,6 @@ export BlendedMixingLength, ColumnStabilityDamping,
        ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
        HardClipping, SmoothClipping,
-       SHOCConstants,
        closure_parameters, with_parameters
 
 using Adapt: Adapt, adapt

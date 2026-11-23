@@ -25,7 +25,6 @@ export TKEBasedTurbulenceClosure,
        ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
        HardClipping, SmoothClipping,
-       SHOCConstants,
        closure_parameters, with_parameters,
        per_column_closure, set_per_column_coefficients!, PerColumnCoefficient,
        DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, LatentStratification, MeanLiquidStratification, InitialStratification, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
@@ -280,7 +279,6 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures,
                                       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
                                       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
                                       HardClipping, SmoothClipping,
-                                      SHOCConstants,
                                       closure_parameters, with_parameters
 
 include("subgrid_distribution.jl")

@@ -27,8 +27,8 @@ limited_by_third_moment(w3, limiter, policy, w_sec) = limit_third_moment(limiter
 limited_by_variance(w_sec, limiter, policy, w3) = limit_third_moment(limiter, policy, w_sec, w3)
 limited_by_maximum_skewness(maximum_skewness, policy, w_sec, w3) =
     limit_third_moment(PolynomialSaturatedSkewness(maximum_skewness), policy, w_sec, w3)
-limited_by_coefficient(c, limiter, policy, constants, arguments) =
-    limit_third_moment(limiter, policy, arguments[3], third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), constants, arguments...))
+limited_by_coefficient(c, limiter, policy, g, arguments) =
+    limit_third_moment(limiter, policy, arguments[3], third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), g, arguments...))
 
 # The derivative of `f(x, parameters...)` with respect to `x` by reverse-mode automatic differentiation
 derivative(f, x, parameters...) =
@@ -118,7 +118,7 @@ derivative(f, x, parameters...) =
     Oceananigans.defaults.FloatType = FT
     @testset "Third moment and skewness limiters" begin
         hard = HardClipping()
-        constants = SHOCConstants(FT)
+        g = FT(9.80616) # the gravitational acceleration of shoc.F90 (`ggr`)
         diagnosis = AlgebraicThirdMoment(FT)
         reset = ResetAboveThresholdSkewness(FT)
         clamped = ClampedSkewness(FT)
@@ -184,8 +184,8 @@ derivative(f, x, parameters...) =
             arguments = (τ, N², w_sec, θˡ, thedz, thedz2, (fraction(n, 6) - FT(0.5)) * FT(0.1),
                          (fraction(n, 7) - FT(0.5)) * FT(0.02), (fraction(n, 8) - FT(0.5)) * FT(0.5),
                          (fraction(n, 9) - FT(0.5)) * FT(0.5), (fraction(n, 10) - FT(0.5)) * FT(0.1))
-            w3 = third_moment(diagnosis, constants, arguments...)
-            @test same_bits(w3, literal_third_moment(constants.ggr, arguments...))
+            w3 = third_moment(diagnosis, g, arguments...)
+            @test same_bits(w3, literal_third_moment(g, arguments...))
             literal_bound = FT(1.2) * sqrt(2 * (w_sec * w_sec * w_sec))
             @test isapprox(third_moment_bound(reset, w_sec), literal_bound; rtol = 8 * eps(FT))
             if abs(abs(w3) - literal_bound) > 8 * eps(FT) * literal_bound
@@ -269,11 +269,11 @@ derivative(f, x, parameters...) =
             # The diagnosis and the limiter together, with respect to the coefficient c, at a state
             # whose diagnosed third moment is beyond the bound of shoc.F90
             arguments = (300.0, 1e-4, 0.4, 300.0, 1 / 40, 1 / 80, 0.02, -0.004, 0.1, 0.15, 0.03)
-            raw = third_moment(diagnosis, constants, arguments...)
+            raw = third_moment(diagnosis, g, arguments...)
             for ratio in (0.9, 1.2, 1.6)
                 limiter = PolynomialSaturatedSkewness(abs(raw) / (ratio * 0.4^1.5))
                 @test abs(raw) / third_moment_bound(limiter, 0.4) ≈ ratio
-                parameters = (limiter, hard, constants, arguments)
+                parameters = (limiter, hard, g, arguments)
                 difference = (limited_by_coefficient(7 + 1e-5, parameters...) - limited_by_coefficient(7 - 1e-5, parameters...)) / 2e-5
                 gradient = derivative(limited_by_coefficient, 7.0, parameters...)
                 @test gradient != 0
@@ -285,7 +285,7 @@ derivative(f, x, parameters...) =
     end
 
     @testset "Stratification number bound" begin
-        constants = SHOCConstants(FT)
+        g = FT(9.80616) # the gravitational acceleration of shoc.F90 (`ggr`)
         diagnosis = AlgebraicThirdMoment(FT)
         unbounded = UnboundedStratificationNumber()
         rational = RationalSaturatedStratificationNumber(FT)
@@ -308,8 +308,8 @@ derivative(f, x, parameters...) =
             τ = FT(10)^(1 + FT(2.5) * fraction(n, 1))
             N² = (fraction(n, 2) - FT(0.4)) * FT(4e-4)
             arguments = (τ, N², FT(0.4), FT(300), FT(1 / 40), FT(1 / 80), FT(0.02), FT(-0.004), FT(0.1), FT(0.15), FT(0.03))
-            @test same_bits(third_moment(diagnosis, unbounded, constants, arguments...),
-                            third_moment(diagnosis, constants, arguments...))
+            @test same_bits(third_moment(diagnosis, unbounded, g, arguments...),
+                            third_moment(diagnosis, g, arguments...))
         end
 
         # Rational: the identity where αᴺ ≤ 0; increasing, and below αᴺᵐᵃˣ = γ × the first pole
@@ -330,13 +330,13 @@ derivative(f, x, parameters...) =
         τ = FT(300)
         for N² in (first_pole / τ^2, (1 / (FT(0.6) / (c * (c - 2)))) / τ^2, FT(1e-2))
             arguments = (τ, N², FT(0.4), FT(300), FT(1 / 40), FT(1 / 80), FT(0.02), FT(-0.004), FT(0.1), FT(0.15), FT(0.03))
-            @test isfinite(third_moment(diagnosis, rational, constants, arguments...))
+            @test isfinite(third_moment(diagnosis, rational, g, arguments...))
         end
         # The first singularity of the unbounded diagnosis is where its denominator vanishes, at
         # αᴺ ≈ 24.26 (0.85 of the first pole, where the poles of X₀ and X₁ cancel in the ratio):
         # there the unbounded third moment is orders of magnitude larger than the bounded one
         near_zero = (τ, FT(24.2589579) / τ^2, FT(0.4), FT(300), FT(1 / 40), FT(1 / 80), FT(0.02), FT(-0.004), FT(0.1), FT(0.15), FT(0.03))
-        @test abs(third_moment(diagnosis, unbounded, constants, near_zero...)) > 100 * abs(third_moment(diagnosis, rational, constants, near_zero...))
+        @test abs(third_moment(diagnosis, unbounded, g, near_zero...)) > 100 * abs(third_moment(diagnosis, rational, g, near_zero...))
 
         if FT == Float64
             # The slope of the bound, 1 / (1 + αᴺ / αᴺᵐᵃˣ)² for αᴺ > 0 and 1 for αᴺ ≤ 0, against
@@ -355,20 +355,20 @@ derivative(f, x, parameters...) =
             # The diagnosed third moment with respect to N², to the pole fraction γ and to the
             # coefficient c, which moves the first pole and so the bound: Enzyme against central
             # differences, in weak and in strong stratification (αᴺ beyond the first pole)
-            moment_by_N²(N², bound, constants, arguments) = third_moment(diagnosis, bound, constants, arguments[1], N², arguments[2:end]...)
-            moment_by_fraction(γ, constants, arguments) = third_moment(diagnosis, RationalSaturatedStratificationNumber(Float64; pole_fraction = γ), constants, arguments...)
-            moment_by_c(c, constants, arguments) = third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), rational, constants, arguments...)
+            moment_by_N²(N², bound, g, arguments) = third_moment(diagnosis, bound, g, arguments[1], N², arguments[2:end]...)
+            moment_by_fraction(γ, g, arguments) = third_moment(diagnosis, RationalSaturatedStratificationNumber(Float64; pole_fraction = γ), g, arguments...)
+            moment_by_c(c, g, arguments) = third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), rational, g, arguments...)
             rest = (0.4, 300.0, 1 / 40, 1 / 80, 0.02, -0.004, 0.1, 0.15, 0.03)
             for αᴺ in (-5.0, 0.5, 5.0, 20.0, 60.0)
                 N² = αᴺ / τ^2
                 arguments = (τ, N², rest...)
-                difference = (moment_by_N²(N² * (1 + h), rational, constants, (τ, rest...)) -
-                              moment_by_N²(N² * (1 - h), rational, constants, (τ, rest...))) / (2 * h * N²)
-                gradient = derivative(moment_by_N², N², rational, constants, (τ, rest...))
+                difference = (moment_by_N²(N² * (1 + h), rational, g, (τ, rest...)) -
+                              moment_by_N²(N² * (1 - h), rational, g, (τ, rest...))) / (2 * h * N²)
+                gradient = derivative(moment_by_N², N², rational, g, (τ, rest...))
                 @test isapprox(gradient, difference; rtol = 1e-5)
                 for (func, x) in ((moment_by_fraction, 0.5), (moment_by_c, 7.0))
-                    difference = (func(x * (1 + h), constants, arguments) - func(x * (1 - h), constants, arguments)) / (2 * h * x)
-                    gradient = derivative(func, x, constants, arguments)
+                    difference = (func(x * (1 + h), g, arguments) - func(x * (1 - h), g, arguments)) / (2 * h * x)
+                    gradient = derivative(func, x, g, arguments)
                     @test isapprox(gradient, difference; rtol = 1e-5, atol = 1e-12)
                 end
             end
@@ -378,7 +378,6 @@ derivative(f, x, parameters...) =
 
     @testset "SmoothDoubleGaussianPDF" begin
         hard = HardClipping()
-        constants = SHOCConstants(FT)
         original_pdf = DoubleGaussianPDF(FT)
         smooth_pdf = SmoothDoubleGaussianPDF(FT)
         @test SimplifiedHigherOrderClosure(FT; subgrid_distribution = shoc_distribution(FT; assumed_pdf = smooth_pdf)) isa
@@ -386,7 +385,7 @@ derivative(f, x, parameters...) =
 
         # One level at 900 hPa and 285 K, close to saturation, between interfaces that carry the
         # same moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec)
-        pressure, θˡ = FT(9e4), FT(285) * (FT(1e5) / FT(9e4))^(constants.rgas / constants.cp)
+        pressure, θˡ = FT(9e4), FT(285) * (FT(1e5) / FT(9e4))^(FT(287.042) / FT(1004.64))
         thermodynamics = (constants = ThermodynamicConstants(FT), standard_pressure = FT(1e5), exner_exponent = VaporEquivalentExponent(),
                           phase_equilibrium = WarmPhaseEquilibrium())
         # Saturation of the level's air with its total water as vapor: a fixed point in qᵗ

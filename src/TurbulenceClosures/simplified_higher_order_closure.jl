@@ -48,7 +48,6 @@ shoc_distribution(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
                        skewness = PolynomialSaturatedSkewness(FT),
                        assumed_pdf = DoubleGaussianPDF(FT),
                        clipping = HardClipping(),
-                       constants = SHOCConstants(FT),
                        kw...)
 
 """

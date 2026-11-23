@@ -252,7 +252,7 @@ energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, CP, C, R, VT, VS, FT}
+struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, CP, R, VT, VS, FT}
     "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref), [`EddyTurnoverTimeScale`](@ref) or [`ReturnToIsotropyTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
@@ -267,8 +267,6 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, CP, C, R, VT, VS, FT}
     assumed_pdf :: PDF
     "Clipping policy of the SHOC components"
     clipping :: CP
-    "SHOC's constants the components read (`ggr`, `basetemp`, `mintke`, …)"
-    constants :: C
     "Maximum flux correlation of w with θˡⁱ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
     ℂʳ :: R
     "Vertical transport of θˡⁱ′², qᵗ′² and θˡⁱ′qᵗ′ ([`ScalarVarianceTransport`](@ref)), or `nothing` for the local diagnosis"
@@ -330,7 +328,6 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              assumed_pdf = EqualWidthDoubleGaussianPDF(FT),
                              skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = representable_skewness(assumed_pdf)),
                              clipping = SmoothClipping(),
-                             constants = SHOCConstants(FT),
                              ℂʳ = nothing,
                              variance_transport = nothing,
                              variance_stability_functions = nothing,
@@ -339,14 +336,14 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
     variance_transport = convert_component(FT, variance_transport)
     variance_stability_functions = convert_component(FT, variance_stability_functions)
     return DoubleGaussian(time_scale, second_moments, third_moment, stratification_number_bound,
-                               skewness, assumed_pdf, clipping, constants, ℂʳ, variance_transport,
+                               skewness, assumed_pdf, clipping, ℂʳ, variance_transport,
                                variance_stability_functions, convert(FT, ℂᵐ))
 end
 
 convert_eltype(::Type{FT}, d::DoubleGaussian) where FT =
     DoubleGaussian(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
-                         d.assumed_pdf, d.clipping, d.constants, d.ℂʳ, d.variance_transport,
+                         d.assumed_pdf, d.clipping, d.ℂʳ, d.variance_transport,
                          d.variance_stability_functions, d.ℂᵐ))...)
 
 convert_component(FT, ::Nothing) = nothing
@@ -780,13 +777,13 @@ end
 ##### The column computation of the distribution
 #####
 
-@inline subgrid_third_moment(::Nothing, d, c, args...) = zero(eltype(args[1]))
-@inline subgrid_third_moment(tm, d, c, args...) = third_moment(tm, d.stratification_number_bound, c, args...)
+@inline subgrid_third_moment(::Nothing, d, g, args...) = zero(eltype(args[1]))
+@inline subgrid_third_moment(tm, d, g, args...) = third_moment(tm, d.stratification_number_bound, g, args...)
 
 # The third moment at the face or the center k before its limiter: from the local arguments of the algebraic diagnosis,
 # or from fields stored at that location (`TKEBudgetThirdMoment`, tke_budget_third_moment.jl)
-@inline third_moment_diagnosis(tm, i, j, k, d, cl, c³, algebraic_arguments) =
-    subgrid_third_moment(tm, d, c³, algebraic_arguments...)
+@inline third_moment_diagnosis(tm, i, j, k, d, cl, g, algebraic_arguments) =
+    subgrid_third_moment(tm, d, g, algebraic_arguments...)
 
 # Raise θˡⁱ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
 # small for the down-gradient fluxes (|correlation with w| > ℂʳ), and scale θˡⁱ′qᵗ′ with them so that
@@ -826,10 +823,9 @@ end
 # gradients of center quantities (w′², e) are compact across the face, over the distance of the two centers, and
 # those of face quantities (θˡⁱ′², w′θˡⁱ′) are taken across the faces k - 1 and k + 1, over the thicknesses of the
 # two cells between them. It is returned before its limiter: the skewness is a ratio formed at the centers.
-# `c³` carries the gravitational acceleration.
-@inline function face_third_moment(i, j, k, grid, d, closure, closure_fields, m, cl, c³, θ, e)
+# `g` is the gravitational acceleration.
+@inline function face_third_moment(i, j, k, grid, d, closure, closure_fields, m, cl, g, θ, e)
     FT = grid_float_type(grid)
-    c = d.constants
     cp = d.clipping
     eᵐⁱⁿ = closure.minimum_tke
     ccc = (Center(), Center(), Center())
@@ -842,8 +838,8 @@ end
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
         τ³ = third_moment_time_scale(d.time_scale, m.τ[i, j, k], ℓ, u, N²)
         τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
-        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * c.mintke
-        w′² = clip_below(cp, linear_interp(zᵘ, zˡ, cl.w′²[i, j, k], cl.w′²[i, j, k-1], zᶠ), w′²ᵐⁱⁿ, c.mintke)
+        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * eᵐⁱⁿ
+        w′² = clip_below(cp, linear_interp(zᵘ, zˡ, cl.w′²[i, j, k], cl.w′²[i, j, k-1], zᶠ), w′²ᵐⁱⁿ, eᵐⁱⁿ)
         θᶠ = linear_interp(zᵘ, zˡ, θ[i, j, k], θ[i, j, k-1], zᶠ)
         algebraic_arguments = (τ³, N², w′², θᶠ,
                                1 / (zᵘ - zˡ), 1 / (Δzᶜᶜᶜ(i, j, k, grid) + Δzᶜᶜᶜ(i, j, k-1, grid)),
@@ -852,7 +848,7 @@ end
                                cl.w′²[i, j, k] - cl.w′²[i, j, k-1],
                                max(e[i, j, k], eᵐⁱⁿ) - max(e[i, j, k-1], eᵐⁱⁿ),
                                m.w′θˡⁱ′[i, j, k])
-        w′³ = third_moment_diagnosis(d.third_moment, i, j, k, d, cl, c³, algebraic_arguments)
+        w′³ = third_moment_diagnosis(d.third_moment, i, j, k, d, cl, g, algebraic_arguments)
     end
     return w′³
 end
@@ -870,10 +866,10 @@ third_moment_location_fields(grid, ::Center) = NamedTuple()
 # interpolates its interface w′³ to the levels, and limited there, where the PDF forms the skewness w′³ / (w′²)^{3/2}
 # with the center w′² (`shoc.F90` limits at the interfaces; the bound of a ratio formed at the centers holds there). `Center()`: w′³ at the centers,
 # which needs the gradients of the center quantities w′² and e across two cells.
-@inline third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e) =
-    third_moment_profile!(third_moment_location(d.third_moment), m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+@inline third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, g, θ, e) =
+    third_moment_profile!(third_moment_location(d.third_moment), m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
 
-@inline function third_moment_profile!(::Face, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+@inline function third_moment_profile!(::Face, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
     ccc = (Center(), Center(), Center())
@@ -882,7 +878,7 @@ third_moment_location_fields(grid, ::Center) = NamedTuple()
         m.w′³[i, j, 1] = zero(FT)
         m.w′³[i, j, Nz+1] = zero(FT)
         for k in 2:Nz
-            m.w′³[i, j, k] = face_third_moment(i, j, k, grid, d, closure, closure_fields, m, cl, c³, θ, e)
+            m.w′³[i, j, k] = face_third_moment(i, j, k, grid, d, closure, closure_fields, m, cl, g, θ, e)
         end
         for k in 1:Nz
             zᶜ = znode(i, j, k, grid, ccc...)
@@ -898,11 +894,10 @@ end
 # The third moment diagnosed at the center k (`Center()`), where the PDF forms the skewness w′³ / (w′²)^{3/2}. The second moments of the faces
 # k and k+1 are differenced across the cell (compact), w′² and e across the neighbouring centers, and the
 # coefficients are the averages of the two faces. `lower` and `upper` are (τ, ℓ, N², θˡⁱ′², w′θˡⁱ′) at the
-# faces k and k+1; `w′θˡⁱ′ᶜ` is the flux interpolated to the center; `c³` carries the gravitational acceleration.
-@inline function center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡⁱ′ᶜ, lower, upper)
+# faces k and k+1; `w′θˡⁱ′ᶜ` is the flux interpolated to the center; `g` is the gravitational acceleration.
+@inline function center_third_moment(i, j, k, grid, d, closure, cl, g, θ, e, w′θˡⁱ′ᶜ, lower, upper)
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
-    c = d.constants
     cp = d.clipping
     eᵐⁱⁿ = closure.minimum_tke
     ccc = (Center(), Center(), Center())
@@ -916,23 +911,23 @@ end
         u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
         τ³ = third_moment_time_scale(d.time_scale, (τˡ + τᵘ) / 2, ℓ, u, N²)
         τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
-        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * c.mintke
+        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * eᵐⁱⁿ
         w′² = cl.w′²[i, j, k]
         Δzʷ = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
         thedz = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
-        algebraic_arguments = (τ³, N², clip_below(cp, w′², w′²ᵐⁱⁿ, c.mintke), θ[i, j, k],
+        algebraic_arguments = (τ³, N², clip_below(cp, w′², w′²ᵐⁱⁿ, eᵐⁱⁿ), θ[i, j, k],
                                thedz, 1 / Δzᶜᶜᶜ(i, j, k, grid),
                                θˡⁱ′²ᵘ - θˡⁱ′²ˡ,
                                w′θˡⁱ′ᵘ - w′θˡⁱ′ˡ,
                                cl.w′²[i, j, kᵘ] - cl.w′²[i, j, kˡ],
                                max(e[i, j, kᵘ], eᵐⁱⁿ) - max(e[i, j, kˡ], eᵐⁱⁿ),
                                w′θˡⁱ′ᶜ)
-        w′³ = third_moment_diagnosis(d.third_moment, i, j, k, d, cl, c³, algebraic_arguments)
+        w′³ = third_moment_diagnosis(d.third_moment, i, j, k, d, cl, g, algebraic_arguments)
     end
     return limit_third_moment(d.skewness, cp, w′², w′³)
 end
 
-@inline function third_moment_profile!(::Center, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+@inline function third_moment_profile!(::Center, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
     ccc = (Center(), Center(), Center())
     ccf = (Center(), Center(), Face())
     @inbounds for k in 1:size(grid, 3)
@@ -942,7 +937,7 @@ end
         w′θˡⁱ′ᶜ = linear_interp(zᵘ, zˡ, m.w′θˡⁱ′[i, j, k+1], m.w′θˡⁱ′[i, j, k], zᶜ)
         lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k])
         upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡⁱ′²[i, j, k+1], m.w′θˡⁱ′[i, j, k+1])
-        cl.w′³[i, j, k] = center_third_moment(i, j, k, grid, d, closure, cl, c³, θ, e, w′θˡⁱ′ᶜ, lower, upper)
+        cl.w′³[i, j, k] = center_third_moment(i, j, k, grid, d, closure, cl, g, θ, e, w′θˡⁱ′ᶜ, lower, upper)
     end
     return nothing
 end
@@ -951,17 +946,14 @@ end
     w = velocities.w
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
-    c = d.constants
     cp = d.clipping
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
     ccc = (Center(), Center(), Center())
     ccf = (Center(), Center(), Face())
 
-    # The gravitational acceleration of the model, in place of SHOC's `ggr`, for the third moment
-    # and the stability of the liquid flux fraction
+    # The gravitational acceleration of the model, for the third moment
     g = thermodynamics.constants.gravitational_acceleration
-    c³ = (; ggr = g)
 
     @inbounds begin
         # The second moments at the interior faces, down the gradient
@@ -1017,7 +1009,7 @@ end
         end
 
         # With a transport of the scalar second moments, their steady budget (scalar_variance_transport.jl)
-        transport_scalar_variances!(d.variance_transport, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+        transport_scalar_variances!(d.variance_transport, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
 
         # The variances no smaller than the fluxes allow at the largest correlation with w
         for k in 2:Nz
@@ -1033,7 +1025,7 @@ end
         m.θˡⁱ′qᵗ′[i, j, 1] = m.θˡⁱ′qᵗ′[i, j, k′]
 
         # The third moment at the faces and at the centers
-        third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+        third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
 
         # The assumed PDF at the centers, from moments co-located there: the second moments and w′³ are
         # interpolated from the faces to the center, so that the skewness w′³ / (w′²)^{3/2} the PDF forms is a ratio

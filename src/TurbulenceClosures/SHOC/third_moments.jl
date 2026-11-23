@@ -3,13 +3,13 @@
 #####
 ##### A third-moment component implements
 #####
-#####     third_moment(tm, constants, τ_zi, N²_zi, w_sec_zi, thetal_zi, thedz, thedz2,
+#####     third_moment(tm, g, τ_zi, N²_zi, w_sec_zi, thetal_zi, thedz, thedz2,
 #####                  Δthl_sec, Δwthl_sec, Δw_sec, Δtke, wthl) -> w3
 #####
 ##### at an interior interface: the diagnosis of the third moment from the second moments. The
 ##### method that takes a stratification number bound after the component,
 #####
-#####     third_moment(tm, stratification_number_bound, constants, ...) -> w3
+#####     third_moment(tm, stratification_number_bound, g, ...) -> w3
 #####
 ##### applies the bound to the stratification number αᴺ = τ² N² inside the diagnosis; the method
 ##### without it leaves αᴺ unbounded.
@@ -136,10 +136,11 @@ Adapt.@adapt_structure AlgebraicThirdMoment
 # The third moment at an interior interface from the interface values of isotropy, Brunt-Vaisala
 # frequency, w_sec and thetal, the inverse thicknesses `thedz` and `thedz2`, and the differences
 # of the moments across the interface; `wthl` is wthl_sec at the interface.
-@inline third_moment(tm::AlgebraicThirdMoment, constants::SHOCConstants, arguments...) =
-    third_moment(tm, UnboundedStratificationNumber(), constants, arguments...)
+# `g` is the gravitational acceleration of the model.
+@inline third_moment(tm::AlgebraicThirdMoment, g::Number, arguments...) =
+    third_moment(tm, UnboundedStratificationNumber(), g, arguments...)
 
-@inline function third_moment(tm::AlgebraicThirdMoment, stratification_number_bound, constants, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
+@inline function third_moment(tm::AlgebraicThirdMoment, stratification_number_bound, g, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
                               thl_sec_diff, wthl_sec_diff, wsec_diff, tke_diff, wthl)
     FT = typeof(wthl)
     c = tm.ℂʷ₂
@@ -154,7 +155,7 @@ Adapt.@adapt_structure AlgebraicThirdMoment
     iso = isotropy_zi
     isosqrd = iso * iso
     αᴺ = bound_stratification_number(stratification_number_bound, isosqrd * brunt_zi, first_pole)
-    bet2 = constants.ggr / thetal_zi
+    bet2 = g / thetal_zi
 
     f0 = thedz2 * (bet2 * bet2 * bet2) * ((iso * iso) * (iso * iso)) * wthl * thl_sec_diff
     f1 = thedz2 * (bet2 * bet2) * (iso * iso * iso) * (wthl * wthl_sec_diff + convert(FT, 0.5) * w_sec_zi * thl_sec_diff)

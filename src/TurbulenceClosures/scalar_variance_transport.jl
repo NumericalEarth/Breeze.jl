@@ -83,15 +83,15 @@ end
 # The third moment w′³ at the centers from the local moments, for the third-moment flux of the solve
 @inline local_center_third_moments!(::Val{false}, args...) = nothing
 
-@inline local_center_third_moments!(::Val{true}, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e) =
-    third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+@inline local_center_third_moments!(::Val{true}, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e) =
+    third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
 
-@inline transport_scalar_variances!(::Nothing, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e) = nothing
+@inline transport_scalar_variances!(::Nothing, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e) = nothing
 
-@inline function transport_scalar_variances!(t::ScalarVarianceTransport, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+@inline function transport_scalar_variances!(t::ScalarVarianceTransport, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
-    local_center_third_moments!(t.component_third_moment, m, cl, i, j, grid, d, closure, closure_fields, c³, θ, e)
+    local_center_third_moments!(t.component_third_moment, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
     work = m.variance_transport_work
     Kᶜ = closure_fields.Kᶜ
     @inbounds begin

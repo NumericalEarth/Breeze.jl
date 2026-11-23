@@ -1,5 +1,5 @@
 #####
-##### Components of SHOC, and the constants they share
+##### Components of SHOC
 #####
 ##### `SimplifiedHigherOrderClosure` is assembled from components: concretely typed, immutable
 ##### structs whose scalar fields all have one type, and whose methods are scalar functions that
@@ -114,80 +114,3 @@ function Base.show(io::IO, component::AbstractSHOCComponent)
         print(io, '\n', "    ", name, " = ", prettysummary(scalar))
     end
 end
-
-"""
-$(TYPEDEF)
-
-The physical constants that SHOC is handed by its host (E3SM's `shr_const`), the reference values
-of `shoc.F90`, and the bounds and safeguards that several components or the column sweeps
-themselves use: the bounds on turbulent kinetic energy, the floors of the surface stress and of
-the surface source of turbulent kinetic energy, and the scale of the stratification for the
-clipping policy. None is an empirical coefficient of the closure; all are dimensional.
-
-$(TYPEDFIELDS)
-"""
-struct SHOCConstants{FT} <: AbstractSHOCComponent
-    "Gravitational acceleration, m s⁻²"
-    ggr :: FT
-    "Dry air gas constant, J kg⁻¹ K⁻¹"
-    rgas :: FT
-    "Water vapor gas constant, J kg⁻¹ K⁻¹"
-    rv :: FT
-    "Specific heat of dry air, J kg⁻¹ K⁻¹"
-    cp :: FT
-    "Latent heat of vaporization, J kg⁻¹"
-    lcond :: FT
-    "`rv / rgas - 1` (E3SM `zvir`)"
-    eps :: FT
-    "Von Kármán constant"
-    vk :: FT
-    "Reference temperature, K"
-    basetemp :: FT
-    "Reference pressure, Pa"
-    basepres :: FT
-    "Pressure above which the column stability is integrated, Pa"
-    troppres :: FT
-    "Minimum turbulent kinetic energy, m² s⁻²"
-    mintke :: FT
-    "Maximum turbulent kinetic energy, m² s⁻²"
-    maxtke :: FT
-    "Minimum wind speed of the lowest level in the implicit surface stress, m s⁻¹ (`wsmin`)"
-    wsmin :: FT
-    "Minimum surface drag coefficient of the implicit surface stress, kg m⁻² s⁻¹ (`ksrfmin`)"
-    ksrfmin :: FT
-    "Minimum friction velocity in the surface source of turbulent kinetic energy, m s⁻¹ (literal `0.01` of `tke_srf_flux_term`)"
-    tke_flux_ustar_min :: FT
-    "Magnitude of the squared buoyancy frequency that scales the smoothing of its bounds, s⁻²; `HardClipping` ignores it"
-    brunt_scale :: FT
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return `SHOCConstants{FT}` with the values of E3SM (`shr_const` and `shoc.F90`).
-"""
-function SHOCConstants(FT::DataType = Oceananigans.defaults.FloatType;
-                       ggr = 9.80616,
-                       rgas = 287.042,
-                       rv = 461.505,
-                       cp = 1004.64,
-                       lcond = 2.501e6,
-                       eps = rv / rgas - 1,
-                       vk = 0.4,
-                       basetemp = 300,
-                       basepres = 100000,
-                       troppres = 80000,
-                       mintke = 0.0004,
-                       maxtke = 50,
-                       wsmin = 1,
-                       ksrfmin = 1e-4,
-                       tke_flux_ustar_min = 0.01,
-                       brunt_scale = 1e-6)
-
-    return SHOCConstants{FT}(ggr, rgas, rv, cp, lcond, eps, vk, basetemp, basepres, troppres, mintke, maxtke,
-                             wsmin, ksrfmin, tke_flux_ustar_min, brunt_scale)
-end
-
-# Kernels receive the components through `adapt`: on `ReactantState` every traced scalar must be
-# replaced by its device counterpart, which needs the fields to be recursed into.
-Adapt.@adapt_structure SHOCConstants

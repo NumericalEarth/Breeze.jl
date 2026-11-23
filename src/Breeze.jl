@@ -260,7 +260,7 @@ export
     BlendedMixingLength, ColumnStabilityDamping, DowngradientSecondMoments,
     AlgebraicThirdMoment, TKEBudgetThirdMoment, HeatingBudgetFlux, RadiativeHeating, PrescribedHeating, heating_budget_flux_bounds,
     UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
-    ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness, DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, HardClipping, SmoothClipping, SHOCConstants,
+    ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness, DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, HardClipping, SmoothClipping,
     closure_parameters, with_parameters,
     per_column_closure, set_per_column_coefficients!, PerColumnCoefficient,
     DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, LatentStratification, MeanLiquidStratification, InitialStratification, SinglePass, DampedFixedPoint, BracketedFractionSolve, StratificationLimitedMomentTimeScale, SecantIteration, BisectionIteration, LaggedStability, DissipationTimeScale, EddyTurnoverTimeScale, ReturnToIsotropyTimeScale, VarianceStabilityFunctions,
