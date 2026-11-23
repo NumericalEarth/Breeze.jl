@@ -90,6 +90,24 @@ How this differs from the operator-split `shoc.F90` step:
 - the cold-surface fallback of the diffusivities and the boundary layer depth (a diagnostic of `shoc.F90`
   that only that fallback uses) are not included.
 
+Four of these differences are deliberate and change the solution measurably; on the same column state (BOMEX and
+RICO states handed to the port and to `shoc.F90`'s routines) they account for the differences of the port:
+
+- **Saturation.** The assumed PDF condenses at the model's saturation specific humidity
+  `qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)`, within about 0.1 % of the exact `ε e / (p - (1 - ε) e)`. `shoc.F90` uses
+  `0.622 e / (p - e)`, about 1.3 % (≈ 3 × 10⁻⁴ kg kg⁻¹ in the trade-cumulus layer) too large, so its PDF condenses less:
+  on one BOMEX state the port's PDF with `shoc.F90`'s saturation reproduces `shoc.F90`'s cloud to round-off, and
+  with the model's saturation it has about twice the cloud fraction and liquid water path.
+- **The asymptotic length.** `l∞` weights the height by `√e` with `e` floored at `minimum_tke`; `shoc.F90` floors
+  `e` at `mintke = 4 × 10⁻⁴` m² s⁻², which gives the free troposphere a weight `√e = 0.02` m s⁻¹. The port's `l∞`
+  is 20–60 % smaller (and equal to that of `shoc.F90` with the same floor), its mixing length 10–30 % smaller,
+  and the time scale, the diffusivities and the variances (`∝ τ² e`) follow.
+- **The bound of the third moment.** It saturates along a polynomial toward `1.2 √2 (w′²)^{3/2}`
+  ([`PolynomialSaturatedSkewness`](@ref)); `shoc.F90` resets a third moment beyond its bound to `0.02` m³ s⁻³, which
+  at an inversion is a large positive skewness.
+- **The surface source of TKE.** The TKE receives `ℂᴾ` times the work of the surface stress on the lowest level,
+  `ℂᴾ u★² |u₁|` per unit area, about `0.1 |u₁| / u★` (2–3 in BOMEX and RICO) times the `u★³` that `shoc.F90` adds.
+
 ```jldoctest
 using Breeze
 
