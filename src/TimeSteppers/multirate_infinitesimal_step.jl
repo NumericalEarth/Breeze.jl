@@ -501,14 +501,14 @@ CompressibleEquations.recovered_state_residual(ts::MultirateInfinitesimalStep) =
 # their advective tendencies when the microphysical sources are added
 # (`AtmosphereModels.separate_stage_tendencies`), so none of them can be built afterwards in shared
 # scratch (`budgeted_tendency_names`).
-#
-# A coefficient set with a diagonal `β` (`DiagonalStorage`) applies every tendency whole, so it
-# separates no fast part and needs no scratch.
+
 # The scalars whose post-loop advective tendencies take fields of their own (see above).
 budgeted_tendency_names(::Nothing, microphysical_names) = nothing
 budgeted_tendency_names(moisture_forcing_names, microphysical_names) =
     (moisture_forcing_names..., filter(name -> name ∉ moisture_forcing_names, microphysical_names)...)
 
+# A coefficient set with a diagonal `β` (`DiagonalStorage`) applies every tendency whole, so it
+# separates no fast part and needs no scratch.
 fast_tendency_storage(::DiagonalStorage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper,
                       moisture_forcing_names) = nothing
 
