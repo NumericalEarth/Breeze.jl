@@ -6,6 +6,7 @@ using CloudMicrophysics.Parameters: CloudIce, CloudLiquid
 import CloudMicrophysics.BulkMicrophysicsTendencies as BMT
 import CloudMicrophysics.Parameters as CMP
 import CloudMicrophysics.ThermodynamicsInterface as TDI
+import ClimaParams
 using Oceananigans
 using Test
 
@@ -20,18 +21,11 @@ using Breeze.Thermodynamics:
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
-# Rebuild a Microphysics1MParams with selected `process_params` entries overridden
-# (CloudMicrophysics 0.38 stores process parameters separately from the option markers).
-override_process_params(parameters; overrides...) =
-    CMP.Microphysics1MParams(;
-        parameters.processes,
-        process_params = merge(parameters.process_params, (; overrides...)),
-        parameters.cloud,
-        parameters.precip,
-        parameters.air_properties,
-        parameters.terminal_velocity,
-        parameters.max_latent_heating_rate,
-    )
+# 1M parameters with the ClimaParams parameters named in `overrides` set to the given values
+function microphysics_1m_parameters(FT, overrides; options...)
+    override_file = Dict(string(name) => Dict("value" => value) for (name, value) in pairs(overrides))
+    return CMP.Microphysics1MParams(ClimaParams.create_toml_dict(FT; override_file); options...)
+end
 
 @testset "MPNE1M suppresses warm cloud-ice growth [$(FT)]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
@@ -125,8 +119,7 @@ end
 
     # Supersaturation-dependent ice autoconversion transfers cloud ice to snow.
     options = merge(disabled_options, (; snow_autoconversion = CMP.WithSupersaturation()))
-    parameters = override_process_params(CMP.Microphysics1MParams(FT; options...);
-                                         snow_autoconversion = (; r_ice_snow = FT(25e-6)))
+    parameters = microphysics_1m_parameters(FT, (; ice_snow_threshold_radius = FT(25e-6)); options...)
     tendencies, = evaluate_tendencies(parameters, FT(250), FT(0.01), FT(0), FT(1e-4), FT(0), FT(0))
     @test tendencies.ρqᶜⁱ < 0
     @test tendencies.ρqˢⁿ > 0
@@ -185,10 +178,11 @@ end
     @test sum(tendencies) ≈ zero(FT) atol=eps(FT)
 
     # TemperatureDependent formation uses the Frostenberg deposition timescale.
-    frostenberg = CMP.Frostenberg2023(; σ = FT(1), b = FT(1), T_freeze = FT(273.15))
     options = merge(disabled_options, (; cloud_ice_formation = CMP.TemperatureDependent()))
-    parameters = override_process_params(CMP.Microphysics1MParams(FT; options...);
-                                         cloud_ice_formation = (; τ_relax = FT(10), frostenberg))
+    overrides = (; sublimation_deposition_timescale = FT(10),
+                 Frostenberg2023_standard_deviation = FT(1),
+                 Frostenberg2023_b_coefficient = FT(1))
+    parameters = microphysics_1m_parameters(FT, overrides; options...)
     tendencies, microphysics = evaluate_tendencies(
         parameters,
         FT(250),
@@ -225,18 +219,20 @@ end
 
 # Kessler rain autoconversion parameters whose timescale and threshold depend on the vertical velocity:
 # a 10× faster conversion and a halved threshold in convective conditions.
-function convective_rain_autoconversion(parameters)
-    acnv = parameters.process_params.rain_autoconversion
-    convective = CMP.KesslerAcnv(; acnv.τ_slow, τ_fast = acnv.τ_slow / 10,
-                                 acnv.q_threshold_slow, q_threshold_fast = acnv.q_threshold_slow / 2,
-                                 acnv.w_0, acnv.k)
-    return override_process_params(parameters; rain_autoconversion = convective)
+# ClimaParams sets the convective values and the ratios of the quiescent to the convective values.
+function convective_rain_autoconversion(FT)
+    acnv = CMP.Microphysics1MParams(FT).process_params.rain_autoconversion
+    overrides = (; rain_autoconversion_timescale = acnv.τ_slow / 10,
+                 rain_autoconversion_timescale_stratiform_scale = FT(10),
+                 cloud_liquid_water_specific_humidity_autoconversion_threshold = acnv.q_threshold_slow / 2,
+                 cloud_liquid_water_specific_humidity_autoconversion_threshold_stratiform_scale = FT(2))
+    return microphysics_1m_parameters(FT, overrides)
 end
 
 @testset "Rain autoconversion depends on the vertical velocity [$(FT)]" for FT in test_float_types()
     default = CMP.Microphysics1MParams(FT)
     @test default.process_params.rain_autoconversion isa CMP.KesslerAcnv
-    convective = convective_rain_autoconversion(default)
+    convective = convective_rain_autoconversion(FT)
     w₀ = convective.process_params.rain_autoconversion.w_0
     qᶜˡ = FT(1e-3)
 
@@ -295,7 +291,7 @@ end
 
 @testset "Rain autoconversion in AtmosphereModel follows the vertical velocity [$(FT)]" for FT in test_float_types()
     default = CMP.Microphysics1MParams(FT)
-    convective = convective_rain_autoconversion(default)
+    convective = convective_rain_autoconversion(FT)
     w = 5 * convective.process_params.rain_autoconversion.w_0
 
     for (name, cloud_formation) in (("warm non-equilibrium", NonEquilibriumCloudFormation(CloudLiquid(FT), nothing)),
@@ -328,7 +324,7 @@ end
 # is the contravariant w̃ = w - (∂z/∂x) u, and under `AcousticRungeKutta3`, where it is the
 # acoustic time average. Autoconversion must follow the physical vertical velocity of the state.
 @testset "Rain autoconversion follows the physical vertical velocity [$(FT)]" for FT in test_float_types()
-    convective = convective_rain_autoconversion(CMP.Microphysics1MParams(FT))
+    convective = convective_rain_autoconversion(FT)
     w₀ = convective.process_params.rain_autoconversion.w_0
 
     # The warm scheme uses the default microphysics kernel, the mixed-phase scheme the fused MPNE1M kernel
