@@ -2,10 +2,10 @@
 ##### Time discretization types for CompressibleDynamics
 #####
 ##### Two top-level choices:
-#####   - SplitExplicitTimeDiscretization — Wicker-Skamarock RK3 outer loop
-#####     with an inner substep that evolves linearized acoustic perturbations
-#####     about each RK stage-entry state. The default uses off-centered
-#####     Crank-Nicolson and Klemp 2018 horizontal divergence damping.
+#####   - SplitExplicitTimeDiscretization — a multistage outer loop (a multirate
+#####     infinitesimal step by default, or Wicker-Skamarock RK3) with an inner
+#####     substep that evolves linearized acoustic perturbations. The default uses
+#####     off-centered Crank-Nicolson and Klemp 2018 horizontal divergence damping.
 #####   - ExplicitTimeStepping — fully explicit time-stepping. Tendencies
 #####     (advection + PGF + buoyancy) are computed together; the time-step
 #####     is bounded by the acoustic CFL.
@@ -18,17 +18,19 @@
 """
 $(TYPEDEF)
 
-Abstract supertype for the outer Runge–Kutta scheme that drives the acoustic
-substep loop. The current implementation supports a single concrete subtype:
+Abstract supertype for the outer Runge–Kutta scheme of
+[`AcousticRungeKutta3`](@ref Breeze.TimeSteppers.AcousticRungeKutta3), whose stages all
+restart from the step-start state. There is a single concrete subtype:
 
   - [`WickerSkamarock3`](@ref) — three-stage Wicker–Skamarock RK3 with stage
-    fractions ``β = (1/3, 1/2, 1)``. This is the only outer scheme supported
-    today and the default for [`SplitExplicitTimeDiscretization`](@ref).
+    fractions ``β = (1/3, 1/2, 1)``.
 
-The interface exists to make the outer-scheme commitment explicit in the
-type system and to provide a clean extension point for a future Multirate
-Infinitesimal Step (MIS) outer scheme. A concrete subtype is expected to
-provide a [`stage_fractions`](@ref) method returning its stage-fraction tuple.
+A concrete subtype is expected to provide a [`stage_fractions`](@ref) method returning
+its stage-fraction tuple. The default outer time stepper of
+[`SplitExplicitTimeDiscretization`](@ref),
+[`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep), is
+not described by this interface: its coefficients are a
+[`MultirateInfinitesimalStepTableau`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStepTableau).
 """
 abstract type AcousticOuterScheme end
 
@@ -54,7 +56,7 @@ scheme. For [`WickerSkamarock3`](@ref) this is the canonical
 stage_fractions(::WickerSkamarock3) = (1//3, 1//2, 1//1)
 
 #####
-##### Acoustic substep distribution across the WS-RK3 stages
+##### Acoustic substep distribution across the stages of the outer scheme
 #####
 
 """
@@ -104,7 +106,9 @@ Acoustic substep distribution where every stage uses the same substep size
 ``Δτ = Δt/N``. ``N`` is rounded up to a multiple of 6 (= LCM of the WS-RK3 stage
 denominators 2 and 3) so the per-stage count ``Nτ = β_\\mathrm{stage} N`` is an
 exact integer and each stage covers exactly ``β Δt`` — uniform Δτ, at the cost of
-over-resolving (substep count is the next multiple of 6 ≥ the CFL minimum).
+over-resolving (substep count is the next multiple of 6 ≥ the CFL minimum). A stage
+whose ``β N`` is not an integer, as in most multirate infinitesimal step tableaux, takes
+``\\mathrm{round}(β N)`` substeps sized to cover ``β Δt`` exactly.
 """
 struct ConstantSubstepSize <: AcousticSubstepDistribution end
 
@@ -114,7 +118,8 @@ $(TYPEDEF)
 Acoustic substep distribution where stage 1 collapses to a single substep
 of size ``Δt/3``; stages 2 and 3 are the same as
 [`ConstantSubstepSize`](@ref) (``N/2`` and ``N`` substeps of size
-``Δτ = Δt/N``).
+``Δτ = Δt/N``). Under a multirate infinitesimal step, every stage shorter than
+``5 Δt / 12`` takes a single substep over its interval.
 """
 struct MonolithicFirstStage <: AcousticSubstepDistribution end
 
@@ -286,11 +291,14 @@ $(TYPEDEF)
 
 Split-explicit time discretization for compressible dynamics.
 
-Outer integration is the Wicker–Skamarock RK3 scheme
-([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) with stage
-fractions ``β = (1/3, 1/2, 1)``. Within each stage, an inner substep loop
-evolves linearized acoustic perturbations about each RK stage-entry
-state. The vertically implicit solve uses an off-centered Crank-Nicolson
+Outer integration is by default a multirate infinitesimal step method
+([`MultirateInfinitesimalStep`](@ref Breeze.TimeSteppers.MultirateInfinitesimalStep)).
+Passing `timestepper = :AcousticRungeKutta3` to `AtmosphereModel` selects the
+Wicker–Skamarock RK3 scheme ([Wicker and Skamarock 2002](@cite WickerSkamarock2002))
+with stage fractions ``β = (1/3, 1/2, 1)`` instead. Within each stage, an inner substep loop
+evolves linearized acoustic perturbations, about the step-start state under a multirate
+infinitesimal step and about each stage-entry state under Wicker–Skamarock RK3.
+The vertically implicit solve uses an off-centered Crank-Nicolson
 scheme with off-centering parameter ``\\omega`` (default 0.65; ``\\omega = 0.5``
 is classic centered CN).
 
@@ -340,7 +348,7 @@ Fields
   lid. Default `nothing` (off). Passing `UpperSponge(; ...)` enables it
   with the configured `damping_rate` and `depth`.
 - `substep_distribution`: How acoustic substeps are distributed across the
-  three WS-RK3 stages.
+  stages of the outer scheme.
 - `open_boundary_relaxation`: Per-substep relaxation factor ``α \\in (0, 1]``
   applied at the outermost open-boundary cell of ``ρ′,(ρθ)′`` to enforce the
   prescribed wall value across the acoustic substeps. Default ``α = 0.5``,
@@ -594,8 +602,8 @@ convert_acoustic_parameter(::Type{FT}, sponge::UpperSponge) where FT =
 $(TYPEDEF)
 
 Time discretization for fully compressible dynamics that integrates slow
-terms with a Wicker-Skamarock RK3 outer loop and acoustic terms with
-split-explicit inner substeps.
+terms with a multistage outer loop (a multirate infinitesimal step by default,
+or Wicker–Skamarock RK3) and acoustic terms with split-explicit inner substeps.
 
 The constructor accepts `substeps` or an `acoustic_cfl` for choosing the
 number of acoustic substeps, a `forward_weight` for off-centering the acoustic

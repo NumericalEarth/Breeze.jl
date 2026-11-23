@@ -445,8 +445,9 @@ before it adds its own to `G`.
 # `Gᵒ` has to hold everything else the stage applies, transport above all: a sink budgeted
 # against `c⁰` alone can remove what advection removes too. A time stepper that keeps part of
 # a stage's tendency apart from `Gⁿ` (the multirate infinitesimal step with post-loop scalar
-# tendencies keeps the advective part apart) hands it over through
-# `separate_stage_tendencies`, and `accumulated_tendency` adds it to `Gⁿ`.
+# tendencies keeps the advective part apart where it recombines the tendencies of earlier
+# stages) hands it over through `separate_stage_tendencies`, and `accumulated_tendency` adds it
+# to `Gⁿ`.
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -590,8 +591,8 @@ function compute_microphysical_tendencies!(microphysics, model)
 
     # Microphysics responds to the physical velocity of the current state, so we pass
     # `model.velocities` rather than `transport_velocities(model)`, which is the contravariant
-    # vertical velocity on terrain-following grids and the acoustic time average under
-    # `AcousticRungeKutta3`.
+    # vertical velocity on terrain-following grids and the acoustic time average under the
+    # acoustic time steppers.
     launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
             G_tuple, name_tuple, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, specific_prognostic_moisture(model),
@@ -755,6 +756,10 @@ volume. It defaults to all prognostic fields; schemes with prognostic number con
 """
 condensate_field_names(microphysics) = prognostic_field_names(microphysics)
 condensate_field_names(::Nothing) = tuple()
+
+# The densities whose tendencies the pressure of an acoustic substep loop ramps with: the prognostic
+# moisture and the condensate masses. Number concentrations, other moments and tracers are not among them.
+moisture_forcing_names(microphysics) = (moisture_prognostic_name(microphysics), condensate_field_names(microphysics)...)
 
 # Precipitating water is part of the thermodynamic moisture bundle, but does not
 # equilibrate as cloud condensate during a saturated parcel displacement.

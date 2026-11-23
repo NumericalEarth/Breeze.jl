@@ -38,7 +38,7 @@
 # 1. **Anelastic**: Filters acoustic waves via the anelastic approximation
 # 2. **Boussinesq**: Anelastic with constant reference density
 # 3. **Compressible (explicit)**: Fully compressible with explicit time stepping (small Δt)
-# 4. **Compressible (split-explicit / substepper)**: Wicker–Skamarock RK3 with acoustic
+# 4. **Compressible (split-explicit / substepper)**: a multirate infinitesimal step with acoustic
 #    substepping — uses the advective ``Δt`` for the outer step and absorbs acoustic
 #    modes in an inner loop with an auto-computed substep count.
 
@@ -111,9 +111,12 @@ compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping();
 
 # #### Case 4: Compressible split-explicit (substepper)
 #
-# Wicker–Skamarock RK3 acoustic substepping with the default
+# Acoustic substepping under the default outer time stepper,
+# [`MultirateInfinitesimalStep`](@ref), with the default
 # [`ThermalDivergenceDamping`](@ref) (coefficient ``0.1``) and an
 # auto-computed substep count chosen from the horizontal acoustic CFL each step.
+# Passing `timestepper = :AcousticRungeKutta3` to `AtmosphereModel` selects
+# Wicker–Skamarock RK3 instead.
 
 substepper_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                            base_pressure,

@@ -183,10 +183,10 @@ TurbulenceClosures.column_stability_field(grid, ::ColumnStabilityDamping) = Fiel
     @inbounds λ[i, j, 1] = clamp(λᶜ, sf.ℂᵝ₁, sf.ℂᵝ₂)
 end
 
-function TurbulenceClosures.compute_column_stability!(::ColumnStabilityDamping, λ, grid, closure, N², model)
+function TurbulenceClosures.compute_column_stability!(::ColumnStabilityDamping, λ, grid, closure, N², model; parameters = :xy)
     pressure = AtmosphereModels.dynamics_pressure(model.dynamics)
     g = model.thermodynamic_constants.gravitational_acceleration
-    launch!(grid.architecture, grid, :xy, _compute_column_stability_damping!, λ, grid, closure, N², pressure, g)
+    launch!(grid.architecture, grid, parameters, _compute_column_stability_damping!, λ, grid, closure, N², pressure, g)
     return nothing
 end
 

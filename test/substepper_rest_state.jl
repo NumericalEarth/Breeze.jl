@@ -266,7 +266,9 @@ end
     # exact-rest contract.
     Δt_cases = (0.5, 20.0)
 
-    n_steps = 200
+    # The instability this guards against doubled `max|w|` every outer step and ran the
+    # density negative within about 15 of them, so 60 steps are far past its onset.
+    n_steps = 60
     bound   = 1e-10
 
     for Δt in Δt_cases

@@ -253,10 +253,14 @@ end
                                     base_pressure = FT(1e5),
                                     standard_pressure = FT(1e5))
 
+    # The scalar tendencies are read from `Gⁿ` after `update_state!` below, which builds them only
+    # with pre-loop scalar tendencies: by default the split-explicit time stepper builds them after
+    # each stage's acoustic loop instead.
     F = FT(1e-5)
     model = AtmosphereModel(grid;
                             dynamics,
                             tracers = :c,
+                            timestepper_kwargs = (; post_loop_scalar_tendencies = false),
                             forcing = (; u=Returns(F),
                                          θ=Returns(F),
                                          E=Returns(zero(FT)),

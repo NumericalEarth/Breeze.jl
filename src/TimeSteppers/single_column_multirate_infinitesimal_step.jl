@@ -42,12 +42,21 @@ function multirate_substepper(grid, ::AnelasticDynamics, prognostic_fields; kw..
 end
 
 # No stage-entry pressure gradient or buoyancy whose remainder would be recombined.
-step_start_storage(grid, ::AnelasticDynamics, tableau, relinearize_stages) = nothing
+step_start_storage(grid, ::Nothing, tableau, relinearize_stages) = nothing
+
+# Without an acoustic loop there is no "after the loop": `update_state!` builds every tendency
+# whole, before the stage, and every tendency is slow, so no fast part needs scratch.
+multirate_post_loop_scalar_tendencies(::Nothing, post_loop_scalar_tendencies) = false
+
+fast_tendency_storage(::AccumulatorStorage, ::PreLoopScalarTendencies, grid, prognostic_fields, dynamics, ::Nothing,
+                      moisture_forcing_names) = nothing
 
 # The tendencies `update_state!` builds are the whole tendency: nothing is integrated apart.
 AtmosphereModels.slow_dynamics(::MultirateInfinitesimalStep, dynamics::AnelasticDynamics) = dynamics
 
-Oceananigans.prognostic_state(::MultirateInfinitesimalStep{<:Any, <:Any, <:Any, <:Any, Nothing}) = nothing
+const SubstepperFreeMultirateStep = MultirateInfinitesimalStep{<:Any, <:Any, <:Any, <:Any, <:Any, Nothing}
+
+Oceananigans.prognostic_state(::SubstepperFreeMultirateStep) = nothing
 
 # Every prognostic's tendency is slow.
 function assemble_single_column_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt)
@@ -78,7 +87,7 @@ function single_column_multirate_stage!(model, Δt, dᵢ)
     closure_before_stage_recombination!(ts, model, kernel_Δt)
     assemble_single_column_stage_forcing!(ts, model, Δt)
 
-    U⁰ = stage_start_state(ts)
+    U⁰ = stage_start_state(ts, model)
     Gⁿ = ts.Gⁿ
     prognostic = prognostic_fields(model)
     thermodynamic_name = thermodynamic_density_name(model.formulation)
@@ -134,11 +143,13 @@ function OceananigansTimeSteppers.time_step!(model::SingleColumnMultirateModel, 
         single_column_multirate_stage!(model, Δt, d[i])
 
         if i < s
-            store_stage_increment!(ts, model, i, Δt)
             ts.next_stage[] = i + 1
             Δc = i == 1 ? c[1] : c[i] - c[i-1]
             tick_stage!(model.clock, Δc * Δt)
             update_state!(model, callbacks; compute_tendencies = true)
+            # After `update_state!`, as with acoustic substepping: the increments are those of the
+            # state it leaves, with its negative-moisture correction (see `stage_increment_source`).
+            store_stage_increment!(ts, model, i, Δt)
         end
     end
 

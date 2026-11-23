@@ -569,7 +569,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Return the default timestepper for `CompressibleDynamics` based on its `time_discretization`.
 
 - [`SplitExplicitTimeDiscretization`](@ref): Returns `:MultirateInfinitesimalStep` for acoustic substepping
-  (with its default `:SSPMIS43` coefficients)
+  (with its default `:ConvexLinearMIS6` coefficients)
 - [`ExplicitTimeStepping`](@ref): Returns `:SSPRungeKutta3` for standard explicit time-stepping
 """
 AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =

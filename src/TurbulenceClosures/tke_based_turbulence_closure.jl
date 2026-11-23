@@ -725,9 +725,9 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Fill `column_stability` (of [`column_stability_field`](@ref)) from the static stability `N²` stored at the faces and
 the state of `model`. Nothing to do without a column value.
 """
-compute_column_stability!(::Nothing, grid, closure, N², model) = nothing
-compute_column_stability!(λ, grid, closure, N², model) =
-    compute_column_stability!(closure_stability_functions(closure), λ, grid, closure, N², model)
+compute_column_stability!(::Nothing, grid, closure, N², model; parameters = :xy) = nothing
+compute_column_stability!(λ, grid, closure, N², model; parameters = :xy) =
+    compute_column_stability!(closure_stability_functions(closure), λ, grid, closure, N², model; parameters)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -949,10 +949,15 @@ centers and the stored static stability `N²` at the faces. One thread per colum
     fill_mixing_length!(ℓ, ℓˢ, i, j, grid, closure_ij.mixing_length, closure_ij, e, N²)
 end
 
-# One thread per column. A backend that runs loops over k slowly inside a kernel (Reactant, where
-# they become one round of launches per level on GPU) may extend this for a whole-array form.
-compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²) =
-    launch!(grid.architecture, grid, :xy, _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
+# One thread per column, over the columns `parameters`. A backend that runs loops over k slowly
+# inside a kernel (Reactant, where they become one round of launches per level on GPU) may extend
+# this for a whole-array form.
+compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²; parameters = :xy) =
+    launch!(grid.architecture, grid, parameters, _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
+
+# The columns of three-dimensional kernel parameters
+column_kernel_parameters(parameters::Symbol) = :xy
+column_kernel_parameters(::KernelParameters{S, O}) where {S, O} = KernelParameters(S[1:2], O[1:2])
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -1161,8 +1166,10 @@ column that the stability functions read, if any, and the diffusivities.
 """
 function compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     grid = model.grid
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²)
-    compute_column_stability!(closure_fields.column_stability, grid, closure, closure_fields.N², model)
+    columns = column_kernel_parameters(parameters)
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²;
+                           parameters = columns)
+    compute_column_stability!(closure_fields.column_stability, grid, closure, closure_fields.N², model; parameters = columns)
     launch!(grid.architecture, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
     return nothing
 end

@@ -22,7 +22,7 @@ features:
     details: With a pressure Poisson solver that filters sound waves
   - icon: 🔊
     title: Compressible dynamics
-    details: With split-explicit acoustic substepping (horizontally explicit, vertically implicit) using SSP-RK3 or Wicker-Skamarock RK3
+    details: With split-explicit acoustic substepping (horizontally explicit, vertically implicit) under a multirate infinitesimal step or Wicker–Skamarock RK3 outer scheme
   - icon: 🏔️
     title: Terrain-following coordinates
     details: Smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system) for compressible flow over complex topography

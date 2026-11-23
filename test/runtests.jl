@@ -28,6 +28,12 @@ if filter_tests!(testsuite, args)
             delete!(testsuite, key)
         end
     end
+
+    # CI runs some tests on one runner only: BREEZE_TEST_SKIP holds space-separated name prefixes
+    # (for example "distributed/ doctests quality_assurance") to leave out of a full run.
+    for prefix in split(get(ENV, "BREEZE_TEST_SKIP", ""))
+        filter!(((name, _),) -> !startswith(name, prefix), testsuite)
+    end
 end
 
 # Install artifacts before running the tests, to avoid spurious failures to
