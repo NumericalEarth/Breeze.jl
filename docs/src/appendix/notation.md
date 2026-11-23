@@ -230,7 +230,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``v`` | `v` | | ``Riᵗ / \sqrt{1 + Riᵗ²} ∈ (-1, 1)``, the argument of the quadratic in ``\ln 𝕊`` of `TurbulentRichardsonStabilityFunction` |
 | ``N²ᵈ, N²ˢ`` | `N²ᵈ`, `N²ˢ` | | Dry and saturated squared buoyancy frequencies, which `SaturationWeightedStaticStability` blends with the weight ``aᴺ`` |
 | ``aᴺ`` | `aᴺ` | `saturated_stability_weightᶜᶜᶠ` | Effective saturated fraction: the weight of ``N²ˢ`` in `SaturationWeightedStaticStability`, ``N² = (1 - aᴺ) N²ᵈ + aᴺ N²ˢ``, from its `fraction`; for `CondensateFluxFraction`, ``aᴺ = w′qᶜ′ / w′s′`` of the subgrid distribution |
-| ``a^{\uparrow}, a^{\downarrow}`` | `a↑`, `a↓` | | Weights of the updraft and downdraft components of the `DoubleGaussian` subgrid distribution, ``a↓ = 1 - a↑`` ("plume" is reserved for the EDMF updraft) |
+| ``a^{\uparrow}, a^{\downarrow}`` | `a↑`, `a↓` | | Weights of the updraft and downdraft components of the `DoubleGaussian` subgrid distribution, ``a↓ = 1 - a↑`` |
 | ``aᶜ`` | `aᶜ` | | Cloud fraction (cloudy volume fraction) of the subgrid distribution |
 | ``a⁺`` | `a⁺` | | Supersaturated fraction of the subgrid distribution |
 | ``aʷ`` | `aʷ` | | Flux-weighted saturated fraction: the share of the flux of the saturation excess carried by saturated air |
