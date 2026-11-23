@@ -356,6 +356,7 @@ HydrostaticEquations.stage_seam_budgets(timestepper::GravityWaveMultirateInfinit
 # are those of that flux, recorded before the stage changes the scalars (`record_stage_seam_budgets!`)
 HydrostaticEquations.stage_seam_budgets(timestepper::ConvexGravityWaveMultirateInfinitesimalStep, model) =
     convex_stage_seam_budgets(timestepper, model)
+HydrostaticEquations.moist_seam_correction(::ConvexGravityWaveMultirateInfinitesimalStep) = true
 
 const GravityWaveMultirateModel = AtmosphereModel{<:HydrostaticDynamics, <:Any, <:Any, <:GravityWaveMultirateInfinitesimalStep}
 

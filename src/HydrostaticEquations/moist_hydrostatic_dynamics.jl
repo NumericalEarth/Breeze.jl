@@ -1798,9 +1798,23 @@ end
 #####
 
 # The checks of the state take the pressure thickness of the layers from the surface pressure
-# alone, and the conservation fixer restores integrals that the sources of water change.
+# alone, and the conservation fixer of the tendencies restores integrals that the sources of water
+# change. With the convex scalar stages the fixer returns only the seam budgets of the stage mass
+# flux, which the sources do not enter (`convex_stage_seam_budgets`), and is supported.
 hydrostatic_state_check(::MoistHydrostaticModel; kw...) =
     unsupported_by_hydrostatic_dynamics("hydrostatic_state_check with moisture")
 
-HydrostaticConservationFixer(::MoistHydrostaticModel) =
-    unsupported_by_hydrostatic_dynamics("the HydrostaticConservationFixer with moisture")
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether `timestepper` corrects the seam of a Yin-Yang grid stage by stage with budgets that the
+sources of water do not enter, so that the conservation fixer is valid with moisture. The convex
+scalar stages of `GravityWaveMultirateInfinitesimalStep` do.
+"""
+moist_seam_correction(timestepper) = false
+
+function HydrostaticConservationFixer(model::MoistHydrostaticModel)
+    moist_seam_correction(model.timestepper) ||
+        unsupported_by_hydrostatic_dynamics("the HydrostaticConservationFixer with moisture")
+    return HydrostaticConservationFixer(nothing, stage_seam_budgets(model.timestepper, model))
+end

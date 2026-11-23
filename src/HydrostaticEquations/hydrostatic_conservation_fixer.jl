@@ -46,6 +46,7 @@ end
 
 Base.summary(fixer::HydrostaticConservationFixer) =
     string("HydrostaticConservationFixer of pˢ, ", join(keys(fixer.tendency_budgets.scalars), ", ", " and "))
+Base.summary(fixer::HydrostaticConservationFixer{Nothing}) = "HydrostaticConservationFixer of the convex scalar stages"
 
 Base.show(io::IO, fixer::HydrostaticConservationFixer) = print(io, summary(fixer))
 
