@@ -48,6 +48,9 @@ step_start_storage(grid, ::Nothing, tableau, relinearize_stages) = nothing
 # whole, before the stage, and every tendency is slow, so no fast part needs scratch.
 multirate_post_loop_scalar_tendencies(::Nothing, post_loop_scalar_tendencies) = false
 
+# No acoustic loop transports the dry density, so there is no transport density tendency to combine.
+transport_density_accumulator_storage(::Nothing, storage, grid, U⁰, fold, s) = ()
+
 fast_tendency_storage(::AccumulatorStorage, ::PreLoopScalarTendencies, grid, prognostic_fields, dynamics, ::Nothing,
                       moisture_forcing_names) = nothing
 

@@ -265,7 +265,7 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
 
     return MultirateInfinitesimalStep(relinearize_stages, fold, tableau, storage, U⁰, Gⁿ, implicit_solver, substepper,
                                       rounding, Uⁿ, accumulators, fast_tendency, scalar_tendencies, step_start,
-                                      transport_density_accumulator_storage(storage, grid, U⁰, fold, s), residual, transport_mass_fluxes,
+                                      transport_density_accumulator_storage(substepper, storage, grid, U⁰, fold, s), residual, transport_mass_fluxes,
                                       Ref(1), Ref(1), Ref(NaN), nothing)
 end
 
@@ -393,6 +393,9 @@ end
 # stage 1 is assembled and read when stage 2 is, just before the dry density's assembly keeps ΔY₁
 # in `U⁰`, which nothing uses until then when the dry density forms its increments in the
 # assembly. So the two share storage.
+transport_density_accumulator_storage(substepper, storage, grid, U⁰, fold, s) =
+    transport_density_accumulator_storage(storage, grid, U⁰, fold, s)
+
 function transport_density_accumulator_storage(::AccumulatorStorage, grid, U⁰, fold, s)
     second = fold ? U⁰.ρᵈ : CenterField(grid)
     return (second, ntuple(_ -> CenterField(grid), s - 2)...)
@@ -947,16 +950,16 @@ stage_assembly_parameters(::TerrainCompressibleAcousticModel, field) =
 # its weight (`stage_offsets`). The sum adds the small `w Z` to the state, as a stage update does,
 # so it takes a round-off treatment (see `start_state_rounding`); the random numbers of a
 # stochastic one are a function of the indices and the key, so every read returns the same value.
-struct StageStartState{T, U, Z, R} <: AbstractArray{T, 3}
+struct StageStartState{T, U, Z, R, K} <: AbstractArray{T, 3}
     Uⁿ :: U
     offset :: Z
     weight :: T
     rounding :: R
-    key :: UInt32
+    key :: K  # the key of `rounding_key`: a `UInt32`, or the Philox counter of `StochasticRounding`
 end
 
 Adapt.adapt_structure(to, s::StageStartState) =
-    StageStartState(adapt(to, s.Uⁿ), adapt(to, s.offset), adapt(to, s.weight), s.rounding, s.key)
+    StageStartState(adapt(to, s.Uⁿ), adapt(to, s.offset), adapt(to, s.weight), s.rounding, adapt(to, s.key))
 
 Base.size(s::StageStartState) = size(s.Uⁿ)
 
