@@ -48,7 +48,7 @@ using CloudMicrophysics: CloudMicrophysics
 const CMExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .CMExt: OneMomentCloudMicrophysics
 
-using Printf: @printf
+using Printf: @printf, @sprintf
 using Dates: DateTime, now, UTC
 
 #####
@@ -727,8 +727,8 @@ function generate_markdown_report(filename, entries)
 
         println(io, "## Results")
         println(io)
-        println(io, "| Benchmark | Float | Backend | Grid | Time/Step (ms) | Steps/s | Points/s | Compile (s) | Timestamp |")
-        println(io, "|-----------|-------|---------|------|----------------|---------|----------|-------------|-----------|")
+        println(io, "| Benchmark | Float | Backend | Grid | Time/Step (ms) | Host time/step (ms) | Host allocations/step | GC (ms) | Steps/s | Points/s | Compile (s) | Timestamp |")
+        println(io, "|-----------|-------|---------|------|----------------|---------------------|-----------------------|---------|---------|----------|-------------|-----------|")
 
         for entry in entries
             grid = entry["grid_size"]
@@ -737,12 +737,27 @@ function generate_markdown_report(filename, entries)
             backend = get(entry, "backend", "")
             compile_time = get(entry, "compile_time_seconds", 0.0)
 
-            @printf(io, "| `%s` | %s | %s | %s | %.2f | %.2f | %.2e | %.3f | %s |\n",
+            # Host-side cost of a step: when the host time is close to the time per step,
+            # the benchmark measures the host rather than the device. Entries from older
+            # results, simulations, and Reactant runs don't have (all of) these numbers.
+            host_time = get(entry, "host_time_per_step_seconds", 0.0)
+            host_time_str = host_time > 0 ? @sprintf("%.2f", 1000 * host_time) : "—"
+            host_allocations_str, gc_str = if haskey(entry, "allocated_bytes_per_step")
+                (Base.format_bytes(round(Int, entry["allocated_bytes_per_step"])),
+                 @sprintf("%.1f", 1000 * entry["gc_time_seconds"]))
+            else
+                ("—", "—")
+            end
+
+            @printf(io, "| `%s` | %s | %s | %s | %.2f | %s | %s | %s | %.2f | %.2e | %.3f | %s |\n",
                     entry["name"],
                     entry["float_type"],
                     backend,
                     grid_str,
                     entry["time_per_step_seconds"] * 1000,
+                    host_time_str,
+                    host_allocations_str,
+                    gc_str,
                     entry["steps_per_second"],
                     entry["grid_points_per_second"],
                     compile_time,
