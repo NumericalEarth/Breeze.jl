@@ -277,3 +277,137 @@ function gravity_wave_seam_budgets(substepper::GravityWaveSubstepper, pˢ⁰, mo
 
     return seam_budgets(model, ρᴸ, pˢ⁰, (; u, v), specific, flux_divergences)
 end
+
+#####
+##### Seam budgets of the convex scalar stages
+#####
+##### A convex stage carries the layer mass and every scalar of `specific_scalars` with one mass flux, that of
+##### the stage velocities 𝐮̂ (`compute_stage_transport_velocities!`), from the state the stage starts from:
+#####
+#####     Mⁱ = (1 - w) M⁰ + w M^{i-1} - Δtˢ ∇·F ,
+#####
+##### so what the seam takes from the owned content over the stage is Δtˢ E, with E = ∫ w ∇ʰ·F dV evaluated with
+##### the operators of the stage itself (the layer-mass flux of 𝐮̂, and `div_ρUc` with the advection of the
+##### scalar and its mixing ratio at the start of the stage). These budgets must be taken before the stage
+##### changes the scalars, so they are recorded when the stage velocities are ready (`record_stage_seam_budgets!`)
+##### and returned once the stage is complete. Returning Δtˢ E at every stage restores the owned content to
+##### the convex combination of the owned contents, so that the integrals over the sphere are conserved.
+#####
+##### On a pressure-level grid the layer density is diagnosed from the surface pressure by `update_state!`,
+##### which carries every scalar density at fixed mixing ratio: the mass returned through pˢ brings the scalar
+##### mass c ΔB δpˢ / g with it, and only the rest, Δtˢ Eᶜ - r Iᶜ, is returned to the scalar itself, in
+##### proportion to the part of it with the sign of most of its content. The potential temperature is not a
+##### convex-stage scalar (the substeps advance it) and is not corrected here.
+
+mutable struct ConvexStageSeamBudgets{I, R}
+    integrals :: I               # owned integrals, built once: the stage budgets (kg s⁻¹) and the contents of the state
+    recorded :: R                # Δtˢ Eᵐ and Δtˢ Eᶜ of the stage being completed (kg), with its weight
+    last_correction :: R         # what the last stage returned: r, and rᶜ per scalar (for diagnostics)
+end
+
+# The content of a layer per unit volume of the grid, (Δp / g) / (Az Δz) times its own area: owned_integral of it is
+# the owned mass of the layers at the current surface pressure (exact, whatever density the grid still holds)
+@inline layer_mass_density(i, j, k, grid) = layer_mass(i, j, k, grid) / Δzᶜᶜᶜ(i, j, k, grid)
+@inline signed_scalar_content(i, j, k, grid, r, s) = @inbounds max(0, s * r[i, j, k]) * layer_mass_density(i, j, k, grid)
+@inline scalar_mass_coupled(i, j, k, grid, r, B, pˢ, pᵗ, g) =
+    @inbounds r[i, j, k] * (B[i, j, k] - B[i, j, k+1]) * (pˢ[i, j, 1] - pᵗ) / (g * Δzᶜᶜᶜ(i, j, k, grid))
+
+function convex_stage_seam_budgets(timestepper, model)
+    grid = model.grid
+    substepper = timestepper.substepper
+    ρ = model.dynamics.density
+    ∫𝐮′ = substepper.integrated_velocities
+    𝐮̂ = coordinate_transport_velocities(grid, ∫𝐮′.u, ∫𝐮′.v, ∫𝐮′.w, ∫𝐮′.ρw)
+    B = model.dynamics.surface_pressure_coefficient
+    pˢ = model.dynamics.surface_pressure
+    pᵗ = model.dynamics.top_pressure
+    g = model.thermodynamic_constants.gravitational_acceleration
+    prognostic = prognostic_fields(model)
+    names = keys(substepper.specific_scalars)
+    operation(f, args...) = KernelFunctionOperation{Center, Center, Center}(f, grid, args...)
+
+    mass = (budget = owned_integral(operation(layer_mass_flux_divergence, ρ, ∫𝐮′.u, ∫𝐮′.v)),
+            content = owned_integral(operation(layer_mass_density)))
+
+    scalars = NamedTuple{names}(map(names) do name
+        r = LayerMassFraction(prognostic[name], ρ)
+        (budget = owned_integral(operation(AtmosphereModels.div_ρUc, model.advection[name], ρ, 𝐮̂, r)),
+         coupled = owned_integral(operation(scalar_mass_coupled, r, B, pˢ, pᵗ, g)),
+         positive = owned_integral(operation(signed_scalar_content, r, 1)),
+         negative = owned_integral(operation(signed_scalar_content, r, -1)))
+    end)
+
+    zeros_of(names) = NamedTuple{names}(map(_ -> 0.0, names))
+    recorded = (mass = 0.0, scalars = zeros_of(names))
+    return ConvexStageSeamBudgets((; mass, scalars), recorded, recorded)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Record the seam budgets of a convex scalar stage of length `Δtˢ`: called by the time stepper once the stage
+velocities are ready and before the stage changes the scalars. Only a [`HydrostaticConservationFixer`](@ref)
+whose stage budgets are those of the convex scalar stages acts.
+"""
+record_stage_seam_budgets!(callback_function, model, Δtˢ) = nothing
+record_stage_seam_budgets!(fixer::HydrostaticConservationFixer, model, Δtˢ) =
+    record_stage_seam_budgets!(fixer.stage_budgets, model, Δtˢ)
+
+function record_stage_seam_budgets!(budgets::ConvexStageSeamBudgets, model, Δtˢ)
+    (; mass, scalars) = budgets.integrals
+    compute!(mass.budget)
+    for integrals in scalars
+        compute!(integrals.budget)
+    end
+    budgets.recorded = (mass = Δtˢ * owned_integral_value(mass.budget),
+                        scalars = map(integrals -> Δtˢ * owned_integral_value(integrals.budget), scalars))
+    return nothing
+end
+
+@kernel function _return_convex_scalar_budget!(ρc, ρ, rᶜ, s)
+    i, j, k = @index(Global, NTuple)
+    @inbounds ρc[i, j, k] += rᶜ * max(0, s * ρc[i, j, k])
+end
+
+function return_convex_stage_seam_budgets!(targets, budgets::ConvexStageSeamBudgets, model)
+    grid = model.grid
+    arch = grid.architecture
+    FT = eltype(grid)
+    dynamics = model.dynamics
+    pˢ = dynamics.surface_pressure
+    pᵗ = dynamics.top_pressure
+    (; mass, scalars) = budgets.integrals
+    recorded = budgets.recorded
+    prognostic = prognostic_fields(model)
+
+    compute!(mass.content)
+    r = recorded.mass / owned_integral_value(mass.content)
+
+    for target in targets
+        @apply_regionally launch!(arch, grid, :xy, _return_mass_budget!, target.pˢ, pˢ, pᵗ, convert(FT, r))
+    end
+
+    rᶜs = map(keys(scalars)) do name
+        integrals = scalars[name]
+        foreach(compute!, (integrals.coupled, integrals.positive, integrals.negative))
+        C⁺ = owned_integral_value(integrals.positive)
+        C⁻ = owned_integral_value(integrals.negative)
+        s = ifelse(C⁺ ≥ C⁻, 1, -1)
+        Cˢ = max(C⁺, C⁻)
+        E = recorded.scalars[name] - r * owned_integral_value(integrals.coupled)
+        rᶜ = ifelse(Cˢ > 0, E / Cˢ, zero(Cˢ))
+        @apply_regionally launch!(arch, grid, :xyz, _return_convex_scalar_budget!, prognostic[name],
+                                  dynamics.density, convert(FT, rᶜ), s)
+        rᶜ
+    end
+
+    budgets.last_correction = (mass = r, scalars = NamedTuple{keys(scalars)}(rᶜs))
+    return nothing
+end
+
+correct_completed_stage!(fixer::HydrostaticConservationFixer{<:Any, <:ConvexStageSeamBudgets}, model, targets) =
+    return_convex_stage_seam_budgets!(targets, fixer.stage_budgets, model)
+
+# With convex scalar stages the mass and the convex-stage scalars are corrected stage by stage, with the
+# budgets of the stage mass flux; the tendencies carry no transport of those scalars to correct
+(fixer::HydrostaticConservationFixer{<:Any, <:ConvexStageSeamBudgets})(model) = nothing

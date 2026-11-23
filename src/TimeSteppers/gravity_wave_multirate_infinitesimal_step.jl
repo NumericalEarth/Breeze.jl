@@ -5,6 +5,7 @@ using Breeze.HydrostaticEquations: HydrostaticEquations, HydrostaticDynamics, Gr
                                    gravity_wave_substep_loop!, stage_substeps, maximum_gravity_wave_speed,
                                    compute_integrated_vertical_velocity!, add_perturbation_transport!,
                                    gravity_wave_seam_budgets, correct_completed_stage!,
+                                   convex_stage_seam_budgets, record_stage_seam_budgets!,
                                    compute_stage_transport_velocities!, advance_scalar_with_stage_transport!,
                                    complete_scalar_stage_transport!,
                                    withhold_scalar_transport!
@@ -351,9 +352,10 @@ HydrostaticEquations.stage_seam_budgets(timestepper::GravityWaveMultirateInfinit
 # The seam budgets of the substeps are those of the integrated velocity perturbation and of the
 # specific values at the start of the step, which the convex scalar stages replace by the mass flux
 # of the stage and the mixing ratio it starts from: the fixer has no budget for them.
-HydrostaticEquations.stage_seam_budgets(::ConvexGravityWaveMultirateInfinitesimalStep, model) =
-    throw(ArgumentError("HydrostaticConservationFixer does not support the convex scalar stages of " *
-                        "GravityWaveMultirateInfinitesimalStep with moist HydrostaticDynamics."))
+# The convex scalar stages carry the mass and the scalars with the mass flux of each stage: their seam budgets
+# are those of that flux, recorded before the stage changes the scalars (`record_stage_seam_budgets!`)
+HydrostaticEquations.stage_seam_budgets(timestepper::ConvexGravityWaveMultirateInfinitesimalStep, model) =
+    convex_stage_seam_budgets(timestepper, model)
 
 const GravityWaveMultirateModel = AtmosphereModel{<:HydrostaticDynamics, <:Any, <:Any, <:GravityWaveMultirateInfinitesimalStep}
 
@@ -514,7 +516,7 @@ the velocity perturbation integrated over the substeps less the part of it that 
 tendencies ``G_j`` already carry, ``Δt Σ_j β_{ij} u′_{j-1}``. The mass fluxes of this net
 perturbation are those that the surface pressure perturbation accounts for.
 """
-function complete_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, model, i, Δt)
+function complete_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, model, i, Δt, callbacks=())
     β = timestepper.tableau.β
     substepper = timestepper.substepper
     storage = timestepper.storage
@@ -530,7 +532,7 @@ function complete_stage!(timestepper::GravityWaveMultirateInfinitesimalStep, mod
         add_scaled!(∫𝐮′.v, ΔYⱼ₋₁.v, - Δt * β[i, j])
     end
 
-    complete_scalar_stage!(timestepper.scalar_stages, timestepper, model, i, Δt)
+    complete_scalar_stage!(timestepper.scalar_stages, timestepper, model, i, Δt, callbacks)
 
     # The surface pressure first: on a pressure-level grid the densities of the scalars are those
     # of their masses at the surface pressure of the end of the stage
@@ -570,7 +572,7 @@ end
 # The increment ``Σ_j (α_{ij} + γ_{ij}) ΔY_j + Δt Σ_j β_{ij} G_j`` of the full tendencies, and the
 # transport of the specific value at the start of the step by the net velocity perturbation, in the
 # units of the stages; `set_completed_scalars!` sets the scalars from it.
-function complete_scalar_stage!(::RecombinedScalarStages, timestepper, model, i, Δt)
+function complete_scalar_stage!(::RecombinedScalarStages, timestepper, model, i, Δt, callbacks=())
     (; α, β, γ) = timestepper.tableau
     substepper = timestepper.substepper
     storage = timestepper.storage
@@ -601,7 +603,7 @@ end
 # `moist_stage_scalar_transport.jl`. The slow tendencies of the scalars hold everything but
 # their transport, and the storage of their increment holds the new state until
 # `set_completed_scalars!` sets the scalars from it.
-function complete_scalar_stage!(::ConvexScalarStages, timestepper, model, i, Δt)
+function complete_scalar_stage!(::ConvexScalarStages, timestepper, model, i, Δt, callbacks=())
     (; α, β, γ) = timestepper.tableau
     substepper = timestepper.substepper
     N = stage_slow_tendencies(timestepper, i)
@@ -614,6 +616,11 @@ function complete_scalar_stage!(::ConvexScalarStages, timestepper, model, i, Δt
     Δtᵉ = Δtˢ / weight
 
     compute_stage_transport_velocities!(substepper, model, Δtˢ)
+
+    # The seam budgets of the stage, before it changes the scalars
+    for callback in callbacks
+        callback.callsite isa TendencyCallsite && record_stage_seam_budgets!(callback.func, model, Δtˢ)
+    end
 
     for name in keys(substepper.specific_scalars)
         advance_scalar_with_stage_transport!(prognostic[name], U⁰[name], scratch[name], N[name],
@@ -674,7 +681,7 @@ function OceananigansTimeSteppers.time_step!(model::GravityWaveMultirateModel, �
         Nτ, Δτ = stage_substeps(substepper, Δt_stage, tableau.d[i], wave_speed)
         gravity_wave_substep_loop!(substepper, model, Nτ, Δτ)
 
-        complete_stage!(timestepper, model, i, Δt)
+        complete_stage!(timestepper, model, i, Δt, callbacks)
         return_stage_seam_budgets!(timestepper, model, i, callbacks)
 
         if i < stages
