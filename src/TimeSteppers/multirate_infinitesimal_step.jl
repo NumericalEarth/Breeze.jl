@@ -79,7 +79,7 @@ Fields
   a different fast operator, so with a non-diagonal tableau the step is first-order accurate (the
   constructor warns). With the `:WickerSkamarock3` coefficients it reproduces `AcousticRungeKutta3`
   bitwise; it exists to diagnose robustness in strongly nonlinear flows.
-- `step_start`: the outer-step-start pressure and water density that the
+- `step_start`: the outer-step-start pressure and total moisture density that the
   slow remainder of the stage-entry pressure gradient and buoyancy is measured from, or `nothing`
   where that remainder is not recombined (see `step_start_storage`).
 - `residual`: what the rounded stage states of the acoustic prognostics lack of the exact sums,
