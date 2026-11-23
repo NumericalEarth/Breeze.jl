@@ -47,7 +47,6 @@ shoc_distribution(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
                        stratification_number_bound = RationalSaturatedStratificationNumber(FT),
                        skewness = PolynomialSaturatedSkewness(FT),
                        assumed_pdf = DoubleGaussianPDF(FT),
-                       saturation = ModelThermodynamicsSaturation(),
                        clipping = HardClipping(),
                        constants = SHOCConstants(FT),
                        kw...)
@@ -139,7 +138,6 @@ SimplifiedHigherOrderClosure{VerticallyImplicitTimeDiscretization}
 │   ├── stratification_number_bound: RationalSaturatedStratificationNumber{Float64}
 │   ├── skewness: PolynomialSaturatedSkewness{Float64}
 │   ├── assumed_pdf: DoubleGaussianPDF{Float64}
-│   ├── saturation: ModelThermodynamicsSaturation{WarmPhaseEquilibrium}
 │   └── clipping: HardClipping
 ├── minimum_tke: 1.0e-6
 └── solver: SinglePass()
@@ -189,7 +187,6 @@ function Base.show(io::IO, closure::SimplifiedHigherOrderClosure)
               "│   ├── stratification_number_bound: ", summary(d.stratification_number_bound), '\n',
               "│   ├── skewness: ", summary(d.skewness), '\n',
               "│   ├── assumed_pdf: ", summary(d.assumed_pdf), '\n',
-              "│   ├── saturation: ", summary(d.saturation), '\n',
               "│   └── clipping: ", summary(d.clipping), '\n',
               "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
               "└── solver: ", summary(closure.solver))

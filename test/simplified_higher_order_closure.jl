@@ -60,7 +60,6 @@ column_data(field) = Array(interior(field))
         @test d.skewness isa PolynomialSaturatedSkewness{FT}
         @test d.stratification_number_bound isa RationalSaturatedStratificationNumber{FT}
         @test d.assumed_pdf isa DoubleGaussianPDF{FT}
-        @test d.saturation isa ModelThermodynamicsSaturation
         @test closure.static_stability isa SaturationWeightedStaticStability
 
         # The published coefficients of shoc.F90

@@ -6,7 +6,7 @@ re-expressed from E3SM's `shoc.F90` (pinned at E3SM `ba53243f`) as components of
 [`TKEBasedTurbulenceClosure`](@ref): the mixing length ([`BlendedMixingLength`](@ref)), the
 return-to-isotropy time scale and diffusivities as stability functions ([`ColumnStabilityDamping`](@ref)),
 and, for the subgrid distribution [`DoubleGaussian`](@ref), the second moments, the third moment and its
-limiters and the assumed double-Gaussian PDF with its saturation. [`SimplifiedHigherOrderClosure`](@ref) is
+limiters and the assumed double-Gaussian PDF, which condenses with the thermodynamics and the condensate phase of the model. [`SimplifiedHigherOrderClosure`](@ref) is
 the configuration of the TKE closure that assembles them with the coefficients of `shoc.F90`.
 """
 module SimplifiedHigherOrderClosures
@@ -17,7 +17,6 @@ export BlendedMixingLength, ColumnStabilityDamping,
        UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
        ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
-       ModelThermodynamicsSaturation,
        HardClipping, SmoothClipping,
        SHOCConstants,
        closure_parameters, with_parameters
@@ -36,6 +35,7 @@ using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities: turbulent_v
 using Oceananigans.Utils: launch!, prettysummary
 
 using Breeze.AtmosphereModels: AtmosphereModels
+using Breeze.AtmosphereModels.Diagnostics: condensate_phase_equilibrium
 using Breeze.TurbulenceClosures: TurbulenceClosures, TKEBasedTurbulenceClosure, AbstractMixingLength,
                                  HardMinimum, HarmonicBlend, TurbulentRichardsonStabilityFunction,
                                  face_valueᶜᶜᶠ, grid_float_type, column_kernel_parameters

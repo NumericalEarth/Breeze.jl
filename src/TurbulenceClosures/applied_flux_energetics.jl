@@ -897,7 +897,7 @@ end
     return clamp(ifelse(resolved, w′qˡ′ / ifelse(resolved, w′s′, one(FT)), zero(FT)), zero(FT), one(FT))
 end
 
-@kernel function _latent_corrected_stability!(N², cl, m, grid, closure, closure_fields, velocities, s, qʷ, e, thermodynamics, sat, c, ω)
+@kernel function _latent_corrected_stability!(N², cl, m, grid, closure, closure_fields, velocities, s, qʷ, e, thermodynamics, ω)
     i, j, k = @index(Global, NTuple)
     FT = grid_float_type(grid)
     closure_ij = getclosure(i, j, closure)
@@ -912,8 +912,8 @@ end
         qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, kₛ] / ρ⁺
         qᶜ⁻ = qʷ⁻ - s.ρqᵛᵉ[i, j, kₛ-1] / ρ⁻
         Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
-        c_q⁺, c_θ⁺, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁺, qʷ⁺, s.p[i, j, kₛ])
-        c_q⁻, c_θ⁻, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        c_q⁺, c_θ⁺, _ = saturation_excess_coefficients(thermodynamics, θ⁺, qʷ⁺, s.p[i, j, kₛ])
+        c_q⁻, c_θ⁻, _ = saturation_excess_coefficients(thermodynamics, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
         c_q = (c_q⁺ + c_q⁻) / 2
         c_θ = (c_θ⁺ + c_θ⁻) / 2
         ∂z_s = (c_q * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
@@ -963,7 +963,7 @@ function cloud_buoyancy_stability_pass!(fields::SubgridCloudFields{<:AppliedFlux
     dist = subgrid_distribution(closure)
     launch!(arch, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments, grid, closure,
             closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, tracers[TKE_NAME], d.thermodynamics,
-            dist.saturation, dist.constants, ω)
+            ω)
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
 end
@@ -1001,7 +1001,7 @@ end
 ##### the fraction gives (for Ri and ℓ) and the buoyancy production then use one saturated fraction.
 #####
 
-@kernel function _microphysics_latent_correction!(cl, grid, closure, s, qʷ, thermodynamics, sat, c, tracers, buoyancy, closure_fields)
+@kernel function _microphysics_latent_correction!(cl, grid, closure, s, qʷ, thermodynamics, tracers, buoyancy, closure_fields)
     i, j, k = @index(Global, NTuple)
     FT = grid_float_type(grid)
     closure_ij = getclosure(i, j, closure)
@@ -1016,8 +1016,8 @@ end
         qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, kₛ] / ρ⁺
         qᶜ⁻ = qʷ⁻ - s.ρqᵛᵉ[i, j, kₛ-1] / ρ⁻
         Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
-        c_q⁺, c_θ⁺, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁺, qʷ⁺, s.p[i, j, kₛ])
-        c_q⁻, c_θ⁻, _ = saturation_excess_coefficients(sat, thermodynamics, c, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        c_q⁺, c_θ⁺, _ = saturation_excess_coefficients(thermodynamics, θ⁺, qʷ⁺, s.p[i, j, kₛ])
+        c_q⁻, c_θ⁻, _ = saturation_excess_coefficients(thermodynamics, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
         c_θ = (c_θ⁺ + c_θ⁻) / 2
         ∂z_s = ((c_q⁺ + c_q⁻) / 2 * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
@@ -1039,7 +1039,6 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergeti
     d = distribution_state(model, nothing)
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
     launch!(grid.architecture, grid, parameters, _microphysics_latent_correction!, fields.cloud, grid, closure,
-            applied_flux_state(model), d.qᵗ, d.thermodynamics, ModelThermodynamicsSaturation(), nothing,
-            tracers, buoyancy, closure_fields)
+            applied_flux_state(model), d.qᵗ, d.thermodynamics, tracers, buoyancy, closure_fields)
     return nothing
 end

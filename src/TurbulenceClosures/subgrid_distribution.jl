@@ -32,7 +32,7 @@ using Oceananigans.Operators: Δzᶜᶜᶠ
 using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
                                       third_moment, limit_third_moment, assumed_pdf, buoyancy_flux_coefficients,
                                       plume_liquid_water_temperature, plume_saturation,
-                                      clip_below, shoc_saturation_thermodynamics,
+                                      clip_below, distribution_thermodynamics,
                                       rate_norm_factor, linear_interp, hard_floor, component_vapor_excess,
                                       representable_skewness, within_component_share
 
@@ -252,7 +252,7 @@ energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT, VS, FT}
+struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, CP, C, R, VT, VS, FT}
     "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref), [`EddyTurnoverTimeScale`](@ref) or [`ReturnToIsotropyTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
@@ -265,8 +265,6 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, PS, CP, C, R, VT, VS, FT}
     skewness :: SK
     "Assumed PDF ([`DoubleGaussianPDF`](@ref) or [`SmoothDoubleGaussianPDF`](@ref))"
     assumed_pdf :: PDF
-    "Saturation of the assumed PDF: [`ModelThermodynamicsSaturation`](@ref), the thermodynamics of the model"
-    saturation :: PS
     "Clipping policy of the SHOC components"
     clipping :: CP
     "SHOC's constants the components read (`ggr`, `basetemp`, `mintke`, …)"
@@ -331,37 +329,31 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              stratification_number_bound = RationalSaturatedStratificationNumber(FT),
                              assumed_pdf = EqualWidthDoubleGaussianPDF(FT),
                              skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = representable_skewness(assumed_pdf)),
-                             saturation = ModelThermodynamicsSaturation(),
                              clipping = SmoothClipping(),
                              constants = SHOCConstants(FT),
                              ℂʳ = nothing,
                              variance_transport = nothing,
                              variance_stability_functions = nothing,
                              ℂᵐ = 1)
-    validate_distribution_saturation(saturation)
     ℂʳ = isnothing(ℂʳ) ? nothing : convert(FT, ℂʳ)
     variance_transport = convert_component(FT, variance_transport)
     variance_stability_functions = convert_component(FT, variance_stability_functions)
     return DoubleGaussian(time_scale, second_moments, third_moment, stratification_number_bound,
-                               skewness, assumed_pdf, saturation, clipping, constants, ℂʳ, variance_transport,
+                               skewness, assumed_pdf, clipping, constants, ℂʳ, variance_transport,
                                variance_stability_functions, convert(FT, ℂᵐ))
 end
-
-# The distribution of this closure saturates with the thermodynamics of the model that holds it.
-validate_distribution_saturation(saturation) = nothing
 
 convert_eltype(::Type{FT}, d::DoubleGaussian) where FT =
     DoubleGaussian(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
-                         d.assumed_pdf, d.saturation, d.clipping, d.constants, d.ℂʳ, d.variance_transport,
+                         d.assumed_pdf, d.clipping, d.constants, d.ℂʳ, d.variance_transport,
                          d.variance_stability_functions, d.ℂᵐ))...)
 
 convert_component(FT, ::Nothing) = nothing
 convert_component(FT, c) = convert_eltype(FT, c)
 convert_component(FT, c::Number) = convert(FT, c)
 
-Base.summary(d::DoubleGaussian) = string("DoubleGaussian(", nameof(typeof(d.assumed_pdf)), ", ",
-                                              nameof(typeof(d.saturation)), ", third moment: ",
+Base.summary(d::DoubleGaussian) = string("DoubleGaussian(", nameof(typeof(d.assumed_pdf)), ", third moment: ",
                                               d.third_moment === nothing ? "none" : nameof(typeof(d.third_moment)), ")")
 
 #####
@@ -770,7 +762,7 @@ function distribution_potential_temperature_density(model)
     return Oceananigans.prognostic_fields(model.formulation).ρθ
 end
 
-# The state the distribution reads: θˡⁱ, qᵗ, e, w, p and the saturation thermodynamics. `e_density`
+# The state the distribution reads: θˡⁱ, qᵗ, e, w, p and the thermodynamics of the model. `e_density`
 # is the density of the specific TKE `ρe` holds: `nothing` within `update_state!`, where the tracer
 # holds its specific value, and `ρ` after the stages, where it holds its density.
 function distribution_state(model, e_density)
@@ -780,7 +772,7 @@ function distribution_state(model, e_density)
     e = SpecificValue(model.tracers[TKE_NAME], e_density)
     w = model.velocities.w
     p = AtmosphereModels.dynamics_pressure(model.dynamics)
-    thermodynamics = shoc_saturation_thermodynamics(model)
+    thermodynamics = distribution_thermodynamics(model)
     return (; θ, qᵗ, e, w, p, thermodynamics)
 end
 
@@ -1062,7 +1054,7 @@ end
             mᵘ = interface_moments(k+1)
             mᶜ = map((yᵘ, yˡ, floor) -> hard_floor(linear_interp(zᵘ, zˡ, yᵘ, yˡ, zᶜ), floor), mᵘ, mˡ, floors)
             mᶜ = (cl.w′³[i, j, k], mᶜ...)
-            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, d.saturation, thermodynamics, cp, c, zᵘ, zˡ, zᶜ,
+            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, thermodynamics, cp, zᵘ, zˡ, zᶜ,
                                                    p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
             store_vapor_excess_components!(cl, i, j, k,
                                            component_vapor_excess(d.assumed_pdf, thermodynamics, cp, zᵘ, zˡ, zᶜ,
@@ -1166,7 +1158,7 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
 # w′qˡ′ = aʷ w′s′, w′s′ = -Kᶜ ∂z s̄, so -Bˡ / Kᶜ = (b_qˡ - b_qᵛ) aʷ ∂z s̄, with (b_qˡ - b_qᵛ) aʷ formed at the
 # centers from the distribution's collocated condensate flux and flux of the saturation excess
 # (`center_condensate_flux_fraction`) and averaged to the face. Also returns ∂z s̄ and the face A_c.
-@inline function condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics, sat, c)
+@inline function condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
     km = max(k - 1, 1)
     @inbounds begin
         Δz = Δzᶜᶜᶠ(i, j, k, grid)
@@ -1174,8 +1166,8 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
         ∂zq = (qᵗ[i, j, k] - qᵗ[i, j, km]) / Δz
         gθᶠ = (cl.gθ[i, j, k] + cl.gθ[i, j, km]) / 2
         gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, km]) / 2
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(sat, thermodynamics, c, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(sat, thermodynamics, c, θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
+        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(thermodynamics, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
+        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(thermodynamics, θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
         bˡᵛaʷ⁺ = (cl.b_qˡ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, m, cl, c_q⁺, c_θ⁺)
         bˡᵛaʷ⁻ = (cl.b_qˡ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, m, cl, c_q⁻, c_θ⁻)
     end
@@ -1185,11 +1177,11 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
     return N²ᶜ, N²ᵇ, ∂zs, gθᶠ * (A⁺ + A⁻) / 2
 end
 
-@kernel function _cloud_buoyancy_stability!(N², grid, m, cl, θ, qᵗ, p, thermodynamics, sat, c, ω)
+@kernel function _cloud_buoyancy_stability!(N², grid, m, cl, θ, qᵗ, p, thermodynamics, ω)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         interior_face = k > 1
-        _, N²ᵇ, _, _ = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics, sat, c)
+        _, N²ᵇ, _, _ = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
         N²[i, j, k] = ifelse(interior_face, relax_stability(N²[i, j, k], N²ᵇ, ω), N²[i, j, k])
     end
 end
@@ -1213,19 +1205,19 @@ function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_f
     cl = fields.cloud
     d = closure.subgrid_distribution
     launch!(arch, grid, parameters, _solve_cloud_buoyancy_stability!, closure_fields.N², fields.solver_state, solver,
-            P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, d.saturation, d.constants, fields.moments, cl)
+            P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, fields.moments, cl)
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
 end
 
 # SHOC's linearization of the saturation excess at a level, s′ = c_q qᵗ′ - c_θ θˡⁱ′, and A_c
-@inline function saturation_excess_coefficients(sat, thermodynamics, c, θ, qᵗ, p)
-    Tˡ = plume_liquid_water_temperature(sat, thermodynamics, c, θ, qᵗ, p)
-    qᵛ⁺, β, cp_over_L, Π = plume_saturation(sat, thermodynamics, c, Tˡ, qᵗ, p)
+@inline function saturation_excess_coefficients(thermodynamics, θ, qᵗ, p)
+    Tˡ = plume_liquid_water_temperature(thermodynamics, θ, qᵗ, p)
+    qᵛ⁺, β, cp_over_L, Π = plume_saturation(thermodynamics, Tˡ, qᵗ, p)
     opbq = 1 + β * qᵛ⁺
     c_θ = ((1 + β * qᵗ) / (opbq * opbq)) * cp_over_L * β * qᵛ⁺ * Π
     c_q = 1 / opbq
-    _, A_c = buoyancy_flux_coefficients(sat, thermodynamics, c, p, θ, qᵗ, zero(θ))
+    _, A_c = buoyancy_flux_coefficients(thermodynamics, p, θ, qᵗ, zero(θ))
     return c_q, c_θ, A_c
 end
 
@@ -1258,12 +1250,12 @@ end
     return x′, L′, U′
 end
 
-@kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, sat, c, m, cl)
+@kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, m, cl)
     i, j, k = @index(Global, NTuple)
     FT = grid_float_type(grid)
     @inbounds begin
         interior_face = k > 1
-        N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics, sat, c)
+        N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
         N²ˢ = N²ᶜ + gA_c * ∂zs
         L = min(N²ᶜ, N²ˢ)
         U = max(N²ᶜ, N²ˢ)
@@ -1307,7 +1299,7 @@ function cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, 
     cl = fields.cloud
     d = closure.subgrid_distribution
     launch!(arch, grid, parameters, _cloud_buoyancy_stability!, closure_fields.N², grid, fields.moments, cl, s.θ, s.qᵗ, s.p,
-            s.thermodynamics, d.saturation, d.constants, ω)
+            s.thermodynamics, ω)
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
 end

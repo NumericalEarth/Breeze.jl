@@ -9,8 +9,8 @@ using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation, Sub
 using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: representable_skewness
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment, linear_interp,
-                                                              ModelThermodynamicsSaturation,
-                                                              shoc_saturation_thermodynamics
+                                                              distribution_thermodynamics
+using Breeze.AtmosphereModels.Diagnostics: condensate_phase_equilibrium
 
 using Oceananigans
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization
@@ -228,7 +228,7 @@ end
             w′³ᶜ = column(cl.w′³)[k]
             @test abs(w′³ᶜ) ≤ d.skewness.maximum_skewness * w′²ᶜ^1.5 * (1 + 1e-12)
             mᶜ = (w′³ᶜ, mᶜ...)
-            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, d.saturation, shoc_saturation_thermodynamics(model), d.clipping, d.constants,
+            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, distribution_thermodynamics(model), d.clipping,
                                                    zf[k+1], zf[k], zc[k], p[k], θ[k], 0.0, qᵗ[k], w′²ᶜ, mᶜ, mᶜ)
             @test matches(column(cl.aᶜ)[k], C)
             @test matches(column(cl.qˡ)[k], qˡ)
@@ -292,11 +292,15 @@ end
     @test column(model.microphysical_fields.ρqᶜˡ) == cloud_liquid
 end
 
-@testset "The distribution with the saturation of the model" begin
-    # The distribution of this closure saturates with the model's thermodynamics
-    @test DoubleGaussian().saturation isa ModelThermodynamicsSaturation
-    for saturation in (ModelThermodynamicsSaturation(),)
-        model = tke_p3_column(DoubleGaussian(; saturation); static_stability = fraction_stability)
+@testset "The distribution condenses with the thermodynamics and the condensate phase of the model" begin
+    # The distribution of this closure condenses on the phase of the condensate of the microphysics: P3 forms ice
+    for distribution in (DoubleGaussian(),)
+        model = tke_p3_column(distribution; static_stability = fraction_stability)
+        thermodynamics = distribution_thermodynamics(model)
+        @test thermodynamics.constants === model.thermodynamic_constants
+        @test thermodynamics.phase_equilibrium === condensate_phase_equilibrium(model.microphysics)
+        @test thermodynamics.phase_equilibrium isa MixedPhaseEquilibrium
+        @test thermodynamics.phase_equilibrium.freezing_temperature == model.microphysics.process_rates.freezing_temperature
         μ = model.microphysical_fields
         water₀ = sum(non_precipitating_water(model) .+ column(μ.ρqʳ))
         for _ in 1:10

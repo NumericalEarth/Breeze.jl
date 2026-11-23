@@ -96,9 +96,9 @@ end
 @inline local_moment_time_scale(ts::DissipationTimeScale, ℓ, u, N², 𝕊ᴰ) = 2 * ℓ / (ts.ℂᵠ * 𝕊ᴰ * u)
 
 # SHOC's saturation excess of the mean state at a level, s = qᵗ - qᵛ⁺ (1 + β qᵗ) / (1 + β qᵛ⁺)
-@inline function mean_saturation_excess(sat, thermodynamics, c, θ, qᵗ, p)
-    Tˡ = plume_liquid_water_temperature(sat, thermodynamics, c, θ, qᵗ, p)
-    qᵛ⁺, β, _, _ = plume_saturation(sat, thermodynamics, c, Tˡ, qᵗ, p)
+@inline function mean_saturation_excess(thermodynamics, θ, qᵗ, p)
+    Tˡ = plume_liquid_water_temperature(thermodynamics, θ, qᵗ, p)
+    qᵛ⁺, β, _, _ = plume_saturation(thermodynamics, Tˡ, qᵗ, p)
     return qᵗ - qᵛ⁺ * (1 + β * qᵗ) / (1 + β * qᵛ⁺)
 end
 
@@ -107,7 +107,6 @@ end
 # The face's constant inputs, gathered once
 @inline function fraction_face_inputs(i, j, k, grid, closure, d, m, cl, θ, qᵗ, e, p, thermodynamics)
     FT = grid_float_type(grid)
-    c = d.constants
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
     @inbounds begin
@@ -119,12 +118,12 @@ end
         gθᶠ = (cl.gθ[i, j, k] + cl.gθ[i, j, k-1]) / 2
         gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, k-1]) / 2
         N²ᶜ = gθᶠ * ∂zθ + gAᶠ * ∂zq
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(d.saturation, thermodynamics, c, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(d.saturation, thermodynamics, c, θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])
+        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(thermodynamics, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
+        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(thermodynamics, θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])
         ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
         ΔN² = gθᶠ * (A⁺ + A⁻) / 2 * ∂zs
-        s̄ = (mean_saturation_excess(d.saturation, thermodynamics, c, θ[i, j, k], qᵗ[i, j, k], p[i, j, k]) +
-             mean_saturation_excess(d.saturation, thermodynamics, c, θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])) / 2
+        s̄ = (mean_saturation_excess(thermodynamics, θ[i, j, k], qᵗ[i, j, k], p[i, j, k]) +
+             mean_saturation_excess(thermodynamics, θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])) / 2
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
         w′²ᶠ = (vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ)) +
                 vertical_velocity_variance(sm, max(e[i, j, k-1], eᵐⁱⁿ))) / 2
@@ -135,7 +134,6 @@ end
 # The liquid flux fraction ãᴺ at face k of the distribution formed with N² = N²ᶜ + aᴺ ΔN² there
 @inline function trial_condensate_flux_fraction(aᴺ, i, j, k, grid, closure, d, m, cl, input, velocities, θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
     FT = grid_float_type(grid)
-    c = d.constants
     cp = d.clipping
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
@@ -176,8 +174,8 @@ end
         stored(n) = @inbounds (m.θˡⁱ′²[i, j, n], m.w′θˡⁱ′[i, j, n], m.θˡⁱ′qᵗ′[i, j, n], m.w′qᵗ′[i, j, n], m.qᵗ′²[i, j, n])
 
         # The assumed PDF at the center below (face k is its upper face) and above (its lower face)
-        Bˡ⁻, C⁻ = center_liquid_buoyancy(i, j, k-1, grid, d, cp, c, cl, w, θ, qᵗ, p, thermodynamics, stored(k-1), trial)
-        Bˡ⁺, C⁺ = center_liquid_buoyancy(i, j, k, grid, d, cp, c, cl, w, θ, qᵗ, p, thermodynamics, trial, stored(k+1))
+        Bˡ⁻, C⁻ = center_liquid_buoyancy(i, j, k-1, grid, d, cp, cl, w, θ, qᵗ, p, thermodynamics, stored(k-1), trial)
+        Bˡ⁺, C⁺ = center_liquid_buoyancy(i, j, k, grid, d, cp, cl, w, θ, qᵗ, p, thermodynamics, trial, stored(k+1))
     end
 
     Bᶠ = (Bˡ⁻ + Bˡ⁺) / 2
@@ -186,7 +184,7 @@ end
     return (; ãᴺ = clamp(ãᴺ, zero(FT), one(FT)), raw = ãᴺ, τ, Kᶜ, C = (C⁻ + C⁺) / 2)
 end
 
-@inline function center_liquid_buoyancy(i, j, k, grid, d, cp, c, cl, w, θ, qᵗ, p, thermodynamics, moments_l, moments_u)
+@inline function center_liquid_buoyancy(i, j, k, grid, d, cp, cl, w, θ, qᵗ, p, thermodynamics, moments_l, moments_u)
     ccc = (Center(), Center(), Center())
     ccf = (Center(), Center(), Face())
     @inbounds begin
@@ -196,9 +194,9 @@ end
         wᶜ = (w[i, j, k] + w[i, j, k+1]) / 2
         θᵏ = θ[i, j, k]
         w′³ = cl.w′³[i, j, k]
-        C, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, d.saturation, thermodynamics, cp, c, zᵘ, zˡ, zᶜ,
+        C, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamics, cp, zᵘ, zˡ, zᶜ,
                                           p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], (w′³, moments_l...), (w′³, moments_u...))
-        _, A_c = buoyancy_flux_coefficients(d.saturation, thermodynamics, c, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
+        _, A_c = buoyancy_flux_coefficients(thermodynamics, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
     end
     return thermodynamics.constants.gravitational_acceleration / θᵏ * A_c * w′qˡ′, C
 end
@@ -314,8 +312,8 @@ end
         ∂zθ = (θ[i, j, kₛ] - θ[i, j, kₛ-1]) / Δz
         ∂zq = (qᵗ[i, j, kₛ] - qᵗ[i, j, kₛ-1]) / Δz
         gθᶠ = (cloud.gθ[i, j, kₛ] + cloud.gθ[i, j, kₛ-1]) / 2
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(d.saturation, thermodynamics, d.constants, θ[i, j, kₛ], qᵗ[i, j, kₛ], p[i, j, kₛ])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(d.saturation, thermodynamics, d.constants, θ[i, j, kₛ-1], qᵗ[i, j, kₛ-1], p[i, j, kₛ-1])
+        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(thermodynamics, θ[i, j, kₛ], qᵗ[i, j, kₛ], p[i, j, kₛ])
+        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(thermodynamics, θ[i, j, kₛ-1], qᵗ[i, j, kₛ-1], p[i, j, kₛ-1])
         ΔN² = gθᶠ * (A⁺ + A⁻) / 2 * ((c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ)
         Bᶠ = (cloud.Bˡ[i, j, kₛ] + cloud.Bˡ[i, j, kₛ-1]) / 2
         Kᶜᵢ = Kᶜ[i, j, kₛ]

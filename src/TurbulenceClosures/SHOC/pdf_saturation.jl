@@ -1,5 +1,5 @@
 #####
-##### Slot: the saturation thermodynamics of the assumed PDF
+##### The saturation thermodynamics of the assumed PDF
 #####
 ##### The assumed PDF condenses each plume where its total water exceeds saturation. It needs, per
 ##### plume, the temperature `T_l` of the plume with its condensate evaporated, the saturation
@@ -12,26 +12,29 @@
 #####
 #####     w'θ_v' = w'θ_l' + A_q w'q_w' + A_c w'q_c'.
 #####
-##### A saturation component implements
+##### They are
 #####
-#####     plume_liquid_water_temperature(saturation, thermodynamics, c, θ_l, q_w, p) -> T_l
-#####     plume_saturation(saturation, thermodynamics, c, T_l, q_w, p) -> (q_s, β, c_p / ℒ, Π)
-#####     buoyancy_flux_coefficients(saturation, thermodynamics, c, p, θ_l, q_w, q_c) -> (A_q, A_c)
+#####     plume_liquid_water_temperature(thermodynamics, θ_l, q_w, p) -> T_l
+#####     plume_saturation(thermodynamics, T_l, q_w, p) -> (q_s, β, c_p / ℒ, Π)
+#####     buoyancy_flux_coefficients(thermodynamics, p, θ_l, q_w, q_c) -> (A_q, A_c)
 #####
-##### where `c` are the `SHOCConstants` and `thermodynamics` is what the model hands the closure.
+##### where `thermodynamics` is that of the model that holds the closure (`distribution_thermodynamics`).
 #####
 
 """
-$(TYPEDEF)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The saturation thermodynamics of the model that holds the closure: its saturation vapor pressure
-(of its `ThermodynamicConstants`), over the condensate surface its `phase_equilibrium` makes at
-the plume temperature (`WarmPhaseEquilibrium()`, liquid, the cloud of P3; or
-`MixedPhaseEquilibrium()`, liquid turning to ice between its freezing and homogeneous nucleation
-temperatures); its temperature-dependent latent heats; the vapor-equivalent heat capacity `ĉᵖ`
-and Exner function `Π = (p / pˢᵗ)^κ` with which it defines the liquid-ice potential temperature
-`θˡⁱ` that SHOC mixes; and, in the buoyancy flux, the potential temperature of the level in
-place of a fixed reference.
+The thermodynamics with which the assumed PDF of the subgrid distribution of `model` condenses: the
+`ThermodynamicConstants` of `model` (its saturation vapor pressure and temperature-dependent latent heats), the
+standard pressure of its potential temperature, the Exner exponent of its formulation, and the phase equilibrium
+of the condensate of its microphysics (`condensate_phase_equilibrium`): `WarmPhaseEquilibrium()`, liquid, or
+`MixedPhaseEquilibrium()`, liquid turning to ice between the freezing and homogeneous freezing temperatures of the
+microphysics, for microphysics with ice (P3, mixed-phase saturation adjustment).
+
+Each plume condenses over the condensate surface that equilibrium makes at the plume temperature, with the
+vapor-equivalent heat capacity `ĉᵖ` and Exner function `Π = (p / pˢᵗ)^κ` with which the model defines the
+liquid-ice potential temperature `θˡⁱ` that the closure mixes, and, in the buoyancy flux, the potential
+temperature of the level in place of a fixed reference.
 
 The saturation excess of a plume is linearized about the plume's own state. With the plume
 temperature `T_l = Π θˡⁱ` of the plume's water all vapor, `ĉᵖ (T - T_l) = ℒ(T) q_c` exactly in
@@ -47,43 +50,15 @@ of `q_s` with respect to `θˡⁱ` is `(∂q_s/∂T) Π`, and the buoyancy flux 
 
     A_q = ((1 - ε) / ε) θ̄,    A_c = ℒ / (ĉᵖ Π) - θ̄ / ε,    ε = Rᵈ / Rᵛ.
 
-The plume is taken free of rain and ice, as in `shoc.F90`. The model supplies its thermodynamic
-constants, the standard pressure and the Exner exponent of its formulation; outside a model
-(`thermodynamics = nothing`) this saturation cannot be used.
-
-$(TYPEDFIELDS)
+The water of the plumes is the total water the distribution reads: the moisture of the model and its cloud
+liquid (all the water with saturation adjustment; the vapor and the cloud liquid with P3, whose rain and ice
+are not distributed).
 """
-struct ModelThermodynamicsSaturation{E} <: AbstractSHOCComponent
-    "The condensate surface: `WarmPhaseEquilibrium()` or `MixedPhaseEquilibrium()`"
-    phase_equilibrium :: E
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return a [`ModelThermodynamicsSaturation`](@ref) that condenses on `phase_equilibrium`
-(liquid, `WarmPhaseEquilibrium()`, by default).
-"""
-ModelThermodynamicsSaturation(; phase_equilibrium = WarmPhaseEquilibrium()) =
-    ModelThermodynamicsSaturation(phase_equilibrium)
-
-Adapt.adapt_structure(to, s::ModelThermodynamicsSaturation) =
-    ModelThermodynamicsSaturation(adapt(to, s.phase_equilibrium))
-
-type_parameter_summary(s::ModelThermodynamicsSaturation) = string("{", nameof(typeof(s.phase_equilibrium)), "}")
-
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The thermodynamics of `model` that [`ModelThermodynamicsSaturation`](@ref) uses: its
-thermodynamic constants, the standard pressure of its potential temperature and the Exner
-exponent of its formulation.
-"""
-function shoc_saturation_thermodynamics(model)
+function distribution_thermodynamics(model)
     return (constants = model.thermodynamic_constants,
             standard_pressure = AtmosphereModels.standard_pressure(model.dynamics),
-            exner_exponent = AtmosphereModels.liquid_ice_exner_exponent(model.formulation))
+            exner_exponent = AtmosphereModels.liquid_ice_exner_exponent(model.formulation),
+            phase_equilibrium = condensate_phase_equilibrium(model.microphysics))
 end
 
 #####
@@ -125,13 +100,14 @@ end
     return ℒ, ℒ / (Rᵛ * T * T) + dλdT * log_ratio
 end
 
-@inline function plume_liquid_water_temperature(::ModelThermodynamicsSaturation, thermodynamics, c, thl, qw, pval)
+@inline function plume_liquid_water_temperature(thermodynamics, thl, qw, pval)
     return plume_exner_function(thermodynamics, qw, pval) * thl
 end
 
-@inline function plume_saturation(s::ModelThermodynamicsSaturation, thermodynamics, c, Tl, qw, pval)
+@inline function plume_saturation(thermodynamics, Tl, qw, pval)
     constants = thermodynamics.constants
-    surface = equilibrated_surface(s.phase_equilibrium, Tl)
+    equilibrium = thermodynamics.phase_equilibrium
+    surface = equilibrated_surface(equilibrium, Tl)
     # The saturation specific humidity of the model (the one the microphysics uses),
     # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T), at the density ρ = p / (Rᵐ T) of the component's air with its total
     # water as vapor
@@ -139,19 +115,19 @@ end
     ρ = pval / (Rᵐ * Tl)
     qᵛ⁺ = saturation_specific_humidity(Tl, ρ, constants, surface)
 
-    ℒ, log_slope = condensate_latent_heat_and_log_slope(s.phase_equilibrium, constants, Tl)
+    ℒ, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, Tl)
     cᵖ = plume_heat_capacity(constants, qw)
     # β q_s = (ℒ / ĉᵖ) ∂q_s/∂T at fixed p and composition: ∂ ln q_s / ∂T = ∂ ln e_s / ∂T
     beta = (ℒ / cᵖ) * log_slope
     return qᵛ⁺, beta, cᵖ / ℒ, plume_exner_function(thermodynamics, qw, pval)
 end
 
-@inline function buoyancy_flux_coefficients(s::ModelThermodynamicsSaturation, thermodynamics, c, pval, thl, qw, ql)
+@inline function buoyancy_flux_coefficients(thermodynamics, pval, thl, qw, ql)
     constants = thermodynamics.constants
     ε = dry_air_gas_constant(constants) / vapor_gas_constant(constants)
     Π = plume_exner_function(thermodynamics, qw, pval)
     Tl = Π * thl
-    ℒ, _ = condensate_latent_heat_and_log_slope(s.phase_equilibrium, constants, Tl)
+    ℒ, _ = condensate_latent_heat_and_log_slope(thermodynamics.phase_equilibrium, constants, Tl)
     cᵖ = plume_heat_capacity(constants, qw)
     heating = ℒ / (cᵖ * Π)
     θ = thl + heating * ql

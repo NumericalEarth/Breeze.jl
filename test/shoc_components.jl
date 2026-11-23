@@ -10,7 +10,7 @@ using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: trainable_paramet
                                       stable_damping, hard_floor, third_moment_bound, limit_third_moment, third_moment,
                                       bound_stratification_number, assumed_pdf, plume_saturation, plume_liquid_water_temperature, plume_variance,
                                       smooth_scalar_plumes, isotropy_ratio, shoc_dissipation_coefficient
-using Breeze.Thermodynamics: VaporEquivalentExponent
+using Breeze.Thermodynamics: VaporEquivalentExponent, WarmPhaseEquilibrium
 using Enzyme: Enzyme
 using Test
 
@@ -387,16 +387,16 @@ derivative(f, x, parameters...) =
         # One level at 900 hPa and 285 K, close to saturation, between interfaces that carry the
         # same moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec)
         pressure, θˡ = FT(9e4), FT(285) * (FT(1e5) / FT(9e4))^(constants.rgas / constants.cp)
-        saturation = ModelThermodynamicsSaturation()
-        thermodynamics = (constants = ThermodynamicConstants(FT), standard_pressure = FT(1e5), exner_exponent = VaporEquivalentExponent())
+        thermodynamics = (constants = ThermodynamicConstants(FT), standard_pressure = FT(1e5), exner_exponent = VaporEquivalentExponent(),
+                          phase_equilibrium = WarmPhaseEquilibrium())
         # Saturation of the level's air with its total water as vapor: a fixed point in qᵗ
-        qˢ = zero(FT)
+        qᵛ⁺ = zero(FT)
         for _ in 1:4
-            Tˡ = plume_liquid_water_temperature(saturation, thermodynamics, constants, θˡ, qˢ, pressure)
-            qˢ = first(plume_saturation(saturation, thermodynamics, constants, Tˡ, qˢ, pressure))
+            Tˡ = plume_liquid_water_temperature(thermodynamics, θˡ, qᵛ⁺, pressure)
+            qᵛ⁺ = first(plume_saturation(thermodynamics, Tˡ, qᵛ⁺, pressure))
         end
         pdf_of(pdf, qᵗ, w_sec, moments; policy = hard) =
-            assumed_pdf(pdf, saturation, thermodynamics, policy, constants, FT(1020), FT(980), FT(1000), pressure, θˡ, zero(FT), qᵗ,
+            assumed_pdf(pdf, thermodynamics, policy, FT(1020), FT(980), FT(1000), pressure, θˡ, zero(FT), qᵗ,
                         w_sec, moments, moments)
 
         # Away from the switches (resolved variances, plumes well apart) the smooth PDF is the
@@ -404,7 +404,7 @@ derivative(f, x, parameters...) =
         # tolerances of shoc.F90, which are a sixth of the standard deviation of total water here
         sharp_pdf = SmoothDoubleGaussianPDF(FT; thl_tol = 1e-5, rt_tol = 1e-7, w_tol = 1e-4, minimum_saturation_spread = 1e-9)
         w_sec = FT(0.6)
-        for w3 in FT[-0.2, 0.05, 0.4], qᵗ in (FT(0.97), FT(1.0), FT(1.03)) .* qˢ
+        for w3 in FT[-0.2, 0.05, 0.4], qᵗ in (FT(0.97), FT(1.0), FT(1.03)) .* qᵛ⁺
             moments = (w3, FT(0.25), FT(-0.25), FT(-1.3e-4), FT(2.9e-4), FT(4e-7))
             a = pdf_of(original_pdf, qᵗ, w_sec, moments)
             b = pdf_of(smooth_pdf, qᵗ, w_sec, moments)
@@ -425,20 +425,20 @@ derivative(f, x, parameters...) =
         still = ntuple(_ -> zero(FT), 6)
         calm = FT(2e-4)
         for pdf in (original_pdf, smooth_pdf)
-            cloud_fraction, liquid, liquid_variance, liquid_flux, buoyancy_flux = pdf_of(pdf, FT(1.02) * qˢ, calm, still)
+            cloud_fraction, liquid, liquid_variance, liquid_flux, buoyancy_flux = pdf_of(pdf, FT(1.02) * qᵛ⁺, calm, still)
             @test isapprox(cloud_fraction, 1; atol = 1e-3)
             @test liquid > 0
             @test liquid_flux == 0
-            @test first(pdf_of(pdf, FT(0.98) * qˢ, calm, still)) < 1e-3
+            @test first(pdf_of(pdf, FT(0.98) * qᵛ⁺, calm, still)) < 1e-3
         end
-        @test isapprox(pdf_of(smooth_pdf, FT(1.02) * qˢ, calm, still)[2], pdf_of(original_pdf, FT(1.02) * qˢ, calm, still)[2]; rtol = 1e-2)
+        @test isapprox(pdf_of(smooth_pdf, FT(1.02) * qᵛ⁺, calm, still)[2], pdf_of(original_pdf, FT(1.02) * qᵛ⁺, calm, still)[2]; rtol = 1e-2)
 
         # No jump where the switches of the original are: the outputs are continuous in the
         # vertical velocity variance across w_tol² and in the scalar variance across its tolerance²
         variable = (FT(1e-4), FT(0.02), FT(-2e-3), FT(-2e-6), FT(3e-6), FT(4e-8))
         step(pdf, f) = maximum(abs, f(pdf, 1 + FT(1e-3)) .- f(pdf, 1 - FT(1e-3)))
-        across_calm(pdf, x) = pdf_of(pdf, qˢ, original_pdf.w_tol^2 * x, variable)[1:2]
-        across_uniform(pdf, x) = pdf_of(pdf, qˢ, FT(0.3), (variable[1], variable[2], variable[3], variable[4], variable[5],
+        across_calm(pdf, x) = pdf_of(pdf, qᵛ⁺, original_pdf.w_tol^2 * x, variable)[1:2]
+        across_uniform(pdf, x) = pdf_of(pdf, qᵛ⁺, FT(0.3), (variable[1], variable[2], variable[3], variable[4], variable[5],
                                                          original_pdf.rt_tol^2 * x))[1:2]
         @test step(smooth_pdf, across_calm)[1] < 1e-3
         @test step(smooth_pdf, across_uniform)[1] < 1e-3
@@ -455,7 +455,7 @@ derivative(f, x, parameters...) =
 
         # A spread of the saturation deficit that does not vanish: the cloud fraction passes
         # through one half at saturation instead of jumping
-        @test isapprox(first(pdf_of(smooth_pdf, qˢ, calm, still)), 0.5; atol = 0.05)
+        @test isapprox(first(pdf_of(smooth_pdf, qᵛ⁺, calm, still)), 0.5; atol = 0.05)
 
     end
 end
