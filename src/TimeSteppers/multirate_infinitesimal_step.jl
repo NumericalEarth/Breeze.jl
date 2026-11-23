@@ -569,10 +569,6 @@ end
 CompressibleEquations.horizontal_substep_form(ts::MultirateInfinitesimalStep) =
     recombines_stage_increments(ts.tableau) ? SymmetricSubsteps() : ForwardBackwardSubsteps()
 
-# Whether the next `update_state!` builds the tendencies of the first stage of an outer step.
-tendencies_feed_first_stage(timestepper) = true
-tendencies_feed_first_stage(ts::MultirateInfinitesimalStep) = ts.next_stage[] == 1
-
 # With the production model's coefficients and scalar tendency timing (see the `AcousticRungeKutta3` method).
 AtmosphereModels.adiabatic_twin_timestepper(ts::MultirateInfinitesimalStep, ::SplitExplicitCompressibleDynamics) =
     :MultirateInfinitesimalStep, (; coefficients = ts.tableau,
