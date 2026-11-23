@@ -24,7 +24,7 @@ using Breeze.CompressibleEquations: AcousticSubstepper,
                                     AcousticTridiagUpper,
                                     freeze_linearization_state!,
                                     assemble_slow_vertical_momentum_tendency!
-using Breeze.TimeSteppers: acoustic_stage!, store_initial_state!, cache_transport_velocity!
+using Breeze.TimeSteppers: acoustic_rk3_substep!, store_initial_state!, cache_transport_velocity!
 
 using Oceananigans
 using Oceananigans.Grids: ZDirection
@@ -614,7 +614,7 @@ end
     freeze_linearization_state!(ts.substepper, model)
     ρᵈ⁰ = CenterField(grid)
     parent(ρᵈ⁰) .= parent(ρᵈ)
-    acoustic_stage!(model, Δt, ts.β₁, RoundToNearest(), ())
+    acoustic_rk3_substep!(model, Δt, ts.β₁, RoundToNearest(), ())
 
     residual₁, Δρᵈ₁ = stage_mass_flux_residual(model, ρᵈ⁰, ρᵈ⁰, ts.β₁, Δt)
     @test Δρᵈ₁ > 0
@@ -625,7 +625,7 @@ end
     cache_transport_velocity!(model)
     ρᵈᴸ = CenterField(grid)
     parent(ρᵈᴸ) .= parent(ρᵈ)
-    acoustic_stage!(model, Δt, ts.β₂, RoundToNearest(), ())
+    acoustic_rk3_substep!(model, Δt, ts.β₂, RoundToNearest(), ())
 
     residual₂, Δρᵈ₂ = stage_mass_flux_residual(model, ρᵈᴸ, ρᵈ⁰, ts.β₂, Δt)
     @test Δρᵈ₂ > 0

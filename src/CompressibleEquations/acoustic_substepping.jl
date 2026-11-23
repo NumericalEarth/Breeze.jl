@@ -1948,7 +1948,7 @@ end
 # The substeps run under `ReactantCore.@trace`: a plain loop on ordinary arrays, a single traced
 # `while` loop under Reactant, so the compiled program holds one copy of the substep body rather
 # than `Nτ`. Reverse-mode differentiation of that loop caches a minimal cut of its values (`mincut`).
-function run_acoustic_substeps!(Nτ, model, substepper, stage, advection)
+function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
     @trace mincut=true track_numbers=false for n in 1:Nτ
         acoustic_substep!(model, substepper, stage, advection, n)
     end
@@ -2842,7 +2842,7 @@ stage depend on `substepper.substep_distribution`. `advection` is the advection 
 thermodynamic density. The recovery of the full state from the stage-entry state and
 the accumulated perturbations is rounded with the round-off treatment `rounding`.
 """
-function acoustic_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection, rounding)
+function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection, rounding)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -2881,7 +2881,7 @@ function acoustic_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stag
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰ = Uᴸ, forcing_interval)
     factor_implicit_advection!(model, substepper, advection, Δτ)
     factor_vertical_solver!(substepper, grid, constants, δτᵐ⁺)
-    run_acoustic_substeps!(Nτ, model, substepper, stage, advection)
+    acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
     # time-averaged velocity field. Read by `update_state!` through

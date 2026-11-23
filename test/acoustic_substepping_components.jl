@@ -30,7 +30,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors, prepare_acoustic_cache!, run_acoustic_substeps!,
+                                    implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
                                     factor_vertical_solver!,
                                     solve_tridiagonal_columns_in_place!
 using Breeze.AtmosphereModels: SlowDynamics,
@@ -486,7 +486,7 @@ for arch in arches
         stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ, U⁰ = model.timestepper.U⁰,
                  forcing_interval = 2Δτ)
         factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
-        run_acoustic_substeps!(2, model, substepper, stage, nothing)
+        acoustic_substep_loop!(2, model, substepper, stage, nothing)
 
         for field in (substepper.density_perturbation,
                       substepper.density_potential_temperature_perturbation,

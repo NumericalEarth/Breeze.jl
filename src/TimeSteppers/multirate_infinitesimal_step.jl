@@ -2039,7 +2039,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
 
     for i in 1:s
         ts.stage[] = i
-        acoustic_stage!(model, Δt, d[i], stage_rounding(ts, i), callbacks)
+        acoustic_rk3_substep!(model, Δt, d[i], stage_rounding(ts, i), callbacks)
 
         if i < s
             ts.next_stage[] = i + 1
