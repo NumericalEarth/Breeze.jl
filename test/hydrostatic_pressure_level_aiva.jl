@@ -6,6 +6,7 @@ include("hydrostatic_moist_utils.jl")
 
 using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.Fields: ZeroField
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: Periodic, Flat, Bounded
 using Oceananigans.MultiRegion: YinYangGrid
 using Oceananigans.Utils: launch!, getregion
