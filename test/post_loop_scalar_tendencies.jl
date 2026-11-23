@@ -335,9 +335,9 @@ end
 #####
 ##### `update_state!` corrects negative moisture between stages, and the next slow tendencies are
 ##### evaluated at the corrected state. The increment ΔYᵢ = Yᵢ − Uⁿ that later stages start from and
-##### are forced with is that of the corrected state too, with every storage layout: the layout with
-##### two registers reads it from the prognostic fields, and the layouts with increment registers and
-##### with accumulators store it once `update_state!` has run. (They used to store it when the stage
+##### are forced with is that of the corrected state too, with both storage layouts: the layout with
+##### two registers reads it from the prognostic fields, and the layout with accumulators stores it
+##### once `update_state!` has run. (They used to store it when the stage
 ##### completed, before the correction, so that the layouts differed wherever the correction was
 ##### active.) The increments of the acoustic prognostics, which `update_state!` does not change, are
 ##### formed in the next stage's assembly or stored with the others; either way the step is the same.
@@ -347,7 +347,7 @@ using CloudMicrophysics
 using Breeze.AtmosphereModels: SpeciesBorrowing
 using Breeze.TimeSteppers: fold_stage_increments, structured_stage_storage, stage_increment_source,
                            acoustic_prognostic_names, IncrementFromState, StoredIncrement,
-                           TwoRegisterStorage, IncrementStorage, AccumulatorStorage
+                           TwoRegisterStorage, AccumulatorStorage
 using Oceananigans: prognostic_fields
 
 const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt).OneMomentCloudMicrophysics
@@ -408,13 +408,12 @@ end
     end
 end
 
-# The increments are those of the corrected state with every layout: a coefficient set that keeps two
+# The increments are those of the corrected state with both layouts: a coefficient set that keeps two
 # registers reads them from the corrected prognostic fields, and reproduces to round-off the same
-# set with increment registers stored after the correction and with accumulators. Three steps of
-# this bubble amplify the round-off the layouts differ by, as in "MIS storage layouts reproduce the
-# accumulators".
+# set with accumulators stored after the correction. Three steps of this bubble amplify the
+# round-off the layouts differ by, as in "MIS storage layouts reproduce the accumulators".
 @testset "MIS storage layouts agree with an active negative-moisture correction [$coefficients, post_loop = $post_loop_scalar_tendencies]" for
-        (coefficients, layout) in ((:LowStorageMIS52, TwoRegisterStorage), (:DiagonalMIS42, IncrementStorage)),
+        (coefficients, layout) in ((:LowStorageMIS52, TwoRegisterStorage),),
         post_loop_scalar_tendencies in (false, true)
 
     kw = (; coefficients, post_loop_scalar_tendencies)

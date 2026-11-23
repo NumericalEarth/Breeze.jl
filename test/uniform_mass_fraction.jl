@@ -58,8 +58,6 @@ end
 const uniform_mass_fraction_steppers = ((:AcousticRungeKutta3, nothing),
                                         (:MultirateInfinitesimalStep, :SSPMIS43),
                                         (:MultirateInfinitesimalStep, :TVDMISB),
-                                        (:MultirateInfinitesimalStep, :DiagonalMIS42),
-                                        (:MultirateInfinitesimalStep, :DiagonalMIS52),
                                         (:MultirateInfinitesimalStep, :LowStorageMIS52),
                                         (:MultirateInfinitesimalStep, :ConvexLinearMIS3),
                                         (:MultirateInfinitesimalStep, :ConvexLinearMIS4),

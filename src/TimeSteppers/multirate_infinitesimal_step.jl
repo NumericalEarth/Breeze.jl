@@ -41,22 +41,18 @@ Fields
 - `tableau`: the [`MultirateInfinitesimalStepTableau`](@ref).
 - `storage`: the storage layout, chosen from the structure of the coefficients (see `stage_storage`):
   `TwoRegisterStorage` for a diagonal `β` with `α` and `γ` on the first subdiagonal alone
-  (`:WickerSkamarock3`, `:LowStorageMIS52`), which keeps `Uⁿ` and `Gⁿ` and nothing else per
-  prognostic, as `AcousticRungeKutta3` does; `IncrementStorage` for any other diagonal `β` with up to
-  five stages (`:DiagonalMIS42`, `:DiagonalMIS52`), which adds two stage increments (three for the
-  moisture, microphysical and tracer fields of a five-stage set); and `AccumulatorStorage` otherwise.
+  (`:WickerSkamarock3`, `:LowStorageMIS52`, the `:ConvexLinearMIS` sets), which keeps `Uⁿ` and `Gⁿ`
+  and nothing else per prognostic, as `AcousticRungeKutta3` does; and `AccumulatorStorage` otherwise.
 - `U⁰`: with `AccumulatorStorage`, what the start state of stages 2 and 3 is formed from: the increment
-  ``ΔY₁`` during stage 2 and the offset ``Σⱼ α₃ⱼ ΔYⱼ`` during stage 3. With `IncrementStorage` it is the
-  first increment register, and with `TwoRegisterStorage` it is `Uⁿ`. No start state is stored: stage 1
-  starts from `Uⁿ` itself and a later stage from `Uⁿ` plus its offset, summed where it is read (see
-  `stage_start_state`).
+  ``ΔY₁`` during stage 2 and the offset ``Σⱼ α₃ⱼ ΔYⱼ`` during stage 3. With `TwoRegisterStorage` it is
+  `Uⁿ`. No start state is stored: stage 1 starts from `Uⁿ` itself and a later stage from `Uⁿ` plus its
+  offset, summed where it is read (see `stage_start_state`).
 - `Gⁿ`: tendency storage; holds the combined slow forcing during each acoustic loop.
 - `implicit_solver`, `substepper`: as for `AcousticRungeKutta3`.
 - `rounding`: Round-off treatment of the state updates that reach ``Uⁿ⁺¹``, [`RoundToNearest`](@ref)
   or [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding).
 - `Uⁿ`: the outer-step-start state.
-- `accumulators`: with `TwoRegisterStorage`, empty. With `IncrementStorage`, the increment registers
-  (see `increment_registers`). With `AccumulatorStorage`, for each stage ``k = 3, …, s``, the parts of
+- `accumulators`: with `TwoRegisterStorage`, empty. With `AccumulatorStorage`, for each stage ``k = 3, …, s``, the parts of
   its forcing and start state known so far,
   `forcing` ``= (1/dₖ) Σⱼ (βₖⱼ Sⱼ + γₖⱼ ΔYⱼ / Δt)`` and `offset` ``= Σⱼ αₖⱼ ΔYⱼ``, accumulated as each
   ``Sⱼ`` and ``ΔYⱼ = Yⱼ - Uⁿ`` becomes available, so no ``Sⱼ`` and only ``ΔY₁`` is stored. Stage 3's
@@ -104,7 +100,7 @@ struct MultirateInfinitesimalStep{TB, SL, U0, TG, TI, AS, R, UN, AC, FC, ST, SS,
     relinearize_stages :: Bool
     fold_stage_increments :: Bool
     tableau :: TB
-    storage :: SL # the storage layout: `TwoRegisterStorage`, `IncrementStorage` or `AccumulatorStorage`
+    storage :: SL # the storage layout: `TwoRegisterStorage` or `AccumulatorStorage`
     U⁰ :: U0
     Gⁿ :: TG
     implicit_solver :: TI
@@ -186,13 +182,11 @@ and `γ` have entries on the first subdiagonal alone (`:WickerSkamarock3`, `:Low
 two copies of the prognostic state, as `AcousticRungeKutta3` does: the step-start state `Uⁿ`, which
 `U⁰` then is, and the tendencies, and with post-loop scalar tendencies the fields that keep the
 moisture and condensate tendencies for the next stage's loop. Every stage forms the one increment it
-needs from the prognostic fields themselves. Any other set with a
-diagonal `β` and at most five stages (`:DiagonalMIS42`, `:DiagonalMIS52`) keeps two stage increments
-besides, and a third for the moisture, microphysical and tracer fields of a five-stage set. The
-remaining sets keep a forcing and an offset accumulator for each stage after the second. With every
-layout the increment of a stage is that of the state `update_state!` leaves after it, so the
-increments of the moisture and microphysical fields include its negative-moisture correction: a
-stage starts from, and is forced with, the corrected state that its tendency was evaluated at.
+needs from the prognostic fields themselves. The remaining sets keep a forcing and an offset
+accumulator for each stage after the second. With either layout the increment of a stage is that of
+the state `update_state!` leaves after it, so the increments of the moisture and microphysical fields
+include its negative-moisture correction: a stage starts from, and is forced with, the corrected state
+that its tendency was evaluated at.
 
 `rounding` sets the round-off treatment of the state updates that reach ``Uⁿ⁺¹`` (default:
 [`RoundToNearest`](@ref)). For the acoustic prognostics that is the last stage's recovery of the
@@ -264,8 +258,6 @@ end
 #####     `γ` are also confined to the first subdiagonal, the only increment needed is that of the stage
 #####     before, ΔYᵢ₋₁ = Yᵢ₋₁ - Uⁿ, and the prognostic fields hold Yᵢ₋₁ until the stage updates them.
 #####     So nothing is stored besides Uⁿ and the tendencies (`TwoRegisterStorage`).
-#####   - With a diagonal `β` and any `α` and `γ`, the increments themselves are stored instead of an
-#####     accumulator pair per later stage (`IncrementStorage`, see `increment_registers`).
 #####   - Otherwise the forcing and the offset of every later stage are accumulated as the stages
 #####     complete (`AccumulatorStorage`).
 #####
@@ -273,10 +265,7 @@ end
 abstract type AbstractStageStorage end
 
 struct TwoRegisterStorage <: AbstractStageStorage end
-struct IncrementStorage <: AbstractStageStorage end
 struct AccumulatorStorage <: AbstractStageStorage end
-
-const DiagonalStorage = Union{TwoRegisterStorage, IncrementStorage}
 
 # A coefficient that is zero but for the round-off of whatever produced the set.
 negligible(a, A) = abs(a) ≤ 8 * eps(eltype(A)) * maximum(abs, A; init = zero(eltype(A)))
@@ -293,26 +282,12 @@ is_first_subdiagonal(A) = all(j == i - 1 || negligible(A[i, j], A) for i in axes
 # when it is constructed.
 const structured_stage_storage = Ref(true)
 
-# The storage layout of a coefficient set. `IncrementStorage` covers up to five stages: the five-stage
-# layout rests on recovering two increments from two combinations of them (see
-# `penultimate_start_weights`), which the coefficients must allow.
+# The storage layout of a coefficient set.
 function stage_storage(tableau)
     (; α, β, γ) = tableau
-    s = number_of_stages(tableau)
     structured_stage_storage[] || return AccumulatorStorage()
-    is_diagonal(β) || return AccumulatorStorage()
-    is_first_subdiagonal(α) && is_first_subdiagonal(γ) && return TwoRegisterStorage()
-    s ≤ 4 && return IncrementStorage()
-    s == 5 && recombination_is_well_conditioned(tableau) && return IncrementStorage()
+    is_diagonal(β) && is_first_subdiagonal(α) && is_first_subdiagonal(γ) && return TwoRegisterStorage()
     return AccumulatorStorage()
-end
-
-# Whether (α₅₁, α₅₂) and (γ₅₁, γ₅₂) are far enough from parallel for ΔY₁ and ΔY₂ to be recovered
-# from the two combinations of them that the last stage of a five-stage set needs.
-function recombination_is_well_conditioned(tableau)
-    (; α, γ) = tableau
-    determinant = α[5, 1] * γ[5, 2] - α[5, 2] * γ[5, 1]
-    return abs(determinant) > hypot(α[5, 1], α[5, 2]) * hypot(γ[5, 1], γ[5, 2]) / 100
 end
 
 # The step-start state Uⁿ. With `TwoRegisterStorage` nothing else is stored, so it takes the storage
@@ -321,29 +296,6 @@ outer_step_state_storage(::TwoRegisterStorage, prognostic_fields, U⁰) = U⁰
 outer_step_state_storage(storage, prognostic_fields, U⁰) = map(similar, prognostic_fields)
 
 stage_accumulators(::TwoRegisterStorage, prognostic_fields, U⁰, folded_names, s) = ()
-stage_accumulators(::IncrementStorage, prognostic_fields, U⁰, folded_names, s) =
-    increment_registers(prognostic_fields, U⁰, folded_names, s)
-
-# The increment registers of a coefficient set with a diagonal `β`, a tuple of `NamedTuple`s of fields,
-# of which the first is `U⁰`. A field that forms its increments in the assembly (`folded_names`) has
-# min(s - 2, 2) of them: stage i < s keeps ΔYᵢ₋₁ in the next free one, and the last stage writes its
-# offset over the first. With five stages, stage 4 has no free register for ΔY₃: it replaces ΔY₁ and
-# ΔY₂ by the two combinations of ΔY₁, ΔY₂ and ΔY₃ that stage 5 needs, and forms its own start state
-# from those and the prognostic field, which holds Y₃ until the stage ends (`penultimate_start_weights`).
-#
-# A field whose increments are stored when a stage completes has max(s - 2, 2): ΔY₁ to ΔYₛ₋₂ raw, and
-# after stage s - 1 the offset and the forcing of the last stage in the first two. The thermodynamic
-# density forms its increments in the assembly, but it is not told apart from the scalars here, where
-# only the dynamics is known, so it is given as many registers as they are.
-function increment_registers(prognostic_fields, U⁰, folded_names, s)
-    names = keys(prognostic_fields)
-    register_count(name) = name ∈ folded_names ? min(s - 2, 2) : max(s - 2, 2)
-
-    return ntuple(max(s - 2, 2)) do m
-        holders = filter(name -> register_count(name) ≥ m, names)
-        NamedTuple{holders}(map(name -> m == 1 ? U⁰[name] : similar(prognostic_fields[name]), holders))
-    end
-end
 
 # The accumulators of stages 3 to s. Stage 3's offset is `U⁰`. A field that forms its increments
 # in the assembly (`folded_names`) reads stage 3's forcing for the last time in the kernel that
@@ -375,9 +327,9 @@ function transport_density_accumulator_storage(::AccumulatorStorage, grid, U⁰,
     return (second, ntuple(_ -> CenterField(grid), s - 2)...)
 end
 
-# With a diagonal `β` the combination is formed from the increments of the dry density where the
+# With two registers the combination is formed from the increment of the dry density where the
 # stage is assembled.
-transport_density_accumulator_storage(::DiagonalStorage, grid, U⁰, fold, s) = ()
+transport_density_accumulator_storage(::TwoRegisterStorage, grid, U⁰, fold, s) = ()
 
 # The correction of the scalars' recombined mass fluxes (see "Mass consistency of the recombined
 # scalar fluxes" below).
@@ -491,9 +443,9 @@ CompressibleEquations.recovered_state_residual(ts::MultirateInfinitesimalStep) =
 # before the loop, as it does pre-loop. Where the moisture and condensate densities are not known
 # (`moisture_forcing_names = nothing`), every one of these prognostics has a field of its own.
 #
-# A coefficient set with a diagonal `β` (`DiagonalStorage`) applies every tendency whole, so it
+# A coefficient set with a diagonal `β` (`TwoRegisterStorage`) applies every tendency whole, so it
 # separates no fast part and needs no scratch.
-fast_tendency_storage(::DiagonalStorage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper,
+fast_tendency_storage(::TwoRegisterStorage, scalar_tendencies, grid, prognostic_fields, dynamics, substepper,
                       moisture_forcing_names) = nothing
 
 fast_tendency_storage(::AccumulatorStorage, ::PreLoopScalarTendencies, grid, prognostic_fields, dynamics, substepper,
@@ -521,7 +473,7 @@ multirate_scalar_tendency_timing(::AccumulatorStorage, post_loop_scalar_tendenci
                                  moisture_forcing_names) =
     scalar_tendency_timing(post_loop_scalar_tendencies)
 
-multirate_scalar_tendency_timing(::DiagonalStorage, post_loop_scalar_tendencies, grid, prognostic_fields, dynamics,
+multirate_scalar_tendency_timing(::TwoRegisterStorage, post_loop_scalar_tendencies, grid, prognostic_fields, dynamics,
                                  moisture_forcing_names) =
     scalar_tendency_timing(post_loop_scalar_tendencies, grid, prognostic_fields, dynamics, moisture_forcing_names)
 
@@ -944,7 +896,7 @@ Base.@propagate_inbounds weighted_sum(i, j, k, a::Tuple, w::Tuple) =
 Base.@propagate_inbounds weighted_sum(i, j, k, sum, a::Tuple, w::Tuple) =
     weighted_sum(i, j, k, sum + w[1] * a[1][i, j, k], Base.tail(a), Base.tail(w))
 
-# An offset Σⱼ αᵢⱼ ΔYⱼ summed where it is read, from increments in registers or in the prognostic field.
+# A weighted sum of arrays, formed where it is read.
 struct WeightedSum{T, A, W} <: AbstractArray{T, 3}
     terms :: A
     weights :: W
@@ -985,52 +937,6 @@ function stage_offset(::TwoRegisterStorage, ts, model, name)
     weight = ts.tableau.α[i, i - 1]
     offset = StateIncrement(prognostic_fields(model)[name], ts.Uⁿ[name], nothing)
     return (; offset, weight, state_weight = weight)
-end
-
-function stage_offset(::IncrementStorage, ts, model, name)
-    i = ts.stage[]
-    α = ts.tableau.α
-    s = number_of_stages(ts.tableau)
-    FT = eltype(α)
-    R = increment_registers(ts, name)
-    source = stage_increment_source(model, name)
-
-    # The raw ΔY₁, and in the last stage its completed offset
-    i == 2 && return (; offset = R[1], weight = α[2, 1], state_weight = zero(FT))
-    i == s && return (; offset = R[1], weight = one(FT), state_weight = zero(FT))
-
-    if source isa IncrementFromState && i == 4 # of five stages
-        p, q, c = penultimate_start_weights(ts.tableau, ts.current_Δt[])
-        ΔY₃ = StateIncrement(source.u, ts.Uⁿ[name], nothing)
-        return (; offset = WeightedSum((R[1], R[2], ΔY₃), (p, q, c)), weight = one(FT), state_weight = c)
-    end
-
-    # The raw increments ΔY₁ to ΔYᵢ₋₁
-    js = ntuple(identity, i - 1)
-    offset = WeightedSum(map(j -> R[j], js), map(j -> α[i, j], js))
-    return (; offset, weight = one(FT), state_weight = zero(FT))
-end
-
-# The increment registers that field `name` has.
-increment_registers(ts::MultirateInfinitesimalStep, name) =
-    map(register -> register[name], filter(register -> haskey(register, name), ts.accumulators))
-
-# Stage 4 of a five-stage set, for a field that forms its increments in the assembly. The assembly
-# has replaced ΔY₁ and ΔY₂ in the registers by the combinations that stage 5 needs,
-#
-#   P = α₅₁ ΔY₁ + α₅₂ ΔY₂ + α₅₃ ΔY₃,    Q = w₅₁ ΔY₁ + w₅₂ ΔY₂ + w₅₃ ΔY₃,    w₅ⱼ = γ₅ⱼ / (d₅ Δt),
-#
-# and the prognostic field still holds Y₃ = Uⁿ + ΔY₃. Solving the two for ΔY₁ and ΔY₂ gives the
-# offset of stage 4 as Z₄ = α₄₁ ΔY₁ + α₄₂ ΔY₂ + α₄₃ ΔY₃ = p P + q Q + c ΔY₃.
-function penultimate_start_weights(tableau, Δt)
-    (; α, γ, d) = tableau
-    FT = eltype(d)
-    w = ntuple(j -> γ[5, j] / (d[5] * convert(FT, Δt)), 3)
-    determinant = α[5, 1] * w[2] - α[5, 2] * w[1]
-    p = (α[4, 1] * w[2] - α[4, 2] * w[1]) / determinant
-    q = (α[4, 2] * α[5, 1] - α[4, 1] * α[5, 2]) / determinant
-    c = α[4, 3] - p * α[5, 3] - q * w[3]
-    return p, q, c
 end
 
 # A field that carries a residual rounds its start state to nearest, and the loop adds the rounding
@@ -1087,20 +993,19 @@ end
 compute_fast_thermodynamic_tendency!(::AccumulatorStorage, C, substepper, model) =
     compute_linearized_thermodynamic_flux_divergence!(C, substepper, model)
 
-compute_fast_thermodynamic_tendency!(::DiagonalStorage, C, substepper, model) = nothing
+compute_fast_thermodynamic_tendency!(::TwoRegisterStorage, C, substepper, model) = nothing
 
 # Give the transport density tendency the stage combination that the moisture forcing has:
 # (1/dᵢ) [Σⱼ βᵢⱼ Gᵗⱼ + Σⱼ γᵢⱼ ΔYⱼ / Δt], with ΔYⱼ the increments of the dry density.
 assemble_transport_density_tendency!(ts::MultirateInfinitesimalStep, model, Δt) =
     assemble_transport_density_tendency!(ts.storage, ts, model, Δt)
 
-# With a diagonal `β`: βᵢᵢ Gᵗᵢ / dᵢ plus the increment part of the dry density's own forcing, read
-# before the dry density's assembly rewrites its registers.
-function assemble_transport_density_tendency!(::DiagonalStorage, ts, model, Δt)
+# With a diagonal `β`: βᵢᵢ Gᵗᵢ / dᵢ plus the increment part of the dry density's own forcing.
+function assemble_transport_density_tendency!(::TwoRegisterStorage, ts, model, Δt)
     i = ts.stage[]
     (; β, d) = ts.tableau
     grid = model.grid
-    terms, weights = transport_density_increment_forcing(ts.storage, ts, model, Δt)
+    terms, weights = transport_density_increment_forcing(ts, model, Δt)
     wβᵢ = β[i, i] / d[i]
     all(is_known_zero, weights) && isone(wβᵢ) && return nothing
     launch!(architecture(grid), grid, :xyz, _combine_transport_density_tendency!,
@@ -1110,16 +1015,13 @@ end
 
 # The increment of the dry density as the transport density tendency has always taken it, without
 # the rounding error of the recovery.
-function transport_density_increment_forcing(::TwoRegisterStorage, ts, model, Δt)
+function transport_density_increment_forcing(ts, model, Δt)
     i = ts.stage[]
     i == 1 && return (), ()
     (; γ, d) = ts.tableau
     ΔY = StateIncrement(model.dynamics.dry_density, ts.Uⁿ.ρᵈ, nothing)
     return (ΔY,), (γ[i, i - 1] / (d[i] * Δt),)
 end
-
-transport_density_increment_forcing(::IncrementStorage, ts, model, Δt) =
-    increment_forcing(stage_increment_source(model, :ρᵈ), ts, model, Δt, :ρᵈ)
 
 @kernel function _combine_transport_density_tendency!(Gᵗ, terms, weights, wβᵢ)
     i, j, k = @index(Global, NTuple)
@@ -1260,7 +1162,7 @@ function assemble_post_loop_stage_forcing!(::PostLoopScalarTendencies, ts, model
 end
 
 post_loop_tendency_split(::AccumulatorStorage, ts, name) = PartitionedTendencySplit(fast_tendency_scratch(ts, name))
-post_loop_tendency_split(::DiagonalStorage, ts, name) = SlowTendencySplit() # the build has added the whole tendency to `Gⁿ`
+post_loop_tendency_split(::TwoRegisterStorage, ts, name) = SlowTendencySplit() # the build has added the whole tendency to `Gⁿ`
 
 # The post-loop scalars whose advective tendency has no field of its own (see
 # `fast_tendency_storage`): the build left it out, and it is built and assembled one scalar at a
@@ -1390,10 +1292,10 @@ function predicted_stage_forcing(::AccumulatorStorage, ts, model, name)
 end
 
 # With a diagonal `β` the stage applies its own tendency whole (βᵢᵢ = dᵢ), so the prediction is
-# Sᵢ₋₁ plus the increments' part of the stage forcing, read where the stage's assembly will read it
-# after the loop (`increment_forcing`): nothing changes the scalars or their registers in between.
+# Sᵢ₋₁ plus the increment's part of the stage forcing, read where the stage's assembly will read it
+# after the loop (`increment_forcing`): nothing changes the scalars in between.
 # A stage that no increment forces (every stage of Wicker–Skamarock RK3) takes Sᵢ₋₁ as it is.
-function predicted_stage_forcing(::DiagonalStorage, ts, model, name)
+function predicted_stage_forcing(::TwoRegisterStorage, ts, model, name)
     FT = eltype(model.grid)
     S = previous_scalar_tendency(ts, name)
     Δt = convert(FT, ts.current_Δt[])
@@ -1610,7 +1512,7 @@ end
 # transported with the stage's mass-flux correction where it has one: every stage but the first of
 # a coefficient set whose `β` is not diagonal.
 #
-# A coefficient set with a diagonal `β` recombines no tendency (`DiagonalStorage`), so its build adds
+# A coefficient set with a diagonal `β` recombines no tendency (`TwoRegisterStorage`), so its build adds
 # the whole tendency to `Gⁿ`, as that of `AcousticRungeKutta3` does, with the stage's own mass flux
 # alone: its correction has none (R = 0). The moisture and condensate tendencies are then copied for
 # the next stage's loop before the assembly adds the increments' part of the stage forcing to them
@@ -1618,7 +1520,7 @@ end
 post_loop_scalar_tendency_kernel(ts::MultirateInfinitesimalStep, model) =
     post_loop_scalar_tendency_kernel(ts.storage, ts, model)
 
-post_loop_scalar_tendency_kernel(::DiagonalStorage, ts, model) = add_scalar_tendency!
+post_loop_scalar_tendency_kernel(::TwoRegisterStorage, ts, model) = add_scalar_tendency!
 
 post_loop_scalar_tendency_kernel(::AccumulatorStorage, ts, model) =
     post_loop_scalar_tendency_kernel(ts.transport_mass_fluxes, ts, model)
@@ -1726,66 +1628,28 @@ assemble_stage_forcing!(ts::MultirateInfinitesimalStep, model, Δt, name, split)
     assemble_stage_forcing!(ts.storage, ts, model, Δt, name, split)
 
 #####
-##### Stage assembly with a diagonal β
+##### Stage assembly with two registers
 #####
 ##### Every stage applies its own slow tendency alone, βᵢᵢ / dᵢ = 1, so the stage forcing is the full
-##### tendency plus the increments' part, G = Gᵢ + Σⱼ wᵢⱼ ΔYⱼ with wᵢⱼ = γᵢⱼ / (dᵢ Δt), and the start
-##### state is Uⁿ + Σⱼ αᵢⱼ ΔYⱼ. Both sums are over increments, held in registers or read from the
-##### prognostic field (`StateIncrement`), and are added in the order in which `AccumulatorStorage`
-##### accumulates them.
+##### tendency plus the increment's part, G = Gᵢ + wᵢ ΔYᵢ₋₁ with wᵢ = γᵢ,ᵢ₋₁ / (dᵢ Δt), and the start
+##### state is Uⁿ + αᵢ,ᵢ₋₁ ΔYᵢ₋₁, with ΔYᵢ₋₁ read from the prognostic field (`StateIncrement`).
 #####
 
-# Write Σₘ wₘ aₘ to the register `target`.
-struct RegisterUpdate{R, A, W}
-    target :: R
-    terms :: A
-    weights :: W
-end
-
-Adapt.adapt_structure(to, update::RegisterUpdate) =
-    RegisterUpdate(adapt(to, update.target), adapt(to, update.terms), update.weights)
-
-# The new values of every register are formed before any is written: a register may be among the
-# terms of another's update, or of its own.
-@inline updated_values(i, j, k, ::Tuple{}) = ()
-Base.@propagate_inbounds updated_values(i, j, k, updates::Tuple) =
-    (weighted_sum(i, j, k, updates[1].terms, updates[1].weights), updated_values(i, j, k, Base.tail(updates))...)
-
-@inline write_registers!(i, j, k, ::Tuple{}, ::Tuple{}) = nothing
-Base.@propagate_inbounds function write_registers!(i, j, k, updates::Tuple, values::Tuple)
-    updates[1].target[i, j, k] = values[1]
-    return write_registers!(i, j, k, Base.tail(updates), Base.tail(values))
-end
-
-@kernel function _assemble_increment_forcing!(G, grid, split, terms, weights, updates)
+@kernel function _assemble_increment_forcing!(G, grid, split, terms, weights)
     i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        forcing = weighted_sum(i, j, k, terms, weights)
-        values = updated_values(i, j, k, updates)
-        G[i, j, k] = full_tendency(i, j, k, grid, split, G) + forcing
-        write_registers!(i, j, k, updates, values)
-    end
+    @inbounds G[i, j, k] = full_tendency(i, j, k, grid, split, G) + weighted_sum(i, j, k, terms, weights)
 end
 
-@kernel function _update_registers!(updates)
-    i, j, k = @index(Global, NTuple)
-    @inbounds write_registers!(i, j, k, updates, updated_values(i, j, k, updates))
-end
-
-function assemble_stage_forcing!(storage::DiagonalStorage, ts, model, Δt, name, split)
+function assemble_stage_forcing!(::TwoRegisterStorage, ts, model, Δt, name, split)
     grid = model.grid
     G = ts.Gⁿ[name]
-    source = stage_increment_source(model, name)
-    terms, weights = increment_forcing(source, ts, model, Δt, name)
-    updates = assembly_register_updates(storage, source, ts, model, Δt, name)
+    terms, weights = increment_forcing(stage_increment_source(model, name), ts, model, Δt, name)
 
     # Nothing to do in stage 1, nor in any stage of Wicker–Skamarock RK3
-    forced = !all(is_known_zero, weights)
-    forced || !isempty(updates) || return nothing
-    terms, weights = forced ? (terms, weights) : ((), ())
+    all(is_known_zero, weights) && return nothing
 
     launch!(architecture(grid), grid, stage_assembly_parameters(model, G), _assemble_increment_forcing!,
-            G, grid, split, terms, weights, updates)
+            G, grid, split, terms, weights)
 
     return nothing
 end
@@ -1800,97 +1664,12 @@ forcing_weight(tableau, Δt, i, j) = tableau.γ[i, j] / (tableau.d[i] * Δt)
 # time step (Reactant) is not known, and its term is added with whatever value it has.
 is_known_zero(w) = iszero(w)
 
-# The increments that force field `name` in the current stage and their weights wᵢⱼ, as the
-# registers hold them when the stage is assembled.
-increment_forcing(source, ts, model, Δt, name) = increment_forcing(ts.storage, source, ts, model, Δt, name)
-
-function increment_forcing(::TwoRegisterStorage, source, ts, model, Δt, name)
+# The increment ΔYᵢ₋₁ that forces field `name` in the current stage and its weight wᵢ,ᵢ₋₁, as a
+# tuple of terms and a tuple of weights.
+function increment_forcing(source, ts, model, Δt, name)
     i = ts.stage[]
     i == 1 && return (), ()
     return (prognostic_increment(source, ts, model, name),), (forcing_weight(ts.tableau, Δt, i, i - 1),)
-end
-
-# A field that forms its increments in the assembly: ΔY₁ to ΔYᵢ₋₂ are in the registers and ΔYᵢ₋₁
-# in the prognostic field, except in stage 5, where the second register holds the forcing but for
-# the part of ΔY₄ (see `assembly_register_updates`).
-function increment_forcing(::IncrementStorage, source::IncrementFromState, ts, model, Δt, name)
-    i = ts.stage[]
-    i == 1 && return (), ()
-    R = increment_registers(ts, name)
-    ΔY = prognostic_increment(source, ts, model, name)
-    i == 5 && return (R[2], ΔY), (one(Δt), forcing_weight(ts.tableau, Δt, 5, 4))
-    js = ntuple(identity, i - 1)
-    return (ntuple(j -> R[j], i - 2)..., ΔY), map(j -> forcing_weight(ts.tableau, Δt, i, j), js)
-end
-
-# A field whose increments are stored: ΔY₁ to ΔYᵢ₋₁ are in the registers, except in the last stage,
-# whose forcing `store_stage_increment!` has left in the second.
-function increment_forcing(::IncrementStorage, ::StoredIncrement, ts, model, Δt, name)
-    i = ts.stage[]
-    i == 1 && return (), ()
-    R = increment_registers(ts, name)
-    i == number_of_stages(ts.tableau) && return (R[2],), (one(Δt),)
-    js = ntuple(identity, i - 1)
-    return map(j -> R[j], js), map(j -> forcing_weight(ts.tableau, Δt, i, j), js)
-end
-
-# What the assembly of the current stage writes to the registers of a field that forms its
-# increments there (see `increment_registers`).
-assembly_register_updates(storage, source, ts, model, Δt, name) = ()
-
-function assembly_register_updates(::IncrementStorage, source::IncrementFromState, ts, model, Δt, name)
-    i = ts.stage[]
-    i == 1 && return ()
-    tableau = ts.tableau
-    α = tableau.α
-    s = number_of_stages(tableau)
-    R = increment_registers(ts, name)
-    ΔY = prognostic_increment(source, ts, model, name)
-    held = (ntuple(j -> R[j], min(i - 2, 2))..., ΔY)
-    js = ntuple(identity, i - 1)
-
-    if i == 5
-        # The offset of stage 5, completed with ΔY₄
-        return (RegisterUpdate(R[1], (R[1], ΔY), (one(Δt), α[5, 4])),)
-    elseif i == s
-        # The offset of the last stage, over ΔY₁
-        return (RegisterUpdate(R[1], held, map(j -> α[s, j], js)),)
-    elseif i == 4
-        # Of five stages: the offset and the forcing of stage 5 but for the parts of ΔY₄, over ΔY₁ and ΔY₂
-        return (RegisterUpdate(R[1], held, map(j -> α[5, j], js)),
-                RegisterUpdate(R[2], held, map(j -> forcing_weight(tableau, Δt, 5, j), js)))
-    else
-        # ΔYᵢ₋₁, in the next free register
-        return (RegisterUpdate(R[i - 1], (ΔY,), (one(Δt),)),)
-    end
-end
-
-# After stage i and its `update_state!`, for a field whose increments are stored: ΔYᵢ in the next free register, or, after
-# stage s - 1, the offset and the forcing of the last stage over ΔY₁ and ΔY₂.
-function store_stage_increment!(::IncrementStorage, ts, model, i, Δt)
-    tableau = ts.tableau
-    α = tableau.α
-    s = number_of_stages(tableau)
-    grid = model.grid
-
-    for (name, u) in pairs(prognostic_fields(model))
-        stage_increment_source(model, name) isa StoredIncrement || continue
-        R = increment_registers(ts, name)
-        ΔY = StateIncrement(u, ts.Uⁿ[name], stage_residual(ts.residual, model, name))
-
-        updates = if i == s - 1
-            held = (ntuple(j -> R[j], s - 2)..., ΔY)
-            js = ntuple(identity, s - 1)
-            (RegisterUpdate(R[1], held, map(j -> α[s, j], js)),
-             RegisterUpdate(R[2], held, map(j -> forcing_weight(tableau, Δt, s, j), js)))
-        else
-            (RegisterUpdate(R[i], (ΔY,), (one(Δt),)),)
-        end
-
-        launch!(architecture(grid), grid, stage_assembly_parameters(model, u), _update_registers!, updates)
-    end
-
-    return nothing
 end
 
 store_stage_increment!(::TwoRegisterStorage, ts, model, i, Δt) = nothing
