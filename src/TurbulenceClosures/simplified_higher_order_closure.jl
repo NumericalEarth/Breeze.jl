@@ -87,11 +87,14 @@ How this differs from the operator-split `shoc.F90` step:
 - the bounds of `shoc.F90` on the TKE (`mintke = 4 × 10⁻⁴` m² s⁻², `maxtke`), the mixing length (`minlen`, `maxlen`) and the time
   scale (`maxiso`) are not imposed as clips: the TKE stays positive through its implicit sinks, and the upper
   bounds of the length and the time scale are sums of inverse squares;
+- the return-to-isotropy time scale is damped in unstable air too, `τ₀ / (1 + (ℂᶜ² / 4) |N²| τ₀²)`, where `shoc.F90`
+  damps it in stable air only, so that the buoyant growth rate of the TKE, `ℂᶜ τ |N²|`, stays below `|N|` for any
+  dissipation coefficient (see [`ColumnStabilityDamping`](@ref));
 - the cold-surface fallback of the diffusivities and the boundary layer depth (a diagnostic of `shoc.F90`
   that only that fallback uses) are not included.
 
-Four of these differences are deliberate and change the solution measurably; on the same column state (BOMEX and
-RICO states handed to the port and to `shoc.F90`'s routines) they account for the differences of the port:
+Five of these differences are deliberate and change the solution measurably; on the same column state (BOMEX and
+RICO states handed to the port and to `shoc.F90`'s routines) the first four account for the differences of the port:
 
 - **Saturation.** The assumed PDF condenses at the model's saturation specific humidity
   `qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)`, within about 0.1 % of the exact `ε e / (p - (1 - ε) e)`. `shoc.F90` uses
@@ -107,6 +110,13 @@ RICO states handed to the port and to `shoc.F90`'s routines) they account for th
   at an inversion is a large positive skewness.
 - **The surface source of TKE.** The TKE receives `ℂᴾ` times the work of the surface stress on the lowest level,
   `ℂᴾ u★² |u₁|` per unit area, about `0.1 |u₁| / u★` (2–3 in BOMEX and RICO) times the `u★³` that `shoc.F90` adds.
+- **The time scale in unstable air.** `shoc.F90` sets `lambda = 0` where `N² ≤ 0`, so the return-to-isotropy time
+  scale there is the undamped `τ₀ = 2 ℓ / (𝕊ᴰ √e)`; the port damps it with `ℂᶜ² / 4` ([`ColumnStabilityDamping`](@ref)),
+  which keeps the buoyant growth rate `ℂᶜ τ |N²|` of the TKE below `|N|`. With the undamped time scale a small
+  dissipation coefficient (`𝕊ᴰ ∝ ℂᴰ₁³ / ℂᴰ₂⁴`, so the ratio `ℂᴰ₂ / ℂᴰ₁` enters to the fourth power) makes the TKE,
+  the diffusivities and the variances run away: at `ℂᴰ₂ / ℂᴰ₁ = 2.25` the port without the damping fails on RICO
+  within 20 minutes while `shoc.F90` runs, and 30–50 % of calibration ensembles around the default ratio went
+  non-finite. At the published coefficients it moves the port's RMS differences from `shoc.F90` by 5–25 %.
 
 ```jldoctest
 using Breeze

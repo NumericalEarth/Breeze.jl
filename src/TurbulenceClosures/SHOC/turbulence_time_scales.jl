@@ -13,9 +13,9 @@ $(TYPEDEF)
 The return-to-isotropy time scale and eddy diffusivities of E3SM `shoc.F90` (`isotropic_ts`,
 `eddy_diffusivities`, the dissipation of `adv_sgs_tke`) as stability functions of
 [`TKEBasedTurbulenceClosure`](@ref): with `τ₀ = 2 e / ε = 2 ℓ / (𝕊ᴰ √e)` the time scale of the dissipation,
-damped in stable air by the stability of the whole column,
+damped in stable air by the stability of the whole column and in unstable air by the buoyancy frequency,
 
-    τ = τᵈ / √(1 + (τᵈ / τᵐᵃˣ)²),    τᵈ = τ₀ / (1 + λ N²⁺ τ₀²),
+    τ = τᵈ / √(1 + (τᵈ / τᵐᵃˣ)²),    τᵈ = τ₀ / (1 + (λ N²⁺ + (ℂᶜ² / 4) N²⁻) τ₀²),    N²⁺ = max(N², 0),  N²⁻ = max(-N², 0),
 
 the diffusivities are `Kᶜ = ℂᶜ τ e` (scalars and turbulent kinetic energy, which `shoc.F90` diffuses with the
 heat diffusivity) and `Kᵘ = ℂᵘ τ e`, that is, the stability functions
@@ -24,6 +24,15 @@ heat diffusivity) and `Kᵘ = ℂᵘ τ e`, that is, the stability functions
 
 The damping `λ = ℂᵝ₁ + (∫ N² dz / g - ℂᵝ₄) ℂᵝ₃`, kept between `ℂᵝ₁` and `ℂᵝ₂`, is one number per column, with
 the static stability integrated over the levels whose pressure exceeds `stability_integration_pressure`.
+
+`shoc.F90` damps the time scale in stable air only (`lambda = 0` where `N² ≤ 0`). In unstable air the TKE grows by
+buoyancy at the rate `B / e = ℂᶜ τ |N²|`; undamped, `τ = τ₀ ∝ 1 / 𝕊ᴰ` and this rate exceeds the growth rate `|N|` of
+the fastest convective displacement once `ℂᶜ τ₀ |N| > 1`, which a small dissipation coefficient (`𝕊ᴰ ∝ ℂᴰ₁³ / ℂᴰ₂⁴`)
+reaches: the TKE, the diffusivities (`∝ τ e`) and the variances (`∝ τ² e`) then run away, and jump with every change of
+sign of `N²`. The damping `ℂᶜ² / 4` is the one whose largest time scale, `1 / (2 √(ℂᶜ² |N²| / 4)) = 1 / (ℂᶜ |N|)` at
+`τ₀ = 2 / (ℂᶜ |N|)`, makes that growth rate at most `|N|`, whatever `𝕊ᴰ`; it is not a new coefficient. Where `ℂᶜ τ₀ |N|`
+is small, as in the convective layers of the cases of `shoc.F90`, it changes the time scale by the fraction
+`(ℂᶜ τ₀ |N| / 2)²`.
 `shoc.F90` bounds the time scale with `min(maxiso, ⋅)`; here the upper bound `τᵐᵃˣ` (`maximum_time_scale`)
 enters as a sum of inverse squares, which changes the time scale by the fraction `(τ / τᵐᵃˣ)² / 2` where it is
 far below it. The cold-surface fallback of `shoc.F90` (diffusivities `ℂ ℓ² |∂z u|` over a surface below 182 K)
@@ -132,11 +141,15 @@ const ColumnStabilityDampingClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:
     shoc_dissipation_coefficient(closure.stability_functions)
 
 # `τ √e / ℓ` from the stability damping `λ` of the column, the length `ℓ`, the turbulent velocity `u` and
-# the static stability `N²`: τ₀ √e / ℓ = 2 / 𝕊ᴰ damped, then bounded by τᵐᵃˣ. Finite at ℓ = 0.
+# the static stability `N²`: τ₀ √e / ℓ = 2 / 𝕊ᴰ damped by the stratification (by the column's λ in stable air, by
+# ℂᶜ² / 4 in unstable air), then bounded by τᵐᵃˣ. Finite at ℓ = 0.
 @inline function isotropy_ratio(sf::ColumnStabilityDamping, λ, ℓ, u, N²)
     s₀ = 2 / shoc_dissipation_coefficient(sf)
     τ₀ = s₀ * ℓ / u
-    s = s₀ / (1 + λ * max(N², zero(N²)) * τ₀ * τ₀)
+    N²⁺ = max(N², zero(N²))
+    # In stable air the damping of the column; in unstable air ℂᶜ² / 4, which bounds τ by 1 / (ℂᶜ |N|)
+    λN² = λ * N²⁺ + sf.ℂᶜ * sf.ℂᶜ / 4 * (N²⁺ - N²)
+    s = s₀ / (1 + λN² * τ₀ * τ₀)
     τᵈ = s * ℓ / u
     x = τᵈ / sf.maximum_time_scale
     return s / sqrt(1 + x * x)

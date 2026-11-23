@@ -128,6 +128,25 @@ column_data(field) = Array(interior(field))
         @test all(≥(0), column_data(model.closure_fields.Kᶜ))
     end
 
+    # The dissipation ratio ℂᴰ₂ / ℂᴰ₁ sets 𝕊ᴰ ∝ (ℂᴰ₂ / ℂᴰ₁)⁻⁴ / ℂᴰ₁ and so the time scale τ₀ ∝ 1 / 𝕊ᴰ: with the
+    # stratification damping τ on both sides the column stays finite and its TKE bounded from 0.5 to 3 times ℂᴰ₁
+    @testset "A column across the dissipation ratio ℂᴰ₂ / ℂᴰ₁" begin
+        grid = RectilinearGrid(default_arch, FT; size = Nz, z = (0, 2400), topology = (Flat, Flat, Bounded))
+        for ratio in (0.5, 1.5, 2.25, 3)
+            stability_functions = ColumnStabilityDamping(FT; ℂᴰ₂ = ratio * 0.1)
+            model = shoc_boundary_layer_model(grid; closure = SimplifiedHigherOrderClosure(FT; stability_functions))
+            for _ in 1:60
+                time_step!(model, 100)
+            end
+            ρ = column_data(model.dynamics.reference_state.density)
+            e = column_data(model.tracers.ρe) ./ ρ
+            @test all(isfinite, e)
+            @test maximum(e) < 10
+            @test all(isfinite, column_data(model.closure_fields.subgrid_cloud.cloud.w′³))
+            @test all(isfinite, column_data(model.formulation.potential_temperature_density))
+        end
+    end
+
     @testset "Rebuilding and materializing the closure" begin
         grid = RectilinearGrid(default_arch, FT; size = Nz, z = (0, 2400), topology = (Flat, Flat, Bounded))
         model = shoc_boundary_layer_model(grid)

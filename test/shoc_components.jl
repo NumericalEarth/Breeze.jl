@@ -488,12 +488,27 @@ end
     rtol_round = FT == Float32 ? 1e-5 : 1e-12
     for tke in (0.01, 0.1, 1.0), brunt in (-1e-4, 0.0, 1e-5, 3e-4), brunt_int in (0.0, 0.25, 0.5, 2.0), mix in (30.0, 300.0)
         iso, tkh, tk, _, λ = fortran_isotropy_and_diffusivities(tke, brunt, brunt_int, mix)
-        λ = brunt <= 0 ? 0.001 : λ # where N² ≤ 0 λ does not matter: the port damps with N²⁺
+        # shoc.F90 does not damp where N² ≤ 0; the port damps there with ℂᶜ² / 4
+        λ = brunt <= 0 ? 0.001 : λ
+        τ₀ = fortran_isotropy_and_diffusivities(tke, 0.0, brunt_int, mix)[1]
+        iso = brunt < 0 ? τ₀ / (1 + 0.1^2 / 4 * abs(brunt) * τ₀^2) : iso
+        tkh = tk = 0.1 * iso * tke
         s = isotropy_ratio(sf, FT(λ), FT(mix), sqrt(FT(tke)), FT(brunt))
         τ = s * mix / sqrt(tke)
         bound = (iso / 20000)^2 # the sum of inverse squares in place of min(maxiso, ⋅)
         @test abs(τ - iso) / iso ≤ bound + rtol_round
         @test abs(sf.ℂᶜ * s * mix * sqrt(tke) - tkh) / tkh ≤ bound + rtol_round
         @test abs(sf.ℂᵘ * s * mix * sqrt(tke) - tk) / tk ≤ bound + rtol_round
+    end
+
+    # The stratification bounds the time scale whatever the dissipation ratio ℂᴰ₂ / ℂᴰ₁: τ |N| ≤ 1 / (2 √λ) in stable
+    # air, and in unstable air τ |N| ≤ 1 / ℂᶜ, so that the buoyant growth rate of the TKE, ℂᶜ τ |N²|, is at most |N|
+    for ratio in (0.5, 1, 1.5, 2.25, 3, 5), N² in (-1e-3, -1e-5, 1e-5, 1e-3), tke in (1e-4, 0.1, 10.0), λ in (0.001, 0.08)
+        sfʳ = ColumnStabilityDamping(FT; ℂᴰ₂ = ratio * 0.1)
+        mix = FT(500)
+        τ = isotropy_ratio(sfʳ, FT(λ), mix, sqrt(FT(tke)), FT(N²)) * mix / sqrt(FT(tke))
+        bound = N² > 0 ? 1 / (2 * sqrt(FT(λ))) : 1 / sfʳ.ℂᶜ
+        @test τ * sqrt(abs(FT(N²))) ≤ (1 + rtol_round) * bound
+        N² < 0 && @test sfʳ.ℂᶜ * τ * abs(FT(N²)) ≤ (1 + rtol_round) * sqrt(abs(FT(N²)))
     end
 end
