@@ -189,6 +189,16 @@ end
 
 @inline applied_shear_conversionᶜᶜᶠ(i, j, k, grid, Kᵘ, u, v) = @inbounds Kᵘ[i, j, k] * shearᶜᶜᶠ(i, j, k, grid, u, v)
 
+# The weights that move a face quantity X to the center k so that Σ ρᶜ Δzᶜ Xᶜ = Σ ρᶠ Δzᶠ Xᶠ: the masses of the lower and
+# upper half-cells with the density of their face, and the mass of the cell, Xᶜ = (wˡᵒʷ Xᶠₖ + wᵘᵖ Xᶠₖ₊₁) / ρΔz
+@inline function half_cell_weights(i, j, k, grid, ρ)
+    zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
+    wˡᵒʷ = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * (zᶜ - znode(i, j, k, grid, Center(), Center(), Face()))
+    wᵘᵖ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ) * (znode(i, j, k + 1, grid, Center(), Center(), Face()) - zᶜ)
+    ρΔz = @inbounds ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+    return wˡᵒʷ, wᵘᵖ, ρΔz
+end
+
 # The conversions of the interior fluxes at center k, from those at its two faces by half-cell
 # weights (the boundary faces carry none: the closure's diffusivities vanish there)
 @inline function interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
@@ -202,10 +212,7 @@ end
     Lᵘᵖ = ifelse(k < Nz, latent_conversionᶜᶜᶠ(i, j, kᵘᵖ, grid, cl, Kᶜ), zero(FT))
     Pˡᵒʷ = ifelse(k > 1, applied_shear_conversionᶜᶜᶠ(i, j, kˡᵒʷ, grid, Kᵘ, u, v), zero(FT))
     Pᵘᵖ = ifelse(k < Nz, applied_shear_conversionᶜᶜᶠ(i, j, kᵘᵖ, grid, Kᵘ, u, v), zero(FT))
-    zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
-    wˡᵒʷ = ℑzᵃᵃᶠ(i, j, k, grid, s.ρ) * (zᶜ - znode(i, j, k, grid, Center(), Center(), Face()))
-    wᵘᵖ = ℑzᵃᵃᶠ(i, j, k + 1, grid, s.ρ) * (znode(i, j, k + 1, grid, Center(), Center(), Face()) - zᶜ)
-    ρΔz = @inbounds s.ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+    wˡᵒʷ, wᵘᵖ, ρΔz = half_cell_weights(i, j, k, grid, s.ρ)
     return (wˡᵒʷ * Bˡᵒʷ + wᵘᵖ * Bᵘᵖ) / ρΔz, (wˡᵒʷ * Pˡᵒʷ + wᵘᵖ * Pᵘᵖ) / ρΔz, (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
 end
 
@@ -342,16 +349,25 @@ solved_conversions_before_tke_solve(::SubgridCloudFields{<:AppliedFluxEnergetics
 # The TKE is solved after the thermodynamic variable where the time stepper allows (`closure_prognostics_solved_last`)
 AtmosphereModels.solved_after_thermodynamic_variable(::FlavorOfTKEClosure, name) = name === TKE_NAME
 
-@inline function solved_shear_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
-    _, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+# The dissipation of backward Euler itself in the momentum solve of the stage, |u - u⁻|² / (2 Δt), at the cell k
+@inline function implicit_momentum_dissipation(i, j, k, s, cl, Δt)
     @inbounds begin
         ρᵢ = s.ρ[i, j, k]
-        Δt = cl.stage_time_step[1, 1, 1]
         Δu = (s.ρu[i, j, k] - cl.ρu⁻[i, j, k]) / ρᵢ
         Δv = (s.ρv[i, j, k] - cl.ρv⁻[i, j, k]) / ρᵢ
     end
-    Dᵘ = (Δu * Δu + Δv * Δv) / (2 * Δt)
-    return Pᵖ, Dᵘ
+    return (Δu * Δu + Δv * Δv) / (2 * Δt)
+end
+
+# b̄ᶜ - b̄ᵛ, b̄ⁱ - b̄ᵛ and b̄ˡ - b̄ᵛ at the interior face k: the buoyancy of vapor that becomes distributed condensate, ice
+# and liquid, from the derivatives stored at the two centers
+@inline function latent_buoyancy_derivativesᶜᶜᶠ(i, j, k, cl)
+    @inbounds begin
+        bᶜᵛ = (cl.b_qᶜ[i, j, k] + cl.b_qᶜ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        bⁱᵛ = (cl.b_qⁱ[i, j, k] + cl.b_qⁱ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        bˡᵛ = (cl.b_qˡ[i, j, k] + cl.b_qˡ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+    end
+    return bᶜᵛ, bⁱᵛ, bˡᵛ
 end
 
 # The latent part of the buoyancy conversion at the interior face k from the solved state: Kᶜ ΔN²ᴸ with the gradients
@@ -371,9 +387,7 @@ end
         ∂z_s = (cl.c_q[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θ[i, j, k] * (θ⁺ - θ⁻)) / Δz
         ∂z_sⁱ = (cl.c_qⁱ[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θⁱ[i, j, k] * (θ⁺ - θ⁻)) / Δz
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
-        bᶜᵛ = (cl.b_qᶜ[i, j, k] + cl.b_qᶜ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
-        bⁱᵛ = (cl.b_qⁱ[i, j, k] + cl.b_qⁱ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
-        bˡᵛ = (cl.b_qˡ[i, j, k] + cl.b_qˡ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        bᶜᵛ, bⁱᵛ, bˡᵛ = latent_buoyancy_derivativesᶜᶜᶠ(i, j, k, cl)
         return Kᶜ[i, j, k] * (bᶜᵛ * (cl.η[i, j, k] * ∂z_qᶜ - cl.aᴺ[i, j, k] * ∂z_s) - bⁱᵛ * cl.ηⁱ[i, j, k] * ∂z_sⁱ -
                               bˡᵛ * cl.ηʷⁱ[i, j, k] * ∂z_s)
     end
@@ -385,18 +399,15 @@ end
     FT = grid_float_type(grid)
     Lˡᵒʷ = ifelse(k > 1, solved_latent_conversionᶜᶜᶠ(i, j, max(k, 2), grid, s, cl, Kᶜ, qʷ, θʷ), zero(FT))
     Lᵘᵖ = ifelse(k < Nz, solved_latent_conversionᶜᶜᶠ(i, j, min(k + 1, Nz), grid, s, cl, Kᶜ, qʷ, θʷ), zero(FT))
-    zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
-    wˡᵒʷ = ℑzᵃᵃᶠ(i, j, k, grid, s.ρ) * (zᶜ - znode(i, j, k, grid, Center(), Center(), Face()))
-    wᵘᵖ = ℑzᵃᵃᶠ(i, j, k + 1, grid, s.ρ) * (znode(i, j, k + 1, grid, Center(), Center(), Face()) - zᶜ)
-    ρΔz = @inbounds s.ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+    wˡᵒʷ, wᵘᵖ, ρΔz = half_cell_weights(i, j, k, grid, s.ρ)
     return (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
 end
 
 @kernel function _give_solved_conversions!(ρe, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, qʷ, θʷ)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
-    Pᵖ, Dᵘ = solved_shear_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
-    Bᵖ, _, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+    Bᵖ, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
+    Dᵘ = implicit_momentum_dissipation(i, j, k, s, cl, @inbounds(cl.stage_time_step[1, 1, 1]))
     Bᴸˢ = solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
     Pⁱ = Pᵖ + Dᵘ
     Bⁱ = max(Bᵖ + Bᴸˢ, zero(Bᵖ))
@@ -702,9 +713,7 @@ end
     @inbounds begin
         ρᵢ = s.ρ[i, j, k]
         e = ρe[i, j, k] / ρᵢ
-        Δu = (s.ρu[i, j, k] - cl.ρu⁻[i, j, k]) / ρᵢ
-        Δv = (s.ρv[i, j, k] - cl.ρv⁻[i, j, k]) / ρᵢ
-        Dᵘ = (Δu * Δu + Δv * Δv) / (2 * Δt)
+        Dᵘ = implicit_momentum_dissipation(i, j, k, s, cl, Δt)
         B = cl.B[i, j, k]
         # what the stage gave: P and B⁺ explicitly, -ωᴮ e implicitly; what the solves converted:
         # Pᵖ + Dᵘ + Pˢ and Bᵖ + Bˢ

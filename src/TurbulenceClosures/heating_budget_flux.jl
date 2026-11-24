@@ -17,7 +17,7 @@
 #####     [mₖ + a₊θ₊ + a₋θ₋] sₖ - a₊(1 - θ₊) sₖ₊₁ - a₋(1 - θ₋) sₖ₋₁ = mₖ 𝒬ₖ,
 #####     m = ρ Δz,    a± = 2 ρ± Λ±² / Δz±,    θ± = ωₖ±₁ / (ωₖ + ωₖ±₁).
 #####
-##### The matrix is the M-matrix of `balance_sinks!`; its columns sum to m, so Σ m s = Σ m 𝒬 and J
+##### The matrix is the M-matrix of `balance_sink!`; its columns sum to m, so Σ m s = Σ m 𝒬 and J
 ##### vanishes at the top of the column too. Where the air is still (ω = 0 at a level and its
 ##### neighbours) the levels do not exchange, s = 𝒬 and J = 0; a heating that is uniform over a
 ##### turbulent layer gives J = 0; cooling at the top of a turbulent layer, or heating at its bottom,
@@ -251,7 +251,7 @@ end
 #####
 
 # The heating as redistributed, `s`, and that of its cooling part min(𝒬, 0), `sᶜ`, of the column at once: the matrix of
-# `balance_sinks!` with the shape ω = max(e, 0) and the exchange length ℂᑫᴸ ℓ, eliminated once for the two right-hand
+# `balance_sink!` with the shape ω = max(e, 0) and the exchange length ℂᑫᴸ ℓ, eliminated once for the two right-hand
 # sides. `work` holds the eliminated upper diagonal.
 @inline function balance_redistributed_heating!(s, sᶜ, work, i, j, grid, ℂᑫᴸ, 𝒬, e, ρ, ℓᵐ)
     Nz = size(grid, 3)
@@ -353,9 +353,7 @@ end
 @inline function heating_flux_buoyancyᶜᶜᶠ(i, j, k, grid, cl)
     @inbounds begin
         b_θ = (cl.b_θ[i, j, k] + cl.b_θ[i, j, k-1]) / 2
-        bᶜᵛ = (cl.b_qᶜ[i, j, k] + cl.b_qᶜ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
-        bⁱᵛ = (cl.b_qⁱ[i, j, k] + cl.b_qⁱ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
-        bˡᵛ = (cl.b_qˡ[i, j, k] + cl.b_qˡ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        bᶜᵛ, bⁱᵛ, bˡᵛ = latent_buoyancy_derivativesᶜᶜᶠ(i, j, k, cl)
         latent = -bᶜᵛ * cl.aᴺ[i, j, k] * cl.c_θ[i, j, k] - bⁱᵛ * cl.ηⁱ[i, j, k] * cl.c_θⁱ[i, j, k] -
                  bˡᵛ * cl.ηʷⁱ[i, j, k] * cl.c_θ[i, j, k]
     end
@@ -376,10 +374,7 @@ end
         Jᶜˡᵒʷ = ifelse(k > 1, cl.Jᑫᶜ[i, j, kˡᵒʷ], zero(FT))
         Jᶜᵘᵖ = ifelse(k < Nz, cl.Jᑫᶜ[i, j, kᵘᵖ], zero(FT))
     end
-    zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
-    wˡᵒʷ = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * (zᶜ - znode(i, j, k, grid, Center(), Center(), Face()))
-    wᵘᵖ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ) * (znode(i, j, k + 1, grid, Center(), Center(), Face()) - zᶜ)
-    ρΔz = @inbounds ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+    wˡᵒʷ, wᵘᵖ, ρΔz = half_cell_weights(i, j, k, grid, ρ)
     dry = (wˡᵒʷ * b_θˡᵒʷ * Jˡᵒʷ + wᵘᵖ * b_θᵘᵖ * Jᵘᵖ) / ρΔz
     latent = (wˡᵒʷ * latentˡᵒʷ * Jˡᵒʷ + wᵘᵖ * latentᵘᵖ * Jᵘᵖ) / ρΔz
     cooling = (wˡᵒʷ * (b_θˡᵒʷ + latentˡᵒʷ) * Jᶜˡᵒʷ + wᵘᵖ * (b_θᵘᵖ + latentᵘᵖ) * Jᶜᵘᵖ) / ρΔz
