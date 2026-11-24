@@ -218,7 +218,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``c = e/u_\star²`` | `e_u★²` | `RationalStabilityFunction(SurfaceLayerSimilarity(); e_u★²)` | Neutral surface-layer ratio of TKE to friction velocity squared, from which the neutral stability functions follow (``𝕊ᵘ⁰ = κ/(ℂˢ\sqrt{c})``, ``𝕊ᴰ⁰ = ℂˢ/(κ c^{3/2})``) |
 | ``Pr⁰, Pr⁻, Pr⁺`` | `Pr⁰`, `Pr⁻`, `Pr⁺` | `RationalStabilityFunction(SurfaceLayerSimilarity(); Pr⁰, Pr⁻, Pr⁺)` | Turbulent Prandtl number at neutral, in the unstable limit and in the stable limit |
 | ``Ri_c`` | `Ri_critical` | `RationalStabilityFunction(SurfaceLayerSimilarity(); Ri_critical)` | Gradient Richardson number of the steady state of the TKE equation in stratified shear with ``ℓ = \sqrt{e}/N`` |
-| ``δ`` | `width` | `DoubleGaussian(; clipping)` | Smoothing length of a bound of the components of a `DoubleGaussian` with `SmoothClipping`, as a fraction of the scale of the bounded quantity: ``\max(a, b) → (a + b + \sqrt{(a - b)² + δ²}) / 2`` |
+| ``δ`` | `width` | `DoubleGaussianPDF(; clipping)` | Smoothing length of a bound of an assumed PDF (`DoubleGaussianPDF`, `EqualWidthDoubleGaussianPDF`, `SmoothDoubleGaussianPDF`) with `SmoothClipping`, as a fraction of the scale of the bounded quantity: ``\max(a, b) → (a + b + \sqrt{(a - b)² + δ²}) / 2`` |
 | ``ℓᵐ`` | `ℓᵐ` | | Stored turbulence mixing length (`closure_fields.ℓᵐ`) |
 | ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |

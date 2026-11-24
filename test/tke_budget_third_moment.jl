@@ -42,13 +42,13 @@ end
 @testset "TanhSaturatedSkewness" begin
     skewness = TanhSaturatedSkewness(maximum_skewness = 2)
     for variance in (0.0, 1e-8, 0.3), w³ in (-1e3, -0.1, 0.0, 1e-9, 0.2, 1e6)
-        limited = limit_third_moment(skewness, nothing, variance, w³)
+        limited = limit_third_moment(skewness, variance, w³)
         @test abs(limited) <= 2 * variance^1.5
         @test sign(limited) == sign(w³) || limited == 0
         @test abs(limited) <= abs(w³)
     end
     # slope one at zero
-    @test limit_third_moment(skewness, nothing, 0.3, 1e-6) ≈ 1e-6 rtol=1e-6
+    @test limit_third_moment(skewness, 0.3, 1e-6) ≈ 1e-6 rtol=1e-6
 end
 
 @testset "TKEBudgetThirdMoment (ℂʷᴸ = $ℂʷᴸ)" for ℂʷᴸ in (Inf, 8)

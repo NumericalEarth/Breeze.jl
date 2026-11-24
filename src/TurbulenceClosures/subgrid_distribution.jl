@@ -32,7 +32,7 @@ using Oceananigans.Operators: Δzᶜᶜᶠ
 using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
                                       third_moment, limit_third_moment, assumed_pdf, buoyancy_flux_coefficients,
                                       plume_liquid_water_temperature, plume_saturation,
-                                      clip_below, distribution_thermodynamics,
+                                      distribution_thermodynamics,
                                       rate_norm_factor, linear_interp, hard_floor, component_vapor_excess,
                                       representable_skewness, within_component_share
 
@@ -252,7 +252,7 @@ energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, CP, R, VT, VS, FT}
+struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, R, VT, VS, FT}
     "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref), [`EddyTurnoverTimeScale`](@ref) or [`ReturnToIsotropyTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
@@ -265,8 +265,6 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, CP, R, VT, VS, FT}
     skewness :: SK
     "Assumed PDF ([`DoubleGaussianPDF`](@ref) or [`SmoothDoubleGaussianPDF`](@ref))"
     assumed_pdf :: PDF
-    "Clipping policy of the SHOC components"
-    clipping :: CP
     "Maximum flux correlation of w with θˡⁱ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
     ℂʳ :: R
     "Vertical transport of θˡⁱ′², qᵗ′² and θˡⁱ′qᵗ′ ([`ScalarVarianceTransport`](@ref)), or `nothing` for the local diagnosis"
@@ -327,7 +325,6 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              stratification_number_bound = RationalSaturatedStratificationNumber(FT),
                              assumed_pdf = EqualWidthDoubleGaussianPDF(FT),
                              skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = representable_skewness(assumed_pdf)),
-                             clipping = SmoothClipping(),
                              ℂʳ = nothing,
                              variance_transport = nothing,
                              variance_stability_functions = nothing,
@@ -336,14 +333,14 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
     variance_transport = convert_component(FT, variance_transport)
     variance_stability_functions = convert_component(FT, variance_stability_functions)
     return DoubleGaussian(time_scale, second_moments, third_moment, stratification_number_bound,
-                               skewness, assumed_pdf, clipping, ℂʳ, variance_transport,
+                               skewness, assumed_pdf, ℂʳ, variance_transport,
                                variance_stability_functions, convert(FT, ℂᵐ))
 end
 
 convert_eltype(::Type{FT}, d::DoubleGaussian) where FT =
     DoubleGaussian(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
-                         d.assumed_pdf, d.clipping, d.ℂʳ, d.variance_transport,
+                         d.assumed_pdf, d.ℂʳ, d.variance_transport,
                          d.variance_stability_functions, d.ℂᵐ))...)
 
 convert_component(FT, ::Nothing) = nothing
@@ -826,7 +823,6 @@ end
 # `g` is the gravitational acceleration.
 @inline function face_third_moment(i, j, k, grid, d, closure, closure_fields, m, cl, g, θ, e)
     FT = grid_float_type(grid)
-    cp = d.clipping
     eᵐⁱⁿ = closure.minimum_tke
     ccc = (Center(), Center(), Center())
     @inbounds begin
@@ -838,8 +834,7 @@ end
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
         τ³ = third_moment_time_scale(d.time_scale, m.τ[i, j, k], ℓ, u, N²)
         τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
-        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * eᵐⁱⁿ
-        w′² = clip_below(cp, linear_interp(zᵘ, zˡ, cl.w′²[i, j, k], cl.w′²[i, j, k-1], zᶠ), w′²ᵐⁱⁿ, eᵐⁱⁿ)
+        w′² = linear_interp(zᵘ, zˡ, cl.w′²[i, j, k], cl.w′²[i, j, k-1], zᶠ)
         θᶠ = linear_interp(zᵘ, zˡ, θ[i, j, k], θ[i, j, k-1], zᶠ)
         algebraic_arguments = (τ³, N², w′², θᶠ,
                                1 / (zᵘ - zˡ), 1 / (Δzᶜᶜᶜ(i, j, k, grid) + Δzᶜᶜᶜ(i, j, k-1, grid)),
@@ -885,7 +880,7 @@ third_moment_location_fields(grid, ::Center) = NamedTuple()
             zˡ = znode(i, j, k, grid, ccf...)
             zᵘ = znode(i, j, k+1, grid, ccf...)
             w′³ = linear_interp(zᵘ, zˡ, m.w′³[i, j, k+1], m.w′³[i, j, k], zᶜ)
-            cl.w′³[i, j, k] = limit_third_moment(d.skewness, d.clipping, cl.w′²[i, j, k], w′³)
+            cl.w′³[i, j, k] = limit_third_moment(d.skewness, cl.w′²[i, j, k], w′³)
         end
     end
     return nothing
@@ -898,7 +893,6 @@ end
 @inline function center_third_moment(i, j, k, grid, d, closure, cl, g, θ, e, w′θˡⁱ′ᶜ, lower, upper)
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
-    cp = d.clipping
     eᵐⁱⁿ = closure.minimum_tke
     ccc = (Center(), Center(), Center())
     τˡ, ℓˡ, N²ˡ, θˡⁱ′²ˡ, w′θˡⁱ′ˡ = lower
@@ -911,11 +905,10 @@ end
         u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
         τ³ = third_moment_time_scale(d.time_scale, (τˡ + τᵘ) / 2, ℓ, u, N²)
         τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
-        w′²ᵐⁱⁿ = (convert(FT, 2) / 3) * eᵐⁱⁿ
         w′² = cl.w′²[i, j, k]
         Δzʷ = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
         thedz = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
-        algebraic_arguments = (τ³, N², clip_below(cp, w′², w′²ᵐⁱⁿ, eᵐⁱⁿ), θ[i, j, k],
+        algebraic_arguments = (τ³, N², w′², θ[i, j, k],
                                thedz, 1 / Δzᶜᶜᶜ(i, j, k, grid),
                                θˡⁱ′²ᵘ - θˡⁱ′²ˡ,
                                w′θˡⁱ′ᵘ - w′θˡⁱ′ˡ,
@@ -924,7 +917,7 @@ end
                                w′θˡⁱ′ᶜ)
         w′³ = third_moment_diagnosis(d.third_moment, i, j, k, d, cl, g, algebraic_arguments)
     end
-    return limit_third_moment(d.skewness, cp, w′², w′³)
+    return limit_third_moment(d.skewness, w′², w′³)
 end
 
 @inline function third_moment_profile!(::Center, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
@@ -946,7 +939,6 @@ end
     w = velocities.w
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
-    cp = d.clipping
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
     ccc = (Center(), Center(), Center())
@@ -1046,10 +1038,10 @@ end
             mᵘ = interface_moments(k+1)
             mᶜ = map((yᵘ, yˡ, floor) -> hard_floor(linear_interp(zᵘ, zˡ, yᵘ, yˡ, zᶜ), floor), mᵘ, mˡ, floors)
             mᶜ = (cl.w′³[i, j, k], mᶜ...)
-            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, thermodynamics, cp, zᵘ, zˡ, zᶜ,
+            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, thermodynamics, zᵘ, zˡ, zᶜ,
                                                    p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
             store_vapor_excess_components!(cl, i, j, k,
-                                           component_vapor_excess(d.assumed_pdf, thermodynamics, cp, zᵘ, zˡ, zᶜ,
+                                           component_vapor_excess(d.assumed_pdf, thermodynamics, zᵘ, zˡ, zᶜ,
                                                                   p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ))
             cl.aᶜ[i, j, k] = C
             # The exchange rate of air between the saturated and subsaturated parts, √e / (ℂᵐ ℓ)

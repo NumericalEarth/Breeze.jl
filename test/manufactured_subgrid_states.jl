@@ -347,7 +347,7 @@ function analytic_diagnostics(m, p, thermo; w′qˡ′_given = nothing, pdf = ma
     constants = thermo.constants
     g = constants.gravitational_acceleration
     moments = (m.w′³, m.θ′², m.w′θ′, m.θ′q′, m.w′q′, m.q′²)
-    C, qˡ, _, w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, thermo, cp, 1.0, 0.0, 0.5, p, m.θ̄, m.w̄, m.q̄, m.w′², moments, moments)
+    C, qˡ, _, w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, thermo, 1.0, 0.0, 0.5, p, m.θ̄, m.w̄, m.q̄, m.w′², moments, moments)
 
     A_q, A_c = buoyancy_flux_coefficients(thermo, p, m.θ̄, m.q̄, qˡ)
     w′qˡ′ˢ = something(w′qˡ′_given, w′qˡ′)

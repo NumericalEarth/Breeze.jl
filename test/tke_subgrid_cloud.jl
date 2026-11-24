@@ -228,7 +228,7 @@ end
             w′³ᶜ = column(cl.w′³)[k]
             @test abs(w′³ᶜ) ≤ d.skewness.maximum_skewness * w′²ᶜ^1.5 * (1 + 1e-12)
             mᶜ = (w′³ᶜ, mᶜ...)
-            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, distribution_thermodynamics(model), d.clipping,
+            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, distribution_thermodynamics(model),
                                                    zf[k+1], zf[k], zc[k], p[k], θ[k], 0.0, qᵗ[k], w′²ᶜ, mᶜ, mᶜ)
             @test matches(column(cl.aᶜ)[k], C)
             @test matches(column(cl.qˡ)[k], qˡ)

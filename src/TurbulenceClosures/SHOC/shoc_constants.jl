@@ -90,14 +90,20 @@ end
 TurbulenceClosures.convert_eltype(::Type{FT}, component::AbstractSHOCComponent) where FT =
     map_scalars(scalar -> convert(FT, scalar), component)
 
-# Every scalar a keyword argument: the constructor of the components below
-function component_from_keywords(Component, FT, defaults::NamedTuple, kw)
+# Every scalar a keyword argument: the constructor of the components below. The scalars come first; the
+# `structural` fields (a clipping policy) follow them.
+function keyword_scalars(Component, FT, defaults::NamedTuple, kw)
     names = keys(defaults)
     all(name -> name ∈ names, keys(kw)) ||
         throw(ArgumentError("$(setdiff(keys(kw), names)) are not fields of $(Component); its fields are $(names)."))
     values = merge(defaults, NamedTuple(kw))
-    return Component{FT}(map(value -> convert(FT, value), Tuple(values))...)
+    return map(value -> convert(FT, value), Tuple(values))
 end
+
+component_from_keywords(Component, FT, defaults::NamedTuple, kw) = Component{FT}(keyword_scalars(Component, FT, defaults, kw)...)
+
+component_from_keywords(Component, FT, defaults::NamedTuple, kw, structural...) =
+    Component(keyword_scalars(Component, FT, defaults, kw)..., structural...)
 
 Base.summary(component::AbstractSHOCComponent) = string(nameof(typeof(component)), type_parameter_summary(component))
 

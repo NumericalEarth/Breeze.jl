@@ -27,7 +27,7 @@
 #####
 ##### A skewness component keeps the diagnosed third moment realizable: it implements
 #####
-#####     limit_third_moment(skewness, cp, w_sec_zi, w3) -> w3
+#####     limit_third_moment(skewness, w_sec_zi, w3) -> w3
 #####
 ##### which returns a third moment no larger in magnitude than `maximum_skewness (w'w')^{3/2}`, that
 ##### is, a bounded skewness `w'³ / (w'w')^{3/2}`. The two slots are independent: any diagnosis goes
@@ -310,7 +310,7 @@ ResetAboveThresholdSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw..
 
 Adapt.@adapt_structure ResetAboveThresholdSkewness
 
-@inline function limit_third_moment(skewness::ResetAboveThresholdSkewness, cp, variance, w3)
+@inline function limit_third_moment(skewness::ResetAboveThresholdSkewness, variance, w3)
     bound = third_moment_bound(skewness, variance)
     return ifelse(abs(w3) > bound, skewness.reset_third_moment, w3)
 end
@@ -361,7 +361,7 @@ Adapt.@adapt_structure PolynomialSaturatedSkewness
     return skewness.maximum_skewness * (variance * zero_safe_sqrt(variance))
 end
 
-@inline function limit_third_moment(skewness::PolynomialSaturatedSkewness, cp, variance, w3)
+@inline function limit_third_moment(skewness::PolynomialSaturatedSkewness, variance, w3)
     FT = typeof(w3)
     bound = third_moment_bound(skewness, variance)
     reach = (convert(FT, 15) / 8) * bound # the magnitude at which the bound is reached
@@ -409,7 +409,7 @@ TanhSaturatedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
 
 Adapt.@adapt_structure TanhSaturatedSkewness
 
-@inline function limit_third_moment(skewness::TanhSaturatedSkewness, cp, variance, w3)
+@inline function limit_third_moment(skewness::TanhSaturatedSkewness, variance, w3)
     FT = typeof(w3)
     variance = max(variance, zero(variance))
     bound = skewness.maximum_skewness * (variance * zero_safe_sqrt(variance))
@@ -421,9 +421,8 @@ end
 $(TYPEDEF)
 
 A third moment beyond the bound `b = maximum_skewness (w'w')^{3/2}` is set to the bound of its
-sign: `w'³ ← clip_between(w'³, -b, b)` through the clipping policy. Continuous, with a kink at the
-bound under [`HardClipping`](@ref); under [`SmoothClipping`](@ref) the kink is rounded over its
-width times `b`.
+sign: `w'³ ← max(-b, min(b, w'³))`. Continuous, with a kink at the bound; [`PolynomialSaturatedSkewness`](@ref)
+and [`TanhSaturatedSkewness`](@ref) bound it smoothly.
 
 $(TYPEDFIELDS)
 """
@@ -443,7 +442,7 @@ ClampedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
 Adapt.@adapt_structure ClampedSkewness
 
 # The bound is positive: the interface variance it is made of is floored
-@inline function limit_third_moment(skewness::ClampedSkewness, cp, variance, w3)
+@inline function limit_third_moment(skewness::ClampedSkewness, variance, w3)
     bound = third_moment_bound(skewness, variance)
-    return clip_between(cp, w3, -bound, bound, bound)
+    return max(-bound, min(bound, w3))
 end

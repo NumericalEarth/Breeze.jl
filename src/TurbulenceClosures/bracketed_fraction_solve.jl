@@ -134,7 +134,6 @@ end
 # The liquid flux fraction ãᴺ at face k of the distribution formed with N² = N²ᶜ + aᴺ ΔN² there
 @inline function trial_condensate_flux_fraction(aᴺ, i, j, k, grid, closure, d, m, cl, input, velocities, θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
     FT = grid_float_type(grid)
-    cp = d.clipping
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
 
@@ -174,8 +173,8 @@ end
         stored(n) = @inbounds (m.θˡⁱ′²[i, j, n], m.w′θˡⁱ′[i, j, n], m.θˡⁱ′qᵗ′[i, j, n], m.w′qᵗ′[i, j, n], m.qᵗ′²[i, j, n])
 
         # The assumed PDF at the center below (face k is its upper face) and above (its lower face)
-        Bˡ⁻, C⁻ = center_liquid_buoyancy(i, j, k-1, grid, d, cp, cl, w, θ, qᵗ, p, thermodynamics, stored(k-1), trial)
-        Bˡ⁺, C⁺ = center_liquid_buoyancy(i, j, k, grid, d, cp, cl, w, θ, qᵗ, p, thermodynamics, trial, stored(k+1))
+        Bˡ⁻, C⁻ = center_liquid_buoyancy(i, j, k-1, grid, d, cl, w, θ, qᵗ, p, thermodynamics, stored(k-1), trial)
+        Bˡ⁺, C⁺ = center_liquid_buoyancy(i, j, k, grid, d, cl, w, θ, qᵗ, p, thermodynamics, trial, stored(k+1))
     end
 
     Bᶠ = (Bˡ⁻ + Bˡ⁺) / 2
@@ -184,7 +183,7 @@ end
     return (; ãᴺ = clamp(ãᴺ, zero(FT), one(FT)), raw = ãᴺ, τ, Kᶜ, C = (C⁻ + C⁺) / 2)
 end
 
-@inline function center_liquid_buoyancy(i, j, k, grid, d, cp, cl, w, θ, qᵗ, p, thermodynamics, moments_l, moments_u)
+@inline function center_liquid_buoyancy(i, j, k, grid, d, cl, w, θ, qᵗ, p, thermodynamics, moments_l, moments_u)
     ccc = (Center(), Center(), Center())
     ccf = (Center(), Center(), Face())
     @inbounds begin
@@ -194,7 +193,7 @@ end
         wᶜ = (w[i, j, k] + w[i, j, k+1]) / 2
         θᵏ = θ[i, j, k]
         w′³ = cl.w′³[i, j, k]
-        C, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamics, cp, zᵘ, zˡ, zᶜ,
+        C, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamics, zᵘ, zˡ, zᶜ,
                                           p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], (w′³, moments_l...), (w′³, moments_u...))
         _, A_c = buoyancy_flux_coefficients(thermodynamics, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
     end

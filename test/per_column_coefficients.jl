@@ -130,7 +130,7 @@ tke_closure(FT, ℂⁱ, ℂᴰ⁰; kw...) =
     @testset "SimplifiedHigherOrderClosure with SmoothClipping: per column equals single columns" begin
         # Rebuilding the closure of a column (`getclosure`, also in GPU kernels) must not check the width
         @test adapt(nothing, SmoothClipping{FT}(-one(FT))).width == -one(FT)
-        distribution = Breeze.TurbulenceClosures.shoc_distribution(FT; clipping = SmoothClipping(FT))
+        distribution = Breeze.TurbulenceClosures.shoc_distribution(FT; assumed_pdf = DoubleGaussianPDF(FT; clipping = SmoothClipping(FT)))
         closures = [with_parameters(SimplifiedHigherOrderClosure(FT; subgrid_distribution = distribution); ℂᶜ=ℂᶜ)
                     for ℂᶜ in (0.1, 0.2)]
         test_per_column_equals_single_columns(FT, closures)

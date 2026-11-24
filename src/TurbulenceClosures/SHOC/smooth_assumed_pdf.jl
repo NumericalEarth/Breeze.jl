@@ -21,14 +21,14 @@ coefficients:
 | saturation deficit of no spread: all or nothing | spread `√(variance + minimum_saturation_spread²)`, the error function everywhere |
 | no liquid where its mean is not positive | the mean of the positive part of a Gaussian, which is positive |
 
-The bounds of the plume fraction, the correlations and the variance ratio go through the clipping
-policy, as in `DoubleGaussianPDF`. Where the variances are well above their tolerances and the
+The bounds of the plume fraction, the correlations and the variance ratio go through the `clipping`
+policy of the PDF (`SmoothClipping()` by default), as in `DoubleGaussianPDF`. Where the variances are well above their tolerances and the
 plumes well apart the two agree closely; in calm or nearly uniform air this PDF keeps the Gaussian
 spread that `shoc.F90` drops.
 
 $(TYPEDFIELDS)
 """
-struct SmoothDoubleGaussianPDF{FT} <: AbstractSHOCComponent
+struct SmoothDoubleGaussianPDF{FT, CP} <: AbstractSHOCComponent
     "Within-plume fraction of the vertical velocity variance (literal `0.4`)"
     ℂᵍ₁ :: FT
     "Skewness of total water relative to that of vertical velocity (literal `1.2`)"
@@ -57,19 +57,22 @@ struct SmoothDoubleGaussianPDF{FT} <: AbstractSHOCComponent
     plume_width_floor :: FT
     "Regularization of the in-plume correlation of θˡⁱ and qᵗ: the fraction of `thl_tol × rt_tol` added to the product of the widths"
     correlation_regularization :: FT
+    "How the bounds are imposed: [`HardClipping`](@ref) or [`SmoothClipping`](@ref)"
+    clipping :: CP
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `SmoothDoubleGaussianPDF{FT}` with the coefficients and tolerances of E3SM `shoc.F90`.
-Every field is a keyword argument.
+Return a `SmoothDoubleGaussianPDF` with the coefficients and tolerances of E3SM `shoc.F90`, its bounds
+imposed smoothly by default. Every field is a keyword argument.
 """
-SmoothDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+SmoothDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; clipping = SmoothClipping(FT), kw...) =
     component_from_keywords(SmoothDoubleGaussianPDF, FT,
                             (ℂᵍ₁ = 0.4, ℂᵍ₂ = 1.2, ℂᵍ₃ = 0.2, ℂᵍ₄ = 0.4, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2, Tl_min = 100,
                              plume_fraction_min = 0.01, plume_fraction_max = 0.99, plume_variance_ratio_max = 100,
-                             minimum_saturation_spread = 1e-6, plume_width_floor = 1e-3, correlation_regularization = 0.1), kw)
+                             minimum_saturation_spread = 1e-6, plume_width_floor = 1e-3, correlation_regularization = 0.1), kw,
+                            TurbulenceClosures.convert_eltype(FT, clipping))
 
 Adapt.@adapt_structure SmoothDoubleGaussianPDF
 
@@ -136,8 +139,9 @@ end
     return s, std_s, qn, C
 end
 
-@inline function assumed_pdf(pdf::SmoothDoubleGaussianPDF, thermodynamics, cp, zi_u, zi_l, zt_k, pval, thl_first,
+@inline function assumed_pdf(pdf::SmoothDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first,
                              w_first, qw_first, wsec, moments_l, moments_u)
+    cp = pdf.clipping
     FT = typeof(thl_first)
     largeneg = convert(FT, -99999999.99)
     thl_tol = pdf.thl_tol

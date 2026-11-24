@@ -3,13 +3,15 @@
 #####
 ##### An assumed-PDF component implements
 #####
-#####     assumed_pdf(pdf, thermodynamics, cp, zi_u, zi_l, zt_k, pval, thl, w, qw, w_sec, moments_l, moments_u)
+#####     assumed_pdf(pdf, thermodynamics, zi_u, zi_l, zt_k, pval, thl, w, qw, w_sec, moments_l, moments_u)
 #####         -> (cldfrac, ql, ql2, wqls, wthv_sec)
 #####
 ##### for a level at height `zt_k` between the interfaces at `zi_l` and `zi_u`: from the pressure,
 ##### the means and the vertical velocity variance of the level and the interface moments
 ##### `(w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec)` below and above it, the subgrid cloud
-##### fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
+##### fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux. The
+##### `clipping` policy of the PDF (`HardClipping` or `SmoothClipping`) imposes its bounds: of the
+##### weight of the updraft plume, of the correlations and of the within-plume variances.
 #####
 
 """
@@ -32,11 +34,12 @@ the plumes collapse onto the mean.
 Between `ℂᵍ₃` and `ℂᵍ₄` the skewness of total water ramps linearly; the Fortran writes the width
 of the ramp as the literal `0.2`, which is taken here as `ℂᵍ₄ - ℂᵍ₃` so that the ramp stays
 continuous when the two are changed. `ℂᵍ₃ < ℂᵍ₄` is required. The fields after the coefficients
-are tolerances and bounds, not empirical coefficients.
+are tolerances and bounds, not empirical coefficients, and the `clipping` policy that imposes the bounds
+(`HardClipping()`, the `max`, `min` and `if` of `shoc.F90`, by default).
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussianPDF{FT} <: AbstractSHOCComponent
+struct DoubleGaussianPDF{FT, CP} <: AbstractSHOCComponent
     "Within-plume fraction of the vertical velocity variance (literal `0.4`)"
     ℂᵍ₁ :: FT
     "Skewness of total water relative to that of vertical velocity (literal `1.2`)"
@@ -59,18 +62,21 @@ struct DoubleGaussianPDF{FT} <: AbstractSHOCComponent
     plume_fraction_max :: FT
     "Highest variance of a scalar within a plume over its variance (literal `100`)"
     plume_variance_ratio_max :: FT
+    "How the bounds are imposed: [`HardClipping`](@ref) or [`SmoothClipping`](@ref)"
+    clipping :: CP
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `DoubleGaussianPDF{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
-argument.
+Return a `DoubleGaussianPDF` with the values of E3SM `shoc.F90`, its bounds imposed by `clipping` (as in
+`shoc.F90` by default). Every field is a keyword argument.
 """
-DoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
+DoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; clipping = HardClipping(), kw...) =
     component_from_keywords(DoubleGaussianPDF, FT,
                             (ℂᵍ₁ = 0.4, ℂᵍ₂ = 1.2, ℂᵍ₃ = 0.2, ℂᵍ₄ = 0.4, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2, Tl_min = 100,
-                             plume_fraction_min = 0.01, plume_fraction_max = 0.99, plume_variance_ratio_max = 100), kw)
+                             plume_fraction_min = 0.01, plume_fraction_max = 0.99, plume_variance_ratio_max = 100), kw,
+                            TurbulenceClosures.convert_eltype(FT, clipping))
 
 Adapt.@adapt_structure DoubleGaussianPDF
 
@@ -107,7 +113,7 @@ within-component θˡⁱ–qᵗ correlation is that of the covariance left after
 
 $(TYPEDFIELDS)
 """
-struct EqualWidthDoubleGaussianPDF{FT} <: AbstractSHOCComponent
+struct EqualWidthDoubleGaussianPDF{FT, CP} <: AbstractSHOCComponent
     "Within-component fraction of the vertical velocity variance at zero skewness"
     ℂᵍ₀ :: FT
     "Slope of the within-component fraction in the skewness of w (in the sigmoid's argument)"
@@ -126,19 +132,22 @@ struct EqualWidthDoubleGaussianPDF{FT} <: AbstractSHOCComponent
     minimum_updraft_fraction :: FT
     "Highest weight of the updraft component"
     maximum_updraft_fraction :: FT
+    "How the bounds are imposed: [`HardClipping`](@ref) or [`SmoothClipping`](@ref)"
+    clipping :: CP
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `EqualWidthDoubleGaussianPDF{FT}` with the coefficients and tolerances of
-[`DoubleGaussianPDF`](@ref). Every field is a keyword argument.
+Return an `EqualWidthDoubleGaussianPDF` with the coefficients and tolerances of [`DoubleGaussianPDF`](@ref), its
+bounds imposed smoothly by default. Every field is a keyword argument.
 """
-function EqualWidthDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; ℂᵍ₀ = 0.4, kw...)
+function EqualWidthDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; ℂᵍ₀ = 0.4, clipping = SmoothClipping(FT), kw...)
     0 < ℂᵍ₀ < 1 || throw(ArgumentError("ℂᵍ₀ must be in (0, 1), got $ℂᵍ₀"))
     return component_from_keywords(EqualWidthDoubleGaussianPDF, FT,
                                    (ℂᵍ₀ = ℂᵍ₀, ℂᵍˢ = 0, ℂᵍˢˢ = 0, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2,
-                                    Tl_min = 100, minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99), kw)
+                                    Tl_min = 100, minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99), kw,
+                                   TurbulenceClosures.convert_eltype(FT, clipping))
 end
 
 Adapt.@adapt_structure EqualWidthDoubleGaussianPDF
@@ -304,8 +313,9 @@ subgrid cloud fraction, liquid water, liquid water variance, liquid water flux a
 The plumes condense with the `thermodynamics` of the model (`distribution_thermodynamics`): its thermodynamic
 constants and the phase equilibrium of the condensate of its microphysics.
 """
-@inline function assumed_pdf(pdf::ComponentDoubleGaussianPDF, thermodynamics, cp, zi_u, zi_l, zt_k, pval, thl_first, w_first,
+@inline function assumed_pdf(pdf::ComponentDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first, w_first,
                              qw_first, wsec, moments_l, moments_u)
+    cp = pdf.clipping
     FT = typeof(thl_first)
     largeneg = convert(FT, -99999999.99)
     thl_tol = pdf.thl_tol
@@ -406,8 +416,9 @@ density ``ρᵢ = p / (Rᵐ Tᵢ)``, and the within-component spread
 ``σᵢ² = qᵗ′²ᵢ + (∂qᵛ⁺ˡ/∂θ)² θ′²ᵢ - 2 (∂qᵛ⁺ˡ/∂θ) r σθᵢ σqᵢ``, with the model's saturation over liquid
 (the formula the microphysics uses). Returns `(a, μ₁, μ₂, σ₁, σ₂)`.
 """
-@inline function component_vapor_excess(pdf::ComponentDoubleGaussianPDF, thermodynamics, cp, zi_u, zi_l, zt_k, pval,
+@inline function component_vapor_excess(pdf::ComponentDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval,
                                         thl_first, w_first, qw_first, wsec, moments_l, moments_u)
+    cp = pdf.clipping
     FT = typeof(thl_first)
     largeneg = convert(FT, -99999999.99)
     thl_tol = pdf.thl_tol
@@ -480,7 +491,7 @@ end
 end
 
 # A PDF without a component form here supplies no spread: the microphysics' grid-mean rate
-@inline function component_vapor_excess(pdf, thermodynamics, cp, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first,
+@inline function component_vapor_excess(pdf, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first,
                                         wsec, moments_l, moments_u)
     FT = typeof(thl_first)
     return convert(FT, 0.5), zero(FT), zero(FT), zero(FT), zero(FT)

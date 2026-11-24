@@ -23,12 +23,12 @@ same_bits(a, b) = a === b
 
 # The limited third moment as a function of one scalar, for derivatives: of the diagnosed third
 # moment, of the vertical velocity variance, of `maximum_skewness`, and of the coefficient `c` of the diagnosis
-limited_by_third_moment(w3, limiter, policy, w_sec) = limit_third_moment(limiter, policy, w_sec, w3)
-limited_by_variance(w_sec, limiter, policy, w3) = limit_third_moment(limiter, policy, w_sec, w3)
-limited_by_maximum_skewness(maximum_skewness, policy, w_sec, w3) =
-    limit_third_moment(PolynomialSaturatedSkewness(maximum_skewness), policy, w_sec, w3)
-limited_by_coefficient(c, limiter, policy, g, arguments) =
-    limit_third_moment(limiter, policy, arguments[3], third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), g, arguments...))
+limited_by_third_moment(w3, limiter, w_sec) = limit_third_moment(limiter, w_sec, w3)
+limited_by_variance(w_sec, limiter, w3) = limit_third_moment(limiter, w_sec, w3)
+limited_by_maximum_skewness(maximum_skewness, w_sec, w3) =
+    limit_third_moment(PolynomialSaturatedSkewness(maximum_skewness), w_sec, w3)
+limited_by_coefficient(c, limiter, g, arguments) =
+    limit_third_moment(limiter, arguments[3], third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), g, arguments...))
 
 # The derivative of `f(x, parameters...)` with respect to `x` by reverse-mode automatic differentiation
 derivative(f, x, parameters...) =
@@ -189,9 +189,9 @@ derivative(f, x, parameters...) =
             literal_bound = FT(1.2) * sqrt(2 * (w_sec * w_sec * w_sec))
             @test isapprox(third_moment_bound(reset, w_sec), literal_bound; rtol = 8 * eps(FT))
             if abs(abs(w3) - literal_bound) > 8 * eps(FT) * literal_bound
-                @test same_bits(limit_third_moment(reset, hard, w_sec, w3), literal_limiter(w_sec, w3))
+                @test same_bits(limit_third_moment(reset, w_sec, w3), literal_limiter(w_sec, w3))
             end
-            nreset += limit_third_moment(reset, hard, w_sec, w3) != w3
+            nreset += limit_third_moment(reset, w_sec, w3) != w3
         end
         @test 0 < nreset < 2000 # the inputs are on both sides of the bound
 
@@ -207,30 +207,29 @@ derivative(f, x, parameters...) =
         for w3 in FT[-10, -1.875, -1, -0.5, -1e-3, 0, 1e-3, 0.5, 1, 1.875, 10] .* bound
             inside = abs(w3) ≤ bound
             # E3SM resets a third moment beyond the bound to 0.02
-            @test limit_third_moment(reset, hard, w_sec, w3) == (inside ? w3 : FT(0.02))
-            @test limit_third_moment(clamped, hard, w_sec, w3) == clamp(w3, -bound, bound)
-            @test abs(limit_third_moment(clamped, SmoothClipping(FT(0.1)), w_sec, w3)) ≤ bound
-            @test abs(limit_third_moment(polynomial, hard, w_sec, w3)) ≤ bound
-            @test sign(limit_third_moment(polynomial, hard, w_sec, w3)) == sign(w3)
-            @test limit_third_moment(polynomial, hard, w_sec, -w3) == -limit_third_moment(polynomial, hard, w_sec, w3)
+            @test limit_third_moment(reset, w_sec, w3) == (inside ? w3 : FT(0.02))
+            @test limit_third_moment(clamped, w_sec, w3) == clamp(w3, -bound, bound)
+            @test abs(limit_third_moment(polynomial, w_sec, w3)) ≤ bound
+            @test sign(limit_third_moment(polynomial, w_sec, w3)) == sign(w3)
+            @test limit_third_moment(polynomial, w_sec, -w3) == -limit_third_moment(polynomial, w_sec, w3)
         end
 
         # Well inside the bound the polynomial changes little: less than a hyperbolic tangent would
-        @test isapprox(limit_third_moment(polynomial, hard, w_sec, bound / 100), bound / 100; rtol = 1e-4)
-        @test isapprox(limit_third_moment(polynomial, hard, w_sec, bound / 2), bound / 2; rtol = 0.05)
-        @test limit_third_moment(polynomial, hard, w_sec, bound) > bound * tanh(one(FT))
-        @test limit_third_moment(polynomial, hard, w_sec, zero(FT)) == 0
+        @test isapprox(limit_third_moment(polynomial, w_sec, bound / 100), bound / 100; rtol = 1e-4)
+        @test isapprox(limit_third_moment(polynomial, w_sec, bound / 2), bound / 2; rtol = 0.05)
+        @test limit_third_moment(polynomial, w_sec, bound) > bound * tanh(one(FT))
+        @test limit_third_moment(polynomial, w_sec, zero(FT)) == 0
 
         # The polynomial is the bound from 15/8 of it on, and increasing before
-        @test limit_third_moment(polynomial, hard, w_sec, FT(1.875) * bound) ≈ bound
-        @test limit_third_moment(polynomial, hard, w_sec, 100 * bound) ≈ bound
+        @test limit_third_moment(polynomial, w_sec, FT(1.875) * bound) ≈ bound
+        @test limit_third_moment(polynomial, w_sec, 100 * bound) ≈ bound
         samples = range(-2 * bound, 2 * bound, length = 401)
-        limited = [limit_third_moment(polynomial, hard, w_sec, FT(w3)) for w3 in samples]
+        limited = [limit_third_moment(polynomial, w_sec, FT(w3)) for w3 in samples]
         @test issorted(limited)
 
         # Without vertical velocity variance the bound is zero and so is the third moment
-        @test limit_third_moment(polynomial, hard, zero(FT), FT(1)) == 0
-        @test limit_third_moment(polynomial, hard, -FT(1), FT(1)) == 0
+        @test limit_third_moment(polynomial, zero(FT), FT(1)) == 0
+        @test limit_third_moment(polynomial, -FT(1), FT(1)) == 0
 
         if FT == Float64
             # The slope of the polynomial limiter against central differences, on both sides of the
@@ -239,27 +238,27 @@ derivative(f, x, parameters...) =
             h = 1e-6
             for ratio in (-2.5, -1.2, -1, -0.3, 0.0, 0.3, 0.9, 1 - 1e-9, 1.0, 1 + 1e-9, 1.1, 1.5, 1.8, 1.874, 1.876, 2.5)
                 w3 = ratio * bound
-                difference = (limit_third_moment(polynomial, hard, w_sec, w3 + h * bound) -
-                              limit_third_moment(polynomial, hard, w_sec, w3 - h * bound)) / (2 * h * bound)
+                difference = (limit_third_moment(polynomial, w_sec, w3 + h * bound) -
+                              limit_third_moment(polynomial, w_sec, w3 - h * bound)) / (2 * h * bound)
                 u = clamp(8 * ratio / 15, -1, 1)
                 @test isapprox(difference, (1 - u^2)^2; atol = 1e-6)
 
-                gradient = derivative(limited_by_third_moment, w3, polynomial, hard, w_sec)
+                gradient = derivative(limited_by_third_moment, w3, polynomial, w_sec)
                 @test isapprox(gradient, difference; atol = 1e-6)
 
                 # The limiter of shoc.F90 jumps at ratio 1; this one does not
                 if abs(ratio) > 0.5
-                    jump = limit_third_moment(polynomial, hard, w_sec, w3 * (1 + h)) - limit_third_moment(polynomial, hard, w_sec, w3 * (1 - h))
+                    jump = limit_third_moment(polynomial, w_sec, w3 * (1 + h)) - limit_third_moment(polynomial, w_sec, w3 * (1 - h))
                     @test abs(jump) ≤ 2 * h * abs(w3)
                 end
             end
-            @test abs(limit_third_moment(reset, hard, w_sec, bound * (1 + h)) - limit_third_moment(reset, hard, w_sec, bound * (1 - h))) > bound / 2
+            @test abs(limit_third_moment(reset, w_sec, bound * (1 + h)) - limit_third_moment(reset, w_sec, bound * (1 - h))) > bound / 2
 
             # The slope with respect to the variance and to maximum_skewness, through the bound
             for ratio in (0.3, 1.1, 1.8, 2.5)
                 w3 = ratio * bound
-                for (func, x, parameters) in ((limited_by_variance, w_sec, (polynomial, hard, w3)),
-                                              (limited_by_maximum_skewness, polynomial.maximum_skewness, (hard, w_sec, w3)))
+                for (func, x, parameters) in ((limited_by_variance, w_sec, (polynomial, w3)),
+                                              (limited_by_maximum_skewness, polynomial.maximum_skewness, (w_sec, w3)))
                     difference = (func(x * (1 + h), parameters...) - func(x * (1 - h), parameters...)) / (2 * h * x)
                     gradient = derivative(func, x, parameters...)
                     @test isapprox(gradient, difference; rtol = 1e-6, atol = 1e-9)
@@ -273,7 +272,7 @@ derivative(f, x, parameters...) =
             for ratio in (0.9, 1.2, 1.6)
                 limiter = PolynomialSaturatedSkewness(abs(raw) / (ratio * 0.4^1.5))
                 @test abs(raw) / third_moment_bound(limiter, 0.4) ≈ ratio
-                parameters = (limiter, hard, g, arguments)
+                parameters = (limiter, g, arguments)
                 difference = (limited_by_coefficient(7 + 1e-5, parameters...) - limited_by_coefficient(7 - 1e-5, parameters...)) / 2e-5
                 gradient = derivative(limited_by_coefficient, 7.0, parameters...)
                 @test gradient != 0
@@ -379,7 +378,7 @@ derivative(f, x, parameters...) =
     @testset "SmoothDoubleGaussianPDF" begin
         hard = HardClipping()
         original_pdf = DoubleGaussianPDF(FT)
-        smooth_pdf = SmoothDoubleGaussianPDF(FT)
+        smooth_pdf = SmoothDoubleGaussianPDF(FT; clipping = hard)
         @test SimplifiedHigherOrderClosure(FT; subgrid_distribution = shoc_distribution(FT; assumed_pdf = smooth_pdf)) isa
               SimplifiedHigherOrderClosure
 
@@ -394,14 +393,14 @@ derivative(f, x, parameters...) =
             Tˡ = plume_liquid_water_temperature(thermodynamics, θˡ, qᵛ⁺, pressure)
             qᵛ⁺ = first(plume_saturation(thermodynamics, Tˡ, qᵛ⁺, pressure))
         end
-        pdf_of(pdf, qᵗ, w_sec, moments; policy = hard) =
-            assumed_pdf(pdf, thermodynamics, policy, FT(1020), FT(980), FT(1000), pressure, θˡ, zero(FT), qᵗ,
+        pdf_of(pdf, qᵗ, w_sec, moments) =
+            assumed_pdf(pdf, thermodynamics, FT(1020), FT(980), FT(1000), pressure, θˡ, zero(FT), qᵗ,
                         w_sec, moments, moments)
 
         # Away from the switches (resolved variances, plumes well apart) the smooth PDF is the
         # original one as its tolerances vanish, and within a few percent of it with the
         # tolerances of shoc.F90, which are a sixth of the standard deviation of total water here
-        sharp_pdf = SmoothDoubleGaussianPDF(FT; thl_tol = 1e-5, rt_tol = 1e-7, w_tol = 1e-4, minimum_saturation_spread = 1e-9)
+        sharp_pdf = SmoothDoubleGaussianPDF(FT; clipping = hard, thl_tol = 1e-5, rt_tol = 1e-7, w_tol = 1e-4, minimum_saturation_spread = 1e-9)
         w_sec = FT(0.6)
         for w3 in FT[-0.2, 0.05, 0.4], qᵗ in (FT(0.97), FT(1.0), FT(1.03)) .* qᵛ⁺
             moments = (w3, FT(0.25), FT(-0.25), FT(-1.3e-4), FT(2.9e-4), FT(4e-7))

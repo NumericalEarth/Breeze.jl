@@ -47,7 +47,6 @@ shoc_distribution(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
                        stratification_number_bound = RationalSaturatedStratificationNumber(FT),
                        skewness = PolynomialSaturatedSkewness(FT),
                        assumed_pdf = DoubleGaussianPDF(FT),
-                       clipping = HardClipping(),
                        kw...)
 
 """
@@ -136,8 +135,7 @@ SimplifiedHigherOrderClosure{VerticallyImplicitTimeDiscretization}
 │   ├── third_moment: AlgebraicThirdMoment{Float64}
 │   ├── stratification_number_bound: RationalSaturatedStratificationNumber{Float64}
 │   ├── skewness: PolynomialSaturatedSkewness{Float64}
-│   ├── assumed_pdf: DoubleGaussianPDF{Float64}
-│   └── clipping: HardClipping
+│   └── assumed_pdf: DoubleGaussianPDF{Float64} with HardClipping
 ├── minimum_tke: 1.0e-6
 └── solver: SinglePass()
 ```
@@ -185,8 +183,7 @@ function Base.show(io::IO, closure::SimplifiedHigherOrderClosure)
               "│   ├── third_moment: ", summary(d.third_moment), '\n',
               "│   ├── stratification_number_bound: ", summary(d.stratification_number_bound), '\n',
               "│   ├── skewness: ", summary(d.skewness), '\n',
-              "│   ├── assumed_pdf: ", summary(d.assumed_pdf), '\n',
-              "│   └── clipping: ", summary(d.clipping), '\n',
+              "│   └── assumed_pdf: ", summary(d.assumed_pdf), " with ", summary(d.assumed_pdf.clipping), '\n',
               "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
               "└── solver: ", summary(closure.solver))
 end

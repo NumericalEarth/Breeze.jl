@@ -141,9 +141,9 @@ end
     θˡ = FT(285) * (c.basepres / p)^(c.rgas / c.cp)
     qs = first(plume_saturation(fixed, FT(285), zero(FT), p))
     moments = (FT(0.05), FT(0.25), FT(-0.25), FT(-1.3e-4), FT(2.9e-4), FT(4e-7))
-    for pdf in (DoubleGaussianPDF(FT), SmoothDoubleGaussianPDF(FT)), qᵗ in (FT(0.99), FT(1.02), FT(1.05)) .* qs
-        a = assumed_pdf(pdf, fixed, HardClipping(), FT(1020), FT(980), FT(1000), p, θˡ, zero(FT), qᵗ, FT(0.6), moments, moments)
-        b = assumed_pdf(pdf, thermo, HardClipping(), FT(1020), FT(980), FT(1000), p, θˡ, zero(FT), qᵗ, FT(0.6), moments, moments)
+    for pdf in (DoubleGaussianPDF(FT), SmoothDoubleGaussianPDF(FT; clipping = HardClipping())), qᵗ in (FT(0.99), FT(1.02), FT(1.05)) .* qs
+        a = assumed_pdf(pdf, fixed, FT(1020), FT(980), FT(1000), p, θˡ, zero(FT), qᵗ, FT(0.6), moments, moments)
+        b = assumed_pdf(pdf, thermo, FT(1020), FT(980), FT(1000), p, θˡ, zero(FT), qᵗ, FT(0.6), moments, moments)
         @test isapprox(b[1], a[1]; atol = 0.1)                 # cloud fraction
         @test isapprox(b[2], a[2]; atol = 0.15 * a[2] + 2e-5)  # liquid water
         # The buoyancy flux is a small residual of larger terms near saturation; the 2.6 % difference
@@ -196,8 +196,8 @@ end
     qs_liquid = first(plume_saturation(warm, T, qw, p))
     moments = (0.05, 0.25, -0.25, -1.3e-5, 2.9e-5, 4e-9)
     for qᵗ in (0.95, 1.0) .* qs_liquid
-        lw = assumed_pdf(DoubleGaussianPDF(FT), warm, HardClipping(), 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ, 0.6, moments, moments)
-        mx = assumed_pdf(DoubleGaussianPDF(FT), mixed, HardClipping(), 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ, 0.6, moments, moments)
+        lw = assumed_pdf(DoubleGaussianPDF(FT), warm, 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ, 0.6, moments, moments)
+        mx = assumed_pdf(DoubleGaussianPDF(FT), mixed, 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ, 0.6, moments, moments)
         @test mx[1] ≥ lw[1]
         @test mx[2] > lw[2]
     end
@@ -213,8 +213,8 @@ end
     for thl_sec in (0.25, 1e2, 1e5, 1e7), w3 in (-2.0, 0.0, 2.0)
         moments = (w3, thl_sec, -0.25 * sqrt(thl_sec), -1.3e-5, 2.9e-5, 4e-9)
         pdf = DoubleGaussianPDF(FT)
-        a = assumed_pdf(pdf, thermo, HardClipping(), 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ, 1.0, moments, moments)
-        v = SimplifiedHigherOrderClosures.component_vapor_excess(pdf, thermo, HardClipping(), 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ,
+        a = assumed_pdf(pdf, thermo, 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ, 1.0, moments, moments)
+        v = SimplifiedHigherOrderClosures.component_vapor_excess(pdf, thermo, 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ,
                                                                1.0, moments, moments)
         @test all(isfinite, a)
         @test all(isfinite, v)
