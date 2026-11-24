@@ -187,7 +187,7 @@ and cloud droplet distribution from which the cloud's phase relaxation rate `ω�
 @inline subgrid_process_distribution(::CloudCondensationOnly, args...) = nothing
 
 @inline function subgrid_process_distribution(processes::AllProcesses, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, constants,
-                                              p3, ρ, transport, cloud)
+                                              p3, ρ, transport, cloud, qᵛ⁺ⁱ = qᵛ⁺ˡ)
     FT = typeof(qᵛ)
     ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
     ωˡ = p3_cloud_phase_relaxation_rate(p3, qᵛ⁺ˡ, qᶜˡ, T, ρ, transport, cloud, constants)
@@ -195,7 +195,46 @@ and cloud droplet distribution from which the cloud's phase relaxation rate `ω�
     s̄ = qᵛ - qᵛ⁺ˡ + ξˡ * q̄ᶜˡ
     a, m, σ = shifted_mixture(statistics, s̄)
     ωᵐ = mixing_rate(statistics, FT)
-    return placed_cloud_liquid(processes.liquid_placement, a, m, σ, s̄, ξˡ, q̄ᶜˡ, qᵛ⁺ˡ, ωˡ, ωᵐ)
+    d = placed_cloud_liquid(processes.liquid_placement, a, m, σ, s̄, ξˡ, q̄ᶜˡ, qᵛ⁺ˡ, ωˡ, ωᵐ)
+    # The saturation excess of the distributed water over ice, sⁱ = qᵛ - qᵛ⁺ⁱ + ξⁱˡ qᶜˡ, about P3's own grid mean
+    ξⁱˡ = p3_ice_liquid_psychrometric_correction(qᵛ⁺ⁱ, T, constants)
+    s̄ⁱ = qᵛ - qᵛ⁺ⁱ + ξⁱˡ * q̄ᶜˡ
+    mⁱ, k = ice_excess_mixture(statistics, d, s̄ⁱ)
+    return merge(d, (; mⁱ, k, ξⁱˡ))
+end
+
+# ξⁱˡ = 1 + ℒˡ ∂qᵛ⁺ⁱ/∂T / cᵖᵈ: the saturation excess over ice that the evaporation of cloud liquid returns, per unit of
+# liquid (the liquid cools the air by ℒˡ / cᵖᵈ and lowers qᵛ⁺ⁱ), with P3's dry-air heat capacity convention
+@inline function p3_ice_liquid_psychrometric_correction(qᵛ⁺ⁱ, T, constants)
+    FT = typeof(T)
+    Rᵛ = FT(vapor_gas_constant(constants))
+    ℒˡ = vaporization_latent_heat(constants, T)
+    ℒⁱ = sublimation_latent_heat(constants, T)
+    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
+    return 1 + ℒˡ * qᵛ⁺ⁱ * ℒⁱ / (Rᵛ * T^2 * cᵖᵈ)
+end
+
+# The saturation excess over ice of the components of the mixture, as a linear function of the excess over liquid s
+# within each component, sⁱ = mⁱᵢ + kᵢ (s - mᵢ): the two are linear in the same fluctuations of θ and qᵗ and differ only
+# in ∂qᵛ⁺/∂T, so within a component they are taken as perfectly correlated, with kᵢ = σⁱᵢ / σᵢ. The means are placed
+# about P3's grid mean s̄ⁱ with the offsets of the statistics. Statistics without the excess over ice (prescribed
+# ones) give it the offsets and spreads of the excess over liquid (kᵢ = 1).
+@inline ice_excess_mixture(statistics::NamedTuple{names}, d, s̄ⁱ) where names =
+    ice_excess_mixture(Val(:μⁱ ∈ names), statistics, d, s̄ⁱ)
+
+@inline function ice_excess_mixture(::Val{false}, statistics, d, s̄ⁱ)
+    mⁱ = map(mᵢ -> s̄ⁱ + (mᵢ - d.mean_excess), d.m)
+    return mⁱ, map(mᵢ -> one(mᵢ), d.m)
+end
+
+@inline function ice_excess_mixture(::Val{true}, statistics, d, s̄ⁱ)
+    FT = typeof(s̄ⁱ)
+    μⁱ = map(x -> convert(FT, x), statistics.μⁱ)
+    σⁱ = map(x -> convert(FT, x), statistics.σⁱ)
+    plume_mean = sum(map(*, d.a, μⁱ))
+    mⁱ = map(μⁱᵢ -> s̄ⁱ + μⁱᵢ - plume_mean, μⁱ)
+    k = map((σⁱᵢ, σᵢ) -> safe_ratio(σⁱᵢ, σᵢ, one(FT)), σⁱ, d.σ)
+    return mⁱ, k
 end
 
 #####
@@ -525,8 +564,92 @@ shifted by the difference of the saturations of the cell, so the fraction is tha
     return ifelse(Sⁱ >= ℂⁿᵘᶜˡ₂, one(FT), zero(FT))
 end
 
-@inline function nucleating_fraction(d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
+@inline nucleating_fraction(d::NamedTuple{names}, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor) where names =
+    nucleating_fraction(Val(:mⁱ ∈ names), d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
+
+# A placement without the excess over ice: the local excess over liquid shifted by the difference of the saturations
+@inline function nucleating_fraction(::Val{false}, d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
     threshold = ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, floor) - qᵛ⁺ˡ + qᵛ⁺ⁱ
     P, _ = vapor_excess_exceedance(d, threshold)
     return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor), P)
+end
+
+# The fraction where the local vapor excess over ice, δⁱ(s) = sⁱ(s) - ξⁱˡ qᶜˡ(s), reaches the threshold
+@inline function nucleating_fraction(::Val{true}, d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
+    P = ice_excess_exceedance(d, ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, floor))
+    return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor), P)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the fraction of the cell where the local vapor excess over ice reaches `threshold` [kg kg⁻¹], at the placement
+`d` with the excess over ice of [`subgrid_process_distribution`](@ref). Within component ``i`` the excess of the
+distributed water over ice is ``sⁱ = bᵢ + kᵢ s``, ``bᵢ = mⁱᵢ - kᵢ mᵢ``, and the local vapor excess over ice is
+``δⁱ = sⁱ - ξⁱˡ qᶜˡ(s)``: ``bᵢ + kᵢ s - ξⁱˡ q⊖`` where ``s ≤ 0`` and ``bᵢ + (kᵢ - ξⁱˡ λ / ξˡ) s`` where ``s > 0``, so in
+each part the set ``δⁱ ≥`` `threshold` is an interval of ``s``.
+"""
+@inline function ice_excess_exceedance(d, threshold)
+    FT = typeof(threshold)
+    c = threshold
+    qᵘ = d.subsaturated_liquid  # the cloud liquid of the subsaturated part, q⊖
+    λⁱ = d.ξⁱˡ * d.λ / d.ξˡ
+    terms = map(d.a, d.m, d.σ, d.mⁱ, d.k) do aᵢ, mᵢ, σᵢ, mⁱᵢ, kᵢ
+        bᵢ = mⁱᵢ - kᵢ * mᵢ
+        # Subsaturated part: kᵢ s ≥ Aᵢ with s ≤ 0
+        Aᵢ = c + d.ξⁱˡ * qᵘ - bᵢ
+        kₛ = ifelse(kᵢ > 0, kᵢ, one(FT))
+        P_sloped, _ = gaussian_interval_moments(mᵢ, σᵢ, min(Aᵢ / kₛ, zero(FT)), zero(FT), true)
+        P_level, _ = gaussian_lower_moments(mᵢ, σᵢ)
+        P⁻ = ifelse(kᵢ > 0, P_sloped, ifelse(Aᵢ <= 0, P_level, zero(FT)))
+        # Saturated part: rᵢ s ≥ Bᵢ with s > 0
+        P⁺, _ = positive_linear_exceedance(mᵢ, σᵢ, kᵢ - λⁱ, c - bᵢ)
+        aᵢ * (P⁻ + P⁺)
+    end
+    return sum(terms)
+end
+
+# The probability and first moment of one Gaussian over the part s > 0 where r s > c
+@inline function positive_linear_exceedance(m, σ, r, c)
+    FT = typeof(m)
+    r₊ = ifelse(r > 0, r, one(FT))
+    r₋ = ifelse(r < 0, r, -one(FT))
+    lower = ifelse(r > 0, max(c, zero(FT)) / r₊, zero(FT))
+    upper = ifelse(r > 0, zero(FT), ifelse(c < 0, c / r₋, zero(FT)))
+    bounded = (r < 0) | ((r == 0) & (c >= 0))
+    return gaussian_interval_moments(m, σ, lower, upper, bounded)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the parts of the cell over which the vapor exchange of ice is evaluated, at the placement `d` with the excess
+over ice: for the saturated part (`+`, where the cloud liquid is placed as the equilibrium condensate) and the
+subsaturated part (`-`), the fraction ``P`` of the cell, ``P δ`` and ``P δⁱ`` with ``δ`` and ``δⁱ`` the mean local vapor
+excesses over liquid and over ice of the part, and ``P r`` with ``r`` the mean phase relaxation rate of the cloud
+liquid of the part relative to that of the cell (``ε ∝ Nᶜˡ^{2/3} qᶜˡ^{1/3}`` at a fixed droplet shape:
+``r⁺ = (χ / f⁺)^{2/3} (χ / ⟨s⁺⟩)^{1/3} ⟨s^{1/3}; s > 0⟩ / f⁺`` and ``r⁻ = ψ``). The ``P δ`` and ``P δⁱ`` of the two parts
+sum to the grid-mean excesses ``qᵛ - qᵛ⁺ˡ`` and ``qᵛ - qᵛ⁺ⁱ``.
+"""
+@inline function ice_exchange_parts(d)
+    FT = typeof(d.qᶜˡ)
+    q̄ = d.qᶜˡ
+    ψ = d.subsaturated_share
+    qᵘ = d.subsaturated_liquid  # the cloud liquid of the subsaturated part, q⊖
+    moments = map(d.a, d.m, d.σ, d.mⁱ, d.k) do aᵢ, mᵢ, σᵢ, mⁱᵢ, kᵢ
+        bᵢ = mⁱᵢ - kᵢ * mᵢ
+        P⁺, M⁺ = gaussian_interval_moments(mᵢ, σᵢ, zero(FT), zero(FT), false)
+        P⁻, M⁻ = gaussian_lower_moments(mᵢ, σᵢ)
+        (aᵢ * (bᵢ * P⁺ + kᵢ * M⁺), aᵢ * (bᵢ * P⁻ + kᵢ * M⁻))
+    end
+    sⁱ⁺ = sum(map(first, moments))
+    sⁱ⁻ = sum(map(last, moments))
+    s⁺ = d.positive_excess
+    saturated_rate = safe_ratio(positive_power(d.χ, convert(FT, 2//3)) *
+                                positive_power(safe_ratio(d.χ, s⁺, zero(FT)), convert(FT, 1//3)) *
+                                mixture_partial_moment(d, convert(FT, 1//3), zero(FT)),
+                                positive_power(d.f⁺, convert(FT, 2//3)), zero(FT))
+    saturated = (; P = d.f⁺, Pδ = (1 - d.λ) * s⁺, Pδⁱ = sⁱ⁺ - d.ξⁱˡ * d.χ * q̄, Pr = saturated_rate)
+    subsaturated = (; P = d.f⁻, Pδ = d.negative_excess - d.ξˡ * d.f⁻ * qᵘ, Pδⁱ = sⁱ⁻ - d.ξⁱˡ * d.f⁻ * qᵘ, Pr = d.f⁻ * ψ)
+    return saturated, subsaturated
 end

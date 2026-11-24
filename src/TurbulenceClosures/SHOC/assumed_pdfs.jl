@@ -411,10 +411,12 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The double Gaussian of `pdf` at a level (the moments are those [`assumed_pdf`](@ref) reads) as the
 distribution of the vapor excess over liquid ``δqᵛ⁺ˡ = qᵗ - qᵛ⁺ˡ`` of each component's air without
 condensate, as the microphysics defines it: the weight `a` of the updraft component (1) and, per
-component, the mean ``μᵢ = qᵗᵢ - qᵛ⁺ˡ(Tᵢ, ρᵢ)`` at its liquid-water temperature ``Tᵢ = Π θˡⁱᵢ`` and the
+component, the mean ``μᵢ = qᵗᵢ - qᵛ⁺ˡ(Tᵢ, ρᵢ)`` at its liquid-water temperature ``Tᵢ = Π θᵢ`` and the
 density ``ρᵢ = p / (Rᵐ Tᵢ)``, and the within-component spread
 ``σᵢ² = qᵗ′²ᵢ + (∂qᵛ⁺ˡ/∂θ)² θ′²ᵢ - 2 (∂qᵛ⁺ˡ/∂θ) r σθᵢ σqᵢ``, with the model's saturation over liquid
-(the formula the microphysics uses). Returns `(a, μ₁, μ₂, σ₁, σ₂)`.
+(the formula the microphysics uses); and the same moments of the vapor excess over ice, ``μⁱᵢ = qᵗᵢ - qᵛ⁺ⁱ(Tᵢ, ρᵢ)``
+and ``σⁱᵢ`` with ``∂qᵛ⁺ⁱ/∂θ``, for the ice outside the distributed water. Returns
+`(a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂)`.
 """
 @inline function component_vapor_excess(pdf::ComponentDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval,
                                         thl_first, w_first, qw_first, wsec, moments_l, moments_u)
@@ -464,9 +466,13 @@ density ``ρᵢ = p / (Rᵐ Tᵢ)``, and the within-component spread
                          ifelse(uncorrelated, one(FT), testvar), -1, 1, 1)
     r = ifelse(uncorrelated, zero(FT), r)
 
-    μ₁, σ₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r)
-    μ₂, σ₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r)
-    return a, μ₁, μ₂, σ₁, σ₂
+    liquid = (PlanarLiquidSurface(), WarmPhaseEquilibrium())
+    ice = (PlanarIceSurface(), IceSurfaceEquilibrium())
+    μ₁, σ₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r, liquid)
+    μ₂, σ₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r, liquid)
+    μⁱ₁, σⁱ₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r, ice)
+    μⁱ₂, σⁱ₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r, ice)
+    return a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂
 end
 
 # The liquid-water temperature of a component of the double Gaussian, the one definition every function of the PDF uses:
@@ -476,23 +482,24 @@ end
     return ifelse(Tl <= pdf.Tl_min, pdf.Tl_min, Tl)
 end
 
-# The moments of the vapor excess over liquid of a component, at the temperature of the component that `assumed_pdf`
-# condenses at, with the model's saturation over liquid (the formula the microphysics uses)
-@inline function component_vapor_excess_moments(pdf, thermodynamics, pval, thl, qw, vθ, vq, σθ, σq, r)
+# The moments of the vapor excess of a component over the surface `(surface, equilibrium)` (liquid, or ice), at the
+# temperature of the component that `assumed_pdf` condenses at, with the model's saturation over that surface (the
+# formula the microphysics uses)
+@inline function component_vapor_excess_moments(pdf, thermodynamics, pval, thl, qw, vθ, vq, σθ, σq, r, (surface, equilibrium))
     constants = thermodynamics.constants
     Π = plume_exner_function(thermodynamics, qw, pval)
     T = component_liquid_water_temperature(pdf, thermodynamics, thl, qw, pval)
     Rᵐ = mixture_gas_constant(MoistureMassFractions(qw), constants)
-    qᵛ⁺ˡ = saturation_specific_humidity(T, pval / (Rᵐ * T), constants, PlanarLiquidSurface())
-    _, log_slope = condensate_latent_heat_and_log_slope(WarmPhaseEquilibrium(), constants, T)
-    ∂qᵛ⁺ˡ∂θ = qᵛ⁺ˡ * log_slope * Π
-    σ = zero_safe_sqrt(max(0, vq + ∂qᵛ⁺ˡ∂θ * ∂qᵛ⁺ˡ∂θ * vθ - 2 * ∂qᵛ⁺ˡ∂θ * r * σθ * σq))
-    return qw - qᵛ⁺ˡ, σ
+    qᵛ⁺ = saturation_specific_humidity(T, pval / (Rᵐ * T), constants, surface)
+    _, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, T)
+    ∂qᵛ⁺∂θ = qᵛ⁺ * log_slope * Π
+    σ = zero_safe_sqrt(max(0, vq + ∂qᵛ⁺∂θ * ∂qᵛ⁺∂θ * vθ - 2 * ∂qᵛ⁺∂θ * r * σθ * σq))
+    return qw - qᵛ⁺, σ
 end
 
 # A PDF without a component form here supplies no spread: the microphysics' grid-mean rate
 @inline function component_vapor_excess(pdf, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first,
                                         wsec, moments_l, moments_u)
     FT = typeof(thl_first)
-    return convert(FT, 0.5), zero(FT), zero(FT), zero(FT), zero(FT)
+    return convert(FT, 0.5), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT)
 end

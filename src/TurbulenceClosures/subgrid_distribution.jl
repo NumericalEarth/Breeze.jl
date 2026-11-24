@@ -1409,18 +1409,25 @@ end
 #####
 
 # The double Gaussian at the centers as the distribution of the vapor excess over liquid: the
-# weight `a` of the updraft component, and each component's mean `μ₁`, `μ₂` and spread `σ₁`, `σ₂`.
+# weight `a` of the updraft component, and each component's mean `μ₁`, `μ₂` and spread `σ₁`, `σ₂`; and over ice,
+# `μⁱ₁`, `μⁱ₂`, `σⁱ₁`, `σⁱ₂`.
 # The saturated fraction `f⁺` is the distribution's own cloud fraction `aᶜ`.
 vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
-                                       σ₁ = CenterField(grid), σ₂ = CenterField(grid), ωᵐ = CenterField(grid))
+                                       σ₁ = CenterField(grid), σ₂ = CenterField(grid), ωᵐ = CenterField(grid),
+                                       μⁱ₁ = CenterField(grid), μⁱ₂ = CenterField(grid),
+                                       σⁱ₁ = CenterField(grid), σⁱ₂ = CenterField(grid))
 
-@inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂))
+@inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂))
     @inbounds begin
         components.a₁[i, j, k] = a
         components.μ₁[i, j, k] = μ₁
         components.μ₂[i, j, k] = μ₂
         components.σ₁[i, j, k] = σ₁
         components.σ₂[i, j, k] = σ₂
+        components.μⁱ₁[i, j, k] = μⁱ₁
+        components.μⁱ₂[i, j, k] = μⁱ₂
+        components.σⁱ₁[i, j, k] = σⁱ₁
+        components.σⁱ₂[i, j, k] = σⁱ₂
     end
     return nothing
 end
@@ -1430,7 +1437,9 @@ end
         a = components.a₁[i, j, k]
         return (; a = (a, 1 - a), μ = (components.μ₁[i, j, k], components.μ₂[i, j, k]),
                   σ = (components.σ₁[i, j, k], components.σ₂[i, j, k]), f⁺ = components.aᶜ[i, j, k],
-                  ωᵐ = components.ωᵐ[i, j, k])
+                  ωᵐ = components.ωᵐ[i, j, k],
+                  μⁱ = (components.μⁱ₁[i, j, k], components.μⁱ₂[i, j, k]),
+                  σⁱ = (components.σⁱ₁[i, j, k], components.σⁱ₂[i, j, k]))
     end
 end
 

@@ -301,7 +301,7 @@ cloud/precipitation fraction framework is handled separately.
                                                      temperature_tendency,
                                                      pressure_tendency,
                                                      lookups = p3_ice_lookups(p3, qⁱ, qʷⁱ, nⁱ, Fᶠ, ρᶠ, ρ),
-                                                     Γ = nothing)
+                                                     Γ = nothing, distribution = nothing)
     FT = typeof(qᶜˡ)
     parameters = p3.process_rates
     floors = parameters.floors
@@ -343,6 +343,11 @@ cloud/precipitation fraction framework is handled separately.
     raw_ice_growth = growth_share(dry_ice_relaxation, ξⁱ, total_driver, total_relaxation,
                                   vapor_excess, transient_response) +
                      (qᵛ⁺ˡ - qᵛ⁺ⁱ) * dry_ice_relaxation / ξⁱ
+    # With the subgrid distribution of every process, the dry ice exchanges vapor in each part of the cell at the
+    # local vapor excesses and against the cloud liquid of that part
+    raw_ice_growth = subgrid_ice_growth(distribution, raw_ice_growth, coefficients, external_driver,
+                                        rain_relaxation + dry_ice_relaxation * ice_liquid_coupling + coating_relaxation,
+                                        τ, FT(floors.rate_scale))
     # Liquid-on-ice coating uses `ξˡ` (like cloud) since the surface condenses
     # vapor as liquid; no Bergeron contribution because the surface is already
     # at liquid saturation.
@@ -392,6 +397,36 @@ cloud/precipitation fraction framework is handled separately.
     return P3CoupledVaporRates{FT}(condensation, rain_evaporation, rain_condensation,
                                    deposition, coating_condensation, coating_evaporation,
                                    cloud_relaxation, rain_relaxation)
+end
+
+# The vapor growth of dry ice over the parts of the cell of the subgrid distribution (`ice_exchange_parts`). The ice
+# fills the cell; in each part p it grows as on the grid mean, at the part's vapor excess over liquid δₚ, its excess
+# over ice δⁱₚ (whose difference Δₚ = δⁱₚ - δₚ replaces qᵛ⁺ˡ - qᵛ⁺ⁱ, also in the Bergeron driver) and the total
+# relaxation εₚ of the part, whose cloud liquid relaxes at rₚ εᶜˡ:
+#
+#   Gₚ = (εⁱ / εₚ) [Dₚ (1 - Tₚ / εₚ) + δₚ Tₚ] / ξⁱ + Δₚ εⁱ / ξⁱ,   Dₚ = D - Δₚ c εⁱ,   Tₚ = (1 - e^{-εₚ τ}) / τ,
+#
+# weighted by the fraction Pₚ of the part, with the excesses formed from the weighted moments Pₚ δₚ, Pₚ δⁱₚ (only the
+# relative rate rₚ of the cloud liquid of a part is a ratio, bounded by construction). Linear in the excesses, so with the same relaxation in both parts (no cloud liquid) it is the grid-mean rate;
+# it differs where the cloud liquid of the saturated part takes the vapor excess there faster than the ice does, while
+# the ice of the subsaturated part takes its own excess alone. `uniform_relaxation` is the relaxation of everything
+# but the cloud liquid (rain, ice, the liquid coating), which fills the cell.
+@inline subgrid_ice_growth(::Nothing, grid_mean, args...) = grid_mean
+
+@inline function subgrid_ice_growth(d, grid_mean, coefficients, external_driver, uniform_relaxation, τ, rate_scale)
+    εⁱ = coefficients.dry_ice_relaxation
+    c = coefficients.ice_liquid_coupling
+    ξⁱ = coefficients.ξⁱ
+    εᶜˡ = coefficients.cloud_relaxation
+    parts = ice_exchange_parts(d)
+    growth = map(parts) do part
+        εₚ = max(uniform_relaxation + εᶜˡ * safe_ratio(part.Pr, part.P, zero(εᶜˡ)), rate_scale)
+        Tₚ = (1 - exp(-εₚ * τ)) / τ
+        PΔ = part.Pδⁱ - part.Pδ
+        PD = part.P * external_driver - PΔ * c * εⁱ
+        (εⁱ / εₚ) * (PD * (1 - Tₚ / εₚ) + part.Pδ * Tₚ) / ξⁱ + PΔ * εⁱ / ξⁱ
+    end
+    return ifelse(d.degenerate, grid_mean, sum(growth))
 end
 
 #####
