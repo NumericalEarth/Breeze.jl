@@ -39,7 +39,7 @@ are tolerances and bounds, not empirical coefficients, and the `clipping` policy
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussianPDF{FT, CP} <: AbstractSHOCComponent
+struct DoubleGaussianPDF{FT, CP} <: AbstractSubgridDistributionComponent
     "Within-plume fraction of the vertical velocity variance (literal `0.4`)"
     ℂᵍ₁ :: FT
     "Skewness of total water relative to that of vertical velocity (literal `1.2`)"
@@ -113,7 +113,7 @@ within-component θˡⁱ–qᵗ correlation is that of the covariance left after
 
 $(TYPEDFIELDS)
 """
-struct EqualWidthDoubleGaussianPDF{FT, CP} <: AbstractSHOCComponent
+struct EqualWidthDoubleGaussianPDF{FT, CP} <: AbstractSubgridDistributionComponent
     "Within-component fraction of the vertical velocity variance at zero skewness"
     ℂᵍ₀ :: FT
     "Slope of the within-component fraction in the skewness of w (in the sigmoid's argument)"

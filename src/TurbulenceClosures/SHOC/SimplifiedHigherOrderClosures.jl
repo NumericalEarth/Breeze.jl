@@ -44,7 +44,7 @@ using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equili
                              liquid_latent_heat, ice_latent_heat, MoistureMassFractions, vapor_equivalent_heat_capacity,
                              exner_exponent, saturation_specific_humidity, mixture_gas_constant
 
-include("shoc_constants.jl")
+include("subgrid_distribution_components.jl")
 include("clipping.jl")
 include("column_utilities.jl")
 include("mixing_lengths.jl")

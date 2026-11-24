@@ -84,7 +84,7 @@ The stratification number enters the expression through the closure's
 
 $(TYPEDFIELDS)
 """
-struct AlgebraicThirdMoment{FT, L} <: AbstractSHOCComponent
+struct AlgebraicThirdMoment{FT, L} <: AbstractSubgridDistributionComponent
     "Coefficient `c` of the diagnostic third moment of vertical velocity (`c_diag_3rd_mom`)"
     ℂʷ₂ :: FT
     "Numerator of `a₀` (literal `0.52`)"
@@ -194,7 +194,7 @@ Supertype of the components that bound the stratification number `αᴺ = τ² N
 of the third moment of vertical velocity ([`AlgebraicThirdMoment`](@ref)). The bound applies
 there only: the time scale `τ` and the frequency `N²` used elsewhere in the closure are unchanged.
 """
-abstract type AbstractStratificationNumberBound <: AbstractSHOCComponent end
+abstract type AbstractStratificationNumberBound <: AbstractSubgridDistributionComponent end
 
 """
 $(TYPEDEF)
@@ -271,7 +271,7 @@ third moment is
 The default, `1.2 √2 ≈ 1.697`, is the bound of E3SM `shoc.F90`, which writes it
 `w3clip √(2 w'w'³)` with `w3clip = 1.2`.
 """
-abstract type AbstractSkewnessLimiter <: AbstractSHOCComponent end
+abstract type AbstractSkewnessLimiter <: AbstractSubgridDistributionComponent end
 
 # The largest skewness of E3SM `shoc.F90`: `w3clip √2` with `w3clip = 1.2`
 const default_maximum_skewness = 1.2 * sqrt(2)

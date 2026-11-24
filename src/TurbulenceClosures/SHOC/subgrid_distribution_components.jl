@@ -1,16 +1,20 @@
 #####
-##### Components of SHOC
+##### Components of the closures
 #####
-##### `SimplifiedHigherOrderClosure` is assembled from components: concretely typed, immutable
-##### structs whose scalar fields all have one type, and whose methods are scalar functions that
-##### the column sweeps call level by level. A component holds the empirical coefficients (written
-##### ℂ) of the relation it implements, and the bounds of that relation.
+##### `SimplifiedHigherOrderClosure` and `TKEBasedTurbulenceClosure` are assembled from components:
+##### concretely typed, immutable structs whose scalar fields all have one type, and whose methods are
+##### scalar functions that the column sweeps call level by level. A component holds the empirical
+##### coefficients (written ℂ) of the relation it implements, and the bounds of that relation.
 #####
 
 """
-Supertype of the components of [`SimplifiedHigherOrderClosure`](@ref) defined with it.
+Supertype of the components of the subgrid distribution [`DoubleGaussian`](@ref) that SHOC and the
+TKE closure share: the second moments, the third moments, the bounds of the stratification number of
+the third-moment diagnosis, the skewness limiters, the assumed PDFs and their clipping policies. Its
+subtypes share a `summary`, a `show` that lists their scalars, and the conversion of their scalars
+to another float type.
 """
-abstract type AbstractSHOCComponent end
+abstract type AbstractSubgridDistributionComponent end
 
 # The constructor of the type of a component, without its type parameters
 component_constructor(::Type{T}) where T = Base.typename(T).wrapper
@@ -87,7 +91,7 @@ component_scalar_names(::TRSF, name) = TurbulenceClosures.TURBULENT_RICHARDSON_C
 end
 @inline map_scalars(f, sf::TRSF) = TRSF(map(f, TurbulenceClosures.stability_coefficients(sf))...)
 
-TurbulenceClosures.convert_eltype(::Type{FT}, component::AbstractSHOCComponent) where FT =
+TurbulenceClosures.convert_eltype(::Type{FT}, component::AbstractSubgridDistributionComponent) where FT =
     map_scalars(scalar -> convert(FT, scalar), component)
 
 # Every scalar a keyword argument: the constructor of the components below. The scalars come first; the
@@ -105,12 +109,12 @@ component_from_keywords(Component, FT, defaults::NamedTuple, kw) = Component{FT}
 component_from_keywords(Component, FT, defaults::NamedTuple, kw, structural...) =
     Component(keyword_scalars(Component, FT, defaults, kw)..., structural...)
 
-Base.summary(component::AbstractSHOCComponent) = string(nameof(typeof(component)), type_parameter_summary(component))
+Base.summary(component::AbstractSubgridDistributionComponent) = string(nameof(typeof(component)), type_parameter_summary(component))
 
 type_parameter_summary(component) = isempty(component_scalars(component)) ? "" :
                                     string("{", typeof(first(component_scalars(component))), "}")
 
-function Base.show(io::IO, component::AbstractSHOCComponent)
+function Base.show(io::IO, component::AbstractSubgridDistributionComponent)
     print(io, summary(component))
     names = component_scalar_names(component)
     scalars = component_scalars(component)

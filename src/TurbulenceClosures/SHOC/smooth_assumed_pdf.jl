@@ -28,7 +28,7 @@ spread that `shoc.F90` drops.
 
 $(TYPEDFIELDS)
 """
-struct SmoothDoubleGaussianPDF{FT, CP} <: AbstractSHOCComponent
+struct SmoothDoubleGaussianPDF{FT, CP} <: AbstractSubgridDistributionComponent
     "Within-plume fraction of the vertical velocity variance (literal `0.4`)"
     ℂᵍ₁ :: FT
     "Skewness of total water relative to that of vertical velocity (literal `1.2`)"

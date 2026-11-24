@@ -113,7 +113,7 @@ simulations of BOMEX, ARM cumulus, ASTEX and DYCOMS (harness `notes/w3-proposal.
 
 $(TYPEDFIELDS)
 """
-struct TKEBudgetThirdMoment{N, FT, L} <: SimplifiedHigherOrderClosures.AbstractSHOCComponent
+struct TKEBudgetThirdMoment{N, FT, L} <: SimplifiedHigherOrderClosures.AbstractSubgridDistributionComponent
     "Coefficient of the budget flux with the sink shape `e`"
     ℂʷᵉ :: FT
     "Coefficient of the budget flux with the sink shape `ε`"

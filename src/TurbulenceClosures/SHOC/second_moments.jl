@@ -29,7 +29,7 @@ not used: the surface face takes the moments of the face above.
 
 $(TYPEDFIELDS)
 """
-struct DowngradientSecondMoments{FT} <: AbstractSHOCComponent
+struct DowngradientSecondMoments{FT} <: AbstractSubgridDistributionComponent
     "Temperature variance factor (`thl2tune`)"
     ℂᵛ₁ :: FT
     "Moisture variance factor (`qw2tune`)"

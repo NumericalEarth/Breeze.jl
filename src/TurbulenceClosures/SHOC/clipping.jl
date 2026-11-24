@@ -19,7 +19,7 @@
 ##### `qˡ ≥ 0`, the variance of `s`). They use `max`, `min` or `hard_floor` directly.
 #####
 
-abstract type AbstractClippingPolicy <: AbstractSHOCComponent end
+abstract type AbstractClippingPolicy <: AbstractSubgridDistributionComponent end
 
 """
 $(TYPEDEF)
