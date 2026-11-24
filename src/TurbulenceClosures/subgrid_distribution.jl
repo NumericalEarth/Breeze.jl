@@ -687,10 +687,12 @@ function build_subgrid_cloud_fields(grid, distribution, solver, static_stability
     moments = (τ = ZFaceField(grid), third_moment_location_fields(grid, third_moment_location(distribution.third_moment))...,
                θˡⁱ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡⁱ′qᵗ′ = ZFaceField(grid),
                w′θˡⁱ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid),
+               unit_variance = ZFaceField(grid), qⁱ′² = ZFaceField(grid), qⁱ′sⁱ′ = ZFaceField(grid), qᵈ′² = ZFaceField(grid),
                scalar_variance_transport_fields(grid, distribution.variance_transport)...)
     cloud = (w′² = CenterField(grid), w′³ = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
              vapor_excess_component_fields(grid)...,
+             qⁱ′sⁱ′ = CenterField(grid), qᵈ′² = CenterField(grid),
              applied_flux_conversion_fields(grid, energetics, tracer_names)...,
              third_moment_fields(grid, distribution.third_moment)...,
              heating_budget_flux_fields(grid, heating_budget_flux)...,
@@ -1073,6 +1075,13 @@ end
             # The flux of θˡⁱ that the turbulence carries includes the heating budget flux (zero without one)
             w′θˡⁱ′ += applied_heating_flux(cl, i, j, k)
 
+            # The variance of a moisture-like scalar of unit gradient, with the same machinery: its dissipation time
+            # is that of the budgets of the condensate outside the distribution (`outside_condensate_moments`)
+            _, unit_variance, _ = interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / Δz, zero(FT), Δz, zero(FT), zero(FT), zero(FT))
+            _, unit_variance, _ = local_scalar_second_moments(d.variance_stability_functions, i, j, k, grid, closure, velocities,
+                                                              closure_fields, e, zero(FT), Δz, Δz, zero(FT), unit_variance, zero(FT))
+            m.unit_variance[i, j, k] = unit_variance
+
             m.τ[i, j, k] = τ
             m.θˡⁱ′²[i, j, k] = θˡⁱ′²
             m.qᵗ′²[i, j, k] = qᵗ′²
@@ -1183,7 +1192,104 @@ function compute_subgrid_distribution!(fields::SubgridCloudFields, closure_field
     s = distribution_state(model, e_density)
     launch!(grid.architecture, grid, :xy, _compute_subgrid_distribution!,
             fields.moments, fields.cloud, grid, closure, closure_fields, s.θ, s.qᵗ, s.e, model.velocities, s.p, s.thermodynamics)
+    compute_outside_condensate_moments!(fields, closure_fields, model, s)
     return nothing
+end
+
+#####
+##### The second moments of the condensate outside the distribution and of the departure of the cloud liquid
+#####
+#
+# Diagnostic steady budgets at the interior faces, with the dissipation time τᵠ = (unit-gradient variance) / (2Kᶜ) of a
+# moisture-like scalar from the closure's own scalar-moment machinery (ℂᵛ₂ τ / 2 down the gradient, 𝕊ᵛ₂ ℓ² / (2Kᶜ)
+# with variance stability functions), the down-gradient fluxes w′φ′ = -Kᶜ ∂z φ̄, and the phase relaxation rates of
+# the microphysics at the face:
+#
+#   * the ice qⁱ outside the distributed water (P3's ice) and the excess of the distributed water over ice sⁱ:
+#
+#       ∂t qⁱ′sⁱ′ = 2Kᶜ ∂z q̄ⁱ ∂z s̄ⁱ + ωⁱ sⁱ′² - (1/τᵠ + ωⁱ) qⁱ′sⁱ′,
+#       ∂t qⁱ′² = 2Kᶜ (∂z q̄ⁱ)² + 2ωⁱ qⁱ′sⁱ′ - qⁱ′² / τᵠ,
+#
+#     production down both gradients; the deposition ωⁱ sⁱ′ of each fluctuation of the excess onto the ice, which
+#     correlates the ice with the excess; and the excess the ice consumes, which decorrelates them at ωⁱ. sⁱ′² =
+#     qᵗ′² - 2aⁱ θ′qᵗ′ + aⁱ² θ′² and ∂z s̄ⁱ = ∂z qʷ - aⁱ ∂z θʷ come from the distribution's moments, aⁱ = ∂qᵛ⁺ⁱ/∂θ of the
+#     level. The covariance is bounded by the realizability |qⁱ′sⁱ′| < (qⁱ′² sⁱ′²)^{1/2} in the rational form of
+#     `realizable_correlation`. Sedimentation with a uniform fall speed transports the variance without producing
+#     it locally; the production by fluctuations of the fall speed (with the size of the particles) is omitted.
+#   * the departure d = qᶜˡ - qᶜ of the cloud liquid from the distribution's equilibrium condensate qᶜ (its mean
+#     liquid), which relaxes back at the droplets' rate ωˡ:
+#
+#       ∂t d′² = 2Kᶜ (∂z d̄)² - 2ωˡ d′² - d′² / τᵠ.
+#
+# Steady: qⁱ′sⁱ′ = τᵠ (2Kᶜ ∂z q̄ⁱ ∂z s̄ⁱ + ωⁱ sⁱ′²) / (1 + τᵠ ωⁱ), qⁱ′² = τᵠ (2Kᶜ (∂z q̄ⁱ)² + 2ωⁱ qⁱ′sⁱ′),
+# d′² = 2Kᶜ τᵠ (∂z d̄)² / (1 + 2τᵠ ωˡ). They are statistics: the water and the energy are unchanged.
+compute_outside_condensate_moments!(fields, closure_fields, model, s) = nothing
+
+function compute_outside_condensate_moments!(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, model, s)
+    grid = model.grid
+    launch!(grid.architecture, grid, :xy, _compute_outside_condensate_moments!, fields.moments, fields.cloud, grid,
+            closure_fields.Kᶜ, s.θ, s.qᵗ, s.p, s.thermodynamics, applied_flux_state(model))
+    return nothing
+end
+
+# The ice outside the distributed water at a cell (zero where nothing is held)
+@inline outside_ice(::Nothing, i, j, k) = 0
+@inline outside_ice(held, i, j, k) = held[i, j, k].ice
+
+# aⁱ = ∂qᵛ⁺ⁱ/∂θ of the level, in the linearization of the distribution's statistics (`component_vapor_excess`)
+@inline function ice_saturation_slope(thermodynamics, θ, qʷ, p)
+    ice = ice_saturation_thermodynamics(thermodynamics)
+    Tˡ = plume_liquid_water_temperature(ice, θ, qʷ, p)
+    qᵛ⁺ⁱ, β, cp_over_L, Π = plume_saturation(ice, Tˡ, qʷ, p)
+    return qᵛ⁺ⁱ * β * cp_over_L * Π
+end
+
+@kernel function _compute_outside_condensate_moments!(m, cl, grid, Kᶜ, θ, qʷ, p, thermodynamics, s)
+    i, j = @index(Global, NTuple)
+    Nz = size(grid, 3)
+    FT = grid_float_type(grid)
+    held = thermodynamics.held_condensate
+    @inbounds begin
+        for k in 2:Nz
+            Δz = Δzᶜᶜᶠ(i, j, k, grid)
+            K = Kᶜ[i, j, k]
+            resolved = K > 0
+            τᵠ = ifelse(resolved, m.unit_variance[i, j, k] / (2 * ifelse(resolved, K, one(FT))), zero(FT))
+            aⁱ = (ice_saturation_slope(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qʷ[i, j, k], p[i, j, k]) +
+                  ice_saturation_slope(level_thermodynamics(thermodynamics, i, j, k-1), θ[i, j, k-1], qʷ[i, j, k-1], p[i, j, k-1])) / 2
+            sⁱ′² = max(0, m.qᵗ′²[i, j, k] - 2 * aⁱ * m.θˡⁱ′qᵗ′[i, j, k] + aⁱ * aⁱ * m.θˡⁱ′²[i, j, k])
+            ∂z_sⁱ = ((qʷ[i, j, k] - qʷ[i, j, k-1]) - aⁱ * (θ[i, j, k] - θ[i, j, k-1])) / Δz
+            ∂z_qⁱ = (convert(FT, outside_ice(held, i, j, k)) - convert(FT, outside_ice(held, i, j, k-1))) / Δz
+            ω⁺ = cell_phase_relaxation_rates(i, j, k, grid, s)
+            ω⁻ = cell_phase_relaxation_rates(i, j, k-1, grid, s)
+            ωⁱ = (ω⁺.ωⁱ + ω⁻.ωⁱ) / 2
+            ωˡ = (ω⁺.ωˡ + ω⁻.ωˡ) / 2
+            covariance = τᵠ * (2 * K * ∂z_qⁱ * ∂z_sⁱ + ωⁱ * sⁱ′²) / (1 + τᵠ * ωⁱ)
+            variance = τᵠ * (2 * K * ∂z_qⁱ * ∂z_qⁱ + 2 * ωⁱ * covariance)
+            # The covariance bounded below (qⁱ′² sⁱ′²)^{1/2}: C₀ / (1 + (C₀ / bound)⁴)^{1/4}, scaled by the larger
+            bound = sqrt(max(0, variance) * sⁱ′²)
+            scale = max(bound, abs(covariance))
+            resolved = scale > 0
+            scaleₛ = ifelse(resolved, scale, one(FT))
+            m.qⁱ′²[i, j, k] = max(0, variance)
+            m.qⁱ′sⁱ′[i, j, k] = ifelse(resolved, covariance * bound / (scaleₛ * sqrt(sqrt((bound / scaleₛ)^4 + (covariance / scaleₛ)^4))), zero(FT))
+            # The departure of the cloud liquid from the equilibrium condensate of the distribution
+            d⁺ = distributed_condensateᶜᶜᶜ(i, j, k, grid, s, qʷ[i, j, k]) - cl.qˡ[i, j, k]
+            d⁻ = distributed_condensateᶜᶜᶜ(i, j, k-1, grid, s, qʷ[i, j, k-1]) - cl.qˡ[i, j, k-1]
+            ∂z_d = (d⁺ - d⁻) / Δz
+            m.qᵈ′²[i, j, k] = 2 * K * τᵠ * ∂z_d * ∂z_d / (1 + 2 * τᵠ * ωˡ)
+        end
+        m.qⁱ′²[i, j, 1] = m.qⁱ′²[i, j, min(2, Nz)]
+        m.qⁱ′sⁱ′[i, j, 1] = m.qⁱ′sⁱ′[i, j, min(2, Nz)]
+        m.qᵈ′²[i, j, 1] = m.qᵈ′²[i, j, min(2, Nz)]
+        m.qⁱ′²[i, j, Nz+1] = 0
+        m.qⁱ′sⁱ′[i, j, Nz+1] = 0
+        m.qᵈ′²[i, j, Nz+1] = 0
+        for k in 1:Nz
+            cl.qⁱ′sⁱ′[i, j, k] = (m.qⁱ′sⁱ′[i, j, k] + m.qⁱ′sⁱ′[i, j, k+1]) / 2
+            cl.qᵈ′²[i, j, k] = (m.qᵈ′²[i, j, k] + m.qᵈ′²[i, j, k+1]) / 2
+        end
+    end
 end
 
 #####
@@ -1531,7 +1637,8 @@ end
                   ωᵐ = components.ωᵐ[i, j, k],
                   μⁱ = (components.μⁱ₁[i, j, k], components.μⁱ₂[i, j, k]),
                   σⁱ = (components.σⁱ₁[i, j, k], components.σⁱ₂[i, j, k]),
-                  ρⁱ = (components.ρⁱ₁[i, j, k], components.ρⁱ₂[i, j, k]))
+                  ρⁱ = (components.ρⁱ₁[i, j, k], components.ρⁱ₂[i, j, k]),
+                  ice_covariance = components.qⁱ′sⁱ′[i, j, k], departure_variance = components.qᵈ′²[i, j, k])
     end
 end
 

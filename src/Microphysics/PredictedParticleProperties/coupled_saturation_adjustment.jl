@@ -346,8 +346,7 @@ cloud/precipitation fraction framework is handled separately.
     # With the subgrid distribution of every process, the dry ice exchanges vapor in each part of the cell at the
     # local vapor excesses and against the cloud liquid of that part
     raw_ice_growth = subgrid_ice_growth(distribution, raw_ice_growth, coefficients, external_driver,
-                                        rain_relaxation + dry_ice_relaxation * ice_liquid_coupling + coating_relaxation,
-                                        τ, FT(floors.rate_scale))
+                                        rain_relaxation + coating_relaxation, τ, FT(floors.rate_scale))
     # Liquid-on-ice coating uses `ξˡ` (like cloud) since the surface condenses
     # vapor as liquid; no Bergeron contribution because the surface is already
     # at liquid saturation.
@@ -412,8 +411,9 @@ end
 # is uniform, r = ψ, so G is evaluated at the part's moments (`ice_exchange_parts`), weighted by its fraction. With
 # the same relaxation everywhere (no cloud liquid) the sum is the grid-mean rate; it differs where the cloud liquid
 # of the saturated part takes the vapor excess there faster than the ice does, while the ice of the subsaturated
-# part takes its own excess alone. `uniform_relaxation` is the relaxation of everything but the cloud liquid (rain,
-# ice, the liquid coating), which fills the cell.
+# part takes its own excess alone. The ice of each part relaxes at its own εⁱ±, εⁱ times its relative ice
+# (`ice_part_scales`: the ice placed with its covariance with the excess over ice, its number with its mass).
+# `uniform_relaxation` is the relaxation of the rain and the liquid coating, which fill the cell.
 @inline subgrid_ice_growth(::Nothing, grid_mean, args...) = grid_mean
 
 @inline function local_ice_growth(εⁱ, c, ξⁱ, ε, τ, external_driver, δ, Δ)
@@ -424,7 +424,9 @@ end
 
 @inline function subgrid_ice_growth(d, grid_mean, coefficients, external_driver, uniform_relaxation, τ, rate_scale)
     FT = typeof(grid_mean)
-    εⁱ = coefficients.dry_ice_relaxation
+    scale⁺, scale⁻ = ice_part_scales(d)
+    εⁱ⁺ = coefficients.dry_ice_relaxation * scale⁺
+    εⁱ⁻ = coefficients.dry_ice_relaxation * scale⁻
     c = coefficients.ice_liquid_coupling
     ξⁱ = coefficients.ξⁱ
     εᶜˡ = coefficients.cloud_relaxation
@@ -437,19 +439,19 @@ end
     saturated = positive_part_quadrature(d) do s, i
         @inbounds bᵢ = d.mⁱ[i] - d.k[i] * d.m[i]
         @inbounds kᵢ = d.k[i]
-        ε = max(uniform_relaxation + εᶜˡ * droplet_scale * positive_power(s, convert(FT, 1//3)), rate_scale)
+        ε = max(uniform_relaxation + εⁱ⁺ * c + εᶜˡ * droplet_scale * positive_power(s, convert(FT, 1//3)), rate_scale)
         δ = (1 - d.λ) * s
         δⁱ = bᵢ + (kᵢ - λⁱ) * s
-        local_ice_growth(εⁱ, c, ξⁱ, ε, τ, external_driver, δ, δⁱ - δ)
+        local_ice_growth(εⁱ⁺, c, ξⁱ, ε, τ, external_driver, δ, δⁱ - δ)
     end
 
     # The subsaturated part, at its moments
     _, part = ice_exchange_parts(d)
-    ε⁻ = max(uniform_relaxation + εᶜˡ * d.subsaturated_share, rate_scale)
+    ε⁻ = max(uniform_relaxation + εⁱ⁻ * c + εᶜˡ * d.subsaturated_share, rate_scale)
     PΔ = part.Pδⁱ - part.Pδ
     T⁻ = (1 - exp(-ε⁻ * τ)) / τ
-    PD = part.P * external_driver - PΔ * c * εⁱ
-    subsaturated = (εⁱ / ε⁻) * (PD * (1 - T⁻ / ε⁻) + part.Pδ * T⁻) / ξⁱ + PΔ * εⁱ / ξⁱ
+    PD = part.P * external_driver - PΔ * c * εⁱ⁻
+    subsaturated = (εⁱ⁻ / ε⁻) * (PD * (1 - T⁻ / ε⁻) + part.Pδ * T⁻) / ξⁱ + PΔ * εⁱ⁻ / ξⁱ
 
     return ifelse(d.degenerate, grid_mean, saturated + subsaturated)
 end

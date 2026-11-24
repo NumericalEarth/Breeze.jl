@@ -176,6 +176,40 @@ end
     @test abs(water) ≤ 10 * eps() * (abs(result.tendency_ρqᵛ) + abs(result.tendency_ρqⁱ))
 end
 
+@testset "P3 subgrid ice: the placement of the ice and the departure of the cloud liquid" begin
+    statistics = merge(ice_mixture(0.3, 2e-4, -0.9e-4, 0.6e-4, 0.5e-4, 2.2e-4, -1e-4, 0.55e-4, 0.45e-4; ωᵐ = 1e-3),
+                       (; ρⁱ = (0.95, 0.9)))
+    d = ice_placement(statistics, 2e-5, 5e-5, 9e-5)
+    qⁱ = 2e-5
+    S⁺, S⁻ = PPP.ice_excess_part_sums(d)
+    contrast = d.f⁻ * S⁺ - d.f⁺ * S⁻
+    @test contrast > 0
+    # A covariance well inside the bound is reproduced by the two-part ice; a large one is bounded so that both parts
+    # stay positive, and the mean is kept
+    for C in (1e-3 * qⁱ * contrast, 1e3 * qⁱ * contrast, -1e3 * qⁱ * contrast)
+        γ = PPP.ice_placement_contrast(merge(statistics, (; ice_covariance = C)), d, qⁱ)
+        q⁺, q⁻ = qⁱ * (1 + γ * d.f⁻), qⁱ * (1 - γ * d.f⁺)
+        @test q⁺ > 0 && q⁻ > 0
+        @test d.f⁺ * q⁺ + d.f⁻ * q⁻ ≈ qⁱ
+        abs(C) < qⁱ * contrast && @test qⁱ * γ * contrast ≈ C rtol = 1e-6
+    end
+    # Without ice both parts hold none, and γ stays bounded
+    γ₀ = PPP.ice_placement_contrast(merge(statistics, (; ice_covariance = 1e-12)), d, 0.0)
+    @test isfinite(γ₀) && abs(γ₀) * max(d.f⁺, d.f⁻) ≤ 1
+
+    # The departure keeps the mean of the cloud liquid and adds its variance d′² = ν² ⟨q²⟩ (Gauss-Hermite is exact for
+    # these polynomials); zero departure is the placement itself
+    for variance in (0.0, 1e-11, 1e-9)
+        ν = PPP.liquid_departure_scale(merge(statistics, (; departure_variance = variance)), d)
+        @test 0 ≤ ν * last(PPP.gauss_hermite_nodes) < 1
+        dᵛ = merge(d, (; ν))
+        @test PPP.departed_liquid_moment(dᵛ, 1.0, 0.0) ≈ PPP.placed_cloud_liquid_moment(d, 1.0, 0.0)
+        @test PPP.departed_liquid_moment(dᵛ, 2.0, 0.0) ≈ (1 + ν^2) * PPP.placed_cloud_liquid_moment(d, 2.0, 0.0)
+        variance == 0 && @test PPP.departed_liquid_moment(dᵛ, 2.47, 1e-5) == PPP.placed_cloud_liquid_moment(d, 2.47, 1e-5)
+        variance == 1e-11 && @test ν^2 * PPP.placed_cloud_liquid_moment(d, 2.0, 0.0) ≈ variance rtol = 1e-2
+    end
+end
+
 #####
 ##### A cold column with the closure's distribution
 #####
@@ -224,6 +258,13 @@ total_water(model) = (μ = model.microphysical_fields; ρ = column_values(model.
     stats = Breeze.AtmosphereModels.supersaturation_statistics(TurbulenceClosureStatistics(), 1, 1, 30, model.grid,
                                                               model.closure, model.closure_fields, nothing)
     @test all(stats.μⁱ .> stats.μ)
+    @test all(abs.(stats.ρⁱ) .≤ 1 + 1e-12)
+    # The second moments of the ice and of the departure of the cloud liquid: realizable and finite
+    m = model.closure_fields.subgrid_cloud.moments
+    qⁱ′² = column_values(m.qⁱ′²)
+    qⁱ′sⁱ′ = column_values(m.qⁱ′sⁱ′)
+    @test all(isfinite, qⁱ′sⁱ′) && all(qⁱ′² .≥ 0) && all(column_values(m.qᵈ′²) .≥ 0)
+    @test maximum(abs, qⁱ′sⁱ′) > 0
     # The water of the closed column is conserved
     @test total_water(model) ≈ W₀ rtol = 1e-10
     # The latent conversion the TKE receives at the centers is that of the faces (ice term included)

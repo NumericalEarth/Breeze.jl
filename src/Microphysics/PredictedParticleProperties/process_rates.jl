@@ -675,7 +675,7 @@ end
     # The placement of cloud liquid that every process reads, at the cloud's phase relaxation rate;
     # `nothing` unless `processes = AllProcesses()`. It sets the condensation correlation Γ too.
     distribution = subgrid_process_distribution(p3.condensation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
-                                                ℳ_adjusted.qᶜˡ, T, constants, p3, ρ, transport, cloud, qᵛ⁺ⁱ)
+                                                ℳ_adjusted.qᶜˡ, T, constants, p3, ρ, transport, cloud, qᵛ⁺ⁱ, ℳ_adjusted.qⁱ)
     Γ = placed_condensation_correlation(distribution, Γ)
 
     phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,

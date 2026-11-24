@@ -187,7 +187,7 @@ and cloud droplet distribution from which the cloud's phase relaxation rate `ω�
 @inline subgrid_process_distribution(::CloudCondensationOnly, args...) = nothing
 
 @inline function subgrid_process_distribution(processes::AllProcesses, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, constants,
-                                              p3, ρ, transport, cloud, qᵛ⁺ⁱ = qᵛ⁺ˡ)
+                                              p3, ρ, transport, cloud, qᵛ⁺ⁱ = qᵛ⁺ˡ, qⁱ = zero(qᵛ))
     FT = typeof(qᵛ)
     ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
     ωˡ = p3_cloud_phase_relaxation_rate(p3, qᵛ⁺ˡ, qᶜˡ, T, ρ, transport, cloud, constants)
@@ -200,7 +200,112 @@ and cloud droplet distribution from which the cloud's phase relaxation rate `ω�
     ξⁱˡ = p3_ice_liquid_psychrometric_correction(qᵛ⁺ⁱ, T, constants)
     s̄ⁱ = qᵛ - qᵛ⁺ⁱ + ξⁱˡ * q̄ᶜˡ
     mⁱ, k, σʳ = ice_excess_mixture(statistics, d, s̄ⁱ)
-    return merge(d, (; mⁱ, k, σʳ, ξⁱˡ))
+    dⁱ = merge(d, (; mⁱ, k, σʳ, ξⁱˡ))
+    # The placement of the ice between the two parts and the departure of the cloud liquid from its placement
+    γⁱ = ice_placement_contrast(statistics, dⁱ, max(0, qⁱ))
+    ν = liquid_departure_scale(statistics, dⁱ)
+    return merge(dⁱ, (; γⁱ, ν))
+end
+
+#####
+##### The ice and the departure of the cloud liquid, from their covariance and variance
+#####
+
+# The ice fills the cell in two parts, with the mean preserved and both parts positive:
+#
+#   qⁱ⁺ = q̄ⁱ (1 + γ f⁻) in the saturated part,   qⁱ⁻ = q̄ⁱ (1 - γ f⁺) in the subsaturated part,
+#
+# whose covariance with the excess over ice is q̄ⁱ γ (f⁻ S⁺ - f⁺ S⁻), S± the P-weighted excess over ice of the
+# distributed water in each part. γ is set by the covariance qⁱ′sⁱ′ of the statistics (their steady budget) and kept
+# in |γ| max(f⁺, f⁻) < 1 by the rational bound γ₀ / (1 + (γ₀ max(f⁺, f⁻))⁴)^{1/4}. Zero without the covariance.
+@inline ice_placement_contrast(statistics::NamedTuple{names}, d, qⁱ) where names =
+    ice_placement_contrast(Val(:ice_covariance ∈ names), statistics, d, qⁱ)
+@inline ice_placement_contrast(::Val{false}, statistics, d, qⁱ) = zero(qⁱ)
+
+@inline function ice_placement_contrast(::Val{true}, statistics, d, qⁱ)
+    FT = typeof(qⁱ)
+    C = convert(FT, statistics.ice_covariance)
+    S⁺, S⁻ = ice_excess_part_sums(d)
+    contrast = d.f⁻ * S⁺ - d.f⁺ * S⁻
+    # γ = γ₀ / (1 + (γ₀ f)⁴)^{1/4} with γ₀ = C / (q̄ⁱ contrast), written as C / ((q̄ⁱ contrast)⁴ + (C f)⁴)^{1/4}
+    γ = bounded_ratio(C, ifelse(contrast > 0, qⁱ * contrast, zero(FT)), max(d.f⁺, d.f⁻))
+    return ifelse(contrast > 0, γ, zero(FT))
+end
+
+# x / (y⁴ + (x b)⁴)^{1/4} = x₀ / (1 + (x₀ b)⁴)^{1/4}, x₀ = x / y, bounded by 1/b, formed without x₀ (so finite where y is
+# tiny) and scaled by the larger of |y| and |x b|; zero where both are
+@inline function bounded_ratio(x, y, b)
+    FT = typeof(x)
+    u = abs(y)
+    v = abs(x * b)
+    scale = max(u, v)
+    resolved = scale > 0
+    scaleₛ = ifelse(resolved, scale, one(FT))
+    û = u / scaleₛ
+    v̂ = v / scaleₛ
+    return ifelse(resolved, x / (scaleₛ * sqrt(sqrt(û^4 + v̂^4))), zero(FT))
+end
+
+# The P-weighted excess over ice of the distributed water in the saturated and subsaturated parts (linear in sⁱ, so the
+# residual of the regression on s averages out)
+@inline function ice_excess_part_sums(d)
+    FT = typeof(d.qᶜˡ)
+    sums = map(d.a, d.m, d.σ, d.mⁱ, d.k) do aᵢ, mᵢ, σᵢ, mⁱᵢ, kᵢ
+        bᵢ = mⁱᵢ - kᵢ * mᵢ
+        P⁺, M⁺ = gaussian_interval_moments(mᵢ, σᵢ, zero(FT), zero(FT), false)
+        P⁻, M⁻ = gaussian_lower_moments(mᵢ, σᵢ)
+        (aᵢ * (bᵢ * P⁺ + kᵢ * M⁺), aᵢ * (bᵢ * P⁻ + kᵢ * M⁻))
+    end
+    return sum(map(first, sums)), sum(map(last, sums))
+end
+
+# The relative ice of the two parts, qⁱ±/q̄ⁱ (one without a placement of the ice)
+@inline ice_part_scales(d::NamedTuple{names}) where names = ice_part_scales(Val(:γⁱ ∈ names), d)
+@inline ice_part_scales(::Val{false}, d) = (one(d.qᶜˡ), one(d.qᶜˡ))
+@inline ice_part_scales(::Val{true}, d) = (1 + d.γⁱ * d.f⁻, 1 - d.γⁱ * d.f⁺)
+
+# The departure of the cloud liquid from its placement is multiplicative, qᶜˡ = q(s) (1 + ν ζ), ζ ~ N(0, 1)
+# independent of s: it keeps the mean and adds ν² ⟨q²⟩ = d′² of variance, the departure variance of the statistics
+# (its steady budget). ν is kept below 1/ζ_max of the outermost node of the Gauss-Hermite rule that integrates over ζ,
+# so the liquid stays positive there: ν = ν₀ / (1 + (ν₀ ζ_max)⁴)^{1/4}, ν₀² = d′² / ⟨q²⟩. Zero without the variance.
+@inline liquid_departure_scale(statistics::NamedTuple{names}, d) where names =
+    liquid_departure_scale(Val(:departure_variance ∈ names), statistics, d)
+@inline liquid_departure_scale(::Val{false}, statistics, d) = zero(d.qᶜˡ)
+
+@inline function liquid_departure_scale(::Val{true}, statistics, d)
+    FT = typeof(d.qᶜˡ)
+    second_moment = placed_cloud_liquid_moment(d, convert(FT, 2), zero(FT))
+    return bounded_ratio(sqrt(max(0, convert(FT, statistics.departure_variance))), sqrt(max(0, second_moment)),
+                         convert(FT, last(gauss_hermite_nodes)))
+end
+
+# The probabilists' 8-point Gauss-Hermite rule, ∫ f(ζ) N(ζ; 0, 1) dζ ≈ Σⱼ wⱼ f(ζⱼ): the positive nodes and their weights
+const gauss_hermite_nodes = (0.5390798113513751, 1.6365190424351082, 2.8024858612875416, 4.144547186125894)
+const gauss_hermite_weights = (0.37301225767907614, 0.11723990766175905, 0.009635220120788268, 0.00011261453837536777)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The cell mean of ``qᶜˡ^β (Nᶜˡ/N̄ᶜˡ)^γ`` above `threshold` with the departure of the cloud liquid from its placement,
+``qᶜˡ = q(s) (1 + ν ζ)``: ``Σⱼ wⱼ (1 + ν ζⱼ)^β ⟨q^β (N/N̄)^γ; q ≥ qᵗ / (1 + ν ζⱼ)⟩`` (``qᵗ`` the `threshold`) over the 8-point
+Gauss-Hermite rule in ``ζ``, with the placed moments of [`placed_cloud_liquid_moment`](@ref). Without a departure
+(``ν = 0``) it is that placed moment.
+"""
+@inline departed_liquid_moment(d::NamedTuple{names}, β, threshold, γ = zero(β)) where names =
+    departed_liquid_moment(Val(:ν ∈ names), d, β, threshold, γ)
+
+@inline departed_liquid_moment(::Val{false}, d, β, threshold, γ) = placed_cloud_liquid_moment(d, β, threshold, γ)
+
+@inline function departed_liquid_moment(::Val{true}, d, β, threshold, γ)
+    FT = typeof(threshold)
+    placed = placed_cloud_liquid_moment(d, β, threshold, γ)
+    terms = map(gauss_hermite_nodes, gauss_hermite_weights) do ζ, w
+        f⁺ = 1 + d.ν * convert(FT, ζ)
+        f⁻ = 1 - d.ν * convert(FT, ζ)
+        convert(FT, w) * (f⁺^β * placed_cloud_liquid_moment(d, β, threshold / f⁺, γ) +
+                          f⁻^β * placed_cloud_liquid_moment(d, β, threshold / f⁻, γ))
+    end
+    return ifelse(d.ν > 0, sum(terms), placed)
 end
 
 # ξⁱˡ = 1 + ℒˡ ∂qᵛ⁺ⁱ/∂T / cᵖᵈ: the saturation excess over ice that the evaporation of cloud liquid returns, per unit of
@@ -506,7 +611,7 @@ end
     ℂᵃᵘᵗᵒ₃ = parameters.autoconversion_exponent_droplet
     ℂᵃᵘᵗᵒ₄ = parameters.autoconversion_threshold
     scaled_cloud_number = Nᶜˡ / parameters.autoconversion_reference_concentration
-    moment = placed_cloud_liquid_moment(d, ℂᵃᵘᵗᵒ₂, ℂᵃᵘᵗᵒ₄, ℂᵃᵘᵗᵒ₃)
+    moment = departed_liquid_moment(d, ℂᵃᵘᵗᵒ₂, ℂᵃᵘᵗᵒ₄, ℂᵃᵘᵗᵒ₃)
     subgrid = ℂᵃᵘᵗᵒ₁ * moment * scaled_cloud_number^ℂᵃᵘᵗᵒ₃
     return ifelse(d.degenerate, rain_autoconversion_rate(p3, qᶜˡ, Nᶜˡ, ρ, qʳ), subgrid)
 end
@@ -524,7 +629,7 @@ end
     ℂᵃᶜᶜʳ₂ = parameters.accretion_exponent
     qʳ₊ = max(0, qʳ)
     rain_present = qʳ₊ >= p3.minimum_mass_mixing_ratio
-    moment = placed_cloud_liquid_moment(d, ℂᵃᶜᶜʳ₂, p3.minimum_mass_mixing_ratio)
+    moment = departed_liquid_moment(d, ℂᵃᶜᶜʳ₂, p3.minimum_mass_mixing_ratio)
     subgrid = ifelse(rain_present, ℂᵃᶜᶜʳ₁ * moment * qʳ₊^ℂᵃᶜᶜʳ₂, zero(FT))
     return ifelse(d.degenerate, rain_accretion_rate(p3, qᶜˡ, qʳ, ρ), subgrid)
 end
