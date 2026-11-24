@@ -726,15 +726,17 @@ end
         w′³ == 0 && @test a == 1 / 2
     end
 
-    # as the within-component share tends to one the components tend to the mean (the single Gaussian)
+    # without skewness, as the within-component share tends to one, the components tend to the mean (the single Gaussian);
+    # with skewness the share between the components carries it, and ℂᵍᶜ = 1 is excluded
     pdf = SkewedScalarDoubleGaussianPDF(; ℂᵍᶜ = 1 - 1e-8)
-    moments = (0.3, θv, wθ, θq, wq, qv)
-    m = components(pdf, thermodynamics, p, θ̄, q̄, w′², 0.3, θv, wθ, θq, wq, qv)
+    m = components(pdf, thermodynamics, p, θ̄, q̄, w′², 0.0, θv, wθ, θq, wq, qv)
     @test isapprox(m.θ₁, θ̄; atol = 1e-3) && isapprox(m.θ₂, θ̄; atol = 1e-3)
     @test_throws ArgumentError SkewedScalarDoubleGaussianPDF(; ℂᵍᶜ = 1)
-    C₀, qˡ₀ = assumed_pdf(SkewedScalarDoubleGaussianPDF(), thermodynamics, 1.0, 0.0, 0.5, p, θ̄, 0.0, q̄, w′², (0.0, moments[2:end]...), (0.0, moments[2:end]...))
-    # and a skewed mixture of a subsaturated mean has more cloud than the unskewed one
-    Cᵏ, qˡᵏ = assumed_pdf(SkewedScalarDoubleGaussianPDF(), thermodynamics, 1.0, 0.0, 0.5, p, θ̄, 0.0, q̄, w′², moments, moments)
+    # a skewed mixture of a subsaturated mean has more cloud than the unskewed one
+    q̄ˢ = 7.0e-3
+    moments = (0.3, θv, wθ, θq, wq, qv)
+    C₀, qˡ₀ = assumed_pdf(SkewedScalarDoubleGaussianPDF(), thermodynamics, 1.0, 0.0, 0.5, p, θ̄, 0.0, q̄ˢ, w′², (0.0, moments[2:end]...), (0.0, moments[2:end]...))
+    Cᵏ, qˡᵏ = assumed_pdf(SkewedScalarDoubleGaussianPDF(), thermodynamics, 1.0, 0.0, 0.5, p, θ̄, 0.0, q̄ˢ, w′², moments, moments)
     @test Cᵏ > C₀ > 0 && qˡᵏ > qˡ₀ > 0
 
     # in a column: the distribution's cloud is the assumed PDF of the moments at the centers, finite and positive
