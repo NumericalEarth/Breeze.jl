@@ -101,7 +101,7 @@ downwelling longwave by -0.2 W m⁻².
         p = state.pressure[i, j, k]
         T = state.temperature[i, j, k]
         χ³ = state.ozone[i, j, k]
-        q = grid_moisture_fractions(i, j, k, grid, state.microphysics, ρ, state.moisture[i, j, k], state.microphysical_fields)
+        q = radiative_moisture_fractions(i, j, k, grid, state.microphysics, ρ, state.moisture[i, j, k], state.microphysical_fields)
     end
     dry_air_moles = ρ * Δz / mᵈ
     return (pressure = p,

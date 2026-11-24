@@ -8,7 +8,7 @@ using Oceananigans.Grids: AbstractGrid
 
 using Breeze.AtmosphereModels: AtmosphereModels, AllSkyOptics, ConstantRadiusParticles,
                                cloud_liquid_effective_radius, cloud_ice_effective_radius,
-                               grid_moisture_fractions, specific_prognostic_moisture
+                               radiative_moisture_fractions, specific_prognostic_moisture
 using Breeze.Thermodynamics: ThermodynamicConstants
 
 using KernelAbstractions: @kernel, @index
@@ -130,7 +130,7 @@ end
         qᵛᵉ = specific_prognostic_moisture[i, j, k]
 
         # Get moisture fractions from microphysics
-        q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
+        q = radiative_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
 
         # Extract liquid and ice mass fractions
         qˡ = q.liquid

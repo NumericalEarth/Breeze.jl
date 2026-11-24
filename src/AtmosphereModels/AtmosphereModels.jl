@@ -82,6 +82,7 @@ export
     shared_excess_relaxation_rates,
     moisture_fractions,
     grid_moisture_fractions,
+    radiative_moisture_fractions,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     aerosol_field_names,

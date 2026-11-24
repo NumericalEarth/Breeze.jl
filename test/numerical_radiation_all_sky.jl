@@ -245,6 +245,38 @@ previous_float_type = Oceananigans.defaults.FloatType
         @test -cloudy.ℐ_sw_dn[Nz+1] ≈ -clear.ℐ_sw_dn[Nz+1] rtol = 1e-2
     end
 
+    @testset "Instantaneous precipitation gives radiation the condensate it removes [$(FT)]" for FT in test_float_types()
+        Oceananigans.defaults.FloatType = FT
+        grid = column_grid(FT)
+        microphysics = InstantaneousPrecipitation(FT; equilibrium = MixedPhaseEquilibrium(FT))
+
+        # A supersaturated layer at 1-1.5 km condenses and rains out in the first step
+        all_sky = all_sky_radiation(grid)
+        clear_sky = clear_sky_radiation(grid)
+        models = map((all_sky, clear_sky)) do radiation
+            constants = ThermodynamicConstants()
+            reference_state = ReferenceState(grid, constants; base_pressure = 101325, potential_temperature = 300)
+            clock = Clock(time = DateTime(2024, 6, 21, 12, 0, 0))
+            model = AtmosphereModel(grid; clock, dynamics = AnelasticDynamics(reference_state), microphysics,
+                                    formulation = :LiquidIcePotentialTemperature, radiation)
+            qᵗ(z) = ifelse(CLOUD_BOTTOM < z < CLOUD_TOP, 0.03, 0.010 * exp(-z / 2500))
+            set!(model; θ = z -> 300 + 5e-3 * z, qᵗ)
+            time_step!(model, 10minutes)
+            model
+        end
+
+        # The state keeps no condensate, but radiation sees the condensate of the step
+        μ = models[1].microphysical_fields
+        @test @allowscalar μ.radiative_cloud_liquid[1, 1, CLOUD_CELL] + μ.radiative_cloud_ice[1, 1, CLOUD_CELL] > 0
+        state = NumericalRadiationExt.ColumnState(all_sky, models[1], 0)
+        N = NumericalRadiationExt.number_of_layers(state)
+        layers = @allowscalar [NumericalRadiationExt.layer_state(1, 1, k, grid, state) for k in 1:N]
+        @test sum(layer -> layer.liquid_water_path + layer.ice_water_path, layers) > 0
+
+        # The cloud reflects sunlight that the clear sky lets through
+        @test column_fluxes(all_sky).ℐ_sw_up[end] > column_fluxes(clear_sky).ℐ_sw_up[end]
+    end
+
     @testset "Effective radius [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         grid = column_grid(FT)

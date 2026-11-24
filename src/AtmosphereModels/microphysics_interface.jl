@@ -1043,6 +1043,19 @@ end
 # Fallback for Nothing microphysics (no fields to index)
 @inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵛ, μ) = MoistureMassFractions(qᵛ)
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the moisture mass fractions of cell `(i, j, k)` that radiation sees: the vapor, and the
+cloud liquid and ice whose optics radiation applies. These are the
+[`grid_moisture_fractions`](@ref) of `microphysics`, except for a scheme that removes its
+condensate within the time step, such as `InstantaneousPrecipitation`: its state holds no
+condensate between steps, so it gives radiation the condensate that formed in the last step
+before it was removed.
+"""
+@inline radiative_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, μ) =
+    grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, μ)
+
 #####
 ##### Total condensate and total air density (diagnosed from dry density)
 #####

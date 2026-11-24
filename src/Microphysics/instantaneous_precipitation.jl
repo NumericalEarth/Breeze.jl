@@ -75,13 +75,20 @@ AtmosphereModels.ice_mass_fraction(::IP, model) = nothing
 # Diagnostic vapor + a precipitation-rate field (kg m⁻³ s⁻¹ of condensed/removed water).
 # The ice share of the removed water is kept beside the total, so that a dynamics whose mass
 # follows its water can book the enthalpy of each phase (`precipitation_mass_change!`).
+# The liquid and ice mass fractions of the condensate that formed in the last step, before its
+# removal, are kept for radiation (`radiative_moisture_fractions`); nothing else reads them.
 AtmosphereModels.materialize_microphysical_fields(::IP, grid, bcs) =
-    (; qᵛ = CenterField(grid), precipitation_rate = CenterField(grid), ice_precipitation_rate = CenterField(grid))
+    (; qᵛ = CenterField(grid), precipitation_rate = CenterField(grid), ice_precipitation_rate = CenterField(grid),
+       radiative_cloud_liquid = CenterField(grid), radiative_cloud_ice = CenterField(grid))
 
 # Prognostic vapor only; no stored condensate (all moisture is vapor between steps).
 @inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::IP, ρ, qᵛ, μ)
     return MoistureMassFractions(qᵛ)
 end
+
+# Radiation sees the condensate removed in the last step: the state holds none between steps
+@inline AtmosphereModels.radiative_moisture_fractions(i, j, k, grid, ::IP, ρ, qᵛ, μ) =
+    @inbounds MoistureMassFractions(qᵛ, μ.radiative_cloud_liquid[i, j, k], μ.radiative_cloud_ice[i, j, k])
 
 @inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, ::IP, ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
@@ -222,5 +229,8 @@ end
         # keep reporting the rate of an earlier step (the kernel runs once per time step).
         μ.precipitation_rate[i, j, k] = precipitation_rate
         μ.ice_precipitation_rate[i, j, k] = precipitation_rate * ice_fraction
+        condensed_fraction = condensed_water_density / ρ
+        μ.radiative_cloud_liquid[i, j, k] = condensed_fraction * (1 - ice_fraction)
+        μ.radiative_cloud_ice[i, j, k] = condensed_fraction * ice_fraction
     end
 end
