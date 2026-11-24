@@ -305,16 +305,12 @@ end
     return s, std_s, qn, C
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The assumed PDF of level `k` (Analytic Double Gaussian 1 of Larson et al. 2002): return the
-subgrid cloud fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
-The plumes condense with the `thermodynamics` of the model (`distribution_thermodynamics`): its thermodynamic
-constants and the phase equilibrium of the condensate of its microphysics.
-"""
-@inline function assumed_pdf(pdf::ComponentDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first, w_first,
-                             qw_first, wsec, moments_l, moments_u)
+# The two components of the double Gaussian at a level, which `assumed_pdf` and `component_vapor_excess` share: the
+# interface moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec of the interfaces below, `moments_l`, and above,
+# `moments_u`) interpolated to the level, the weight `a` of the updraft component, the normalized vertical velocities
+# `w1_1`, `w1_2` of the components (before `shoc_assumed_pdf_tilde_to_real`), the means, variances and spreads of θˡⁱ
+# (`thl`) and qᵗ (`qw`) of each component, and their within-component correlation `r`.
+@inline function double_gaussian_components(pdf, zi_u, zi_l, zt_k, thl_first, w_first, qw_first, wsec, moments_l, moments_u)
     cp = pdf.clipping
     FT = typeof(thl_first)
     largeneg = convert(FT, -99999999.99)
@@ -322,8 +318,6 @@ constants and the phase equilibrium of the condensate of its microphysics.
     rt_tol = pdf.rt_tol
     w_tol_sqd = pdf.w_tol * pdf.w_tol
 
-    # Interpolate the interface moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec of the
-    # interfaces below, `moments_l`, and above, `moments_u`, the level) to the level
     interpolate(n, minthresh) = hard_floor(linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k), minthresh)
     w3var = interpolate(1, largeneg)
     thlsec = interpolate(2, zero(FT))
@@ -354,23 +348,42 @@ constants and the phase equilibrium of the condensate of its microphysics.
     w1_2 = ifelse(calm, w_first, w1_2)
 
     # shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters
-    thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 =
-        scalar_plume_parameters(cp, wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, pdf)
-
-    qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 =
-        scalar_plume_parameters(cp, wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, pdf)
-
-    # shoc_assumed_pdf_tilde_to_real
-    w1_1 = w1_1 * sqrtw2 + w_first
-    w1_2 = w1_2 * sqrtw2 + w_first
+    thl = scalar_plume_parameters(cp, wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, pdf)
+    qw = scalar_plume_parameters(cp, wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, pdf)
 
     # shoc_assumed_pdf_inplume_correlations
+    thl1_1, thl1_2, _, _, sqrtthl2_1, sqrtthl2_2 = thl
+    qw1_1, qw1_2, _, _, sqrtqw2_1, sqrtqw2_2 = qw
     testvar = a * sqrtqw2_1 * sqrtthl2_1 + (1 - a) * sqrtqw2_2 * sqrtthl2_2
     uncorrelated = testvar == 0
-    r_qwthl_1 = clip_between(cp, (qwthlsec - a * (qw1_1 - qw_first) * (thl1_1 - thl_first)
-                                  - (1 - a) * (qw1_2 - qw_first) * (thl1_2 - thl_first)) /
-                                 ifelse(uncorrelated, one(FT), testvar), -1, 1, 1)
-    r_qwthl_1 = ifelse(uncorrelated, zero(FT), r_qwthl_1)
+    r = clip_between(cp, (qwthlsec - a * (qw1_1 - qw_first) * (thl1_1 - thl_first)
+                          - (1 - a) * (qw1_2 - qw_first) * (thl1_2 - thl_first)) /
+                         ifelse(uncorrelated, one(FT), testvar), -1, 1, 1)
+    r = ifelse(uncorrelated, zero(FT), r)
+
+    return (; a, w1_1, w1_2, sqrtw2, wthlsec, wqwsec, thl, qw, r)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The assumed PDF of level `k` (Analytic Double Gaussian 1 of Larson et al. 2002): return the
+subgrid cloud fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
+The plumes condense with the `thermodynamics` of the model (`distribution_thermodynamics`): its thermodynamic
+constants and the phase equilibrium of the condensate of its microphysics.
+"""
+@inline function assumed_pdf(pdf::ComponentDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first, w_first,
+                             qw_first, wsec, moments_l, moments_u)
+    cp = pdf.clipping
+    rt_tol = pdf.rt_tol
+    c = double_gaussian_components(pdf, zi_u, zi_l, zt_k, thl_first, w_first, qw_first, wsec, moments_l, moments_u)
+    a, wthlsec, wqwsec, r_qwthl_1 = c.a, c.wthlsec, c.wqwsec, c.r
+    thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 = c.thl
+    qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 = c.qw
+
+    # shoc_assumed_pdf_tilde_to_real
+    w1_1 = c.w1_1 * c.sqrtw2 + w_first
+    w1_2 = c.w1_2 * c.sqrtw2 + w_first
 
     # shoc_assumed_pdf_compute_temperature
     Tl1_1 = component_liquid_water_temperature(pdf, thermodynamics, thl1_1, qw1_1, pval)
@@ -420,51 +433,10 @@ and ``σⁱᵢ`` with ``∂qᵛ⁺ⁱ/∂θ``, for the ice outside the distribut
 """
 @inline function component_vapor_excess(pdf::ComponentDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval,
                                         thl_first, w_first, qw_first, wsec, moments_l, moments_u)
-    cp = pdf.clipping
-    FT = typeof(thl_first)
-    largeneg = convert(FT, -99999999.99)
-    thl_tol = pdf.thl_tol
-    rt_tol = pdf.rt_tol
-    w_tol_sqd = pdf.w_tol * pdf.w_tol
-
-    interpolate(n, minthresh) = hard_floor(linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k), minthresh)
-    w3var = interpolate(1, largeneg)
-    thlsec = interpolate(2, zero(FT))
-    wthlsec = interpolate(3, largeneg)
-    qwthlsec = interpolate(4, largeneg)
-    wqwsec = interpolate(5, largeneg)
-    qwsec = interpolate(6, zero(FT))
-
-    sqrtw2 = zero_safe_sqrt(wsec)
-    sqrtthl = clip_max(cp, thl_tol, zero_safe_sqrt(thlsec), thl_tol)
-    sqrtqt = clip_max(cp, rt_tol, zero_safe_sqrt(qwsec), rt_tol)
-
-    calm = wsec <= w_tol_sqd
-    wsec_safe = ifelse(calm, one(FT), wsec)
-    Skew_w = w3var / sqrt(wsec_safe * wsec_safe * wsec_safe)
-    w2_1 = within_component_share(pdf, Skew_w)
-    omw = 1 - w2_1
-    a = clip_between(cp, convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))),
-                     minimum_updraft_fraction(pdf), maximum_updraft_fraction(pdf), 1)
-    sqrtw2t = sqrt(1 - w2_1)
-    w1_1 = sqrt((1 - a) / a) * sqrtw2t
-    w1_2 = -1 * sqrt(a / (1 - a)) * sqrtw2t
-    Skew_w = ifelse(calm, zero(FT), Skew_w)
-    a = ifelse(calm, convert(FT, 0.5), a)
-    w1_1 = ifelse(calm, w_first, w1_1)
-    w1_2 = ifelse(calm, w_first, w1_2)
-
-    thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 =
-        scalar_plume_parameters(cp, wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, pdf)
-    qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 =
-        scalar_plume_parameters(cp, wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, pdf)
-
-    testvar = a * sqrtqw2_1 * sqrtthl2_1 + (1 - a) * sqrtqw2_2 * sqrtthl2_2
-    uncorrelated = testvar == 0
-    r = clip_between(cp, (qwthlsec - a * (qw1_1 - qw_first) * (thl1_1 - thl_first)
-                          - (1 - a) * (qw1_2 - qw_first) * (thl1_2 - thl_first)) /
-                         ifelse(uncorrelated, one(FT), testvar), -1, 1, 1)
-    r = ifelse(uncorrelated, zero(FT), r)
+    c = double_gaussian_components(pdf, zi_u, zi_l, zt_k, thl_first, w_first, qw_first, wsec, moments_l, moments_u)
+    a, r = c.a, c.r
+    thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 = c.thl
+    qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 = c.qw
 
     liquid = (PlanarLiquidSurface(), WarmPhaseEquilibrium())
     ice = (PlanarIceSurface(), IceSurfaceEquilibrium())
