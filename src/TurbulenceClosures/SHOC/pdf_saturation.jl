@@ -75,8 +75,25 @@ end
 
 @inline plume_heat_capacity(constants, qw) = vapor_equivalent_heat_capacity(MoistureMassFractions(qw), constants)
 
+# Saturation over ice at every temperature: the surface of the ice outside the distributed water (P3's ice), for
+# the saturation excess of the distributed water over ice (`ice_saturation_thermodynamics`)
+struct IceSurfaceEquilibrium end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The `thermodynamics` of the distribution (`distribution_thermodynamics`) with saturation over ice at every
+temperature and the latent heat of sublimation: those with which the saturation excess of the distributed water over
+ice, ``sⁱ = qʷ - qᵛ⁺ⁱ``, is linearized, for the ice that condenses outside the distributed water.
+"""
+ice_saturation_thermodynamics(thermodynamics) = merge(thermodynamics, (; phase_equilibrium = IceSurfaceEquilibrium()))
+
+@inline saturation_surface(equilibrium, T) = equilibrated_surface(equilibrium, T)
+@inline saturation_surface(::IceSurfaceEquilibrium, T) = PlanarIceSurface()
+
 # The liquid fraction of the condensate, and its derivative with respect to temperature
 @inline condensate_liquid_fraction(::WarmPhaseEquilibrium, T) = (one(T), zero(T))
+@inline condensate_liquid_fraction(::IceSurfaceEquilibrium, T) = (zero(T), zero(T))
 
 @inline function condensate_liquid_fraction(equilibrium::MixedPhaseEquilibrium, T)
     Tᶠ = equilibrium.freezing_temperature
@@ -108,7 +125,7 @@ end
 @inline function plume_saturation(thermodynamics, Tl, qw, pval)
     constants = thermodynamics.constants
     equilibrium = thermodynamics.phase_equilibrium
-    surface = equilibrated_surface(equilibrium, Tl)
+    surface = saturation_surface(equilibrium, Tl)
     # The saturation specific humidity of the model (the one the microphysics uses),
     # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T), at the density ρ = p / (Rᵐ T) of the component's air with its total
     # water as vapor

@@ -419,8 +419,9 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the phase relaxation rates `(; ωˡ, ωⁱ, ωᶜ)` [s⁻¹] of P3 at density `ρ`, microphysical state
 `ℳ` and thermodynamic state `𝒰`: the coefficients of the vapor excess in the condensation rate
-of cloud liquid (``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ``) and the deposition rate of ice (``ωⁱ``), and their sum
-``ωᶜ = ωˡ + ωⁱ``.
+of cloud liquid (``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ``) and the vapor exchange of ice (``ωⁱ``), and their sum
+``ωᶜ = ωˡ + ωⁱ``; and the two parts of ``ωⁱ``, the deposition on dry ice ``ωᵈⁱ`` and the condensation on the
+liquid coating of ice ``ωʷⁱ``.
 """
 @inline function p3_phase_relaxation_rates(p3, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)
@@ -446,7 +447,8 @@ end
 @inline function phase_relaxation_rates(p3, coefficients)
     ℂᵈⁱᶠᶠ₁ = p3.process_rates.calibration_factor_deposition
     ωˡ = cloud_phase_relaxation_rate(p3.cloud_relaxation, p3, coefficients)
-    ωⁱ = ℂᵈⁱᶠᶠ₁ * coefficients.dry_ice_relaxation / coefficients.ξⁱ +
-         coefficients.coating_relaxation / coefficients.ξˡ
-    return (; ωˡ, ωⁱ, ωᶜ = ωˡ + ωⁱ)
+    ωʷⁱ = coefficients.coating_relaxation / coefficients.ξˡ
+    ωᵈⁱ = ℂᵈⁱᶠᶠ₁ * coefficients.dry_ice_relaxation / coefficients.ξⁱ
+    ωⁱ = ωᵈⁱ + ωʷⁱ
+    return (; ωˡ, ωⁱ, ωᶜ = ωˡ + ωⁱ, ωʷⁱ, ωᵈⁱ)
 end

@@ -34,7 +34,8 @@ using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocit
                                       plume_liquid_water_temperature, plume_saturation,
                                       distribution_thermodynamics,
                                       rate_norm_factor, linear_interp, hard_floor, component_vapor_excess,
-                                      representable_skewness, within_component_share
+                                      representable_skewness, within_component_share, ice_saturation_thermodynamics,
+                                      condensate_liquid_fraction as distributed_condensate_liquid_fraction
 
 
 #####
@@ -702,8 +703,9 @@ end
 # rate, the stored derivatives b_χ of the buoyancy and ĉᵖ Π, momentum before its solve, and the
 # conversions of the solved state and the dissipation of the last stage (diagnostics)
 function applied_flux_conversion_fields(grid, ::AppliedFluxEnergetics, tracer_names)
-    centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :Bᴸˢ, :Bⁱ, :P, :Pⁱ, :Bˢ, :Pˢ, :ωᴮ, :b_θ, :b_qᵛ, :b_qˡ, :b_qⁱ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_b_θ, :stage_b_qᵛ, :stage_b_qˡ, :stage_b_qⁱ, :stage_surface, :shortfall, :after_solves_ρθ, :stage_combination))
-    faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid), η = ZFaceField(grid), c_q = ZFaceField(grid), c_θ = ZFaceField(grid))
+    centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :Bᴸˢ, :Bⁱ, :P, :Pⁱ, :Bˢ, :Pˢ, :ωᴮ, :b_θ, :b_qᵛ, :b_qˡ, :b_qⁱ, :b_qᶜ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_b_θ, :stage_b_qᵛ, :stage_b_qˡ, :stage_b_qⁱ, :stage_surface, :shortfall, :after_solves_ρθ, :stage_combination))
+    faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid), η = ZFaceField(grid), c_q = ZFaceField(grid), c_θ = ZFaceField(grid),
+             ηⁱ = ZFaceField(grid), c_qⁱ = ZFaceField(grid), c_θⁱ = ZFaceField(grid))
     return merge(centers, faces, (ρu⁻ = XFaceField(grid), ρv⁻ = YFaceField(grid),
                                   stage_time_step = Oceananigans.Fields.Field{Nothing, Nothing, Nothing}(grid)))
 end
@@ -1115,13 +1117,13 @@ end
             cl.w′θᵥ′[i, j, k] = w′θᵥ′
             # The stability uses the exact derivatives b_χ of the model's buoyancy at the level
             # (g / θᵥ, the moisture dependence of Π and the loading included):
-            # w′b′ = b_θ w′θˡⁱ′ + b_qᵛ w′qᵗ′ + (b_qˡ - b_qᵛ) w′qˡ′. The buoyancy production of the TKE
+            # w′b′ = b_θ w′θʷ′ + b_qᵛ w′qᵗ′ + (b_qᶜ - b_qᵛ) w′qˡ′, b_qᶜ that of the distributed condensate. The buoyancy production of the TKE
             # equation is not this distribution's: it is the conversion of the fluxes the closure
             # applies (`compute_applied_flux_conversions!`).
             b_qᵛ = cl.b_qᵛ[i, j, k]
             cl.gθ[i, j, k] = cl.b_θ[i, j, k]
             cl.gA[i, j, k] = b_qᵛ
-            cl.Bˡ[i, j, k] = (cl.b_qˡ[i, j, k] - b_qᵛ) * w′qˡ′
+            cl.Bˡ[i, j, k] = (cl.b_qᶜ[i, j, k] - b_qᵛ) * w′qˡ′
         end
     end
 
@@ -1213,8 +1215,8 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
         gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, km]) / 2
         c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(thermodynamics, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
         c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(thermodynamics, θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
-        bˡᵛaʷ⁺ = (cl.b_qˡ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, m, cl, c_q⁺, c_θ⁺)
-        bˡᵛaʷ⁻ = (cl.b_qˡ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, m, cl, c_q⁻, c_θ⁻)
+        bˡᵛaʷ⁺ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, m, cl, c_q⁺, c_θ⁺)
+        bˡᵛaʷ⁻ = (cl.b_qᶜ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, m, cl, c_q⁻, c_θ⁻)
     end
     N²ᶜ = gθᶠ * ∂zθ + gAᶠ * ∂zq
     ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ

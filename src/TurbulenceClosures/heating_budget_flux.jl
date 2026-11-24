@@ -30,7 +30,7 @@
 ##### (a heating that stabilizes stays where it acts, and the gradient closure sees it), and gives its
 ##### energy conversion to the TKE equation, whose production is then P + B + G - ε:
 #####
-#####     G = b_θ Jᑫ - (b̄ˡ - b̄ᵛ) aᴺ c_θ Jᑫ    at the faces, moved to the centers with the half-cell weights.
+#####     G = b_θ Jᑫ - (b̄ᶜ - b̄ᵛ) aᴺ c_θ Jᑫ - (b̄ⁱ - b̄ᵛ) ηⁱ c_θⁱ Jᑫ    at the faces, moved to the centers with the half-cell weights.
 #####
 ##### The first term is the dynamic enthalpy the flux takes from the mean state, exactly (the dynamic
 ##### enthalpy is linear in θˡⁱ at the stage's b_θ, as for the fluxes down the gradient). The second is
@@ -348,12 +348,14 @@ end
 #####
 
 # The buoyancy of a flux of θˡⁱ at the interior face k, per unit flux: b̄_θ, and the latent part
-# -(b̄ˡ - b̄ᵛ) aᴺ c_θ of the condensate flux that the flux of the saturation excess -c_θ J implies
+# -(b̄ᶜ - b̄ᵛ) aᴺ c_θ - (b̄ⁱ - b̄ᵛ) ηⁱ c_θⁱ of the condensate and ice fluxes that the fluxes of the saturation excesses
+# over the distributed condensate, -c_θ J, and over ice, -c_θⁱ J, imply
 @inline function heating_flux_buoyancyᶜᶜᶠ(i, j, k, grid, cl)
     @inbounds begin
         b_θ = (cl.b_θ[i, j, k] + cl.b_θ[i, j, k-1]) / 2
-        bˡᵛ = (cl.b_qˡ[i, j, k] + cl.b_qˡ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
-        latent = -bˡᵛ * cl.aᴺ[i, j, k] * cl.c_θ[i, j, k]
+        bᶜᵛ = (cl.b_qᶜ[i, j, k] + cl.b_qᶜ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        bⁱᵛ = (cl.b_qⁱ[i, j, k] + cl.b_qⁱ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        latent = -bᶜᵛ * cl.aᴺ[i, j, k] * cl.c_θ[i, j, k] - bⁱᵛ * cl.ηⁱ[i, j, k] * cl.c_θⁱ[i, j, k]
     end
     return b_θ, latent
 end

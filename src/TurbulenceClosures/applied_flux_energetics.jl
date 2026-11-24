@@ -126,11 +126,15 @@ end
     Π = (@inbounds(s.p[i, j, k]) / s.standard_pressure)^κ
     qᵗ = q.vapor + q.liquid + q.ice
     ĉᵖ = constants.dry_air.heat_capacity + qᵗ * (constants.vapor.heat_capacity - constants.dry_air.heat_capacity)
+    # The derivative with respect to the condensate of the distributed water: liquid and ice in the proportion of its
+    # phase equilibrium at the temperature of the cell (liquid for a microphysics with prognostic cloud liquid)
+    λ, _ = distributed_condensate_liquid_fraction(s.phase_equilibrium, @inbounds(s.T[i, j, k]))
     @inbounds begin
         cl.b_θ[i, j, k] = b_θ
         cl.b_qᵛ[i, j, k] = b_qᵛ
         cl.b_qˡ[i, j, k] = b_qˡ
         cl.b_qⁱ[i, j, k] = b_qⁱ
+        cl.b_qᶜ[i, j, k] = λ * b_qˡ + (1 - λ) * b_qⁱ
         cl.ĉᵖΠ[i, j, k] = ĉᵖ * Π
     end
 end
@@ -141,7 +145,7 @@ function compute_buoyancy_derivatives!(fields::SubgridCloudFields{<:AppliedFluxE
     grid = model.grid
     cl = fields.cloud
     launch!(grid.architecture, grid, :xyz, _compute_buoyancy_derivatives!, cl, grid, applied_flux_state(model))
-    fill_halo_regions!((cl.b_θ, cl.b_qᵛ, cl.b_qˡ, cl.b_qⁱ))
+    fill_halo_regions!((cl.b_θ, cl.b_qᵛ, cl.b_qˡ, cl.b_qⁱ, cl.b_qᶜ))
     return nothing
 end
 
@@ -247,7 +251,8 @@ function applied_flux_state(model)
             formulation = model.formulation,
             microphysics = model.microphysics,
             microphysical_fields = model.microphysical_fields,
-            constants = model.thermodynamic_constants)
+            constants = model.thermodynamic_constants,
+            phase_equilibrium = condensate_phase_equilibrium(model.microphysics))
 end
 
 function applied_flux_bottom_bcs(model)
@@ -334,8 +339,8 @@ AtmosphereModels.solved_after_thermodynamic_variable(::FlavorOfTKEClosure, name)
 end
 
 # The latent part of the buoyancy conversion at the interior face k from the solved state: Kᶜ ΔN²ᴸ with the gradients
-# of the solved θˡⁱ, total water and condensate and the stage's shares η, aᴺ = η aʷ and coefficients c_q, c_θ, bˡᵛ
-# (see `_latent_corrected_stability!`)
+# of the solved θʷ, distributed water and condensate and the stage's shares η, aᴺ = η aʷ, ηⁱ and coefficients c_q, c_θ,
+# c_qⁱ, c_θⁱ (see `_latent_corrected_stability!`)
 @inline function solved_latent_conversionᶜᶜᶠ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
     @inbounds begin
         ρ⁺ = s.ρ[i, j, k]
@@ -348,9 +353,11 @@ end
         qᶜ⁻ = qʷ⁻ - s.ρqᵛᵉ[i, j, k-1] / ρ⁻
         Δz = Δzᶜᶜᶠ(i, j, k, grid)
         ∂z_s = (cl.c_q[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θ[i, j, k] * (θ⁺ - θ⁻)) / Δz
+        ∂z_sⁱ = (cl.c_qⁱ[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θⁱ[i, j, k] * (θ⁺ - θ⁻)) / Δz
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
-        bˡᵛ = (cl.b_qˡ[i, j, k] + cl.b_qˡ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
-        return Kᶜ[i, j, k] * bˡᵛ * (cl.η[i, j, k] * ∂z_qᶜ - cl.aᴺ[i, j, k] * ∂z_s)
+        bᶜᵛ = (cl.b_qᶜ[i, j, k] + cl.b_qᶜ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        bⁱᵛ = (cl.b_qⁱ[i, j, k] + cl.b_qⁱ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        return Kᶜ[i, j, k] * (bᶜᵛ * (cl.η[i, j, k] * ∂z_qᶜ - cl.aᴺ[i, j, k] * ∂z_s) - bⁱᵛ * cl.ηⁱ[i, j, k] * ∂z_sⁱ)
     end
 end
 
@@ -845,18 +852,38 @@ end
 ##### is the work of the latent heat of the subgrid condensation and is taken from the internal energy.
 ##### aᴺ = η aʷ is stored: the share of the flux of the saturation excess that condenses.
 #####
+##### (b̄ˡ - b̄ᵛ) is that of the distributed condensate, b̄ᶜ - b̄ᵛ with b_qᶜ = λ b_qˡ + (1 - λ) b_qⁱ for the liquid
+##### fraction λ of its phase equilibrium (λ = 1 for cloud liquid), so that the latent heat of its buoyancy is the
+##### one with which c_θ is formed.
+#####
+##### Ice outside the distributed water (P3's ice) fills the cell and relaxes the vapor excess over ice at its own
+##### rate ωⁱ; it is not equilibrium condensate, so it has no target of its own and the closure applies -Kᶜ ∂z qⁱ to
+##### it as to a passive scalar. A displaced parcel deposits on its ice the share ηⁱ of the change of its saturation
+##### excess over ice sⁱ = c_qⁱ qʷ - c_θⁱ θʷ (linearized with qᵛ⁺ⁱ and ℒⁱ), so the ice flux the turbulence carries
+##### exceeds the applied one by ηⁱ w′sⁱ′ = -Kᶜ ηⁱ ∂z s̄ⁱ, and the latent correction gains the ice term
+#####
+#####   ΔN²ᴸ = η (b̄ᶜ - b̄ᵛ) (∂z qᶜ - aʷ ∂z s̄) - ηⁱ (b̄ⁱ - b̄ᵛ) ∂z s̄ⁱ,
+#####
+##### with the shares of `saturated_response_sharesᶜᶜᶠ`: in the saturated part the distributed condensate and the
+##### ice share the vapor excess in proportion to their rates, and in the subsaturated part the ice alone takes it.
+##### Deposition is buoyant with ℒⁱ (through b_qⁱ), condensation with the latent heat of the distributed condensate.
+##### Without ice ηⁱ = 0 and the correction is unchanged. The ice term enters Bᴸ, the conversion of the solved state
+##### and the latent part of the heating budget flux like the condensate term, and its energy is drawn from the
+##### internal energy with them.
+#####
 
-# The rate ωᶜ (s⁻¹) at which the condensate of the cell absorbs vapor excess, from the microphysics
-# (`AtmosphereModels.phase_relaxation_rate`; 0 without condensing microphysics). It includes the
-# psychrometric correction ξ of the latent heating (P3: ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ), so x = tₑ ωᶜ.
-@inline function cell_phase_relaxation_rate(i, j, k, grid, s)
+# The rates (s⁻¹) at which the condensate of the cell absorbs vapor excess, from the microphysics
+# (`AtmosphereModels.phase_relaxation_rates`; 0 without condensing microphysics): ωˡ of the distributed condensate
+# and ωⁱ of the ice outside the distributed water. They include the psychrometric correction ξ of the latent
+# heating (P3: ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ), so x = tₑ ω.
+@inline function cell_phase_relaxation_rates(i, j, k, grid, s)
     @inbounds begin
         ρ = s.ρ[i, j, k]
         qᵛᵉ = s.qᵛᵉ[i, j, k]
     end
     q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵛᵉ, s.microphysical_fields)
     𝒰 = AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid, s.formulation, s.dynamics, q)
-    return AtmosphereModels.phase_relaxation_rate(i, j, k, grid, s.microphysics, s.microphysical_fields, 𝒰, s.constants)
+    return AtmosphereModels.phase_relaxation_rates(i, j, k, grid, s.microphysics, s.microphysical_fields, 𝒰, s.constants)
 end
 
 """
@@ -875,11 +902,30 @@ down to ``x = 0``, where ``η = 0``.
     return ifelse(small, x * (1 / convert(FT, 2) - x * (1 / convert(FT, 6) - x / 24)), 1 + expm1(-xˢ) / xˢ)
 end
 
-# η at the face k: 1 for a microphysics that removes the vapor excess instantly (saturation
-# adjustment), without forming tₑ ωᶜ = ∞; otherwise η(tₑ ωᶜ) with ωᶜ interpolated to the face
-@inline saturated_response_shareᶜᶜᶠ(::Val{true}, tₑ, i, j, k, grid, s) = one(tₑ)
-@inline saturated_response_shareᶜᶜᶠ(::Val{false}, tₑ, i, j, k, grid, s) =
-    condensing_fraction(tₑ * (cell_phase_relaxation_rate(i, j, k, grid, s) + cell_phase_relaxation_rate(i, j, k-1, grid, s)) / 2)
+# The shares (ηˡ, ηⁱ) of the saturated response at the face k, with the rates of the two cells interpolated to it. The
+# distributed condensate lies in the saturated part of the distribution, which carries the share aʷ of the flux of the
+# saturation excess; the ice fills the cell. In the saturated part both absorb the vapor excess, together at
+# ω⁺ = ωˡ + ωⁱ, in proportion to their rates; in the subsaturated part only the ice, at ωⁱ:
+#
+#     ηˡ = (ωˡ / ω⁺) η(tₑ ω⁺),    ηⁱ = aʷ (ωⁱ / ω⁺) η(tₑ ω⁺) + (1 - aʷ) η(tₑ ωⁱ).
+#
+# Without ice, ηˡ = η(tₑ ωˡ) and ηⁱ = 0. A microphysics that removes the vapor excess instantly (saturation adjustment)
+# has ηˡ = 1 and no ice outside its distributed water, ηⁱ = 0, without forming tₑ ω = ∞.
+@inline saturated_response_sharesᶜᶜᶠ(::Val{true}, tₑ, aʷ, i, j, k, grid, s) = (one(tₑ), zero(tₑ))
+
+@inline function saturated_response_sharesᶜᶜᶠ(::Val{false}, tₑ, aʷ, i, j, k, grid, s)
+    ω⁺ = cell_phase_relaxation_rates(i, j, k, grid, s)
+    ω⁻ = cell_phase_relaxation_rates(i, j, k-1, grid, s)
+    ωˡ = (ω⁺.ωˡ + ω⁻.ωˡ) / 2
+    ωⁱ = (ω⁺.ωⁱ + ω⁻.ωⁱ) / 2
+    ωᶜ = ωˡ + ωⁱ
+    ηᶜ = condensing_fraction(tₑ * ωᶜ)
+    absorbing = ωᶜ > 0
+    ωᶜₛ = ifelse(absorbing, ωᶜ, one(ωᶜ))
+    ηˡ = ifelse(absorbing, ωˡ / ωᶜₛ, one(ωᶜ)) * ηᶜ
+    ηⁱ = aʷ * ifelse(absorbing, ωⁱ / ωᶜₛ, zero(ωᶜ)) * ηᶜ + (1 - aʷ) * condensing_fraction(tₑ * ωⁱ)
+    return ηˡ, ηⁱ
+end
 
 # aʷ = w′qˡ′ / w′s′ at the center k: the condensate flux of the distribution there over the flux of the
 # saturation excess s = c_q qᵗ - c_θ θˡⁱ formed from the face moments interpolated to the center, which
@@ -917,8 +963,16 @@ end
         c_q = (c_q⁺ + c_q⁻) / 2
         c_θ = (c_θ⁺ + c_θ⁻) / 2
         ∂z_s = (c_q * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
+        # The saturation excess of the distributed water over ice, sⁱ = c_qⁱ qʷ - c_θⁱ θʷ, for the ice outside it
+        ice = ice_saturation_thermodynamics(thermodynamics)
+        c_qⁱ⁺, c_θⁱ⁺, _ = saturation_excess_coefficients(ice, θ⁺, qʷ⁺, s.p[i, j, kₛ])
+        c_qⁱ⁻, c_θⁱ⁻, _ = saturation_excess_coefficients(ice, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        c_qⁱ = (c_qⁱ⁺ + c_qⁱ⁻) / 2
+        c_θⁱ = (c_θⁱ⁺ + c_θⁱ⁻) / 2
+        ∂z_sⁱ = (c_qⁱ * (qʷ⁺ - qʷ⁻) - c_θⁱ * (θ⁺ - θ⁻)) / Δz
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
-        bˡᵛ = (cl.b_qˡ[i, j, kₛ] + cl.b_qˡ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
+        bᶜᵛ = (cl.b_qᶜ[i, j, kₛ] + cl.b_qᶜ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
+        bⁱᵛ = (cl.b_qⁱ[i, j, kₛ] + cl.b_qⁱ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
         N²ᵇ = applied_stratificationᶜᶜᶠ(i, j, kₛ, grid, s, cl)
 
         # aʷ = w′qˡ′ / w′s′ formed at the centers above and below, where numerator and denominator come
@@ -932,22 +986,25 @@ end
         𝕊ᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, kₛ, grid, closure_ij, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
         tₑ = ℓ / (𝕊ᴰ * u)
         instantaneous = Val(AtmosphereModels.instantaneous_phase_relaxation(s.microphysics))
-        η = saturated_response_shareᶜᶜᶠ(instantaneous, tₑ, i, j, kₛ, grid, s)
+        η, ηⁱ = saturated_response_sharesᶜᶜᶠ(instantaneous, tₑ, aʷ, i, j, kₛ, grid, s)
         aᴺ = η * aʷ
 
-        ΔN²ᴸ = η * bˡᵛ * (∂z_qᶜ - aʷ * ∂z_s)
+        ΔN²ᴸ = η * bᶜᵛ * (∂z_qᶜ - aʷ * ∂z_s) - ηⁱ * bⁱᵛ * ∂z_sⁱ
         N²ᵉ = N²ᵇ - ΔN²ᴸ
         interior = k > 1
         cl.aʷ[i, j, k] = ifelse(interior, aʷ, zero(FT))
         cl.aᴺ[i, j, k] = ifelse(interior, aᴺ, zero(FT))
         cl.c_θ[i, j, k] = ifelse(interior, c_θ, zero(FT))
         cl.c_q[i, j, k] = ifelse(interior, c_q, zero(FT))
+        cl.c_θⁱ[i, j, k] = ifelse(interior, c_θⁱ, zero(FT))
+        cl.c_qⁱ[i, j, k] = ifelse(interior, c_qⁱ, zero(FT))
+        cl.ηⁱ[i, j, k] = ifelse(interior, ηⁱ, zero(FT))
         cl.η[i, j, k] = ifelse(interior, η, zero(FT))
         cl.ΔN²ᴸ[i, j, k] = ifelse(interior, ΔN²ᴸ, zero(FT))
         # The static stability the mixing length and the stability functions read: the latent one, that of the mean state
         # with the distribution's mean liquid, or the initial one
         N²⁰ = N²[i, j, k]
-        N²ˢ = condensate_flux_stratification(closure_ij.static_stability.fraction.stratification, N²ᵉ, N²ᵇ, bˡᵛ,
+        N²ˢ = condensate_flux_stratification(closure_ij.static_stability.fraction.stratification, N²ᵉ, N²ᵇ, bᶜᵛ,
                                              cl.qˡ[i, j, kₛ] - cl.qˡ[i, j, kₛ-1], qᶜ⁺ - qᶜ⁻, Δz, N²⁰)
         N²[i, j, k] = ifelse(interior, relax_stability(N²⁰, N²ˢ, ω), N²⁰)
     end
@@ -1021,9 +1078,9 @@ end
         c_θ = (c_θ⁺ + c_θ⁻) / 2
         ∂z_s = ((c_q⁺ + c_q⁻) / 2 * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
-        bˡᵛ = (cl.b_qˡ[i, j, kₛ] + cl.b_qˡ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
+        bᶜᵛ = (cl.b_qᶜ[i, j, kₛ] + cl.b_qᶜ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
         a = saturated_stability_weightᶜᶜᶠ(i, j, kₛ, grid, closure_ij.static_stability.fraction, buoyancy, tracers, closure_fields)
-        ΔN²ᴸ = bˡᵛ * (∂z_qᶜ - a * ∂z_s)
+        ΔN²ᴸ = bᶜᵛ * (∂z_qᶜ - a * ∂z_s)
         interior = k > 1
         cl.aʷ[i, j, k] = ifelse(interior, a, zero(FT))
         cl.aᴺ[i, j, k] = ifelse(interior, a, zero(FT))

@@ -64,6 +64,7 @@ export
     supersaturation_statistics_model_fields,
     saturated_fraction,
     phase_relaxation_rate,
+    phase_relaxation_rates,
     instantaneous_phase_relaxation,
 
     # Microphysics interface

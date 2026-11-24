@@ -353,5 +353,12 @@ AtmosphereModels.instantaneous_phase_relaxation(bμp::BulkMicrophysics) =
 @inline AtmosphereModels.phase_relaxation_rate(i, j, k, grid, cloud_formation::NonEquilibriumCloudFormation, μ, 𝒰, constants) =
     constant_formation_rate(cloud_formation.liquid, grid) + constant_formation_rate(cloud_formation.ice, grid)
 
+@inline AtmosphereModels.phase_relaxation_rates(i, j, k, grid, bμp::BulkMicrophysics, μ, 𝒰, constants) =
+    AtmosphereModels.phase_relaxation_rates(i, j, k, grid, bμp.cloud_formation, μ, 𝒰, constants)
+
+# The cloud liquid is distributed; the cloud ice is not
+@inline AtmosphereModels.phase_relaxation_rates(i, j, k, grid, cloud_formation::NonEquilibriumCloudFormation, μ, 𝒰, constants) =
+    (; ωˡ = constant_formation_rate(cloud_formation.liquid, grid), ωⁱ = constant_formation_rate(cloud_formation.ice, grid))
+
 @inline constant_formation_rate(formation::ConstantRateCondensateFormation, grid) = convert(eltype(grid), formation.rate)
 @inline constant_formation_rate(formation, grid) = zero(eltype(grid))
