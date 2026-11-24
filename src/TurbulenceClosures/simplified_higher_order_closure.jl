@@ -191,7 +191,13 @@ function Base.show(io::IO, closure::SimplifiedHigherOrderClosure)
               "│   ├── third_moment: ", summary(d.third_moment), '\n',
               "│   ├── stratification_number_bound: ", summary(d.stratification_number_bound), '\n',
               "│   ├── skewness: ", summary(d.skewness), '\n',
-              "│   └── assumed_pdf: ", summary(d.assumed_pdf), " with ", summary(d.assumed_pdf.clipping), '\n',
-              "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
+              "│   ", isnothing(d.liquid_flux) ? "└" : "├", "── assumed_pdf: ", assumed_pdf_summary(d.assumed_pdf), '\n')
+    isnothing(d.liquid_flux) || print(io, "│   └── liquid_flux: ", summary(d.liquid_flux), '\n')
+    isnothing(closure.heating_budget_flux) || print(io, "├── heating_budget_flux: ", summary(closure.heating_budget_flux), '\n')
+    isnothing(closure.total_water_budget_flux) || print(io, "├── total_water_budget_flux: ", summary(closure.total_water_budget_flux), '\n')
+    print(io, "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
               "└── solver: ", summary(closure.solver))
 end
+
+# An assumed PDF with the policy that imposes its bounds, or one without bounds
+assumed_pdf_summary(pdf) = hasproperty(pdf, :clipping) ? string(summary(pdf), " with ", summary(pdf.clipping)) : summary(pdf)

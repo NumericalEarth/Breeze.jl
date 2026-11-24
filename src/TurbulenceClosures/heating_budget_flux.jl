@@ -250,10 +250,26 @@ end
 ##### The redistributed heating and the flux, column by column
 #####
 
-# The heating as redistributed, `s`, and that of its cooling part min(𝒬, 0), `sᶜ`, of the column at once: the matrix of
-# `balance_sink!` with the shape ω = max(e, 0) and the exchange length ℂᑫᴸ ℓ, eliminated once for the two right-hand
-# sides. `work` holds the eliminated upper diagonal.
-@inline function balance_redistributed_heating!(s, sᶜ, work, i, j, grid, ℂᑫᴸ, 𝒬, e, ρ, ℓᵐ)
+# The cooling part min(𝒬, 0) of a heating, as an array of the centers
+struct CoolingPart{Q}
+    heating :: Q
+end
+
+@inline Base.getindex(c::CoolingPart, i, j, k) = @inbounds min(c.heating[i, j, k], zero(eltype(c.heating)))
+
+# Two sources of the column as the turbulence redistributes them, `s₁` and `s₂`, at once: the matrix of
+# `balance_sink!` with the shape ω = max(e, 0) and the exchange length ℂᴸ ℓ, eliminated once for the two right-hand
+# sides `source₁` and `source₂` (arrays of the centers). `work` holds the eliminated upper diagonal. The heating budget
+# flux redistributes its heating and the cooling part of it, the total water budget flux one source (`nothing` second).
+# A second source of `nothing` is none (the total water budget flux has one source)
+@inline source_value(source, i, j, k, FT) = @inbounds source[i, j, k]
+@inline source_value(::Nothing, i, j, k, FT) = zero(FT)
+@inline store_source!(s, i, j, k, value) = @inbounds s[i, j, k] = value
+@inline store_source!(::Nothing, i, j, k, value) = nothing
+@inline eliminate_source!(s, work, i, j, k) = @inbounds s[i, j, k] -= work[i, j, k] * s[i, j, k+1]
+@inline eliminate_source!(::Nothing, work, i, j, k) = nothing
+
+@inline function balance_redistributed_sources!(s₁, s₂, work, i, j, grid, ℂᴸ, source₁, source₂, e, ρ, ℓᵐ)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
     tiny = sqrt(floatmin(FT))
@@ -277,27 +293,26 @@ end
                 lower = -a⁻ * ω / share
             end
             if k < Nz
-                a = sink_exchange_coefficientᶜᶜᶠ(i, j, k + 1, grid, ℂᑫᴸ, ρ, ℓᵐ)
+                a = sink_exchange_coefficientᶜᶜᶠ(i, j, k + 1, grid, ℂᴸ, ρ, ℓᵐ)
                 ω⁺ = max(e[i, j, k+1], zero(FT))
                 share = ω + ω⁺ + tiny
                 diagonal += a * ω⁺ / share
                 upper = -a * ω / share
                 a⁻ = a
             end
-            heating = 𝒬[i, j, k]
             pivot = diagonal - lower * c′
-            d′ = (m * heating - lower * d′) / pivot
-            d′ᶜ = (m * min(heating, zero(FT)) - lower * d′ᶜ) / pivot
+            d′ = (m * source₁[i, j, k] - lower * d′) / pivot
+            d′ᶜ = (m * source_value(source₂, i, j, k, FT) - lower * d′ᶜ) / pivot
             c′ = upper / pivot
             work[i, j, k] = c′
-            s[i, j, k] = d′
-            sᶜ[i, j, k] = d′ᶜ
+            s₁[i, j, k] = d′
+            store_source!(s₂, i, j, k, d′ᶜ)
             ω⁻ = ω
             ω = ω⁺
         end
         for k in Nz-1:-1:1
-            s[i, j, k] -= work[i, j, k] * s[i, j, k+1]
-            sᶜ[i, j, k] -= work[i, j, k] * sᶜ[i, j, k+1]
+            s₁[i, j, k] -= work[i, j, k] * s₁[i, j, k+1]
+            eliminate_source!(s₂, work, i, j, k)
         end
     end
     return nothing
@@ -311,7 +326,7 @@ end
     hb = getclosure(i, j, closure).heating_budget_flux
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
-    balance_redistributed_heating!(cl.sᑫ, cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, cl.𝒬, e, ρ, ℓᵐ)
+    balance_redistributed_sources!(cl.sᑫ, cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, cl.𝒬, CoolingPart(cl.𝒬), e, ρ, ℓᵐ)
     below = zero(FT)
     belowᶜ = zero(FT)
     @inbounds begin

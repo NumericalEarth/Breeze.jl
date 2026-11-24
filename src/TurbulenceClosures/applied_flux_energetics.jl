@@ -214,8 +214,10 @@ end
     return (wˡᵒʷ * Bˡᵒʷ + wᵘᵖ * Bᵘᵖ) / ρΔz, (wˡᵒʷ * Pˡᵒʷ + wᵘᵖ * Pᵘᵖ) / ρΔz, (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
 end
 
-# The latent part of the buoyancy production at a face, Kᶜ ΔN²ᴸ (see `_latent_corrected_stability!`)
-@inline latent_conversionᶜᶜᶠ(i, j, k, grid, cl, Kᶜ) = @inbounds Kᶜ[i, j, k] * cl.ΔN²ᴸ[i, j, k]
+# The latent part of the buoyancy production at a face, Kᶜ ΔN²ᴸ (see `_latent_corrected_stability!`), or with a
+# `LiquidFluxVarianceRelation` that of its flux of liquid (liquid_flux_variance_relation.jl)
+@inline latent_conversionᶜᶜᶠ(i, j, k, grid, cl, Kᶜ) =
+    hasproperty(cl, :Bˡᶠ) ? @inbounds(Kᶜ[i, j, k] * cl.Λᴸ[i, j, k] + cl.Bˡᶠ[i, j, k]) : @inbounds(Kᶜ[i, j, k] * cl.ΔN²ᴸ[i, j, k])
 
 # The conversions of the surface fluxes within the bottom half-cell: the work of the surface
 # stress on the lowest level, -u₁ 𝒯ˣ - v₁ 𝒯ʸ (𝒯 the upward flux of ρu, ρv), and the dynamic
@@ -241,9 +243,10 @@ end
     i, j, k = @index(Global, NTuple)
     B, P, Bᴸ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     Bˢ, Pˢ = surface_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, u, v, bottom_bcs, bc_args)
-    # The conversion of the heating budget flux (zero without one); its latent part is drawn from the internal energy with Bᴸ
+    # The conversions of the budget fluxes (zero without them); their latent parts are drawn from the internal energy with Bᴸ
     Gᑫ = store_heating_flux_conversions!(cl, i, j, k, grid, s.ρ)
-    B = B + Bˢ + Bᴸ + Gᑫ
+    Gᵇ = store_budget_flux_conversions!(cl, i, j, k, grid, s.ρ)
+    B = B + Bˢ + Bᴸ + Gᑫ + Gᵇ
     @inbounds begin
         cl.B[i, j, k] = B
         cl.Bᴸ[i, j, k] = Bᴸ
@@ -292,6 +295,7 @@ function compute_applied_flux_conversions!(fields::SubgridCloudFields{<:AppliedF
     cl = fields.cloud
     s = applied_flux_state(model)
     u, v = model.velocities.u, model.velocities.v
+    compute_liquid_flux_conversion!(fields, closure, model, s)
     launch!(arch, grid, :xyz, _compute_applied_flux_conversions!, cl, grid, closure, s, closure_fields.Kᶜ,
             closure_fields.Kᵘ, u, v, tracers[TKE_NAME], applied_flux_bottom_bcs(model), boundary_condition_args(model))
     return nothing
@@ -383,8 +387,11 @@ end
         ∂z_sⁱ = (cl.c_qⁱ[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θⁱ[i, j, k] * (θ⁺ - θ⁻)) / Δz
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
         bᶜᵛ, bⁱᵛ, bˡᵛ = latent_buoyancy_derivativesᶜᶜᶠ(i, j, k, cl)
-        return Kᶜ[i, j, k] * (bᶜᵛ * (cl.η[i, j, k] * ∂z_qᶜ - cl.aᴺ[i, j, k] * ∂z_s) - bⁱᵛ * cl.ηⁱ[i, j, k] * ∂z_sⁱ -
-                              bˡᵛ * cl.ηʷⁱ[i, j, k] * ∂z_s)
+        condensate = bᶜᵛ * (cl.η[i, j, k] * ∂z_qᶜ - cl.aᴺ[i, j, k] * ∂z_s)
+        outside = - bⁱᵛ * cl.ηⁱ[i, j, k] * ∂z_sⁱ - bˡᵛ * cl.ηʷⁱ[i, j, k] * ∂z_s
+        # with a `LiquidFluxVarianceRelation` the condensate part is that of its flux of liquid, less the applied flux
+        return Kᶜ[i, j, k] * (solved_condensate_conversion(cl, i, j, k, condensate, bᶜᵛ * ∂z_qᶜ) + outside) +
+               liquid_flux_buoyancy(cl, i, j, k)
     end
 end
 
@@ -431,12 +438,12 @@ end
 # The buoyancy production in the stage tendency: the positive part of all of it, or, where the conversions of the solved
 # state are given before the TKE solve, of the stage-state conversions of the surface fluxes and of the heating budget flux
 @inline explicit_buoyancy_conversion(cl, i, j, k, B, injected) =
-    @inbounds ifelse(injected, max(cl.Bˢ[i, j, k] + heating_flux_conversion(cl, i, j, k), zero(B)), max(B, zero(B)))
+    @inbounds ifelse(injected, max(cl.Bˢ[i, j, k] + budget_flux_conversions(cl, i, j, k), zero(B)), max(B, zero(B)))
 
 # The stage-state conversions the correction after the solves counts as converted: with the conversions of the solved
 # state given before the TKE solve, the latent part is that of the solved state, not of the stage
 @inline stage_state_conversion(cl, i, j, k, injected) =
-    @inbounds cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + heating_flux_conversion(cl, i, j, k) + ifelse(injected, zero(cl.Bᴸ[i, j, k]), cl.Bᴸ[i, j, k])
+    @inbounds cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + budget_flux_conversions(cl, i, j, k) + ifelse(injected, zero(cl.Bᴸ[i, j, k]), cl.Bᴸ[i, j, k])
 
 #####
 ##### The floor of e in the buoyancy sink rate
@@ -1152,6 +1159,7 @@ end
         cl.ηʷⁱ[i, j, k] = ifelse(interior, L.ηʷⁱ, zero(FT))
         cl.ΔN²ᴸ[i, j, k] = ifelse(interior, L.ΔN²ᴸ, zero(FT))
     end
+    store_outside_latent_correction!(cl, i, j, k, interior, L)
     return nothing
 end
 
@@ -1236,6 +1244,7 @@ end
 function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergetics, Nothing}, closure_fields, closure, model, tracers, parameters)
     compute_buoyancy_derivatives!(fields, model)
     compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
+    compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
     grid = model.grid
     d = distribution_state(model, nothing)
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)

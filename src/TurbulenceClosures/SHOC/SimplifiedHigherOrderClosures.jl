@@ -17,7 +17,7 @@ export BlendedMixingLength, ColumnStabilityDamping,
        AlgebraicThirdMoment,
        UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
        ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
-       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
+       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, SkewedScalarDoubleGaussianPDF,
        HardClipping, SmoothClipping,
        closure_parameters, with_parameters
 
@@ -55,6 +55,7 @@ include("third_moments.jl")
 include("pdf_saturation.jl")
 include("assumed_pdfs.jl")
 include("smooth_assumed_pdf.jl")
+include("skewed_scalar_pdf.jl")
 include("shoc_parameters.jl")
 
 end # module SimplifiedHigherOrderClosures

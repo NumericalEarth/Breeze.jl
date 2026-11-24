@@ -694,3 +694,83 @@ end
     @test all(θ₁ .≥ θ₀ .* (1 - 1e-12)) && any(θ₁ .> θ₀ .* 1.01)
     @test wθ₁ == wθ₀
 end
+
+@testset "SkewedScalarDoubleGaussianPDF: the mixture has the moments it is given and the skewness the third moment implies" begin
+    model = tke_p3_column(DoubleGaussian())
+    thermodynamics = distribution_thermodynamics(model)
+    components = Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures.skewed_scalar_components
+    p = 9.0e4; θ̄ = 293.0; q̄ = 11.0e-3; w′² = 0.4
+    θv = 0.04; qv = 4e-7; θq = -0.5 * sqrt(θv * qv); wθ = -0.02 * sqrt(w′² * θv); wq = 0.45 * sqrt(w′² * qv)
+    for pdf in (SkewedScalarDoubleGaussianPDF(), SkewedScalarDoubleGaussianPDF(; ℂᵍᵏ = 2, ℂᵍᶜ = 0.3)), w′³ in (0.0, 0.3, -0.2)
+        m = components(pdf, thermodynamics, p, θ̄, q̄, w′², w′³, θv, wθ, θq, wq, qv)
+        a = m.a
+        @test 0 < a < 1
+        # the means and the covariance of θˡⁱ and qᵗ
+        @test a * m.θ₁ + (1 - a) * m.θ₂ ≈ θ̄ rtol=1e-14
+        @test a * m.q₁ + (1 - a) * m.q₂ ≈ q̄ rtol=1e-14
+        @test m.θv_c + a * (1 - a) * (m.θ₁ - m.θ₂)^2 ≈ θv rtol=1e-10
+        @test m.qv_c + a * (1 - a) * (m.q₁ - m.q₂)^2 ≈ qv rtol=1e-10
+        @test m.θq_c + a * (1 - a) * (m.θ₁ - m.θ₂) * (m.q₁ - m.q₂) ≈ θq rtol=1e-10 atol=1e-20
+        @test m.θv_c * m.qv_c ≥ m.θq_c^2 # positive semidefinite within the components
+        # the skewness of the saturation excess s = c_q q - c_θ θ of the mixture is the one the third moment implies,
+        # ℂᵍᵏ Sk_w r̂³ / (1 - ℂᵍ₀)³, with the within-component share ℂᵍᶜ of its variance
+        c_θ, c_q = m.c_θ, m.c_q
+        s₁ = c_q * (m.q₁ - q̄) - c_θ * (m.θ₁ - θ̄); s₂ = c_q * (m.q₂ - q̄) - c_θ * (m.θ₂ - θ̄)
+        σs² = c_θ^2 * θv + c_q^2 * qv - 2c_θ * c_q * θq
+        @test a * (1 - a) * (s₁ - s₂)^2 ≈ (1 - pdf.ℂᵍᶜ) * σs² rtol=1e-10
+        r = (c_q * wq - c_θ * wθ) / sqrt(w′² * σs²); r̂ = r / (1 + r^4)^(1/4)
+        Sk_s = (a * s₁^3 + (1 - a) * s₂^3) / σs²^1.5
+        @test Sk_s ≈ pdf.ℂᵍᵏ * w′³ / w′²^1.5 * r̂^3 / (1 - pdf.ℂᵍ₀)^3 rtol=1e-9 atol=1e-14
+        # positive skewness of w and an upward flux of the excess: the moist component is the narrow tail
+        w′³ > 0 && @test a < 1 / 2 && s₁ > 0
+        w′³ == 0 && @test a == 1 / 2
+    end
+
+    # as the within-component share tends to one the components tend to the mean (the single Gaussian)
+    pdf = SkewedScalarDoubleGaussianPDF(; ℂᵍᶜ = 1 - 1e-8)
+    moments = (0.3, θv, wθ, θq, wq, qv)
+    m = components(pdf, thermodynamics, p, θ̄, q̄, w′², 0.3, θv, wθ, θq, wq, qv)
+    @test isapprox(m.θ₁, θ̄; atol = 1e-3) && isapprox(m.θ₂, θ̄; atol = 1e-3)
+    @test_throws ArgumentError SkewedScalarDoubleGaussianPDF(; ℂᵍᶜ = 1)
+    C₀, qˡ₀ = assumed_pdf(SkewedScalarDoubleGaussianPDF(), thermodynamics, 1.0, 0.0, 0.5, p, θ̄, 0.0, q̄, w′², (0.0, moments[2:end]...), (0.0, moments[2:end]...))
+    # and a skewed mixture of a subsaturated mean has more cloud than the unskewed one
+    Cᵏ, qˡᵏ = assumed_pdf(SkewedScalarDoubleGaussianPDF(), thermodynamics, 1.0, 0.0, 0.5, p, θ̄, 0.0, q̄, w′², moments, moments)
+    @test Cᵏ > C₀ > 0 && qˡᵏ > qˡ₀ > 0
+
+    # in a column: the distribution's cloud is the assumed PDF of the moments at the centers, finite and positive
+    for distribution in (DoubleGaussian(; assumed_pdf = SkewedScalarDoubleGaussianPDF()),
+                         DoubleGaussian(; assumed_pdf = SkewedScalarDoubleGaussianPDF(), third_moment = TKEBudgetThirdMoment(location = Face())))
+        model = tke_p3_column(distribution; static_stability = fraction_stability)
+        update_state!(model)
+        cl = model.closure_fields.subgrid_cloud.cloud
+        @test all(isfinite, column(cl.aᶜ)) && all(isfinite, column(cl.qˡ′²)) && all(isfinite, column(cl.w′qˡ′))
+        @test all(x -> 0 ≤ x ≤ 1, column(cl.aᶜ)) && maximum(column(cl.aᶜ)) > 0
+        for n in 1:3
+            time_step!(model, 10)
+        end
+        @test all(isfinite, column(model.tracers.ρe))
+    end
+end
+
+@testset "LiquidFluxVarianceRelation: the latent part of the buoyancy production from w′qˡ′ = ℂʳˡ √(w′² qˡ′²)" begin
+    for static_stability in (MoistStaticStability(), fraction_stability)
+        relation = LiquidFluxVarianceRelation(; ℂʳˡ = 0.62)
+        model = tke_p3_column(DoubleGaussian(; liquid_flux = relation); static_stability)
+        update_state!(model)
+        cl = model.closure_fields.subgrid_cloud.cloud
+        Nz = size(model.grid, 3)
+        ρ = column(model.dynamics.reference_state.density)
+        w′² = column(cl.w′²); qˡ′² = column(cl.qˡ′²)
+        bᶜᵛ = column(cl.b_qᶜ) .- column(cl.b_qᵛ)
+        for k in 2:Nz
+            expected = (bᶜᵛ[k] + bᶜᵛ[k-1]) / 2 * 0.62 * sqrt((w′²[k] + w′²[k-1]) / 2 * (qˡ′²[k] + qˡ′²[k-1]) / 2)
+            @test column(cl.Bˡᶠ)[k] ≈ expected rtol=1e-12 atol=1e-30
+        end
+        @test column(cl.Bˡᶠ)[1] == 0 && column(cl.Bˡᶠ)[Nz+1] == 0
+        @test maximum(column(cl.Bˡᶠ)) > 0
+        # with liquid in the layer the latent part is positive where the relation's flux dominates
+        @test maximum(column(cl.Bᴸ)) > 0
+        @test with_parameters(model.closure; ℂʳˡ = 0.3).subgrid_distribution.liquid_flux == LiquidFluxVarianceRelation(; ℂʳˡ = 0.3)
+    end
+    @test_throws ArgumentError LiquidFluxVarianceRelation(; ℂʳˡ = 1.5)
+end

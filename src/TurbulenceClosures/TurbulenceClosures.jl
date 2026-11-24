@@ -21,13 +21,14 @@ export TKEBasedTurbulenceClosure,
        DowngradientSecondMoments,
        AlgebraicThirdMoment, TKEBudgetThirdMoment,
        HeatingBudgetFlux, RadiativeHeating, PrescribedHeating, heating_budget_flux_bounds,
+       TotalWaterBudgetFlux, total_water_budget_flux_bounds,
        UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
        ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
-       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
+       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, SkewedScalarDoubleGaussianPDF,
        HardClipping, SmoothClipping,
        closure_parameters, with_parameters,
        per_column_closure, set_per_column_coefficients!, PerColumnCoefficient,
-       DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, LatentStratification, MeanLiquidStratification, InitialStratification, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
+       DoubleGaussian, LiquidFluxVarianceRelation, ScalarVarianceTransport, CondensateFluxFraction, LatentStratification, MeanLiquidStratification, InitialStratification, SinglePass, DampedFixedPoint, BracketedFractionSolve, SecantIteration, BisectionIteration, LaggedStability,
        StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale, ReturnToIsotropyTimeScale,
        VarianceStabilityFunctions
 
@@ -278,7 +279,7 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures,
                                       AlgebraicThirdMoment,
                                       UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
                                       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
-                                      DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
+                                      DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, SkewedScalarDoubleGaussianPDF,
                                       HardClipping, SmoothClipping,
                                       closure_parameters, with_parameters
 
@@ -288,6 +289,8 @@ include("variance_stability_functions.jl")
 include("applied_flux_energetics.jl")
 include("tke_budget_third_moment.jl")
 include("heating_budget_flux.jl")
+include("total_water_budget_flux.jl")
+include("liquid_flux_variance_relation.jl")
 include("bracketed_fraction_solve.jl")
 include("simplified_higher_order_closure.jl")
 

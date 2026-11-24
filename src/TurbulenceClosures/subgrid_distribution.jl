@@ -256,7 +256,7 @@ liquid, which condenses over liquid; P3's ice enters through its relaxation rate
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, R, VT, VS, FT}
+struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, R, VT, VS, FT, LF}
     "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref), [`EddyTurnoverTimeScale`](@ref) or [`ReturnToIsotropyTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
@@ -277,6 +277,8 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, R, VT, VS, FT}
     variance_stability_functions :: VS
     "Mixing time of air between the saturated and subsaturated parts of the distribution, in eddy turnover times ℓ / √e"
     ℂᵐ :: FT
+    "The flux of liquid of the latent part of the buoyancy production of the TKE: `nothing` for that of the saturated share of the fluxes, or [`LiquidFluxVarianceRelation`](@ref)"
+    liquid_flux :: LF
 end
 
 Adapt.@adapt_structure DoubleGaussian
@@ -323,6 +325,11 @@ subsaturated parts of the distribution, which the microphysics reads to place cl
 them (`AllProcesses` of P3's `SubgridCondensation`). The default, 1, is one eddy turnover time
 ``ℓ / √e``: the time an eddy of the mixing length takes to carry air across the boundary of the
 saturated part.
+
+`liquid_flux` is the flux of liquid whose buoyancy is the latent part of the buoyancy production of the TKE:
+`nothing` (the default), the share of the flux of the saturation excess that the saturated part of the distribution
+carries, or a [`LiquidFluxVarianceRelation`](@ref), `w′qˡ′ = ℂʳˡ √(w′² qˡ′²)` with the liquid variance of the
+distribution.
 """
 function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              time_scale = DissipationTimeScale(FT; ℂᵠ = 1.3),
@@ -334,20 +341,22 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              ℂʳ = nothing,
                              variance_transport = nothing,
                              variance_stability_functions = nothing,
-                             ℂᵐ = 1)
+                             ℂᵐ = 1,
+                             liquid_flux = nothing)
     ℂʳ = isnothing(ℂʳ) ? nothing : convert(FT, ℂʳ)
     variance_transport = convert_component(FT, variance_transport)
     variance_stability_functions = convert_component(FT, variance_stability_functions)
+    liquid_flux = convert_component(FT, liquid_flux)
     return DoubleGaussian(time_scale, second_moments, third_moment, stratification_number_bound,
                                skewness, assumed_pdf, ℂʳ, variance_transport,
-                               variance_stability_functions, convert(FT, ℂᵐ))
+                               variance_stability_functions, convert(FT, ℂᵐ), liquid_flux)
 end
 
 convert_eltype(::Type{FT}, d::DoubleGaussian) where FT =
     DoubleGaussian(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
                          d.assumed_pdf, d.ℂʳ, d.variance_transport,
-                         d.variance_stability_functions, d.ℂᵐ))...)
+                         d.variance_stability_functions, d.ℂᵐ, d.liquid_flux))...)
 
 convert_component(FT, ::Nothing) = nothing
 convert_component(FT, c) = convert_eltype(FT, c)
@@ -674,15 +683,19 @@ Adapt.adapt_structure(to, f::SubgridCloudFields) =
 # Without a distribution: the plain closure, or, with a saturated fraction from the microphysics
 # (or any fraction other than the distribution's), the energetics of the applied fluxes with the
 # latent conversion of the condensate flux that the fraction implies
-build_subgrid_cloud_fields(grid, ::Nothing, solver, static_stability, tracer_names, heating_budget_flux = nothing) = nothing
+build_subgrid_cloud_fields(grid, ::Nothing, solver, static_stability, tracer_names, heating_budget_flux = nothing,
+                           total_water_budget_flux = nothing) = nothing
 
-function build_subgrid_cloud_fields(grid, ::Nothing, solver, ::SaturationWeightedStaticStability, tracer_names, heating_budget_flux = nothing)
+function build_subgrid_cloud_fields(grid, ::Nothing, solver, ::SaturationWeightedStaticStability, tracer_names, heating_budget_flux = nothing,
+                                    total_water_budget_flux = nothing)
     energetics = AppliedFluxEnergetics(solver)
-    cloud = merge(applied_flux_conversion_fields(grid, energetics, tracer_names), heating_budget_flux_fields(grid, heating_budget_flux))
+    cloud = merge(applied_flux_conversion_fields(grid, energetics, tracer_names), heating_budget_flux_fields(grid, heating_budget_flux),
+                  total_water_budget_flux_fields(grid, total_water_budget_flux))
     return SubgridCloudFields(energetics, nothing, cloud, nothing, build_presolve_fields(grid, energetics, tracer_names))
 end
 
-function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names, heating_budget_flux = nothing)
+function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names, heating_budget_flux = nothing,
+                                    total_water_budget_flux = nothing)
     energetics = AppliedFluxEnergetics(solver)
     moments = (τ = ZFaceField(grid), third_moment_location_fields(grid, third_moment_location(distribution.third_moment))...,
                θˡⁱ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡⁱ′qᵗ′ = ZFaceField(grid),
@@ -696,6 +709,8 @@ function build_subgrid_cloud_fields(grid, distribution, solver, static_stability
              applied_flux_conversion_fields(grid, energetics, tracer_names)...,
              third_moment_fields(grid, distribution.third_moment)...,
              heating_budget_flux_fields(grid, heating_budget_flux)...,
+             total_water_budget_flux_fields(grid, total_water_budget_flux)...,
+             liquid_flux_fields(grid, distribution.liquid_flux)...,
              gθ = CenterField(grid), gA = CenterField(grid))
     return SubgridCloudFields(energetics, moments, cloud, build_solver_state(grid, energetics),
                               build_presolve_fields(grid, energetics, tracer_names))
@@ -1072,8 +1087,10 @@ end
             θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′ = local_scalar_second_moments(d.variance_stability_functions, i, j, k, grid, closure, velocities,
                                                              closure_fields, e, Δθ, Δq, Δz, θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′)
 
-            # The flux of θˡⁱ that the turbulence carries includes the heating budget flux (zero without one)
+            # The fluxes of θˡⁱ and qᵗ that the turbulence carries include the budget fluxes (zero without them)
             w′θˡⁱ′ += applied_heating_flux(cl, i, j, k)
+            w′qᵗ′ += applied_budget_flux_q(cl, i, j, k)
+
 
             # The variance of a moisture-like scalar of unit gradient, with the same machinery: its dissipation time
             # is that of the budgets of the condensate outside the distribution (`outside_condensate_moments`)
@@ -1313,6 +1330,7 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergeti
     N²₋ = fields.solver_state.N²₋
     compute_buoyancy_derivatives!(fields, model)
     compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
+    compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
     launch!(arch, grid, parameters, _set_lagged_stability!, closure_fields.N², N²₋)
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
@@ -1325,8 +1343,11 @@ end
 compute_subgrid_cloud_buoyancy_derivatives!(fields, distribution, model) = compute_buoyancy_derivatives!(fields, model)
 
 # The heating budget flux of the prognostic state (heating_budget_flux.jl), likewise
-compute_subgrid_cloud_heating_budget_flux!(fields, distribution, closure_fields, closure, model, tracers) =
+function compute_subgrid_cloud_heating_budget_flux!(fields, distribution, closure_fields, closure, model, tracers)
     compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
+    compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
+    return nothing
+end
 
 # Within `update_state!`, after the diffusivities and before the implicit coefficient
 function compute_subgrid_cloud!(fields::SubgridCloudFields, closure_fields, closure, model, tracers, parameters)
@@ -1517,7 +1538,7 @@ end
 
 SimplifiedHigherOrderClosures.closure_components(closure::TKEBasedTurbulenceClosure) =
     (closure.mixing_length, closure.stability_functions, closure.static_stability, closure.shear, closure.subgrid_distribution,
-     closure.heating_budget_flux)
+     closure.heating_budget_flux, closure.total_water_budget_flux)
 
 SimplifiedHigherOrderClosures.rebuild_component(::Nothing, scalars, n) = nothing, n
 
@@ -1551,13 +1572,13 @@ function SimplifiedHigherOrderClosures.with_parameters(closure::TKEBasedTurbulen
         component, n = SimplifiedHigherOrderClosures.rebuild_component(component, promoted, n)
         components = (components..., component)
     end
-    mixing_length, stability_functions, static_stability, shear, subgrid_distribution, heating_budget_flux = components
+    mixing_length, stability_functions, static_stability, shear, subgrid_distribution, heating_budget_flux, total_water_budget_flux = components
 
     return TKEBasedTurbulenceClosure{TD}(mixing_length, stability_functions, static_stability,
                                          closure.maximum_viscosity, closure.maximum_tracer_diffusivity,
                                          closure.maximum_tke_diffusivity, closure.minimum_tke, shear,
                                          closure.negative_tke_damping_time_scale, subgrid_distribution, closure.solver,
-                                         heating_budget_flux)
+                                         heating_budget_flux, total_water_budget_flux)
 end
 
 #####

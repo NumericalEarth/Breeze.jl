@@ -52,7 +52,14 @@ closure_paths = (distribution = (static_stability = SaturationWeightedStaticStab
                  # production and heat the air by the rest
                  shoc = shoc_components(SimplifiedHigherOrderClosure()),
                  # and with ℂᴾ = 1, all of it
-                 shoc_whole_shear = shoc_components(SimplifiedHigherOrderClosure(stability_functions = ColumnStabilityDamping(; ℂᴾ = 1))))
+                 shoc_whole_shear = shoc_components(SimplifiedHigherOrderClosure(stability_functions = ColumnStabilityDamping(; ℂᴾ = 1))),
+                 # the latent part of the buoyancy production from the flux–variance relation of the liquid, with the saturated
+                 # fraction of the distribution and with the moist static stability (no latent correction of its own)
+                 liquid_flux = (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                subgrid_distribution = DoubleGaussian(liquid_flux = LiquidFluxVarianceRelation())),
+                 liquid_flux_moist_stability = (static_stability = MoistStaticStability(),
+                                                subgrid_distribution = DoubleGaussian(liquid_flux = LiquidFluxVarianceRelation(),
+                                                                                      assumed_pdf = SkewedScalarDoubleGaussianPDF())))
 # A cooling of 5 K h⁻¹ over the top 100 m of the moist layer of `moist_tke_column` and a warming of 1 K h⁻¹ below
 # 300 m, as the prescribed heating of a `HeatingBudgetFlux` (the tendency of θˡⁱ, K s⁻¹)
 function cloud_top_cooling(grid)
@@ -68,13 +75,29 @@ heating_paths = (heating_budget_flux = grid -> (static_stability = SaturationWei
                                                heating_budget_flux = HeatingBudgetFlux(ℂʷᑫ = 0.6, heating = PrescribedHeating(cloud_top_cooling(grid)))),
                  heating_budget_flux_no_distribution = grid -> (static_stability = SaturationWeightedStaticStability(HalfSaturatedFraction()),
                                                                subgrid_distribution = nothing,
-                                                               heating_budget_flux = HeatingBudgetFlux(ℂᑫ = 0.7, ℂᑫᴸ = 4, heating = PrescribedHeating(cloud_top_cooling(grid)))))
+                                                               heating_budget_flux = HeatingBudgetFlux(ℂᑫ = 0.7, ℂᑫᴸ = 4, heating = PrescribedHeating(cloud_top_cooling(grid)))),
+                 # the budget fluxes of θˡⁱ and qᵗ, which redistribute the forcing of `budget_flux_forcing` and the surface fluxes
+                 total_water_budget_flux = grid -> (static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                               subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷᵇ = 0.6, ℂʷᵀ = 0.3)),
+                                               heating_budget_flux = HeatingBudgetFlux(heating = PrescribedHeating(cloud_top_cooling(grid))),
+                                               total_water_budget_flux = TotalWaterBudgetFlux(ℂᵇᴸ = 16)),
+                 total_water_budget_flux_no_distribution = grid -> (static_stability = SaturationWeightedStaticStability(HalfSaturatedFraction()),
+                                                              subgrid_distribution = nothing,
+                                                              total_water_budget_flux = TotalWaterBudgetFlux(ℂᵇᵠ = 0.7, ℂᵇᴸ = 4)))
 all_paths = (keys(closure_paths)..., keys(heating_paths)...)
 
 # The budgets of the whole step take the TKE to receive the whole shear production, which with ℂᴾ < 1 it receives
 # in part (the rest heats the air in the stage tendency: tested below at the level of the tendencies)
 whole_shear_paths = filter(!=(:shoc), all_paths)
 path_keywords(path, grid) = haskey(closure_paths, path) ? closure_paths[path] : heating_paths[path](grid)
+
+# The paths of the total water budget flux are forced as a cumulus layer is: a cooling of 5 K h⁻¹ over the top 100 m of
+# the moist layer, a warming of 1 K h⁻¹ below 300 m and a drying of 2 g kg⁻¹ d⁻¹ over the cloud layer, tendencies of ρθ
+# and ρqᵗ (with the distribution, together with the heating budget flux of the same cooling)
+const total_water_budget_paths = (:total_water_budget_flux, :total_water_budget_flux_no_distribution)
+budget_flux_forcing(path) = path ∈ total_water_budget_paths ?
+    (ρθ = Forcing((z, t) -> 1.1 * (1000 < z < 1100 ? -5 / 3600 : z < 300 ? 1 / 3600 : 0.0)),
+     ρqᵗ = Forcing((z, t) -> 500 < z < 1500 ? -1.1 * 2e-3 / 86400 : 0.0)) : NamedTuple()
 
 # The fields of the heating budget flux, zero without one
 heating_column(cl, name, n) = hasproperty(cl, name) ? budget_column(getproperty(cl, name)) : zeros(n)
@@ -98,7 +121,7 @@ function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2
          ρu = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 0.08)),
          ρv = FieldBoundaryConditions(bottom = FluxBoundaryCondition(-1.17 * 0.02))) : NamedTuple()
     model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants, microphysics, closure, boundary_conditions, timestepper,
-                            timestepper_kwargs)
+                            timestepper_kwargs, forcing = budget_flux_forcing(path))
 
     # BOMEX-like: a mixed layer, a conditionally unstable cloud layer moistened to saturation, an inversion
     θ₀(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4 + (z - 1480) * 5.8 / 520
@@ -110,6 +133,20 @@ function moist_tke_column(; rain = false, surface_fluxes = false, Nz = 40, H = 2
         set!(model.microphysical_fields.ρnʳ, z -> 300 < z < 1200 ? 2.2e4 : 0.0)
     end
     return model
+end
+
+# The latent part of the buoyancy conversion at the faces: Kᶜ ΔN²ᴸ, or with a `LiquidFluxVarianceRelation`
+# (b̄ᶜ - b̄ᵛ) (ℂʳˡ √(w′² qˡ′²) + Kᶜ ∂z qᶜ) + Kᶜ ΔN²ᴸᵒ from the moments of the distribution and the cloud liquid
+function latent_conversion(model, cl, ρ, ρᶠ, Δzᶠ, Kᶜ, Nz)
+    hasproperty(cl, :Bˡᶠ) || return sum(ρᶠ .* Δzᶠ .* Kᶜ[2:Nz] .* budget_column(cl.ΔN²ᴸ)[2:Nz])
+    ℂʳˡ = model.closure.subgrid_distribution.liquid_flux.ℂʳˡ
+    bᶜᵛ = budget_column(cl.b_qᶜ) .- budget_column(cl.b_qᵛ)
+    w′² = budget_column(cl.w′²); qˡ′² = budget_column(cl.qˡ′²)
+    qᶜ = budget_column(model.microphysical_fields.ρqᶜˡ) ./ ρ
+    outside = budget_column(cl.ΔN²ᴸᵒ)
+    face(x, f) = (x[f] + x[f-1]) / 2
+    Bᴸ = [face(bᶜᵛ, f) * (ℂʳˡ * sqrt(face(w′², f) * face(qˡ′², f)) + Kᶜ[f] * (qᶜ[f] - qᶜ[f-1]) / Δzᶠ[f-1]) + Kᶜ[f] * outside[f] for f in 2:Nz]
+    return sum(ρᶠ .* Δzᶠ .* Bᴸ)
 end
 
 function closure_energy_conversions(model)
@@ -152,10 +189,11 @@ function closure_energy_conversions(model)
         x⁺[s] += h[s]; x⁻[s] -= h[s]
         β[k, s] = (buoyancy(x⁺..., k) - buoyancy(x⁻..., k)) / 2h[s]
     end
-    # the fluxes down the gradient and the heating budget flux of θˡⁱ (zero without one)
-    Jᑫ = heating_column(cl, :Jᑫ, Nz + 1)
+    # the fluxes down the gradient and the budget fluxes of θˡⁱ and of the vapor (zero without them)
+    Jᶿ = heating_column(cl, :Jᑫ, Nz + 1)
+    Jᵠ = heating_column(cl, :Jᵠ, Nz + 1)
     Bᶠ = [-Kᶜ[f] * sum((β[f, s] + β[f-1, s]) / 2 * (φ[f, s] - φ[f-1, s]) for s in 1:4) / Δzᶠ[f-1] +
-          (β[f, 1] + β[f-1, 1]) / 2 * Jᑫ[f] for f in 2:Nz]
+          (β[f, 1] + β[f-1, 1]) / 2 * Jᶿ[f] + (β[f, 2] + β[f-1, 2]) / 2 * Jᵠ[f] for f in 2:Nz]
     Pᶠ = [Kᵘ[f] * ((u[f] - u[f-1])^2 + (v[f] - v[f-1])^2) / Δzᶠ[f-1]^2 for f in 2:Nz]
 
     # What the TKE equation receives: P and B⁺ explicitly, the buoyancy sink ωᴮ e and the
@@ -168,9 +206,9 @@ function closure_energy_conversions(model)
     return (mean_kinetic_energy_loss = sum(ρᶠ .* Δzᶠ .* Pᶠ),
             shear_production = sum(ρ .* Δzᶜ .* budget_column(cl.P)),
             buoyancy_conversion = sum(ρᶠ .* Δzᶠ .* Bᶠ),
-            buoyancy_production = sum(ρ .* Δzᶜ .* (B .- budget_column(cl.Bᴸ) .- heating_column(cl, :Gᑫᴸ, Nz))),
+            buoyancy_production = sum(ρ .* Δzᶜ .* (B .- budget_column(cl.Bᴸ) .- heating_column(cl, :Gᑫᴸ, Nz) .- heating_column(cl, :Gᵇᴸ, Nz))),
             latent_production = sum(ρ .* Δzᶜ .* budget_column(cl.Bᴸ)),
-            latent_conversion = sum(ρᶠ .* Δzᶠ .* Kᶜ[2:Nz] .* budget_column(cl.ΔN²ᴸ)[2:Nz]),
+            latent_conversion = latent_conversion(model, cl, ρ, ρᶠ, Δzᶠ, Kᶜ, Nz),
             dissipation = sum(ρ .* Δzᶜ .* ε),
             β = β, stored_β = hcat(budget_column(cl.b_θ), budget_column(cl.b_qᵛ), budget_column(cl.b_qˡ), budget_column(cl.b_qⁱ)))
 end
@@ -506,7 +544,7 @@ function heating_tendencies(model)
     return (ρθ = budget_column(Gⁿ.ρθ), ρe = budget_column(Gⁿ.ρe))
 end
 
-@testset "Heating budget flux: flux form, boundaries and still air ($path, $FT)" for path in keys(heating_paths), FT in (Float64, Float32)
+@testset "Heating budget flux: flux form, boundaries and still air ($path, $FT)" for path in (:heating_budget_flux, :heating_budget_flux_no_distribution), FT in (Float64, Float32)
     model = moist_tke_column(; path, FT)
     Oceananigans.TimeSteppers.update_state!(model)
     Nz = size(model.grid, 3)
@@ -653,4 +691,157 @@ end
     scale = maximum(abs, ρ .* Pᵉ)
     @test Gᵉ(whole) .- Gᵉ(shoc) ≈ 0.9 .* ρ .* Pᵉ rtol=1e-10 atol=1e-12 * scale
     @test ĉᵖΠ .* (Gᶿ(shoc) .- Gᶿ(whole)) ≈ 0.9 .* ρ .* Pᵉ rtol=1e-10 atol=1e-12 * scale
+end
+
+#####
+##### The total water budget flux: a flux of qᵗ in flux form, zero at the boundaries and in still air, built from the
+##### tendencies the model gave the water at the stage before; the TKE equation receives its conversion
+#####
+
+# The tendencies of the stage without the closure's (`update_state!` and the boundary fluxes, as the time steppers build
+# them), then the closure's own: returns the first, as the tendency of the distributed water, and leaves the whole in `Gⁿ`
+function stage_tendencies!(model)
+    Gⁿ = model.timestepper.Gⁿ
+    Oceananigans.TimeSteppers.compute_flux_bc_tendencies!(model)
+    ρ = budget_column(model.dynamics.reference_state.density)
+    source = (budget_column(Gⁿ.ρqᵛ) .+ budget_column(Gⁿ.ρqᶜˡ)) ./ ρ
+    without = (ρθ = budget_column(Gⁿ.ρθ), ρqᵛ = budget_column(Gⁿ.ρqᵛ), ρe = budget_column(Gⁿ.ρe))
+    Breeze.AtmosphereModels.compute_closure_tendencies!(Gⁿ, model.closure_fields, model.closure, model)
+    return source, without
+end
+
+@testset "Total water budget flux: flux form, boundaries and still air ($path, $FT)" for path in total_water_budget_paths, FT in (Float64, Float32)
+    model = moist_tke_column(; path, FT, surface_fluxes = true)
+    Oceananigans.TimeSteppers.update_state!(model)
+    Nz = size(model.grid, 3)
+    cl = model.closure_fields.subgrid_cloud.cloud
+    sb = model.closure.total_water_budget_flux
+    # before the first stage nothing is stored: no flux
+    @test all(==(0), budget_column(cl.Jᵠ))
+    source, _ = stage_tendencies!(model)
+    @test budget_column(cl.𝒬ᵠ) ≈ source rtol=10eps(FT)
+    Oceananigans.TimeSteppers.update_state!(model)
+
+    ρ = Float64.(budget_column(model.dynamics.reference_state.density))
+    Δzᶜ = diff(znodes(model.grid, Face()))
+    ρᶠ = [(ρ[k] + ρ[k-1]) / 2 for k in 2:Nz]
+    ϵ = eps(FT)
+    𝒬 = Float64.(budget_column(cl.𝒬ᵠ)); s = Float64.(budget_column(cl.sᵠ)); J = Float64.(budget_column(cl.Jᵠ))
+    # the redistribution conserves the water, so the flux vanishes at the top too (to the rounding of the elimination,
+    # whose pivots carry the surface flux of the lowest cell, orders of magnitude above the tendencies aloft)
+    @test abs(sum(ρ .* Δzᶜ .* (𝒬 .- s))) ≤ 1000ϵ * sum(ρ .* Δzᶜ .* (abs.(𝒬) .+ abs.(s)))
+    @test J[1] == 0 && J[Nz+1] == 0
+    ρJ = cumsum(ρ .* Δzᶜ .* (𝒬 .- s))[1:Nz-1]
+    @test J[2:Nz] ≈ sb.ℂᵇᵠ .* ρJ ./ ρᶠ rtol=1e4ϵ atol=1e4ϵ * maximum(abs, J)
+    # the surface flux of water is carried up
+    @test J[2] > 0
+
+
+    # still air: no turbulent kinetic energy above 200 m, and no flux there
+    still = moist_tke_column(; path, FT, surface_fluxes = true, e₀ = z -> z < 200 ? 0.5 : 0.0, closure_keywords = (; minimum_tke = 0))
+    Oceananigans.TimeSteppers.update_state!(still)
+    stage_tendencies!(still)
+    Oceananigans.TimeSteppers.update_state!(still)
+    cl = still.closure_fields.subgrid_cloud.cloud
+    zᶠ = znodes(still.grid, Face())
+    scale = sum(ρ .* Δzᶜ .* abs.(budget_column(cl.𝒬ᵠ))) / ρ[1]
+    @test all(k -> abs(budget_column(cl.Jᵠ)[k]) ≤ 1e3ϵ * scale, findall(>(300), zᶠ))
+end
+
+# The flux applied to the mean state and its conversion, against the same column with ℂᵇᵠ = 0. Without a distribution
+# the saturated fraction does not read the flux, so the two columns differ by the flux alone.
+@testset "Total water budget flux: the energy the flux takes from the mean state is what the TKE receives" begin
+    path = :total_water_budget_flux_no_distribution
+    with_flux = moist_tke_column(; path, surface_fluxes = true, e₀ = z -> 0.6)
+    without_flux = moist_tke_column(; path, surface_fluxes = true, e₀ = z -> 0.6,
+                                    closure_keywords = (; total_water_budget_flux = TotalWaterBudgetFlux(ℂᵇᵠ = 0, ℂᵇᴸ = 4)))
+    G = map((with_flux, without_flux)) do model
+        Oceananigans.TimeSteppers.update_state!(model)
+        stage_tendencies!(model)
+        Oceananigans.TimeSteppers.update_state!(model)
+        _, without = stage_tendencies!(model)
+        Gⁿ = model.timestepper.Gⁿ
+        (ρθ = budget_column(Gⁿ.ρθ) .- without.ρθ, ρqᵛ = budget_column(Gⁿ.ρqᵛ) .- without.ρqᵛ, ρe = budget_column(Gⁿ.ρe) .- without.ρe)
+    end
+    G, G⁰ = G
+
+    grid = with_flux.grid
+    Nz = size(grid, 3)
+    ρ = budget_column(with_flux.dynamics.reference_state.density)
+    zᶜ = znodes(grid, Center()); zᶠ = znodes(grid, Face())
+    Δzᶜ = diff(zᶠ); Δzᶠ = diff(zᶜ)
+    cl = with_flux.closure_fields.subgrid_cloud.cloud
+    cl⁰ = without_flux.closure_fields.subgrid_cloud.cloud
+
+    # with no share nothing is applied or converted, from the same stored tendency
+    @test budget_column(cl⁰.𝒬ᵠ) == budget_column(cl.𝒬ᵠ)
+    @test all(==(0), budget_column(cl⁰.Jᵠ)) && all(==(0), budget_column(cl⁰.Gᵇ))
+    @test budget_column(cl⁰.B) .+ budget_column(cl.Gᵇ) ≈ budget_column(cl.B) rtol=1e-12
+
+    # the tendency of the vapor: the divergence of ρᶠ Jᵠ; that of ρθ: the draw of the latent part of the conversion
+    Jᵠ = budget_column(cl.Jᵠ); Gᵇ = budget_column(cl.Gᵇ); Gᵇᴸ = budget_column(cl.Gᵇᴸ)
+    ρᶠ = vcat(0.0, [(ρ[k] + ρ[k-1]) / 2 for k in 2:Nz], 0.0)
+    divergence = [(ρᶠ[k+1] * Jᵠ[k+1] - ρᶠ[k] * Jᵠ[k]) / Δzᶜ[k] for k in 1:Nz]
+    latent_draw = ρ .* Gᵇᴸ ./ budget_column(cl.ĉᵖΠ)
+    @test G.ρqᵛ .- G⁰.ρqᵛ ≈ -divergence rtol=1e-9 atol=1e-9 * maximum(abs, divergence)
+    @test G.ρθ .- G⁰.ρθ ≈ -latent_draw rtol=1e-9 atol=1e-12 * maximum(abs, divergence)
+    tendency = G.ρqᵛ .- G⁰.ρqᵛ
+    @test abs(sum(Δzᶜ .* tendency)) ≤ 1e-10 * sum(Δzᶜ .* abs.(tendency)) # flux form: the water is conserved
+
+    # the dynamic enthalpy the flux takes from the mean state, Σ Δz Zᵛ ∂t(ρqᵛ), with Z from the derivatives of the
+    # buoyancy by central differences, is the dry part of the conversion
+    c = closure_energy_conversions(with_flux)
+    Z = zeros(Nz)
+    Z[1] = c.β[1, 2] * (zᶜ[1] - zᶠ[1])
+    for k in 2:Nz
+        Z[k] = Z[k-1] + (c.β[k, 2] + c.β[k-1, 2]) / 2 * Δzᶠ[k-1]
+    end
+    dynamic_enthalpy_loss = sum(Δzᶜ .* Z .* tendency)
+    @test dynamic_enthalpy_loss ≈ sum(ρ .* Δzᶜ .* (Gᵇ .- Gᵇᴸ)) rtol=1e-6
+
+    # the TKE equation receives the conversion in the stage tendency, as for the heating budget flux
+    injected = Breeze.TurbulenceClosures.solved_conversions_before_tke_solve(with_flux.closure_fields.subgrid_cloud, with_flux.closure, with_flux)
+    explicit(c, B) = injected ? max.(budget_column(c.Bˢ) .+ heating_column(c, :Gᵇ, Nz), 0) : max.(B, 0)
+    B = budget_column(cl.B); B⁰ = budget_column(cl⁰.B)
+    @test G.ρe .- G⁰.ρe ≈ ρ .* (explicit(cl, B) .- explicit(cl⁰, B⁰)) rtol=1e-9 atol=1e-12 * maximum(abs, G.ρe)
+    @test sum(Δzᶜ .* budget_column(cl.ĉᵖΠ) .* latent_draw) ≈ sum(ρ .* Δzᶜ .* Gᵇᴸ) rtol=1e-12
+end
+
+# Where the turbulence vanishes and the budget flux does not, the variances stay those of the gradient: finite, and those
+# of the same column without the flux
+@testset "Total water budget flux: weak turbulence at a finite flux ($path)" for path in total_water_budget_paths
+    columns = map((TotalWaterBudgetFlux(ℂᵇᴸ = 16), TotalWaterBudgetFlux(ℂᵇᵠ = 0, ℂᵇᴸ = 16))) do flux
+        model = moist_tke_column(; path, surface_fluxes = true, e₀ = z -> z < 300 ? 0.5 : 1e-9,
+                                 closure_keywords = (; total_water_budget_flux = flux))
+        Oceananigans.TimeSteppers.update_state!(model)
+        stage_tendencies!(model)
+        Oceananigans.TimeSteppers.update_state!(model)
+        model
+    end
+    with, without = columns
+    cl = with.closure_fields.subgrid_cloud.cloud
+    @test maximum(abs, budget_column(cl.Jᵠ)) > 0
+    has_moments = !isnothing(with.closure_fields.subgrid_cloud.moments)
+    if has_moments
+        m = with.closure_fields.subgrid_cloud.moments; m⁰ = without.closure_fields.subgrid_cloud.moments
+        @test all(isfinite, budget_column(m.qᵗ′²)) && all(isfinite, budget_column(m.θˡⁱ′qᵗ′))
+        @test budget_column(m.qᵗ′²) == budget_column(m⁰.qᵗ′²)
+        Nz = size(with.grid, 3)
+        @test budget_column(m.w′qᵗ′)[2:Nz] ≈ budget_column(m⁰.w′qᵗ′)[2:Nz] .+ budget_column(cl.Jᵠ)[2:Nz] rtol=1e-12 atol=1e-20
+    end
+    @test all(isfinite, budget_column(cl.B))
+end
+
+@testset "Total water budget flux: coefficients" begin
+    closure = TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian(), total_water_budget_flux = TotalWaterBudgetFlux(),
+                                        heating_budget_flux = HeatingBudgetFlux())
+    parameters = closure_parameters(closure)
+    bounds = total_water_budget_flux_bounds()
+    @test all(name -> bounds[name][1] ≤ parameters[name] ≤ bounds[name][2], keys(bounds))
+    @test with_parameters(closure; ℂᵇᵠ = 0.25, ℂᵇᴸ = 40).total_water_budget_flux == TotalWaterBudgetFlux(ℂᵇᵠ = 0.25, ℂᵇᴸ = 40)
+    @test_throws ArgumentError TotalWaterBudgetFlux(ℂᵇᵠ = 1.5)
+    @test_throws ArgumentError TotalWaterBudgetFlux(ℂᵇᴸ = Inf)
+    @test_throws ArgumentError TKEBasedTurbulenceClosure(; total_water_budget_flux = TotalWaterBudgetFlux())
+    @test_throws ArgumentError TKEBasedTurbulenceClosure(ExplicitTimeDiscretization(); subgrid_distribution = DoubleGaussian(),
+                                                         total_water_budget_flux = TotalWaterBudgetFlux())
 end
