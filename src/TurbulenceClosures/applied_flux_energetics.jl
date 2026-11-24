@@ -153,6 +153,22 @@ end
 @inline applied_buoyancy_conversionᶜᶜᶠ(i, j, k, grid, s, cl, Kᶜ) =
     - @inbounds(Kᶜ[i, j, k]) * applied_stratificationᶜᶜᶠ(i, j, k, grid, s, cl)
 
+# The moisture mass fractions of the current state at center k. The stage's partition with the vapor changed by the change
+# of the prognostic moisture since the stage, qᵛᵉ - qᵛᵉₛ (qᵛᵉₛ the specific moisture the stage diagnosed): at the stage
+# state the stage's own partition; in the state the implicit solves leave, the vapor and condensate that the solves move.
+# With prognostic condensate (P3) the moisture density is the vapor and this is the solved vapor and the solved
+# condensate. With saturation adjustment, whose moisture density is the total water and whose condensate the solves do
+# not move, it is the stage's condensate (`distributed_condensateᶜᶜᶜ`) and the solved total water less it.
+@inline function current_moisture_fractionsᶜᶜᶜ(i, j, k, grid, s)
+    @inbounds begin
+        ρ = s.ρ[i, j, k]
+        qᵛᵉ = s.ρqᵛᵉ[i, j, k] / ρ
+        qᵛᵉₛ = s.qᵛᵉ[i, j, k]
+    end
+    q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵛᵉₛ, s.microphysical_fields)
+    return MoistureMassFractions(q.vapor + (qᵛᵉ - qᵛᵉₛ), q.liquid, q.ice)
+end
+
 # The stratification of the mixed variables, Σ b̄_χ δz χ: the buoyancy gradient a displacement
 # without phase change feels (the stratification behind the applied buoyancy flux)
 @inline function applied_stratificationᶜᶜᶠ(i, j, k, grid, s, cl)
@@ -161,8 +177,8 @@ end
         ρ⁻ = s.ρ[i, j, k-1]
         θ⁺ = s.ρθ[i, j, k] / ρ⁺
         θ⁻ = s.ρθ[i, j, k-1] / ρ⁻
-        q⁺ = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ⁺, s.ρqᵛᵉ[i, j, k] / ρ⁺, s.microphysical_fields)
-        q⁻ = grid_moisture_fractions(i, j, k-1, grid, s.microphysics, ρ⁻, s.ρqᵛᵉ[i, j, k-1] / ρ⁻, s.microphysical_fields)
+        q⁺ = current_moisture_fractionsᶜᶜᶜ(i, j, k, grid, s)
+        q⁻ = current_moisture_fractionsᶜᶜᶜ(i, j, k-1, grid, s)
         Δb = (cl.b_θ[i, j, k] + cl.b_θ[i, j, k-1]) / 2 * (θ⁺ - θ⁻) +
              (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, k-1]) / 2 * (q⁺.vapor - q⁻.vapor) +
              (cl.b_qˡ[i, j, k] + cl.b_qˡ[i, j, k-1]) / 2 * (q⁺.liquid - q⁻.liquid) +

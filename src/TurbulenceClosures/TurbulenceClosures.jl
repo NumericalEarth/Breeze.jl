@@ -84,7 +84,7 @@ using Breeze.AtmosphereModels.Diagnostics: microphysics_phase_equilibrium, conde
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics, SubgridCondensation
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturation_specific_humidity,
                              equilibrated_surface, absolute_zero_latent_heat, specific_heat_difference,
-                             vapor_equivalent_heat_capacity
+                             vapor_equivalent_heat_capacity, MoistureMassFractions
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 #####
