@@ -1342,8 +1342,7 @@ end
 solve_static_stability!(static_stability, buoyancy_flux, args...) = nothing
 solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args...) = cloud_buoyancy_stability!(buoyancy_flux, args...)
 
-# N²ᵇ = (g / θ)(∂z θˡⁱ + A_q ∂z qᵗ) - Bˡ / Kᶜ at the interior faces (`condensate_flux_stabilityᶜᶜᶠ`), then the
-# mixing length and the diffusivities again from it
+# The update of the stored N² toward the N²ᵇ of a pass: N²ᵇ itself, or the blend with the relaxation ω
 @inline relax_stability(N², N²ᵇ, ::Nothing) = N²ᵇ
 @inline relax_stability(N², N²ᵇ, ω) = (1 - ω) * N² + ω * N²ᵇ
 
@@ -1369,15 +1368,6 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
     ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
     N²ᵇ = N²ᶜ + (bˡᵛaʷ⁺ + bˡᵛaʷ⁻) / 2 * ∂zs
     return N²ᶜ, N²ᵇ, ∂zs, gθᶠ * (A⁺ + A⁻) / 2
-end
-
-@kernel function _cloud_buoyancy_stability!(N², grid, m, cl, θ, qᵗ, p, thermodynamics, ω)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        interior_face = k > 1
-        _, N²ᵇ, _, _ = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
-        N²[i, j, k] = ifelse(interior_face, relax_stability(N²[i, j, k], N²ᵇ, ω), N²[i, j, k])
-    end
 end
 
 function cloud_buoyancy_stability!(buoyancy_flux::AppliedFluxEnergetics{N, W, <:Union{SecantIteration, BisectionIteration}},
@@ -1504,20 +1494,6 @@ function store_latent_correction_of_solved_stability!(fields, closure_fields, cl
     launch!(grid.architecture, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments,
             grid, closure, closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, d.θ, tracers[TKE_NAME],
             d.thermodynamics, zero(grid))
-    return nothing
-end
-
-# N²ᵇ from the stored distribution (blended into the stored N² with weight ω, unless ω = nothing), then
-# the mixing length and the diffusivities from it
-function cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters, ω = nothing)
-    grid = model.grid
-    arch = grid.architecture
-    s = distribution_state(model, nothing)
-    cl = fields.cloud
-    d = closure.subgrid_distribution
-    launch!(arch, grid, parameters, _cloud_buoyancy_stability!, closure_fields.N², grid, fields.moments, cl, s.θ, s.qᵗ, s.p,
-            s.thermodynamics, ω)
-    compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
 end
 
