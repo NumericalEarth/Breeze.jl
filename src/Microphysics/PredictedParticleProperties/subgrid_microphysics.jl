@@ -296,14 +296,21 @@ Gauss-Hermite rule in ``ζ``, with the placed moments of [`placed_cloud_liquid_m
 
 @inline departed_liquid_moment(::Val{false}, d, β, threshold, γ) = placed_cloud_liquid_moment(d, β, threshold, γ)
 
+# f^β ⟨q^β; f q ≥ threshold⟩ at the node's factor f ≥ 0 (zero at f = 0, where the bound on ν puts the outermost node
+# when the cell has no cloud liquid)
+@inline function scaled_placed_moment(d, β, threshold, γ, f)
+    present = f > 0
+    fₛ = ifelse(present, f, one(f))
+    return ifelse(present, fₛ^β * placed_cloud_liquid_moment(d, β, threshold / fₛ, γ), zero(f))
+end
+
 @inline function departed_liquid_moment(::Val{true}, d, β, threshold, γ)
     FT = typeof(threshold)
     placed = placed_cloud_liquid_moment(d, β, threshold, γ)
     terms = map(gauss_hermite_nodes, gauss_hermite_weights) do ζ, w
         f⁺ = 1 + d.ν * convert(FT, ζ)
         f⁻ = 1 - d.ν * convert(FT, ζ)
-        convert(FT, w) * (f⁺^β * placed_cloud_liquid_moment(d, β, threshold / f⁺, γ) +
-                          f⁻^β * placed_cloud_liquid_moment(d, β, threshold / f⁻, γ))
+        convert(FT, w) * (scaled_placed_moment(d, β, threshold, γ, f⁺) + scaled_placed_moment(d, β, threshold, γ, f⁻))
     end
     return ifelse(d.ν > 0, sum(terms), placed)
 end
