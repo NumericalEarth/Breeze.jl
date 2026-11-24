@@ -293,14 +293,14 @@ end
 end
 
 @testset "The distribution condenses with the thermodynamics and the condensate phase of the model" begin
-    # The distribution of this closure condenses on the phase of the condensate of the microphysics: P3 forms ice
+    # The distribution of this closure condenses on the phase of the condensate in the water it distributes: with P3,
+    # the vapor and the cloud liquid, whose condensate is liquid (P3's ice is not distributed)
     for distribution in (DoubleGaussian(),)
         model = tke_p3_column(distribution; static_stability = fraction_stability)
         thermodynamics = distribution_thermodynamics(model)
         @test thermodynamics.constants === model.thermodynamic_constants
         @test thermodynamics.phase_equilibrium === condensate_phase_equilibrium(model.microphysics)
-        @test thermodynamics.phase_equilibrium isa MixedPhaseEquilibrium
-        @test thermodynamics.phase_equilibrium.freezing_temperature == model.microphysics.process_rates.freezing_temperature
+        @test thermodynamics.phase_equilibrium isa WarmPhaseEquilibrium
         μ = model.microphysical_fields
         water₀ = sum(non_precipitating_water(model) .+ column(μ.ρqʳ))
         for _ in 1:10
