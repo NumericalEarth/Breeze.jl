@@ -706,7 +706,7 @@ end
 function applied_flux_conversion_fields(grid, ::AppliedFluxEnergetics, tracer_names)
     centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :Bᴸˢ, :Bⁱ, :P, :Pⁱ, :Bˢ, :Pˢ, :ωᴮ, :b_θ, :b_qᵛ, :b_qˡ, :b_qⁱ, :b_qᶜ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_b_θ, :stage_b_qᵛ, :stage_b_qˡ, :stage_b_qⁱ, :stage_surface, :shortfall, :after_solves_ρθ, :stage_combination))
     faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid), η = ZFaceField(grid), c_q = ZFaceField(grid), c_θ = ZFaceField(grid),
-             ηⁱ = ZFaceField(grid), c_qⁱ = ZFaceField(grid), c_θⁱ = ZFaceField(grid))
+             ηⁱ = ZFaceField(grid), ηʷⁱ = ZFaceField(grid), c_qⁱ = ZFaceField(grid), c_θⁱ = ZFaceField(grid))
     return merge(centers, faces, (ρu⁻ = XFaceField(grid), ρv⁻ = YFaceField(grid),
                                   stage_time_step = Oceananigans.Fields.Field{Nothing, Nothing, Nothing}(grid)))
 end
@@ -1146,7 +1146,7 @@ end
                                                    p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
             store_vapor_excess_components!(cl, i, j, k,
                                            component_vapor_excess(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
-                                                                  p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ))
+                                                                  p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ), C)
             cl.aᶜ[i, j, k] = C
             # The exchange rate of air between the saturated and subsaturated parts, √e / (ℂᵐ ℓ)
             ℓᶜ = (closure_fields.ℓᵐ[i, j, k] + closure_fields.ℓᵐ[i, j, k+1]) / 2
@@ -1293,8 +1293,11 @@ function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_f
     cl = fields.cloud
     d = closure.subgrid_distribution
     launch!(arch, grid, parameters, _solve_cloud_buoyancy_stability!, closure_fields.N², fields.solver_state, solver,
-            P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, fields.moments, cl)
+            P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, fields.moments, cl,
+            closure, closure_fields, model.velocities, applied_flux_state(model), tracers[TKE_NAME])
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
+    # After the last pass: the latent correction of the solved state for the buoyancy production (N² unchanged)
+    P == N && store_latent_correction_of_solved_stability!(fields, closure_fields, closure, model, tracers, parameters)
     return nothing
 end
 
@@ -1338,12 +1341,21 @@ end
     return x′, L′, U′
 end
 
-@kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, m, cl)
+@kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, m, cl,
+                                                  closure, closure_fields, velocities, s, e)
     i, j, k = @index(Global, NTuple)
     FT = grid_float_type(grid)
     @inbounds begin
         interior_face = k > 1
         N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
+        # The latent response of the condensate outside the distributed water (ice and its liquid coating), at the
+        # eddy time of this pass; it moves the target and both ends of the bracket alike
+        kₛ = max(k, 2)
+        aʷ = face_condensate_flux_fraction(i, j, kₛ, grid, m, cl, qᵗ, θ, p, thermodynamics)
+        X = latent_correctionᶜᶜᶠ(i, j, kₛ, grid, getclosure(i, j, closure), closure_fields, velocities, s, qᵗ, θ, e,
+                                 thermodynamics, cl, aʷ, face_ice_excess_flux_fraction(i, j, kₛ, cl, aʷ)).outside
+        N²ᶜ += X
+        G += X
         N²ˢ = N²ᶜ + gA_c * ∂zs
         L = min(N²ᶜ, N²ˢ)
         U = max(N²ᶜ, N²ˢ)
@@ -1375,6 +1387,17 @@ function cloud_buoyancy_stability!(buoyancy_flux::AppliedFluxEnergetics, fields,
         cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters,
                                        buoyancy_flux.stability_relaxation)
     end
+    return nothing
+end
+
+# The latent correction of the state a solver of the coupling left, stored for the buoyancy production and the
+# conversion of the solved state without changing N² (ω = 0)
+function store_latent_correction_of_solved_stability!(fields, closure_fields, closure, model, tracers, parameters)
+    grid = model.grid
+    d = distribution_state(model, nothing)
+    launch!(grid.architecture, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments,
+            grid, closure, closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, d.θ, tracers[TKE_NAME],
+            d.thermodynamics, zero(grid))
     return nothing
 end
 
@@ -1456,9 +1479,10 @@ end
 vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterField(grid), μ₂ = CenterField(grid),
                                        σ₁ = CenterField(grid), σ₂ = CenterField(grid), ωᵐ = CenterField(grid),
                                        μⁱ₁ = CenterField(grid), μⁱ₂ = CenterField(grid),
-                                       σⁱ₁ = CenterField(grid), σⁱ₂ = CenterField(grid))
+                                       σⁱ₁ = CenterField(grid), σⁱ₂ = CenterField(grid),
+                                       ρⁱ₁ = CenterField(grid), ρⁱ₂ = CenterField(grid), aʷⁱ = CenterField(grid))
 
-@inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂))
+@inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂), aᶜ)
     @inbounds begin
         components.a₁[i, j, k] = a
         components.μ₁[i, j, k] = μ₁
@@ -1469,8 +1493,34 @@ vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterF
         components.μⁱ₂[i, j, k] = μⁱ₂
         components.σⁱ₁[i, j, k] = σⁱ₁
         components.σⁱ₂[i, j, k] = σⁱ₂
+        components.ρⁱ₁[i, j, k] = ρ₁
+        components.ρⁱ₂[i, j, k] = ρ₂
+        components.aʷⁱ[i, j, k] = ice_excess_flux_fraction(a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂, aᶜ)
     end
     return nothing
+end
+
+# The share of the flux of the excess over ice sⁱ carried by the saturated part s > 0 of the double Gaussian. Within a
+# component w is uncorrelated with the scalars, so a flux is the difference of the component means times
+# a (1 - a)(w₁ - w₂), which cancels: aʷⁱ = (Y₁ - Y₂) / (μⁱ₁ - μⁱ₂), Yᵢ = Eᵢ[sⁱ 𝟙ₛ₎₀] = μⁱᵢ Φ(μᵢ/σᵢ) + ρᵢ σⁱᵢ φ(μᵢ/σᵢ)
+# (sⁱ regressed on s, the residual independent of s). In [0, 1] as aʷ; the cloud fraction `aᶜ` where the components
+# do not differ.
+@inline function ice_excess_flux_fraction(a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂, aᶜ)
+    FT = typeof(μ₁)
+    Y₁ = component_saturated_ice_excess(μ₁, σ₁, μⁱ₁, σⁱ₁, ρ₁)
+    Y₂ = component_saturated_ice_excess(μ₂, σ₂, μⁱ₂, σⁱ₂, ρ₂)
+    Δμⁱ = μⁱ₁ - μⁱ₂
+    resolved = abs(Δμⁱ) > sqrt(floatmin(FT))
+    return clamp(ifelse(resolved, (Y₁ - Y₂) / ifelse(resolved, Δμⁱ, one(FT)), aᶜ), zero(FT), one(FT))
+end
+
+@inline function component_saturated_ice_excess(μ, σ, μⁱ, σⁱ, ρ)
+    FT = typeof(μ)
+    σ₊ = max(σ, floatmin(FT) / eps(FT))
+    z = clamp(μ / σ₊, -convert(FT, 40), convert(FT, 40))
+    Φ = erfc(-z / sqrt(FT(2))) / 2
+    φ = exp(-z * z / 2) / sqrt(2 * FT(π))
+    return ifelse(σ > 0, μⁱ * Φ + ρ * σⁱ * φ, ifelse(μ > 0, μⁱ, zero(FT)))
 end
 
 @inline function stored_vapor_excess_components(i, j, k, components)
@@ -1480,7 +1530,8 @@ end
                   σ = (components.σ₁[i, j, k], components.σ₂[i, j, k]), f⁺ = components.aᶜ[i, j, k],
                   ωᵐ = components.ωᵐ[i, j, k],
                   μⁱ = (components.μⁱ₁[i, j, k], components.μⁱ₂[i, j, k]),
-                  σⁱ = (components.σⁱ₁[i, j, k], components.σⁱ₂[i, j, k]))
+                  σⁱ = (components.σⁱ₁[i, j, k], components.σⁱ₂[i, j, k]),
+                  ρⁱ = (components.ρⁱ₁[i, j, k], components.ρⁱ₂[i, j, k]))
     end
 end
 

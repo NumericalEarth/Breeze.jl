@@ -355,7 +355,9 @@ end
         b_θ = (cl.b_θ[i, j, k] + cl.b_θ[i, j, k-1]) / 2
         bᶜᵛ = (cl.b_qᶜ[i, j, k] + cl.b_qᶜ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
         bⁱᵛ = (cl.b_qⁱ[i, j, k] + cl.b_qⁱ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
-        latent = -bᶜᵛ * cl.aᴺ[i, j, k] * cl.c_θ[i, j, k] - bⁱᵛ * cl.ηⁱ[i, j, k] * cl.c_θⁱ[i, j, k]
+        bˡᵛ = (cl.b_qˡ[i, j, k] + cl.b_qˡ[i, j, k-1] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, k-1]) / 2
+        latent = -bᶜᵛ * cl.aᴺ[i, j, k] * cl.c_θ[i, j, k] - bⁱᵛ * cl.ηⁱ[i, j, k] * cl.c_θⁱ[i, j, k] -
+                 bˡᵛ * cl.ηʷⁱ[i, j, k] * cl.c_θ[i, j, k]
     end
     return b_θ, latent
 end

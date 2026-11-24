@@ -399,34 +399,59 @@ cloud/precipitation fraction framework is handled separately.
                                    cloud_relaxation, rain_relaxation)
 end
 
-# The vapor growth of dry ice over the parts of the cell of the subgrid distribution (`ice_exchange_parts`). The ice
-# fills the cell; in each part p it grows as on the grid mean, at the part's vapor excess over liquid δₚ, its excess
-# over ice δⁱₚ (whose difference Δₚ = δⁱₚ - δₚ replaces qᵛ⁺ˡ - qᵛ⁺ⁱ, also in the Bergeron driver) and the total
-# relaxation εₚ of the part, whose cloud liquid relaxes at rₚ εᶜˡ:
+# The vapor growth of dry ice over the subgrid distribution. The ice fills the cell; at each point it grows as on the
+# grid mean, at the local vapor excess over liquid δ, the local excess over ice δⁱ (whose difference Δ = δⁱ - δ replaces
+# qᵛ⁺ˡ - qᵛ⁺ⁱ, also in the Bergeron driver) and the local total relaxation ε, whose cloud liquid relaxes at r εᶜˡ:
 #
-#   Gₚ = (εⁱ / εₚ) [Dₚ (1 - Tₚ / εₚ) + δₚ Tₚ] / ξⁱ + Δₚ εⁱ / ξⁱ,   Dₚ = D - Δₚ c εⁱ,   Tₚ = (1 - e^{-εₚ τ}) / τ,
+#   G = (εⁱ / ε) [D (1 - T / ε) + δ T] / ξⁱ + Δ εⁱ / ξⁱ,   D = D̄ - Δ c εⁱ,   T = (1 - e^{-ε τ}) / τ.
 #
-# weighted by the fraction Pₚ of the part, with the excesses formed from the weighted moments Pₚ δₚ, Pₚ δⁱₚ (only the
-# relative rate rₚ of the cloud liquid of a part is a ratio, bounded by construction). Linear in the excesses, so with the same relaxation in both parts (no cloud liquid) it is the grid-mean rate;
-# it differs where the cloud liquid of the saturated part takes the vapor excess there faster than the ice does, while
-# the ice of the subsaturated part takes its own excess alone. `uniform_relaxation` is the relaxation of everything
-# but the cloud liquid (rain, ice, the liquid coating), which fills the cell.
+# In the saturated part s > 0 the cloud liquid is the placed equilibrium condensate, so δ = (1 - λ) s,
+# δⁱ = bᵢ + (kᵢ - ξⁱˡ λ / ξˡ) s and r(s) = (χ / f⁺)^{2/3} (χ s / ⟨s⁺⟩)^{1/3} (ε ∝ Nᶜˡ^{2/3} qᶜˡ^{1/3} at a fixed droplet
+# shape): G is integrated over s with the Gauss-Legendre rule of the placement. G is linear in δⁱ at given ε, so the
+# residual of the excess over ice, independent of s, averages out exactly. In the subsaturated part the cloud liquid
+# is uniform, r = ψ, so G is evaluated at the part's moments (`ice_exchange_parts`), weighted by its fraction. With
+# the same relaxation everywhere (no cloud liquid) the sum is the grid-mean rate; it differs where the cloud liquid
+# of the saturated part takes the vapor excess there faster than the ice does, while the ice of the subsaturated
+# part takes its own excess alone. `uniform_relaxation` is the relaxation of everything but the cloud liquid (rain,
+# ice, the liquid coating), which fills the cell.
 @inline subgrid_ice_growth(::Nothing, grid_mean, args...) = grid_mean
 
+@inline function local_ice_growth(εⁱ, c, ξⁱ, ε, τ, external_driver, δ, Δ)
+    T = (1 - exp(-ε * τ)) / τ
+    D = external_driver - Δ * c * εⁱ
+    return (εⁱ / ε) * (D * (1 - T / ε) + δ * T) / ξⁱ + Δ * εⁱ / ξⁱ
+end
+
 @inline function subgrid_ice_growth(d, grid_mean, coefficients, external_driver, uniform_relaxation, τ, rate_scale)
+    FT = typeof(grid_mean)
     εⁱ = coefficients.dry_ice_relaxation
     c = coefficients.ice_liquid_coupling
     ξⁱ = coefficients.ξⁱ
     εᶜˡ = coefficients.cloud_relaxation
-    parts = ice_exchange_parts(d)
-    growth = map(parts) do part
-        εₚ = max(uniform_relaxation + εᶜˡ * safe_ratio(part.Pr, part.P, zero(εᶜˡ)), rate_scale)
-        Tₚ = (1 - exp(-εₚ * τ)) / τ
-        PΔ = part.Pδⁱ - part.Pδ
-        PD = part.P * external_driver - PΔ * c * εⁱ
-        (εⁱ / εₚ) * (PD * (1 - Tₚ / εₚ) + part.Pδ * Tₚ) / ξⁱ + PΔ * εⁱ / ξⁱ
+
+    # The saturated part, over s
+    s⁺ = d.positive_excess
+    droplet_scale = safe_ratio(positive_power(d.χ, convert(FT, 2//3)), positive_power(d.f⁺, convert(FT, 2//3)), zero(FT)) *
+                    positive_power(safe_ratio(d.χ, s⁺, zero(FT)), convert(FT, 1//3))
+    λⁱ = d.ξⁱˡ * d.λ / d.ξˡ
+    saturated = positive_part_quadrature(d) do s, i
+        @inbounds bᵢ = d.mⁱ[i] - d.k[i] * d.m[i]
+        @inbounds kᵢ = d.k[i]
+        ε = max(uniform_relaxation + εᶜˡ * droplet_scale * positive_power(s, convert(FT, 1//3)), rate_scale)
+        δ = (1 - d.λ) * s
+        δⁱ = bᵢ + (kᵢ - λⁱ) * s
+        local_ice_growth(εⁱ, c, ξⁱ, ε, τ, external_driver, δ, δⁱ - δ)
     end
-    return ifelse(d.degenerate, grid_mean, sum(growth))
+
+    # The subsaturated part, at its moments
+    _, part = ice_exchange_parts(d)
+    ε⁻ = max(uniform_relaxation + εᶜˡ * d.subsaturated_share, rate_scale)
+    PΔ = part.Pδⁱ - part.Pδ
+    T⁻ = (1 - exp(-ε⁻ * τ)) / τ
+    PD = part.P * external_driver - PΔ * c * εⁱ
+    subsaturated = (εⁱ / ε⁻) * (PD * (1 - T⁻ / ε⁻) + part.Pδ * T⁻) / ξⁱ + PΔ * εⁱ / ξⁱ
+
+    return ifelse(d.degenerate, grid_mean, saturated + subsaturated)
 end
 
 #####

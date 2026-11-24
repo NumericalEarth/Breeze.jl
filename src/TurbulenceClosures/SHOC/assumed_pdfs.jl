@@ -416,7 +416,7 @@ density ``ρᵢ = p / (Rᵐ Tᵢ)``, and the within-component spread
 ``σᵢ² = qᵗ′²ᵢ + (∂qᵛ⁺ˡ/∂θ)² θ′²ᵢ - 2 (∂qᵛ⁺ˡ/∂θ) r σθᵢ σqᵢ``, with the model's saturation over liquid
 (the formula the microphysics uses); and the same moments of the vapor excess over ice, ``μⁱᵢ = qᵗᵢ - qᵛ⁺ⁱ(Tᵢ, ρᵢ)``
 and ``σⁱᵢ`` with ``∂qᵛ⁺ⁱ/∂θ``, for the ice outside the distributed water. Returns
-`(a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂)`.
+`(a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂)`, with ``ρᵢ`` the within-component correlation of the two excesses.
 """
 @inline function component_vapor_excess(pdf::ComponentDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval,
                                         thl_first, w_first, qw_first, wsec, moments_l, moments_u)
@@ -468,11 +468,23 @@ and ``σⁱᵢ`` with ``∂qᵛ⁺ⁱ/∂θ``, for the ice outside the distribut
 
     liquid = (PlanarLiquidSurface(), WarmPhaseEquilibrium())
     ice = (PlanarIceSurface(), IceSurfaceEquilibrium())
-    μ₁, σ₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r, liquid)
-    μ₂, σ₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r, liquid)
-    μⁱ₁, σⁱ₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r, ice)
-    μⁱ₂, σⁱ₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r, ice)
-    return a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂
+    μ₁, σ₁, ∂₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r, liquid)
+    μ₂, σ₂, ∂₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r, liquid)
+    μⁱ₁, σⁱ₁, ∂ⁱ₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r, ice)
+    μⁱ₂, σⁱ₂, ∂ⁱ₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r, ice)
+    ρ₁ = component_excess_correlation(qw2_1, thl2_1, sqrtthl2_1, sqrtqw2_1, r, ∂₁, ∂ⁱ₁, σ₁, σⁱ₁)
+    ρ₂ = component_excess_correlation(qw2_2, thl2_2, sqrtthl2_2, sqrtqw2_2, r, ∂₂, ∂ⁱ₂, σ₂, σⁱ₂)
+    return a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂
+end
+
+# The within-component correlation of the excesses over liquid and over ice, sˡ′ = qᵗ′ - aˡ θ′ and sⁱ′ = qᵗ′ - aⁱ θ′
+# (aˡ, aⁱ = ∂qᵛ⁺/∂θ over each surface): cov = qᵗ′² - (aˡ + aⁱ) r σθ σq + aˡ aⁱ θ′². One where either has no spread
+# (a point mass; the correlation does not enter).
+@inline function component_excess_correlation(vq, vθ, σθ, σq, r, aˡ, aⁱ, σ, σⁱ)
+    covariance = vq - (aˡ + aⁱ) * r * σθ * σq + aˡ * aⁱ * vθ
+    spread = σ * σⁱ
+    resolved = spread > 0
+    return ifelse(resolved, covariance / ifelse(resolved, spread, one(spread)), one(spread))
 end
 
 # The liquid-water temperature of a component of the double Gaussian, the one definition every function of the PDF uses:
@@ -494,12 +506,12 @@ end
     _, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, T)
     ∂qᵛ⁺∂θ = qᵛ⁺ * log_slope * Π
     σ = zero_safe_sqrt(max(0, vq + ∂qᵛ⁺∂θ * ∂qᵛ⁺∂θ * vθ - 2 * ∂qᵛ⁺∂θ * r * σθ * σq))
-    return qw - qᵛ⁺, σ
+    return qw - qᵛ⁺, σ, ∂qᵛ⁺∂θ
 end
 
 # A PDF without a component form here supplies no spread: the microphysics' grid-mean rate
 @inline function component_vapor_excess(pdf, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first,
                                         wsec, moments_l, moments_u)
     FT = typeof(thl_first)
-    return convert(FT, 0.5), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT)
+    return convert(FT, 0.5), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), one(FT), one(FT)
 end

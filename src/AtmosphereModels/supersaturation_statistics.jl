@@ -182,15 +182,16 @@ feedback on the saturation already included). `𝒰` is the thermodynamic state 
 """
     phase_relaxation_rates(i, j, k, grid, microphysics, microphysical_fields, 𝒰, constants)
 
-Return `(; ωˡ, ωⁱ)` [s⁻¹]: the phase relaxation rate of the condensate in the water that a subgrid distribution
+Return `(; ωˡ, ωⁱ, ωʷⁱ)` [s⁻¹]: the phase relaxation rate of the condensate in the water that a subgrid distribution
 distributes (the equilibrium condensate of `condensate_phase_equilibrium`: cloud liquid, or the condensate of a
-saturation adjustment), and that of the ice outside it, which condenses on ice and fills the cell (the ice of P3
-and of non-equilibrium cloud formation). Their sum is [`phase_relaxation_rate`](@ref). The default is
-`ωˡ = phase_relaxation_rate(...)` and `ωⁱ = 0`, a microphysics without ice outside the distributed water.
+saturation adjustment), and those of the condensate outside it, which fills the cell: the ice, which condenses on
+ice (the ice of P3 and of non-equilibrium cloud formation), and the liquid on ice, which condenses on liquid (P3's
+liquid coating of ice). Their sum is [`phase_relaxation_rate`](@ref). The default is
+`ωˡ = phase_relaxation_rate(...)` and `ωⁱ = ωʷⁱ = 0`, a microphysics with nothing outside the distributed water.
 """
 @inline function phase_relaxation_rates(i, j, k, grid, microphysics, microphysical_fields, 𝒰, constants)
     ωˡ = phase_relaxation_rate(i, j, k, grid, microphysics, microphysical_fields, 𝒰, constants)
-    return (; ωˡ, ωⁱ = zero(ωˡ))
+    return (; ωˡ, ωⁱ = zero(ωˡ), ωʷⁱ = zero(ωˡ))
 end
 
 """

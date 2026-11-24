@@ -50,8 +50,8 @@ only_condensation = subgrid_p3(CloudCondensationOnly())
 function ice_placement(statistics, s̄, qᶜˡ, s̄ⁱ; ξˡ = 1.05, ξⁱˡ = 1.06, ωˡ = 0.05)
     a, m, σ = PPP.shifted_mixture(statistics, s̄)
     d = placed_cloud_liquid(MixingEvaporationBalance(), a, m, σ, s̄, ξˡ, qᶜˡ, 1e-3, ωˡ, statistics.ωᵐ)
-    mⁱ, k = PPP.ice_excess_mixture(statistics, d, s̄ⁱ)
-    return merge(d, (; mⁱ, k, ξⁱˡ))
+    mⁱ, k, σʳ = PPP.ice_excess_mixture(statistics, d, s̄ⁱ)
+    return merge(d, (; mⁱ, k, σʳ, ξⁱˡ))
 end
 
 # The points s, their weights, and the excess over ice sⁱ(s) of each component at them
@@ -104,6 +104,29 @@ end
     dᵖ = ice_placement(prescribed, s̄, qᶜˡ, s̄ⁱ)
     @test all(dᵖ.k .== 1)
     @test all(dᵖ.mⁱ .- s̄ⁱ .≈ dᵖ.m .- s̄)
+end
+
+@testset "P3 subgrid ice: the excess over ice with its within-component correlation" begin
+    # (the residual is integrated in closed form at each s)
+
+    statistics = merge(ice_mixture(0.2, 4e-4, -1e-4, 1.2e-4, 1e-4, 4.5e-4, -1.1e-4, 1.1e-4, 0.9e-4; ωᵐ = 1e-2),
+                       (; ρⁱ = (0.9, 0.7)))
+    s̄, qᶜˡ, s̄ⁱ = 1e-5, 6e-5, 1.4e-4
+    d = ice_placement(statistics, s̄, qᶜˡ, s̄ⁱ)
+    @test all(d.k .≈ (0.9 * 1.1e-4 / 1.2e-4, 0.7 * 0.9e-4 / 1e-4))
+    @test all(d.σʳ .≈ (1.1e-4 * sqrt(1 - 0.81), 0.9e-4 * sqrt(1 - 0.49)))
+    # Against a Riemann sum over s and the residual
+    s, q, components = riemann_ice(d; n = 4000)
+    r = range(-6, 6, length = 801)
+    Δr = step(r)
+    wʳ = exp.(-r .^ 2 ./ 2) ./ sqrt(2π) .* Δr
+    for c in (-5e-5, 0.0, 1e-4)
+        P = 0.0
+        for ((wˢ, sⁱ), σʳ) in zip(components, d.σʳ), (ζᵣ, wᵣ) in zip(r, wʳ)
+            P += wᵣ * sum(wˢ[(sⁱ .+ σʳ * ζᵣ .- d.ξⁱˡ .* q) .>= c])
+        end
+        @test PPP.ice_excess_exceedance(d, c)[1] ≈ P atol = 1e-3
+    end
 end
 
 @testset "P3 subgrid ice: ice nucleates from the subgrid excess over ice of a cell subsaturated over ice on the mean" begin

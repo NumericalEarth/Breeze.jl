@@ -199,8 +199,8 @@ and cloud droplet distribution from which the cloud's phase relaxation rate `ω�
     # The saturation excess of the distributed water over ice, sⁱ = qᵛ - qᵛ⁺ⁱ + ξⁱˡ qᶜˡ, about P3's own grid mean
     ξⁱˡ = p3_ice_liquid_psychrometric_correction(qᵛ⁺ⁱ, T, constants)
     s̄ⁱ = qᵛ - qᵛ⁺ⁱ + ξⁱˡ * q̄ᶜˡ
-    mⁱ, k = ice_excess_mixture(statistics, d, s̄ⁱ)
-    return merge(d, (; mⁱ, k, ξⁱˡ))
+    mⁱ, k, σʳ = ice_excess_mixture(statistics, d, s̄ⁱ)
+    return merge(d, (; mⁱ, k, σʳ, ξⁱˡ))
 end
 
 # ξⁱˡ = 1 + ℒˡ ∂qᵛ⁺ⁱ/∂T / cᵖᵈ: the saturation excess over ice that the evaporation of cloud liquid returns, per unit of
@@ -214,27 +214,35 @@ end
     return 1 + ℒˡ * qᵛ⁺ⁱ * ℒⁱ / (Rᵛ * T^2 * cᵖᵈ)
 end
 
-# The saturation excess over ice of the components of the mixture, as a linear function of the excess over liquid s
-# within each component, sⁱ = mⁱᵢ + kᵢ (s - mᵢ): the two are linear in the same fluctuations of θ and qᵗ and differ only
-# in ∂qᵛ⁺/∂T, so within a component they are taken as perfectly correlated, with kᵢ = σⁱᵢ / σᵢ. The means are placed
-# about P3's grid mean s̄ⁱ with the offsets of the statistics. Statistics without the excess over ice (prescribed
-# ones) give it the offsets and spreads of the excess over liquid (kᵢ = 1).
+# The saturation excess over ice of the components of the mixture, regressed on the excess over liquid s within each
+# component: sⁱ = mⁱᵢ + kᵢ (s - mᵢ) + rᵢ, kᵢ = ρᵢ σⁱᵢ / σᵢ, with the residual rᵢ ~ N(0, (σʳᵢ)²), σʳᵢ = σⁱᵢ √(1 - ρᵢ²),
+# independent of s, and ρᵢ the within-component correlation of the two excesses that the statistics carry (both are
+# linear in the same fluctuations of θ and qᵗ and differ in ∂qᵛ⁺/∂T). The means are placed about P3's grid mean s̄ⁱ
+# with the offsets of the statistics. Statistics without the excess over ice (prescribed ones) give it the offsets
+# and spreads of the excess over liquid (kᵢ = 1, no residual); without a correlation, ρᵢ = 1.
 @inline ice_excess_mixture(statistics::NamedTuple{names}, d, s̄ⁱ) where names =
     ice_excess_mixture(Val(:μⁱ ∈ names), statistics, d, s̄ⁱ)
 
 @inline function ice_excess_mixture(::Val{false}, statistics, d, s̄ⁱ)
     mⁱ = map(mᵢ -> s̄ⁱ + (mᵢ - d.mean_excess), d.m)
-    return mⁱ, map(mᵢ -> one(mᵢ), d.m)
+    return mⁱ, map(mᵢ -> one(mᵢ), d.m), map(mᵢ -> zero(mᵢ), d.m)
 end
+
+@inline excess_correlation(statistics::NamedTuple{names}, FT) where names = excess_correlation(Val(:ρⁱ ∈ names), statistics, FT)
+@inline excess_correlation(::Val{true}, statistics, FT) = map(x -> convert(FT, x), statistics.ρⁱ)
+@inline excess_correlation(::Val{false}, statistics, FT) = map(x -> one(FT), statistics.μⁱ)
 
 @inline function ice_excess_mixture(::Val{true}, statistics, d, s̄ⁱ)
     FT = typeof(s̄ⁱ)
     μⁱ = map(x -> convert(FT, x), statistics.μⁱ)
     σⁱ = map(x -> convert(FT, x), statistics.σⁱ)
+    ρ = excess_correlation(statistics, FT)
     plume_mean = sum(map(*, d.a, μⁱ))
     mⁱ = map(μⁱᵢ -> s̄ⁱ + μⁱᵢ - plume_mean, μⁱ)
-    k = map((σⁱᵢ, σᵢ) -> safe_ratio(σⁱᵢ, σᵢ, one(FT)), σⁱ, d.σ)
-    return mⁱ, k
+    k = map((ρᵢ, σⁱᵢ, σᵢ) -> safe_ratio(ρᵢ * σⁱᵢ, σᵢ, one(FT)), ρ, σⁱ, d.σ)
+    # (round-off can put |ρ| a hair above 1); with no spread of s the residual is all of σⁱ
+    σʳ = map((ρᵢ, σⁱᵢ, σᵢ) -> ifelse(σᵢ > 0, σⁱᵢ * sqrt(max(0, 1 - ρᵢ * ρᵢ)), σⁱᵢ), ρ, σⁱ, d.σ)
+    return mⁱ, k, σʳ
 end
 
 #####
@@ -339,6 +347,31 @@ end
 @inline function positive_power(s, β)
     positive = s > 0
     return ifelse(positive, ifelse(positive, s, one(s))^β, zero(s))
+end
+
+# Σᵢ aᵢ ∫₀^∞ f(s, i) N(s; mᵢ, σᵢ²) ds, with the 24-point Gauss-Legendre rule of `gaussian_partial_moment` over
+# [max(0, mᵢ - 8σᵢ), mᵢ + 8σᵢ]; a zero spread is the point mass at the mean. `f(s, i)` returns a number.
+@inline function positive_part_quadrature(f, d)
+    FT = typeof(d.qᶜˡ)
+    R = convert(FT, 8)
+    components = map(d.a, d.m, d.σ, ntuple(identity, length(d.a))) do aᵢ, m, σ, i
+        σ₊ = max(σ, floatmin(FT) / eps(FT))
+        lo = max(zero(FT), m - R * σ₊)
+        hi = max(lo, m + R * σ₊)
+        h = (hi - lo) / 2
+        c = (hi + lo) / 2
+        terms = map(gauss_legendre_nodes, gauss_legendre_weights) do x, w
+            s⁺ = c + h * convert(FT, x)
+            s⁻ = c - h * convert(FT, x)
+            z⁺ = (s⁺ - m) / σ₊
+            z⁻ = (s⁻ - m) / σ₊
+            convert(FT, w) * (f(s⁺, i) * exp(-z⁺^2 / 2) + f(s⁻, i) * exp(-z⁻^2 / 2))
+        end
+        quadrature = sum(terms) * h / (sqrt(2 * FT(π)) * σ₊)
+        point_mass = ifelse(m > 0, f(max(m, floatmin(FT)), i), zero(FT))
+        aᵢ * ifelse(σ > 0, quadrature, point_mass)
+    end
+    return sum(components)
 end
 
 @inline mixture_partial_moment(d, β, l) =
@@ -586,18 +619,61 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Return the fraction `P` of the cell where the local vapor excess over ice ``δⁱ`` reaches `threshold` [kg kg⁻¹], and the
 mean of ``δⁱ`` over that part times `P`, at the placement `d` with the excess over ice of
 [`subgrid_process_distribution`](@ref). Within component ``i`` the excess of the
-distributed water over ice is ``sⁱ = bᵢ + kᵢ s``, ``bᵢ = mⁱᵢ - kᵢ mᵢ``, and the local vapor excess over ice is
-``δⁱ = sⁱ - ξⁱˡ qᶜˡ(s)``: ``bᵢ + kᵢ s - ξⁱˡ q⊖`` where ``s ≤ 0`` and ``bᵢ + (kᵢ - ξⁱˡ λ / ξˡ) s`` where ``s > 0``, so in
-each part the set ``δⁱ ≥`` `threshold` is an interval of ``s``.
+distributed water over ice is ``sⁱ = bᵢ + kᵢ s``, ``bᵢ = mⁱᵢ - kᵢ mᵢ + rᵢ``, and the local vapor excess over ice is
+``δⁱ = sⁱ - ξⁱˡ qᶜˡ(s)``: ``bᵢ + kᵢ s - ξⁱˡ q⊖`` where ``s ≤ 0`` and ``bᵢ + (kᵢ - ξⁱˡ λ / ξˡ) s`` where ``s > 0``, so at a
+given residual the set ``δⁱ ≥`` `threshold` is an interval of ``s`` in each part. At given ``s`` the local excess is
+Gaussian in the residual, independent of ``s``, with the exceedance ``Φ(z)`` and partial mean ``μ Φ(z) + σʳ φ(z)``,
+smooth in ``s`` within each part, so those are integrated over ``s`` with the 24-point Gauss-Legendre rule in each part
+(the exact form needs the bivariate normal distribution function); without a residual, over the exact intervals.
 """
 @inline function ice_excess_exceedance(d, threshold)
     FT = typeof(threshold)
     c = threshold
     qᵘ = d.subsaturated_liquid  # the cloud liquid of the subsaturated part, q⊖
     λⁱ = d.ξⁱˡ * d.λ / d.ξˡ
-    terms = map(d.a, d.m, d.σ, d.mⁱ, d.k) do aᵢ, mᵢ, σᵢ, mⁱᵢ, kᵢ
+    R = convert(FT, 8)
+    terms = map(d.a, d.m, d.σ, d.mⁱ, d.k, d.σʳ) do aᵢ, mᵢ, σᵢ, mⁱᵢ, kᵢ, σʳᵢ
         bᵢ = mⁱᵢ - kᵢ * mᵢ
-        # Subsaturated part: kᵢ s ≥ Aᵢ with s ≤ 0
+        # At given s the local excess over ice is Gaussian in the residual: its exceedance and partial mean
+        function conditional(s)
+            μ = bᵢ + ifelse(s > 0, (kᵢ - λⁱ) * s, kᵢ * s - d.ξⁱˡ * qᵘ)
+            z = (μ - c) / max(σʳᵢ, floatmin(FT) / eps(FT))
+            Φ = gaussian_upper_tail(-z)
+            φ = gaussian_density(z)
+            return (Φ, μ * Φ + σʳᵢ * φ)
+        end
+        σ₊ = max(σᵢ, floatmin(FT) / eps(FT))
+        lower = gauss_legendre_interval(s -> conditional(s), min(mᵢ - R * σ₊, zero(FT)), min(mᵢ + R * σ₊, zero(FT)), mᵢ, σ₊)
+        upper = gauss_legendre_interval(s -> conditional(s), max(mᵢ - R * σ₊, zero(FT)), max(mᵢ + R * σ₊, zero(FT)), mᵢ, σ₊)
+        point = ifelse(σᵢ > 0, (lower[1] + upper[1], lower[2] + upper[2]), conditional(mᵢ))
+        # Without a residual the conditional exceedance is a step, integrated exactly over intervals of s
+        exact = ice_excess_exceedance_without_residual(d, c, aᵢ, mᵢ, σᵢ, bᵢ, kᵢ, qᵘ, λⁱ)
+        resolved = σʳᵢ > 0
+        (aᵢ * ifelse(resolved, point[1], exact[1]), aᵢ * ifelse(resolved, point[2], exact[2]))
+    end
+    return sum(map(first, terms)), sum(map(last, terms))
+end
+
+# ∫ₗᵒ^ʰⁱ f(s) N(s; m, σ²) ds by the 24-point Gauss-Legendre rule, for f returning a tuple
+@inline function gauss_legendre_interval(f, lo, hi, m, σ)
+    FT = typeof(m)
+    h = (hi - lo) / 2
+    c = (hi + lo) / 2
+    terms = map(gauss_legendre_nodes, gauss_legendre_weights) do x, w
+        s⁺ = c + h * convert(FT, x)
+        s⁻ = c - h * convert(FT, x)
+        n⁺ = exp(-((s⁺ - m) / σ)^2 / 2)
+        n⁻ = exp(-((s⁻ - m) / σ)^2 / 2)
+        map((y⁺, y⁻) -> convert(FT, w) * (y⁺ * n⁺ + y⁻ * n⁻), f(s⁺), f(s⁻))
+    end
+    scale = h / (sqrt(2 * FT(π)) * σ)
+    return map(x -> x * scale, reduce((x, y) -> x .+ y, terms))
+end
+
+# One component without a residual: the set δⁱ ≥ c is an interval of s in each part
+@inline function ice_excess_exceedance_without_residual(d, c, aᵢ, mᵢ, σᵢ, bᵢ, kᵢ, qᵘ, λⁱ)
+    FT = typeof(c)
+    # Subsaturated part: kᵢ s ≥ Aᵢ with s ≤ 0
         Aᵢ = c + d.ξⁱˡ * qᵘ - bᵢ
         kₛ = ifelse(kᵢ > 0, kᵢ, one(FT))
         P_sloped, M_sloped = gaussian_interval_moments(mᵢ, σᵢ, min(Aᵢ / kₛ, zero(FT)), zero(FT), true)
@@ -608,9 +684,7 @@ each part the set ``δⁱ ≥`` `threshold` is an interval of ``s``.
         # Saturated part: rᵢ s ≥ Bᵢ with s > 0
         rᵢ = kᵢ - λⁱ
         P⁺, M⁺ = positive_linear_exceedance(mᵢ, σᵢ, rᵢ, c - bᵢ)
-        (aᵢ * (P⁻ + P⁺), aᵢ * ((bᵢ - d.ξⁱˡ * qᵘ) * P⁻ + kᵢ * M⁻ + bᵢ * P⁺ + rᵢ * M⁺))
-    end
-    return sum(map(first, terms)), sum(map(last, terms))
+    return (P⁻ + P⁺, (bᵢ - d.ξⁱˡ * qᵘ) * P⁻ + kᵢ * M⁻ + bᵢ * P⁺ + rᵢ * M⁺)
 end
 
 """

@@ -19,7 +19,7 @@
 ##### when traced.
 #####
 
-using SpecialFunctions: erf
+using SpecialFunctions: erf, erfc
 
 """
     BracketedFractionSolve(iterations = 3; classification_tolerance = 1e-8, lagged_envelope = false)
@@ -216,7 +216,7 @@ end
 end
 
 @kernel function _bracketed_fraction_solve!(N², state, solver::BracketedFractionSolve{N}, grid, closure, moments, cloud,
-                                            velocities, θ, qᵗ, e, p, thermodynamics, ℓˢ) where N
+                                            velocities, θ, qᵗ, e, p, thermodynamics, ℓˢ, closure_fields, s) where N
     i, j, k = @index(Global, NTuple)
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
@@ -229,6 +229,12 @@ end
     tol = convert(FT, solver.classification_tolerance)
     ℓᵉ = ifelse(solver.lagged_envelope, @inbounds(ℓˢ[i, j, kₛ]), FT(Inf))
     input = fraction_face_inputs(i, j, kₛ, grid, closure_ij, d, moments, cloud, θ, qᵗ, e, p, thermodynamics)
+    # The latent response of the condensate outside the distributed water (ice and its liquid coating), with the
+    # distribution and the eddy time before the solve (as the moments of the neighbouring faces)
+    aʷ = face_condensate_flux_fraction(i, j, kₛ, grid, moments, cloud, qᵗ, θ, p, thermodynamics)
+    X = latent_correctionᶜᶜᶠ(i, j, kₛ, grid, closure_ij, closure_fields, velocities, s, qᵗ, θ, e, thermodynamics, cloud,
+                             aʷ, face_ice_excess_flux_fraction(i, j, kₛ, cloud, aʷ)).outside
+    input = merge(input, (; N²ᶜ = input.N²ᶜ + X))
     ãᴺ(x) = trial_condensate_flux_fraction(x, i, j, kₛ, grid, closure_ij, d, moments, cloud, input, velocities,
                                       θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
 
@@ -329,11 +335,13 @@ function cloud_buoyancy_stability!(buoyancy_flux::BracketedAppliedFluxEnergetics
     s = distribution_state(model, nothing)
     state = fields.solver_state
     launch!(arch, grid, parameters, _bracketed_fraction_solve!, closure_fields.N², state, buoyancy_flux.stability_solver,
-            grid, closure, fields.moments, fields.cloud, model.velocities, s.θ, s.qᵗ, s.e, s.p, s.thermodynamics, closure_fields.ℓˢ)
+            grid, closure, fields.moments, fields.cloud, model.velocities, s.θ, s.qᵗ, s.e, s.p, s.thermodynamics, closure_fields.ℓˢ,
+            closure_fields, applied_flux_state(model))
     # The column envelope of the mixing length, the diffusivities and the distribution, once
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
     launch!(arch, grid, parameters, _final_condensate_flux_fraction!, state.ãᴺᶠ, grid, closure, fields.cloud, closure_fields.Kᶜ,
             s.θ, s.qᵗ, s.p, s.thermodynamics)
+    store_latent_correction_of_solved_stability!(fields, closure_fields, closure, model, tracers, parameters)
     return nothing
 end
