@@ -261,7 +261,9 @@ previous_float_type = Oceananigans.defaults.FloatType
                                     formulation = :LiquidIcePotentialTemperature, radiation)
             qᵗ(z) = ifelse(CLOUD_BOTTOM < z < CLOUD_TOP, 0.03, 0.010 * exp(-z / 2500))
             set!(model; θ = z -> 300 + 5e-3 * z, qᵗ)
-            time_step!(model, 10minutes)
+            # One rain-out of a 10-minute step, applied directly (the DateTime clock cannot advance by a Float)
+            model.clock.last_Δt = 10minutes
+            Breeze.AtmosphereModels.microphysics_model_update!(microphysics, model)
             model
         end
 
