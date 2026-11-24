@@ -6,7 +6,7 @@
 #####   * the distribution: the second moments θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′ down the gradient,
 #####     `ℂᵛ τ Kᶜ ∂z a ∂z b` and `-Kᶜ ∂z a`, with the closure's `Kᶜ` and a moment time scale `τ` built
 #####     from its `ℓ`, `e` and `N²`; `w′² = ℂʷ₁ (2/3) e`; the third moment w′³ and its limiter; and the
-#####     assumed double-Gaussian distribution with its saturation, which gives the cloud fraction aᶜ,
+#####     assumed double-Gaussian distribution, condensing on the condensate phase of the microphysics, which gives the cloud fraction aᶜ,
 #####     the cloud liquid, the condensate flux w′qᶜ′ and the buoyancy flux w′θᵥ′ = w′θˡⁱ′ + A_q w′qᵗ′ + A_c w′qᶜ′.
 #####   * the energetics (`AppliedFluxEnergetics`, internal): the TKE equation takes its shear and
 #####     buoyancy production from the energy the fluxes the closure applies take from the mean state
@@ -69,8 +69,8 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a [`StratificationLimitedMomentTimeScale`](@ref) with the values of the fixed smooth SHOC
-configuration: `ℂᵗ = 1`, `ℂᴺ = 4.5`, `exponent = 4`.
+Return a [`StratificationLimitedMomentTimeScale`](@ref): `ℂᵗ = 1` eddy turnover, the limit `ℂᴺ = 4.5` on `τ N` and
+the exponent `p = 4` of its norm by default.
 """
 StratificationLimitedMomentTimeScale(FT::DataType = Oceananigans.defaults.FloatType;
                                      ℂᵗ = 1, ℂᴺ = 4.5, exponent = 4, minimum_buoyancy_frequency = 1e-4) =
@@ -246,9 +246,10 @@ end
 $(TYPEDEF)
 
 The subgrid distribution of θˡⁱ, qᵗ and w of [`TKEBasedTurbulenceClosure`](@ref) (`subgrid_distribution`): the
-components of `SimplifiedHigherOrderClosure` for the second moments, the third moment and its
-limiter, the assumed PDF and its saturation, evaluated on the mixing length, turbulent kinetic
-energy, diffusivities and static stability of [`TKEBasedTurbulenceClosure`](@ref).
+second moments, the third moment and its limiter and the assumed PDF, evaluated on the mixing length, turbulent
+kinetic energy, diffusivities and static stability of the closure. The PDF condenses with the thermodynamics of
+the model, on the phase of the condensate of its microphysics (liquid, or liquid and ice for P3 and mixed-phase
+saturation adjustment; `condensate_phase_equilibrium`).
 
 $(TYPEDFIELDS)
 """
@@ -263,7 +264,7 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, R, VT, VS, FT}
     stratification_number_bound :: SB
     "Limiter of the third moment"
     skewness :: SK
-    "Assumed PDF ([`DoubleGaussianPDF`](@ref) or [`SmoothDoubleGaussianPDF`](@ref))"
+    "Assumed PDF ([`EqualWidthDoubleGaussianPDF`](@ref), [`DoubleGaussianPDF`](@ref) or [`SmoothDoubleGaussianPDF`](@ref)), with the clipping policy of its bounds"
     assumed_pdf :: PDF
     "Maximum flux correlation of w with θˡⁱ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
     ℂʳ :: R
@@ -280,10 +281,13 @@ Adapt.@adapt_structure DoubleGaussian
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a [`DoubleGaussian`](@ref). The defaults are the components of the fixed smooth SHOC
-configuration with published coefficients, except the third moment, [`TKEBudgetThirdMoment`](@ref)
-in place of SHOC's [`AlgebraicThirdMoment`](@ref) (still available through `third_moment`), and the
-largest skewness of the third-moment limiter: the largest that `assumed_pdf` represents,
+Return a [`DoubleGaussian`](@ref). The defaults are the moment time scale of the scalar-variance budget
+([`DissipationTimeScale`](@ref) with `ℂᵠ = 1.3`), SHOC's down-gradient second moments
+([`DowngradientSecondMoments`](@ref)), the third moment of the TKE budget ([`TKEBudgetThirdMoment`](@ref), in place
+of SHOC's [`AlgebraicThirdMoment`](@ref)) with the bound [`RationalSaturatedStratificationNumber`](@ref) of the
+stratification number, the double Gaussian with equal within-component widths
+([`EqualWidthDoubleGaussianPDF`](@ref), whose bounds are smooth) and the limiter
+[`PolynomialSaturatedSkewness`](@ref) with the largest skewness that `assumed_pdf` represents,
 
     (1 - 2a) (1 - ℂᵍ)^{3/2} / √(a (1 - a)),
 
