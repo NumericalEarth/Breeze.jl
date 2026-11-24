@@ -336,12 +336,12 @@ end
 # The latent part of the buoyancy conversion at the interior face k from the solved state: Kᶜ ΔN²ᴸ with the gradients
 # of the solved θˡⁱ, total water and condensate and the stage's shares η, aᴺ = η aʷ and coefficients c_q, c_θ, bˡᵛ
 # (see `_latent_corrected_stability!`)
-@inline function solved_latent_conversionᶜᶜᶠ(i, j, k, grid, s, cl, Kᶜ, qʷ)
+@inline function solved_latent_conversionᶜᶜᶠ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
     @inbounds begin
         ρ⁺ = s.ρ[i, j, k]
         ρ⁻ = s.ρ[i, j, k-1]
-        θ⁺ = s.ρθ[i, j, k] / ρ⁺
-        θ⁻ = s.ρθ[i, j, k-1] / ρ⁻
+        θ⁺ = θʷ[i, j, k]
+        θ⁻ = θʷ[i, j, k-1]
         qʷ⁺ = qʷ[i, j, k]
         qʷ⁻ = qʷ[i, j, k-1]
         qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, k] / ρ⁺
@@ -355,11 +355,11 @@ end
 end
 
 # At the center k, from its two faces with the half-cell weights of `interior_conversionsᶜᶜᶜ`
-@inline function solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ)
+@inline function solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
-    Lˡᵒʷ = ifelse(k > 1, solved_latent_conversionᶜᶜᶠ(i, j, max(k, 2), grid, s, cl, Kᶜ, qʷ), zero(FT))
-    Lᵘᵖ = ifelse(k < Nz, solved_latent_conversionᶜᶜᶠ(i, j, min(k + 1, Nz), grid, s, cl, Kᶜ, qʷ), zero(FT))
+    Lˡᵒʷ = ifelse(k > 1, solved_latent_conversionᶜᶜᶠ(i, j, max(k, 2), grid, s, cl, Kᶜ, qʷ, θʷ), zero(FT))
+    Lᵘᵖ = ifelse(k < Nz, solved_latent_conversionᶜᶜᶠ(i, j, min(k + 1, Nz), grid, s, cl, Kᶜ, qʷ, θʷ), zero(FT))
     zᶜ = znode(i, j, k, grid, Center(), Center(), Center())
     wˡᵒʷ = ℑzᵃᵃᶠ(i, j, k, grid, s.ρ) * (zᶜ - znode(i, j, k, grid, Center(), Center(), Face()))
     wᵘᵖ = ℑzᵃᵃᶠ(i, j, k + 1, grid, s.ρ) * (znode(i, j, k + 1, grid, Center(), Center(), Face()) - zᶜ)
@@ -367,12 +367,12 @@ end
     return (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
 end
 
-@kernel function _give_solved_conversions!(ρe, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, qʷ)
+@kernel function _give_solved_conversions!(ρe, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, qʷ, θʷ)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     Pᵖ, Dᵘ = solved_shear_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     Bᵖ, _, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
-    Bᴸˢ = solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ)
+    Bᴸˢ = solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
     Pⁱ = Pᵖ + Dᵘ
     Bⁱ = max(Bᵖ + Bᴸˢ, zero(Bᵖ))
     ℂᴾ = shear_production_fraction(closure_ij.stability_functions)
@@ -388,12 +388,12 @@ function give_solved_conversions!(closure_fields, closure, model)
     grid = model.grid
     cl = closure_fields.subgrid_cloud.cloud
     s = applied_flux_state(model)
-    qʷ = distribution_state(model, nothing).qᵗ
+    d = distribution_state(model, nothing)
     fill_halo_regions!((model.momentum.ρu, model.momentum.ρv))
     u = SpecificValue(model.momentum.ρu, s.ρ)
     v = SpecificValue(model.momentum.ρv, s.ρ)
     launch!(grid.architecture, grid, :xyz, _give_solved_conversions!, model.tracers[TKE_NAME], cl, grid, closure, s,
-            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, qʷ)
+            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, d.qᵗ, d.θ)
     return nothing
 end
 
@@ -897,7 +897,7 @@ end
     return clamp(ifelse(resolved, w′qˡ′ / ifelse(resolved, w′s′, one(FT)), zero(FT)), zero(FT), one(FT))
 end
 
-@kernel function _latent_corrected_stability!(N², cl, m, grid, closure, closure_fields, velocities, s, qʷ, e, thermodynamics, ω)
+@kernel function _latent_corrected_stability!(N², cl, m, grid, closure, closure_fields, velocities, s, qʷ, θʷ, e, thermodynamics, ω)
     i, j, k = @index(Global, NTuple)
     FT = grid_float_type(grid)
     closure_ij = getclosure(i, j, closure)
@@ -905,8 +905,8 @@ end
     @inbounds begin
         ρ⁺ = s.ρ[i, j, kₛ]
         ρ⁻ = s.ρ[i, j, kₛ-1]
-        θ⁺ = s.ρθ[i, j, kₛ] / ρ⁺
-        θ⁻ = s.ρθ[i, j, kₛ-1] / ρ⁻
+        θ⁺ = θʷ[i, j, kₛ]
+        θ⁻ = θʷ[i, j, kₛ-1]
         qʷ⁺ = qʷ[i, j, kₛ]
         qʷ⁻ = qʷ[i, j, kₛ-1]
         qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, kₛ] / ρ⁺
@@ -962,7 +962,7 @@ function cloud_buoyancy_stability_pass!(fields::SubgridCloudFields{<:AppliedFlux
     d = distribution_state(model, nothing)
     dist = subgrid_distribution(closure)
     launch!(arch, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments, grid, closure,
-            closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, tracers[TKE_NAME], d.thermodynamics,
+            closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, d.θ, tracers[TKE_NAME], d.thermodynamics,
             ω)
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
@@ -1001,7 +1001,7 @@ end
 ##### the fraction gives (for Ri and ℓ) and the buoyancy production then use one saturated fraction.
 #####
 
-@kernel function _microphysics_latent_correction!(cl, grid, closure, s, qʷ, thermodynamics, tracers, buoyancy, closure_fields)
+@kernel function _microphysics_latent_correction!(cl, grid, closure, s, qʷ, θʷ, thermodynamics, tracers, buoyancy, closure_fields)
     i, j, k = @index(Global, NTuple)
     FT = grid_float_type(grid)
     closure_ij = getclosure(i, j, closure)
@@ -1009,8 +1009,8 @@ end
     @inbounds begin
         ρ⁺ = s.ρ[i, j, kₛ]
         ρ⁻ = s.ρ[i, j, kₛ-1]
-        θ⁺ = s.ρθ[i, j, kₛ] / ρ⁺
-        θ⁻ = s.ρθ[i, j, kₛ-1] / ρ⁻
+        θ⁺ = θʷ[i, j, kₛ]
+        θ⁻ = θʷ[i, j, kₛ-1]
         qʷ⁺ = qʷ[i, j, kₛ]
         qʷ⁻ = qʷ[i, j, kₛ-1]
         qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, kₛ] / ρ⁺
@@ -1039,6 +1039,6 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergeti
     d = distribution_state(model, nothing)
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
     launch!(grid.architecture, grid, parameters, _microphysics_latent_correction!, fields.cloud, grid, closure,
-            applied_flux_state(model), d.qᵗ, d.thermodynamics, tracers, buoyancy, closure_fields)
+            applied_flux_state(model), d.qᵗ, d.θ, d.thermodynamics, tracers, buoyancy, closure_fields)
     return nothing
 end

@@ -760,13 +760,70 @@ function distribution_potential_temperature_density(model)
     return Oceananigans.prognostic_fields(model.formulation).ρθ
 end
 
-# The state the distribution reads: θˡⁱ, qᵗ, e, w, p and the thermodynamics of the model. `e_density`
+# The liquid-ice potential temperature of the distributed water, θʷ. The model's θˡⁱ subtracts the latent heat of all
+# its condensate, ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ. Where the distributed water is the vapor and the cloud liquid
+# (a microphysics with prognostic cloud liquid: P3, Kessler, non-equilibrium cloud formation), the condensate outside
+# it (rain, ice, the liquid on ice) is held, not evaporated, in the all-vapor state of the distribution:
+#
+#     ĉᵖ Π θʷ = cᵖᵐ T - ℒˡ₀ qᶜˡ,    θʷ = θˡⁱ + (ℒˡ₀ (qˡ - qᶜˡ) + ℒⁱ₀ qⁱ) / (ĉᵖ Π),
+#
+# with ĉᵖ, Π those of the model at the cell, so that (θʷ, qᵛ + qᶜˡ) describe the same water and Π θʷ is the
+# temperature of the cell with its cloud liquid evaporated. Where all the water is distributed (saturation
+# adjustment, or no condensate), θʷ = θˡⁱ.
+struct DistributedWaterPotentialTemperature{Θ, R, V, L, P, G, M, F, C, X, S}
+    ρθ :: Θ
+    density :: R
+    moisture_density :: V
+    cloud_liquid :: L
+    pressure :: P
+    grid :: G
+    microphysics :: M
+    microphysical_fields :: F
+    constants :: C
+    exner_exponent :: X
+    standard_pressure :: S
+end
+
+Adapt.adapt_structure(to, θ::DistributedWaterPotentialTemperature) =
+    DistributedWaterPotentialTemperature(adapt(to, θ.ρθ), adapt(to, θ.density), adapt(to, θ.moisture_density),
+                                         adapt(to, θ.cloud_liquid), adapt(to, θ.pressure), adapt(to, θ.grid),
+                                         adapt(to, θ.microphysics), adapt(to, θ.microphysical_fields),
+                                         θ.constants, θ.exner_exponent, θ.standard_pressure)
+
+@inline function Base.getindex(θ::DistributedWaterPotentialTemperature, i, j, k)
+    constants = θ.constants
+    @inbounds begin
+        ρ = θ.density[i, j, k]
+        θˡⁱ = θ.ρθ[i, j, k] / ρ
+        qᶜˡ = θ.cloud_liquid[i, j, k] / ρ
+        p = θ.pressure[i, j, k]
+        qᵛᵉ = θ.moisture_density[i, j, k] / ρ
+    end
+    q = grid_moisture_fractions(i, j, k, θ.grid, θ.microphysics, ρ, qᵛᵉ, θ.microphysical_fields)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    Π = (p / θ.standard_pressure)^exner_exponent(θ.exner_exponent, q, constants)
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
+    return θˡⁱ + (ℒˡ₀ * (q.liquid - qᶜˡ) + ℒⁱ₀ * q.ice) / (ĉᵖ * Π)
+end
+
+distributed_water_potential_temperature(model, ρθ, ρ, ::Nothing) = SpecificValue(ρθ, ρ)
+
+distributed_water_potential_temperature(model, ρθ, ρ, ρqᶜˡ) =
+    DistributedWaterPotentialTemperature(ρθ, ρ, model.moisture_density, ρqᶜˡ, AtmosphereModels.dynamics_pressure(model.dynamics),
+                                         model.grid, model.microphysics, model.microphysical_fields,
+                                         model.thermodynamic_constants,
+                                         AtmosphereModels.liquid_ice_exner_exponent(model.formulation),
+                                         AtmosphereModels.standard_pressure(model.dynamics))
+
+# The state the distribution reads: θʷ, qᵗ, e, w, p and the thermodynamics of the model. `e_density`
 # is the density of the specific TKE `ρe` holds: `nothing` within `update_state!`, where the tracer
 # holds its specific value, and `ρ` after the stages, where it holds its density.
 function distribution_state(model, e_density)
     ρ = AtmosphereModels.total_density(model.dynamics)
-    θ = SpecificValue(distribution_potential_temperature_density(model), ρ)
-    qᵗ = SpecificTotalWater(model.moisture_density, cloud_liquid_density(model.microphysical_fields), ρ)
+    ρqᶜˡ = cloud_liquid_density(model.microphysical_fields)
+    θ = distributed_water_potential_temperature(model, distribution_potential_temperature_density(model), ρ, ρqᶜˡ)
+    qᵗ = SpecificTotalWater(model.moisture_density, ρqᶜˡ, ρ)
     e = SpecificValue(model.tracers[TKE_NAME], e_density)
     w = model.velocities.w
     p = AtmosphereModels.dynamics_pressure(model.dynamics)
