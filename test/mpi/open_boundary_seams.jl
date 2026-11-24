@@ -34,9 +34,6 @@ const nranks = MPI.Comm_size(comm)
 const use_gpu = CUDA.functional() && length(CUDA.devices()) >= nranks
 const child_architecture = use_gpu ? GPU() : CPU()
 
-# Rounding differs between CPU and GPU, so the comparison with the serial CPU run is looser on GPU.
-const rtol = use_gpu ? 1e-6 : 1e-8
-
 const partition_name = isempty(ARGS) ? "xy" : ARGS[1]
 
 function partition_for(name, nranks)
@@ -83,7 +80,7 @@ end
     model = open_boundary_simulation(arch)
     @test model.clock.iteration == 1
 
-    serial_model = rank == 0 ? open_boundary_simulation(CPU()) : nothing
+    serial_model = rank == 0 ? open_boundary_simulation(child_architecture) : nothing
     rank == 0 && @test maximum(interior(serial_model.microphysical_fields.qˡ)) > 0
 
     distributed_fields = Oceananigans.prognostic_fields(model)
@@ -95,7 +92,7 @@ end
             serial_data = Array(interior(Oceananigans.prognostic_fields(serial_model)[name]))
             @test !any(isnan, distributed_data)
             @info "$(name): max difference $(maximum(abs, distributed_data .- serial_data))"
-            @test distributed_data ≈ serial_data rtol=rtol
+            @test distributed_data ≈ serial_data rtol=1e-8
         end
     end
 end
