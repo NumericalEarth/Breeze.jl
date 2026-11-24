@@ -248,8 +248,9 @@ $(TYPEDEF)
 The subgrid distribution of θˡⁱ, qᵗ and w of [`TKEBasedTurbulenceClosure`](@ref) (`subgrid_distribution`): the
 second moments, the third moment and its limiter and the assumed PDF, evaluated on the mixing length, turbulent
 kinetic energy, diffusivities and static stability of the closure. The PDF condenses with the thermodynamics of
-the model, on the phase of the condensate of its microphysics (liquid, or liquid and ice for P3 and mixed-phase
-saturation adjustment; `condensate_phase_equilibrium`).
+the model, on the phase of the condensate of the water it distributes (`condensate_phase_equilibrium`): liquid, or
+liquid and ice for mixed-phase saturation adjustment. With P3 the distributed water is the vapor and the cloud
+liquid, which condenses over liquid; P3's ice enters through its relaxation rate and the saturation excess over ice.
 
 $(TYPEDFIELDS)
 """

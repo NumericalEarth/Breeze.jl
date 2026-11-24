@@ -27,9 +27,10 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The thermodynamics with which the assumed PDF of the subgrid distribution of `model` condenses: the
 `ThermodynamicConstants` of `model` (its saturation vapor pressure and temperature-dependent latent heats), the
 standard pressure of its potential temperature, the Exner exponent of its formulation, and the phase equilibrium
-of the condensate of its microphysics (`condensate_phase_equilibrium`): `WarmPhaseEquilibrium()`, liquid, or
-`MixedPhaseEquilibrium()`, liquid turning to ice between the freezing and homogeneous freezing temperatures of the
-microphysics, for microphysics with ice (P3, mixed-phase saturation adjustment).
+of the condensate in the water it distributes (`condensate_phase_equilibrium`): `WarmPhaseEquilibrium()`, liquid
+(warm microphysics, and the cloud liquid of P3 and of non-equilibrium cloud formation), or `MixedPhaseEquilibrium()`,
+liquid turning to ice between the freezing and homogeneous freezing temperatures, for mixed-phase saturation
+adjustment.
 
 Each plume condenses over the condensate surface that equilibrium makes at the plume temperature, with the
 vapor-equivalent heat capacity `ĉᵖ` and Exner function `Π = (p / pˢᵗ)^κ` with which the model defines the

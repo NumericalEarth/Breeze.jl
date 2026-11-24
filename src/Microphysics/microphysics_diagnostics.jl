@@ -24,10 +24,9 @@ using ..AtmosphereModels.Diagnostics:
 @inline Diagnostics.microphysics_phase_equilibrium(μ::BulkMicrophysics) = microphysics_phase_equilibrium(μ.cloud_formation)
 
 # The condensate of bulk microphysics is that of its cloud formation: the equilibrium of its saturation
-# adjustment, or, without one, liquid, and ice if it forms ice
+# adjustment, or, without one, the cloud liquid of its distributed water (its cloud ice is not distributed)
 @inline Diagnostics.condensate_phase_equilibrium(μ::BulkMicrophysics) = condensate_phase_equilibrium(μ.cloud_formation)
-@inline Diagnostics.condensate_phase_equilibrium(::NonEquilibriumCloudFormation{<:Any, Nothing}) = WarmPhaseEquilibrium()
-@inline Diagnostics.condensate_phase_equilibrium(::NonEquilibriumCloudFormation) = MixedPhaseEquilibrium()
+@inline Diagnostics.condensate_phase_equilibrium(::NonEquilibriumCloudFormation) = WarmPhaseEquilibrium()
 
 const C = Center
 

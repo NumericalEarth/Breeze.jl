@@ -83,14 +83,10 @@ model_thermodynamics(FT; phase_equilibrium = WarmPhaseEquilibrium()) =
     @test condensate_phase_equilibrium(InstantaneousPrecipitation(FT; equilibrium = mixed)) === mixed
     @test condensate_phase_equilibrium(Breeze.DCMIP2016KesslerMicrophysics(FT)) isa WarmPhaseEquilibrium
     @test condensate_phase_equilibrium(NonEquilibriumCloudFormation(:liquid, nothing)) isa WarmPhaseEquilibrium
-    @test condensate_phase_equilibrium(NonEquilibriumCloudFormation(:liquid, :ice)) isa MixedPhaseEquilibrium
-
-    # P3 forms ice: liquid above its freezing temperature, ice below that of homogeneous freezing
-    p3 = PredictedParticlePropertiesMicrophysics(FT)
-    p3_equilibrium = condensate_phase_equilibrium(p3)
-    @test p3_equilibrium isa MixedPhaseEquilibrium{FT}
-    @test p3_equilibrium.freezing_temperature == p3.process_rates.freezing_temperature
-    @test p3_equilibrium.homogeneous_ice_nucleation_temperature == p3.process_rates.homogeneous_freezing_temperature
+    # Schemes with prognostic cloud liquid distribute vapor and cloud liquid: their condensate is the cloud liquid,
+    # relaxed toward saturation over liquid; their ice is not distributed
+    @test condensate_phase_equilibrium(NonEquilibriumCloudFormation(:liquid, :ice)) isa WarmPhaseEquilibrium
+    @test condensate_phase_equilibrium(PredictedParticlePropertiesMicrophysics(FT)) isa WarmPhaseEquilibrium
 
     # The thermodynamics of the distribution are those of the model, with the phase of its microphysics
     grid = RectilinearGrid(default_arch, FT; size = 4, z = (0, 1000), topology = (Flat, Flat, Bounded))

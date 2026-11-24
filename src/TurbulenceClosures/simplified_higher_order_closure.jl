@@ -93,11 +93,10 @@ How this differs from the operator-split `shoc.F90` step:
   constants, heat capacities, temperature-dependent latent heats, saturation vapor pressure), its standard
   pressure and the potential temperature of each level in place of `shoc.F90`'s fixed constants, `basepres`
   and `basetemp`, and the third moment takes the model's gravitational acceleration in place of `ggr`;
-- the assumed PDF condenses on the phase of the condensate of the model's microphysics
-  (`condensate_phase_equilibrium`): liquid, as `shoc.F90`, for warm microphysics, and liquid turning to ice
-  between the freezing and homogeneous freezing temperatures, with the latent heat of the condensate, for
-  microphysics with ice (P3, mixed-phase saturation adjustment). There is no phase equilibrium of the
-  closure's own.
+- the assumed PDF condenses on the phase of the condensate in the water it distributes
+  (`condensate_phase_equilibrium`): liquid, as `shoc.F90`, for warm microphysics and for the cloud liquid of P3,
+  and liquid turning to ice between the freezing and homogeneous freezing temperatures, with the latent heat of
+  the condensate, for mixed-phase saturation adjustment. There is no phase equilibrium of the closure's own.
 
 Five of these differences are deliberate and change the solution measurably; on the same column state (BOMEX and
 RICO states handed to the port and to `shoc.F90`'s routines) the first four account for the differences of the port:

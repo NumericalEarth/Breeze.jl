@@ -130,7 +130,7 @@ using Oceananigans.Architectures: CPU, on_architecture
 using Breeze.AtmosphereModels: prognostic_field_names
 using Breeze.AtmosphereModels.Diagnostics: Diagnostics
 using Breeze.Microphysics: thermodynamic_adjustment_factor
-using Breeze.Thermodynamics: MixedPhaseEquilibrium,
+using Breeze.Thermodynamics: WarmPhaseEquilibrium,
                              MoistureMassFractions,
                              PlanarIceSurface,
                              PlanarLiquidSurface,

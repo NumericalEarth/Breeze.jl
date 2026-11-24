@@ -284,7 +284,6 @@ end
 # Note: prognostic_field_names is implemented in p3_microphysical_state.jl to extend
 # AtmosphereModels.prognostic_field_names
 
-# The condensate of P3 is liquid and ice: cloud liquid above the freezing temperature, ice below the temperature of
-# homogeneous freezing, and both in between
-@inline Diagnostics.condensate_phase_equilibrium(p3::PredictedParticlePropertiesMicrophysics) =
-    MixedPhaseEquilibrium(p3.process_rates.freezing_temperature, p3.process_rates.homogeneous_freezing_temperature)
+# The condensate of the water a subgrid distribution distributes with P3 (vapor and cloud liquid) is its cloud liquid,
+# which P3 relaxes toward saturation over liquid; P3's ice and rain are not distributed
+@inline Diagnostics.condensate_phase_equilibrium(::PredictedParticlePropertiesMicrophysics) = WarmPhaseEquilibrium()
