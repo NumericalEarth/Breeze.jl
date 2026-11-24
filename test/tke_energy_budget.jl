@@ -537,8 +537,9 @@ end
     # the conversion the TKE equation receives is positive and reduced by its latent part
     Gᑫ = budget_column(cl.Gᑫ); Gᑫᴸ = budget_column(cl.Gᑫᴸ); Gᑫᶜ = budget_column(cl.Gᑫᶜ)
     @test all(≥(0), Gᑫ) && maximum(Gᑫ) > 0
-    # (no latent part with the distribution here: the column has no cloud droplets yet, so nothing condenses in an eddy time)
-    @test all(≤(0), Gᑫᴸ) && (path === :heating_budget_flux || minimum(Gᑫᴸ) < 0)
+    # (no latent part here: the column has no cloud droplets yet, so nothing condenses in an eddy time, with or without a
+    # distribution; the saturated fraction of the microphysics takes the same shares of the saturated response)
+    @test all(≤(0), Gᑫᴸ)
     @test all(≥(0), Gᑫᶜ) && maximum(Gᑫᶜ) > 0
 
     # still air: no turbulent kinetic energy where the heating acts and around it, and no flux at all

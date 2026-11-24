@@ -874,18 +874,23 @@ end
 ##### internal energy with them.
 #####
 
-# The condensate of the distributed water qʷ at center k: qʷ less the vapor of the cell. With prognostic cloud liquid
-# (P3) the vapor is the moisture density and qᶜ the cloud liquid; with saturation adjustment, whose moisture density
-# is the total water, the vapor is that of the adjusted state and qᶜ its condensate (liquid and ice), so that
-# the stratification N²ᵇ of the adjusted state and the latent correction count the condensate gradient once.
+# The condensate of the distributed water at center k: the cloud liquid where it is prognostic (P3, Kessler,
+# non-equilibrium cloud formation; the vapor and the cloud liquid are the distributed water), and otherwise the
+# condensate of the adjusted state (saturation adjustment, whose moisture density is the total water), so that the
+# stratification N²ᵇ of that state and the latent correction count the condensate gradient once. In the state the
+# implicit solves leave, the condensate of saturation adjustment is that of the stage (the solves move its total water,
+# not its partition, as the conversion of the solved fluxes reads it).
 @inline function distributed_condensateᶜᶜᶜ(i, j, k, grid, s, qʷ)
     @inbounds begin
         ρ = s.ρ[i, j, k]
         qᵛᵉ = s.ρqᵛᵉ[i, j, k] / ρ
     end
     q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵛᵉ, s.microphysical_fields)
-    return qʷ - q.vapor
+    return distributed_condensate(cloud_liquid_density(s.microphysical_fields), i, j, k, ρ, q)
 end
+
+@inline distributed_condensate(::Nothing, i, j, k, ρ, q) = q.liquid + q.ice
+@inline distributed_condensate(ρqᶜˡ, i, j, k, ρ, q) = @inbounds ρqᶜˡ[i, j, k] / ρ
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
