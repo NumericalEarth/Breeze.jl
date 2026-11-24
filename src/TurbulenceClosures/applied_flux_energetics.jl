@@ -1024,8 +1024,8 @@ end
         qᶜ⁻ = distributed_condensateᶜᶜᶜ(i, j, kₛ-1, grid, s, qʷ⁻)
         Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
         # The linearization of the assumed PDF, with which its condensate flux fraction aʷ is formed
-        c_qᵖ⁺, c_θᵖ⁺, _ = saturation_excess_coefficients(thermodynamics, θ⁺, qʷ⁺, s.p[i, j, kₛ])
-        c_qᵖ⁻, c_θᵖ⁻, _ = saturation_excess_coefficients(thermodynamics, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        c_qᵖ⁺, c_θᵖ⁺, _ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, kₛ), θ⁺, qʷ⁺, s.p[i, j, kₛ])
+        c_qᵖ⁻, c_θᵖ⁻, _ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, kₛ-1), θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
         # The saturation excess s = c_q qʷ - c_θ θʷ, linearized about the state of each cell
         c_q⁺, c_θ⁺ = saturated_condensate_coefficients(thermodynamics, i, j, kₛ, grid, s, θ⁺)
         c_q⁻, c_θ⁻ = saturated_condensate_coefficients(thermodynamics, i, j, kₛ-1, grid, s, θ⁻)

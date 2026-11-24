@@ -118,12 +118,12 @@ end
         gθᶠ = (cl.gθ[i, j, k] + cl.gθ[i, j, k-1]) / 2
         gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, k-1]) / 2
         N²ᶜ = gθᶠ * ∂zθ + gAᶠ * ∂zq
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(thermodynamics, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(thermodynamics, θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])
+        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
+        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k-1), θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])
         ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
         ΔN² = gθᶠ * (A⁺ + A⁻) / 2 * ∂zs
-        s̄ = (mean_saturation_excess(thermodynamics, θ[i, j, k], qᵗ[i, j, k], p[i, j, k]) +
-             mean_saturation_excess(thermodynamics, θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])) / 2
+        s̄ = (mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k]) +
+             mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k-1), θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])) / 2
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
         w′²ᶠ = (vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ)) +
                 vertical_velocity_variance(sm, max(e[i, j, k-1], eᵐⁱⁿ))) / 2
@@ -193,9 +193,10 @@ end
         wᶜ = (w[i, j, k] + w[i, j, k+1]) / 2
         θᵏ = θ[i, j, k]
         w′³ = cl.w′³[i, j, k]
-        C, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamics, zᵘ, zˡ, zᶜ,
+        thermodynamicsᵏ = level_thermodynamics(thermodynamics, i, j, k)
+        C, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
                                           p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], (w′³, moments_l...), (w′³, moments_u...))
-        _, A_c = buoyancy_flux_coefficients(thermodynamics, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
+        _, A_c = buoyancy_flux_coefficients(thermodynamicsᵏ, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
     end
     return thermodynamics.constants.gravitational_acceleration / θᵏ * A_c * w′qˡ′, C
 end
@@ -311,8 +312,8 @@ end
         ∂zθ = (θ[i, j, kₛ] - θ[i, j, kₛ-1]) / Δz
         ∂zq = (qᵗ[i, j, kₛ] - qᵗ[i, j, kₛ-1]) / Δz
         gθᶠ = (cloud.gθ[i, j, kₛ] + cloud.gθ[i, j, kₛ-1]) / 2
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(thermodynamics, θ[i, j, kₛ], qᵗ[i, j, kₛ], p[i, j, kₛ])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(thermodynamics, θ[i, j, kₛ-1], qᵗ[i, j, kₛ-1], p[i, j, kₛ-1])
+        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, kₛ), θ[i, j, kₛ], qᵗ[i, j, kₛ], p[i, j, kₛ])
+        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, kₛ-1), θ[i, j, kₛ-1], qᵗ[i, j, kₛ-1], p[i, j, kₛ-1])
         ΔN² = gθᶠ * (A⁺ + A⁻) / 2 * ((c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ)
         Bᶠ = (cloud.Bˡ[i, j, kₛ] + cloud.Bˡ[i, j, kₛ-1]) / 2
         Kᶜᵢ = Kᶜ[i, j, kₛ]

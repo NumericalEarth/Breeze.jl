@@ -66,14 +66,26 @@ end
 ##### The thermodynamics of the model
 #####
 
+# The moisture fractions of a plume: its distributed water `qw` as vapor (the all-vapor state of the distribution),
+# with the condensate the distribution does not distribute (`held`, the rain and ice of P3 at the level) held as
+# condensate, so that its heat capacity, gas constant and Exner exponent are those of the model's total water
+@inline held_condensate(thermodynamics::NamedTuple{names}) where names = held_condensate(Val(:held ∈ names), thermodynamics)
+@inline held_condensate(::Val{true}, thermodynamics) = thermodynamics.held
+@inline held_condensate(::Val{false}, thermodynamics) = nothing
+
+@inline plume_moisture(thermodynamics, qw) = moisture_with_held_condensate(held_condensate(thermodynamics), qw)
+@inline moisture_with_held_condensate(::Nothing, qw) = MoistureMassFractions(qw)
+@inline moisture_with_held_condensate(held, qw) =
+    MoistureMassFractions(qw, convert(typeof(qw), held.liquid), convert(typeof(qw), held.ice))
+
 @inline function plume_exner_function(thermodynamics, qw, pval)
     constants = thermodynamics.constants
-    q = MoistureMassFractions(qw)
+    q = plume_moisture(thermodynamics, qw)
     κ = exner_exponent(thermodynamics.exner_exponent, q, constants)
     return (pval / thermodynamics.standard_pressure)^κ
 end
 
-@inline plume_heat_capacity(constants, qw) = vapor_equivalent_heat_capacity(MoistureMassFractions(qw), constants)
+@inline plume_heat_capacity(thermodynamics, qw) = vapor_equivalent_heat_capacity(plume_moisture(thermodynamics, qw), thermodynamics.constants)
 
 # Saturation over ice at every temperature: the surface of the ice outside the distributed water (P3's ice), for
 # the saturation excess of the distributed water over ice (`ice_saturation_thermodynamics`)
@@ -129,12 +141,12 @@ end
     # The saturation specific humidity of the model (the one the microphysics uses),
     # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T), at the density ρ = p / (Rᵐ T) of the component's air with its total
     # water as vapor
-    Rᵐ = mixture_gas_constant(MoistureMassFractions(qw), constants)
+    Rᵐ = mixture_gas_constant(plume_moisture(thermodynamics, qw), constants)
     ρ = pval / (Rᵐ * Tl)
     qᵛ⁺ = saturation_specific_humidity(Tl, ρ, constants, surface)
 
     ℒ, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, Tl)
-    cᵖ = plume_heat_capacity(constants, qw)
+    cᵖ = plume_heat_capacity(thermodynamics, qw)
     # β q_s = (ℒ / ĉᵖ) ∂q_s/∂T at fixed p and composition: ∂ ln q_s / ∂T = ∂ ln e_s / ∂T
     beta = (ℒ / cᵖ) * log_slope
     return qᵛ⁺, beta, cᵖ / ℒ, plume_exner_function(thermodynamics, qw, pval)
@@ -146,7 +158,7 @@ end
     Π = plume_exner_function(thermodynamics, qw, pval)
     Tl = Π * thl
     ℒ, _ = condensate_latent_heat_and_log_slope(thermodynamics.phase_equilibrium, constants, Tl)
-    cᵖ = plume_heat_capacity(constants, qw)
+    cᵖ = plume_heat_capacity(thermodynamics, qw)
     heating = ℒ / (cᵖ * Π)
     θ = thl + heating * ql
     return ((1 - ε) / ε) * θ, heating - θ / ε

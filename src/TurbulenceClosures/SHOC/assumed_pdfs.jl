@@ -489,7 +489,7 @@ end
     constants = thermodynamics.constants
     Π = plume_exner_function(thermodynamics, qw, pval)
     T = component_liquid_water_temperature(pdf, thermodynamics, thl, qw, pval)
-    Rᵐ = mixture_gas_constant(MoistureMassFractions(qw), constants)
+    Rᵐ = mixture_gas_constant(plume_moisture(thermodynamics, qw), constants)
     qᵛ⁺ = saturation_specific_humidity(T, pval / (Rᵐ * T), constants, surface)
     _, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, T)
     ∂qᵛ⁺∂θ = qᵛ⁺ * log_slope * Π

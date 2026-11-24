@@ -810,6 +810,45 @@ Adapt.adapt_structure(to, θ::DistributedWaterPotentialTemperature) =
     return θˡⁱ + (ℒˡ₀ * (q.liquid - qᶜˡ) + ℒⁱ₀ * q.ice) / (ĉᵖ * Π)
 end
 
+# The condensate a distribution does not distribute, at a cell: (liquid, ice), the rain, the liquid on ice and the ice
+# of a microphysics with prognostic cloud liquid. The assumed PDF holds it as condensate in the all-vapor state of
+# its water (`plume_moisture`).
+struct HeldCondensate{R, V, L, G, M, F}
+    density :: R
+    moisture_density :: V
+    cloud_liquid :: L
+    grid :: G
+    microphysics :: M
+    microphysical_fields :: F
+end
+
+Adapt.adapt_structure(to, h::HeldCondensate) =
+    HeldCondensate(adapt(to, h.density), adapt(to, h.moisture_density), adapt(to, h.cloud_liquid), adapt(to, h.grid),
+                   adapt(to, h.microphysics), adapt(to, h.microphysical_fields))
+
+@inline function Base.getindex(h::HeldCondensate, i, j, k)
+    @inbounds begin
+        ρ = h.density[i, j, k]
+        qᶜˡ = h.cloud_liquid[i, j, k] / ρ
+        qᵛᵉ = h.moisture_density[i, j, k] / ρ
+    end
+    q = grid_moisture_fractions(i, j, k, h.grid, h.microphysics, ρ, qᵛᵉ, h.microphysical_fields)
+    return (; liquid = q.liquid - qᶜˡ, ice = q.ice)
+end
+
+held_condensate_field(model, ρ, ::Nothing) = nothing
+held_condensate_field(model, ρ, ρqᶜˡ) = HeldCondensate(ρ, model.moisture_density, ρqᶜˡ, model.grid, model.microphysics,
+                                                      model.microphysical_fields)
+
+# The thermodynamics of the distribution at the cell (i, j, k): with the condensate it holds there
+@inline level_thermodynamics(thermodynamics::NamedTuple{names}, i, j, k) where names =
+    level_thermodynamics(Val(:held_condensate ∈ names), thermodynamics, i, j, k)
+@inline level_thermodynamics(::Val{false}, thermodynamics, i, j, k) = thermodynamics
+@inline level_thermodynamics(::Val{true}, thermodynamics, i, j, k) =
+    level_thermodynamics(thermodynamics.held_condensate, thermodynamics, i, j, k)
+@inline level_thermodynamics(::Nothing, thermodynamics, i, j, k) = thermodynamics
+@inline level_thermodynamics(held, thermodynamics, i, j, k) = merge(thermodynamics, (; held = held[i, j, k]))
+
 distributed_water_potential_temperature(model, ρθ, ρ, ::Nothing) = SpecificValue(ρθ, ρ)
 
 distributed_water_potential_temperature(model, ρθ, ρ, ρqᶜˡ) =
@@ -830,7 +869,7 @@ function distribution_state(model, e_density)
     e = SpecificValue(model.tracers[TKE_NAME], e_density)
     w = model.velocities.w
     p = AtmosphereModels.dynamics_pressure(model.dynamics)
-    thermodynamics = distribution_thermodynamics(model)
+    thermodynamics = merge(distribution_thermodynamics(model), (; held_condensate = held_condensate_field(model, ρ, ρqᶜˡ)))
     return (; θ, qᵗ, e, w, p, thermodynamics)
 end
 
@@ -1102,10 +1141,11 @@ end
             mᵘ = interface_moments(k+1)
             mᶜ = map((yᵘ, yˡ, floor) -> hard_floor(linear_interp(zᵘ, zˡ, yᵘ, yˡ, zᶜ), floor), mᵘ, mˡ, floors)
             mᶜ = (cl.w′³[i, j, k], mᶜ...)
-            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, thermodynamics, zᵘ, zˡ, zᶜ,
+            thermodynamicsᵏ = level_thermodynamics(thermodynamics, i, j, k)
+            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
                                                    p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
             store_vapor_excess_components!(cl, i, j, k,
-                                           component_vapor_excess(d.assumed_pdf, thermodynamics, zᵘ, zˡ, zᶜ,
+                                           component_vapor_excess(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
                                                                   p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ))
             cl.aᶜ[i, j, k] = C
             # The exchange rate of air between the saturated and subsaturated parts, √e / (ℂᵐ ℓ)
@@ -1214,8 +1254,8 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
         ∂zq = (qᵗ[i, j, k] - qᵗ[i, j, km]) / Δz
         gθᶠ = (cl.gθ[i, j, k] + cl.gθ[i, j, km]) / 2
         gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, km]) / 2
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(thermodynamics, θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(thermodynamics, θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
+        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
+        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, km), θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
         bˡᵛaʷ⁺ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, m, cl, c_q⁺, c_θ⁺)
         bˡᵛaʷ⁻ = (cl.b_qᶜ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, m, cl, c_q⁻, c_θ⁻)
     end
