@@ -34,89 +34,28 @@ contain the pressure gradient or buoyancy; the continuity tendency ``-∇·(ρu)
 and the thermodynamic slow tendency is the full tendency minus ``-∇·(θ (ρu))`` in the loop's
 discretization (see `compute_linearized_thermodynamic_flux_divergence!`). With
 the `:WickerSkamarock3` coefficients the scheme reduces to `AcousticRungeKutta3`.
-
-Fields
-======
-
-- `tableau`: the [`MultirateInfinitesimalStepTableau`](@ref).
-- `storage`: the storage layout, chosen from the structure of the coefficients (see `stage_storage`):
-  `TwoRegisterStorage` for a diagonal `β` with `α` and `γ` on the first subdiagonal alone
-  (`:WickerSkamarock3`, `:LowStorageMIS52`, the `:ConvexLinearMIS` sets), which keeps `Uⁿ` and `Gⁿ`
-  and nothing else per prognostic, as `AcousticRungeKutta3` does; and `AccumulatorStorage` otherwise.
-- `U⁰`: with `AccumulatorStorage`, what the start state of stages 2 and 3 is formed from: the increment
-  ``ΔY₁`` during stage 2 and the offset ``Σⱼ α₃ⱼ ΔYⱼ`` during stage 3. With `TwoRegisterStorage` it is
-  `Uⁿ`. No start state is stored: stage 1 starts from `Uⁿ` itself and a later stage from `Uⁿ` plus its
-  offset, summed where it is read (see `stage_start_state`).
-- `Gⁿ`: tendency storage; holds the combined slow forcing during each acoustic loop.
-- `implicit_solver`, `substepper`: as for `AcousticRungeKutta3`.
-- `rounding`: Round-off treatment of the state updates that reach ``Uⁿ⁺¹``, [`RoundToNearest`](@ref)
-  or [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding).
-- `Uⁿ`: the outer-step-start state.
-- `accumulators`: with `TwoRegisterStorage`, empty. With `AccumulatorStorage`, for each stage ``k = 3, …, s``, the parts of
-  its forcing and start state known so far,
-  `forcing` ``= (1/dₖ) Σⱼ (βₖⱼ Sⱼ + γₖⱼ ΔYⱼ / Δt)`` and `offset` ``= Σⱼ αₖⱼ ΔYⱼ``, accumulated as each
-  ``Sⱼ`` and ``ΔYⱼ = Yⱼ - Uⁿ`` becomes available, so no ``Sⱼ`` and only ``ΔY₁`` is stored. Stage 3's
-  forcing holds the raw ``S₁`` until stage 2 consumes it, and its offset, which is `U⁰`, holds the
-  raw ``ΔY₁`` through stage 2, so the offsets of later stages are first written with ``ΔY₂``. Stage
-  4's offset then shares the storage of stage 3's forcing for the fields that form their increments
-  in the assembly (see `stage_accumulators`).
-- `fast_tendency`: scratch for the fast parts of the tendencies, or `nothing` for a coefficient set with a
-  diagonal `β`, which applies every tendency whole: with `PreLoopScalarTendencies`
-  one field, for the stage-entry fast thermodynamic tendency, sharing storage with the substepper; with `PostLoopScalarTendencies`
-  one per moisture and condensate density, which the post-loop build fills with its advective
-  tendency and the assembly leaves holding its slow tendency, for the next stage's loop (see
-  `PredictedStageForcing`). The thermodynamic variable and the other scalars, whose tendencies no
-  loop reads, use the substepper's field in turn (see `fast_tendency_scratch`).
-- `stage`: the stage being integrated.
-- `next_stage`, `current_Δt`: the stage the next tendency evaluation feeds and the current outer step, which
-  size the adaptive-implicit vertical-advection split (see `adaptive_advection_timestep`).
-- `relinearize_stages`: re-linearize the fast operator at every stage entry (as `AcousticRungeKutta3` does)
-  instead of once per step. Off by default: the slow tendencies of earlier stages were split against
-  a different fast operator, so with a non-diagonal tableau the step is first-order accurate (the
-  constructor warns). With the `:WickerSkamarock3` coefficients it reproduces `AcousticRungeKutta3`
-  bitwise; it exists to diagnose robustness in strongly nonlinear flows.
-- `step_start`: the outer-step-start pressure and total moisture density that the
-  slow remainder of the stage-entry pressure gradient and buoyancy is measured from, or `nothing`
-  where that remainder is not recombined (see `step_start_storage`).
-- `residual`: what the rounded stage states of the acoustic prognostics lack of the exact sums,
-  kept from the end of a stage to the assembly of the next, in the substepper's perturbation fields
-  where it can be (see `stage_residual_storage`), or `nothing` for a tableau that recombines no
-  increments. What the rounded start states lack is evaluated where it is read
-  (see `start_state_residual` in the acoustic substepper).
-- `fold_stage_increments`: whether the acoustic prognostics form their increments in the assembly
-  of the next stage (see `stage_increment_source`).
-- `transport_mass_fluxes`: the weights and mass fluxes of the correction that makes the
-  recombined post-loop scalar fluxes carry each stage's own mass flux, or `nothing` where the
-  stages' fluxes need no correction (see `ScalarMassFluxCorrection`).
-- `scalar_tendencies`: when the moisture and tracer tendencies are built,
-  `PostLoopScalarTendencies` (after each stage's own acoustic loop, the default) or
-  `PreLoopScalarTendencies` (between stages). With the former, the
-  scalars' slow tendency ``Sᵢ`` stored for stage ``i`` is the post-loop one, and their stage forcing
-  and start state are assembled after the loop. For a coefficient set with a diagonal `β`, which has no
-  `fast_tendency` scratch, it holds the fields in which the moisture and condensate tendencies
-  are kept for the next stage's loop (see `previous_scalar_tendency`).
 """
 struct MultirateInfinitesimalStep{TB, SL, U0, TG, TI, AS, R, UN, AC, FC, ST, SS, TA, RS, MF} <: AcousticTimeStepper
-    relinearize_stages :: Bool
-    fold_stage_increments :: Bool
-    tableau :: TB
-    storage :: SL # the storage layout: `TwoRegisterStorage` or `AccumulatorStorage`
-    U⁰ :: U0
-    Gⁿ :: TG
+    relinearize_stages :: Bool # re-linearize the fast operator at every stage entry, as `AcousticRungeKutta3` does; first-order with a non-diagonal `β`
+    fold_stage_increments :: Bool # whether the acoustic prognostics form their increments in the assembly of the next stage (see `stage_increment_source`)
+    tableau :: TB # the `MultirateInfinitesimalStepTableau`
+    storage :: SL # the storage layout: `TwoRegisterStorage` or `AccumulatorStorage` (see `stage_storage`)
+    U⁰ :: U0 # `Uⁿ` with `TwoRegisterStorage`; with `AccumulatorStorage`, ΔY₁ during stage 2 and the offset Σⱼ α₃ⱼ ΔYⱼ during stage 3 (see `stage_start_state`)
+    Gⁿ :: TG # tendency storage; holds the combined slow forcing during each acoustic loop
     implicit_solver :: TI
     substepper :: AS
-    rounding :: R
-    Uⁿ :: UN
-    accumulators :: AC
-    fast_tendency :: FC
-    scalar_tendencies :: ST
-    step_start :: SS
+    rounding :: R # round-off treatment of the state updates that reach Uⁿ⁺¹: `RoundToNearest` or `StochasticRounding`
+    Uⁿ :: UN # the outer-step-start state
+    accumulators :: AC # with `AccumulatorStorage`, the parts known so far of the forcing and offset of each stage k ≥ 3 (see `stage_accumulators`); empty otherwise
+    fast_tendency :: FC # scratch for the fast parts of the tendencies (see `fast_tendency_scratch`); `nothing` for a diagonal `β`
+    scalar_tendencies :: ST # `PostLoopScalarTendencies` (default) or `PreLoopScalarTendencies`; with a diagonal `β` it also keeps the moisture tendencies for the next loop (see `previous_scalar_tendency`)
+    step_start :: SS # the outer-step-start pressure and total moisture density the slow remainder of the stage-entry force is measured from; `nothing` where it is not recombined (see `step_start_storage`)
     transport_density_accumulators :: TA # with `AccumulatorStorage`, stages 2 to s: the parts known so far of the transport density tendency's stage combination; stage 2's shares storage with `U⁰.ρᵈ`. Empty otherwise
-    residual :: RS # what the rounded stage states of the acoustic prognostics lack of the exact ones; `nothing` when no stage recombines increments
-    transport_mass_fluxes :: MF # the correction of the scalars' recombined mass fluxes; `nothing` when no stage corrects them
-    stage :: Base.RefValue{Int}
-    next_stage :: Base.RefValue{Int}
-    current_Δt :: Base.RefValue{Float64}
+    residual :: RS # what the rounded stage states of the acoustic prognostics lack of the exact ones (see `stage_residual_storage`); `nothing` when no stage recombines increments
+    transport_mass_fluxes :: MF # the correction of the scalars' recombined mass fluxes (see `ScalarMassFluxCorrection`); `nothing` when no stage corrects them
+    stage :: Base.RefValue{Int} # the stage being integrated
+    next_stage :: Base.RefValue{Int} # the stage the next tendency evaluation feeds (sizes the adaptive-implicit split, see `adaptive_advection_timestep`)
+    current_Δt :: Base.RefValue{Float64} # the current outer step
 end
 
 """
@@ -150,23 +89,14 @@ earlier stages, so their acoustic substeps are symmetric in the horizontal momen
 pressure (see `SymmetricSubsteps`).
 
 By default (`post_loop_scalar_tendencies = true`) the moisture and tracer tendencies are built
-after each stage's own acoustic loop, with that loop's time-averaged transport velocity (see
-`PostLoopScalarTendencies`). Every stage then transports the scalars with the mass flux its own
-loop applied to the dry air, so a uniform mass fraction stays uniform to round-off with every
-coefficient set: the recombined tendencies of earlier stages carry those stages' mass fluxes, and
-each stage transports the scalars with its own mass flux plus the one that makes up the difference
-once the stages are recombined (see `ScalarMassFluxCorrection`). That needs a coefficient set whose
-`β` is diagonal or has no zero on its diagonal.
-
-The acoustic loop's pressure depends on the moisture and condensate tendencies, which are not
-built yet when a stage's loop starts. The loop takes those that the stage before built in their
-place (see `PredictedStageForcing`).
-
-`post_loop_scalar_tendencies = false` builds the scalar tendencies between stages instead, with
-the preceding loop's transport velocity, which does not keep a uniform mass fraction uniform. It
-needs less storage: the post-loop tendencies take a field for each moisture and condensate
-density, and, for a coefficient set whose `β` is not diagonal, three face fields for each stage
-after the second.
+after each stage's own acoustic loop, with that loop's time-averaged transport velocity, so a
+uniform mass fraction stays uniform to round-off with every coefficient set whose `β` is diagonal
+or has no zero on its diagonal (see `PostLoopScalarTendencies` and `ScalarMassFluxCorrection`).
+The loop's pressure takes the moisture tendencies the stage before built in place of the stage's
+own, which are not built yet (see `PredictedStageForcing`). `post_loop_scalar_tendencies = false`
+builds the scalar tendencies between stages, with the preceding loop's transport velocity, which
+does not keep a uniform mass fraction uniform, and needs less storage. Both are described in the
+[Compressible dynamics](@ref Compressible-section) section of the documentation.
 
 `moisture_forcing_names` names the moisture and condensate densities, whose tendencies the loop's
 pressure ramps with; `AtmosphereModel` provides them. With `nothing`, the time stepper cannot tell
@@ -175,31 +105,22 @@ by continuity or momentum. The step is the same either way.
 
 `Gⁿ` and `U⁰` are the tendency storage and the storage the first start states are formed from,
 allocated by default. Passing them shares the storage of another time stepper, as the
-adiabatic-balance twin does (see `adiabatic_balance_twin`).
+adiabatic-balance twin does (see `adiabatic_balance_twin`). What else is stored follows the
+structure of the coefficients (see `stage_storage`). With either layout the increment of a stage is
+that of the state `update_state!` leaves after it, so the increments of the moisture and
+microphysical fields include its negative-moisture correction.
 
-The storage follows the structure of the coefficients. A set whose `β` is diagonal and whose `α`
-and `γ` have entries on the first subdiagonal alone (`:WickerSkamarock3`, `:LowStorageMIS52`) keeps
-two copies of the prognostic state, as `AcousticRungeKutta3` does: the step-start state `Uⁿ`, which
-`U⁰` then is, and the tendencies, and with post-loop scalar tendencies the fields that keep the
-moisture and condensate tendencies for the next stage's loop. Every stage forms the one increment it
-needs from the prognostic fields themselves. The remaining sets keep a forcing and an offset
-accumulator for each stage after the second. With either layout the increment of a stage is that of
-the state `update_state!` leaves after it, so the increments of the moisture and microphysical fields
-include its negative-moisture correction: a stage starts from, and is forced with, the corrected state
-that its tendency was evaluated at.
+`relinearize_stages = true` re-linearizes the fast operator at every stage entry, as
+`AcousticRungeKutta3` does, instead of once per step; with a non-diagonal `β` the step is then
+first-order accurate (the constructor warns).
 
-`rounding` sets the round-off treatment of the state updates that reach ``Uⁿ⁺¹`` (default:
-[`RoundToNearest`](@ref)). For the acoustic prognostics that is the last stage's recovery of the
-state from its stage-entry value plus the accumulated perturbation, alone: the earlier stages'
-recoveries and the start states ``U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ`` round to nearest and keep their rounding
-errors, which are added back to the increments ``ΔYⱼ`` and to the perturbation the next loop
-starts from, so that no intermediate sum loses anything or perturbs the step. For the moisture,
-microphysical and tracer fields, [`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding)
-rounds the update ``u⁰ + Δt G`` and the start state stochastically in the last stage and in every
-stage whose increment a later stage reuses: what round to nearest loses from such an increment
-is lost from ``Uⁿ⁺¹`` as well. Stages that enter later ones through their tendency alone (the
-first two of `:WickerSkamarock3`), the perturbations themselves, and the vertically-implicit
-solves stay round-to-nearest.
+`rounding` sets the round-off treatment, [`RoundToNearest`](@ref) (default) or
+[`StochasticRounding`](@ref Breeze.RoundingTreatments.StochasticRounding), of the state updates
+that reach ``Uⁿ⁺¹``: the last stage's recovery of the acoustic prognostics, and the updates of
+the moisture, microphysical and tracer fields in every stage whose increment a later stage reuses.
+The rounding errors of the intermediate sums of the acoustic prognostics are kept and added back
+(see `stage_residual_storage` and the [Round-off](@ref round-off-section) section of the
+documentation).
 """
 function MultirateInfinitesimalStep(grid, prognostic_fields;
                                     dynamics,
@@ -528,11 +449,7 @@ AtmosphereModels.adiabatic_twin_timestepper(ts::MultirateInfinitesimalStep, ::Sp
 
 const MultirateAcousticModel = AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep}
 
-@inline function final_stage_increment(ts::MultirateInfinitesimalStep)
-    c = ts.tableau.c
-    s = length(c)
-    return s == 1 ? c[1] : c[s] - c[s-1]
-end
+@inline final_stage_increment(ts::MultirateInfinitesimalStep) = (c = ts.tableau.c; c[end] - c[end-1])
 
 #####
 ##### Stage assembly
@@ -754,13 +671,10 @@ end
         forcing = completed_forcing(source, F₃, wγ₃, ΔY₂, i, j, k)
         G[i, j, k] = full_tendency(i, j, k, grid, split, G) + wᵢ * slow + forcing
         write_offsets!(source, Z₃, Z, α₃₁, α₃₂, α₁ᵏ, α₂ᵏ, ΔY₂, i, j, k)
-        accumulate_forcing!(source, F, wγᵏ, wβᵏ, slow, ΔY₂, i, j, k)
+        accumulate_later_stages!(source, F, (), wγᵏ, wβᵏ, (), slow, ΔY₂, i, j, k)
         keep_slow_tendency!(i, j, k, split, slow)
     end
 end
-
-@inline accumulate_forcing!(::IncrementFromState, F, wγᵏ, wβᵏ, slow, ΔY, i, j, k) = accumulate!(i, j, k, F, wγᵏ, ΔY, wβᵏ, slow)
-@inline accumulate_forcing!(::StoredIncrement, F, wγᵏ, wβᵏ, slow, ΔY, i, j, k) = accumulate!(i, j, k, F, wβᵏ, slow)
 
 # Stage i ≥ 4 uses its completed accumulators and adds Sᵢ to those of later stages.
 @kernel function _later_multirate_stage!(G, grid, Uⁿ, source, split, wᵢ, Fᵢ, Zᵢ, wγᵢ, αᵢ, F, Z, wγᵏ, wβᵏ, αᵏ, residual)
@@ -1222,22 +1136,15 @@ end
 #####
 ##### The moisture's part of the loop's pressure with post-loop scalar tendencies
 #####
-##### The loop's pressure ramps with the stage forcing of the moisture and condensate densities
-##### (Section 3b of the acoustic substepper), (1/dᵢ)[βᵢᵢ Sᵢ + Σⱼ (βᵢⱼ Sⱼ + γᵢⱼ ΔYⱼ / Δt)] with the sum
-##### over the stages j < i. Built after the loop, Sᵢ is not in hand when the loop starts, and the
-##### loop is given the forcing with the slow tendency of the stage before, Sᵢ₋₁, in its place (in
-##### stage 1 that of the last stage of the step before): the same transport, of the mass fractions
-##### one stage earlier. The rest of the forcing is known. Sᵢ₋₁ is kept in the scalar's
-##### `fast_tendency` scratch, where the assembly leaves it (`keep_slow_tendency!`) and nothing
-##### writes until the next post-loop build, or, for a coefficient set with a diagonal `β`, which has
-##### no such scratch, in a field of its own (`previous_scalar_tendency`). What the loop's pressure
-##### missed of the moisture's change over a stage, βᵢᵢ Δt (Sᵢ − Sᵢ₋₁), reaches the next stage with
-##### its start state.
-#####
+##### The loop's pressure ramps with the stage forcing of the moisture and condensate densities, whose
+##### own slow tendency Sᵢ is not in hand when the loop starts; the loop takes Sᵢ₋₁ in its place (see
+##### the Compressible dynamics section of the documentation). Sᵢ₋₁ is kept in the scalar's
+##### `fast_tendency` scratch, where the assembly leaves it (`keep_slow_tendency!`), or, for a
+##### diagonal `β`, which has no such scratch, in a field of its own (`previous_scalar_tendency`).
 ##### The dilution of the moisture is paired with the dry air's share of the divergence of the mass
-##### flux those tendencies carry (`transport_density_tendency`), so that takes the same
-##### combination: each stage's is evaluated after its loop, with the mass flux of the stage's
-##### correction, added to the accumulators of later stages there, and predicts the next stage's.
+##### flux those tendencies carry (`transport_density_tendency`), which takes the same combination:
+##### evaluated after each loop with the mass flux of the stage's correction, added to the
+##### accumulators of later stages there, and predicting the next stage's.
 #####
 
 # The stage forcing of one post-loop scalar with the previous stage's slow tendency standing in
@@ -1307,42 +1214,16 @@ end
 #####
 ##### Mass consistency of the recombined scalar fluxes
 #####
-##### Stage i moves the dry air with the mass flux Fᵢ of its own loop, over dᵢ Δt, while the scalars'
-##### stage forcing recombines the advective tendencies of the stages so far, -∇·(Fⱼ ĉⱼ₋₁) with
-##### weights βᵢⱼ (Σⱼ βᵢⱼ = dᵢ): the mass flux Σⱼ βᵢⱼ Fⱼ they carry is not dᵢ Fᵢ unless `β` is
-##### diagonal, so a uniform mass fraction does not stay uniform, and the scalars are first-order
-##### accurate in time wherever the mass flux changes during a step.
-#####
-##### Each stage therefore transports the scalars with the mass flux Fⱼ + Rⱼ,
-#####
-#####   Rⱼ = Σₖ Wⱼₖ Fₖ,   W = β⁻¹ diag(d) - I   (k ≤ j, since β is lower triangular),
-#####
-##### for which the recombined fluxes carry the stage's own: Σⱼ βᵢⱼ (Fⱼ + Rⱼ) = dᵢ Fᵢ. Every stage
-##### then applies dᵢ Fᵢ to a uniform mass fraction exactly. The rows of W sum to zero, so Rⱼ is a
-##### combination of differences of the stages' mass fluxes, O(Δt) smaller than Fⱼ. Fⱼ + Rⱼ is the
-##### slow mass flux that the stages would recombine into the dry air's own, so with it the scalars
-##### have the order of accuracy of the slow method where the mass flux changes during a step.
-#####
-##### Both mass fluxes are carried by one reconstruction of the scalar: the advection operator
-##### reads the velocity whose mass flux is Fⱼ + Rⱼ (`MassConsistentVelocity`). A separate flux
-##### of Rⱼ with a reconstruction of its own, a first-order upwind one in its own direction say,
-##### would differ from the operator's by a truncation error that does not decrease with the time
-##### step, times Rⱼ: first-order accurate in time.
-#####
-##### The correction is part of the slow tendency Sⱼ that the stages recombine, rather than an
-##### addition to one stage's forcing, so that the scalars are still advanced by the slow method
-##### alone: with a strong-stability-preserving coefficient set every stage remains a convex
-##### combination of forward-Euler steps (see `strong_stability_coefficient`), each a step of the
-##### scalar's own advection operator with the velocity of Fⱼ + Rⱼ. Added to a stage at weight one
-##### the correction would enter later stages through their increments with weights of either
-##### sign, and a species that a microphysical sink has emptied would go negative.
-#####
-##### Fⱼ is the flux the tendencies were built with: the stage-entry total density times the loop's
-##### transport velocity, of which adaptive implicit vertical advection leaves a fraction to the
-##### implicit solve. That fraction is taken from the advection scheme of the prognostic moisture
-##### and the velocity of the air. A scalar with another vertical time discretization, and one that
-##### sediments (whose fraction is that of the air's velocity plus its own), is corrected exactly
-##### only where the vertical advection is fully explicit.
+##### Each stage transports the scalars with the mass flux Fⱼ + Rⱼ, Rⱼ = Σₖ Wⱼₖ Fₖ with
+##### W = β⁻¹ diag(d) - I, so that the recombined fluxes carry the stage's own, Σⱼ βᵢⱼ (Fⱼ + Rⱼ) = dᵢ Fᵢ,
+##### as part of the slow tendency Sⱼ and through one reconstruction of the scalar
+##### (`MassConsistentVelocity`); the reasoning is in the Compressible dynamics section of the
+##### documentation. Fⱼ is the flux the tendencies were built with: the stage-entry total density
+##### times the loop's transport velocity, of which adaptive implicit vertical advection leaves a
+##### fraction to the implicit solve. That fraction is taken from the advection scheme of the
+##### prognostic moisture and the velocity of the air, so a scalar with another vertical time
+##### discretization, and one that sediments, is corrected exactly only where the vertical
+##### advection is fully explicit.
 #####
 
 prepare_post_loop_scalar_tendencies!(ts::MultirateInfinitesimalStep, model) =

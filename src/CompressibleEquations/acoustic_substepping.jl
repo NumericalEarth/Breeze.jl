@@ -1509,30 +1509,19 @@ end
 #####
 ##### What the rounded state lacks of the exact one
 #####
-#####
-##### A stage of a multirate infinitesimal step starts from Uⁿ + Σⱼ αᵢⱼ ΔYⱼ and is forced with
-##### γᵢⱼ ΔYⱼ / Δt, where ΔYⱼ = Yⱼ − Uⁿ are the increments of earlier stages. Three sums on the way
-##### round a small increment into a state of the size of Uⁿ: the recovery Yⱼ = Yⱼ₋₁ + U′ at the
-##### end of a stage, the start state U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ, and the last recovery, Uⁿ⁺¹. Each
-##### rounding of the first two kinds is a perturbation of one unit in the last place that later
-##### stages recombine with weights of either sign, where a scheme whose stages start from Uⁿ
-##### (Wicker–Skamarock) makes only the last. They are also where increments below one unit in
-##### the last place are lost.
-#####
-##### Neither sum needs to round what the loop integrates, because the loop integrates
-##### perturbations: the rounding errors, exact in floating point (`rounding_error`), are added
-##### back to the small quantity that is formed next from the rounded state. That of a stage's
-##### state is kept in a field per acoustic prognostic (the *residual*) until the next stage is
-##### assembled; that of a start state is evaluated from its two terms where the loop starts:
+##### A multirate infinitesimal step forms states of the size of Uⁿ from small increments at the end of
+##### a stage, at the start of the next and at Uⁿ⁺¹. The loop integrates perturbations, so the rounding
+##### errors of the first two sums (exact in floating point, `rounding_error`) are added back to the
+##### small quantity formed next from the rounded state, and only the last recovery rounds, with the
+##### time stepper's round-off treatment (see the Round-off section of the documentation):
 #####
 #####   end of stage j:      Yⱼ = fl(Yⱼ₋₁ + U′),           residual = (Yⱼ₋₁ + U′) − Yⱼ
 #####   assembly of stage i: ΔYⱼ = (Yⱼ − Uⁿ) + residual
 #####   start of stage i:    U⁰ = fl(Uⁿ + Zᵢ),   U′ = (U⁰ − Yᵢ₋₁) + [(Uⁿ + Zᵢ) − U⁰]
 #####
-##### The differences in parentheses are exact (the states are within a factor of two of each
-##### other), so the increments and the loop's start state are those of exact sums to the
-##### precision of the *increment*. Only the last recovery rounds, and it takes the time
-##### stepper's round-off treatment.
+##### The residual of a stage's state is kept in a field per acoustic prognostic until the next stage is
+##### assembled; that of a start state is evaluated from its two terms where the loop starts. The
+##### differences in parentheses are exact (the states are within a factor of two of each other).
 #####
 
 # The residuals of the start state of the current stage of `timestepper`, a `NamedTuple` with keys

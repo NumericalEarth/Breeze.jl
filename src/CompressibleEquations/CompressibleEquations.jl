@@ -80,11 +80,6 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
                              equilibrated_surface, saturation_vapor_pressure,
                              PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
                              LiquidIceDensityState
-
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions,
-                               base_pressure, standard_pressure, thermodynamic_density,
-                               thermodynamic_density_name, specific_prognostic_moisture
-using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using ReactantCore: @trace
