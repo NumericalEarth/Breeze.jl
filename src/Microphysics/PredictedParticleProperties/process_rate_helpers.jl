@@ -188,7 +188,8 @@ end
 # limited (the result of `limit_liquid_vapor_rates`, or the implicitly relaxed rates on the grid)
 @inline function limit_ice_vapor_rates(liquid, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
                                        dt_safety, freezing_temperature,
-                                       temperature_tendency, pressure_tendency)
+                                       temperature_tendency, pressure_tendency,
+                                       distribution = nothing, qᵛ⁺ⁱ = qᵛ)
     (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap, coat_cond, coat_evap) = liquid
     FT = typeof(qᵛ)
     Rᵛ = FT(vapor_gas_constant(constants))
@@ -208,8 +209,12 @@ end
     Aⁱ = external_vapor_excess_forcing(qᵛ⁺ⁱ_after, ℒⁱ_after, T_after, P,
                                        temperature_tendency, pressure_tendency, constants)
     δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * dt_safety) / ξⁱ_after
-    qdep_cap = max(0, δqⁱ)
-    qsub_cap = max(0, -δqⁱ)
+    # With the subgrid distribution of every process the sinks draw on the positive part of the local excess over
+    # ice, shifted uniformly by what the liquid rates and the forcing do to the cell over `dt_safety`, and the sources
+    # on its negative part (their difference is the mean, δqⁱ)
+    excess = qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * dt_safety
+    qdep_cap = available_ice_excess(distribution, qᵛ - qᵛ⁺ⁱ, excess) / ξⁱ_after
+    qsub_cap = max(0, qdep_cap - δqⁱ)
 
     # Deposition cap
     dep_sink_total = max(0, dep) + nuc_q

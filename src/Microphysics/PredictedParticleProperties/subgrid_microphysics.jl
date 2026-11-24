@@ -576,15 +576,16 @@ end
 
 # The fraction where the local vapor excess over ice, δⁱ(s) = sⁱ(s) - ξⁱˡ qᶜˡ(s), reaches the threshold
 @inline function nucleating_fraction(::Val{true}, d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
-    P = ice_excess_exceedance(d, ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, floor))
+    P, _ = ice_excess_exceedance(d, ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, floor))
     return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor), P)
 end
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the fraction of the cell where the local vapor excess over ice reaches `threshold` [kg kg⁻¹], at the placement
-`d` with the excess over ice of [`subgrid_process_distribution`](@ref). Within component ``i`` the excess of the
+Return the fraction `P` of the cell where the local vapor excess over ice ``δⁱ`` reaches `threshold` [kg kg⁻¹], and the
+mean of ``δⁱ`` over that part times `P`, at the placement `d` with the excess over ice of
+[`subgrid_process_distribution`](@ref). Within component ``i`` the excess of the
 distributed water over ice is ``sⁱ = bᵢ + kᵢ s``, ``bᵢ = mⁱᵢ - kᵢ mᵢ``, and the local vapor excess over ice is
 ``δⁱ = sⁱ - ξⁱˡ qᶜˡ(s)``: ``bᵢ + kᵢ s - ξⁱˡ q⊖`` where ``s ≤ 0`` and ``bᵢ + (kᵢ - ξⁱˡ λ / ξˡ) s`` where ``s > 0``, so in
 each part the set ``δⁱ ≥`` `threshold` is an interval of ``s``.
@@ -599,14 +600,38 @@ each part the set ``δⁱ ≥`` `threshold` is an interval of ``s``.
         # Subsaturated part: kᵢ s ≥ Aᵢ with s ≤ 0
         Aᵢ = c + d.ξⁱˡ * qᵘ - bᵢ
         kₛ = ifelse(kᵢ > 0, kᵢ, one(FT))
-        P_sloped, _ = gaussian_interval_moments(mᵢ, σᵢ, min(Aᵢ / kₛ, zero(FT)), zero(FT), true)
-        P_level, _ = gaussian_lower_moments(mᵢ, σᵢ)
-        P⁻ = ifelse(kᵢ > 0, P_sloped, ifelse(Aᵢ <= 0, P_level, zero(FT)))
+        P_sloped, M_sloped = gaussian_interval_moments(mᵢ, σᵢ, min(Aᵢ / kₛ, zero(FT)), zero(FT), true)
+        P_level, M_level = gaussian_lower_moments(mᵢ, σᵢ)
+        reached = Aᵢ <= 0
+        P⁻ = ifelse(kᵢ > 0, P_sloped, ifelse(reached, P_level, zero(FT)))
+        M⁻ = ifelse(kᵢ > 0, M_sloped, ifelse(reached, M_level, zero(FT)))
         # Saturated part: rᵢ s ≥ Bᵢ with s > 0
-        P⁺, _ = positive_linear_exceedance(mᵢ, σᵢ, kᵢ - λⁱ, c - bᵢ)
-        aᵢ * (P⁻ + P⁺)
+        rᵢ = kᵢ - λⁱ
+        P⁺, M⁺ = positive_linear_exceedance(mᵢ, σᵢ, rᵢ, c - bᵢ)
+        (aᵢ * (P⁻ + P⁺), aᵢ * ((bᵢ - d.ξⁱˡ * qᵘ) * P⁻ + kᵢ * M⁻ + bᵢ * P⁺ + rᵢ * M⁺))
     end
-    return sum(terms)
+    return sum(map(first, terms)), sum(map(last, terms))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the excess over ice that the vapor sinks of ice can draw on when the grid-mean vapor excess over ice
+`grid_excess` of the placement `d` becomes `excess` (by the liquid rates and the forcing, uniformly over the cell):
+the cell mean of the positive part of the local excess shifted by `excess - grid_excess`, and the positive part of
+`excess` on the grid mean (`d = nothing`).
+"""
+@inline available_ice_excess(::Nothing, grid_excess, excess) = max(0, excess)
+
+@inline available_ice_excess(d::NamedTuple{names}, grid_excess, excess) where names =
+    available_ice_excess(Val(:mⁱ ∈ names), d, grid_excess, excess)
+
+@inline available_ice_excess(::Val{false}, d, grid_excess, excess) = max(0, excess)
+
+@inline function available_ice_excess(::Val{true}, d, grid_excess, excess)
+    shift = excess - grid_excess
+    P, M = ice_excess_exceedance(d, -shift)
+    return ifelse(d.degenerate, max(0, excess), max(0, M + shift * P))
 end
 
 # The probability and first moment of one Gaussian over the part s > 0 where r s > c

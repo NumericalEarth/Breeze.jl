@@ -790,7 +790,8 @@ end
                                                distribution)
     # The ice-phase caps follow whichever liquid rates were chosen, so they are evaluated once.
     vapor_rates = limit_ice_vapor_rates(liquid_rates, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
-                                        dt_safety, T₀, temperature_tendency, pressure_tendency)
+                                        dt_safety, T₀, temperature_tendency, pressure_tendency,
+                                        distribution, qᵛ⁺ⁱ)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number
