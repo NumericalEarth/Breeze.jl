@@ -35,6 +35,7 @@ using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocit
                                       distribution_thermodynamics,
                                       rate_norm_factor, linear_interp, hard_floor, component_vapor_excess,
                                       representable_skewness, within_component_share, ice_saturation_thermodynamics,
+                                      saturation_surface, condensate_latent_heat_and_log_slope,
                                       condensate_liquid_fraction as distributed_condensate_liquid_fraction
 
 

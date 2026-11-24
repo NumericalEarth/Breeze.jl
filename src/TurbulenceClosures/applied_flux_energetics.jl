@@ -349,8 +349,8 @@ end
         θ⁻ = θʷ[i, j, k-1]
         qʷ⁺ = qʷ[i, j, k]
         qʷ⁻ = qʷ[i, j, k-1]
-        qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, k] / ρ⁺
-        qᶜ⁻ = qʷ⁻ - s.ρqᵛᵉ[i, j, k-1] / ρ⁻
+        qᶜ⁺ = distributed_condensateᶜᶜᶜ(i, j, k, grid, s, qʷ⁺)
+        qᶜ⁻ = distributed_condensateᶜᶜᶜ(i, j, k-1, grid, s, qʷ⁻)
         Δz = Δzᶜᶜᶠ(i, j, k, grid)
         ∂z_s = (cl.c_q[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θ[i, j, k] * (θ⁺ - θ⁻)) / Δz
         ∂z_sⁱ = (cl.c_qⁱ[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θⁱ[i, j, k] * (θ⁺ - θ⁻)) / Δz
@@ -872,6 +872,71 @@ end
 ##### internal energy with them.
 #####
 
+# The condensate of the distributed water qʷ at center k: qʷ less the vapor of the cell. With prognostic cloud liquid
+# (P3) the vapor is the moisture density and qᶜ the cloud liquid; with saturation adjustment, whose moisture density
+# is the total water, the vapor is that of the adjusted state and qᶜ its condensate (liquid and ice), so that
+# the stratification N²ᵇ of the adjusted state and the latent correction count the condensate gradient once.
+@inline function distributed_condensateᶜᶜᶜ(i, j, k, grid, s, qʷ)
+    @inbounds begin
+        ρ = s.ρ[i, j, k]
+        qᵛᵉ = s.ρqᵛᵉ[i, j, k] / ρ
+    end
+    q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵛᵉ, s.microphysical_fields)
+    return qʷ - q.vapor
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The coefficients `(c_q, c_θ)` of the change of the equilibrium condensate of the distributed water at center `k`,
+``δqᶜ = c_q δqʷ - c_θ δθʷ`` at fixed pressure, linearized about the cell's own state: its temperature `T`, its
+moisture fractions and the saturation over the surface of the phase equilibrium of `thermodynamics` (the
+condensate of the distribution, or ice with `ice_saturation_thermodynamics`). From ``qᶜ = qʷ - qᵛ⁺``,
+``qᵛ⁺ = pᵛ⁺(T) Rᵐ / (p Rᵛ)`` and ``cᵖᵐ T = ĉᵖ Π θʷ + ℒ₀ qᶜ`` (+ the held condensate), with ``ℒ = ℒ₀ + (cᵖᵛ - cᶜ) T``:
+
+    D c_q = 1 - qᵛ⁺ (Rᵛ - Rᵈ) / Rᵐ - (∂qᵛ⁺/∂T) B / cᵖᵐ,    D c_θ = (∂qᵛ⁺/∂T) ĉᵖ Π / cᵖᵐ,
+    D = 1 - qᵛ⁺ Rᵛ / Rᵐ + (∂qᵛ⁺/∂T) ℒ / cᵖᵐ,    B = θʷ Π ((cᵖᵛ - cᵖᵈ) + ĉᵖ ln(p / pˢᵗ) ∂κ/∂qᵗ) - (cᵖᵛ - cᵖᵈ) T,
+
+with ``∂ ln qᵛ⁺/∂T`` that of the equilibrium (the change of its liquid fraction included). A saturated displacement
+holds ``s = 0``, so these give the saturated stratification ``N²ᶜ + (b_qᶜ - b_qᵛ) ∂z s̄`` exactly to first order.
+The linearization of the assumed PDF is about the temperature of the water all vapor instead, which in a
+cloud is off by ``ℒ qᶜ / ĉᵖ`` (several kelvin in a deep cloud) and misses the saturated stratification by tens
+of percent there.
+"""
+@inline function saturated_condensate_coefficients(thermodynamics, i, j, k, grid, s, θʷ)
+    constants = thermodynamics.constants
+    equilibrium = thermodynamics.phase_equilibrium
+    @inbounds begin
+        ρ = s.ρ[i, j, k]
+        T = s.T[i, j, k]
+        p = s.p[i, j, k]
+        qᵛᵉ = s.ρqᵛᵉ[i, j, k] / ρ
+    end
+    q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵛᵉ, s.microphysical_fields)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    Rᵐ = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    qᵗ = q.vapor + q.liquid + q.ice
+    ĉᵖ = cᵖᵈ + qᵗ * (cᵖᵛ - cᵖᵈ)
+    R̂ = Rᵈ + qᵗ * (Rᵛ - Rᵈ)
+    κ = exner_exponent(s.exner_exponent, q, constants)
+    κ′ = exner_exponent_moisture_derivative(s.exner_exponent, R̂, ĉᵖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    ln_p = log(p / s.standard_pressure)
+    Π = exp(κ * ln_p)
+
+    qᵛ⁺ = saturation_specific_humidity(T, p / (Rᵐ * T), constants, saturation_surface(equilibrium, T))
+    ℒ, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, T)
+    ∂qᵛ⁺∂T = qᵛ⁺ * log_slope
+    B = θʷ * Π * ((cᵖᵛ - cᵖᵈ) + ĉᵖ * ln_p * κ′) - (cᵖᵛ - cᵖᵈ) * T
+    D = 1 - qᵛ⁺ * Rᵛ / Rᵐ + ∂qᵛ⁺∂T * ℒ / cᵖᵐ
+    c_q = (1 - qᵛ⁺ * (Rᵛ - Rᵈ) / Rᵐ - ∂qᵛ⁺∂T * B / cᵖᵐ) / D
+    c_θ = ∂qᵛ⁺∂T * ĉᵖ * Π / (cᵖᵐ * D)
+    return c_q, c_θ
+end
+
 # The rates (s⁻¹) at which the condensate of the cell absorbs vapor excess, from the microphysics
 # (`AtmosphereModels.phase_relaxation_rates`; 0 without condensing microphysics): ωˡ of the distributed condensate
 # and ωⁱ of the ice outside the distributed water. They include the psychrometric correction ξ of the latent
@@ -955,18 +1020,22 @@ end
         θ⁻ = θʷ[i, j, kₛ-1]
         qʷ⁺ = qʷ[i, j, kₛ]
         qʷ⁻ = qʷ[i, j, kₛ-1]
-        qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, kₛ] / ρ⁺
-        qᶜ⁻ = qʷ⁻ - s.ρqᵛᵉ[i, j, kₛ-1] / ρ⁻
+        qᶜ⁺ = distributed_condensateᶜᶜᶜ(i, j, kₛ, grid, s, qʷ⁺)
+        qᶜ⁻ = distributed_condensateᶜᶜᶜ(i, j, kₛ-1, grid, s, qʷ⁻)
         Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
-        c_q⁺, c_θ⁺, _ = saturation_excess_coefficients(thermodynamics, θ⁺, qʷ⁺, s.p[i, j, kₛ])
-        c_q⁻, c_θ⁻, _ = saturation_excess_coefficients(thermodynamics, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        # The linearization of the assumed PDF, with which its condensate flux fraction aʷ is formed
+        c_qᵖ⁺, c_θᵖ⁺, _ = saturation_excess_coefficients(thermodynamics, θ⁺, qʷ⁺, s.p[i, j, kₛ])
+        c_qᵖ⁻, c_θᵖ⁻, _ = saturation_excess_coefficients(thermodynamics, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        # The saturation excess s = c_q qʷ - c_θ θʷ, linearized about the state of each cell
+        c_q⁺, c_θ⁺ = saturated_condensate_coefficients(thermodynamics, i, j, kₛ, grid, s, θ⁺)
+        c_q⁻, c_θ⁻ = saturated_condensate_coefficients(thermodynamics, i, j, kₛ-1, grid, s, θ⁻)
         c_q = (c_q⁺ + c_q⁻) / 2
         c_θ = (c_θ⁺ + c_θ⁻) / 2
         ∂z_s = (c_q * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
         # The saturation excess of the distributed water over ice, sⁱ = c_qⁱ qʷ - c_θⁱ θʷ, for the ice outside it
         ice = ice_saturation_thermodynamics(thermodynamics)
-        c_qⁱ⁺, c_θⁱ⁺, _ = saturation_excess_coefficients(ice, θ⁺, qʷ⁺, s.p[i, j, kₛ])
-        c_qⁱ⁻, c_θⁱ⁻, _ = saturation_excess_coefficients(ice, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        c_qⁱ⁺, c_θⁱ⁺ = saturated_condensate_coefficients(ice, i, j, kₛ, grid, s, θ⁺)
+        c_qⁱ⁻, c_θⁱ⁻ = saturated_condensate_coefficients(ice, i, j, kₛ-1, grid, s, θ⁻)
         c_qⁱ = (c_qⁱ⁺ + c_qⁱ⁻) / 2
         c_θⁱ = (c_θⁱ⁺ + c_θⁱ⁻) / 2
         ∂z_sⁱ = (c_qⁱ * (qʷ⁺ - qʷ⁻) - c_θⁱ * (θ⁺ - θ⁻)) / Δz
@@ -977,8 +1046,8 @@ end
 
         # aʷ = w′qˡ′ / w′s′ formed at the centers above and below, where numerator and denominator come
         # from the same moments, and averaged to the face
-        aʷ = (center_condensate_flux_fraction(i, j, kₛ, m, cl, c_q⁺, c_θ⁺) +
-              center_condensate_flux_fraction(i, j, kₛ-1, m, cl, c_q⁻, c_θ⁻)) / 2
+        aʷ = (center_condensate_flux_fraction(i, j, kₛ, m, cl, c_qᵖ⁺, c_θᵖ⁺) +
+              center_condensate_flux_fraction(i, j, kₛ-1, m, cl, c_qᵖ⁻, c_θᵖ⁻)) / 2
 
         # η over the eddy time tₑ = e / ε = ℓ / (𝕊ᴰ √e) at the face
         ℓ = closure_fields.ℓᵐ[i, j, kₛ]
@@ -1070,13 +1139,14 @@ end
         θ⁻ = θʷ[i, j, kₛ-1]
         qʷ⁺ = qʷ[i, j, kₛ]
         qʷ⁻ = qʷ[i, j, kₛ-1]
-        qᶜ⁺ = qʷ⁺ - s.ρqᵛᵉ[i, j, kₛ] / ρ⁺
-        qᶜ⁻ = qʷ⁻ - s.ρqᵛᵉ[i, j, kₛ-1] / ρ⁻
+        qᶜ⁺ = distributed_condensateᶜᶜᶜ(i, j, kₛ, grid, s, qʷ⁺)
+        qᶜ⁻ = distributed_condensateᶜᶜᶜ(i, j, kₛ-1, grid, s, qʷ⁻)
         Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
-        c_q⁺, c_θ⁺, _ = saturation_excess_coefficients(thermodynamics, θ⁺, qʷ⁺, s.p[i, j, kₛ])
-        c_q⁻, c_θ⁻, _ = saturation_excess_coefficients(thermodynamics, θ⁻, qʷ⁻, s.p[i, j, kₛ-1])
+        c_q⁺, c_θ⁺ = saturated_condensate_coefficients(thermodynamics, i, j, kₛ, grid, s, θ⁺)
+        c_q⁻, c_θ⁻ = saturated_condensate_coefficients(thermodynamics, i, j, kₛ-1, grid, s, θ⁻)
+        c_q = (c_q⁺ + c_q⁻) / 2
         c_θ = (c_θ⁺ + c_θ⁻) / 2
-        ∂z_s = ((c_q⁺ + c_q⁻) / 2 * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
+        ∂z_s = (c_q * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
         ∂z_qᶜ = (qᶜ⁺ - qᶜ⁻) / Δz
         bᶜᵛ = (cl.b_qᶜ[i, j, kₛ] + cl.b_qᶜ[i, j, kₛ-1] - cl.b_qᵛ[i, j, kₛ] - cl.b_qᵛ[i, j, kₛ-1]) / 2
         a = saturated_stability_weightᶜᶜᶠ(i, j, kₛ, grid, closure_ij.static_stability.fraction, buoyancy, tracers, closure_fields)
@@ -1085,6 +1155,8 @@ end
         cl.aʷ[i, j, k] = ifelse(interior, a, zero(FT))
         cl.aᴺ[i, j, k] = ifelse(interior, a, zero(FT))
         cl.c_θ[i, j, k] = ifelse(interior, c_θ, zero(FT))
+        cl.c_q[i, j, k] = ifelse(interior, c_q, zero(FT))
+        cl.η[i, j, k] = ifelse(interior, one(FT), zero(FT))
         cl.ΔN²ᴸ[i, j, k] = ifelse(interior, ΔN²ᴸ, zero(FT))
     end
 end

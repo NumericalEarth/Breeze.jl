@@ -220,3 +220,60 @@ end
     model = cold_column(ice = false)
     @test all(column_values(model.closure_fields.subgrid_cloud.cloud.ηⁱ) .== 0)
 end
+
+#####
+##### The latent correction against the saturated stratification (saturation adjustment, no distribution)
+#####
+
+struct FixedSaturatedFraction{FT}
+    a :: FT
+end
+
+@inline Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ(i, j, k, grid, f::FixedSaturatedFraction, buoyancy, tracers,
+                                                               closure_fields) = f.a
+
+@testset "P3 subgrid ice: N²ᵇ - ΔN²ᴸ is the saturated stratification at a = 1 and that of the conserved variables at a = 0" begin
+    FT = Float64
+    grid = RectilinearGrid(CPU(), FT; size = 40, z = (0, 2000), topology = (Flat, Flat, Bounded))
+    constants = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, constants; base_pressure = 101500, potential_temperature = 290)
+    microphysics = SaturationAdjustment(FT; equilibrium = WarmPhaseEquilibrium())
+    θˡⁱ(z) = 290 + 2e-3 * z # saturated throughout at qᵗ = 15 g/kg
+    column_model(a) = AtmosphereModel(grid; dynamics = AnelasticDynamics(reference_state), thermodynamic_constants = constants,
+                                      microphysics,
+                                      closure = TKEBasedTurbulenceClosure(FT; static_stability = SaturationWeightedStaticStability(FixedSaturatedFraction(a))))
+    g = constants.gravitational_acceleration
+
+    # The exact saturated N² of the column: a parcel keeps θˡⁱ and qᵗ and readjusts, N² = ∂b/∂θˡⁱ|ₚ ∂z θˡⁱ,
+    # b = g (1 - Xᵣ / X), X = Rᵐ T, by a difference in θˡⁱ
+    function log_X(model, k)
+        ρ = model.dynamics.reference_state.density[1, 1, k]
+        q = Breeze.AtmosphereModels.grid_moisture_fractions(1, 1, k, grid, model.microphysics, ρ, model.moisture_density[1, 1, k] / ρ,
+                                                            model.microphysical_fields)
+        return log(Breeze.Thermodynamics.mixture_gas_constant(q, constants) * model.temperature[1, 1, k])
+    end
+    buoyancy(model, k) = Breeze.AtmosphereModels.buoyancy_forceᶜᶜᶜ(1, 1, k, grid, model.dynamics, model.temperature,
+                                                                   Breeze.AtmosphereModels.specific_prognostic_moisture(model),
+                                                                   model.microphysics, model.microphysical_fields, constants) /
+                         model.dynamics.reference_state.density[1, 1, k]
+    reference = column_model(1.0)
+    ε = 1e-3
+    set!(reference; θ = z -> θˡⁱ(z) + ε, qᵗ = 15e-3)
+    X₁ = [log_X(reference, k) for k in 1:40]
+    set!(reference; θ = θˡⁱ, qᵗ = 15e-3)
+    X₀ = [log_X(reference, k) for k in 1:40]
+    exact(k) = (g - (buoyancy(reference, k) + buoyancy(reference, k-1)) / 2) * ((X₁[k] + X₁[k-1]) - (X₀[k] + X₀[k-1])) / (2ε) * 2e-3
+
+    for a in (1.0, 0.0)
+        model = column_model(a)
+        set!(model; θ = θˡⁱ, qᵗ = 15e-3, ρe = 0.1)
+        cl = model.closure_fields.subgrid_cloud.cloud
+        s = Breeze.TurbulenceClosures.applied_flux_state(model)
+        for k in (10, 20, 30)
+            N² = Breeze.TurbulenceClosures.applied_stratificationᶜᶜᶠ(1, 1, k, grid, s, cl) - cl.ΔN²ᴸ[1, 1, k]
+            # the stratification of the conserved variables θˡⁱ and qᵗ (uniform here)
+            N²ᶜ = (cl.b_θ[1, 1, k] + cl.b_θ[1, 1, k-1]) / 2 * 2e-3
+            @test N² ≈ (a == 1 ? exact(k) : N²ᶜ) rtol = 1e-3
+        end
+    end
+end
