@@ -36,18 +36,11 @@ Base.show(io::IO, policy::HardClipping) = print(io, summary(policy), "()")
 @inline clip_max(::HardClipping, a, b, scale) = max(a, b)
 @inline clip_min(::HardClipping, a, b, scale) = min(a, b)
 
-# `y`, not below `lo`: the Fortran `if (y < lo) y = lo`
-@inline clip_below(::HardClipping, y, lo, scale) = ifelse(y < lo, lo, y)
-
 # `x`, between `lo` and `hi`
 @inline clip_between(::HardClipping, x, lo, hi, scale) = max(lo, min(hi, x))
 
 # The positive part of `x`
 @inline clip_negative(::HardClipping, x, scale) = ifelse(x >= 0, x, zero(x))
-
-# `λ N²` where the stratification `N²` is stable, zero elsewhere: the Fortran sets `λ = 0` where
-# `N² ≤ 0` and multiplies afterwards.
-@inline stable_damping(::HardClipping, λ, N², scale) = ifelse(N² <= 0, zero(λ), λ) * N²
 
 #####
 ##### Smooth clipping
@@ -98,13 +91,11 @@ Adapt.adapt_structure(to, policy::SmoothClipping) = (width = adapt(to, policy.wi
 
 @inline clip_max(policy::SmoothClipping, a, b, scale) = smooth_max(a, b, policy.width * scale)
 @inline clip_min(policy::SmoothClipping, a, b, scale) = smooth_min(a, b, policy.width * scale)
-@inline clip_below(policy::SmoothClipping, y, lo, scale) = smooth_max(y, lo, policy.width * scale)
 # The difference of the two square roots loses digits where `x` is far beyond the bounds; the
 # hard bound guards that round-off only (the exact value is strictly inside).
 @inline clip_between(policy::SmoothClipping, x, lo, hi, scale) =
     max(lo, min(hi, smooth_clamp(x, lo, hi, policy.width * scale)))
 @inline clip_negative(policy::SmoothClipping, x, scale) = smooth_max(x, zero(x), policy.width * scale)
-@inline stable_damping(policy::SmoothClipping, λ, N², scale) = λ * clip_negative(policy, N², scale)
 
 #####
 ##### Guards that are hard in every configuration

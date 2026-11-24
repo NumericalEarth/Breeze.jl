@@ -187,8 +187,6 @@ end
     end
 end
 
-@inline applied_shear_conversionᶜᶜᶠ(i, j, k, grid, Kᵘ, u, v) = @inbounds Kᵘ[i, j, k] * shearᶜᶜᶠ(i, j, k, grid, u, v)
-
 # The weights that move a face quantity X to the center k so that Σ ρᶜ Δzᶜ Xᶜ = Σ ρᶠ Δzᶠ Xᶠ: the masses of the lower and
 # upper half-cells with the density of their face, and the mass of the cell, Xᶜ = (wˡᵒʷ Xᶠₖ + wᵘᵖ Xᶠₖ₊₁) / ρΔz
 @inline function half_cell_weights(i, j, k, grid, ρ)
@@ -210,8 +208,8 @@ end
     Bᵘᵖ = ifelse(k < Nz, applied_buoyancy_conversionᶜᶜᶠ(i, j, kᵘᵖ, grid, s, cl, Kᶜ), zero(FT))
     Lˡᵒʷ = ifelse(k > 1, latent_conversionᶜᶜᶠ(i, j, kˡᵒʷ, grid, cl, Kᶜ), zero(FT))
     Lᵘᵖ = ifelse(k < Nz, latent_conversionᶜᶜᶠ(i, j, kᵘᵖ, grid, cl, Kᶜ), zero(FT))
-    Pˡᵒʷ = ifelse(k > 1, applied_shear_conversionᶜᶜᶠ(i, j, kˡᵒʷ, grid, Kᵘ, u, v), zero(FT))
-    Pᵘᵖ = ifelse(k < Nz, applied_shear_conversionᶜᶜᶠ(i, j, kᵘᵖ, grid, Kᵘ, u, v), zero(FT))
+    Pˡᵒʷ = ifelse(k > 1, shear_productionᶜᶜᶠ(i, j, kˡᵒʷ, grid, Kᵘ, u, v), zero(FT))
+    Pᵘᵖ = ifelse(k < Nz, shear_productionᶜᶜᶠ(i, j, kᵘᵖ, grid, Kᵘ, u, v), zero(FT))
     wˡᵒʷ, wᵘᵖ, ρΔz = half_cell_weights(i, j, k, grid, s.ρ)
     return (wˡᵒʷ * Bˡᵒʷ + wᵘᵖ * Bᵘᵖ) / ρΔz, (wˡᵒʷ * Pˡᵒʷ + wᵘᵖ * Pᵘᵖ) / ρΔz, (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
 end

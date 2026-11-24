@@ -6,17 +6,13 @@ using Oceananigans.Grids: znodes
 using Breeze.TurbulenceClosures: convert_eltype, column_stability_field, diffusivity_stability_functionsᶜᶜᶠ,
                                  dissipation_stability_functionᶜᶜᶜ, shoc_distribution
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: trainable_parameter_names, is_calibratable, component_scalar_names,
-                                      clip_max, clip_min, clip_below, clip_between, clip_negative,
-                                      stable_damping, hard_floor, third_moment_bound, limit_third_moment, third_moment,
+                                      clip_max, clip_min, clip_between, clip_negative,
+                                      hard_floor, third_moment_bound, limit_third_moment, third_moment,
                                       bound_stratification_number, assumed_pdf, plume_saturation, plume_liquid_water_temperature, plume_variance,
                                       smooth_scalar_plumes, isotropy_ratio, shoc_dissipation_coefficient
 using Breeze.Thermodynamics: VaporEquivalentExponent, WarmPhaseEquilibrium
 using Enzyme: Enzyme
 using Test
-
-# Bitwise equality, with NaN equal to NaN and the two zeros distinct
-same_bits(a, b) = a === b
-
 
 # Bitwise equality, with NaN equal to NaN and the two zeros distinct
 same_bits(a, b) = a === b
@@ -43,9 +39,7 @@ derivative(f, x, parameters...) =
         for a in values, b in values
             @test same_bits(clip_max(policy, a, b, scale), max(a, b))
             @test same_bits(clip_min(policy, a, b, scale), min(a, b))
-            @test same_bits(clip_below(policy, a, b, scale), ifelse(a < b, b, a))
             @test same_bits(hard_floor(a, b), ifelse(a < b, b, a))
-            @test same_bits(stable_damping(policy, a, b, scale), ifelse(b <= 0, zero(FT), a) * b)
         end
 
         for x in values
@@ -76,7 +70,6 @@ derivative(f, x, parameters...) =
                 roundoff = 4eps(FT) * (abs(a) + abs(b))
                 @test clip_max(policy, a, b, scale) ≥ max(a, b) - roundoff
                 @test clip_min(policy, a, b, scale) ≤ min(a, b) + roundoff
-                @test clip_below(policy, a, b, scale) ≥ max(a, b) - roundoff
                 @test clip_max(policy, a, b, scale) - max(a, b) ≤ δ / 2 + roundoff
                 @test min(a, b) - clip_min(policy, a, b, scale) ≤ δ / 2 + roundoff
                 @test clip_max(policy, a, b, scale) isa FT
@@ -86,7 +79,6 @@ derivative(f, x, parameters...) =
                 @test -1 ≤ clip_between(policy, x, -1, 1, 1) ≤ 1
                 @test abs(clip_between(policy, x, -1, 1, 1) - clamp(x, -1, 1)) ≤ δ
                 @test clip_negative(policy, x, scale) ≥ 0
-                @test stable_damping(policy, FT(2), x, scale) ≥ 2 * max(x, 0) - 8eps(FT) * abs(x)
             end
             # Strictly inside the bounds where the argument is within a few bounds of them
             @test FT(0.01) < clip_between(policy, FT(-1), FT(0.01), FT(0.99), 1) < clip_between(policy, FT(2), FT(0.01), FT(0.99), 1) < FT(0.99)
