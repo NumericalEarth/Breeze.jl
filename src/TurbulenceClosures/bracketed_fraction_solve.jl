@@ -110,25 +110,17 @@ end
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
     @inbounds begin
-        Δz = Δzᶜᶜᶠ(i, j, k, grid)
-        Δθ = θ[i, j, k] - θ[i, j, k-1]
-        Δq = qᵗ[i, j, k] - qᵗ[i, j, k-1]
-        ∂zθ = Δθ / Δz
-        ∂zq = Δq / Δz
-        gθᶠ = (cl.gθ[i, j, k] + cl.gθ[i, j, k-1]) / 2
+        g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
         gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, k-1]) / 2
-        N²ᶜ = gθᶠ * ∂zθ + gAᶠ * ∂zq
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k-1), θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])
-        ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
-        ΔN² = gθᶠ * (A⁺ + A⁻) / 2 * ∂zs
+        N²ᶜ = g.gθᶠ * g.∂zθ + gAᶠ * g.∂zq
+        ΔN² = g.gA_c * g.∂zs
         s̄ = (mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k]) +
              mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k-1), θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])) / 2
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
         w′²ᶠ = (vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ)) +
                 vertical_velocity_variance(sm, max(e[i, j, k-1], eᵐⁱⁿ))) / 2
     end
-    return (; Δz, Δθ, Δq, ∂zθ, ∂zq, N²ᶜ, ΔN², ∂zs, s̄, u, w′²ᶠ)
+    return (; g.Δz, g.Δθ, g.Δq, N²ᶜ, ΔN², g.∂zs, s̄, u, w′²ᶠ)
 end
 
 # The liquid flux fraction ãᴺ at face k of the distribution formed with N² = N²ᶜ + aᴺ ΔN² there
@@ -314,13 +306,8 @@ end
     kₛ = clamp(k, 2, max(Nz, 2))
     d = getclosure(i, j, closure).subgrid_distribution
     @inbounds begin
-        Δz = Δzᶜᶜᶠ(i, j, kₛ, grid)
-        ∂zθ = (θ[i, j, kₛ] - θ[i, j, kₛ-1]) / Δz
-        ∂zq = (qᵗ[i, j, kₛ] - qᵗ[i, j, kₛ-1]) / Δz
-        gθᶠ = (cloud.gθ[i, j, kₛ] + cloud.gθ[i, j, kₛ-1]) / 2
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, kₛ), θ[i, j, kₛ], qᵗ[i, j, kₛ], p[i, j, kₛ])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, kₛ-1), θ[i, j, kₛ-1], qᵗ[i, j, kₛ-1], p[i, j, kₛ-1])
-        ΔN² = gθᶠ * (A⁺ + A⁻) / 2 * ((c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ)
+        g = saturation_excess_gradientᶜᶜᶠ(i, j, kₛ, grid, cloud, θ, qᵗ, p, thermodynamics)
+        ΔN² = g.gA_c * g.∂zs
         Bᶠ = (cloud.Bˡ[i, j, kₛ] + cloud.Bˡ[i, j, kₛ-1]) / 2
         Kᶜᵢ = Kᶜ[i, j, kₛ]
         resolved = (Kᶜᵢ > sqrt(floatmin(FT))) & (abs(ΔN²) > floatmin(FT))

@@ -1353,21 +1353,33 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
 # face. Also returns ∂z s̄ and the face A_c.
 @inline function condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
     km = max(k - 1, 1)
+    g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
     @inbounds begin
-        Δz = Δzᶜᶜᶠ(i, j, k, grid)
-        ∂zθ = (θ[i, j, k] - θ[i, j, km]) / Δz
-        ∂zq = (qᵗ[i, j, k] - qᵗ[i, j, km]) / Δz
-        gθᶠ = (cl.gθ[i, j, k] + cl.gθ[i, j, km]) / 2
         gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, km]) / 2
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, km), θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
         bˡᵛaʷ⁺ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, cl)
         bˡᵛaʷ⁻ = (cl.b_qᶜ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, cl)
     end
-    N²ᶜ = gθᶠ * ∂zθ + gAᶠ * ∂zq
+    N²ᶜ = g.gθᶠ * g.∂zθ + gAᶠ * g.∂zq
+    N²ᵇ = N²ᶜ + (bˡᵛaʷ⁺ + bˡᵛaʷ⁻) / 2 * g.∂zs
+    return N²ᶜ, N²ᵇ, g.∂zs, g.gA_c
+end
+
+# Across the face k (between the centers k - 1 and k): the gradients of θʷ and qʷ, that of SHOC's linearized saturation
+# excess, ∂z s̄ = c̄_q ∂z qʷ - c̄_θ ∂z θʷ, the face b̄_θ (`gθᶠ`) and b̄_θ Ā_c (`gA_c`), so that N²ˢ - N²ᶜ = gA_c ∂z s̄
+@inline function saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
+    km = max(k - 1, 1)
+    @inbounds begin
+        Δz = Δzᶜᶜᶠ(i, j, k, grid)
+        Δθ = θ[i, j, k] - θ[i, j, km]
+        Δq = qᵗ[i, j, k] - qᵗ[i, j, km]
+        gθᶠ = (cl.gθ[i, j, k] + cl.gθ[i, j, km]) / 2
+        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
+        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, km), θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
+    end
+    ∂zθ = Δθ / Δz
+    ∂zq = Δq / Δz
     ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
-    N²ᵇ = N²ᶜ + (bˡᵛaʷ⁺ + bˡᵛaʷ⁻) / 2 * ∂zs
-    return N²ᶜ, N²ᵇ, ∂zs, gθᶠ * (A⁺ + A⁻) / 2
+    return (; Δz, Δθ, Δq, ∂zθ, ∂zq, gθᶠ, ∂zs, gA_c = gθᶠ * (A⁺ + A⁻) / 2)
 end
 
 function cloud_buoyancy_stability!(buoyancy_flux::AppliedFluxEnergetics{N, W, <:Union{SecantIteration, BisectionIteration}},
