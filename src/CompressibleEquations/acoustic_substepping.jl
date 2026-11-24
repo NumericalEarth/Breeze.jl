@@ -848,10 +848,19 @@ end
 # `finalize_time_averaged_velocity!` normalizes it (see Section 10).
 function remove_moisture_content!(substepper::AcousticSubstepper, model, U⁰, Δτ)
     grid = model.grid
+    fill_integrated_momentum_halos!(substepper, model)
     launch!(architecture(grid), grid, :xyz, _remove_moisture_content!,
             substepper.density_potential_temperature_perturbation,
             substepper.stage_end_moisture_content,
             fast_content_arguments(substepper, model, U⁰)..., Δτ, 1 - substepper.forward_weight)
+    return nothing
+end
+
+# `fast_content_divergence` reads the horizontal sums `M` across the east and north faces of a cell,
+# and the substeps accumulate them in the interior only: on distributed grids, exchange them first.
+function fill_integrated_momentum_halos!(substepper, model)
+    M = substepper.time_averaged_velocities
+    fill_substep_halos!((M.u, M.v), model)
     return nothing
 end
 
@@ -2111,6 +2120,7 @@ function apply_open_boundary_relaxation!(substepper, model, grid, arch, stage, n
     west, east = is_active_open_bc(bcs_u.west), is_active_open_bc(bcs_u.east)
     south, north = is_active_open_bc(bcs_v.south), is_active_open_bc(bcs_v.north)
     west || east || south || north || return nothing
+    fill_integrated_momentum_halos!(substepper, model)
 
     Nx, Ny, _ = size(grid)
     α   = substepper.open_boundary_relaxation
@@ -2145,21 +2155,24 @@ end
     @inbounds ρv′[i, jᶠ, k] = 0
 end
 
+# Whether the left and right sides of a dimension are walls. On a distributed grid either side
+# may be a seam with another rank instead.
+closed_sides(::Type{TwoSided{L, R}}) where {L, R} = (L === Closed, R === Closed)
+closed_sides(topology) = (false, false)
+
 function enforce_wall_impenetrability!(substepper, model, grid, arch)
     TX, TY, _ = topology(grid)
     Nx, Ny, _ = size(grid)
     ρu′ = substepper.momentum_perturbation.u
     ρv′ = substepper.momentum_perturbation.v
+    west, east = closed_sides(TX)
+    south, north = closed_sides(TY)
     # Auxiliary `nothing` BCs do not zero faces. Enforce zero perturbations explicitly
     # to match the topology-aware divergence and hold prescribed flow in the stage-entry state.
-    if TX === Bounded
-        launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
-        launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
-    end
-    if TY === Bounded
-        launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
-        launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
-    end
+    west  && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
+    east  && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
+    south && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
+    north && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
     return nothing
 end
 
