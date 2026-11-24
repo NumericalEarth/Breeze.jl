@@ -1001,7 +1001,6 @@ end
 
     closure_ij = getclosure(i, j, closure)
     e = tracers[TKE_NAME]
-    N² = closure_fields.N²
 
     # The one diffusivity the closure forms, ℓ √e — with the stored mixing length and √e floored
     # at the minimum TKE and reconstructed from the centers to the face — which the stability
@@ -1066,7 +1065,6 @@ sink ``ωᴮ e`` is ``-B⁻``; below it the sink falls linearly with ``e``, cont
 stays positive for any time step.
 """
 @inline function tke_sink_rate(i, j, k, grid, closure, e, B, velocities, closure_fields)
-    eᵐⁱⁿ = closure.minimum_tke
     eᵢ = @inbounds e[i, j, k]
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
     𝕊ᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
@@ -1106,7 +1104,6 @@ subgrid distribution, the exact conversion of the scalar fluxes the closure appl
 
     closure_ij = getclosure(i, j, closure)
     e = tracers[TKE_NAME]
-    N² = closure_fields.N²
 
     B = tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields)
     ω = tke_sink_rate(i, j, k, grid, closure_ij, e, B, velocities, closure_fields)

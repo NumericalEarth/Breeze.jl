@@ -241,7 +241,6 @@ end
 
 @kernel function _compute_applied_flux_conversions!(cl, grid, closure, s, Kᶜ, Kᵘ, u, v, e, bottom_bcs, bc_args)
     i, j, k = @index(Global, NTuple)
-    closure_ij = getclosure(i, j, closure)
     B, P, Bᴸ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     Bˢ, Pˢ = surface_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, u, v, bottom_bcs, bc_args)
     # The conversion of the heating budget flux (zero without one); its latent part is drawn from the internal energy with Bᴸ
@@ -375,8 +374,6 @@ end
 # c_qⁱ, c_θⁱ (see `_latent_corrected_stability!`)
 @inline function solved_latent_conversionᶜᶜᶠ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
     @inbounds begin
-        ρ⁺ = s.ρ[i, j, k]
-        ρ⁻ = s.ρ[i, j, k-1]
         θ⁺ = θʷ[i, j, k]
         θ⁻ = θʷ[i, j, k-1]
         qʷ⁺ = qʷ[i, j, k]
@@ -1187,7 +1184,6 @@ function cloud_buoyancy_stability_pass!(fields::SubgridCloudFields{<:AppliedFlux
     grid = model.grid
     arch = grid.architecture
     d = distribution_state(model, nothing)
-    dist = subgrid_distribution(closure)
     launch!(arch, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments, grid, closure,
             closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, d.θ, tracers[TKE_NAME], d.thermodynamics,
             ω)

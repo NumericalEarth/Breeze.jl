@@ -317,7 +317,6 @@ cloud/precipitation fraction framework is handled separately.
     ξˡ = coefficients.ξˡ
     ξⁱ = coefficients.ξⁱ
     ℒˡ = coefficients.ℒˡ
-    Rᵛ = coefficients.Rᵛ
     qⁱ_total = coefficients.qⁱ_total
     Fˡ = coefficients.Fˡ
 

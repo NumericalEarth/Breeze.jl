@@ -106,7 +106,6 @@ end
 
 # The face's constant inputs, gathered once
 @inline function fraction_face_inputs(i, j, k, grid, closure, d, m, cl, θ, qᵗ, e, p, thermodynamics)
-    FT = grid_float_type(grid)
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
     @inbounds begin
@@ -127,7 +126,6 @@ end
 @inline function trial_condensate_flux_fraction(aᴺ, i, j, k, grid, closure, d, m, cl, input, velocities, θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)
     FT = grid_float_type(grid)
     sm = d.second_moments
-    eᵐⁱⁿ = closure.minimum_tke
 
     N² = input.N²ᶜ + aᴺ * input.ΔN²
     u = input.u
@@ -304,7 +302,6 @@ end
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
     kₛ = clamp(k, 2, max(Nz, 2))
-    d = getclosure(i, j, closure).subgrid_distribution
     @inbounds begin
         g = saturation_excess_gradientᶜᶜᶠ(i, j, kₛ, grid, cloud, θ, qᵗ, p, thermodynamics)
         ΔN² = g.gA_c * g.∂zs

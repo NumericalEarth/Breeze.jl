@@ -1399,7 +1399,6 @@ function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_f
     arch = grid.architecture
     s = distribution_state(model, nothing)
     cl = fields.cloud
-    d = closure.subgrid_distribution
     launch!(arch, grid, parameters, _solve_cloud_buoyancy_stability!, closure_fields.N², fields.solver_state, solver,
             P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, fields.moments, cl,
             closure, closure_fields, model.velocities, applied_flux_state(model), tracers[TKE_NAME])
@@ -1452,7 +1451,6 @@ end
 @kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, m, cl,
                                                   closure, closure_fields, velocities, s, e)
     i, j, k = @index(Global, NTuple)
-    FT = grid_float_type(grid)
     @inbounds begin
         interior_face = k > 1
         N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
