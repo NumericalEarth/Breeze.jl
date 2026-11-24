@@ -23,7 +23,7 @@ Reactant.set_default_backend(default_arch isa GPU ? "gpu" : "cpu")
 
 # XLA's CPU compiler moves a while loop whose buffers are all small (here the time-step loops of an ensemble of
 # a few short columns) into one function, and optimizing that function for the gradient of this closure takes
-# hours (more than three, at 40 GB). A threshold of zero keeps the loops as loops.
+# more than three hours, at 40 GB. A threshold of zero keeps the loops as loops.
 small_while_loop_options = (; xla_backend_extra_options = Dict("xla_cpu_small_while_loop_byte_threshold" => "0"))
 compile_options = CompileOptions(; raise = true, raise_first = true, sync = true,
                                  xla_debug_options = default_arch isa GPU ? (;) : small_while_loop_options)

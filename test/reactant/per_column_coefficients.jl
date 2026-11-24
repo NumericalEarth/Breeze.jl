@@ -10,13 +10,19 @@ using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Oceananigans.Grids: ColumnEnsembleSize
 using Reactant
-using Reactant: @trace
+using Reactant: @trace, CompileOptions
 using GPUArraysCore: @allowscalar
 using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, AllProcesses
 using Test
 using CUDA
 
 Reactant.set_default_backend(default_arch isa GPU ? "gpu" : "cpu")
+
+# XLA's CPU compiler moves a while loop whose buffers are all small (the time-step loop of these few short columns)
+# into one function, whose optimization did not finish in 45 minutes; a threshold of zero keeps the loop as a loop.
+small_while_loop_options = (; xla_backend_extra_options = Dict("xla_cpu_small_while_loop_byte_threshold" => "0"))
+compile_options = CompileOptions(; raise = true, raise_first = true, sync = true,
+                                 xla_debug_options = default_arch isa GPU ? (;) : small_while_loop_options)
 
 function column_tke(model, Δt, Nsteps)
     set!(model; θ = z -> 290 + 3e-3 * max(z - 800, 0), qᵗ=0.012, u=5, ρe=0.1)
@@ -50,7 +56,7 @@ end
 
     model = column_model(ReactantState(), first_ensemble)
     @test model.closure.mixing_length.ℂⁱ.values isa Reactant.ConcreteRArray
-    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true column_tke(model, Δt, Ns)
+    compiled = @with_stack_size Reactant.@compile compile_options=compile_options column_tke(model, Δt, Ns)
 
     for closures in (first_ensemble, second_ensemble)
         set_per_column_coefficients!(model.closure, closures)
@@ -82,7 +88,7 @@ updated_closures(values) = reshape([updated_closure(v...) for v in values], leng
     # The closure and P3 keep state that `set!` does not reset (lagged stability, the stage start of the implicit
     # relaxation, ...), so each ensemble runs on a copy of the model as built, as a calibration runs each member
     template = deepcopy(model)
-    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true column_tke(model, Δt, Ns)
+    compiled = @with_stack_size Reactant.@compile compile_options=compile_options column_tke(model, Δt, Ns)
 
     for closures in (first_ensemble, second_ensemble)
         member = deepcopy(template)
