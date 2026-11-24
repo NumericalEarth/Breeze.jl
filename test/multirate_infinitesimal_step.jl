@@ -7,13 +7,24 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: stage_time_step
-using Breeze.TimeSteppers: MultirateInfinitesimalStepTableau, multirate_infinitesimal_step_tableau, number_of_stages
+using Breeze.AtmosphereModels: stage_time_step, moisture_prognostic_name
+using Breeze.CompressibleEquations: freeze_linearization_state!, compute_pressure_remainder!,
+                                    StageEntryForceRemainder, linearized_pressure_remainder,
+                                    pressure_change, moisture_content_arguments,
+                                    horizontal_substep_form, ForwardBackwardSubsteps, SymmetricSubsteps
+using Breeze.TimeSteppers: MultirateInfinitesimalStepTableau, multirate_infinitesimal_step_tableau, number_of_stages,
+                           store_step_start_state!, stage_storage, structured_stage_storage,
+                           TwoRegisterStorage, AccumulatorStorage
 using Oceananigans
 using Oceananigans: prognostic_fields
+using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, adaptive_advection_timestep
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: update_state!
+using CloudMicrophysics: CloudMicrophysics
 using LinearAlgebra: isdiag, istril, istriu
 using Test
+
+const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt).OneMomentCloudMicrophysics
 
 # Every coefficient set repeats the integrations below with a time stepper of its own. By default
 # we test one set per storage layout plus the default; BREEZE_TEST_EXHAUSTIVE runs all of them.
@@ -23,8 +34,10 @@ const mis_coefficient_sets = exhaustive_tests() ? all_mis_coefficient_sets :
                                                   (:WickerSkamarock3, :SSPMIS43, :ConvexLinearMIS6)
 const recombining_mis_coefficient_sets = filter(!=(:WickerSkamarock3), mis_coefficient_sets)
 
-function mis_bubble_model(; timestepper, coefficients = :SSPMIS43, moist = false, Δθ = 2, qᵗ = 0.012,
-                          scalar_advection = WENO(order=5), post_loop_scalar_tendencies = nothing)
+# `coefficients = nothing` leaves the time stepper its default set.
+function mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :SSPMIS43, moist = false, Δθ = 2, qᵗ = 0.012,
+                          momentum_advection = WENO(order=5), scalar_advection = WENO(order=5),
+                          post_loop_scalar_tendencies = nothing, timestepper_kwargs = NamedTuple())
     grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5),
                            x = (-10e3, 10e3), z = (0, 10e3),
                            topology = (Bounded, Flat, Bounded))
@@ -34,11 +47,13 @@ function mis_bubble_model(; timestepper, coefficients = :SSPMIS43, moist = false
                                     base_pressure = p₀, standard_pressure = p₀,
                                     reference_potential_temperature = θ₀)
     microphysics = moist ? SaturationAdjustment(; equilibrium = WarmPhaseEquilibrium()) : nothing
-    timestepper_kwargs = timestepper === :MultirateInfinitesimalStep ? (; coefficients) : NamedTuple()
+    if timestepper === :MultirateInfinitesimalStep && !isnothing(coefficients)
+        timestepper_kwargs = merge(timestepper_kwargs, (; coefficients))
+    end
     if !isnothing(post_loop_scalar_tendencies)
         timestepper_kwargs = merge(timestepper_kwargs, (; post_loop_scalar_tendencies))
     end
-    model = AtmosphereModel(grid; dynamics, microphysics, momentum_advection = WENO(order=5), scalar_advection,
+    model = AtmosphereModel(grid; dynamics, microphysics, momentum_advection, scalar_advection,
                             timestepper, timestepper_kwargs)
     constants = model.thermodynamic_constants
     θᵢ(x, z) = θ₀ + Δθ * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2
@@ -65,8 +80,7 @@ end
     # requested of both.
     for moist in (false, true), post_loop_scalar_tendencies in (false, true)
         reference = mis_bubble_model(; timestepper = :AcousticRungeKutta3, moist, post_loop_scalar_tendencies)
-        mis = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :WickerSkamarock3, moist,
-                               post_loop_scalar_tendencies)
+        mis = mis_bubble_model(; coefficients = :WickerSkamarock3, moist, post_loop_scalar_tendencies)
         @test mis.timestepper isa MultirateInfinitesimalStep
         for _ in 1:5
             time_step!(reference, 5)
@@ -87,16 +101,8 @@ end
 end
 
 @testset "MIS preserves a resting atmosphere [$coefficients]" for coefficients in mis_coefficient_sets
-    model = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients, Δθ = 0)
-
-    # The discrete reference state, exactly: a continuous-formula θ balances only to truncation error.
-    ref = model.dynamics.reference_state
-    Rᵈ = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
-    parent(model.dynamics.dry_density) .= parent(ref.density)
-    ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
-    parent(ρθ) .= parent(ref.pressure) ./ (Rᵈ .* parent(ref.exner_function))
-    fill!(parent(model.momentum.ρu), 0)
-    fill!(parent(model.momentum.ρw), 0)
+    model = mis_bubble_model(; coefficients, Δθ = 0)
+    set_discrete_reference_state!(model)
     update_state!(model)
 
     for _ in 1:10
@@ -107,7 +113,7 @@ end
 end
 
 @testset "MIS thermal bubble [$coefficients, moist = $moist]" for coefficients in mis_coefficient_sets, moist in (false, true)
-    model = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients, moist)
+    model = mis_bubble_model(; coefficients, moist)
     for _ in 1:20
         time_step!(model, 5)
     end
@@ -117,12 +123,8 @@ end
     @test model.clock.time ≈ 100
 end
 
-# The saturated column of `acoustic_substepping_stability.jl`: a seeded 2Δx mode in a moist-stable
-# column in a 15 m/s wind, undamped at Δt = 10 s, under saturation adjustment. MIS linearizes once
-# per step with the substepper it shares with AcousticRungeKutta3, and recombines as slow the part
-# of the pressure gradient its loop does not account for. Both must be those of the pressure the
-# adjustment re-diagnoses, in air saturated throughout and at the edges of a cloud layer: with the
-# partition held the mode grew to several m/s.
+# The saturated column of `acoustic_substepping_stability.jl`: a seeded 2Δx mode, undamped at Δt = 10 s, under
+# saturation adjustment. With the moisture partition held in the loop's pressure the mode grew to several m/s.
 @testset "MIS keeps a seeded 2Δx mode in saturated air at its amplitude [$label]" for (label, qᵗ) in
         (("saturated throughout", 0.02), ("cloud layer", (x, z) -> ifelse(1500 < z < 4000, 0.02, 0.0)))
 
@@ -153,21 +155,8 @@ end
     @test minimum(qˡ[:, 1, 8:15]) > 0
 end
 
-using Breeze.CompressibleEquations: freeze_linearization_state!, compute_pressure_remainder!,
-                                    StageEntryForceRemainder, linearized_pressure_remainder
-using Breeze.TimeSteppers: store_step_start_state!
-using Breeze.AtmosphereModels: moisture_prognostic_name
-using CloudMicrophysics: CloudMicrophysics
-
-const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt).OneMomentCloudMicrophysics
-
-# The force remainder that MIS recombines as slow is the pressure gradient its loop does not account
-# for (`StageEntryForceRemainder`). For a stage-entry state that differs from the step-start state by
-# 10⁻⁶ in any density, the pressure the loop accounts for must be the difference of the re-diagnosed
-# pressures, so that the remainder vanishes to that order: under saturation adjustment, where the
-# loop's pressure is that of the adjusted partition and the difference enters it scaled, with and
-# without precipitation, and for a scheme that carries its cloud. At the held partition the
-# remainder was 1.5 times the pressure difference in warm cloud.
+# The force remainder MIS recombines as slow (`StageEntryForceRemainder`) must vanish to first order in a
+# 10⁻⁶ change of any density, under saturation adjustment with and without precipitation and with carried cloud.
 @testset "MIS force remainder vanishes to first order [$label]" for (label, cloud_formation, condensates) in
         (("warm-phase saturation adjustment", :warm, (;)),
          ("one-moment, mixed-phase saturation adjustment", :mixed, (; ρqʳ = 2e-3, ρqˢⁿ = 1e-3)),
@@ -229,12 +218,8 @@ const OneMomentCloudMicrophysics = Base.get_extension(Breeze, :BreezeCloudMicrop
     end
 end
 
-# In air without condensate the pressure change since the step start is evaluated from the changes
-# of the densities (`clear_air_pressure_change`), not as the difference of two diagnosed pressures,
-# each rounded at its own size. It must be that difference up to its rounding, for either Exner
-# exponent, for changes of every density large enough for its curvature to matter.
-using Breeze.CompressibleEquations: pressure_change, moisture_content_arguments
-
+# In clear air the pressure change since the step start is evaluated from the changes of the densities
+# (`clear_air_pressure_change`); it must equal the difference of the diagnosed pressures to their rounding.
 @testset "The clear-air pressure change is the change of the diagnosed pressure [$(nameof(typeof(exner_exponent)))]" for
         exner_exponent in (VaporEquivalentExponent(), DryExponent())
 
@@ -279,16 +264,8 @@ using Breeze.CompressibleEquations: pressure_change, moisture_content_arguments
 end
 
 @testset "MIS with adaptive-implicit vertical advection" begin
-    using Oceananigans.Advection: AdaptiveVerticallyImplicitDiscretization, adaptive_advection_timestep
-    grid = RectilinearGrid(default_arch; size = (16, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
-                           topology = (Bounded, Flat, Bounded))
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5, standard_pressure = 1e5,
-                                    reference_potential_temperature = 300)
     advection = WENO(order = 5, time_discretization = AdaptiveVerticallyImplicitDiscretization(; cfl = 0.5))
-    model = AtmosphereModel(grid; dynamics, advection, timestepper = :MultirateInfinitesimalStep,
-                            timestepper_kwargs = (; coefficients = :TVDMISB))
-    set!(model; ρ = model.dynamics.reference_state.density,
-         θ = (x, z) -> 300 + 2 * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2)
+    model = mis_bubble_model(; coefficients = :TVDMISB, momentum_advection = advection, scalar_advection = advection)
     for _ in 1:10
         time_step!(model, 20)
     end
@@ -322,7 +299,7 @@ end
 
 @testset "MIS forward-Euler interval [$coefficients]" for coefficients in mis_coefficient_sets
     # Δt / C, and the whole step where there is no strong-stability coefficient to divide by.
-    model = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients)
+    model = mis_bubble_model(; coefficients)
     Δt = 2
     time_step!(model, Δt)
     C = model.timestepper.tableau.strong_stability_coefficient
@@ -332,21 +309,13 @@ end
 #####
 ##### Order of accuracy with moisture
 #####
-##### The acoustic loop applies the stage-entry pressure gradient and buoyancy at weight one. The
-##### part its linear operator does not carry — here the dependence of pressure on vapor — is slow
-##### and has to be recombined across stages (`StageEntryForceRemainder`); left at weight one it is
-##### integrated at first order by every non-diagonal tableau.
+##### The dependence of pressure on vapor is slow and recombined across stages (`StageEntryForceRemainder`);
+##### left at weight one it is integrated at first order by every non-diagonal tableau.
 #####
 
-using Oceananigans.BoundaryConditions: fill_halo_regions!
-
-# A small vapor anomaly carried by a sheared wind over a resting, exactly balanced neutral
-# atmosphere: linear, so the reference of any consistent scheme is the same, and the only thing
-# that moves the air is the pressure the vapor adds. The substep size is the same for every Δt,
-# with no damping and a centered vertical solve, so the acoustic loop's own error does not scale
-# with Δt, and that error is of second order in the substep for the symmetric substeps of these
-# tableaux: negligible here. The forward–backward substeps of the reference are of first order, so
-# its substep is sixteen times shorter.
+# A small vapor anomaly in a sheared wind over an exactly balanced neutral atmosphere, linear in the anomaly.
+# The acoustic substep is the same for every Δt, undamped and centered, so the loop's own error does not
+# scale with Δt; the forward–backward substeps of the reference are first order, so its substep is 16 times shorter.
 function vapor_anomaly_density(; timestepper, coefficients = nothing, Δt, stop_time = 8, substep = 1/1024, N = 16)
     L = 200N
     grid = RectilinearGrid(default_arch, Float64; size = (N, N), halo = (5, 5), x = (0, L), z = (0, L),
@@ -357,14 +326,8 @@ function vapor_anomaly_density(; timestepper, coefficients = nothing, Δt, stop_
                                     reference_potential_temperature = 300)
     timestepper_kwargs = isnothing(coefficients) ? NamedTuple() : (; coefficients)
     model = AtmosphereModel(grid; dynamics, advection = UpwindBiased(order = 5), timestepper, timestepper_kwargs)
-
-    # The discrete reference state, exactly, as in the resting-atmosphere test.
-    reference = model.dynamics.reference_state
-    Rᵈ = Breeze.dry_air_gas_constant(model.thermodynamic_constants)
+    set_discrete_reference_state!(model)
     ρ = model.dynamics.dry_density
-    ρθ = Breeze.AtmosphereModels.thermodynamic_density(model.formulation)
-    parent(ρ) .= parent(reference.density)
-    parent(ρθ) .= parent(reference.pressure) ./ (Rᵈ .* parent(reference.exner_function))
 
     qᵛ = CenterField(grid)
     u = XFaceField(grid)
@@ -385,31 +348,23 @@ end
 
 const vapor_anomaly_reference = vapor_anomaly_density(; timestepper = :AcousticRungeKutta3, Δt = 1/256, substep = 1/16384)
 
-@testset "MIS order of accuracy with moisture [$coefficients]" for (coefficients, Δts, order) in
-        filter(case -> first(case) in mis_coefficient_sets,
-               ((:TVDMISB, (1/16, 1/32, 1/64), 1.8), (:SSPMIS43, (1/8, 1/16, 1/32), 1.8), (:MIS4a, (1/2, 1/4, 1/8), 2.7),
-                (:LowStorageMIS52, (1/8, 1/16, 1/32), 1.8),
-                (:ConvexLinearMIS3, (1/8, 1/16, 1/32), 1.8), (:ConvexLinearMIS4, (1/8, 1/16, 1/32), 1.8),
-                (:ConvexLinearMIS5, (1/8, 1/16, 1/32), 1.8), (:ConvexLinearMIS6, (1/8, 1/16, 1/32), 1.8)))
-    reference = vapor_anomaly_reference
+# The time steps and the order to reach, where they differ from (1/8, 1/16, 1/32) and 1.8
+const order_of_accuracy_cases = Dict(:TVDMISB => ((1/16, 1/32, 1/64), 1.8), :MIS4a => ((1/2, 1/4, 1/8), 2.7))
+
+@testset "MIS order of accuracy with moisture [$coefficients]" for coefficients in recombining_mis_coefficient_sets
+    Δts, order = get(order_of_accuracy_cases, coefficients, ((1/8, 1/16, 1/32), 1.8))
     errors = map(Δts) do Δt
         ρ = vapor_anomaly_density(; timestepper = :MultirateInfinitesimalStep, coefficients, Δt)
-        maximum(abs, ρ .- reference)
+        maximum(abs, ρ .- vapor_anomaly_reference)
     end
     @test all(isfinite, errors)
     @test log2(errors[1] / errors[3]) / log2(Δts[1] / Δts[3]) ≥ order
 end
 
-# The pure acoustic mode has no slow tendency: a stage only rotates the state it starts from, and
-# stages that start from combinations of earlier increments need the substeps to return that state
-# without a skew between momentum and pressure. Forward–backward substeps, with the momentum half
-# a substep behind the pressure, amplified the 3Δx acoustic mode by 1.2 per step in this bubble
-# (the reproducer of `post_loop_scalar_tendencies.jl`, c Δt / Δx = 3.5 and 1.7) without
-# divergence damping: max|u| passed 100 m/s within 46 steps at Δt = 10 s and 62 at Δt = 5 s.
-using Breeze.CompressibleEquations: horizontal_substep_form, ForwardBackwardSubsteps, SymmetricSubsteps
-
+# Stages that start from combinations of earlier increments need substeps without a skew between momentum and
+# pressure: forward–backward substeps amplified the 3Δx acoustic mode of the bubble below by 1.2 per step.
 @testset "MIS substep form [$coefficients]" for coefficients in mis_coefficient_sets
-    model = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients)
+    model = mis_bubble_model(; coefficients)
     form = coefficients === :WickerSkamarock3 ? ForwardBackwardSubsteps() : SymmetricSubsteps()
     @test horizontal_substep_form(model.timestepper) === form
     reference = mis_bubble_model(; timestepper = :AcousticRungeKutta3)
@@ -439,52 +394,24 @@ end
 
 @testset "MIS falls back where the stage-entry force remainder cannot be recombined" begin
     # A diagonal tableau has nothing to recombine and holds no step-start state.
-    diagonal = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :WickerSkamarock3)
+    diagonal = mis_bubble_model(; coefficients = :WickerSkamarock3)
     @test isnothing(diagonal.timestepper.step_start)
-    recombined = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients = :TVDMISB)
+    recombined = mis_bubble_model(; coefficients = :TVDMISB)
     @test !isnothing(recombined.timestepper.step_start)
 
     # Re-linearizing per stage leaves no single fast operator to define the remainder against.
-    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
-                           topology = (Bounded, Flat, Bounded))
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
-    timestepper_kwargs = (; coefficients = :TVDMISB, relinearize_stages = true)
-    relinearized = @test_logs (:warn, r"first-order accurate") match_mode=:any AtmosphereModel(grid; dynamics,
-        timestepper = :MultirateInfinitesimalStep, timestepper_kwargs)
+    relinearized = @test_logs (:warn, r"first-order accurate") match_mode=:any mis_bubble_model(;
+        coefficients = :TVDMISB, timestepper_kwargs = (; relinearize_stages = true))
     @test isnothing(relinearized.timestepper.step_start)
 end
 
 # A diagonal β recombines no slow tendency of an earlier stage: the stepper holds neither the step-start force
 # state nor, with post-loop scalar tendencies, the mass fluxes that correct recombined advective tendencies.
-@testset "MIS coefficient sets with a diagonal β [$coefficients]" for coefficients in (:LowStorageMIS52,)
-    tableau = multirate_infinitesimal_step_tableau(coefficients)
-    @test isdiag(tableau.β)
-    @test all(tableau.β .≥ 0)
-
-    # Convex start states and stage states, so the slow method is strong-stability preserving
-    @test all(tableau.α .≥ 0)
-    @test all(sum(tableau.α, dims = 2) .≤ 1 + 1e-12)
-    @test all(tableau.α .+ tableau.γ .≥ -1e-12)
-    @test all(sum(tableau.α .+ tableau.γ, dims = 2) .≤ 1 + 1e-12)
-    @test tableau.strong_stability_coefficient > 1.9
-    @test istriu(tableau.α, -1)
-    @test istriu(tableau.γ, -1)
-
-    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
-                           topology = (Bounded, Flat, Bounded))
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
-    timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies = true)
-    model = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep, timestepper_kwargs)
-    @test isnothing(model.timestepper.step_start)
-    @test isnothing(model.timestepper.transport_mass_fluxes)
-end
-
-# The sets for flux-limited transport combine the stage states convexly, each stage with the outer-step-start state,
-# the stage before it and its own slow tendency alone, so that each stage is a convex combination of the
-# outer-step-start state and one forward-Euler step of length Δt / C from the stage before, with C the
-# strong-stability coefficient. The stage start states of the fast integration need not be convex.
-@testset "MIS coefficient sets for flux-limited transport [$coefficients]" for (coefficients, C) in
-        ((:ConvexLinearMIS3, 0.6056), (:ConvexLinearMIS4, 1.2957), (:ConvexLinearMIS5, 1.4282), (:ConvexLinearMIS6, 1.7656))
+# The sets for flux-limited transport (strong-stability coefficient `C`) combine the stage states convexly,
+# each stage a convex combination of the step-start state and one forward-Euler step of length Δt / C.
+@testset "MIS coefficient sets with a diagonal β [$coefficients]" for (coefficients, C, ϵ) in
+        ((:LowStorageMIS52, nothing, 1e-12), (:ConvexLinearMIS3, 0.6056, 0), (:ConvexLinearMIS4, 1.2957, 0),
+         (:ConvexLinearMIS5, 1.4282, 0), (:ConvexLinearMIS6, 1.7656, 0))
 
     tableau = multirate_infinitesimal_step_tableau(coefficients)
     @test isdiag(tableau.β)
@@ -492,40 +419,35 @@ end
     @test istriu(tableau.α, -1)
     @test istriu(tableau.γ, -1)
 
+    # Convex stage states, so the slow method is strong-stability preserving
     stage_weights = tableau.α .+ tableau.γ
-    @test all(stage_weights .≥ 0)
-    @test all(sum(stage_weights, dims = 2) .≤ 1)
+    @test all(stage_weights .≥ -ϵ)
+    @test all(sum(stage_weights, dims = 2) .≤ 1 + ϵ)
 
-    s = number_of_stages(tableau)
-    forward_euler_steps = [tableau.β[1, 1]; [tableau.β[i, i] / stage_weights[i, i-1] for i in 2:s]]
-    @test maximum(forward_euler_steps) ≈ 1 / C atol = 1e-3
-    @test tableau.strong_stability_coefficient ≈ C atol = 1e-3
+    if isnothing(C)
+        @test all(tableau.α .≥ 0)
+        @test all(sum(tableau.α, dims = 2) .≤ 1 + 1e-12)
+        @test tableau.strong_stability_coefficient > 1.9
+    else
+        s = number_of_stages(tableau)
+        forward_euler_steps = [tableau.β[1, 1]; [tableau.β[i, i] / stage_weights[i, i-1] for i in 2:s]]
+        @test maximum(forward_euler_steps) ≈ 1 / C atol = 1e-3
+        @test tableau.strong_stability_coefficient ≈ C atol = 1e-3
+    end
 
-    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
-                           topology = (Bounded, Flat, Bounded))
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
-    timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies = true)
-    model = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep, timestepper_kwargs)
+    model = mis_bubble_model(; coefficients, post_loop_scalar_tendencies = true)
     @test isnothing(model.timestepper.step_start)
     @test isnothing(model.timestepper.transport_mass_fluxes)
 end
 
 @testset "The default MIS coefficients" begin
-    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-10e3, 10e3), z = (0, 10e3),
-                           topology = (Bounded, Flat, Bounded))
-    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
-    model = AtmosphereModel(grid; dynamics, timestepper = :MultirateInfinitesimalStep)
-    @test model.timestepper.tableau.β == multirate_infinitesimal_step_tableau(:ConvexLinearMIS6, eltype(grid)).β
+    model = mis_bubble_model(; coefficients = nothing)
+    @test model.timestepper.tableau.β == multirate_infinitesimal_step_tableau(:ConvexLinearMIS6, eltype(model.grid)).β
 end
 
 #####
-##### Storage layouts
+##### Storage layouts: chosen from the structure of the coefficients, and the same step to round-off
 #####
-##### The storage is chosen from the structure of the coefficients. Whatever the layout, the step is
-##### the one that accumulates a forcing and an offset per later stage, to round-off.
-#####
-
-using Breeze.TimeSteppers: stage_storage, structured_stage_storage, TwoRegisterStorage, AccumulatorStorage
 
 @testset "MIS storage layouts" begin
     layout(coefficients, FT = Float64) = stage_storage(multirate_infinitesimal_step_tableau(coefficients, FT))
@@ -561,7 +483,7 @@ using Breeze.TimeSteppers: stage_storage, structured_stage_storage, TwoRegisterS
 
     # Two registers: the step-start state and the tendencies, and nothing else per prognostic
     for coefficients in (:WickerSkamarock3, :LowStorageMIS52), post_loop_scalar_tendencies in (false, true)
-        model = mis_bubble_model(; timestepper = :MultirateInfinitesimalStep, coefficients, moist = true, post_loop_scalar_tendencies)
+        model = mis_bubble_model(; coefficients, moist = true, post_loop_scalar_tendencies)
         ts = model.timestepper
         @test ts.Uⁿ === ts.U⁰
         @test isempty(ts.accumulators)
@@ -595,16 +517,13 @@ function storage_layout_state(; coefficients, structured, FT, topology, post_loo
     return map(field -> Array(interior(field)), prognostic_fields(model))
 end
 
+# Single precision with the stage-state round-off in the substepper's perturbation fields (periodic), double
+# with it in fields of their own (bounded). The layouts differ in round-off alone, which three steps of this
+# bubble amplify to a few hundred ulps of the momentum, and to about 1500 on some CI platforms in single precision.
 @testset "MIS storage layouts reproduce the accumulators [$coefficients, $FT, post_loop = $post_loop_scalar_tendencies, $(topology[1])]" for
         coefficients in (:LowStorageMIS52,), post_loop_scalar_tendencies in (false, true),
         (FT, topology) in ((Float32, (Periodic, Flat, Bounded)), (Float64, (Bounded, Flat, Bounded)))
 
-    # Single precision with the rounding errors of the stage states kept in the substepper's
-    # perturbation fields (periodic), double precision with those in fields of their own (bounded).
-    # The layouts differ in round-off alone: where the start state of a stage is rounded, and which
-    # increment of the dry density the transport density tendency takes. Three steps of this bubble
-    # amplify that to a few hundred units in the last place of the momentum, and to about 1500 on some
-    # CI platforms in single precision.
     kw = (; coefficients, FT, topology, post_loop_scalar_tendencies)
     accumulated = storage_layout_state(; structured = false, kw...)
     structured = storage_layout_state(; structured = true, kw...)
