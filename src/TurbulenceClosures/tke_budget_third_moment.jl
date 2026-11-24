@@ -250,84 +250,59 @@ end
     return 2 * ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Λ * Λ / Δzᶜᶜᶠ(i, j, k, grid)
 end
 
-# The two sinks of the column at once, `uᵉ` and `uᵋ` holding their shapes on entry; the matrices share the exchange
-# coefficients and the right-hand side ρ Δz (P + B). `workᵉ` and `workᵋ` hold the eliminated upper diagonals.
-@inline function balance_sinks!(uᵉ, uᵋ, workᵉ, workᵋ, i, j, grid, ℂʷᴸ, cl, ρ, ℓᵐ)
+# The sink of the column, `u` holding its shape ω on entry: the tridiagonal balance with the exchange coefficients of
+# the faces and the right-hand side ρ Δz (P + B). `work` holds the eliminated upper diagonal.
+@inline function balance_sink!(u, work, i, j, grid, ℂʷᴸ, cl, ρ, ℓᵐ)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
     tiny = sqrt(floatmin(FT))
     @inbounds if isfinite(ℂʷᴸ)
-        # Thomas algorithm; each matrix is diagonally dominant by columns
-        ωᵉ⁻ = zero(FT)
-        ωᵋ⁻ = zero(FT)
-        c′ᵉ = zero(FT)
-        d′ᵉ = zero(FT)
-        c′ᵋ = zero(FT)
-        d′ᵋ = zero(FT)
+        # Thomas algorithm; the matrix is diagonally dominant by columns
+        ω⁻ = zero(FT)
+        c′ = zero(FT)
+        d′ = zero(FT)
         a⁻ = zero(FT) # the exchange coefficient at the face below
         for k in 1:Nz
-            ωᵉ = uᵉ[i, j, k]
-            ωᵋ = uᵋ[i, j, k]
+            ω = u[i, j, k]
             m = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
-            diagonalᵉ = m
-            diagonalᵋ = m
-            lowerᵉ = zero(FT)
-            lowerᵋ = zero(FT)
-            upperᵉ = zero(FT)
-            upperᵋ = zero(FT)
+            diagonal = m
+            lower = zero(FT)
+            upper = zero(FT)
             if k > 1
-                sᵉ = ωᵉ + ωᵉ⁻ + tiny
-                sᵋ = ωᵋ + ωᵋ⁻ + tiny
-                diagonalᵉ += a⁻ * ωᵉ⁻ / sᵉ
-                diagonalᵋ += a⁻ * ωᵋ⁻ / sᵋ
-                lowerᵉ = -a⁻ * ωᵉ / sᵉ
-                lowerᵋ = -a⁻ * ωᵋ / sᵋ
+                s = ω + ω⁻ + tiny
+                diagonal += a⁻ * ω⁻ / s
+                lower = -a⁻ * ω / s
             end
             if k < Nz
                 a = sink_exchange_coefficientᶜᶜᶠ(i, j, k + 1, grid, ℂʷᴸ, ρ, ℓᵐ)
-                ωᵉ⁺ = uᵉ[i, j, k+1]
-                ωᵋ⁺ = uᵋ[i, j, k+1]
-                sᵉ = ωᵉ + ωᵉ⁺ + tiny
-                sᵋ = ωᵋ + ωᵋ⁺ + tiny
-                diagonalᵉ += a * ωᵉ⁺ / sᵉ
-                diagonalᵋ += a * ωᵋ⁺ / sᵋ
-                upperᵉ = -a * ωᵉ / sᵉ
-                upperᵋ = -a * ωᵋ / sᵋ
+                ω⁺ = u[i, j, k+1]
+                s = ω + ω⁺ + tiny
+                diagonal += a * ω⁺ / s
+                upper = -a * ω / s
                 a⁻ = a
             end
             source = m * (cl.P[i, j, k] + cl.B[i, j, k])
-            pivotᵉ = diagonalᵉ - lowerᵉ * c′ᵉ
-            pivotᵋ = diagonalᵋ - lowerᵋ * c′ᵋ
-            d′ᵉ = (source - lowerᵉ * d′ᵉ) / pivotᵉ
-            d′ᵋ = (source - lowerᵋ * d′ᵋ) / pivotᵋ
-            c′ᵉ = upperᵉ / pivotᵉ
-            c′ᵋ = upperᵋ / pivotᵋ
-            workᵉ[i, j, k] = c′ᵉ
-            workᵋ[i, j, k] = c′ᵋ
-            uᵉ[i, j, k] = d′ᵉ
-            uᵋ[i, j, k] = d′ᵋ
-            ωᵉ⁻ = ωᵉ
-            ωᵋ⁻ = ωᵋ
+            pivot = diagonal - lower * c′
+            d′ = (source - lower * d′) / pivot
+            c′ = upper / pivot
+            work[i, j, k] = c′
+            u[i, j, k] = d′
+            ω⁻ = ω
         end
         for k in Nz-1:-1:1
-            uᵉ[i, j, k] -= workᵉ[i, j, k] * uᵉ[i, j, k+1]
-            uᵋ[i, j, k] -= workᵋ[i, j, k] * uᵋ[i, j, k+1]
+            u[i, j, k] -= work[i, j, k] * u[i, j, k+1]
         end
     else
         Π = zero(FT)
-        Ωᵉ = zero(FT)
-        Ωᵋ = zero(FT)
+        Ω = zero(FT)
         for k in 1:Nz
             m = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
             Π += m * (cl.P[i, j, k] + cl.B[i, j, k])
-            Ωᵉ += m * uᵉ[i, j, k]
-            Ωᵋ += m * uᵋ[i, j, k]
+            Ω += m * u[i, j, k]
         end
-        cᵉ = Π / (Ωᵉ + tiny)
-        cᵋ = Π / (Ωᵋ + tiny)
+        c = Π / (Ω + tiny)
         for k in 1:Nz
-            uᵉ[i, j, k] *= cᵉ
-            uᵋ[i, j, k] *= cᵋ
+            u[i, j, k] *= c
         end
     end
     return nothing
@@ -399,8 +374,8 @@ end
         cl.uᵉ[i, j, k] = max(e[i, j, k], zero(grid_float_type(grid))) + tm.ℂʷᵒ * e⁻
         cl.uᵋ[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
     end
-    # Fᵋ holds the eliminated upper diagonal of the second solve until the fluxes overwrite it
-    balance_sinks!(cl.uᵉ, cl.uᵋ, cl.budget_work, cl.Fᵋ, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
+    balance_sink!(cl.uᵉ, cl.budget_work, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
+    balance_sink!(cl.uᵋ, cl.budget_work, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
     N² = closure_fields.N²
     # The fluxes F at the centers: the integral of ρ (P + B - u) from the ground, the cell of the center counted half
     belowᵉ = zero(grid_float_type(grid))
