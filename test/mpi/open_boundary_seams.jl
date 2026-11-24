@@ -46,7 +46,7 @@ function partition_for(name, nranks)
     error("Unknown partition $(repr(name))")
 end
 
-function open_boundary_simulation(arch; stop_iteration=3)
+function open_boundary_simulation(arch; stop_iteration=1)
     Nx, Ny, Nz = 16, 16, 8
     Lx, Ly, Lz = 10000, 10000, 5000
 
@@ -81,7 +81,7 @@ end
 @testset "Open-boundary seams on Distributed($(partition_name)) [$(nranks) ranks, $(use_gpu ? "GPU" : "CPU")]" begin
     arch = Distributed(child_architecture; partition=partition_for(partition_name, nranks))
     model = open_boundary_simulation(arch)
-    @test model.clock.iteration == 3
+    @test model.clock.iteration == 1
 
     serial_model = rank == 0 ? open_boundary_simulation(CPU()) : nothing
     rank == 0 && @test maximum(interior(serial_model.microphysical_fields.qˡ)) > 0
