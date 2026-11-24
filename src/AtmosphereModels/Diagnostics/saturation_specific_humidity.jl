@@ -33,7 +33,7 @@ struct EquilibriumFlavor end
 struct TotalMoistureFlavor end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `KernelFunctionOperation` representing the specified flavor
 of *saturation specific humidity* ``qᵛ⁺``.
@@ -95,7 +95,7 @@ end
 @inline microphysics_phase_equilibrium(μ) = WarmPhaseEquilibrium()
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the *saturation total specific moisture* under the assumption that all moisture is vapor at saturation,
 ``qᵗ = qᵛ⁺``. With this assumption, the equation of state for moist air can be solved in closed form, yielding an

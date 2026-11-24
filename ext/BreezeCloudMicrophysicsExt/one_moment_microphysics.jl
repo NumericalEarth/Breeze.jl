@@ -88,7 +88,7 @@ struct TemperatureDependentIceFormation{FT, F} <: AbstractCondensateFormation
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return one-moment categories backed by CloudMicrophysics' unified
 `Microphysics1MParams` container.
@@ -128,7 +128,7 @@ const CM1MCategories = OneMomentCloudMicrophysicsCategories{<:Microphysics1MPara
 const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `OneMomentCloudMicrophysics` microphysics scheme for warm-rain and mixed-phase precipitation.
 
@@ -776,6 +776,15 @@ end
     qᵛ = qᵉ - qᶜˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
+
+# Saturation adjustment schemes carry the equilibrium moisture, a change of which is cloud condensate
+# in saturated air (see `equilibrium_moisture_phase_fractions`). The cloud is the diagnosed condensate,
+# without the precipitation.
+@inline AM.prognostic_moisture_phase_fractions(i, j, k, grid, bμp::WP1M, μ, q) =
+    @inbounds equilibrium_moisture_phase_fractions(μ.qᶜˡ[i, j, k], zero(q.vapor))
+
+@inline AM.prognostic_moisture_phase_fractions(i, j, k, grid, bμp::MP1M, μ, q) =
+    @inbounds equilibrium_moisture_phase_fractions(μ.qᶜˡ[i, j, k], μ.qᶜⁱ[i, j, k])
 
 # Warm-phase non-equilibrium: prognostic stores true vapor; construct fractions directly.
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::WPNE1M, ρ, qᵛ, μ)

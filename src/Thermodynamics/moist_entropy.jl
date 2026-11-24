@@ -57,7 +57,7 @@
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the density- and composition-dependent part ``f(ρ, q)`` of the moist specific entropy,
 ``η = cᵛᵐ \\ln(T / Tᵗʳ) - f``, for total density `ρ` and moisture mass fractions `q`:
@@ -85,7 +85,7 @@ term takes its limit zero as ``qᵛ → 0``.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the moist specific entropy ``η`` [J kg⁻¹ K⁻¹] of air at temperature `T`, total density `ρ`
 and moisture mass fractions `q`, with the entropy of liquid water zero at the triple point:
@@ -120,7 +120,7 @@ round(η, digits=3)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the temperature of air with moist specific entropy `η`, total density `ρ` and moisture mass
 fractions `q`: the closed-form inversion ``T = Tᵗʳ \\exp[(η + f(ρ, q)) / cᵛᵐ]`` of [`moist_entropy`](@ref).
@@ -136,7 +136,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Partial specific entropy of water vapor at temperature `T` and vapor density `ρᵛ`,
 ``ηᵛ = cᵖᵛ \\ln(T/Tᵗʳ) - Rᵛ \\ln(pᵛ/pᵗʳ) + ℒˡ(Tᵗʳ)/Tᵗʳ`` with ``pᵛ = ρᵛ Rᵛ T``. The vapor density is
@@ -152,7 +152,7 @@ floored at the smallest positive float.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Specific entropy of liquid water at temperature `T`, ``ηˡ = cˡ \\ln(T/Tᵗʳ)``.
 """
@@ -160,7 +160,7 @@ Specific entropy of liquid water at temperature `T`, ``ηˡ = cˡ \\ln(T/Tᵗʳ)
     constants.liquid.heat_capacity * log(T / constants.triple_point_temperature)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Specific entropy of ice at temperature `T`, ``ηⁱ = cⁱ \\ln(T/Tᵗʳ) - ℒᶠ(Tᵗʳ)/Tᵗʳ``.
 """
@@ -170,7 +170,7 @@ Specific entropy of ice at temperature `T`, ``ηⁱ = cⁱ \\ln(T/Tᵗʳ) - ℒ�
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return ``𝒢ᵛ - 𝒢ˡ = Rᵛ T \\ln(pᵛ / pᵛ⁺ˡ)``, the difference of the specific Gibbs functions of vapor
 and liquid water consistent with [`moist_entropy`](@ref), at temperature `T` and vapor density `ρᵛ`.
@@ -190,7 +190,7 @@ latent heats, whatever saturation formula the microphysics uses. Vapor densities
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return ``𝒢ⁱ - 𝒢ˡ = Rᵛ T \\ln(pᵛ⁺ⁱ / pᵛ⁺ˡ)``, the difference of the specific Gibbs functions of ice
 and liquid water consistent with [`moist_entropy`](@ref), at temperature `T`: negative below the

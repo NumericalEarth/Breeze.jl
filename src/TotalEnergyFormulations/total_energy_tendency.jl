@@ -9,7 +9,7 @@ AtmosphereModels.liquid_ice_potential_temperature_density(model::TotalEnergyMode
 AtmosphereModels.static_energy(model::TotalEnergyModel) = Diagnostics.StaticEnergy(model, :specific)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the static energy density of a total-energy model as a `Field` whose boundary conditions
 return the energy fluxes supplied for `ρE` — the sensible heat flux — without the enthalpy of the
@@ -444,7 +444,7 @@ AtmosphereModels.set_thermodynamic_variable!(model::TotalEnergyModel, ::Val{:ρE
     set!(model.formulation.energy_density, value)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the total energy density from the temperature ``T``, the moisture, the total density and the
 velocities: ``ρE = ρ (cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ + K + g z) - T₀ (ρᵈ cᵖᵈ + ρqᵗ cˡ)``, with ``T₀`` the
@@ -460,7 +460,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::TotalEnergyModel, :
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the total energy density from the liquid-ice potential temperature ``θˡⁱ``, converted to
 temperature at the model's total density.

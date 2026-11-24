@@ -66,6 +66,8 @@ export
     initial_aerosol_number_density,
     sedimentation_velocity,
     condensate_liquid_fraction,
+    prognostic_moisture_phase_fractions,
+    saturation_adjusted_equilibrium,
     sedimentation_velocity_field,
     write_sedimentation_velocity!,
     microphysical_velocities,
@@ -135,7 +137,9 @@ export
     # Radiation schedules that the architecture can evaluate
     validate_schedule
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+
+using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -180,7 +184,9 @@ include("atmosphere_model.jl")
 
 include("atmosphere_model_buoyancy.jl")
 include("solar_position.jl")
+include("mean_solar_zenith_angle.jl")
 include("radiation_interface.jl")
+include("approximate_radiation_updates.jl")
 include("dynamics_kernel_functions.jl")
 include("implicit_vertical_advection.jl")
 include("density_weighted_implicit_diffusion.jl")

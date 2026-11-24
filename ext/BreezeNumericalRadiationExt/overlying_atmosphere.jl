@@ -23,7 +23,7 @@ extension_ozone(::Nothing, ::AbstractField) =
                         "`OverlyingAtmosphereColumn(ozone_mole_fraction = ...)` (a number or a function of height)."))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Materialize `extension` on the geometrically stretched layers between the top face of `grid` and
 `extension.top` (see [`overlying_atmosphere_faces`](@ref)): the layers' thicknesses and centers and the
@@ -66,7 +66,7 @@ end
 materialize_overlying_atmosphere(::Nothing, grid, background) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The number of extension layers, `Nₑ`.
 """

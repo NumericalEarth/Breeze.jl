@@ -56,19 +56,20 @@ using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        Bottom, Top, West, East, South, North
 using Oceananigans.Fields: Field
 using Oceananigans.Grids: Center, Face, XDirection, YDirection, ZDirection, AbstractGrid, node, znode
-using Oceananigans.TurbulenceClosures: closure_required_tracers
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ, ℑyzᵃᶠᶜ, ℑyzᵃᶜᶠ, ℑxzᶠᵃᶜ, ℑxzᶜᵃᶠ,
                               ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
+using Oceananigans.TurbulenceClosures: closure_required_tracers
 
 using Adapt: Adapt
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using DocStringExtensions: TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 #####
 ##### The surface-layer field tuple
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The field tuple the wall diagnostics read: the model fields merged with the thermodynamic pressure
 `p` and density `ρ`.
@@ -135,7 +136,7 @@ field_location(::Val{:ρw}) = (Center(), Center(), Face())
 field_location(::Val) = (Center(), Center(), Center())  # default for scalars
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Regularize boundary conditions for [`AtmosphereModel`](@ref AtmosphereModels.AtmosphereModel).
 This function walks through all boundary conditions and calls
@@ -242,7 +243,7 @@ function route_interface_bcs(bcs, interface_name, target_name, adapt)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Assemble the boundary conditions of the prognostic thermodynamic density of `formulation`:
 move any conditions supplied under the energy key `ρE` (see
@@ -268,7 +269,7 @@ function convert_energy_bcs(bcs, formulation)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the boundary conditions `ρᵡ_bcs` of the thermodynamic density named by `ρᵡ` of `formulation`, amended
 with the contribution of the water fluxes among the boundary conditions `bcs` (under the
@@ -280,7 +281,7 @@ extends this function.
 add_moisture_flux_contribution(ρᵡ_bcs, ρᵡ, bcs, formulation) = ρᵡ_bcs
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Assemble the boundary conditions of the prognostic moisture density of `microphysics`, moving
 any conditions supplied under the moisture key `ρqᵗ` (see

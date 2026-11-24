@@ -144,16 +144,23 @@ function benchmark_time_stepping(model;
     if verbose
         @info "  Running benchmark..."
     end
-    start_time = time_ns()
-    if is_reactant
-        invoke!()
-    else
-        many_time_steps!(model, Δt_FT, time_steps)
+    # Start the window from a clean heap, so that whether a collection triggered by
+    # earlier allocations lands inside it doesn't depend on what ran before
+    full_garbage_collection()
+    stats = @timed begin
+        if is_reactant
+            invoke!()
+        else
+            many_time_steps!(model, Δt_FT, time_steps)
+        end
+        synchronize_device(arch)
     end
-    synchronize_device(arch)
-    end_time = time_ns()
 
-    total_time_seconds = (end_time - start_time) / 1e9
+    # The compiled Reactant program runs all the time steps in a single call,
+    # so the host time of a single step is only measured for eager backends
+    host_time_per_step_seconds = is_reactant ? 0.0 : host_time_per_step(model, Δt_FT)
+
+    total_time_seconds = stats.time
     time_per_step_seconds = total_time_seconds / time_steps
     steps_per_second = time_steps / total_time_seconds
     grid_points_per_second = total_points / time_per_step_seconds
@@ -183,6 +190,10 @@ function benchmark_time_stepping(model;
         compile_timings.mlir,
         compile_timings.xla,
         gpu_memory_used,
+        stats.gctime,
+        stats.bytes / time_steps,
+        Base.gc_alloc_count(stats.gcstats) / time_steps,
+        host_time_per_step_seconds,
         metadata,
     )
 
@@ -191,6 +202,41 @@ function benchmark_time_stepping(model;
     memory_reclaim(arch)
 
     return result
+end
+
+"""
+    full_garbage_collection()
+
+Run full and incremental garbage collections so that a timing window starts from
+the same heap state regardless of what was allocated before it.
+"""
+function full_garbage_collection()
+    GC.gc(true)
+    GC.gc(false)
+    GC.gc(true)
+    return nothing
+end
+
+const host_time_steps = 10
+
+"""
+    host_time_per_step(model, Δt)
+
+Median over `host_time_steps` time steps of the time the host takes to return from `time_step!`,
+with the device synchronized before each step. On a GPU this is the time to enqueue one step:
+when it is close to the time per step, the benchmark measures the host rather than the device.
+"""
+function host_time_per_step(model, Δt)
+    arch = Oceananigans.Architectures.architecture(model.grid)
+    host_seconds = zeros(host_time_steps)
+    for n in 1:host_time_steps
+        synchronize_device(arch)
+        start_time = time_ns()
+        time_step!(model, Δt)
+        host_seconds[n] = (time_ns() - start_time) / 1e9
+    end
+    synchronize_device(arch)
+    return median(host_seconds)
 end
 
 #####

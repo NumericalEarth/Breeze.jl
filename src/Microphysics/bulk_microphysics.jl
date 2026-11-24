@@ -1,3 +1,6 @@
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using DocStringExtensions: TYPEDEF
+
 using Breeze.Thermodynamics:
     AbstractReferencePressureState,
     LiquidIceDensityState,
@@ -11,8 +14,6 @@ using Breeze.Thermodynamics:
     condensate_latent_energy,
     exner_exponent,
     specific_heat_difference
-
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 """
 $(TYPEDEF)
@@ -182,7 +183,7 @@ const FixedDensityEnergyOrEntropyState = Union{InternalEnergyDensityState, Moist
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the thermodynamic adjustment factor `Γ = 1 + dqᵛ⁺/dqᶜ` used in
 relaxation-to-saturation condensation/evaporation tendencies, so that condensation alone relaxes
@@ -201,7 +202,7 @@ its chosen Exner exponent and the temperature its `temperature_solver` returns.
     1 + saturation_response(𝒰, qᵛ⁺, T, ℒ, Δcᵖ, constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the thermodynamic adjustment factor `Γ` used in relaxation-to-saturation
 deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_factor`).
@@ -211,7 +212,7 @@ deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_fac
                                     specific_heat_difference(constants, constants.ice), constants)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the condensation/evaporation rate for cloud liquid water in a relaxation-to-saturation model.
 
@@ -229,7 +230,7 @@ condensation; negative values indicate evaporation. Evaporation is limited by th
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the deposition/sublimation rate for cloud ice in a relaxation-to-saturation model.
 
@@ -263,7 +264,7 @@ const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories}
 Base.summary(::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `BulkMicrophysics` microphysics scheme.
 
@@ -318,6 +319,14 @@ end
 @inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵛ, μ)
     return grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵛ, μ)
 end
+
+# Forward prognostic_moisture_phase_fractions to cloud_formation scheme
+@inline AtmosphereModels.prognostic_moisture_phase_fractions(i, j, k, grid, bμp::NPBM, μ, q) =
+    AtmosphereModels.prognostic_moisture_phase_fractions(i, j, k, grid, bμp.cloud_formation, μ, q)
+
+# Forward saturation_adjusted_equilibrium to cloud_formation scheme
+@inline AtmosphereModels.saturation_adjusted_equilibrium(bμp::BulkMicrophysics) =
+    AtmosphereModels.saturation_adjusted_equilibrium(bμp.cloud_formation)
 
 # Forward state-based moisture_fractions to cloud_formation scheme
 @inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵛ)

@@ -32,7 +32,7 @@ function set_thermodynamic_variable! end
 #####
 
 """
-    set_velocity!(model, name, value)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the velocity component `name` (`:u`, `:v`, or `:w`) to `value`.
 Also updates the corresponding momentum field.
@@ -47,7 +47,7 @@ function set_velocity!(model::AtmosphereModel, name::Symbol, value)
 end
 
 """
-    set_momentum!(model, name, value)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the momentum component `name` (`:ρu`, `:ρv`, or `:ρw`) to `value`.
 """
@@ -58,7 +58,7 @@ function set_momentum!(model::AtmosphereModel, name::Symbol, value)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Mid-`set!` hook (run after density + moisture are set, before the thermodynamic variable and
 velocities) that makes the dry density `ρᵈ` and the diagnosed total density `ρ` mutually consistent
@@ -81,7 +81,7 @@ establish_densities!(model, total_density_given, dry_density_given,
                      specific_microphysical_names=()) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Reconcile dry and total density after relative humidity has diagnosed specific vapor.
 
@@ -94,7 +94,7 @@ establish_relative_humidity_densities!(model, total_density_given,
                                        specific_microphysical_names=()) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Convert a specific microphysical variable name to its density-weighted counterpart.
 For example, `:qᶜˡ` → `:ρqᶜˡ`, `:qʳ` → `:ρqʳ`, `:nᶜˡ` → `:ρnᶜˡ`, `:bᶠ` → `:ρbᶠ`.
@@ -112,7 +112,7 @@ function specific_to_density_weighted(name::Symbol)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a tuple of specific (non-density-weighted) names that can be set
 for the given microphysics scheme. These are derived from the prognostic
@@ -150,7 +150,7 @@ function enforce_mass_conservation!(model::AtmosphereModel)
 end
 
 """
-    set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set variables in an [`AtmosphereModel`](@ref).
 

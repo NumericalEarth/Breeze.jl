@@ -11,7 +11,8 @@ module TotalEnergyFormulations
 
 export TotalEnergyFormulation
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using DocStringExtensions: TYPEDEF
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 

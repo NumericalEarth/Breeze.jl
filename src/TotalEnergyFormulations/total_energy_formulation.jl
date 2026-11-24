@@ -63,28 +63,27 @@ TotalEnergyFormulation
 └── reference_temperature: 273.16
 ```
 """
-struct TotalEnergyFormulation{E, U, H, Q, S, X, W, T}
+struct TotalEnergyFormulation{E, U, H, Q, S, X, T}
     energy_density :: E              # ρE (prognostic)
     internal_energy :: U             # 𝓊 = ρE / ρ - K - g z + T₀ (qᵈ cᵖᵈ + qᵗ cˡ), from liquid water at 0 K (diagnostic)
     dry_enthalpy :: H                # ĥᵈ = cᵖᵈ (T - T₀) + K + g z (diagnostic, advected with the dry air)
     moisture_enthalpy :: Q           # eᵛᵉ, the enthalpy of the prognostic moisture less K + g z (diagnostic)
     static_energy :: S               # ŝ - T₀ (qᵈ cᵖᵈ + qᵗ cˡ) (diagnostic, diffused)
     diffusion_workspace :: X         # ρᵈ ŝ, the variable of the vertically implicit diffusion solve
-    water_pressure_perturbation :: W # Σₓ Ĉₓ (ρqˣ)′ at the end of an acoustic loop (see `total_energy_compressible.jl`)
     reference_temperature :: T       # T₀, the energy origin
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `TotalEnergyFormulation` whose energy origin is `reference_temperature` ``T₀``: liquid
 water has zero internal energy and dry air zero enthalpy at ``T₀`` (default `0`).
 """
 TotalEnergyFormulation(; reference_temperature = 0) =
-    TotalEnergyFormulation(nothing, nothing, nothing, nothing, nothing, nothing, nothing, reference_temperature)
+    TotalEnergyFormulation(nothing, nothing, nothing, nothing, nothing, nothing, reference_temperature)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the temperature ``T₀`` that sets the energy origin of `formulation`: liquid water has zero
 internal energy and dry air zero enthalpy at ``T₀``. The stored energy of a `TotalEnergyFormulation`
@@ -94,7 +93,7 @@ AtmosphereModels.reference_temperature(formulation::TotalEnergyFormulation) = fo
 AtmosphereModels.reference_temperature(::Val) = 0
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The energy per unit volume by which the origin ``T₀`` lowers the stored energy,
 ``T₀ (ρᵈ cᵖᵈ + ρqᵗ cˡ)`` with ``ρqᵗ = ρ - ρᵈ`` the total water density. It depends on the
@@ -110,7 +109,6 @@ Adapt.adapt_structure(to, formulation::TotalEnergyFormulation) =
                            adapt(to, formulation.moisture_enthalpy),
                            adapt(to, formulation.static_energy),
                            adapt(to, formulation.diffusion_workspace),
-                           adapt(to, formulation.water_pressure_perturbation),
                            formulation.reference_temperature)
 
 function BoundaryConditions.fill_halo_regions!(formulation::TotalEnergyFormulation)
@@ -134,7 +132,7 @@ end
 @inline z_mean_square(i, j, k, grid, w) = ℑzᵃᵃᶜ(i, j, k, grid, ϕ², w)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the kinetic energy per unit mass at the center of cell `(i, j, k)` from the staggered
 velocity components `u`, `v`, `w`,
@@ -164,7 +162,7 @@ AtmosphereModels.thermodynamic_density_name(::TotalEnergyFormulation) = :ρE
 AtmosphereModels.thermodynamic_density(formulation::TotalEnergyFormulation) = formulation.energy_density
 AtmosphereModels.with_thermodynamic_density(f::TotalEnergyFormulation, ρE) =
     TotalEnergyFormulation(ρE, f.internal_energy, f.dry_enthalpy, f.moisture_enthalpy, f.static_energy,
-                           f.diffusion_workspace, f.water_pressure_perturbation, f.reference_temperature)
+                           f.diffusion_workspace, f.reference_temperature)
 
 AtmosphereModels.prognostic_thermodynamic_field_names(::TotalEnergyNames) = tuple(:ρE)
 AtmosphereModels.additional_thermodynamic_field_names(::TotalEnergyNames) = (:𝓊, :ĥᵈ, :eᵛᵉ, :ŝ)
@@ -206,10 +204,9 @@ function AtmosphereModels.materialize_formulation(formulation::TotalEnergyFormul
     moisture_enthalpy = CenterField(grid)
     static_energy = CenterField(grid)
     diffusion_workspace = CenterField(grid)
-    water_pressure_perturbation = CenterField(grid)
     T₀ = convert(eltype(grid), formulation.reference_temperature)
     return TotalEnergyFormulation(energy_density, internal_energy, dry_enthalpy, moisture_enthalpy, static_energy,
-                                  diffusion_workspace, water_pressure_perturbation, T₀)
+                                  diffusion_workspace, T₀)
 end
 
 #####
@@ -251,7 +248,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build an `InternalEnergyDensityState` at grid point `(i, j, k)` from the internal energy of the
 `formulation` (measured from liquid water at zero kelvin, whatever the formulation's origin),

@@ -36,7 +36,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute T,P-dependent air transport properties following
 [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021).

@@ -3,7 +3,7 @@
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute ice nucleation rate from deposition/condensation freezing.
 
@@ -94,7 +94,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 [Barklie and Gokhale (1959)](@cite BarklieGokhale1959) stochastic immersion
 freezing, shared by the cloud and rain paths.
@@ -152,7 +152,7 @@ gamma PSD the mass (6th moment) rate carries the correction
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute immersion freezing rate of cloud droplets using the
 [Barklie and Gokhale (1959)](@cite BarklieGokhale1959) stochastic volume-dependent
@@ -187,7 +187,7 @@ negligible for small droplets.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute immersion freezing rate of rain drops.
 
@@ -222,7 +222,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Instantaneous homogeneous freezing, shared by the cloud and rain paths: below the
 homogeneous freezing threshold the whole population is transferred to ice over
@@ -245,7 +245,7 @@ number per unit mass [1/kg].
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute homogeneous freezing rate of cloud droplets.
 
@@ -285,7 +285,7 @@ round.((Q, N), sigdigits=4)
     homogeneous_freezing_rate(p3, qᶜˡ, Nᶜˡ / ρ, T)  # Nᶜˡ is [1/m³]; nᶜˡ = Nᶜˡ/ρ
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute homogeneous freezing rate of rain drops.
 
@@ -325,7 +325,7 @@ round.((Q, N), sigdigits=4)
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute secondary ice production from rime splintering (Hallett-Mossop effect).
 

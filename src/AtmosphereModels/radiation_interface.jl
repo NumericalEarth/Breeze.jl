@@ -7,16 +7,17 @@
 
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Fields: ConstantField
+using GPUArraysCore: @allowscalar
 using InteractiveUtils: subtypes
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Update the radiative fluxes of `rtm` from the current model state when they are due; the
 computation itself is `_update_radiation!(rtm, model)`.
 
 `update_state!` runs several times per time step: after each Runge-Kutta stage, and again after an
-operator-split update such as Kessler microphysics. Radiation is updated
+operator-split update such as Kessler microphysics. Full radiation solves run
 
 - at initialization: by every `update_state!` between steps at iteration 0 (`clock.stage == 1`),
   that is model construction, `set!` and the preparation of the first step, which all see the
@@ -24,10 +25,14 @@ operator-split update such as Kessler microphysics. Radiation is updated
 - during time stepping: once per iteration `n > 0` at which `rtm.schedule` actuates, by the
   first-stage `update_state!` of the step that begins at `n` (the clock is then at stage 2 in
   Breeze's Runge-Kutta steppers). The new fluxes enter from the second stage of that step. Later
-  stages, the end of the step and operator-split updates do not update radiation.
+  stages, the end of the step and operator-split updates do not run scheduled solves.
 
 With `schedule = IterationInterval(80)` and `Δt = 7.5` s, the fluxes are computed from the initial
 state and then every 600 s, in the steps that begin at iterations 80, 160, …
+
+Every other `update_state!` updates the fluxes between solves instead (see
+[`update_radiation_between_solves!`](@ref)). A checkpoint restored without the radiation cache
+solves at the next `update_state!` outside a step, or else at the next first stage.
 
 Under Reactant the iteration is traced: `BreezeReactantExt` applies the scheduled update with a
 traced conditional, which requires a stateless schedule such as `IterationInterval`, and computes
@@ -36,7 +41,7 @@ the initial fluxes in `Breeze.TimeSteppers.prepare_first_time_step!`
 """
 function update_radiation!(rtm, model)
     isnothing(rtm) && return nothing
-    due = radiation_update_due(rtm.schedule, model.clock, model)
+    due = radiation_update_due(rtm.schedule, model.clock, model) | !radiation_cache_is_valid(rtm)
     conditionally_update_radiation!(due, rtm, model)
     return nothing
 end
@@ -47,12 +52,16 @@ function radiation_update_due(schedule, clock, model)
 end
 
 function conditionally_update_radiation!(due::Bool, rtm, model)
-    due && _update_radiation!(rtm, model)
+    if due
+        solve_scheduled_radiation!(rtm, model)
+    else
+        update_radiation_between_solves!(rtm, model)
+    end
     return nothing
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `schedule` if radiation can be updated on it on architecture `arch`, and throw an
 `ArgumentError` otherwise. Every schedule is valid on native architectures; `BreezeReactantExt`
@@ -64,7 +73,7 @@ validate_schedule(schedule, arch) = schedule
 # Fallback: no radiation
 update_radiation!(::Nothing, model) = nothing
 
-# Internal function that actually computes radiation (implemented by extensions)
+# Internal function that actually computes radiation (see the `RadiativeTransferModel` method below)
 _update_radiation!(::Nothing, model) = nothing
 
 # Extract the radiation flux divergence field from radiation (nothing-safe)
@@ -75,7 +84,7 @@ radiation_flux_divergence(radiation) = radiation.flux_divergence
 @inline radiation_flux_divergence(i, j, k, grid, ::Nothing) = zero(eltype(grid))
 @inline radiation_flux_divergence(i, j, k, grid, flux_divergence) = @inbounds flux_divergence[i, j, k]
 
-struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S}
+struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS, LW, SW, F, H, LER, IER, CB, S, U, V}
     solar_constant :: SC # a scalar or an (Nx, Ny) array of per-column values
     solar_position :: SOP # AbstractSolarPosition: how to obtain cos(θ_z) on each update
     surface_radiation :: SP
@@ -85,17 +94,88 @@ struct RadiativeTransferModel{SC<:Union{Number, AbstractArray}, SOP, SP, BA, AS,
     shortwave_solver :: SW
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
-    upwelling_shortwave_flux :: F # Zero for non-scattering gray optics
+    upwelling_shortwave_flux :: F
     downwelling_shortwave_flux :: F
     flux_divergence :: H # Center field: -dF_net/dz in W/m³
     liquid_effective_radius :: LER # Model for cloud liquid effective radius (Nothing for gray/clear-sky)
     ice_effective_radius :: IER    # Model for cloud ice effective radius (Nothing for gray/clear-sky)
     column_batches :: CB  # Number of column batches for the RRTMGP solve (Nothing for one unbatched solve)
     schedule :: S  # Update schedule (default: IterationInterval(1) = every step)
+    approximate_updates :: U # ApproximateRadiationUpdates, or Nothing
+    cache_valid :: V # false until the fluxes are solved, e.g. after a restart without them
+end
+
+# The constructor without the last two fields, for backends without updates between solves
+function RadiativeTransferModel(solar_constant::Union{Number, AbstractArray}, solar_position, surface_radiation, background_atmosphere,
+                                atmospheric_state, longwave_solver, shortwave_solver, up_lw, down_lw,
+                                up_sw, down_sw, divergence, liquid_radius, ice_radius, batches, schedule)
+    return RadiativeTransferModel(solar_constant, solar_position, surface_radiation, background_atmosphere,
+                                 atmospheric_state, longwave_solver, shortwave_solver, up_lw, down_lw,
+                                 up_sw, down_sw, divergence, liquid_radius, ice_radius, batches, schedule,
+                                 nothing, radiation_cache_validity(divergence.grid))
+end
+
+solve_scheduled_radiation!(rtm, model) = _update_radiation!(rtm, model)
+
+function solve_scheduled_radiation!(rtm::RadiativeTransferModel, model)
+    _update_radiation!(rtm, model)
+    set_radiation_cache_validity!(rtm.cache_valid, true)
+    return nothing
+end
+
+# A host `Ref`; `BreezeReactantExt` uses a device array that compiled updates can change
+radiation_cache_validity(grid::AbstractGrid) = radiation_cache_validity(architecture(grid))
+radiation_cache_validity(arch) = Ref(false)
+
+radiation_cache_is_valid(radiation) = true
+radiation_cache_is_valid(rtm::RadiativeTransferModel) = radiation_cache_is_valid(rtm.cache_valid)
+radiation_cache_is_valid(valid::Bool) = valid
+radiation_cache_is_valid(valid::Ref) = valid[]
+radiation_cache_is_valid(valid::AbstractArray) = @allowscalar only(valid)
+
+function set_radiation_cache_validity!(valid::Ref, value)
+    valid[] = value
+    return nothing
+end
+
+function set_radiation_cache_validity!(valid::AbstractArray, value)
+    fill!(valid, value)
+    return nothing
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Solve the radiative transfer of `rtm` for the current state of `model`, for every backend: set
+[`solver_cos_zenith`](@ref) (see [`update_solve_cos_zenith!`](@ref)), call
+[`solve_radiative_transfer!`](@ref), then [`complete_radiation_solve!`](@ref).
+"""
+function _update_radiation!(rtm::RadiativeTransferModel, model)
+    assert_bound_surface_temperature(rtm)
+    update_solve_cos_zenith!(solver_cos_zenith(rtm), rtm, model)
+    solve_radiative_transfer!(rtm, model)
+    complete_radiation_solve!(rtm, model)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The per-column solar cosine that the solver of `rtm` reads. Implemented by each backend.
+"""
+function solver_cos_zenith end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Solve the four flux fields of `rtm` for the current state of `model` and, when
+[`solves_longwave_response`](@ref), the longwave fluxes at the perturbed surface temperature into
+the longwave responses. Implemented by each backend and called by [`_update_radiation!`](@ref).
+"""
+function solve_radiative_transfer! end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Number of whole j-rows of columns in each radiation batch when the domain's `Ny` rows are split
 into at most `column_batches` batches. `nothing` means one unbatched solve over all `Ny` rows.
@@ -232,7 +312,7 @@ struct EcCKDOptics{M, C, S} <: AbstractOptics
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct [`EcCKDOptics`](@ref) with the reference `gas_model` (default `:climate_32x32`) and,
 for all-sky radiation, [`CloudScatteringTables`](@ref) as `clouds` (default `nothing`: clear sky).
@@ -258,7 +338,7 @@ function Base.show(io::IO, optics::EcCKDOptics)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `RadiativeTransferModel` on `grid` using the specified `optics`.
 
@@ -434,7 +514,7 @@ struct BackgroundAtmosphere{N2, O2, CO2, CH4, N2O, CO, NO2, O3, CFC11, CFC12, CF
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 An idealized climatological ozone volume mixing ratio (mol/mol) as a function of height
 `z` (m): a weak tropospheric background increasing toward the tropopause, blended into a
@@ -453,7 +533,7 @@ for an observed or model ozone climatology.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a `BackgroundAtmosphere` with volume mixing ratios for radiatively active gases.
 All values are dimensionless molar fractions.
@@ -559,7 +639,7 @@ end
 using Oceananigans.Fields: field
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Materialize a `BackgroundAtmosphere` by converting O₃ functions to fields and
 converting constant gases to the grid's float type.
@@ -652,7 +732,7 @@ using Oceananigans.Grids: xnode, ynode, znode, Center, Face
 using Breeze.CelestialMechanics: SingleColumnGrid
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The column index `c = i + (j - 1) Nx` of horizontal cell `(i, j)`: every column-based radiation
 backend stores its per-column arrays in this order.
@@ -682,7 +762,7 @@ maybe_infer_solar_position(sp::AbstractSolarPosition, grid) = sp
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The scalar behind a surface property that is constant in space and time, or `nothing` when the
 property carries no such scalar.
@@ -696,7 +776,7 @@ surface_fraction_scalar(x::ConstantField) = surface_fraction_scalar(x.constant)
 surface_fraction_scalar(x) = nothing
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Throw an `ArgumentError` for any keyword whose value is a spatially uniform scalar outside ``[0, 1]``.
 
@@ -715,7 +795,7 @@ function validate_surface_fractions(; kw...)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Wrap a scalar surface property in a `ConstantField` of the working precision, passing anything
 already field-valued through unchanged, so that emissivity and both albedos are uniformly
@@ -725,7 +805,7 @@ constant_field_property(x::Number, FT) = ConstantField(convert(FT, x))
 constant_field_property(x, FT) = x
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Resolve the albedo keywords of a `RadiativeTransferModel` constructor into a
 `(direct, diffuse)` pair of materialized surface albedos.
@@ -788,7 +868,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Pressure on the bottom face of column `(i, j)`, extrapolated hydrostatically from the lowest
 cell center: `p₁ + ρ₁ g (z₁ᶜ - z₁ᶠ)`.
@@ -800,7 +880,7 @@ cell center: `p₁ + ρ₁ g (z₁ᶜ - z₁ᶠ)`.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Pressure on the top face of column `(i, j)`, extrapolated hydrostatically from the highest
 cell center: `p_Nz - ρ_Nz g (z_{Nz+1}ᶠ - z_Nzᶜ)`.
@@ -817,7 +897,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute `rtm.flux_divergence = -∂F_net/∂z` (W m⁻³) from the four `ZFaceField` fluxes of `rtm`,
 with `F_net` the sum of the up- and downwelling longwave and shortwave fluxes, all signed
@@ -860,7 +940,7 @@ const ISA_1976_BASE_HEIGHTS = (0, 11e3, 20e3, 32e3, 47e3, 51e3, 71e3, 84852)
 const ISA_1976_BASE_TEMPERATURES = (288.15, 216.65, 216.65, 228.65, 270.65, 270.65, 214.65, 186.946)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The temperature (K) of the U.S. Standard Atmosphere 1976 ([NOAA, NASA & USAF (1976)](@cite USStandardAtmosphere1976))
 at height `z` (m): piecewise linear through the seven layers between 0 and 86 km, with the
@@ -900,7 +980,7 @@ function standard_atmosphere_temperature(z)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 An idealized specific humidity (kg kg⁻¹) at height `z` (m): 10 g kg⁻¹ at the surface decaying
 with a 2.5 km scale height, floored at 3 mg kg⁻¹ (about 5 ppmv) for the dry stratosphere,
@@ -1006,7 +1086,7 @@ struct OverlyingAtmosphereColumn{FT, T, Q, O, B, V}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`OverlyingAtmosphereColumn`](@ref) of float type `FT` reaching `top` (default 65 km) with
 `layers` layers (default 40), a `blending_height` of 1 km for the temperature anchor, and
@@ -1082,7 +1162,7 @@ function geometric_stack_depth(Δz₁, r, N)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The ratio `r` between successive layers of a geometric stretching of `N` layers whose first layer
 is `Δz₁` thick and which together span `depth`, i.e. the root of
@@ -1127,7 +1207,7 @@ function geometric_stretching_ratio(Δz₁, depth, N)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The face heights of the extension layers of `extension` above a grid whose top face is at `z_top`
 and whose top layer is `Δz_top` thick: a vector of `Nₑ + 1` heights starting at `z_top` and ending

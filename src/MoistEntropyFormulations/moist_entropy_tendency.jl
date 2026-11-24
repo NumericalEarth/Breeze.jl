@@ -9,7 +9,7 @@ AtmosphereModels.liquid_ice_potential_temperature_density(model::MoistEntropyMod
 AtmosphereModels.static_energy(model::MoistEntropyModel) = Diagnostics.StaticEnergy(model, :specific)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the static energy density as a `Field` whose boundary conditions are the energy fluxes
 `𝒬ᵀ` carried inside the entropy fluxes of `ρη` (see `EntropyFluxBoundaryConditionFunction`), so
@@ -53,7 +53,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::MoistEntropyMod
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Tendency of the moist entropy density ``ρη`` at cell `(i, j, k)`, apart from the sedimentation of
 condensate (`add_sedimentation_tendency!` and `add_precipitation_drag_heating!`):
@@ -256,7 +256,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::MoistEntropyModel, 
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the moist entropy from the in-situ temperature ``T``, at the model's total density and
 moisture mass fractions: ``ρη = ρ η(T, ρ, q)``.
@@ -269,7 +269,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::MoistEntropyModel, 
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the moist entropy from the liquid-ice potential temperature ``θˡⁱ`` (with the vapor-equivalent
 Exner exponent), inverted for the temperature at the model's total density.

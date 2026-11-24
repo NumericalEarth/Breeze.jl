@@ -11,7 +11,7 @@ module StaticEnergyFormulations
 
 export StaticEnergyFormulation
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using DocStringExtensions: TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -28,8 +28,8 @@ using Breeze.AtmosphereModels: AtmosphereModels,
     add_sedimentation_tendency!, sedimentation_composition_increment, enthalpy_increment,
     AtmosphereModelBuoyancy,
     radiation_flux_divergence
-
 using Breeze.Thermodynamics: StaticEnergyState, LiquidIcePotentialTemperatureState, with_temperature
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 # The lowercase c is a singleton instance of Center
 const c = Center()

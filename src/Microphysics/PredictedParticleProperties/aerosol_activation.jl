@@ -21,7 +21,7 @@ struct AerosolMode{FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `AerosolMode` representing one component of a multimodal aerosol
 size distribution. Particles in a mode share one chemical composition and their
@@ -123,7 +123,7 @@ struct AerosolActivation{FT, P, M}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `AerosolActivation` from one or more [`AerosolMode`](@ref)s.
 
@@ -218,7 +218,7 @@ function AerosolActivation(mode1::AerosolMode{FT}, rest::AerosolMode{FT}...;
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return whether the aerosol reservoir `ρnᵃ` is prognostic.
 """
@@ -243,7 +243,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the activated number [kg⁻¹] from a single lognormal aerosol mode
 at temperature `T` [K] and environmental supersaturation `S` [-].
@@ -286,7 +286,7 @@ and the activated fraction is ``N^a / 2 \\, [1 - \\text{erf}(u)]`` where
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Total aerosol number mixing ratio [kg⁻¹] across all modes.
 """
@@ -299,7 +299,7 @@ Total aerosol number mixing ratio [kg⁻¹] across all modes.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Total activated number [kg⁻¹] summed across all aerosol modes,
 capped at the total aerosol number.
@@ -313,7 +313,7 @@ capped at the total aerosol number.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute cloud droplet activation rates from the aerosol distribution.
 The supplied `nᵃ` limits activation to the remaining aerosol population;

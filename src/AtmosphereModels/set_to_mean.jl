@@ -14,7 +14,7 @@ using GPUArraysCore: @allowscalar
 using Statistics: mean!
 
 """
-    rescale_density_weighted_fields!(model, ρ⁻)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rescale all density-weighted prognostic fields so that specific quantities
 (velocity, potential temperature, moisture, etc.) are preserved after a change
@@ -108,7 +108,7 @@ end
 end
 
 """
-    set_to_mean!(reference_state, model; rescale_densities=false)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the reference pressure and density profiles from horizontally-averaged
 temperature and moisture mass fractions of the current model state.
@@ -157,7 +157,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Rewrite the bottom-face pressure and density of an `ExnerReferenceState` from the horizontal-mean
 near-surface state `(θˢ, qᵛˢ)`, in place.
@@ -169,16 +169,16 @@ level, so a horizontally uniform reduction is exact; terrain-following resets go
 `reset_reference_state!`, which reduces the datum per column along the terrain.
 """
 function update_exner_surface_state!(ref::ExnerReferenceState, θ, qᵛ, grid, constants, κ̂)
-    FT  = eltype(ref)
     Rᵈ  = dry_air_gas_constant(constants)
     Rᵛ  = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
 
-    θˢ, qᵛˢ = @allowscalar (θ[1, 1, 1], qᵛ[1, 1, 1])
+    # The bottom of each column profile, read from its data: a profile allocated inside a compiled
+    # function has a traced element type, for which the reduced-Field `getindex` is ambiguous.
+    θˢ, qᵛˢ = @allowscalar (θ.data[1, 1, 1], qᵛ.data[1, 1, 1])
     zˢ = bottom_face_height(grid)
-    pˢ = convert(FT, moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ,
-                                                ref.standard_pressure, constants, κ̂))
+    pˢ = moist_hydrostatic_pressure(zˢ, ref.base_pressure, θˢ, qᵛˢ, ref.standard_pressure, constants, κ̂)
 
     set_surface_state!(ref.surface_pressure, pˢ)
     update_exner_surface_density!(ref, pˢ, θˢ, qᵛˢ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, κ̂)
@@ -190,12 +190,12 @@ function update_exner_surface_density!(ref::ExnerReferenceState, pˢ, θˢ, qᵛ
     # nothing to keep in sync.
     isnothing(ref.surface_density) && return nothing
     ρˢ = surface_reference_density(pˢ, θˢ, qᵛˢ, ref.standard_pressure, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ, κ̂)
-    set_surface_state!(ref.surface_density, convert(eltype(ref), ρˢ))
+    set_surface_state!(ref.surface_density, ρˢ)
     return nothing
 end
 
 """
-    set_to_mean!(ref::ExnerReferenceState, model)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Exner analogue of the `ReferenceState` method, for split-explicit `CompressibleDynamics`. Recompute
 the base `exner_function`/`pressure`/`density` by re-running the same discrete Exner column
@@ -252,7 +252,7 @@ function set_to_mean!(ref::ExnerReferenceState, model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the reference state of `model`'s dynamics from the temperature `T̄` and the vapor, liquid and
 ice mass fractions `q̄ᵛ`, `q̄ˡ`, `q̄ⁱ` (`Number`s, `Function(z)`s, or `Field`s), and update the pressure
@@ -266,7 +266,7 @@ function Thermodynamics.compute_reference_state!(model::AtmosphereModel, T̄, q�
 end
 
 """
-    reset_reference_state!(model)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Recompute the dynamics' reference state from the horizontal means of the model's current state via
 [`set_to_mean!`](@ref) — works for both the anelastic `ReferenceState` and the split-explicit
@@ -354,18 +354,22 @@ function default_hydrostatic_surface_pressure(model, θ, qᵛ, reference_state, 
     return pˢ
 end
 
+# Whether an array of interior data is all zero; extensions specialize it for arrays that cannot be reduced in
+# place (see `BreezeReactantExt`).
+data_all_zero(data) = all(iszero, data)
+
 has_nonzero_mass_fraction(::Nothing) = false
 
 function has_nonzero_mass_fraction(mass_fraction)
     field = mass_fraction isa Field ? mass_fraction : Field(mass_fraction)
-    return !all(iszero, interior(field))
+    return !data_all_zero(interior(field))
 end
 
 function has_condensate(model)
     names = condensate_field_names(model.microphysics)
     for name in names
         field = model.microphysical_fields[name]
-        all(iszero, interior(field)) || return true
+        data_all_zero(interior(field)) || return true
     end
 
     if applicable(liquid_mass_fraction, model.microphysics, model)
@@ -380,7 +384,7 @@ function has_condensate(model)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the prognostic density of a `CompressibleDynamics` model into discrete hydrostatic balance with
 the current `θˡⁱ`/`qᵛ`, per [`HydrostaticallyBalancedDensity`](@ref). Runs the same per-column

@@ -74,7 +74,7 @@ initialize_boundary_condition!(bc::VaporEnthalpyFluxBoundaryCondition, side, fie
     initialize_boundary_condition!(energy_boundary_condition(bc), side, field, model)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the energy-flux part of a wall boundary condition of a total energy density, stripped of the
 enthalpy of the water crossing the wall: the sensible heat flux of a `VaporEnthalpyFluxFunction`,
@@ -87,7 +87,7 @@ flux_boundary_condition(::Nothing) = OceananigansBC.NoFluxBoundaryCondition()
 flux_boundary_condition(condition) = BoundaryCondition(Flux(), condition)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `fbcs` with every wall flux of a total energy density reduced to its energy-flux part (see
 [`energy_boundary_condition`](@ref)), for diagnostics of the sensible heat flux alone.

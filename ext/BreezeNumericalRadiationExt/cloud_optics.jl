@@ -41,7 +41,7 @@ function spectral_cloud_optics(FT, table, mapping, effective_radius, arch)
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Read the liquid and ice scattering tables of `tables::CloudScatteringTables` and map them onto
 the longwave and shortwave g points of the gas model selected by `gas_model` (a reference selector

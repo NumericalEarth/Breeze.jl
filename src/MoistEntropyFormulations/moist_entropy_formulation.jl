@@ -47,7 +47,7 @@ struct MoistEntropyFormulation{D, S, FT}
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `MoistEntropyFormulation` whose fields are materialized in the model constructor.
 
@@ -69,7 +69,7 @@ MoistEntropyFormulation(; water_entropy_offset = default_water_entropy_offset) =
 const default_water_entropy_offset = -7000
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the entropy offset ``b`` per unit water mass of `formulation` (see [`MoistEntropyFormulation`](@ref)).
 """
@@ -139,7 +139,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return `true` if `microphysics` couples to the thermodynamics only through tendencies of its
 water species and the temperature of the thermodynamic state, which is what
@@ -178,7 +178,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Build a `MoistEntropyState` at grid point `(i, j, k)` from the specific entropy (less its water
 offset), the total density and the moisture mass fractions `q`.

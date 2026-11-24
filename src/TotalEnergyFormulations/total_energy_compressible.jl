@@ -5,7 +5,7 @@
 const CompressibleTotalEnergyModel = AtmosphereModel{<:FlatCompressibleDynamics, <:TotalEnergyFormulation}
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Diagnose temperature, pressure, the enthalpy of the dry air ``ĥᵈ = cᵖᵈ (T - T₀) + K + g z``, the
 enthalpy ``eᵛᵉ`` of the prognostic moisture less ``K + g z``, and the diffused static energy
@@ -128,8 +128,12 @@ end
 # the loop integrates p′/C = (ρE)′ + Eρ′ + Σ Ĉˣ (ρqˣ)′ with (ρqˣ)′ the prescribed rewind-plus-tendency
 # water perturbation. Without this the loop would see the latent energy of a surface vapor flux, or
 # of the water's advective flux divergence, without the vapor, and phase changes not at all, and
-# each stage's state would be offset from the loop's until the next stage. This is carried by
-# adding Σ Ĉˣ (ρqˣ)′ to the loop's (ρE)′, and removing its final value on recovery.
+# each stage's state would be offset from the loop's until the next stage. This is carried as the
+# loop carries the moisture content of ρθ (`acoustic_substepping.jl`, Section 3b): the rewind
+# Σ Ĉˣ (ρqˣ⁰ − ρqˣ) is added to the loop's (ρE)′ (and to the stash the divergence damping differences
+# it against), Σ Ĉˣ Gρqˣ to the loop's slow forcing, the substepper's `scaled_thermodynamic_tendency`
+# (the model's GρE is left as it is), and the sum's value at the end of the stage to the content the
+# stage end takes off, `stage_end_moisture_content`.
 
 @inline function CompressibleEquations.acoustic_linearization(i, j, k, grid, formulation::TotalEnergyFormulation,
                                                               dynamics, constants, microphysics, μ, qᵛ, velocities)
@@ -167,9 +171,13 @@ function CompressibleEquations.initialize_water_pressure_perturbation!(formulati
                                                                        substepper, model, U⁰, Δt)
     grid = model.grid
     arch = grid.architecture
-    W = formulation.water_pressure_perturbation
-    fill!(parent(W), 0)
+    # The content the end of the stage takes off the loop's (ρE)′, zero for this formulation as the
+    # stage start left it; the loop's (ρE)′, the stash its divergence damping differences (ρE)′
+    # against, and its slow forcing.
+    W = substepper.stage_end_moisture_content
     ρE′ = substepper.density_potential_temperature_perturbation
+    ρE′ˢ⁻ = substepper.previous_density_potential_temperature_perturbation
+    GˢρE = substepper.scaled_thermodynamic_tendency
     C = substepper.linearization_pressure_coefficient
     Gⁿ = model.timestepper.Gⁿ
     constants = model.thermodynamic_constants
@@ -178,34 +186,35 @@ function CompressibleEquations.initialize_water_pressure_perturbation!(formulati
 
     moisture_name = moisture_prognostic_name(model.microphysics)
     launch!(arch, grid, :xyz, _add_moisture_pressure_perturbation!,
-            W, ρE′, Gⁿ.ρE, grid, kernel_Δt, C, formulation, model.temperature,
+            W, ρE′, ρE′ˢ⁻, GˢρE, grid, kernel_Δt, C, formulation, model.temperature,
             specific_prognostic_moisture(model), model.dynamics, model.microphysics, model.microphysical_fields,
             getproperty(U⁰, moisture_name), getproperty(prognostic_fields(model), moisture_name),
             getproperty(Gⁿ, moisture_name), constants)
 
-    add_condensate_pressure_perturbations!(condensate_field_names(model.microphysics), W, ρE′, Gⁿ, grid, kernel_Δt,
-                                           formulation, model, U⁰)
-    fill_halo_regions!(ρE′)
+    add_condensate_pressure_perturbations!(condensate_field_names(model.microphysics), W, ρE′, ρE′ˢ⁻, GˢρE, grid,
+                                           kernel_Δt, formulation, model, U⁰)
+    fill_halo_regions!((ρE′, ρE′ˢ⁻))
     return nothing
 end
 
 add_condensate_pressure_perturbations!(::Tuple{}, args...) = nothing
 
-function add_condensate_pressure_perturbations!(names::Tuple, W, ρE′, Gⁿ, grid, Δt, formulation, model, U⁰)
+function add_condensate_pressure_perturbations!(names::Tuple, W, ρE′, ρE′ˢ⁻, GˢρE, grid, Δt, formulation, model, U⁰)
     name = first(names)
+    Gⁿ = model.timestepper.Gⁿ
     launch!(grid.architecture, grid, :xyz, _add_condensate_pressure_perturbation!,
-            W, ρE′, Gⁿ.ρE, Δt, formulation, model.temperature,
+            W, ρE′, ρE′ˢ⁻, GˢρE, Δt, formulation, model.temperature,
             condensate_enthalpy(model.microphysics, Val(name), formulation.reference_temperature,
                                 model.thermodynamic_constants),
             getproperty(U⁰, name), getproperty(prognostic_fields(model), name), getproperty(Gⁿ, name),
             model.thermodynamic_constants)
-    return add_condensate_pressure_perturbations!(Base.tail(names), W, ρE′, Gⁿ, grid, Δt, formulation, model, U⁰)
+    return add_condensate_pressure_perturbations!(Base.tail(names), W, ρE′, ρE′ˢ⁻, GˢρE, grid, Δt, formulation, model, U⁰)
 end
 
 # K + g z = ĥᵈ − cᵖᵈ (T − T₀)
 @inline mechanical_energy(ĥᵈ, T, T₀, constants) = ĥᵈ - constants.dry_air.heat_capacity * (T - T₀)
 
-@kernel function _add_moisture_pressure_perturbation!(W, ρE′, GρE, grid, Δt, C, formulation, temperature_field,
+@kernel function _add_moisture_pressure_perturbation!(W, ρE′, ρE′ˢ⁻, GˢρE, grid, Δt, C, formulation, temperature_field,
                                                       specific_moisture, dynamics, microphysics, μ,
                                                       ρq⁰, ρq, Gρq, constants)
     i, j, k = @index(Global, NTuple)
@@ -222,12 +231,13 @@ end
         Ĉ = Rᵛᵉ * T * (1 + 1 / C[i, j, k]) - ĥᵛᵉ
         rewind = Ĉ * (ρq⁰[i, j, k] - ρq[i, j, k])
         ρE′[i, j, k] += rewind
-        GρE[i, j, k] += Ĉ * Gρq[i, j, k]
+        ρE′ˢ⁻[i, j, k] += rewind
+        GˢρE[i, j, k] += Ĉ * Gρq[i, j, k]
         W[i, j, k] += rewind + Δt * Ĉ * Gρq[i, j, k]
     end
 end
 
-@kernel function _add_condensate_pressure_perturbation!(W, ρE′, GρE, Δt, formulation, temperature_field, enthalpy,
+@kernel function _add_condensate_pressure_perturbation!(W, ρE′, ρE′ˢ⁻, GˢρE, Δt, formulation, temperature_field, enthalpy,
                                                         ρq⁰, ρq, Gρq, constants)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
@@ -237,18 +247,8 @@ end
         Ĉ = - ĥˣ
         rewind = Ĉ * (ρq⁰[i, j, k] - ρq[i, j, k])
         ρE′[i, j, k] += rewind
-        GρE[i, j, k] += Ĉ * Gρq[i, j, k]
+        ρE′ˢ⁻[i, j, k] += rewind
+        GˢρE[i, j, k] += Ĉ * Gρq[i, j, k]
         W[i, j, k] += rewind + Δt * Ĉ * Gρq[i, j, k]
     end
-end
-
-function CompressibleEquations.remove_water_pressure_perturbation!(formulation::TotalEnergyFormulation, substepper, model)
-    grid = model.grid
-    launch!(grid.architecture, grid, :xyz, _subtract!, formulation.energy_density, formulation.water_pressure_perturbation)
-    return nothing
-end
-
-@kernel function _subtract!(a, b)
-    i, j, k = @index(Global, NTuple)
-    @inbounds a[i, j, k] -= b[i, j, k]
 end

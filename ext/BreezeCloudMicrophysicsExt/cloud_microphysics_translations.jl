@@ -25,7 +25,7 @@ const Γ = SF.gamma
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the thermodynamic factor ``G`` that controls the rate of diffusional
 growth of cloud droplets and rain drops.
@@ -67,7 +67,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the cloud-ice deposition relaxation timescale for the
 CloudMicrophysics `TemperatureDependent` option.
@@ -96,7 +96,7 @@ for use from Breeze GPU kernels.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute supersaturation-dependent autoconversion of cloud ice to snow using
 Breeze thermodynamics.
@@ -132,7 +132,7 @@ distribution uses the total density `ρ`, which weights the prognostic condensat
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute melting of cloud ice to cloud liquid using Breeze thermodynamics.
 """
@@ -160,7 +160,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the rain evaporation rate (dqʳ/dt, negative for evaporation).
 
@@ -233,7 +233,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the snow sublimation/deposition rate (dqˢⁿ/dt).
 
@@ -304,7 +304,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the snow melting rate (dqˢⁿ/dt due to melting, always non-negative).
 
@@ -372,7 +372,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the thermal melt factor for warm accretion processes.
 
@@ -414,7 +414,7 @@ end
 using CloudMicrophysics.Microphysics2M: pdf_rain_parameters, Γ_incl
 
 """
-    rain_evaporation_2m(sb, aps, q, qʳ, ρ, ρᵗʰ, Nʳ, T, constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the two-moment rain evaporation rate returning both number and mass tendencies.
 
@@ -578,7 +578,7 @@ Base.summary(::AerosolActivation) = "AerosolActivation"
 #####
 
 """
-    max_supersaturation_breeze(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the maximum supersaturation using the [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000)
 parameterization.

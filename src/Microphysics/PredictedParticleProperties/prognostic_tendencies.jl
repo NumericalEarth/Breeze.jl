@@ -34,7 +34,7 @@
 @inline liquid_fraction_routing_active(parameters::ProcessRate) = tracks_liquid_on_ice(parameters)
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute cloud liquid mass tendency from P3 process rates.
 
@@ -65,7 +65,7 @@ Cloud liquid is consumed by:
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain mass tendency from P3 process rates.
 
@@ -109,7 +109,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rain number tendency from P3 process rates.
 
@@ -181,7 +181,7 @@ Rain number loses from:
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute ice mass tendency from P3 process rates.
 
@@ -221,7 +221,7 @@ Ice loses from:
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute ice number tendency from P3 process rates.
 
@@ -253,7 +253,7 @@ raises `nⁱ` where the tabulated lower bound binds and lowers it where the uppe
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rime mass tendency from P3 process rates.
 
@@ -295,7 +295,7 @@ Rime mass loses from:
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute rime volume tendency from P3 process rates.
 
@@ -361,7 +361,7 @@ preferentially, driving the remaining rime toward the configured solid-ice densi
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute cloud-number tendency from P3 process rates.
 
@@ -396,7 +396,7 @@ to the cloud mass they consume.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute liquid on ice tendency from P3 process rates.
 
@@ -450,7 +450,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute vapor mass tendency from P3 process rates.
 
@@ -485,7 +485,7 @@ automatically when integrated with `dt = sink_limiting_timescale`. See
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Compute the tendency of the vapor excess over liquid from Grabowski & Morrison (2008).
 
@@ -505,7 +505,7 @@ When `vapor_excess = DiagnosticVaporExcess()`, returns zero tendency.
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the aerosol number density tendency ``∂ρn^a/∂t = -ρ \\, n_{\\text{nuc}}``.
 Each activated droplet consumes one aerosol. Applied only to a prognostic reservoir.

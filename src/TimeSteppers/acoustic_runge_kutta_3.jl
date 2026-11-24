@@ -1,10 +1,11 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: TendencyCallsite
-using Oceananigans.Utils: time_difference_seconds
+using Oceananigans.Utils: time_difference_in_seconds
 
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
+    next_time,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
@@ -76,8 +77,10 @@ struct AcousticRungeKutta3{FT, U0, TG, TI, AS, R} <: AbstractTimeStepper
     rounding :: R
 end
 
+AtmosphereModels.stage_abscissae(ts::AcousticRungeKutta3) = (ts.β₁, ts.β₂)
+
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct an `AcousticRungeKutta3` time stepper for fully compressible dynamics.
 
@@ -140,7 +143,7 @@ const CompressibleAcousticModel{Arc} = AtmosphereModel{<:CompressibleDynamics, <
 @inline stage_increment(ts, stage) = ifelse(stage == 1, ts.β₁, ifelse(stage == 2, ts.β₂ - ts.β₁, 1 - ts.β₂))
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The adaptive-implicit split time step for the *next* Wicker–Skamarock stage, so the explicit
 velocity fraction frozen into `Gⁿ` pairs with the implicit fraction the next stage applies.
@@ -162,7 +165,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Run one Wicker–Skamarock RK3 stage: complete the slow tendencies built by
 `update_state!`, then execute the linearized-acoustic substep loop, then
@@ -243,7 +246,7 @@ end
 #####
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Seed `clock.last_stage_Δt` before the first step (or for a clock carrying a non-finite value)
 with the increment a completed third stage leaves, ``(1 - β₂) Δt`` — what
@@ -272,7 +275,7 @@ function OceananigansTimeSteppers.maybe_prepare_first_time_step!(model::Compress
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Step forward `model` one time step `Δt` with Wicker–Skamarock RK3 and
 linearized acoustic substepping.
@@ -286,7 +289,9 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     β₂ = ts.β₂
     β₃ = ts.β₃
 
-    tⁿ⁺¹ = model.clock.time + Δt
+    # Compute the next time a priori to reduce floating point error accumulation; `next_time`
+    # also serves a calendar clock, whose `time` cannot take a `Δt` in seconds directly.
+    tⁿ⁺¹ = next_time(model.clock, Δt)
 
     # Snapshot outer-step-start state into U⁰ for use by all stages.
     # The substepper also seeds its stage-1 cache and time-averaged
@@ -307,14 +312,14 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     acoustic_rk3_substep!(model, Δt, β₂)
 
     tick_stage!(model.clock, (β₂ - β₁) * Δt)
-    update_state!(model, callbacks; compute_tendencies = true)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
     cache_transport_velocity!(model)
 
     # Stage 3: Uⁿ⁺¹ = Uⁿ + Δt R(U**). Every stage restarts from Uⁿ, so only this stage's
     # rounding reaches Uⁿ⁺¹, and only this stage takes the time stepper's round-off treatment.
     acoustic_rk3_substep!(model, Δt, β₃, ts.rounding)
 
-    corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
+    corrected_Δt = time_difference_in_seconds(tⁿ⁺¹, model.clock.time)
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
@@ -328,14 +333,18 @@ function OceananigansTimeSteppers.time_step!(model::CompressibleAcousticModel, �
     # Forwarding the callbacks through microphysics_model_update! would fix this and let the pass
     # always be skipped.
     skip_tendencies = skip_pre_microphysics_tendencies(model.microphysics, Δt, callbacks)
-    update_state!(model, callbacks; compute_tendencies = !skip_tendencies)
-    # These tendencies are consumed by stage 1 of the next step, after
-    # `freeze_linearization_state!` has reseeded the live field.
-    cache_transport_velocity!(model)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks; compute_tendencies = !skip_tendencies)
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.
     microphysics_model_update!(model.microphysics, model)
+
+    # After the step's last tendency build, which is the one inside the microphysics update for a
+    # scheme that refreshes the state itself (`refreshes_state_after_update`): the transport density
+    # tendency is the divergence of the mass flux the moisture tendencies were built with, total
+    # density included. These tendencies are consumed by stage 1 of the next step, after
+    # `freeze_linearization_state!` has reseeded the live field.
+    cache_transport_velocity!(model)
 
     # Advect particles once per step, over the full Δt, with the velocity of the state
     # just refreshed to tⁿ⁺¹: Xⁿ⁺¹ = Xⁿ + Δt u(Xⁿ, tⁿ⁺¹) — consistent, but first order,

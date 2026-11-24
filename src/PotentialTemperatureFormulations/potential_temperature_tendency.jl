@@ -18,7 +18,7 @@ AtmosphereModels.liquid_ice_potential_temperature(model::PotentialTemperatureMod
 AtmosphereModels.static_energy(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :specific)
 
 """
-    static_energy_density(model::PotentialTemperatureModel)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the static energy density as a `Field` with boundary conditions that return
 energy fluxes when used with `BoundaryConditionOperation`.
@@ -254,7 +254,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the transported liquid/ice enthalpies and local potential-temperature heating response.
 With a fixed total density (the default) the departed condensate mass is made up by dry air at
@@ -360,7 +360,7 @@ end
 #####
 
 """
-    $(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Set the thermodynamic state from in-situ temperature ``T``.
 
