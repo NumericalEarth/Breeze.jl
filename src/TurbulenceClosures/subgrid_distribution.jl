@@ -296,8 +296,7 @@ zero skewness (4.58 for `a = 0.01`, `ℂᵍ = 0.4`), in place of SHOC's 1.2 √2
 the PDF have the same width in `w`, so the third moment is carried by their weights alone, and a
 bound on the skewness is a bound on the weight of the updraft component: with 1.2 √2 it is no less
 than 0.06, with 4.58 no less than 0.01. Large-eddy simulations of cumulus have a skewness of 2 to
-5 in the cloud layer, where the saturated updrafts cover 0.5 to 5 % (harness
-`notes/cumulus-skewness.md`).
+5 in the cloud layer, where the saturated updrafts cover 0.5 to 5 %.
 
 `ℂʳ` is the maximum flux correlation: where the down-gradient variance ``a′²`` of ``a = θˡⁱ`` or
 ``qᵗ`` is too small for the down-gradient flux, ``(w′a′)² > (ℂʳ)² w′² a′²``, the variance is raised

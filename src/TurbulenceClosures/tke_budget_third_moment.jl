@@ -4,7 +4,7 @@
 ##### A third moment of the `DoubleGaussian` subgrid distribution of `TKEBasedTurbulenceClosure`
 ##### (`third_moment = TKEBudgetThirdMoment(...)`), next to `AlgebraicThirdMoment`.
 #####
-##### Large-eddy simulations give w′³ ≈ r w′e′ with r ≈ 1.5 (harness notes/w3-model.md), and the
+##### Large-eddy simulations give w′³ ≈ r w′e′ with r ≈ 1.5, and the
 ##### flux of TKE is what the TKE budget leaves over: ∂z (ρ F) = ρ (P + B - u), with P + B the shear
 ##### and buoyancy production the TKE equation receives and u a sink. The model takes the sink as
 ##### u = c ω with a shape ω that vanishes with e (ω = e, one turnover rate; ω = ε, the closure's
@@ -109,7 +109,7 @@ The limiter in the `skewness` slot of [`DoubleGaussian`](@ref) ([`TanhSaturatedS
 keeps the result realizable.
 
 The initial values of the coefficients are a joint least-squares fit to coarse-grained large-eddy
-simulations of BOMEX, ARM cumulus, ASTEX and DYCOMS (harness `notes/w3-proposal.md`).
+simulations of BOMEX, ARM cumulus, ASTEX and DYCOMS.
 
 $(TYPEDFIELDS)
 """
@@ -158,11 +158,11 @@ without skewness.
 
 `ℂʷˡ = 8` is twice the upper end, 4, of the estimate `3 √(2/3) ρ (1.6 to 2.5)` for a correlation `ρ = 0.5` to
 `0.7` of `w` with the saturation excess, and near a fit of `w′³` in the cloud layer of large-eddy
-simulations of cumulus (3.4 with their mixing length; harness `notes/cumulus-skewness.md`). It is
-an initial value: the closure's own `ρ` and `w′²` differ from the simulations', and the columns
-of the note come closer to them with a larger coefficient: with the hand-tuned stability functions
+simulations of cumulus (3.4 with their mixing length). It is
+an initial value: the closure's own `ρ` and `w′²` differ from the simulations', and the simulated columns
+come closer to them with a larger coefficient: with the hand-tuned stability functions
 8 lowers the error of the BOMEX and cfsite14_04 columns against 4 and leaves the others nearly
-unchanged (harness `notes/hand-tuning.md`).
+unchanged.
 """
 function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
                               ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0, ℂʷˡ = 8, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,

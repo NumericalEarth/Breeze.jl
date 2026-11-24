@@ -840,7 +840,7 @@ end
 ##### the stratification of the conserved variables, not that of the mean condensate. (Weighting N²ᵇ
 ##### and N²ˢ instead, N²ᵇ - η aʷ (N²ᵇ - N²ˢ), leaves (1 - aʷ)(b̄ˡ - b̄ᵛ) ∂z qᶜ > 0 wherever the mean
 ##### condensate rises with height in partly cloudy air: a stable stratification at the base of a
-##### well-mixed cloud layer and a buoyancy flux of the wrong sign there; harness notes/total-energy-design.md §11.)
+##### well-mixed cloud layer and a buoyancy flux of the wrong sign there.)
 ##### The buoyancy production gains Bᴸ = Kᶜ ΔN²ᴸ over the conversion of the applied fluxes; that energy
 ##### is the work of the latent heat of the subgrid condensation and is taken from the internal energy.
 ##### aᴺ = η aʷ is stored: the share of the flux of the saturation excess that condenses.

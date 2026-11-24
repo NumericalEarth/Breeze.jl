@@ -122,8 +122,7 @@ the flux that the radiative cooling drives, and the gradient closure carries the
 `ℂᑫ = 1` the single column of DYCOMS-II RF01 becomes stably stratified in θˡⁱ by 0.4 K over the layer
 (0.12 K without the flux, 0.27 K with `ℂᑫ = 0.5`). `ℂʷᑫ > 0` gives the cloud layer of a stratocumulus
 column the negative skewness of its large-eddy simulation, and gives the same sign to cumulus layers
-below a radiatively cooled anvil, where the large-eddy simulations have positive skewness (harness
-`notes/total-energy-design.md` §11).
+below a radiatively cooled anvil, where the large-eddy simulations have positive skewness.
 
 [`heating_budget_flux_bounds`](@ref) gives an interval for each coefficient for a calibration.
 """
