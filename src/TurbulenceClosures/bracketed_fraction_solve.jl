@@ -231,9 +231,9 @@ end
     stored_input = fraction_face_inputs(i, j, kₛ, grid, closure_ij, d, moments, cloud, θ, qᵗ, e, p, thermodynamics)
     # The latent response of the condensate outside the distributed water (ice and its liquid coating), with the
     # distribution and the eddy time before the solve (as the moments of the neighbouring faces)
-    aʷ = face_condensate_flux_fraction(i, j, kₛ, grid, moments, cloud, qᵗ, θ, p, thermodynamics)
+    aʷ = face_condensate_flux_fraction(i, j, kₛ, cloud)
     X = latent_correctionᶜᶜᶠ(i, j, kₛ, grid, closure_ij, closure_fields, velocities, s, qᵗ, θ, e, thermodynamics, cloud,
-                             aʷ, face_ice_excess_flux_fraction(i, j, kₛ, cloud, aʷ)).outside
+                             aʷ).outside
     input = merge(stored_input, (; N²ᶜ = stored_input.N²ᶜ + X))
     ãᴺ(x) = trial_condensate_flux_fraction(x, i, j, kₛ, grid, closure_ij, d, moments, cloud, input, velocities,
                                       θ, qᵗ, e, p, thermodynamics, w, ℓᵉ)

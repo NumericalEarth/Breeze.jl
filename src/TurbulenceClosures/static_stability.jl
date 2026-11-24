@@ -67,7 +67,7 @@ This slot is the only owner of ``N²``: every other component reads `closure_fie
 `fraction` supplies ``aᴺ`` by extending
 [`saturated_stability_weightᶜᶜᶠ`](@ref Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ);
 without a method for the model, computing ``N²`` throws a `MethodError`. The closure's own subgrid
-distribution is the cloud model [`CondensateFluxFraction`](@ref), ``aᴺ = w′qˡ′ / w′s′``, which depends on
+distribution is the cloud model [`CondensateFluxFraction`](@ref), ``aᴺ = η aʷ``, which depends on
 the diffusivities and so is solved together with them in the closure update.
 `SaturationWeightedStaticStability()`, without a model, takes the subgrid model of the microphysics
 ([`MicrophysicsSaturatedFraction`](@ref Breeze.TurbulenceClosures.MicrophysicsSaturatedFraction)), so that

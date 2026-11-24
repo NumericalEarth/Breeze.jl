@@ -1155,7 +1155,7 @@ end
                                                    p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
             store_vapor_excess_components!(cl, i, j, k,
                                            component_vapor_excess(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
-                                                                  p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ), C)
+                                                                  p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ))
             cl.aᶜ[i, j, k] = C
             # The exchange rate of air between the saturated and subsaturated parts, √e / (ℂᵐ ℓ)
             ℓᶜ = (closure_fields.ℓᵐ[i, j, k] + closure_fields.ℓᵐ[i, j, k+1]) / 2
@@ -1350,8 +1350,8 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
 # The stratification of the mixed variables N²ᶜ = Σ b̄_χ δz χ at the interior face k and the latent-corrected
 # N²ᵇ = N²ᶜ - Bˡ / Kᶜ, with Bˡ / Kᶜ in the form in which Kᶜ cancels: Bˡ = (b_qˡ - b_qᵛ) w′qˡ′ and
 # w′qˡ′ = aʷ w′s′, w′s′ = -Kᶜ ∂z s̄, so -Bˡ / Kᶜ = (b_qˡ - b_qᵛ) aʷ ∂z s̄, with (b_qˡ - b_qᵛ) aʷ formed at the
-# centers from the distribution's collocated condensate flux and flux of the saturation excess
-# (`center_condensate_flux_fraction`) and averaged to the face. Also returns ∂z s̄ and the face A_c.
+# centers from the saturated share of the components there (`center_condensate_flux_fraction`) and averaged to the
+# face. Also returns ∂z s̄ and the face A_c.
 @inline function condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
     km = max(k - 1, 1)
     @inbounds begin
@@ -1362,8 +1362,8 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
         gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, km]) / 2
         c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
         c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, km), θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
-        bˡᵛaʷ⁺ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, m, cl, c_q⁺, c_θ⁺)
-        bˡᵛaʷ⁻ = (cl.b_qᶜ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, m, cl, c_q⁻, c_θ⁻)
+        bˡᵛaʷ⁺ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, cl)
+        bˡᵛaʷ⁻ = (cl.b_qᶜ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, cl)
     end
     N²ᶜ = gθᶠ * ∂zθ + gAᶠ * ∂zq
     ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
@@ -1457,9 +1457,9 @@ end
         # The latent response of the condensate outside the distributed water (ice and its liquid coating), at the
         # eddy time of this pass; it moves the target and both ends of the bracket alike
         kₛ = max(k, 2)
-        aʷ = face_condensate_flux_fraction(i, j, kₛ, grid, m, cl, qᵗ, θ, p, thermodynamics)
+        aʷ = face_condensate_flux_fraction(i, j, kₛ, cl)
         X = latent_correctionᶜᶜᶠ(i, j, kₛ, grid, getclosure(i, j, closure), closure_fields, velocities, s, qᵗ, θ, e,
-                                 thermodynamics, cl, aʷ, face_ice_excess_flux_fraction(i, j, kₛ, cl, aʷ)).outside
+                                 thermodynamics, cl, aʷ).outside
         N²ᶜ += X
         G += X
         N²ˢ = N²ᶜ + gA_c * ∂zs
@@ -1586,9 +1586,9 @@ vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterF
                                        σ₁ = CenterField(grid), σ₂ = CenterField(grid), ωᵐ = CenterField(grid),
                                        μⁱ₁ = CenterField(grid), μⁱ₂ = CenterField(grid),
                                        σⁱ₁ = CenterField(grid), σⁱ₂ = CenterField(grid),
-                                       ρⁱ₁ = CenterField(grid), ρⁱ₂ = CenterField(grid), aʷⁱ = CenterField(grid))
+                                       ρⁱ₁ = CenterField(grid), ρⁱ₂ = CenterField(grid))
 
-@inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂), aᶜ)
+@inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂))
     @inbounds begin
         components.a₁[i, j, k] = a
         components.μ₁[i, j, k] = μ₁
@@ -1601,32 +1601,8 @@ vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterF
         components.σⁱ₂[i, j, k] = σⁱ₂
         components.ρⁱ₁[i, j, k] = ρ₁
         components.ρⁱ₂[i, j, k] = ρ₂
-        components.aʷⁱ[i, j, k] = ice_excess_flux_fraction(a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂, aᶜ)
     end
     return nothing
-end
-
-# The share of the flux of the excess over ice sⁱ carried by the saturated part s > 0 of the double Gaussian. Within a
-# component w is uncorrelated with the scalars, so a flux is the difference of the component means times
-# a (1 - a)(w₁ - w₂), which cancels: aʷⁱ = (Y₁ - Y₂) / (μⁱ₁ - μⁱ₂), Yᵢ = Eᵢ[sⁱ 𝟙ₛ₎₀] = μⁱᵢ Φ(μᵢ/σᵢ) + ρᵢ σⁱᵢ φ(μᵢ/σᵢ)
-# (sⁱ regressed on s, the residual independent of s). In [0, 1] as aʷ; the cloud fraction `aᶜ` where the components
-# do not differ.
-@inline function ice_excess_flux_fraction(a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂, aᶜ)
-    FT = typeof(μ₁)
-    Y₁ = component_saturated_ice_excess(μ₁, σ₁, μⁱ₁, σⁱ₁, ρ₁)
-    Y₂ = component_saturated_ice_excess(μ₂, σ₂, μⁱ₂, σⁱ₂, ρ₂)
-    Δμⁱ = μⁱ₁ - μⁱ₂
-    resolved = abs(Δμⁱ) > sqrt(floatmin(FT))
-    return clamp(ifelse(resolved, (Y₁ - Y₂) / ifelse(resolved, Δμⁱ, one(FT)), aᶜ), zero(FT), one(FT))
-end
-
-@inline function component_saturated_ice_excess(μ, σ, μⁱ, σⁱ, ρ)
-    FT = typeof(μ)
-    σ₊ = max(σ, floatmin(FT) / eps(FT))
-    z = clamp(μ / σ₊, -convert(FT, 40), convert(FT, 40))
-    Φ = erfc(-z / sqrt(FT(2))) / 2
-    φ = exp(-z * z / 2) / sqrt(2 * FT(π))
-    return ifelse(σ > 0, μⁱ * Φ + ρ * σⁱ * φ, ifelse(μ > 0, μⁱ, zero(FT)))
 end
 
 @inline function stored_vapor_excess_components(i, j, k, components)
