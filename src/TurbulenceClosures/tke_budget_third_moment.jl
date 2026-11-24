@@ -381,9 +381,6 @@ end
     belowᵉ = zero(grid_float_type(grid))
     belowᵋ = zero(grid_float_type(grid))
     @inbounds for k in 1:size(grid, 3)
-        # The third moment at the face k, below this center, from the fluxes there (the integral of the cells below)
-        k > 1 && diagnose_face_third_moment!(tm.location, diagnose, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², ρ, belowᵉ, belowᵋ)
-
         ρΔz = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
         rᵉ = ρΔz * (cl.P[i, j, k] + cl.B[i, j, k] - cl.uᵉ[i, j, k])
         rᵋ = ρΔz * (cl.P[i, j, k] + cl.B[i, j, k] - cl.uᵋ[i, j, k])
@@ -396,6 +393,7 @@ end
 
         diagnose_center_third_moment!(tm.location, diagnose, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², cl.Fᵉ[i, j, k], cl.Fᵋ[i, j, k])
     end
+    diagnose_face_third_moments!(tm.location, diagnose, cl, i, j, grid, tm, closure_ij, e, ℓᵐ, N², ρ)
 end
 
 # The third moment at the interior face k, with ℓ, √e and N² of the face; one stratification number αᴺ = τ₃² N² for
@@ -403,10 +401,26 @@ end
 # at the face; the buoyancy production and the latent source are averaged from the two centers. Only in the passes
 # of `diagnose_third_moment!` (`Val(true)`). Diagnosed at the faces, as `shoc.F90` diagnoses its third moment, and
 # interpolated to the centers with the other moments.
-@inline diagnose_face_third_moment!(location, ::Val{false}, args...) = nothing
-@inline diagnose_face_third_moment!(::Center, ::Val{true}, args...) = nothing
+@inline diagnose_face_third_moments!(location, ::Val{false}, args...) = nothing
+@inline diagnose_face_third_moments!(::Center, ::Val{true}, args...) = nothing
 
-@inline function diagnose_face_third_moment!(::Face, ::Val{true}, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², ρ, ρFᵉ, ρFᵋ)
+# The faces of the column in a loop of their own, after the fluxes at the centers: a branch on `k > 1` in the loop
+# over the centers lets LLVM peel the first center and leave the rest a loop whose exit flag is carried, whose
+# iteration count the reverse pass of Enzyme (under Reactant) cannot recover to cache its values. The integrals
+# of the cells below each face are summed again, in the order and with the operations of the loop over the centers.
+@inline function diagnose_face_third_moments!(::Face, ::Val{true}, cl, i, j, grid, tm, closure_ij, e, ℓᵐ, N², ρ)
+    belowᵉ = zero(grid_float_type(grid))
+    belowᵋ = zero(grid_float_type(grid))
+    @inbounds for k in 1:size(grid, 3)-1
+        ρΔz = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
+        belowᵉ += ρΔz * (cl.P[i, j, k] + cl.B[i, j, k] - cl.uᵉ[i, j, k])
+        belowᵋ += ρΔz * (cl.P[i, j, k] + cl.B[i, j, k] - cl.uᵋ[i, j, k])
+        diagnose_face_third_moment!(cl, i, j, k + 1, grid, tm, closure_ij, e, ℓᵐ, N², ρ, belowᵉ, belowᵋ)
+    end
+    return nothing
+end
+
+@inline function diagnose_face_third_moment!(cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², ρ, ρFᵉ, ρFᵋ)
     @inbounds begin
         ρᶠ = (ρ[i, j, k] + ρ[i, j, k-1]) / 2
         ℓ = ℓᵐ[i, j, k]

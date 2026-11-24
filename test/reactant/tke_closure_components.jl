@@ -13,13 +13,20 @@ using Oceananigans
 using Oceananigans.Architectures: ReactantState
 using Oceananigans.Grids: ColumnEnsembleSize
 using Reactant
-using Reactant: @trace
+using Reactant: @trace, CompileOptions
 using Enzyme
 using GPUArraysCore: @allowscalar
 using Test
 using CUDA
 
 Reactant.set_default_backend(default_arch isa GPU ? "gpu" : "cpu")
+
+# XLA's CPU compiler moves a while loop whose buffers are all small (here the time-step loops of an ensemble of
+# a few short columns) into one function, and optimizing that function for the gradient of this closure takes
+# hours (more than three, at 40 GB). A threshold of zero keeps the loops as loops.
+small_while_loop_options = (; xla_backend_extra_options = Dict("xla_cpu_small_while_loop_byte_threshold" => "0"))
+compile_options = CompileOptions(; raise = true, raise_first = true, sync = true,
+                                 xla_debug_options = default_arch isa GPU ? (;) : small_while_loop_options)
 
 struct MixingLengthWeight{FT}
     ℓ⁰ :: FT
@@ -62,7 +69,7 @@ end
     @testset "Forward" begin
         model = AtmosphereModel(grid; dynamics, microphysics, closure)
         θ_init = initial_θ()
-        compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true tke_loss(model, θ_init, Δt, Ns)
+        compiled = @with_stack_size Reactant.@compile compile_options=compile_options tke_loss(model, θ_init, Δt, Ns)
         value = @with_stack_size compiled(model, θ_init, Δt, Ns)
         @test isfinite(value) && value > 0
     end
@@ -72,7 +79,7 @@ end
         θ_init = initial_θ()
         dθ_init = CenterField(grid); set!(dθ_init, 0)
         dmodel = Enzyme.make_zero(model)
-        compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_tke_loss(
+        compiled_grad = @with_stack_size Reactant.@compile compile_options=compile_options grad_tke_loss(
             model, dmodel, θ_init, dθ_init, Δt, Ns)
         dθ, loss_value = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
         ad_grad = @allowscalar Array(interior(dθ))
@@ -130,7 +137,7 @@ end
     θ_init = CenterField(grid); set!(θ_init, z -> 290 + 3e-3 * z)
 
     forward_model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
-    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true trained_loss(
+    compiled = @with_stack_size Reactant.@compile compile_options=compile_options trained_loss(
         forward_model, trained(), θ_init, Δt, Ns)
     loss(coefficients) = Float64(Reactant.to_number(@with_stack_size compiled(forward_model, coefficients, θ_init, Δt, Ns)))
 
@@ -144,7 +151,7 @@ end
         dmodel = Enzyme.make_zero(model)
         coefficients = trained()
         dcoefficients = map(c -> Reactant.ConcreteRNumber(0.0), coefficients)
-        compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_trained_loss(
+        compiled_grad = @with_stack_size Reactant.@compile compile_options=compile_options grad_trained_loss(
             model, dmodel, coefficients, dcoefficients, θ_init, Δt, Ns)
         derivatives, loss_value = @with_stack_size compiled_grad(model, dmodel, coefficients, dcoefficients, θ_init, Δt, Ns)
         derivatives = map(d -> Float64(Reactant.to_number(d)), derivatives)
@@ -189,7 +196,7 @@ end
     initial_θ() = (θ = CenterField(grid); set!(θ, z -> 290 + 3e-3 * z); θ)
 
     model = AtmosphereModel(grid; dynamics, microphysics, closure)
-    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true tke_loss(model, initial_θ(), Δt, Ns)
+    compiled = @with_stack_size Reactant.@compile compile_options=compile_options tke_loss(model, initial_θ(), Δt, Ns)
     value = @with_stack_size compiled(model, initial_θ(), Δt, Ns)
     @test isfinite(value) && value > 0
 
@@ -197,7 +204,7 @@ end
     θ_init = initial_θ()
     dθ_init = CenterField(grid); set!(dθ_init, 0)
     dmodel = Enzyme.make_zero(model)
-    compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_tke_loss(
+    compiled_grad = @with_stack_size Reactant.@compile compile_options=compile_options grad_tke_loss(
         model, dmodel, θ_init, dθ_init, Δt, Ns)
     dθ, loss_value = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
     @test isfinite(loss_value)
@@ -229,7 +236,7 @@ end
     θ_init = CenterField(grid); set!(θ_init, z -> 290 + 3e-3 * z)
 
     forward_model = AtmosphereModel(grid; dynamics, microphysics, closure, timestepper=:MultirateInfinitesimalStep)
-    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true trained_loss(
+    compiled = @with_stack_size Reactant.@compile compile_options=compile_options trained_loss(
         forward_model, trained(), θ_init, Δt, Ns)
     loss(coefficients) = Float64(Reactant.to_number(@with_stack_size compiled(forward_model, coefficients, θ_init, Δt, Ns)))
 
@@ -243,7 +250,7 @@ end
         dmodel = Enzyme.make_zero(model)
         coefficients = trained()
         dcoefficients = map(c -> Reactant.ConcreteRNumber(0.0), coefficients)
-        compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_trained_loss(
+        compiled_grad = @with_stack_size Reactant.@compile compile_options=compile_options grad_trained_loss(
             model, dmodel, coefficients, dcoefficients, θ_init, Δt, Ns)
         derivatives, loss_value = @with_stack_size compiled_grad(model, dmodel, coefficients, dcoefficients, θ_init, Δt, Ns)
         derivatives = map(d -> Float64(Reactant.to_number(d)), derivatives)
@@ -281,7 +288,7 @@ end
     initial_θ() = (θ = CenterField(grid); set!(θ, z -> 290 + 3e-3 * z); θ)
 
     model = AtmosphereModel(grid; dynamics, microphysics, closure)
-    compiled = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true tke_loss(model, initial_θ(), Δt, Ns)
+    compiled = @with_stack_size Reactant.@compile compile_options=compile_options tke_loss(model, initial_θ(), Δt, Ns)
     value = @with_stack_size compiled(model, initial_θ(), Δt, Ns)
     @test isfinite(value) && value > 0
 
@@ -289,7 +296,7 @@ end
     θ_init = initial_θ()
     dθ_init = CenterField(grid); set!(dθ_init, 0)
     dmodel = Enzyme.make_zero(model)
-    compiled_grad = @with_stack_size Reactant.@compile raise=true raise_first=true sync=true grad_tke_loss(
+    compiled_grad = @with_stack_size Reactant.@compile compile_options=compile_options grad_tke_loss(
         model, dmodel, θ_init, dθ_init, Δt, Ns)
     dθ, loss_value = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
     @test isfinite(loss_value)
