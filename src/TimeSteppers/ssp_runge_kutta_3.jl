@@ -3,15 +3,16 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: prognostic_fields, fields
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
+    next_time,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
     substep_lagrangian_particles!,
     implicit_step!
 
-using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
-                                microphysics_model_update!, microphysics_model_update_refreshes_state,
-                                field_advection_scheme,
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, compute_pressure_correction!, make_pressure_correction!,
+                               microphysics_model_update!, microphysics_model_update_refreshes_state,
+                               field_advection_scheme,
                                 compute_closure_tendencies!,
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
@@ -64,6 +65,9 @@ struct SSPRungeKutta3{FT, U0, TG, TI, R} <: AbstractTimeStepper
     implicit_solver :: TI
     rounding :: R
 end
+
+# A Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) sits at cₘ = αₘ (cₘ₋₁ + 1)
+AtmosphereModels.stage_abscissae(ts::SSPRungeKutta3) = (ts.α¹, ts.α² * (ts.α¹ + 1))
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -288,16 +292,12 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
     α² = ts.α²
     α³ = ts.α³
 
-    # Stage abscissae: a Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) has
-    # Butcher row sum cₘ = αₘ (cₘ₋₁ + 1), so u^(1) sits at tⁿ + Δt but u^(2) sits at
-    # tⁿ + Δt/2. Evaluating G(u^(2)) at tⁿ + Δt instead breaks the order conditions
-    # (Σbᵢcᵢ = 5/6 ≠ 1/2) and leaves `clock.stage` stuck at 2, so per-stage work keyed on
-    # `(iteration, stage)`, such as the filtered surface state, skips the third stage.
-    c¹ = α¹              # = 1
-    c² = α² * (c¹ + 1)   # = 1/2
+    # u^(1) sits at tⁿ + Δt but u^(2) at tⁿ + Δt/2; evaluating G(u^(2)) at tⁿ + Δt breaks third order
+    c¹, c² = AtmosphereModels.stage_abscissae(ts)  # = 1, 1/2
 
-    # Compute the next time step a priori to reduce floating point error accumulation
-    tⁿ⁺¹ = model.clock.time + Δt
+    # Compute the next time a priori to reduce floating point error accumulation; `next_time`
+    # also serves a calendar clock, whose `time` cannot take a `Δt` in seconds directly.
+    tⁿ⁺¹ = next_time(model.clock, Δt)
 
     # Store u^(0) for use in stages 2 and 3
     store_initial_state!(model)
@@ -334,7 +334,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     # Back to tⁿ + Δt/2, the abscissa of u^(2); `corrected_Δt` below restores the Δt/2.
     tick_stage!(model.clock, (c² - c¹) * Δt)
-    update_state!(model, callbacks; compute_tendencies = true)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
 
     #
     # Third stage: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * G(u^(2)))
@@ -357,7 +357,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     # Tendencies are skipped if the microphysics update below recomputes them anyway
     compute_tendencies = !microphysics_model_update_refreshes_state(model.microphysics)
-    update_state!(model, callbacks; compute_tendencies)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks; compute_tendencies)
 
     # Apply the operator-split microphysics update exactly once per step, on the post-RK
     # state just refreshed by `update_state!`. A no-op for tendency-interface schemes.

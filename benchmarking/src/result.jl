@@ -24,6 +24,10 @@ struct BenchmarkResult
     compile_mlir_time_seconds::Float64
     compile_xla_time_seconds::Float64
     gpu_memory_used::Int64
+    gc_time_seconds::Float64
+    allocated_bytes_per_step::Float64
+    allocations_per_step::Float64
+    host_time_per_step_seconds::Float64  # 0 when not measured (Reactant)
     metadata::BenchmarkMetadata
 end
 
@@ -56,6 +60,11 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
         println(io, "│   └── xla: ", @sprintf("%.3f s", r.compile_xla_time_seconds))
     end
     println(io, "├── gpu_memory_used: ", Base.format_bytes(r.gpu_memory_used))
+    println(io, "├── gc_time: ", @sprintf("%.3f s", r.gc_time_seconds))
+    println(io, "├── host allocations per step: ", Base.format_bytes(round(Int, r.allocated_bytes_per_step)),
+                " in ", round(Int, r.allocations_per_step), " allocations")
+    r.host_time_per_step_seconds > 0 &&
+        println(io, "├── host_time_per_step: ", @sprintf("%.6f s", r.host_time_per_step_seconds))
     print(io,   "└── metadata: ", r.metadata.architecture, " @ ", r.metadata.timestamp)
 end
 
@@ -77,6 +86,10 @@ function log_benchmark_result(r::BenchmarkResult)
         @info "      MLIR: $(@sprintf("%.3f", r.compile_mlir_time_seconds)) s"
         @info "      XLA: $(@sprintf("%.3f", r.compile_xla_time_seconds)) s"
     end
+    r.host_time_per_step_seconds > 0 &&
+        @info "    Host time per step: $(@sprintf("%.6f", r.host_time_per_step_seconds)) s (time to enqueue one step, median of $host_time_steps)"
+    @info "    Host allocations per step: $(Base.format_bytes(round(Int, r.allocated_bytes_per_step))) in $(round(Int, r.allocations_per_step)) allocations"
+    @info "    GC time: $(@sprintf("%.3f", r.gc_time_seconds)) s"
     r.gpu_memory_used > 0 && @info "    GPU memory usage: $(Base.format_bytes(r.gpu_memory_used))"
     return nothing
 end

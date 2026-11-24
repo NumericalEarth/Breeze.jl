@@ -210,6 +210,7 @@ function AtmosphereModel(grid;
     # Validate that the radiation's solar position can read the clock, and that its schedule
     # can be evaluated on this architecture (before anything is traced)
     validate_radiation(radiation, clock, grid.architecture)
+    initialize_radiation_schedule!(radiation, clock)
 
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
@@ -277,6 +278,7 @@ function AtmosphereModel(grid;
 
     # Materialize dynamics and formulation
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics, formulation)
+    validate_dynamics_halo(dynamics, grid, momentum_advection, closure)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions;
                                           float_type=thermodynamic_float_type)
 
