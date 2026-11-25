@@ -73,4 +73,3 @@ Closures that supply subgrid statistics add methods for their correlation type; 
 supplies no cloud.
 """
 @inline subgrid_statisticsᶜᶜᶜ(i, j, k, grid, ::NoSubgridCorrelation, closure, closure_fields) = DiracStatistics()
-

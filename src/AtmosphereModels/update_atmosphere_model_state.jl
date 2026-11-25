@@ -809,4 +809,3 @@ Return `timestepper` holding the stage storage of the closure (see
 `AtmosphereModel` calls this once both exist. The default returns `timestepper` unchanged.
 """
 materialize_closure_stage_storage(timestepper, closure_fields, closure, grid) = timestepper
-
