@@ -10,7 +10,7 @@
 ##### gives the variances and the covariance stability functions of their own,
 #####
 #####     θˡⁱ′² = 𝕊ᵛ₁ ℓ² (∂z θˡⁱ)²,   qᵗ′² = 𝕊ᵛ₂ ℓ² (∂z qᵗ)²,   θˡⁱ′qᵗ′ = 𝕊ᵛ₃ ℓ² ∂z θˡⁱ ∂z qᵗ,
-#####     𝕊ᵛ₃ = ρᵛ √(𝕊ᵛ₁ 𝕊ᵛ₂),
+#####     𝕊ᵛ₃ = 𝕏ᵛ √(𝕊ᵛ₁ 𝕊ᵛ₂),
 #####
 ##### of the turbulent Richardson number of the closure's `TurbulentRichardsonStabilityFunction`.
 #####
@@ -24,7 +24,7 @@ of [`TKEBasedTurbulenceClosure`](@ref), in place of the ratio ``𝕊ᶜ / 𝕊�
 
 ```math
 θˡⁱ′² = 𝕊ᵛ₁ ℓ² (∂_z θˡⁱ)², \\qquad qᵗ′² = 𝕊ᵛ₂ ℓ² (∂_z qᵗ)², \\qquad
-θˡⁱ′qᵗ′ = 𝕊ᵛ₃ ℓ² ∂_z θˡⁱ ∂_z qᵗ, \\qquad 𝕊ᵛ₃ = ρᵛ \\sqrt{𝕊ᵛ₁ 𝕊ᵛ₂},
+θˡⁱ′qᵗ′ = 𝕊ᵛ₃ ℓ² ∂_z θˡⁱ ∂_z qᵗ, \\qquad 𝕊ᵛ₃ = 𝕏ᵛ \\sqrt{𝕊ᵛ₁ 𝕊ᵛ₂},
 ```
 
 with ``ℓ`` the closure's mixing length at the face. The functions are of the coordinate
@@ -37,15 +37,15 @@ that type, ``𝕊ᵛ₁`` and ``𝕊ᵛ₂`` are the exponentials of the quadrat
 \\ln 𝕊ᵛ = \\ln ℂᵛ⁰ + \\tfrac{1}{2} \\ln(ℂᵛ⁺ / ℂᵛ⁻) \\, v + \\left[\\tfrac{1}{2} \\ln(ℂᵛ⁺ ℂᵛ⁻) - \\ln ℂᵛ⁰\\right] v².
 ```
 
-The correlation of θˡⁱ and qᵗ is ``r = ρᵛ \\operatorname{sign}(∂_z θˡⁱ ∂_z qᵗ)``, with ``ρᵛ`` the
+The correlation of θˡⁱ and qᵗ is ``r = 𝕏ᵛ \\operatorname{sign}(∂_z θˡⁱ ∂_z qᵗ)``, with ``𝕏ᵛ`` the
 quadratic Bernstein polynomial of ``t = (1 + v) / 2 ∈ (0, 1)`` with the control values
 ``ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺``:
 
 ```math
-ρᵛ = (1 - t)² ℂᵛ₃⁻ + 2 t (1 - t) ℂᵛ₃ᵐ + t² ℂᵛ₃⁺,
+𝕏ᵛ = (1 - t)² ℂᵛ₃⁻ + 2 t (1 - t) ℂᵛ₃ᵐ + t² ℂᵛ₃⁺,
 ```
 
-a convex combination of the three, so ``|r| ≤ 1`` wherever ``|ℂᵛ₃^{-,m,+}| ≤ 1``. ``ρᵛ = ℂᵛ₃⁻`` and
+a convex combination of the three, so ``|r| ≤ 1`` wherever ``|ℂᵛ₃^{-,m,+}| ≤ 1``. ``𝕏ᵛ = ℂᵛ₃⁻`` and
 ``ℂᵛ₃⁺`` in the strongly unstable and stable limits, and ``(ℂᵛ₃⁻ + 2 ℂᵛ₃ᵐ + ℂᵛ₃⁺) / 4`` at neutral.
 ``ℂᵛ₃⁻ = ℂᵛ₃ᵐ = ℂᵛ₃⁺ = 1`` is the perfect correlation of the down-gradient diagnosis.
 
@@ -75,11 +75,11 @@ struct VarianceStabilityFunctions{FT}
     ℂᵛ₂⁰ :: FT
     "variance of qᵗ, strongly stable"
     ℂᵛ₂⁺ :: FT
-    "correlation of θˡⁱ and qᵗ, strongly unstable (the first control value of ``ρᵛ``)"
+    "correlation of θˡⁱ and qᵗ, strongly unstable (the first control value of ``𝕏ᵛ``)"
     ℂᵛ₃⁻ :: FT
-    "correlation of θˡⁱ and qᵗ, middle control value of ``ρᵛ``"
+    "correlation of θˡⁱ and qᵗ, middle control value of ``𝕏ᵛ``"
     ℂᵛ₃ᵐ :: FT
-    "correlation of θˡⁱ and qᵗ, strongly stable (the last control value of ``ρᵛ``)"
+    "correlation of θˡⁱ and qᵗ, strongly stable (the last control value of ``𝕏ᵛ``)"
     ℂᵛ₃⁺ :: FT
 end
 
@@ -94,7 +94,7 @@ function Base.show(io::IO, vs::VarianceStabilityFunctions)
     print(io, summary(vs), '\n',
           "├── 𝕊ᵛ₁ (ℂᵛ₁⁻, ℂᵛ₁⁰, ℂᵛ₁⁺): ", join(prettysummary.((vs.ℂᵛ₁⁻, vs.ℂᵛ₁⁰, vs.ℂᵛ₁⁺)), ", "), '\n',
           "├── 𝕊ᵛ₂ (ℂᵛ₂⁻, ℂᵛ₂⁰, ℂᵛ₂⁺): ", join(prettysummary.((vs.ℂᵛ₂⁻, vs.ℂᵛ₂⁰, vs.ℂᵛ₂⁺)), ", "), '\n',
-          "└── ρᵛ  (ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺): ", join(prettysummary.((vs.ℂᵛ₃⁻, vs.ℂᵛ₃ᵐ, vs.ℂᵛ₃⁺)), ", "))
+          "└── 𝕏ᵛ  (ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺): ", join(prettysummary.((vs.ℂᵛ₃⁻, vs.ℂᵛ₃ᵐ, vs.ℂᵛ₃⁺)), ", "))
 end
 
 function validate_variance_stability_coefficients(coefficients)
@@ -126,7 +126,7 @@ VarianceStabilityFunctions(; ℂᵛ₁⁺ = 1.2, ℂᵛ₂⁺ = 1.2)
 VarianceStabilityFunctions{Float64}
 ├── 𝕊ᵛ₁ (ℂᵛ₁⁻, ℂᵛ₁⁰, ℂᵛ₁⁺): 1.54801, 0.683608, 1.2
 ├── 𝕊ᵛ₂ (ℂᵛ₂⁻, ℂᵛ₂⁰, ℂᵛ₂⁺): 1.54801, 0.683608, 1.2
-└── ρᵛ  (ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺): 1.0, 1.0, 1.0
+└── 𝕏ᵛ  (ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺): 1.0, 1.0, 1.0
 ```
 """
 function VarianceStabilityFunctions(FT::DataType = Oceananigans.defaults.FloatType;
@@ -182,7 +182,7 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The functions ``(𝕊ᵛ₁, 𝕊ᵛ₂, ρᵛ)`` of `vs` at the coordinate ``v = Riᵗ / \\sqrt{1 + Riᵗ²}``. The logarithms
+The functions ``(𝕊ᵛ₁, 𝕊ᵛ₂, 𝕏ᵛ)`` of `vs` at the coordinate ``v = Riᵗ / \\sqrt{1 + Riᵗ²}``. The logarithms
 are taken here, from the coefficients, so that the functions follow coefficients replaced or traced.
 """
 @inline function variance_stability_functions(vs::VarianceStabilityFunctions, v)
@@ -190,8 +190,8 @@ are taken here, from the coefficients, so that the functions follow coefficients
     𝕊ᵛ₂ = evaluate_log_quadratic(log_quadratic_coefficients(vs.ℂᵛ₂⁻, vs.ℂᵛ₂⁰, vs.ℂᵛ₂⁺), v)
     t = (1 + v) / 2
     s = 1 - t
-    ρᵛ = s * s * vs.ℂᵛ₃⁻ + 2 * t * s * vs.ℂᵛ₃ᵐ + t * t * vs.ℂᵛ₃⁺
-    return 𝕊ᵛ₁, 𝕊ᵛ₂, ρᵛ
+    𝕏ᵛ = s * s * vs.ℂᵛ₃⁻ + 2 * t * s * vs.ℂᵛ₃ᵐ + t * t * vs.ℂᵛ₃⁺
+    return 𝕊ᵛ₁, 𝕊ᵛ₂, 𝕏ᵛ
 end
 
 # The local scalar second moments at the interior face k from the differences Δθ, Δq across it and its
@@ -204,14 +204,14 @@ end
     ℓᵐ = closure_fields.ℓᵐ
     αᴺ, αˢ = stratification_and_shear_numbersᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, ℓᵐ)
     v = variance_richardson_coordinate(closure.stability_functions, αᴺ, αˢ)
-    𝕊ᵛ₁, 𝕊ᵛ₂, ρᵛ = variance_stability_functions(vs, v)
+    𝕊ᵛ₁, 𝕊ᵛ₂, 𝕏ᵛ = variance_stability_functions(vs, v)
     ℓ = @inbounds ℓᵐ[i, j, k]
     ∂zθ = Δθ / Δz
     ∂zq = Δq / Δz
     ℓ² = ℓ * ℓ
     return (𝕊ᵛ₁ * ℓ² * ∂zθ * ∂zθ,
             𝕊ᵛ₂ * ℓ² * ∂zq * ∂zq,
-            ρᵛ * sqrt(𝕊ᵛ₁ * 𝕊ᵛ₂) * ℓ² * ∂zθ * ∂zq)
+            𝕏ᵛ * sqrt(𝕊ᵛ₁ * 𝕊ᵛ₂) * ℓ² * ∂zθ * ∂zq)
 end
 
 @inline variance_richardson_coordinate(sf::TurbulentRichardsonStabilityFunction, αᴺ, αˢ) =

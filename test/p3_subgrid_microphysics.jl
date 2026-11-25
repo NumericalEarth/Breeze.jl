@@ -329,7 +329,7 @@ end
 end
 
 # Perfectly correlated scalar moments: with VarianceStabilityFunctions the local covariance of θˡⁱ and qᵗ is
-# ρᵛ √(θˡⁱ′² qᵗ′²), so ℂᵛ₃ = ±1 makes the joint distribution of the components degenerate (the saturation excess of
+# 𝕏ᵛ √(θˡⁱ′² qᵗ′²), so ℂᵛ₃ = ±1 makes the joint distribution of the components degenerate (the saturation excess of
 # a component can have no spread). The column must stay finite there and near there, and the distribution P3 reads
 # must stay realizable.
 @testset "P3 subgrid microphysics: a column at perfectly and nearly perfectly correlated θˡⁱ and qᵗ" begin
@@ -339,8 +339,8 @@ end
     microphysics = PredictedParticlePropertiesMicrophysics(; condensation)
     boundary_conditions = (; ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.2 * 1.5e-2)),
                              ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.2 * 1.5e-5)))
-    for ρᵛ in (1, -1, 0.999, -0.999)
-        variance_stability_functions = VarianceStabilityFunctions(; ℂᵛ₃⁻ = ρᵛ, ℂᵛ₃ᵐ = ρᵛ, ℂᵛ₃⁺ = ρᵛ)
+    for 𝕏ᵛ in (1, -1, 0.999, -0.999)
+        variance_stability_functions = VarianceStabilityFunctions(; ℂᵛ₃⁻ = 𝕏ᵛ, ℂᵛ₃ᵐ = 𝕏ᵛ, ℂᵛ₃⁺ = 𝕏ᵛ)
         closure = TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian(; variance_stability_functions,
                                                                                        variance_transport = ScalarVarianceTransport()),
                                               static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()))

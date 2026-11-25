@@ -630,7 +630,7 @@ end
     end
 end
 
-@testset "VarianceStabilityFunctions: θˡⁱ′² = 𝕊ᵛ₁ ℓ² (∂z θˡⁱ)², qᵗ′² = 𝕊ᵛ₂ ℓ² (∂z qᵗ)², θˡⁱ′qᵗ′ = ρᵛ √(𝕊ᵛ₁ 𝕊ᵛ₂) ℓ² ∂z θˡⁱ ∂z qᵗ" begin
+@testset "VarianceStabilityFunctions: θˡⁱ′² = 𝕊ᵛ₁ ℓ² (∂z θˡⁱ)², qᵗ′² = 𝕊ᵛ₂ ℓ² (∂z qᵗ)², θˡⁱ′qᵗ′ = 𝕏ᵛ √(𝕊ᵛ₁ 𝕊ᵛ₂) ℓ² ∂z θˡⁱ ∂z qᵗ" begin
     moments(model) = (m = model.closure_fields.subgrid_cloud.moments; Array.(interior.((m.θˡⁱ′², m.qᵗ′², m.θˡⁱ′qᵗ′, m.w′θˡⁱ′, m.w′qᵗ′, m.τ))))
     sf = TurbulentRichardsonStabilityFunction()
 
@@ -669,7 +669,7 @@ end
         @test column(reference.closure_fields.subgrid_cloud.cloud.aᶜ) ≈ column(reproduced.closure_fields.subgrid_cloud.cloud.aᶜ) rtol=1e-10
     end
 
-    # Realizability: |θˡⁱ′qᵗ′| ≤ √(θˡⁱ′² qᵗ′²) for any coefficients within their intervals, and the correlation follows ρᵛ
+    # Realizability: |θˡⁱ′qᵗ′| ≤ √(θˡⁱ′² qᵗ′²) for any coefficients within their intervals, and the correlation follows 𝕏ᵛ
     for (ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺) in ((1, 1, 1), (-1, -1, -1), (0.9, -1, 0.3), (-0.5, 1, 1), (0, 0, 0))
         vs = VarianceStabilityFunctions(; ℂᵛ₁⁺ = 2, ℂᵛ₂⁻ = 0.1, ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺)
         model = tke_p3_column(DoubleGaussian(; variance_stability_functions = vs))
@@ -683,8 +683,8 @@ end
         @test all(isfinite, column(model.tracers.ρe))
     end
     for v in range(-1, 1, length = 41)
-        _, _, ρᵛ = Breeze.TurbulenceClosures.variance_stability_functions(VarianceStabilityFunctions(; ℂᵛ₃⁻ = -1, ℂᵛ₃ᵐ = 1, ℂᵛ₃⁺ = -1), v)
-        @test -1 ≤ ρᵛ ≤ 1
+        _, _, 𝕏ᵛ = Breeze.TurbulenceClosures.variance_stability_functions(VarianceStabilityFunctions(; ℂᵛ₃⁻ = -1, ℂᵛ₃ᵐ = 1, ℂᵛ₃⁺ = -1), v)
+        @test -1 ≤ 𝕏ᵛ ≤ 1
     end
 
     # Larger stable variance: larger variances where the column is stratified, the fluxes unchanged
