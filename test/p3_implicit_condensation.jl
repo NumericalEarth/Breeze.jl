@@ -12,8 +12,8 @@ using Breeze.Microphysics.PredictedParticleProperties: PredictedParticleProperti
                                                        LiquidRelaxationStage, GridLiquidRelaxationStage,
                                                        compute_p3_process_rates, liquid_equilibrium_condensate
 using Breeze.Thermodynamics: ThermodynamicConstants, MoistureMassFractions, LiquidIcePotentialTemperatureState,
-                             with_temperature, saturation_specific_humidity, PlanarLiquidSurface, density,
-                             temperature, air_pressure
+                             with_temperature, with_moisture, saturation_specific_humidity,
+                             PlanarLiquidSurface, PlanarIceSurface, density, temperature, air_pressure
 using Enzyme: Enzyme, autodiff, Forward, Duplicated, Const
 using Test
 
@@ -151,8 +151,8 @@ end
     @test compute_p3_process_rates(arguments..., nothing, nothing) == explicit
 
     # On the grid the stage is read from the tendencies and the state the stage starts from
-    fields = (; ρqᶜˡ = fill(3e-4, 1, 1, 1))
-    G = (; ρqᶜˡ = fill(-1e-6, 1, 1, 1))
+    fields = map(x -> fill(x, 1, 1, 1), (; ρqᵛ = qᵛ, ρqᶜˡ = 3e-4, ρqʳ = 1e-4, ρqʷⁱ = 0.0))
+    G = map(x -> fill(x, 1, 1, 1), (; ρqᵛ = 0.0, ρqᶜˡ = -1e-6, ρqʳ = 0.0, ρqʷⁱ = 0.0))
     unknown = GridLiquidRelaxationStage(1, 1, 1, G, StageStart(fields, fields, false, Inf))
     @test compute_p3_process_rates(arguments..., nothing, unknown) == explicit
 
@@ -161,9 +161,201 @@ end
     @test stage.active
     @test stage.Δt == 20
     @test stage.qᶜˡ ≈ 3e-4 - 20 * 1e-6
+    @test stage.Δqᵛ == 0
+    @test stage.qʳ == 1e-4
+    @test stage.qʷⁱ == 0
     implicit = compute_p3_process_rates(arguments..., nothing, known)
     @test implicit == compute_p3_process_rates(arguments..., nothing, stage)
     @test 0 < implicit.condensation < explicit.condensation
+end
+
+@testset "Ice cap sees the stage-integrated liquid exchange" begin
+    constants = ThermodynamicConstants(Float64)
+    T, P, τ = 263.0, 9e4, 10.0
+    vapor = 2.3e-3
+    function capped_deposition(cond, interval; coat_cond=1e-7)
+        liquid = (; cond, ccn_activation_mass=0.0, ccn_activation_number=0.0,
+                  rain_cond=0.0, rain_evap=0.0, coat_cond, coat_evap=0.0)
+        return PPP.limit_ice_vapor_rates(liquid, 1e-3, 0.0, 0.0, vapor, T, P, vapor,
+                                         constants, τ, 273.15, 0.0, 0.0, interval).dep
+    end
+    @test 0 < capped_deposition(1e-5, 2.0) < capped_deposition(0.0, 2.0)
+    # Cloud and coating exchange are both projected over the stage interval
+    @test capped_deposition(1e-5, 2.0) ≈ capped_deposition(2e-6, τ; coat_cond=2e-8)
+    @test capped_deposition(0.0, 2.0) > capped_deposition(0.0, 2.0; coat_cond=1e-5)
+    # A stage longer than the limiting timescale consumes the ice excess once, not Δt / τ times.
+    @test 50 * capped_deposition(0.0, 50.0; coat_cond=0.0) ≈ τ * capped_deposition(0.0, τ; coat_cond=0.0)
+end
+
+@testset "Stage vapor excess follows the limited phase changes, not the host" begin
+    constants = ThermodynamicConstants(Float64)
+    p3 = P3Microphysics(Float64; vapor_excess=PrognosticVaporExcess())
+    ρ, cloud = 1.0, 3e-4
+    vapor = cell_saturation(cloud, constants) + 2e-4
+    𝒰 = cell_state(vapor, cloud, constants)
+    # The prognostic vapor excess is zero and the host's is not, so the alignment is active.
+    ℳ = cell_microphysics(cloud, 1e8)
+    host_excess = PPP.vapor_excess_after_moisture_update(𝒰, vapor, cloud, 0.0, constants)
+    @test abs(host_excess - ℳ.δqᵛ⁺ˡ) > 1e-4
+    inputs = (; ρ, 𝒰, ℳ, temperature_tendency=0.0, pressure_tendency=0.0)
+    properties = PPP.p3_process_properties(p3, ρ, ℳ)
+
+    function limited_stage(Δt, ρqᵛ)
+        rates = stage_rates(p3, vapor, cloud, constants, Δt)
+        fields = (; ρqᵛ, ρqᶜˡ=cloud, ρqʳ=0.0, ρnʳ=0.0, ρqⁱ=0.0, ρnⁱ=0.0, ρqʷⁱ=0.0)
+        fields = map(x -> fill(x, 1, 1, 1), fields)
+        G = map(zero, fields)
+        stage = StageStart(fields, fields, false, Δt)
+        φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
+        limited = PPP.patankar_limited_rates(rates, φ)
+        tendency = PPP.stage_vapor_excess_tendency(p3.process_rates, inputs, stage, constants,
+                                                   limited, rates.condensation)
+        return rates, limited, tendency
+    end
+
+    for Δt in (2.0, 20.0)
+        # Nothing is limited: the tendency is the one the rates project from the aligned state,
+        # less the part of it that takes the prognostic excess to the diagnosis of that state.
+        rates, limited, tendency = limited_stage(Δt, vapor)
+        @test limited.condensation ≈ rates.condensation
+        ε = p3.process_rates.sink_limiting_timescale * rates.prognostic_vapor_excess_adjustment
+        aligned_excess = PPP.vapor_excess_after_moisture_update(𝒰, vapor - ε, cloud + ε, 0.0, constants)
+        @test tendency / ρ ≈ rates.prognostic_vapor_excess_tendency - (aligned_excess - ℳ.δqᵛ⁺ˡ) / Δt rtol=1e-6
+
+        # A stage with an exhausted vapor donor applies no condensation and no alignment. The
+        # prognostic vapor excess then stays where it is, whatever the stage interval, and is
+        # not drawn to the host's.
+        rates, limited, tendency = limited_stage(Δt, 0.0)
+        @test rates.condensation > 0
+        @test limited.condensation == 0
+        @test abs(Δt * tendency / ρ) < 0.05 * abs(host_excess - ℳ.δqᵛ⁺ˡ)
+    end
+end
+
+@testset "Transported cloud does not drive condensation or evaporation" begin
+    constants = ThermodynamicConstants(Float64)
+    p3 = P3Microphysics(Float64)
+    cloud, Δt = 3e-4, 20.0
+    ℳ = cell_microphysics(cloud, 1e8)
+    function condensation(vapor, remainder)
+        𝒰 = cell_state(vapor, cloud, constants)
+        return compute_p3_process_rates(p3, 1.0, ℳ, 𝒰, constants, nothing, 285.0, 0.0, 0.0, nothing,
+                                        LiquidRelaxationStage(Δt, remainder, 1e8, true)).condensation
+    end
+    # Keep the rate state fixed and advect cloud into and out of the cell.
+    saturated = cell_saturation(cloud, constants)
+    for remainder in (cloud / 2, 2cloud)
+        @test condensation(saturated, remainder) ≈ condensation(saturated, cloud)
+    end
+
+    # In dry air the cloud evaporates no more than the stage leaves of it...
+    dry = saturated - 1e-3
+    @test condensation(dry, cloud) < 0
+    @test 0 < -Δt * condensation(dry, 1e-5) ≤ 1e-5
+    # ...and a negative remainder is refilled from vapor, not left negative.
+    refill = Δt * condensation(dry, -1e-5)
+    @test 0 < refill ≤ 1e-5
+end
+
+@testset "Stages that restart from the step start keep the condensate of earlier stages" begin
+    constants = ThermodynamicConstants(Float64)
+    p3 = P3Microphysics(Float64)
+    cloud = 3e-4
+    # Three stages of growing length from one step start, with no transport: each is evaluated
+    # at the state the one before it left, which is nearly saturated after the first.
+    for excess in (1e-4, -1e-4)
+        vapor = cell_saturation(cloud, constants) + excess
+        start = cell_state(vapor, cloud, constants)
+        state, rate_vapor, rate_cloud = start, vapor, cloud
+        increments = map((100.0, 150.0, 300.0)) do Δt
+            stage = LiquidRelaxationStage(Δt, cloud, 1e8, true, vapor - rate_vapor, Inf, Inf)
+            r = compute_p3_process_rates(p3, 1.0, cell_microphysics(rate_cloud, 1e8), state, constants,
+                                         nothing, 285.0, 0.0, 0.0, nothing, stage)
+            increment = Δt * (r.condensation + r.ccn_activation_mass)
+            rate_vapor, rate_cloud = vapor - increment, cloud + increment
+            state = with_moisture(start, MoistureMassFractions(rate_vapor, rate_cloud, 0.0))
+            increment
+        end
+        @test all(sign.(increments) .== sign(excess))
+        # A longer stage from the same start exchanges no less, and none overshoots saturation
+        @test abs(increments[1]) ≤ abs(increments[2]) ≤ abs(increments[3])
+        @test abs(increments[3]) < 1.1 * abs(increments[1])
+        final = PPP.vapor_excess_after_moisture_update(start, rate_vapor, rate_cloud, 0.0, constants)
+        @test 0 ≤ final / excess < 0.05
+    end
+end
+
+@testset "Prognostic vapor excess does not move without phase change or forcing" begin
+    constants = ThermodynamicConstants(Float64)
+    p3 = P3Microphysics(Float64; vapor_excess=PrognosticVaporExcess())
+    # No cloud to evaporate, so the alignment cannot bring the host to the prognostic excess
+    vapor = cell_saturation(0.0, constants) - 6.6e-3
+    𝒰 = cell_state(vapor, 0.0, constants)
+    ℳ = P3MicrophysicalState(ntuple(_ -> 0.0, 9)..., -1e-3, 0.0, 0.0)
+    host_excess = PPP.vapor_excess_after_moisture_update(𝒰, vapor, 0.0, 0.0, constants)
+    @test abs(host_excess - ℳ.δqᵛ⁺ˡ) > 5e-3
+    inputs = (; ρ=1.0, 𝒰, ℳ, temperature_tendency=0.0, pressure_tendency=0.0)
+    fields = map(x -> fill(x, 1, 1, 1), (; ρqᵛ=vapor, ρqᶜˡ=0.0, ρqʳ=0.0, ρnʳ=0.0, ρqⁱ=0.0, ρnⁱ=0.0, ρqʷⁱ=0.0))
+    for Δt in (0.2, 2.0)
+        rates = compute_p3_process_rates(p3, 1.0, ℳ, 𝒰, constants, nothing, 285.0, 0.0, 0.0, nothing,
+                                         LiquidRelaxationStage(Δt, 0.0, 0.0, true))
+        @test rates.condensation == 0
+        @test rates.deposition == 0
+        stage = StageStart(fields, fields, false, Δt)
+        @test PPP.stage_vapor_excess_tendency(p3.process_rates, inputs, stage, constants,
+                                              rates, rates.condensation) == 0
+    end
+end
+
+@testset "Ice cap sees only the liquid exchange that the stage applies" begin
+    constants = ThermodynamicConstants(Float64)
+    p3 = P3Microphysics(Float64)
+    T, Δt = 263.0, 300.0
+    𝒰 = cell_state(1e-3, 0.0, constants; T)
+    liquid_saturation = saturation_specific_humidity(T, density(𝒰, constants), constants, PlanarLiquidSurface())
+    ice_saturation = saturation_specific_humidity(T, density(𝒰, constants), constants, PlanarIceSurface())
+    ice_excess = (liquid_saturation - ice_saturation) / 50
+    𝒰 = cell_state(ice_saturation + ice_excess, 0.0, constants; T)
+    # Rain at the state the rates see, in air below liquid and just above ice saturation
+    ℳ = P3MicrophysicalState(0.0, 0.0, 1e-3, 1e4, 1e-3, 1e6, ntuple(_ -> 0.0, 6)...)
+    rates(rain) = compute_p3_process_rates(p3, 1.0, ℳ, 𝒰, constants, nothing, T, 0.0, 0.0, nothing,
+                                           LiquidRelaxationStage(Δt, 0.0, 0.0, true, 0.0, rain, Inf))
+    supplied, empty = rates(Inf), rates(0.0)
+    # The rate asks for the same evaporation either way; the stage applies none of it where it
+    # leaves no rain, and deposition then takes no more than the ice excess holds
+    @test supplied.rain_evaporation > 0
+    @test empty.rain_evaporation == supplied.rain_evaporation
+    @test 0 < Δt * empty.deposition ≤ ice_excess
+    @test Δt * supplied.deposition > ice_excess
+    @test empty.deposition < rates(1e-6).deposition < supplied.deposition
+
+    # Coating evaporation is projected over the stage, and no further than the coating it leaves
+    liquid = (; cond=0.0, ccn_activation_mass=0.0, ccn_activation_number=0.0, rain_cond=0.0,
+              rain_evap=0.0, coat_cond=0.0, coat_evap=1e-7)
+    qᵛ = ice_saturation + ice_excess
+    P = air_pressure(𝒰, constants)
+    capped(coating) = PPP.limit_ice_vapor_rates(liquid, 1e-6, 0.0, 0.0, qᵛ, T, P, qᵛ, constants, 10.0, 273.15,
+                                                0.0, 0.0, Δt, 0.0, Inf, coating).dep
+    @test capped(0.0) < capped(1e-6) < capped(Inf)
+    @test capped(Inf) ≈ capped(Δt * 1e-7)
+end
+
+@testset "Activation and rain growth share the vapor excess" begin
+    constants = ThermodynamicConstants(Float64)
+    p3 = P3Microphysics(Float64)
+    vapor = cell_saturation(0.0, constants)
+    for _ in 1:5
+        state = cell_state(vapor, 0.0, constants)
+        vapor = saturation_specific_humidity(285.0, density(state, constants), constants, PlanarLiquidSurface()) + 1e-7
+    end
+    𝒰 = cell_state(vapor, 0.0, constants)
+    saturation = saturation_specific_humidity(285.0, density(𝒰, constants), constants, PlanarLiquidSurface())
+    ξˡ = PPP.p3_liquid_psychrometric_correction(saturation, 285.0, constants)
+    Δt = 1e4
+    r = stage_rates(p3, vapor, 0.0, constants, Δt; qʳ = 1e-3, nʳ = 1e6)
+    @test r.rain_condensation > 0
+    @test r.ccn_activation_mass > 0
+    @test Δt * (r.ccn_activation_mass + r.rain_condensation) ≤ (vapor - saturation) / ξˡ * (1 + 5eps())
 end
 
 @testset "Implicit activation relaxes toward the activated number" begin

@@ -98,6 +98,31 @@ function p3_process_rates_with(FT; kwargs...)
     return P3ProcessRates(values...)
 end
 
+@testset "Stage number budgets follow the applied donor transfers" begin
+    p3 = P3Microphysics(Float64; aerosol = PPP.AerosolActivation(PPP.AerosolMode(Float64)))
+    ρ, Δt = 1.0, 2.0
+    ℳ = P3MicrophysicalState(1e-3, 1e8, 1e-3, 1e5, 1e-4, 2e4, 0.0, 0.0, 2e-4, 0.0, 0.0, 0.0)
+    properties = PPP.p3_process_properties(p3, ρ, ℳ)
+    reservoirs = (; ρqᵛ=0.01, ρqᶜˡ=0.0, ρnᶜˡ=10.0, ρqʳ=1e-3, ρnʳ=1e7,
+                    ρqⁱ=0.0, ρnⁱ=2e4, ρqʷⁱ=2e-4)
+    fields = map(x -> fill(x, 1, 1, 1), reservoirs)
+    G = map(x -> zero(x), fields)
+    stage = Breeze.AtmosphereModels.StageStart(fields, fields, false, Δt)
+    rates = p3_process_rates_with(Float64; cloud_self_collection=1e8, cloud_homogeneous_number=1e7,
+                                  rain_homogeneous_number=1e7, homogeneous_number_excess=1e7,
+                                  cloud_riming=1e-4, rain_riming=2e-4, splintering_number=60.0,
+                                  coating_evaporation=1e-6, coating_evaporation_number=20.0,
+                                  sublimation_number=30.0, deposition=-1e-6)
+    φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
+    limited = PPP.patankar_limited_rates(rates, φ)
+    @test φ.ice_number ≈ reservoirs.ρnⁱ / (reservoirs.ρnⁱ + Δt * rates.sublimation_number)
+    @test reservoirs.ρnᶜˡ + Δt * tendency_ρnᶜˡ(limited, ρ, properties.Nᶜˡ, ℳ.qᶜˡ, p3) ≥ 0
+    @test 0 < limited.cloud_self_collection < rates.cloud_self_collection
+    @test limited.splintering_number ≈ 60 * limited.rain_riming / (rates.cloud_riming + rates.rain_riming)
+    @test limited.sublimation_number ≈ rates.coating_evaporation_number * min(φ.coating, φ.ice_number)
+    @test reservoirs.ρnⁱ + Δt * tendency_ρnⁱ(limited, ρ) ≈ p3.process_rates.maximum_ice_number_density
+end
+
 # Build a real p3 with a specific `process_rates`/`warm_rain_scheme`. Used in
 # tests that only need to exercise `tendency_ρnʳ` / `tendency_ρnᶜˡ` (which read
 # both fields). Prefer this over a NamedTuple shim so future field additions to
@@ -503,6 +528,7 @@ end
             FT(0),      # post_process_clipping
             # Sublimation number loss
             FT(0.0),    # sublimation_number
+            FT(0.0),    # coating_evaporation_number
             # Phase 2: Aggregation (positive magnitude)
             FT(500.0),  # aggregation
             FT(0.0),    # ni_limit (global Nⁱ cap; zero in warm-environment test)

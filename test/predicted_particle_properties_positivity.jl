@@ -106,7 +106,7 @@ one_cell_fields(values) = NamedTuple{p3_density_names}(map(v -> fill(v, 1, 1, 1)
                                              temperature(𝒰, constants), zero(FT), zero(FT),
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
 
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
             result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited_rates)
             relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates, result)
@@ -257,7 +257,7 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
             stage = StageStart(fields, fields, false, Δt)
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z,
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # Evaporation is drawn in full: the air is dry enough that the equilibrium condensate
@@ -302,7 +302,7 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
             stage = StageStart(fields, fields, false, Δt)
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z,
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # Evaporation is faster than the timescale budget would let the number follow...
@@ -334,7 +334,7 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
             stage = StageStart(fields, fields, false, Δt)
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, T, z, z,
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # The activated number exceeds the reservoir, so the droplet number relaxes toward
@@ -371,7 +371,7 @@ end
 
     @testset "Δt = $Δt s" for Δt in (5, 45, 200, 5000)
         Δt = FT(Δt)
-        overdrawn = zeros(Int, 4)             # vapor, cloud, rain, aerosol
+        overdrawn = zeros(Int, 5)             # vapor, cloud, rain, aerosol, cloud number
         limited_twice = zeros(Int, 4)         # an implicit draw that fits but was scaled
         evaporating, condensing, activating = 0, 0, 0
 
@@ -397,13 +397,14 @@ end
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                              temperature(𝒰, constants), zero(FT), zero(FT),
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # Everything drawn from a donor, implicit and explicit, fits in what the stage leaves of it.
             available = (c̃[1], c̃[2], c̃[3], c̃[11])
             drawn = Δt .* ρ .* (p3_donor_losses(limited_rates)..., limited_rates.ccn_activation_number)
-            overdrawn .+= drawn .> available .* (1 + roundoff)
+            cloud_number_draw = Δt * ρ * PPP.cloud_number_loss(limited_rates, ρ, properties.Nᶜˡ, ℳ.qᶜˡ, p3)
+            overdrawn .+= (drawn..., cloud_number_draw) .> (available..., c̃[10]) .* (1 + roundoff)
 
             # An implicit draw that fits in what the stage leaves of its donor is taken in full.
             condensation = max(0, rates.condensation) + rates.ccn_activation_mass + rates.rain_condensation
@@ -473,7 +474,7 @@ ice_number_after_sinks(n, Δt, rates) =
         stage = StageStart(fields, fields, false, Δt)
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, temperature(𝒰, constants), z, z,
                                          nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-        φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+        φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
         limited_rates = PPP.patankar_limited_rates(rates, φ)
         result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited_rates)
         relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates, result)
@@ -619,7 +620,7 @@ end
             rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                              temperature(𝒰, constants), zero(FT), zero(FT),
                                              nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
             limited = PPP.patankar_limited_rates(rates, φ)
 
             # Rain: the mass that the limited mass sinks leave, the number it needs, and the

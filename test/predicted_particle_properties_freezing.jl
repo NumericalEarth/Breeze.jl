@@ -658,6 +658,7 @@ using Oceananigans.Fields: interior
             FT(0),      # clipping_rime_volume
             FT(0),      # post_process_clipping
             FT(0.0),    # sublimation_number (nisub)
+            FT(0.0),    # coating_evaporation_number
             FT(500.0),  # aggregation (positive magnitude)
             FT(0.0),    # ni_limit (global Nⁱ cap)
             FT(1e-7),   # cloud_riming
