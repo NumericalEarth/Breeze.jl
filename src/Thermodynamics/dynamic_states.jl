@@ -509,7 +509,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the latent energy of moist air relative to liquid water at zero kelvin,
 ``ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``, with the latent heats ``ℒˡ₀`` and ``ℒⁱ₀`` extrapolated to absolute
-zero ([`absolute_zero_latent_heat`](@ref)). Vapor carries ``ℒˡ₀`` above liquid water and ice
+zero (`absolute_zero_latent_heat`). Vapor carries ``ℒˡ₀`` above liquid water and ice
 ``ℒⁱ₀ - ℒˡ₀`` below it, so that the specific internal energy is
 ``𝓊 = cᵛᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ`` and the specific enthalpy is
 ``h = cᵖᵐ T + ℒˡ₀ qᵛ + (ℒˡ₀ - ℒⁱ₀) qⁱ``.

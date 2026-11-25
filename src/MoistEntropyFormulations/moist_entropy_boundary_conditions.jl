@@ -74,7 +74,7 @@ end
 """
 $(TYPEDEF)
 
-Tells a [`BulkSensibleHeatFlux`](@ref) on the moist entropy to form an energy flux from the
+Tells a [`BulkSensibleHeatFlux`](@ref Breeze.BoundaryConditions.BulkSensibleHeatFlux) on the moist entropy to form an energy flux from the
 static-energy difference ``cᵖᵐ (T - Tˢ) + g (z - zˢ)`` between the adjacent cell and the wall, which
 [`EntropyFluxBoundaryConditionFunction`](@ref) then divides by the cell temperature.
 """
