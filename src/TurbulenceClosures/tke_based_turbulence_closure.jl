@@ -8,9 +8,11 @@
 #####
 ##### The static stability N² is diagnosed once per stage at the cell interfaces and stored with the
 ##### closure fields, so that the mixing length, the buoyancy flux and the stability functions all
-##### see one value. `MoistStaticStability` (the default) is the gradient of the buoyancy of the
-##### dynamics, ∂z_b, where the air is subsaturated, and the buoyancy frequency of a saturated
-##### displacement where it is saturated; `DryStaticStability` is ∂z_b everywhere (static_stability.jl).
+##### see one value. `MoistStaticStability` (the default without a subgrid distribution) is the gradient of the
+##### buoyancy of the dynamics, ∂z_b, where the air is subsaturated, and the buoyancy frequency of a saturated
+##### displacement where it is saturated; `DryStaticStability` is ∂z_b everywhere (static_stability.jl). With a
+##### subgrid distribution the default is the latent static stability of the distribution,
+##### `SaturationWeightedStaticStability(CondensateFluxFraction())` (subgrid_distribution.jl).
 #####
 ##### Three formulations of the mixing length share the wall coefficient ℂˢ and are computed column by
 ##### column, once per stage, into `closure_fields.ℓᵐ`: `LocalMinimumMixingLength`, ℓ = min(ℂˢ z, ℓᵇ),
@@ -387,8 +389,9 @@ primary mixing length ([`AbstractMixingLength`](@ref): [`GradientLimitedMixingLe
 ([`TurbulentRichardsonStabilityFunction`](@ref) by default, [`RationalStabilityFunction`](@ref) or
 [`ConstantStabilityFunctions`](@ref)). ``N²`` is
 diagnosed once per time-step stage at the cell
-interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default,
-[`DryStaticStability`](@ref) or [`SaturationWeightedStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
+interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default without a subgrid
+distribution, [`SaturationWeightedStaticStability`](@ref)`(`[`CondensateFluxFraction`](@ref)`())` by default with one,
+or [`DryStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
 the tracer `ρe`, which the
 closure adds to the model; it is advected and vertically diffused like every other scalar, and the
 closure applies the local production, buoyancy flux and dissipation.
@@ -492,8 +495,13 @@ limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``; where ``S² ≫ S²ᵐⁱⁿ`` the
 ``S²ᵐⁱⁿ / S²``. The shear does not enter [`ConstantStabilityFunctions`](@ref).
 
 `subgrid_distribution` (default `nothing`) is a [`DoubleGaussian`](@ref), or `nothing` for none.
-`static_stability = SaturationWeightedStaticStability(CondensateFluxFraction())` weights the
-saturated static stability by the condensate flux fraction of the distribution; `solver`
+The default `static_stability` follows it: [`MoistStaticStability`](@ref) without a distribution, and with one
+the latent static stability of the distribution, `SaturationWeightedStaticStability(CondensateFluxFraction())`, which
+weights the saturated static stability by the condensate flux fraction of the distribution, so that the static
+stability and the buoyancy production of the TKE are one ([`LatentStratification`](@ref)). In dry air the condensate
+flux vanishes and it is the stratification of the buoyancy derivatives of the dynamics, which differs from the
+``g ∂_z \ln θᵨ`` of [`MoistStaticStability`](@ref) by the factor ``ρ / ρᵣ`` of the derivative of
+``b = -g (ρ - ρᵣ) / ρᵣ``. `solver`
 ([`SinglePass`](@ref) by default, [`DampedFixedPoint`](@ref), [`BracketedFractionSolve`](@ref), ...)
 solves that coupling.
 
@@ -519,7 +527,8 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    FT = Oceananigans.defaults.FloatType;
                                    mixing_length = GradientLimitedMixingLength(ℂˢ = 1.299067385616381, ℂⁱ = 1.5609936948461662),
                                    stability_functions = TurbulentRichardsonStabilityFunction(),
-                                   static_stability = MoistStaticStability(),
+                                   subgrid_distribution = nothing,
+                                   static_stability = default_static_stability(subgrid_distribution),
                                    maximum_viscosity = Inf,
                                    maximum_tracer_diffusivity = Inf,
                                    maximum_tke_diffusivity = Inf,
@@ -529,7 +538,6 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    # CATKE's value; atmospheric turbulence evolves faster than the
                                    # ocean's, so a shorter time scale may be more appropriate here.
                                    negative_tke_damping_time_scale = 1minute,
-                                   subgrid_distribution = nothing,
                                    solver = SinglePass(),
                                    heating_budget_flux = nothing,
                                    total_water_budget_flux = nothing) where TD
@@ -568,6 +576,11 @@ end
 
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
     TKEBasedTurbulenceClosure(VerticallyImplicitTimeDiscretization(), FT; kw...)
+
+# The static stability of the closure without one given: the latent static stability of the subgrid distribution where
+# there is one, `MoistStaticStability()` otherwise
+default_static_stability(::Nothing) = MoistStaticStability()
+default_static_stability(subgrid_distribution) = SaturationWeightedStaticStability(CondensateFluxFraction())
 
 @inline convert_eltype(::Type{FT}, sf::ConstantStabilityFunctions) where FT =
     ConstantStabilityFunctions{FT}(convert(FT, sf.ℂᵘ), convert(FT, sf.ℂᶜ), convert(FT, sf.ℂᵉ), convert(FT, sf.ℂᴰ))

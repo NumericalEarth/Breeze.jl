@@ -33,7 +33,7 @@ Static stability using the dry buoyancy gradient in subsaturated air and the sat
 buoyancy frequency of [Durran and Klemp (1982)](@cite DurranKlemp1982) otherwise.
 The saturation test excludes precipitating water, while its density loading remains in the
 buoyancy frequency. Latent heat follows the microphysics' phase equilibrium. This is the
-default for [`TKEBasedTurbulenceClosure`](@ref).
+default for [`TKEBasedTurbulenceClosure`](@ref) without a subgrid distribution.
 """
 struct MoistStaticStability end
 

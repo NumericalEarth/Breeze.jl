@@ -317,7 +317,8 @@ end
     @test Breeze.TurbulenceClosures.stability_iterations(Breeze.TurbulenceClosures.AppliedFluxEnergetics(DampedFixedPoint(; iterations = 3))) == 3
     @test Breeze.TurbulenceClosures.stability_iterations(Breeze.TurbulenceClosures.AppliedFluxEnergetics(SinglePass())) == 0
     @test_throws ArgumentError DampedFixedPoint(; iterations = -1)
-    @test_throws ArgumentError TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian(), solver = DampedFixedPoint())
+    @test_throws ArgumentError TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian(), static_stability = MoistStaticStability(),
+                                                         solver = DampedFixedPoint())
     @test DampedFixedPoint(; iterations = 3, relaxation = 0.5).relaxation == 0.5
     @test_throws ArgumentError DampedFixedPoint(; relaxation = 0)
     @test_throws ArgumentError DampedFixedPoint(; relaxation = 1.5)
@@ -406,8 +407,10 @@ end
     @test closure.static_stability.fraction.initial_stability isa DryStaticStability
     @test sprint(show, closure.static_stability) == "SaturationWeightedStaticStability(CondensateFluxFraction(DryStaticStability))"
     @test CondensateFluxFraction() == CondensateFluxFraction(DryStaticStability())
-    # Without the fraction the static stability is left alone
-    @test TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian()).static_stability isa MoistStaticStability
+    # With a distribution and no static stability given, the fraction is the default; without one, MoistStaticStability
+    @test TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian()).static_stability ==
+          SaturationWeightedStaticStability(CondensateFluxFraction())
+    @test TKEBasedTurbulenceClosure().static_stability isa MoistStaticStability
     # The fraction needs the distribution
     @test_throws ArgumentError TKEBasedTurbulenceClosure(; static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()))
 end

@@ -89,7 +89,7 @@ lies below the hard one by an amount that depends on ``p`` and on the grid spaci
 ``N²`` enters the stratification length, the buoyancy flux, and ``Ri``. It is diagnosed once per
 stage at cell interfaces and stored in `closure_fields.N²`, according to the closure's
 `static_stability`. [`DryStaticStability`](@ref) uses ``g \, ∂_z \ln θᵨ``, with ``θᵨ`` the density
-potential temperature. [`MoistStaticStability`](@ref), the default, uses the dry value where
+potential temperature. [`MoistStaticStability`](@ref), the default without a subgrid distribution, uses the dry value where
 subsaturated and, where saturated, the saturated buoyancy frequency of
 [Durran and Klemp (1982)](@cite DurranKlemp1982),
 
@@ -115,7 +115,9 @@ mixing length reads the stored `closure_fields.ℓᵐ` of the previous update, b
 diagnosed before ``ℓ``. With a `subgrid_distribution` ([`DoubleGaussian`](@ref)) the fraction can be
 [`CondensateFluxFraction`](@ref), ``aᴺ = w′qᶜ′ / w′s′``; because it depends on the diffusivities,
 the closure's `solver` ([`SinglePass`](@ref), [`DampedFixedPoint`](@ref) or
-[`BracketedFractionSolve`](@ref)) solves the two together.
+[`BracketedFractionSolve`](@ref)) solves the two together. With a distribution,
+`SaturationWeightedStaticStability(CondensateFluxFraction())` is the default: the static stability is then the
+one the buoyancy production of the TKE carries, latent part included ([`LatentStratification`](@ref)).
 
 ### Stability functions
 
