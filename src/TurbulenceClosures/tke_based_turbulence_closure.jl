@@ -500,7 +500,7 @@ the latent static stability of the distribution, `SaturationWeightedStaticStabil
 weights the saturated static stability by the condensate flux fraction of the distribution, so that the static
 stability and the buoyancy production of the TKE are one ([`LatentStratification`](@ref)). In dry air the condensate
 flux vanishes and it is the stratification of the buoyancy derivatives of the dynamics, which differs from the
-``g ∂_z \ln θᵨ`` of [`MoistStaticStability`](@ref) by the factor ``ρ / ρᵣ`` of the derivative of
+``g ∂_z \\ln θᵨ`` of [`MoistStaticStability`](@ref) by the factor ``ρ / ρᵣ`` of the derivative of
 ``b = -g (ρ - ρᵣ) / ρᵣ``. `solver`
 ([`SinglePass`](@ref) by default, [`DampedFixedPoint`](@ref), [`BracketedFractionSolve`](@ref), ...)
 solves that coupling.
