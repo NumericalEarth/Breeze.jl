@@ -151,7 +151,8 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     # in `implicit_substep!`, so the moved content takes the same closure diffusion as the rest
     # of the field; its implicit vertical transport ran inside the substep loop, before this
     # step (a first-order splitting difference).
-    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, Δt_stage, velocities)
+    isnothing(model.timestepper.implicit_solver) ||
+        implicit_sedimentation_step!(model, Δt_stage, velocities, model.formulation, ρ)
 
     return nothing
 end
