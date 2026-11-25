@@ -49,6 +49,36 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
+Return the factor ``(r₀ / r)²`` by which the solar irradiance at the top of the atmosphere differs
+from the solar constant on day `day_of_year`, where ``r`` is the Earth–Sun distance and ``r₀`` its mean.
+It is largest near perihelion in early January (about 1.034) and smallest near aphelion in early July (about 0.967).
+
+Uses the approximation by [Spencer (1971)](@cite spencer1971fourier):
+
+```math
+(r₀ / r)² = 1.000110 + 0.034221 \\cos(γ) + 0.001280 \\sin(γ) + 0.000719 \\cos(2γ) + 0.000077 \\sin(2γ)
+```
+
+where ``γ = 2π (d - 1) / 365`` is the fractional year in radians and ``d`` is the day of year.
+
+```jldoctest
+julia> using Breeze.CelestialMechanics: earth_sun_distance_factor
+
+julia> round(earth_sun_distance_factor(3), digits=3)
+1.035
+
+julia> round(earth_sun_distance_factor(185), digits=3)
+0.967
+```
+"""
+function earth_sun_distance_factor(day_of_year)
+    γ = 2π * (day_of_year - 1) / 365
+    return 1.000110 + 0.034221 * cos(γ) + 0.001280 * sin(γ) + 0.000719 * cos(2γ) + 0.000077 * sin(2γ)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
 Compute the equation of time (in minutes) for a given day of year.
 
 This accounts for the difference between mean solar time and apparent solar time

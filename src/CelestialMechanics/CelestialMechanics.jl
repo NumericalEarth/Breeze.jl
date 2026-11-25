@@ -3,6 +3,7 @@ module CelestialMechanics
 export cos_solar_zenith_angle,
        solar_declination,
        equation_of_time,
+       earth_sun_distance_factor,
        hour_angle,
        day_of_year
 

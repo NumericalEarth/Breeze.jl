@@ -181,6 +181,11 @@ previous_float_type = Oceananigans.defaults.FloatType
         _, _, _, ℐ_sw_dn_a, _ = column_fluxes(apparent)
         @test -ℐ_sw_dn_a[Nz+1] < S₀ * cos_zenith
         @test -ℐ_sw_dn_a[Nz+1] > 0.5 * S₀ * cos_zenith
+
+        # Near aphelion the sun is farther than its mean distance: the irradiance is about 3% below S₀
+        f = Breeze.AtmosphereModels.solar_irradiance_factor(apparent.solar_position, apparent_model.clock)
+        @test f ≈ Breeze.CelestialMechanics.earth_sun_distance_factor(173.5)
+        @test 0.96 < f < 0.975
     end
 end
 

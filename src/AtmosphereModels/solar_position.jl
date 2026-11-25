@@ -225,10 +225,10 @@ end
 ##### its column array.
 #####
 
-using Dates: AbstractDateTime, Millisecond
+using Dates: AbstractDateTime, Millisecond, Dates
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: λnode, φnode, Center
-using Breeze.CelestialMechanics: cos_solar_zenith_angle
+using Breeze.CelestialMechanics: cos_solar_zenith_angle, earth_sun_distance_factor, day_of_year
 
 compute_datetime(dt::AbstractDateTime, epoch) = dt
 compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))
@@ -283,6 +283,24 @@ function update_cos_zenith!(cos_zenith, sp::ApparentSolarPosition, grid, clock)
     datetime = compute_datetime(clock.time, sp.epoch)
     update_apparent_zenith!(cos_zenith, sp.coordinate, grid, datetime)
     return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The factor by which the top-of-atmosphere solar irradiance differs from the solar constant at the time of
+`clock`. An [`ApparentSolarPosition`](@ref) follows the calendar, so it returns the Earth–Sun distance factor
+``(r₀ / r)²`` of the date (see [`earth_sun_distance_factor`](@ref Breeze.CelestialMechanics.earth_sun_distance_factor)).
+The idealized solar positions have no orbit and return one.
+"""
+# TODO: only the ecCKD radiation (BreezeNumericalRadiationExt) applies this factor; the RRTMGP extensions
+# still use the bare solar constant and should multiply their top-of-atmosphere solar flux by it too.
+solar_irradiance_factor(solar_position, clock) = 1
+
+function solar_irradiance_factor(sp::ApparentSolarPosition, clock)
+    datetime = compute_datetime(clock.time, sp.epoch)
+    fraction_of_day = Dates.value(datetime - floor(datetime, Dates.Day)) / 86_400_000
+    return earth_sun_distance_factor(day_of_year(datetime) + fraction_of_day)
 end
 
 # Idealized diurnal cycle: pure analytical hour angle, no calendar / orbit.

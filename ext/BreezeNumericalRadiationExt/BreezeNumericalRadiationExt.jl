@@ -17,7 +17,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, RadiativeTransferModel, Surface
                                materialize_background_atmosphere, materialize_surface_property,
                                validate_surface_fractions, constant_field_property, resolve_surface_albedos,
                                assert_bound_surface_temperature, maybe_infer_solar_position,
-                               initialize_cos_zenith!, update_cos_zenith!,
+                               initialize_cos_zenith!, update_cos_zenith!, solar_irradiance_factor,
                                column_index, compute_radiation_flux_divergence!, show_radiation_summary,
                                bottom_face_pressure, top_face_pressure,
                                overlying_atmosphere_faces,
