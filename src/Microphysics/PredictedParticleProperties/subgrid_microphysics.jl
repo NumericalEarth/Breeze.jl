@@ -706,26 +706,26 @@ a placement the local excess over ice is ``δ(s) + qᵛ⁺ˡ - qᵛ⁺ⁱ``, the
 shifted by the difference of the saturations of the cell, so the fraction is that where
 ``δ(s) ≥ ℂⁿᵘᶜˡ₂ qᵛ⁺ⁱ - qᵛ⁺ˡ + qᵛ⁺ⁱ``.
 """
-@inline function nucleating_fraction(::Nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
+@inline function nucleating_fraction(::Nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation)
     FT = typeof(qᵛ)
-    Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, floor)
-    return ifelse(Sⁱ >= ℂⁿᵘᶜˡ₂, one(FT), zero(FT))
+    𝒮ⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, minimum_saturation)
+    return ifelse(𝒮ⁱ >= ℂⁿᵘᶜˡ₂, one(FT), zero(FT))
 end
 
-@inline nucleating_fraction(d::NamedTuple{names}, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor) where names =
-    nucleating_fraction(Val(:mⁱ ∈ names), d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
+@inline nucleating_fraction(d::NamedTuple{names}, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation) where names =
+    nucleating_fraction(Val(:mⁱ ∈ names), d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation)
 
 # A placement without the excess over ice: the local excess over liquid shifted by the difference of the saturations
-@inline function nucleating_fraction(::Val{false}, d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
-    threshold = ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, floor) - qᵛ⁺ˡ + qᵛ⁺ⁱ
+@inline function nucleating_fraction(::Val{false}, d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation)
+    threshold = ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, minimum_saturation) - qᵛ⁺ˡ + qᵛ⁺ⁱ
     P, _ = vapor_excess_exceedance(d, threshold)
-    return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor), P)
+    return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation), P)
 end
 
 # The fraction where the local vapor excess over ice, δⁱ(s) = sⁱ(s) - ξⁱˡ qᶜˡ(s), reaches the threshold
-@inline function nucleating_fraction(::Val{true}, d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor)
-    P, _ = ice_excess_exceedance(d, ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, floor))
-    return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floor), P)
+@inline function nucleating_fraction(::Val{true}, d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation)
+    P, _ = ice_excess_exceedance(d, ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, minimum_saturation))
+    return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation), P)
 end
 
 """

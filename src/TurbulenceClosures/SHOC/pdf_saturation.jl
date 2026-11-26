@@ -2,21 +2,21 @@
 ##### The saturation thermodynamics of the assumed PDF
 #####
 ##### The assumed PDF condenses each plume where its total water exceeds saturation. It needs, per
-##### plume, the temperature `T_l` of the plume with its condensate evaporated, the saturation
-##### specific humidity `q_s(T_l)`, the factor `β` of the linearized saturation excess
+##### plume, the temperature `Tˡ` of the plume with its condensate evaporated, the saturation
+##### specific humidity `qᵛ⁺(Tˡ)`, the factor `β` of the linearized saturation excess
 #####
-#####     s = q_w - q_s (1 + β q_w) / (1 + β q_s) = (q_w - q_s) / (1 + β q_s),    β q_s = (ℒ / c_p) ∂q_s/∂T,
+#####     s = qᵗ - qᵛ⁺ (1 + β qᵗ) / (1 + β qᵛ⁺) = (qᵗ - qᵛ⁺) / (1 + β qᵛ⁺),    β qᵛ⁺ = (ℒ / ĉᵖ) ∂qᵛ⁺/∂T,
 #####
-##### the conversion `c_p / ℒ` and the Exner function `Π` with which the derivative of `q_s` with
-##### respect to `θ_l` is `(c_p / ℒ) β q_s Π`, and the two coefficients of the buoyancy flux
+##### the conversion `ĉᵖ / ℒ` and the Exner function `Π` with which the derivative of `qᵛ⁺` with
+##### respect to `θˡⁱ` is `(ĉᵖ / ℒ) β qᵛ⁺ Π`, and the two coefficients of the buoyancy flux
 #####
-#####     w'θ_v' = w'θ_l' + A_q w'q_w' + A_c w'q_c'.
+#####     w′θᵛ′ = w′θˡⁱ′ + A_q w′qᵗ′ + A_c w′qᶜ′.
 #####
 ##### They are
 #####
-#####     plume_liquid_water_temperature(thermodynamics, θ_l, q_w, p) -> T_l
-#####     plume_saturation(thermodynamics, T_l, q_w, p) -> (q_s, β, c_p / ℒ, Π)
-#####     buoyancy_flux_coefficients(thermodynamics, p, θ_l, q_w, q_c) -> (A_q, A_c)
+#####     plume_liquid_water_temperature(thermodynamics, θˡⁱ, qᵗ, p) -> Tˡ
+#####     plume_saturation(thermodynamics, Tˡ, qᵗ, p) -> (qᵛ⁺, β, ĉᵖ / ℒ, Π)
+#####     buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qᶜ) -> (A_q, A_c)
 #####
 ##### where `thermodynamics` is that of the model that holds the closure (`distribution_thermodynamics`).
 #####
@@ -38,16 +38,18 @@ liquid-ice potential temperature `θˡⁱ` that the closure mixes, and, in the b
 temperature of the level in place of a fixed reference.
 
 The saturation excess of a plume is linearized about the plume's own state. With the plume
-temperature `T_l = Π θˡⁱ` of the plume's water all vapor, `ĉᵖ (T - T_l) = ℒ(T) q_c` exactly in
-the model's thermodynamics, and `q_s(T) ≈ q_s(T_l) + (∂q_s/∂T)(T - T_l)`, so
+temperature `Tˡ = Π θˡⁱ` of the plume's water all vapor, `ĉᵖ (T - Tˡ) = ℒ(T) qᶜ` exactly in
+the model's thermodynamics, and `qᵛ⁺(T) ≈ qᵛ⁺(Tˡ) + (∂qᵛ⁺/∂T)(T - Tˡ)`, so
 
-    q_c = (q_w - q_s(T_l)) / (1 + β q_s),    β q_s = (ℒ / ĉᵖ) ∂q_s/∂T,
-    q_s = ε (1 - q_w) e_s / (p - e_s),       ∂ ln q_s / ∂T = (p / (p - e_s)) ∂ ln e_s / ∂T,
+    qᶜ = (qᵗ - qᵛ⁺(Tˡ)) / (1 + β qᵛ⁺),    β qᵛ⁺ = (ℒ / ĉᵖ) ∂qᵛ⁺/∂T,
+    qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ Tˡ),  ρ = p / (Rᵐ Tˡ),    ∂ ln qᵛ⁺ / ∂T = ∂ ln pᵛ⁺ / ∂T,
 
 where `ℒ` is the latent heat of the condensate the equilibrium forms (`λ ℒˡ + (1 - λ) ℒⁱ` for a
-liquid fraction `λ`) and `∂ ln e_s/∂T` includes the change of `λ` with temperature. The derivative
-of `q_s` with respect to `θˡⁱ` is `(∂q_s/∂T) Π`, and the buoyancy flux follows from linearizing
-`θ_v = θ (1 + (1/ε - 1) q_v - q_c)` with `θ = θˡⁱ + ℒ q_c / (ĉᵖ Π)` about the level mean `θ̄`:
+liquid fraction `λ`), `Rᵐ` the gas constant of the plume's air with its water all vapor (the model's
+saturation specific humidity, at fixed pressure and composition) and `∂ ln pᵛ⁺/∂T` includes the change
+of `λ` with temperature. The derivative
+of `qᵛ⁺` with respect to `θˡⁱ` is `(∂qᵛ⁺/∂T) Π`, and the buoyancy flux follows from linearizing
+`θᵛ = θ (1 + (1/ε - 1) qᵛ - qᶜ)` with `θ = θˡⁱ + ℒ qᶜ / (ĉᵖ Π)` about the level mean `θ̄`:
 
     A_q = ((1 - ε) / ε) θ̄,    A_c = ℒ / (ĉᵖ Π) - θ̄ / ε,    ε = Rᵈ / Rᵛ.
 
@@ -66,26 +68,26 @@ end
 ##### The thermodynamics of the model
 #####
 
-# The moisture fractions of a plume: its distributed water `qw` as vapor (the all-vapor state of the distribution),
+# The moisture fractions of a plume: its distributed water `qᵗ` as vapor (the all-vapor state of the distribution),
 # with the condensate the distribution does not distribute (`held`, the rain and ice of P3 at the level) held as
 # condensate, so that its heat capacity, gas constant and Exner exponent are those of the model's total water
 @inline held_condensate(thermodynamics::NamedTuple{names}) where names = held_condensate(Val(:held ∈ names), thermodynamics)
 @inline held_condensate(::Val{true}, thermodynamics) = thermodynamics.held
 @inline held_condensate(::Val{false}, thermodynamics) = nothing
 
-@inline plume_moisture(thermodynamics, qw) = moisture_with_held_condensate(held_condensate(thermodynamics), qw)
-@inline moisture_with_held_condensate(::Nothing, qw) = MoistureMassFractions(qw)
-@inline moisture_with_held_condensate(held, qw) =
-    MoistureMassFractions(qw, convert(typeof(qw), held.liquid), convert(typeof(qw), held.ice))
+@inline plume_moisture(thermodynamics, qᵗ) = moisture_with_held_condensate(held_condensate(thermodynamics), qᵗ)
+@inline moisture_with_held_condensate(::Nothing, qᵗ) = MoistureMassFractions(qᵗ)
+@inline moisture_with_held_condensate(held, qᵗ) =
+    MoistureMassFractions(qᵗ, convert(typeof(qᵗ), held.liquid), convert(typeof(qᵗ), held.ice))
 
-@inline function plume_exner_function(thermodynamics, qw, pval)
+@inline function plume_exner_function(thermodynamics, qᵗ, p)
     constants = thermodynamics.constants
-    q = plume_moisture(thermodynamics, qw)
+    q = plume_moisture(thermodynamics, qᵗ)
     κ = exner_exponent(thermodynamics.exner_exponent, q, constants)
-    return (pval / thermodynamics.standard_pressure)^κ
+    return (p / thermodynamics.standard_pressure)^κ
 end
 
-@inline plume_heat_capacity(thermodynamics, qw) = vapor_equivalent_heat_capacity(plume_moisture(thermodynamics, qw), thermodynamics.constants)
+@inline plume_heat_capacity(thermodynamics, qᵗ) = vapor_equivalent_heat_capacity(plume_moisture(thermodynamics, qᵗ), thermodynamics.constants)
 
 # Saturation over ice at every temperature: the surface of the ice outside the distributed water (P3's ice), for
 # the saturation excess of the distributed water over ice (`ice_saturation_thermodynamics`)
@@ -115,51 +117,51 @@ ice_saturation_thermodynamics(thermodynamics) = merge(thermodynamics, (; phase_e
     return λ, ifelse(ramp, 1 / (Tᶠ - Tʰ), zero(T))
 end
 
-# The latent heat of the condensate the equilibrium forms at T, and ∂ ln e_s / ∂T. On a surface of
-# fixed liquid fraction ln e_s is linear in the fraction, so the change of the fraction with
-# temperature adds (∂λ/∂T) ln(e_s,liquid / e_s,ice).
+# The latent heat of the condensate the equilibrium forms at T, and ∂ ln pᵛ⁺ / ∂T. On a surface of
+# fixed liquid fraction ln pᵛ⁺ is linear in the fraction, so the change of the fraction with
+# temperature adds (∂λ/∂T) ln(pᵛ⁺ˡ / pᵛ⁺ⁱ).
 @inline function condensate_latent_heat_and_log_slope(equilibrium, constants, T)
-    λ, dλdT = condensate_liquid_fraction(equilibrium, T)
+    λ, ∂λ∂T = condensate_liquid_fraction(equilibrium, T)
     Rᵛ = vapor_gas_constant(constants)
     ℒˡ = liquid_latent_heat(T, constants)
     ℒⁱ = ice_latent_heat(T, constants)
     ℒ = λ * ℒˡ + (1 - λ) * ℒⁱ
-    eˡ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
-    eⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
-    log_ratio = ifelse(dλdT == 0, zero(T), log(eˡ / eⁱ))
-    return ℒ, ℒ / (Rᵛ * T * T) + dλdT * log_ratio
+    pᵛ⁺ˡ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+    log_ratio = ifelse(∂λ∂T == 0, zero(T), log(pᵛ⁺ˡ / pᵛ⁺ⁱ))
+    return ℒ, ℒ / (Rᵛ * T * T) + ∂λ∂T * log_ratio
 end
 
-@inline function plume_liquid_water_temperature(thermodynamics, thl, qw, pval)
-    return plume_exner_function(thermodynamics, qw, pval) * thl
+@inline function plume_liquid_water_temperature(thermodynamics, θˡⁱ, qᵗ, p)
+    return plume_exner_function(thermodynamics, qᵗ, p) * θˡⁱ
 end
 
-@inline function plume_saturation(thermodynamics, Tl, qw, pval)
+@inline function plume_saturation(thermodynamics, Tˡ, qᵗ, p)
     constants = thermodynamics.constants
     equilibrium = thermodynamics.phase_equilibrium
-    surface = saturation_surface(equilibrium, Tl)
+    surface = saturation_surface(equilibrium, Tˡ)
     # The saturation specific humidity of the model (the one the microphysics uses),
     # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T), at the density ρ = p / (Rᵐ T) of the component's air with its total
     # water as vapor
-    Rᵐ = mixture_gas_constant(plume_moisture(thermodynamics, qw), constants)
-    ρ = pval / (Rᵐ * Tl)
-    qᵛ⁺ = saturation_specific_humidity(Tl, ρ, constants, surface)
+    Rᵐ = mixture_gas_constant(plume_moisture(thermodynamics, qᵗ), constants)
+    ρ = p / (Rᵐ * Tˡ)
+    qᵛ⁺ = saturation_specific_humidity(Tˡ, ρ, constants, surface)
 
-    ℒ, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, Tl)
-    cᵖ = plume_heat_capacity(thermodynamics, qw)
-    # β q_s = (ℒ / ĉᵖ) ∂q_s/∂T at fixed p and composition: ∂ ln q_s / ∂T = ∂ ln e_s / ∂T
-    beta = (ℒ / cᵖ) * log_slope
-    return qᵛ⁺, beta, cᵖ / ℒ, plume_exner_function(thermodynamics, qw, pval)
+    ℒ, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, Tˡ)
+    ĉᵖ = plume_heat_capacity(thermodynamics, qᵗ)
+    # β qᵛ⁺ = (ℒ / ĉᵖ) ∂qᵛ⁺/∂T at fixed p and composition: ∂ ln qᵛ⁺ / ∂T = ∂ ln pᵛ⁺ / ∂T
+    β = (ℒ / ĉᵖ) * log_slope
+    return qᵛ⁺, β, ĉᵖ / ℒ, plume_exner_function(thermodynamics, qᵗ, p)
 end
 
-@inline function buoyancy_flux_coefficients(thermodynamics, pval, thl, qw, ql)
+@inline function buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qˡ)
     constants = thermodynamics.constants
     ε = dry_air_gas_constant(constants) / vapor_gas_constant(constants)
-    Π = plume_exner_function(thermodynamics, qw, pval)
-    Tl = Π * thl
-    ℒ, _ = condensate_latent_heat_and_log_slope(thermodynamics.phase_equilibrium, constants, Tl)
-    cᵖ = plume_heat_capacity(thermodynamics, qw)
-    heating = ℒ / (cᵖ * Π)
-    θ = thl + heating * ql
+    Π = plume_exner_function(thermodynamics, qᵗ, p)
+    Tˡ = Π * θˡⁱ
+    ℒ, _ = condensate_latent_heat_and_log_slope(thermodynamics.phase_equilibrium, constants, Tˡ)
+    ĉᵖ = plume_heat_capacity(thermodynamics, qᵗ)
+    heating = ℒ / (ĉᵖ * Π)
+    θ = θˡⁱ + heating * qˡ
     return ((1 - ε) / ε) * θ, heating - θ / ε
 end

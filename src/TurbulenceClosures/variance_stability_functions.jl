@@ -168,11 +168,11 @@ function VarianceStabilityFunctions(sf::TurbulentRichardsonStabilityFunction, ti
     sm = second_moments
     a₁ = 2 * sm.ℂᵛ₁ / ℂᵠ
     a₂ = 2 * sm.ℂᵛ₂ / ℂᵠ
-    ρ = sm.ℂᵛ₃ / sqrt(sm.ℂᵛ₁ * sm.ℂᵛ₂)
+    r = sm.ℂᵛ₃ / sqrt(sm.ℂᵛ₁ * sm.ℂᵛ₂) # the correlation of θˡⁱ and qᵗ
     return VarianceStabilityFunctions(FT;
                                       ℂᵛ₁⁻ = a₁ * sf.ℂᶜ⁻ / ℂᴰ⁻, ℂᵛ₁⁰ = a₁ * sf.ℂᶜ⁰ / ℂᴰ⁰, ℂᵛ₁⁺ = a₁ * sf.ℂᶜ⁺ / ℂᴰ⁺,
                                       ℂᵛ₂⁻ = a₂ * sf.ℂᶜ⁻ / ℂᴰ⁻, ℂᵛ₂⁰ = a₂ * sf.ℂᶜ⁰ / ℂᴰ⁰, ℂᵛ₂⁺ = a₂ * sf.ℂᶜ⁺ / ℂᴰ⁺,
-                                      ℂᵛ₃⁻ = ρ, ℂᵛ₃ᵐ = ρ, ℂᵛ₃⁺ = ρ)
+                                      ℂᵛ₃⁻ = r, ℂᵛ₃ᵐ = r, ℂᵛ₃⁺ = r)
 end
 
 #####

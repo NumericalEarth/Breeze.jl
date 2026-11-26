@@ -61,7 +61,7 @@ limits from the behaviour of second-moment closures and observations:
 `𝕊ᵉ = 𝕊ᵘ / σᵉ` at every limit.
 
 With the defaults, `𝕊ᶜ 𝕊ᴰ` is largest in the unstable limit, `𝕊ᴰ⁰ 𝕊ᵘ⁰ / Pr⁻ = 0.101`, so the squared
-correlation `ρ² = 0.75 ℂᵠ 𝕊ᶜ 𝕊ᴰ / ℂʷ₁` of [`DissipationTimeScale`](@ref) stays below `1 - ℂᵍ₁ = 0.6`
+correlation `r² = 0.75 ℂᵠ 𝕊ᶜ 𝕊ᴰ / ℂʷ₁` of [`DissipationTimeScale`](@ref) stays below `1 - ℂᵍ₁ = 0.6`
 for `ℂᵠ < 7.9`: 0.152 at most for `ℂᵠ = 2`, 0.126 at neutral. In general the constraint is
 
     max over Ri of 3 ℂᵠ 𝕊ᶜ 𝕊ᴰ / (4 ℂʷ₁) < 1 - ℂᵍ₁,
@@ -85,8 +85,8 @@ function RationalStabilityFunction(::SurfaceLayerSimilarity; e_u★² = 3.75, Pr
                                      ℂᴰ⁻ = ℂᴰ⁰, ℂᴰ⁰, ℂᴰ⁺ = ℂᴰ⁰, Ri⁻, Ri⁺)
 
     # The realizability of the double-Gaussian PDF with DissipationTimeScale(ℂᵠ = 2), ℂʷ₁ = 1, ℂᵍ₁ = 0.4
-    ρ²max = 3 * 2 * max(ℂᶜ⁻ * ℂᴰ⁰, ℂᶜ⁰ * ℂᴰ⁰, ℂᶜ⁺ * ℂᴰ⁰) / 4
-    ρ²max < 0.6 || @warn "RationalStabilityFunction(SurfaceLayerSimilarity()): max ρ² = $ρ²max ≥ 0.6 with ℂᵠ = 2"
+    r²ᵐᵃˣ = 3 * 2 * max(ℂᶜ⁻ * ℂᴰ⁰, ℂᶜ⁰ * ℂᴰ⁰, ℂᶜ⁺ * ℂᴰ⁰) / 4
+    r²ᵐᵃˣ < 0.6 || @warn "RationalStabilityFunction(SurfaceLayerSimilarity()): max r² = $(r²ᵐᵃˣ) ≥ 0.6 with ℂᵠ = 2"
 
     return sf
 end
