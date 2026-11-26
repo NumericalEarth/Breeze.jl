@@ -17,7 +17,7 @@
 #####
 ##### the construction of `HeatingBudgetFlux` (and of the sinks of `TKEBudgetThirdMoment`) applied to every tendency the
 ##### model gives the water. In the amplitude, (ρJ)₊ = -ρ₊ Λ₊² ω̃₊ (c₊ - c) / Δz₊ with ω̃ the harmonic mean of ω of the
-##### two levels: the amplitude is exchanged down its gradient. The matrix is the M-matrix of `balance_sink!`, one
+##### two levels: the amplitude is exchanged down its gradient. The matrix is the M-matrix of `exchange_amplitudes!`, one
 ##### solve per column; its columns sum to m, so Σ m s = Σ m 𝒬 and Jᵠ vanishes at the top of the column too: the flux
 ##### conserves the water. Where the air is still the levels do not exchange, s = 𝒬 and Jᵠ = 0: the tendency stays where
 ##### it acts. The surface flux is carried up over the turbulent layer.
@@ -174,7 +174,7 @@ end
     sb = getclosure(i, j, closure).total_water_budget_flux
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
-    balance_redistributed_sources!(cl.sᵠ, nothing, cl.budget_work, i, j, grid, sb.ℂᵇᴸ, cl.𝒬ᵠ, nothing, e, ρ, ℓᵐ)
+    exchange_amplitudes!(cl.sᵠ, nothing, cl.budget_work, i, j, grid, sb.ℂᵇᴸ, NonNegativePart(e), cl.𝒬ᵠ, nothing, ρ, ℓᵐ)
     below = zero(FT)
     @inbounds begin
         cl.Jᵠ[i, j, 1] = zero(FT)
@@ -208,10 +208,10 @@ end
 ##### The conversions of the flux, at the centers
 #####
 
-# The buoyancy of a flux of qᵗ at the interior face k, per unit flux: the vapor's, b̄_qᵛ, and the latent part of the
-# condensate and ice fluxes that the fluxes of the saturation excesses over the distributed condensate, c_q Jᵠ, and over
-# ice, c_qⁱ Jᵠ, imply
-@inline function moisture_flux_buoyancyᶜᶜᶠ(i, j, k, grid, cl)
+# The conversions of the flux of qᵗ at the interior face k: of the buoyancy of the vapor, b̄_qᵛ Jᵠ, and of the latent
+# part, [(b̄ᶜ - b̄ᵛ) aᴺ c_q + (b̄ⁱ - b̄ᵛ) ηⁱ c_qⁱ + (b̄ˡ - b̄ᵛ) ηʷⁱ c_q] Jᵠ, of the fluxes of condensate, of ice and of liquid on
+# ice that the fluxes of the saturation excesses over the distributed condensate, c_q Jᵠ, and over ice, c_qⁱ Jᵠ, imply
+@inline function total_water_flux_conversionsᶜᶜᶠ(i, j, k, grid, cl)
     @inbounds begin
         b_qᵛ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, k-1]) / 2
         bᶜᵛ, bⁱᵛ, bˡᵛ = latent_buoyancy_derivativesᶜᶜᶠ(i, j, k, cl)
@@ -221,22 +221,21 @@ end
     return b_qᵛ * Jᵠ, latent * Jᵠ
 end
 
-# From the two faces of the cell k to its center with the half-cell weights (the boundary faces carry no flux)
-@inline function budget_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
-    Nz = size(grid, 3)
-    FT = grid_float_type(grid)
-    dryˡᵒʷ, latentˡᵒʷ = moisture_flux_buoyancyᶜᶜᶠ(i, j, max(k, 2), grid, cl)
-    dryᵘᵖ, latentᵘᵖ = moisture_flux_buoyancyᶜᶜᶠ(i, j, min(k + 1, Nz), grid, cl)
-    wˡᵒʷ, wᵘᵖ, ρΔz = half_cell_weights(i, j, k, grid, ρ)
-    wˡᵒʷ = ifelse(k > 1, wˡᵒʷ, zero(FT))
-    wᵘᵖ = ifelse(k < Nz, wᵘᵖ, zero(FT))
-    return (wˡᵒʷ * dryˡᵒʷ + wᵘᵖ * dryᵘᵖ) / ρΔz, (wˡᵒʷ * latentˡᵒʷ + wᵘᵖ * latentᵘᵖ) / ρΔz
+# From the two faces of the cell k to its center (`half_cell_conversionᶜᶜᶜ`)
+@inline function total_water_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
+    lower = total_water_flux_conversionsᶜᶜᶠ(i, j, max(k, 2), grid, cl)
+    upper = total_water_flux_conversionsᶜᶜᶠ(i, j, min(k + 1, size(grid, 3)), grid, cl)
+    return map((l, u) -> half_cell_conversionᶜᶜᶜ(i, j, k, grid, ρ, l, u), lower, upper)
 end
 
 # Stores the conversions at the center k and returns what the TKE equation receives; nothing without the flux
-@inline function store_budget_flux_conversions!(cl, i, j, k, grid, ρ)
-    hasproperty(cl, :Jᵠ) || return zero(grid_float_type(grid))
-    dry, latent = budget_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
+@inline store_budget_flux_conversions!(cl, i, j, k, grid, ρ) =
+    store_budget_flux_conversions!(has_field(cl, Val(:Jᵠ)), cl, i, j, k, grid, ρ)
+
+@inline store_budget_flux_conversions!(::Val{false}, cl, i, j, k, grid, ρ) = zero(grid_float_type(grid))
+
+@inline function store_budget_flux_conversions!(::Val{true}, cl, i, j, k, grid, ρ)
+    dry, latent = total_water_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
     @inbounds begin
         cl.Gᵇ[i, j, k] = dry + latent
         cl.Gᵇᴸ[i, j, k] = latent
@@ -245,10 +244,10 @@ end
 end
 
 # The applied flux at a face; zero without it
-@inline applied_budget_flux_q(cl, i, j, k) = hasproperty(cl, :Jᵠ) ? @inbounds(cl.Jᵠ[i, j, k]) : zero(eltype(cl.w′²))
+@inline applied_budget_flux_q(cl, i, j, k) = stored_or_zero(cl, Val(:Jᵠ), i, j, k, eltype(cl.w′²))
 
 # The stored conversion of the total water budget flux; zero without it
-@inline total_water_budget_flux_conversion(cl, i, j, k) = hasproperty(cl, :Gᵇ) ? @inbounds(cl.Gᵇ[i, j, k]) : zero(eltype(cl.B))
+@inline total_water_budget_flux_conversion(cl, i, j, k) = stored_or_zero(cl, Val(:Gᵇ), i, j, k, eltype(cl.B))
 
 # The conversions of both budget fluxes, which the stage tendency gives the TKE
 @inline budget_flux_conversions(cl, i, j, k) = heating_flux_conversion(cl, i, j, k) + total_water_budget_flux_conversion(cl, i, j, k)

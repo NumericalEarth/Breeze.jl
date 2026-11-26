@@ -17,7 +17,7 @@
 #####     [mₖ + a₊θ₊ + a₋θ₋] sₖ - a₊(1 - θ₊) sₖ₊₁ - a₋(1 - θ₋) sₖ₋₁ = mₖ 𝒬ₖ,
 #####     m = ρ Δz,    a± = 2 ρ± Λ±² / Δz±,    θ± = ωₖ±₁ / (ωₖ + ωₖ±₁).
 #####
-##### The matrix is the M-matrix of `balance_sink!`; its columns sum to m, so Σ m s = Σ m 𝒬 and J
+##### The matrix is the M-matrix of `exchange_amplitudes!`; its columns sum to m, so Σ m s = Σ m 𝒬 and J
 ##### vanishes at the top of the column too. Where the air is still (ω = 0 at a level and its
 ##### neighbours) the levels do not exchange, s = 𝒬 and J = 0; a heating that is uniform over a
 ##### turbulent layer gives J = 0; cooling at the top of a turbulent layer, or heating at its bottom,
@@ -257,67 +257,6 @@ end
 
 @inline Base.getindex(c::CoolingPart, i, j, k) = @inbounds min(c.heating[i, j, k], zero(eltype(c.heating)))
 
-# Two sources of the column as the turbulence redistributes them, `s₁` and `s₂`, at once: the matrix of
-# `balance_sink!` with the shape ω = max(e, 0) and the exchange length ℂᴸ ℓ, eliminated once for the two right-hand
-# sides `source₁` and `source₂` (arrays of the centers). `work` holds the eliminated upper diagonal. The heating budget
-# flux redistributes its heating and the cooling part of it, the total water budget flux one source (`nothing` second).
-# A second source of `nothing` is none (the total water budget flux has one source)
-@inline source_value(source, i, j, k, FT) = @inbounds source[i, j, k]
-@inline source_value(::Nothing, i, j, k, FT) = zero(FT)
-@inline store_source!(s, i, j, k, value) = @inbounds s[i, j, k] = value
-@inline store_source!(::Nothing, i, j, k, value) = nothing
-@inline eliminate_source!(s, work, i, j, k) = @inbounds s[i, j, k] -= work[i, j, k] * s[i, j, k+1]
-@inline eliminate_source!(::Nothing, work, i, j, k) = nothing
-
-@inline function balance_redistributed_sources!(s₁, s₂, work, i, j, grid, ℂᴸ, source₁, source₂, e, ρ, ℓᵐ)
-    Nz = size(grid, 3)
-    FT = grid_float_type(grid)
-    tiny = sqrt(floatmin(FT))
-    @inbounds begin
-        # Thomas algorithm; the matrix is diagonally dominant by columns
-        ω⁻ = zero(FT)
-        c′ = zero(FT)
-        d′ = zero(FT)
-        d′ᶜ = zero(FT)
-        a⁻ = zero(FT) # the exchange coefficient at the face below
-        ω = max(e[i, j, 1], zero(FT))
-        for k in 1:Nz
-            m = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
-            diagonal = m
-            lower = zero(FT)
-            upper = zero(FT)
-            ω⁺ = zero(FT)
-            if k > 1
-                share = ω + ω⁻ + tiny
-                diagonal += a⁻ * ω⁻ / share
-                lower = -a⁻ * ω / share
-            end
-            if k < Nz
-                a = sink_exchange_coefficientᶜᶜᶠ(i, j, k + 1, grid, ℂᴸ, ρ, ℓᵐ)
-                ω⁺ = max(e[i, j, k+1], zero(FT))
-                share = ω + ω⁺ + tiny
-                diagonal += a * ω⁺ / share
-                upper = -a * ω / share
-                a⁻ = a
-            end
-            pivot = diagonal - lower * c′
-            d′ = (m * source₁[i, j, k] - lower * d′) / pivot
-            d′ᶜ = (m * source_value(source₂, i, j, k, FT) - lower * d′ᶜ) / pivot
-            c′ = upper / pivot
-            work[i, j, k] = c′
-            s₁[i, j, k] = d′
-            store_source!(s₂, i, j, k, d′ᶜ)
-            ω⁻ = ω
-            ω = ω⁺
-        end
-        for k in Nz-1:-1:1
-            s₁[i, j, k] -= work[i, j, k] * s₁[i, j, k+1]
-            eliminate_source!(s₂, work, i, j, k)
-        end
-    end
-    return nothing
-end
-
 # One thread per column: the redistributed heatings, then ρJ at the faces from the ground,
 # (ρJ)ₖ₊½ = (ρJ)ₖ₋½ + ρ Δz (𝒬 - s), whose positive part over ρ at the face is the flux (times the share ℂᑫ for the
 # applied one). The boundary faces carry none.
@@ -326,7 +265,7 @@ end
     hb = getclosure(i, j, closure).heating_budget_flux
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
-    balance_redistributed_sources!(cl.sᑫ, cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, cl.𝒬, CoolingPart(cl.𝒬), e, ρ, ℓᵐ)
+    exchange_amplitudes!(cl.sᑫ, cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, NonNegativePart(e), cl.𝒬, CoolingPart(cl.𝒬), ρ, ℓᵐ)
     below = zero(FT)
     belowᶜ = zero(FT)
     @inbounds begin
@@ -362,43 +301,36 @@ end
 ##### The conversions of the flux, at the centers
 #####
 
-# The buoyancy of a flux of θˡⁱ at the interior face k, per unit flux: b̄_θ, and the latent part
-# -(b̄ᶜ - b̄ᵛ) aᴺ c_θ - (b̄ⁱ - b̄ᵛ) ηⁱ c_θⁱ of the condensate and ice fluxes that the fluxes of the saturation excesses
-# over the distributed condensate, -c_θ J, and over ice, -c_θⁱ J, imply
-@inline function heating_flux_buoyancyᶜᶜᶠ(i, j, k, grid, cl)
+# The conversions of the flux of θˡⁱ at the interior face k: of its buoyancy b̄_θ J; of the latent part,
+# -[(b̄ᶜ - b̄ᵛ) aᴺ c_θ + (b̄ⁱ - b̄ᵛ) ηⁱ c_θⁱ + (b̄ˡ - b̄ᵛ) ηʷⁱ c_θ] J, of the fluxes of condensate, of ice and of liquid on ice
+# that the fluxes of the saturation excesses over the distributed condensate, -c_θ J, and over ice, -c_θⁱ J, imply;
+# and of both for the flux Jᶜ that the cooling alone drives
+@inline function heating_flux_conversionsᶜᶜᶠ(i, j, k, grid, cl)
     @inbounds begin
         b_θ = (cl.b_θ[i, j, k] + cl.b_θ[i, j, k-1]) / 2
         bᶜᵛ, bⁱᵛ, bˡᵛ = latent_buoyancy_derivativesᶜᶜᶠ(i, j, k, cl)
         latent = -bᶜᵛ * cl.aᴺ[i, j, k] * cl.c_θ[i, j, k] - bⁱᵛ * cl.ηⁱ[i, j, k] * cl.c_θⁱ[i, j, k] -
                  bˡᵛ * cl.ηʷⁱ[i, j, k] * cl.c_θ[i, j, k]
+        J = cl.Jᑫ[i, j, k]
+        Jᶜ = cl.Jᑫᶜ[i, j, k]
     end
-    return b_θ, latent
+    return b_θ * J, latent * J, (b_θ + latent) * Jᶜ
 end
 
-# From the two faces of the cell k to its center with the half-cell weights (the boundary faces carry no flux)
+# From the two faces of the cell k to its center (`half_cell_conversionᶜᶜᶜ`)
 @inline function heating_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
-    Nz = size(grid, 3)
-    FT = grid_float_type(grid)
-    kˡᵒʷ = max(k, 2)
-    kᵘᵖ = min(k + 1, Nz)
-    b_θˡᵒʷ, latentˡᵒʷ = heating_flux_buoyancyᶜᶜᶠ(i, j, kˡᵒʷ, grid, cl)
-    b_θᵘᵖ, latentᵘᵖ = heating_flux_buoyancyᶜᶜᶠ(i, j, kᵘᵖ, grid, cl)
-    @inbounds begin
-        Jˡᵒʷ = ifelse(k > 1, cl.Jᑫ[i, j, kˡᵒʷ], zero(FT))
-        Jᵘᵖ = ifelse(k < Nz, cl.Jᑫ[i, j, kᵘᵖ], zero(FT))
-        Jᶜˡᵒʷ = ifelse(k > 1, cl.Jᑫᶜ[i, j, kˡᵒʷ], zero(FT))
-        Jᶜᵘᵖ = ifelse(k < Nz, cl.Jᑫᶜ[i, j, kᵘᵖ], zero(FT))
-    end
-    wˡᵒʷ, wᵘᵖ, ρΔz = half_cell_weights(i, j, k, grid, ρ)
-    dry = (wˡᵒʷ * b_θˡᵒʷ * Jˡᵒʷ + wᵘᵖ * b_θᵘᵖ * Jᵘᵖ) / ρΔz
-    latent = (wˡᵒʷ * latentˡᵒʷ * Jˡᵒʷ + wᵘᵖ * latentᵘᵖ * Jᵘᵖ) / ρΔz
-    cooling = (wˡᵒʷ * (b_θˡᵒʷ + latentˡᵒʷ) * Jᶜˡᵒʷ + wᵘᵖ * (b_θᵘᵖ + latentᵘᵖ) * Jᶜᵘᵖ) / ρΔz
-    return dry, latent, cooling
+    lower = heating_flux_conversionsᶜᶜᶠ(i, j, max(k, 2), grid, cl)
+    upper = heating_flux_conversionsᶜᶜᶠ(i, j, min(k + 1, size(grid, 3)), grid, cl)
+    return map((l, u) -> half_cell_conversionᶜᶜᶜ(i, j, k, grid, ρ, l, u), lower, upper)
 end
 
 # Stores the conversions at the center k and returns what the TKE equation receives; nothing without the flux
-@inline function store_heating_flux_conversions!(cl, i, j, k, grid, ρ)
-    hasproperty(cl, :Jᑫ) || return zero(grid_float_type(grid))
+@inline store_heating_flux_conversions!(cl, i, j, k, grid, ρ) =
+    store_heating_flux_conversions!(has_field(cl, Val(:Jᑫ)), cl, i, j, k, grid, ρ)
+
+@inline store_heating_flux_conversions!(::Val{false}, cl, i, j, k, grid, ρ) = zero(grid_float_type(grid))
+
+@inline function store_heating_flux_conversions!(::Val{true}, cl, i, j, k, grid, ρ)
     dry, latent, cooling = heating_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
     @inbounds begin
         cl.Gᑫ[i, j, k] = dry + latent
@@ -409,9 +341,9 @@ end
 end
 
 # The stored conversion, the applied flux at a face and the conversion that the cooling alone would drive; zero without the flux
-@inline heating_flux_conversion(cl, i, j, k) = hasproperty(cl, :Gᑫ) ? @inbounds(cl.Gᑫ[i, j, k]) : zero(eltype(cl.B))
-@inline applied_heating_flux(cl, i, j, k) = hasproperty(cl, :Jᑫ) ? @inbounds(cl.Jᑫ[i, j, k]) : zero(eltype(cl.w′²))
-@inline cooling_flux_conversion(cl, i, j, k) = hasproperty(cl, :Gᑫᶜ) ? @inbounds(cl.Gᑫᶜ[i, j, k]) : zero(eltype(cl.B))
+@inline heating_flux_conversion(cl, i, j, k) = stored_or_zero(cl, Val(:Gᑫ), i, j, k, eltype(cl.B))
+@inline applied_heating_flux(cl, i, j, k) = stored_or_zero(cl, Val(:Jᑫ), i, j, k, eltype(cl.w′²))
+@inline cooling_flux_conversion(cl, i, j, k) = stored_or_zero(cl, Val(:Gᑫᶜ), i, j, k, eltype(cl.B))
 
 # ℂʷᑫ of the closure at a column; zero without the flux
 @inline cooling_third_moment_coefficient(::Nothing, FT) = zero(FT)

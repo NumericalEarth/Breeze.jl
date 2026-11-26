@@ -113,7 +113,11 @@ simulations of BOMEX, ARM cumulus, ASTEX and DYCOMS.
 
 $(TYPEDFIELDS)
 """
-struct TKEBudgetThirdMoment{N, FT, L} <: SimplifiedHigherOrderClosures.AbstractSubgridDistributionComponent
+# The amplitude of the sinks that balance the budget: one per column, or one per level exchanged between neighbours
+struct ColumnSinkAmplitude end
+struct ExchangedSinkAmplitude end
+
+struct TKEBudgetThirdMoment{N, FT, L, A} <: SimplifiedHigherOrderClosures.AbstractSubgridDistributionComponent
     "Coefficient of the budget flux with the sink shape `e`"
     ℂʷᵉ :: FT
     "Coefficient of the budget flux with the sink shape `ε`"
@@ -138,10 +142,13 @@ struct TKEBudgetThirdMoment{N, FT, L} <: SimplifiedHigherOrderClosures.AbstractS
     ℂʷᵒ :: FT
     "Where the third moment is diagnosed: `Face()` (the default) or `Center()`"
     location :: L
+    "The amplitude of the sinks: `ExchangedSinkAmplitude()`, or `ColumnSinkAmplitude()` (constructed with `ℂʷᴸ = Inf`)"
+    sink_amplitude :: A
 
     TKEBudgetThirdMoment{N}(ℂʷᵉ::FT, ℂʷᵋ::FT, ℂʷᴸ::FT, ℂʷʳ::FT, ℂʷᵇ::FT, ℂʷˡ::FT, ℂʷᵍ::FT, ℂʷᴺ::FT, ℂʷᵀ::FT,
-                            stratification_damping_width::FT, ℂʷᵒ::FT, location::L = Face()) where {N, FT, L} =
-        new{N, FT, L}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width, ℂʷᵒ, location)
+                            stratification_damping_width::FT, ℂʷᵒ::FT, location::L = Face(),
+                            sink_amplitude::A = ExchangedSinkAmplitude()) where {N, FT, L, A} =
+        new{N, FT, L, A}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width, ℂʷᵒ, location, sink_amplitude)
 end
 
 """
@@ -177,7 +184,9 @@ function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
     passes isa Integer && passes >= 1 || throw(ArgumentError("passes must be a positive integer, got $(passes)."))
     scalars = (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width, ℂʷᵒ)
     SimplifiedHigherOrderClosures.validate_third_moment_location(location)
-    return TKEBudgetThirdMoment{Int(passes)}(map(c -> convert(FT, c), scalars)..., location)
+    # The amplitude is chosen here, once: a kernel does not branch on a coefficient
+    sink_amplitude = isfinite(ℂʷᴸ) ? ExchangedSinkAmplitude() : ColumnSinkAmplitude()
+    return TKEBudgetThirdMoment{Int(passes)}(map(c -> convert(FT, c), scalars)..., location, sink_amplitude)
 end
 
 # The number of passes is a type parameter, so that the loop over them is unrolled when traced
@@ -190,7 +199,7 @@ SimplifiedHigherOrderClosures.component_constructor(::Type{<:TKEBudgetThirdMomen
 Adapt.adapt_structure(to, tm::TKEBudgetThirdMoment{N}) where N =
     TKEBudgetThirdMoment{N}(adapt(to, tm.ℂʷᵉ), adapt(to, tm.ℂʷᵋ), adapt(to, tm.ℂʷᴸ), adapt(to, tm.ℂʷʳ), adapt(to, tm.ℂʷᵇ),
                             adapt(to, tm.ℂʷˡ), adapt(to, tm.ℂʷᵍ), adapt(to, tm.ℂʷᴺ), adapt(to, tm.ℂʷᵀ),
-                            adapt(to, tm.stratification_damping_width), adapt(to, tm.ℂʷᵒ), tm.location)
+                            adapt(to, tm.stratification_damping_width), adapt(to, tm.ℂʷᵒ), tm.location, tm.sink_amplitude)
 
 SimplifiedHigherOrderClosures.type_parameter_summary(tm::TKEBudgetThirdMoment{N, FT}) where {N, FT} = string("{", N, ", ", FT, "}")
 
@@ -248,54 +257,101 @@ end
 #####
 
 # 2 ρ Λ² / Δz at the face k, between the centers k - 1 and k
-@inline function sink_exchange_coefficientᶜᶜᶠ(i, j, k, grid, ℂʷᴸ, ρ, ℓᵐ)
-    Λ = @inbounds ℂʷᴸ * ℓᵐ[i, j, k]
+@inline function sink_exchange_coefficientᶜᶜᶠ(i, j, k, grid, ℂᴸ, ρ, ℓᵐ)
+    Λ = @inbounds ℂᴸ * ℓᵐ[i, j, k]
     return 2 * ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Λ * Λ / Δzᶜᶜᶠ(i, j, k, grid)
 end
 
-# The sink of the column, `u` holding its shape ω on entry: the tridiagonal balance with the exchange coefficients of
-# the faces and the right-hand side ρ Δz (P + B). `work` holds the eliminated upper diagonal.
-@inline function balance_sink!(u, work, i, j, grid, ℂʷᴸ, cl, ρ, ℓᵐ)
+# The non-negative part max(x, 0) of an array of the centers and the sum of two, as arrays of the centers
+struct NonNegativePart{X}
+    x :: X
+end
+
+@inline Base.getindex(p::NonNegativePart, i, j, k) = @inbounds max(p.x[i, j, k], zero(eltype(p.x)))
+
+struct SumOfArrays{A, B}
+    a :: A
+    b :: B
+end
+
+@inline Base.getindex(s::SumOfArrays, i, j, k) = @inbounds s.a[i, j, k] + s.b[i, j, k]
+
+# A second source of `nothing` is none
+@inline source_value(source, i, j, k, FT) = @inbounds source[i, j, k]
+@inline source_value(::Nothing, i, j, k, FT) = zero(FT)
+@inline store_source!(s, i, j, k, value) = @inbounds s[i, j, k] = value
+@inline store_source!(::Nothing, i, j, k, value) = nothing
+@inline eliminate_source!(s, work, i, j, k) = @inbounds s[i, j, k] -= work[i, j, k] * s[i, j, k+1]
+@inline eliminate_source!(::Nothing, work, i, j, k) = nothing
+
+# Two sources of the column, `source₁` and `source₂` (arrays of the centers, per unit mass), as the turbulence
+# redistributes them, `s₁` and `s₂`: each c ω with the `shape` ω (an array of the centers) and an amplitude c exchanged
+# between neighbouring levels over the length ℂᴸ ℓ,
+#
+#     [mₖ + a₊θ₊ + a₋θ₋] sₖ - a₊(1 - θ₊) sₖ₊₁ - a₋(1 - θ₋) sₖ₋₁ = mₖ sourceₖ,    m = ρ Δz,    θ± = ωₖ±₁ / (ωₖ + ωₖ±₁),
+#
+# with the exchange coefficients a± of the faces (`sink_exchange_coefficientᶜᶜᶠ`). The Thomas algorithm eliminates the
+# matrix, which is diagonally dominant by columns, once for the two right-hand sides; `work` holds the eliminated upper
+# diagonal. `s₁` may be the array of the shape (the shape of a level is read before its `s₁` is stored). The one solve
+# of the sinks of `TKEBudgetThirdMoment` and of the budget fluxes of the heating and of the total water.
+@inline function exchange_amplitudes!(s₁, s₂, work, i, j, grid, ℂᴸ, shape, source₁, source₂, ρ, ℓᵐ)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
     tiny = sqrt(floatmin(FT))
-    @inbounds if isfinite(ℂʷᴸ)
-        # Thomas algorithm; the matrix is diagonally dominant by columns
+    @inbounds begin
         ω⁻ = zero(FT)
         c′ = zero(FT)
-        d′ = zero(FT)
+        d′₁ = zero(FT)
+        d′₂ = zero(FT)
         a⁻ = zero(FT) # the exchange coefficient at the face below
+        ω = shape[i, j, 1]
         for k in 1:Nz
-            ω = u[i, j, k]
             m = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
             diagonal = m
             lower = zero(FT)
             upper = zero(FT)
+            ω⁺ = zero(FT)
             if k > 1
-                s = ω + ω⁻ + tiny
-                diagonal += a⁻ * ω⁻ / s
-                lower = -a⁻ * ω / s
+                share = ω + ω⁻ + tiny
+                diagonal += a⁻ * ω⁻ / share
+                lower = -a⁻ * ω / share
             end
             if k < Nz
-                a = sink_exchange_coefficientᶜᶜᶠ(i, j, k + 1, grid, ℂʷᴸ, ρ, ℓᵐ)
-                ω⁺ = u[i, j, k+1]
-                s = ω + ω⁺ + tiny
-                diagonal += a * ω⁺ / s
-                upper = -a * ω / s
+                a = sink_exchange_coefficientᶜᶜᶠ(i, j, k + 1, grid, ℂᴸ, ρ, ℓᵐ)
+                ω⁺ = shape[i, j, k+1]
+                share = ω + ω⁺ + tiny
+                diagonal += a * ω⁺ / share
+                upper = -a * ω / share
                 a⁻ = a
             end
-            source = m * (cl.P[i, j, k] + cl.B[i, j, k])
             pivot = diagonal - lower * c′
-            d′ = (source - lower * d′) / pivot
+            d′₁ = (m * source₁[i, j, k] - lower * d′₁) / pivot
+            d′₂ = (m * source_value(source₂, i, j, k, FT) - lower * d′₂) / pivot
             c′ = upper / pivot
             work[i, j, k] = c′
-            u[i, j, k] = d′
+            s₁[i, j, k] = d′₁
+            store_source!(s₂, i, j, k, d′₂)
             ω⁻ = ω
+            ω = ω⁺
         end
         for k in Nz-1:-1:1
-            u[i, j, k] -= work[i, j, k] * u[i, j, k+1]
+            s₁[i, j, k] -= work[i, j, k] * s₁[i, j, k+1]
+            eliminate_source!(s₂, work, i, j, k)
         end
-    else
+    end
+    return nothing
+end
+
+# The sink of the column, `u` holding its shape ω on entry and the sink that balances ρ Δz (P + B) on exit
+@inline balance_sink!(u, work, i, j, grid, ::ExchangedSinkAmplitude, ℂʷᴸ, cl, ρ, ℓᵐ) =
+    exchange_amplitudes!(u, nothing, work, i, j, grid, ℂʷᴸ, u, SumOfArrays(cl.P, cl.B), nothing, ρ, ℓᵐ)
+
+# One amplitude for the column, c = Σ ρ Δz (P + B) / Σ ρ Δz ω
+@inline function balance_sink!(u, work, i, j, grid, ::ColumnSinkAmplitude, ℂʷᴸ, cl, ρ, ℓᵐ)
+    Nz = size(grid, 3)
+    FT = grid_float_type(grid)
+    tiny = sqrt(floatmin(FT))
+    @inbounds begin
         Π = zero(FT)
         Ω = zero(FT)
         for k in 1:Nz
@@ -377,8 +433,8 @@ end
         cl.uᵉ[i, j, k] = max(e[i, j, k], zero(grid_float_type(grid))) + tm.ℂʷᵒ * e⁻
         cl.uᵋ[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
     end
-    balance_sink!(cl.uᵉ, cl.budget_work, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
-    balance_sink!(cl.uᵋ, cl.budget_work, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
+    balance_sink!(cl.uᵉ, cl.budget_work, i, j, grid, tm.sink_amplitude, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
+    balance_sink!(cl.uᵋ, cl.budget_work, i, j, grid, tm.sink_amplitude, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
     N² = closure_fields.N²
     # The fluxes F at the centers: the integral of ρ (P + B - u) from the ground, the cell of the center counted half
     belowᵉ = zero(grid_float_type(grid))

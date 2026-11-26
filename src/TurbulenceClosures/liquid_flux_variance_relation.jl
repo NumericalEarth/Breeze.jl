@@ -66,8 +66,12 @@ liquid_flux_fields(grid, ::Nothing) = NamedTuple()
 liquid_flux_fields(grid, ::LiquidFluxVarianceRelation) = (Λᴸ = ZFaceField(grid), Bˡᶠ = ZFaceField(grid), ΔN²ᴸᵒ = ZFaceField(grid))
 
 # The part of the latent correction outside the distributed water, stored where the relation reads it
-@inline function store_outside_latent_correction!(cl, i, j, k, interior, L)
-    hasproperty(cl, :ΔN²ᴸᵒ) || return nothing
+@inline store_outside_latent_correction!(cl, i, j, k, interior, L) =
+    store_outside_latent_correction!(has_field(cl, Val(:ΔN²ᴸᵒ)), cl, i, j, k, interior, L)
+
+@inline store_outside_latent_correction!(::Val{false}, cl, i, j, k, interior, L) = nothing
+
+@inline function store_outside_latent_correction!(::Val{true}, cl, i, j, k, interior, L)
     @inbounds cl.ΔN²ᴸᵒ[i, j, k] = ifelse(interior, L.outside, zero(L.outside))
     return nothing
 end
@@ -75,8 +79,10 @@ end
 # The condensate part of the latent conversion of the solved state per unit Kᶜ: that of the saturated share
 # (`condensate`), or, with the relation, the removal of the applied condensate flux (`applied`), whose flux of liquid
 # (`liquid_flux_buoyancy`) does not depend on the solved gradients
-@inline solved_condensate_conversion(cl, i, j, k, condensate, applied) = hasproperty(cl, :Bˡᶠ) ? applied : condensate
-@inline liquid_flux_buoyancy(cl, i, j, k) = hasproperty(cl, :Bˡᶠ) ? @inbounds(cl.Bˡᶠ[i, j, k]) : zero(eltype(cl.B))
+@inline solved_condensate_conversion(cl, condensate, applied) = solved_condensate_conversion(has_field(cl, Val(:Bˡᶠ)), condensate, applied)
+@inline solved_condensate_conversion(::Val{true}, condensate, applied) = applied
+@inline solved_condensate_conversion(::Val{false}, condensate, applied) = condensate
+@inline liquid_flux_buoyancy(cl, i, j, k) = stored_or_zero(cl, Val(:Bˡᶠ), i, j, k, eltype(cl.B))
 
 @kernel function _compute_liquid_flux_conversion!(cl, grid, closure, s)
     i, j, k = @index(Global, NTuple)

@@ -200,8 +200,10 @@ end
 ##### For a scalar diffusivity of `VerticalFormulation` stepped with a `VerticallyImplicitTimeDiscretization` (e.g.
 ##### `TKEBasedTurbulenceClosure`), every horizontal viscous and diffusive flux is Oceananigans' literal `zero(grid)`,
 ##### and on a vertically bounded grid the vertical flux is the literal zero of the implicit part on every interior
-##### face; only the bottom and top faces carry an explicit flux, behind a branch on k. The generic operators above
-##### still multiply each zero by an interpolated density and an area, difference and sum them.
+##### face; only the bottom and top faces carry an explicit flux. The generic operators above still multiply each
+##### zero by an interpolated density and an area, difference and sum them. The methods below form the vertical
+##### difference alone and select it on the bottom and top levels with `ifelse` on the level index (the selection
+##### is by value, as the kernels require; the horizontal terms are not formed).
 #####
 ##### With densities and areas finite and positive, each dropped term is exactly +0: A·(ρ·(+0)) = +0, δ(+0, +0) = +0.
 ##### So the generic bracket `(δx + δy) + δz` is `(+0) + δz`, and on interior levels `δz = +0` too, so the operator is
@@ -221,25 +223,19 @@ const VerticallyBoundedUnderlyingGrid = AbstractUnderlyingGrid{<:Any, <:Any, <:A
 @inline function AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid::VerticallyBoundedUnderlyingGrid, ρᵣ,
                                           closure::VerticallyImplicitVerticalDiffusivity,
                                           closure_fields, clock, model_fields, buoyancy)
-    if explicit_vertical_flux_level(k, grid)
-        disc = time_discretization(closure)
-        return V⁻¹ᶠᶜᶜ(i, j, k, grid) *
-               (zero(grid) + δzᵃᵃᶜ(i, j, k, grid, Az_qᶠᶜᶠ, 𝒯_uz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
-    else
-        return zero(grid)
-    end
+    disc = time_discretization(closure)
+    divergence = V⁻¹ᶠᶜᶜ(i, j, k, grid) *
+                 (zero(grid) + δzᵃᵃᶜ(i, j, k, grid, Az_qᶠᶜᶠ, 𝒯_uz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
+    return ifelse(explicit_vertical_flux_level(k, grid), divergence, zero(grid))
 end
 
 @inline function AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid::VerticallyBoundedUnderlyingGrid, ρᵣ,
                                           closure::VerticallyImplicitVerticalDiffusivity,
                                           closure_fields, clock, model_fields, buoyancy)
-    if explicit_vertical_flux_level(k, grid)
-        disc = time_discretization(closure)
-        return V⁻¹ᶜᶠᶜ(i, j, k, grid) *
-               (zero(grid) + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶠᶠ, 𝒯_vz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
-    else
-        return zero(grid)
-    end
+    disc = time_discretization(closure)
+    divergence = V⁻¹ᶜᶠᶜ(i, j, k, grid) *
+                 (zero(grid) + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶠᶠ, 𝒯_vz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
+    return ifelse(explicit_vertical_flux_level(k, grid), divergence, zero(grid))
 end
 
 @inline AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid::VerticallyBoundedUnderlyingGrid, ρᵣ,
@@ -249,13 +245,10 @@ end
 @inline function AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid::VerticallyBoundedUnderlyingGrid, ρᵣ,
                                            closure::VerticallyImplicitVerticalDiffusivity,
                                            closure_fields, id, c, clock, model_fields, buoyancy)
-    if explicit_vertical_flux_level(k, grid)
-        disc = time_discretization(closure)
-        return V⁻¹ᶜᶜᶜ(i, j, k, grid) *
-               (zero(grid) + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, Jᶜz, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy))
-    else
-        return zero(grid)
-    end
+    disc = time_discretization(closure)
+    divergence = V⁻¹ᶜᶜᶜ(i, j, k, grid) *
+                 (zero(grid) + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, Jᶜz, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy))
+    return ifelse(explicit_vertical_flux_level(k, grid), divergence, zero(grid))
 end
 
 # The floating-point type of the grid's numbers inside a kernel. A grid whose eltype is a traced number type (a

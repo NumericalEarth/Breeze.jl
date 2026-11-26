@@ -45,6 +45,15 @@ using SpecialFunctions: erfc
 
 using Oceananigans.BoundaryConditions: BoundaryCondition, Flux, Bottom, total_boundary_flux
 
+# Whether the fields `cl` of the closure hold the field `name`, as a type: the optional components (the budget fluxes,
+# the flux of liquid) add their fields to `cl`, and what reads them is chosen by dispatch on this
+@inline has_field(::NamedTuple{names}, ::Val{name}) where {names, name} = Val(name ∈ names)
+
+# The field `name` of `cl` at (i, j, k), or the zero of the type `FT` without it
+@inline stored_or_zero(cl, name::Val, i, j, k, FT) = stored_or_zero(has_field(cl, name), cl, name, i, j, k, FT)
+@inline stored_or_zero(::Val{true}, cl, ::Val{name}, i, j, k, FT) where name = @inbounds getproperty(cl, name)[i, j, k]
+@inline stored_or_zero(::Val{false}, cl, name, i, j, k, FT) = zero(FT)
+
 # The density-weighted flux through the bottom of column (i, j) that the boundary condition `bc` of the
 # prognostic field `c` prescribes: positive upward, into the domain. Only `Flux` boundary conditions carry one
 # (the default no-flux condition gives zero).
@@ -199,6 +208,16 @@ end
     return wˡᵒʷ, wᵘᵖ, ρΔz
 end
 
+# The conversion at the center k of a budget flux from its conversions at the two faces of the cell, `lower` and `upper`
+# (evaluated at the nearest interior face where the face is a boundary, which carries no flux), with the half-cell
+# weights: the one form for the budget fluxes of the heating and of the total water
+@inline function half_cell_conversionᶜᶜᶜ(i, j, k, grid, ρ, lower, upper)
+    wˡᵒʷ, wᵘᵖ, ρΔz = half_cell_weights(i, j, k, grid, ρ)
+    wˡᵒʷ = ifelse(k > 1, wˡᵒʷ, zero(wˡᵒʷ))
+    wᵘᵖ = ifelse(k < size(grid, 3), wᵘᵖ, zero(wᵘᵖ))
+    return (wˡᵒʷ * lower + wᵘᵖ * upper) / ρΔz
+end
+
 # The conversions of the interior fluxes at center k, from those at its two faces by half-cell
 # weights (the boundary faces carry none: the closure's diffusivities vanish there)
 @inline function interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
@@ -218,8 +237,9 @@ end
 
 # The latent part of the buoyancy production at a face, Kᶜ ΔN²ᴸ (see `_latent_corrected_stability!`), or with a
 # `LiquidFluxVarianceRelation` that of its flux of liquid (liquid_flux_variance_relation.jl)
-@inline latent_conversionᶜᶜᶠ(i, j, k, grid, cl, Kᶜ) =
-    hasproperty(cl, :Bˡᶠ) ? @inbounds(Kᶜ[i, j, k] * cl.Λᴸ[i, j, k] + cl.Bˡᶠ[i, j, k]) : @inbounds(Kᶜ[i, j, k] * cl.ΔN²ᴸ[i, j, k])
+@inline latent_conversionᶜᶜᶠ(i, j, k, grid, cl, Kᶜ) = latent_conversionᶜᶜᶠ(has_field(cl, Val(:Bˡᶠ)), i, j, k, grid, cl, Kᶜ)
+@inline latent_conversionᶜᶜᶠ(::Val{true}, i, j, k, grid, cl, Kᶜ) = @inbounds Kᶜ[i, j, k] * cl.Λᴸ[i, j, k] + cl.Bˡᶠ[i, j, k]
+@inline latent_conversionᶜᶜᶠ(::Val{false}, i, j, k, grid, cl, Kᶜ) = @inbounds Kᶜ[i, j, k] * cl.ΔN²ᴸ[i, j, k]
 
 # The conversions of the surface fluxes within the bottom half-cell: the work of the surface
 # stress on the lowest level, -u₁ 𝒯ˣ - v₁ 𝒯ʸ (𝒯 the upward flux of ρu, ρv), and the dynamic
@@ -392,7 +412,7 @@ end
         condensate = bᶜᵛ * (cl.η[i, j, k] * ∂z_qᶜ - cl.aᴺ[i, j, k] * ∂z_s)
         outside = - bⁱᵛ * cl.ηⁱ[i, j, k] * ∂z_sⁱ - bˡᵛ * cl.ηʷⁱ[i, j, k] * ∂z_s
         # with a `LiquidFluxVarianceRelation` the condensate part is that of its flux of liquid, less the applied flux
-        return Kᶜ[i, j, k] * (solved_condensate_conversion(cl, i, j, k, condensate, bᶜᵛ * ∂z_qᶜ) + outside) +
+        return Kᶜ[i, j, k] * (solved_condensate_conversion(cl, condensate, bᶜᵛ * ∂z_qᶜ) + outside) +
                liquid_flux_buoyancy(cl, i, j, k)
     end
 end
