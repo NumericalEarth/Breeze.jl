@@ -48,14 +48,6 @@ export
     SpeciesBorrowing,
     AbstractNumberConcentrationCategories,
 
-    # Subgrid statistics (closure → microphysics)
-    AbstractSubgridStatistics,
-    DiracStatistics,
-    AbstractSubgridCorrelation,
-    NoSubgridCorrelation,
-    subgrid_correlation,
-    subgrid_statisticsᶜᶜᶜ,
-
     # Subgrid supersaturation statistics and the phase relaxation rate
     AbstractSupersaturationStatistics,
     PrescribedStatistics,
@@ -203,7 +195,6 @@ using Oceananigans.Utils: prettysummary, launch!
 
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
-include("subgrid_statistics.jl")
 include("supersaturation_statistics.jl")
 include("dynamics_interface.jl")
 include("formulation_interface.jl")

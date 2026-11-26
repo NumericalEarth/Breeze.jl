@@ -6,8 +6,6 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.AtmosphereModels: DiracStatistics, NoSubgridCorrelation,
-                               MicrophysicalProcessRate, subgrid_correlation, subgrid_statisticsᶜᶜᶜ
 
 using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation, SubgridCondensation
 using Breeze.AtmosphereModels: supersaturation_statistics, supersaturation_statistics_model_fields, saturated_fraction
@@ -46,12 +44,6 @@ column(field) = Array(interior(field))[1, 1, :]
 function non_precipitating_water(model)
     μ = model.microphysical_fields
     return column(model.moisture_density) .+ column(μ.ρqᶜˡ)
-end
-
-@testset "Subgrid statistics interface" begin
-    @test subgrid_correlation(nothing) isa NoSubgridCorrelation
-    grid = RectilinearGrid(CPU(); size=4, z=(0, 1), topology=(Flat, Flat, Bounded))
-    @test subgrid_statisticsᶜᶜᶜ(1, 1, 1, grid, NoSubgridCorrelation(), nothing, nothing) isa DiracStatistics
 end
 
 @testset "With P3, SHOC diffuses the cloud liquid in the stages" begin
