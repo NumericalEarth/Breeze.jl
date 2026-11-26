@@ -137,6 +137,10 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Step forward a single-column `model` with anelastic dynamics one time step `Δt` with the slow
 method of a multirate infinitesimal step (see `single_column_multirate_stage!`).
 """
+update_stage_state!(model, callbacks, stage) =
+    stage == 1 ? update_state!(model, callbacks; compute_tendencies = true) :
+                 AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
+
 function OceananigansTimeSteppers.time_step!(model::SingleColumnMultirateModel, Δt; callbacks=[])
 
     ts = model.timestepper
@@ -146,7 +150,7 @@ function OceananigansTimeSteppers.time_step!(model::SingleColumnMultirateModel, 
 
     (; c, d) = ts.tableau
     s = length(d)
-    tⁿ⁺¹ = model.clock.time + Δt
+    tⁿ⁺¹ = next_time(model.clock, Δt)
 
     store_outer_step_state!(ts, model)
 
@@ -158,7 +162,8 @@ function OceananigansTimeSteppers.time_step!(model::SingleColumnMultirateModel, 
             ts.next_stage[] = i + 1
             Δc = i == 1 ? c[1] : c[i] - c[i-1]
             tick_stage!(model.clock, Δc * Δt)
-            update_state!(model, callbacks; compute_tendencies = true)
+            # The update after the first stage checks the radiation schedule, as in `SSPRungeKutta3`
+            update_stage_state!(model, callbacks, i)
             # After `update_state!`, as with acoustic substepping: the increments are those of the
             # state it leaves, with its negative-moisture correction (see `stage_increment_source`).
             store_stage_increment!(ts, model, i, Δt)
@@ -171,7 +176,7 @@ function OceananigansTimeSteppers.time_step!(model::SingleColumnMultirateModel, 
     tick_stage!(model.clock, corrected_Δt, Δt)
 
     step_closure_prognostics!(model.closure_fields, model.closure, model, Δt)
-    update_state!(model, callbacks; compute_tendencies = true)
+    AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
 
     # The operator-split microphysics update, once per step, and the particles (see `SSPRungeKutta3`).
     microphysics_model_update!(model.microphysics, model)
