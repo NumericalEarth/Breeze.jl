@@ -218,12 +218,15 @@ const PASS_CLOSURE_FIELD_NAMES = (:N², :ℓᵐ, :ℓˢ, :Kᵘ, :Kᶜ, :Kᵉ)
 pass_name(name) = Symbol(:pass_, name)
 
 # The closure fields of a pass: those of the prognostic state with the stability, the mixing lengths and the
-# diffusivities replaced by the pass's own (the per-tracer lookup of the diffusivities included)
+# diffusivities replaced by the pass's own (the per-tracer lookup of the diffusivities included). The column value of
+# the stability functions (`column_stability`, `nothing` for pointwise ones) is shared: each pass fills it from its own
+# static stability before its diffusivities, as the prognostic state does.
 function pass_closure_fields(closure_fields::TKEClosureFields, cl)
     Kᵘ, Kᶜ, Kᵉ = cl.pass_Kᵘ, cl.pass_Kᶜ, cl.pass_Kᵉ
     tracer_diffusivities = map(K -> K === closure_fields.Kᵉ ? Kᵉ : Kᶜ, closure_fields.tupled_tracer_diffusivities)
     return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, cl.pass_N², cl.pass_ℓᵐ, cl.pass_ℓˢ, closure_fields.Lᵉ, tracer_diffusivities,
-                            closure_fields.tupled_implicit_linear_coefficients, closure_fields.subgrid_cloud)
+                            closure_fields.tupled_implicit_linear_coefficients, closure_fields.subgrid_cloud,
+                            closure_fields.column_stability)
 end
 
 # The pass starts from the closure fields of the prognostic state, halos included: one kernel for the six copies
