@@ -577,8 +577,8 @@ end
 using Breeze.AtmosphereModels: AtmosphereModels, supersaturation_statistics, supersaturation_statistics_model_fields,
                                saturated_fraction
 using Breeze.Microphysics.PredictedParticleProperties: CloudDroplets, CondensationTimescaleRelaxation
-using Breeze.TurbulenceClosures: applied_flux_state, cell_phase_relaxation_rate, condensing_fraction,
-                                 saturated_response_shareᶜᶜᶠ, saturated_fraction_fields, with_saturated_fraction_fields
+using Breeze.TurbulenceClosures: applied_flux_state, cell_phase_relaxation_rates, condensing_fraction,
+                                 saturated_response_sharesᶜᶜᶠ, saturated_fraction_model_fields, with_saturated_fraction_fields
 
 function closure_statistics_column(static_stability; Nz = 40, H = 2400, microphysics_kw = (;), steps = 25,
                                    subgrid_distribution = DoubleGaussian())
@@ -616,7 +616,8 @@ end
     # The static stability blends with f⁺ averaged to the interfaces. N² of the next update reads
     # the distribution this update leaves.
     buoyancy, tracers = buoyancy_force(model), buoyancy_tracers(model)
-    static_stability = with_saturated_fraction_fields(closure.static_stability, buoyancy, saturated_fraction_fields(model))
+    static_stability = with_saturated_fraction_fields(closure.static_stability, buoyancy, closure, fields,
+                                                      saturated_fraction_model_fields(closure.static_stability, model))
     operation = KernelFunctionOperation{Center, Center, Face}(static_stabilityᶜᶜᶠ, grid, static_stability, buoyancy, tracers, fields)
     N² = column(Field(operation))
     N²ᵈ = face_field(model, ∂z_b, buoyancy, tracers)
@@ -638,10 +639,11 @@ end
     s = applied_flux_state(model)
     Nz = size(model.grid, 3)
     @allowscalar begin
-        @test all(k -> cell_phase_relaxation_rate(1, 1, k, model.grid, s) == 1 / τ, 1:Nz)
+        @test all(k -> cell_phase_relaxation_rates(1, 1, k, model.grid, s).ωˡ == 1 / τ, 1:Nz)
+        # Without ice the distributed condensate takes all of the saturated response, at any flux share aʷ
         tₑ = 30.0
-        @test saturated_response_shareᶜᶜᶠ(Val(false), tₑ, 1, 1, 5, model.grid, s) == condensing_fraction(tₑ / τ)
+        @test saturated_response_sharesᶜᶜᶠ(Val(false), tₑ, 0.5, 1, 1, 5, model.grid, s) == (condensing_fraction(tₑ / τ), 0, 0)
     end
     physical = closure_statistics_column(SaturationWeightedStaticStability(CondensateFluxFraction()); microphysics_kw = (; cloud), steps = 2)
-    @test @allowscalar cell_phase_relaxation_rate(1, 1, 5, physical.grid, applied_flux_state(physical)) != 1 / τ
+    @test @allowscalar cell_phase_relaxation_rates(1, 1, 5, physical.grid, applied_flux_state(physical)).ωˡ != 1 / τ
 end
