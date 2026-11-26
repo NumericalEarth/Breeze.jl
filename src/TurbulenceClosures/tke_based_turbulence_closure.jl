@@ -198,7 +198,7 @@ using Breeze
 GradientLimitedMixingLength(blending = HarmonicBlend(exponent=8))
 
 # output
-GradientLimitedMixingLength{Float64} (ℂˢ = 1.316, ℂⁱ = 1.316, blending = HarmonicBlend(exponent = 8))
+GradientLimitedMixingLength{Float64} (ℂˢ = 1.316, ℂⁱ = 1.316, ℂˡᵇ = 1.0, blending = HarmonicBlend(exponent = 8))
 ```
 """
 function HarmonicBlend(; exponent = 4)
@@ -296,17 +296,25 @@ end
 """
 $(TYPEDEF)
 
-A gradient-limited mixing length with independent wall coefficient ``ℂˢ`` and interior slope ``ℂⁱ``:
+A gradient-limited mixing length with independent wall coefficient ``ℂˢ``, interior slope ``ℂⁱ`` and
+buoyancy-length coefficient ``ℂˡᵇ``:
 
 ```math
-ℓ(z) = \\min\\left(ℂˢ z, \\min_{z′ > 0} [ℓᵇ(z′) + ℂⁱ |z - z′|]\\right).
+ℓ(z) = \\min\\left(ℂˢ z, \\min_{z′ > 0} [ℂˡᵇ ℓᵇ(z′) + ℂⁱ |z - z′|]\\right), \\qquad ℓᵇ = \\sqrt{e} / N.
 ```
 
 Two sweeps per column compute the stratification envelope; the surface length bounds the result separately.
 The uncapped envelope is retained for cell-center reconstruction, so changing ``ℂⁱ`` does not
 change the neutral wall length ``ℂˢ z``. The domain top is not an obstacle.
-With equal slopes this recovers the original gradient-limited formulation
+With equal slopes and ``ℂˡᵇ = 1`` this recovers the original gradient-limited formulation
 ([Gaspar et al. 1990](@cite Gaspar1990)).
+
+In stable air away from the ground the length tends to ``ℂˡᵇ \\sqrt{e} / N``, where the stratification number of
+[`TurbulentRichardsonStabilityFunction`](@ref) is ``α_N = (ℓ N)² / e → (ℂˡᵇ)²``. With ``ℂˡᵇ = 1``, the default, the
+length carries the stratification limit (``α_N ≤ 1``); with ``ℂˡᵇ > 1`` the stability functions carry it beyond
+``α_N = 1`` (SHOC's length, [`BlendedMixingLength`](@ref), tends to ``(ℂˡ₂ / ℂˡ₁) \\sqrt{e} / (\\sqrt{ℂˡ₃} N)``,
+``ℂˡᵇ ≈ 56.6``). The buoyancy length of the cell centers, which bounds the length of the dissipation, takes
+the same coefficient.
 
 The standalone constructor retains `ℂˢ = 1.316` and `ℂⁱ = ℂˢ` for compatibility:
 a single positional coefficient or a lone `ℂˢ` keyword still sets both slopes.
@@ -319,16 +327,19 @@ and each step of the two sweeps that build the envelope.
 struct GradientLimitedMixingLength{FT, B} <: AbstractMixingLength
     ℂˢ :: FT       # wall length coefficient
     ℂⁱ :: FT       # interior envelope slope; equal slopes recover the original formulation
+    ℂˡᵇ :: FT      # coefficient of the buoyancy length ℂˡᵇ √e / N; 1 is the original formulation
     blending :: B  # how the bounds on the length combine
 end
 
-function GradientLimitedMixingLength(; ℂˢ = 1.316, ℂⁱ = ℂˢ, blending = HardMinimum())
-    ℂˢ, ℂⁱ = promote(ℂˢ, ℂⁱ)
-    return GradientLimitedMixingLength(ℂˢ, ℂⁱ, blending)
+function GradientLimitedMixingLength(; ℂˢ = 1.316, ℂⁱ = ℂˢ, ℂˡᵇ = 1, blending = HardMinimum())
+    ℂˢ, ℂⁱ, ℂˡᵇ = promote(ℂˢ, ℂⁱ, ℂˡᵇ)
+    return GradientLimitedMixingLength(ℂˢ, ℂⁱ, ℂˡᵇ, blending)
 end
 
 GradientLimitedMixingLength(ℂˢ::Number) = GradientLimitedMixingLength(ℂˢ, ℂˢ)
-GradientLimitedMixingLength(ℂˢ::Number, ℂⁱ::Number) = GradientLimitedMixingLength(promote(ℂˢ, ℂⁱ)..., HardMinimum())
+GradientLimitedMixingLength(ℂˢ::Number, ℂⁱ::Number) = GradientLimitedMixingLength(ℂˢ, ℂⁱ, HardMinimum())
+GradientLimitedMixingLength(ℂˢ::Number, ℂⁱ::Number, blending::Union{HardMinimum, HarmonicBlend}) =
+    GradientLimitedMixingLength(promote(ℂˢ, ℂⁱ, one(ℂˢ))..., blending)
 GradientLimitedMixingLength{FT}(ℂˢ) where FT = GradientLimitedMixingLength{FT}(ℂˢ, ℂˢ)
 GradientLimitedMixingLength{FT}(ℂˢ, ℂⁱ) where FT = GradientLimitedMixingLength(convert(FT, ℂˢ), convert(FT, ℂⁱ), HardMinimum())
 
@@ -344,6 +355,10 @@ Adapt.@adapt_structure GradientLimitedMixingLength
 @inline interior_slope(ml::GradientLimitedMixingLength) = ml.ℂⁱ
 @inline interior_slope(ml::AbstractMixingLength) = ml.ℂˢ
 
+# The coefficient of the buoyancy length ℂˡᵇ √e / N
+@inline buoyancy_length_coefficient(ml::GradientLimitedMixingLength) = ml.ℂˡᵇ
+@inline buoyancy_length_coefficient(ml::AbstractMixingLength) = 1
+
 Base.summary(ml::LocalMinimumMixingLength{FT}) where FT = "LocalMinimumMixingLength{$FT}"
 Base.summary(ml::IntegralMixingLength{FT}) where FT = "IntegralMixingLength{$FT}"
 Base.summary(ml::GradientLimitedMixingLength{FT}) where FT = "GradientLimitedMixingLength{$FT}"
@@ -355,13 +370,14 @@ blending_summary(blending) = string(", blending = ", blending)
 Base.show(io::IO, ml::AbstractMixingLength) =
     print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), blending_summary(length_blending(ml)), ")")
 Base.show(io::IO, ml::GradientLimitedMixingLength) =
-    print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), ", ℂⁱ = ", prettysummary(ml.ℂⁱ), blending_summary(ml.blending), ")")
+    print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), ", ℂⁱ = ", prettysummary(ml.ℂⁱ), ", ℂˡᵇ = ", prettysummary(ml.ℂˡᵇ),
+          blending_summary(ml.blending), ")")
 
 @inline convert_eltype(::Type{FT}, ml::LocalMinimumMixingLength) where FT =
     LocalMinimumMixingLength(convert(FT, ml.ℂˢ), convert_eltype(FT, ml.blending))
 @inline convert_eltype(::Type{FT}, ml::IntegralMixingLength) where FT = IntegralMixingLength{FT}(convert(FT, ml.ℂˢ))
 @inline convert_eltype(::Type{FT}, ml::GradientLimitedMixingLength) where FT =
-    GradientLimitedMixingLength(convert(FT, ml.ℂˢ), convert(FT, ml.ℂⁱ), convert_eltype(FT, ml.blending))
+    GradientLimitedMixingLength(convert(FT, ml.ℂˢ), convert(FT, ml.ℂⁱ), convert(FT, ml.ℂˡᵇ), convert_eltype(FT, ml.blending))
 
 #####
 ##### The closure
@@ -854,7 +870,7 @@ end
 # the stratification there through the penetration depth
 @inline function local_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
-    ℓᵇ = buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
+    ℓᵇ = buoyancy_length_coefficient(closure.mixing_length) * buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     ℓ = blend(length_blending(closure.mixing_length), d, ℓᵇ)
     return ifelse(isnan(ℓ), d, ℓ)
 end
@@ -864,7 +880,7 @@ end
     FT = grid_float_type(grid)
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
     N²⁺ = clip(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²))
-    ℓᵇ = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
+    ℓᵇ = buoyancy_length_coefficient(closure.mixing_length) * turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
     ℓ = blend(length_blending(closure.mixing_length), d, ifelse(N²⁺ == 0, FT(Inf), ℓᵇ))
     return ifelse(isnan(ℓ), d, ℓ)
 end
@@ -878,7 +894,7 @@ end
     return nothing
 end
 
-# Sweep the stratification envelope at ℂⁱ, then apply the wall bound ℂˢ z separately.
+# Sweep the stratification envelope of the buoyancy length ℂˡᵇ √e / N at ℂⁱ, then apply the wall bound ℂˢ z separately.
 # Neither the ground nor the domain top seeds the stratification envelope. Every combination of
 # two lengths goes through the blending of the mixing length: the minimum, or a `HarmonicBlend`,
 # which each sweep applies recursively (see its docstring for what that implies).
@@ -888,7 +904,7 @@ end
     @inbounds begin
         ℓˢ[i, j, 1] = FT(Inf)
         for k in 2:Nz+1
-            ℓᵇ = buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
+            ℓᵇ = ml.ℂˡᵇ * buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
             ℓˢ[i, j, k] = ifelse(isnan(ℓᵇ), FT(Inf), ℓᵇ)
         end
         for k in 2:Nz+1

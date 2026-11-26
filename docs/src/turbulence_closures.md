@@ -62,8 +62,10 @@ stratification; they differ elsewhere:
 - [`LocalMinimumMixingLength`](@ref): ``ℓ = \min(ℂˢ z, ℓᵇ)``, after Deardorff (1980). In an elevated
   layer with ``N² ≤ 0``, such as a saturated cloud layer, only the distance to the ground bounds ``ℓ``,
   so the diffusivity can jump by orders of magnitude.
-- [`GradientLimitedMixingLength`](@ref) (default): ``ℓ(z) = \min(ℂˢ z, \min_{z′}[ℓᵇ(z′) + ℂⁱ |z - z′|])``,
-  which also bounds ``ℓ`` by the distance to nearby stratification, growing at slope ``ℂⁱ``.
+- [`GradientLimitedMixingLength`](@ref) (default): ``ℓ(z) = \min(ℂˢ z, \min_{z′}[ℂˡᵇ ℓᵇ(z′) + ℂⁱ |z - z′|])``,
+  which also bounds ``ℓ`` by the distance to nearby stratification, growing at slope ``ℂⁱ``. In stable
+  air ``ℓ → ℂˡᵇ \sqrt{e} / N``; with ``ℂˡᵇ > 1`` (1 by default) the stability functions carry the
+  stratification limit beyond ``α_N = 1``.
   The envelope before capping at the surface length is stored in `closure_fields.ℓˢ`.
 - [`IntegralMixingLength`](@ref): the parcel length of
   [Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989), ``ℓ = ℂˢ \min(ℓ↑, ℓ↓)``, where

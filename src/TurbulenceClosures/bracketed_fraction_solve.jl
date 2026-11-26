@@ -131,7 +131,7 @@ end
     # The local mixing length
     ℓᵈ = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
     N²⁺ = max(N², zero(FT))
-    ℓᵇ = ifelse(N²⁺ == 0, FT(Inf), u / sqrt(N²⁺))
+    ℓᵇ = ifelse(N²⁺ == 0, FT(Inf), buoyancy_length_coefficient(closure.mixing_length) * u / sqrt(N²⁺))
     ℓ = blend(length_blending(closure.mixing_length), ℓᵈ, ℓᵇ)
     ℓ = ifelse(isnan(ℓ), ℓᵈ, ℓ)
     ℓ = blend(length_blending(closure.mixing_length), ℓ, ℓᵉ) # ℓᵉ = Inf without the lagged envelope
