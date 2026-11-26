@@ -306,7 +306,7 @@ jobs:
       - name: Run tests
         uses: julia-actions/julia-runtest@6e050c8013b833b1195105ff2fce9cd802f53271 # v1.12.0
         with:
-          check_bounds: "yes"
+          check_bounds: "auto"
           optimize: "0"
           test_args: "--verbose --quickfail distributed"
       - name: "Upload Manifest"
