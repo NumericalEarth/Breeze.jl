@@ -170,7 +170,7 @@ function saturated_stability_weightᶜᶜᶠ end
 # `AtmosphereModels.saturated_fraction(supersaturation_statistics(...))`, averaged from the two
 # adjacent centers to the interface. The statistics need the closure and the model fields, which the
 # static stability does not receive; they are gathered when the static stability is launched
-# (`saturated_fraction_fields`) and attached to the fraction in the kernel
+# (`saturated_fraction_model_fields`) and attached to the fraction in the kernel
 # (`with_saturated_fraction_fields`). A statistics source of the closure's own distribution reads
 # the distribution of the previous update, as a weight that reads the mixing length does.
 
@@ -183,20 +183,25 @@ end
 Adapt.adapt_structure(to, f::StatisticsSaturatedFraction) =
     StatisticsSaturatedFraction(adapt(to, f.statistics), adapt(to, f.fields))
 
-# The arguments `(closure, closure_fields, model_fields)` of `supersaturation_statistics` for the
-# subgrid model of the microphysics, or `nothing`
-saturated_fraction_fields(model) = saturated_fraction_fields(microphysics_subgrid_model(model.microphysics), model)
-saturated_fraction_fields(subgrid_model, model) = nothing
-saturated_fraction_fields(::AtmosphereModels.AbstractSupersaturationStatistics, model) =
-    (model.closure, model.closure_fields, AtmosphereModels.supersaturation_statistics_model_fields(model))
-
 const MicrophysicsSaturatedFractionStability = SaturationWeightedStaticStability{MicrophysicsSaturatedFraction}
 
-@inline with_saturated_fraction_fields(static_stability, buoyancy, fields) = static_stability
-@inline with_saturated_fraction_fields(static_stability::MicrophysicsSaturatedFractionStability, buoyancy, ::Nothing) = static_stability
+# The model fields of `supersaturation_statistics` for the subgrid model of the microphysics, where the static stability
+# reads them, or `nothing`. The statistics read the closure and its fields too, which the kernel of the static stability
+# receives itself (`with_saturated_fraction_fields`): each reaches the kernel once.
+saturated_fraction_model_fields(static_stability, model) = nothing
+saturated_fraction_model_fields(::MicrophysicsSaturatedFractionStability, model) =
+    statistics_model_fields(microphysics_subgrid_model(model.microphysics), model)
+statistics_model_fields(subgrid_model, model) = nothing
+statistics_model_fields(::AtmosphereModels.AbstractSupersaturationStatistics, model) =
+    AtmosphereModels.supersaturation_statistics_model_fields(model)
 
-@inline with_saturated_fraction_fields(::MicrophysicsSaturatedFractionStability, buoyancy, fields) =
-    SaturationWeightedStaticStability(StatisticsSaturatedFraction(microphysics_subgrid_model(buoyancy.microphysics), fields))
+@inline with_saturated_fraction_fields(static_stability, buoyancy, closure, closure_fields, model_fields) = static_stability
+@inline with_saturated_fraction_fields(static_stability::MicrophysicsSaturatedFractionStability, buoyancy, closure, closure_fields,
+                                       ::Nothing) = static_stability
+
+@inline with_saturated_fraction_fields(::MicrophysicsSaturatedFractionStability, buoyancy, closure, closure_fields, model_fields) =
+    SaturationWeightedStaticStability(StatisticsSaturatedFraction(microphysics_subgrid_model(buoyancy.microphysics),
+                                                                  (closure, closure_fields, model_fields)))
 
 @inline function cell_saturated_fraction(i, j, k, grid, fraction::StatisticsSaturatedFraction)
     statistics = AtmosphereModels.supersaturation_statistics(fraction.statistics, i, j, k, grid, fraction.fields...)

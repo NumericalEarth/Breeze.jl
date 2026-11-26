@@ -32,7 +32,6 @@ using Oceananigans.Operators: Δzᶜᶜᶠ
 using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
                                       third_moment, limit_third_moment, assumed_pdf, buoyancy_flux_coefficients,
                                       plume_liquid_water_temperature, plume_saturation,
-                                      distribution_thermodynamics,
                                       rate_norm_factor, linear_interp, hard_floor, component_vapor_excess,
                                       representable_skewness, within_component_share, ice_saturation_thermodynamics,
                                       saturation_surface, condensate_latent_heat_and_log_slope,
@@ -710,8 +709,7 @@ function build_subgrid_cloud_fields(grid, distribution, solver, static_stability
              third_moment_fields(grid, distribution.third_moment)...,
              heating_budget_flux_fields(grid, heating_budget_flux)...,
              total_water_budget_flux_fields(grid, total_water_budget_flux)...,
-             liquid_flux_fields(grid, distribution.liquid_flux)...,
-             gθ = CenterField(grid), gA = CenterField(grid))
+             liquid_flux_fields(grid, distribution.liquid_flux)...)
     return SubgridCloudFields(energetics, moments, cloud, build_solver_state(grid, energetics),
                               build_presolve_fields(grid, energetics, tracer_names))
 end
@@ -770,7 +768,7 @@ Adapt.adapt_structure(to, q::SpecificTotalWater) =
 @inline Base.getindex(q::SpecificTotalWater{<:Any, Nothing}, i, j, k) =
     @inbounds q.vapor[i, j, k] / q.density[i, j, k]
 
-cloud_liquid_density(microphysical_fields) =
+@inline cloud_liquid_density(microphysical_fields) =
     hasproperty(microphysical_fields, :ρqᶜˡ) ? microphysical_fields.ρqᶜˡ : nothing
 
 function distribution_potential_temperature_density(model)
@@ -853,9 +851,9 @@ Adapt.adapt_structure(to, h::HeldCondensate) =
     return (; liquid = q.liquid - qᶜˡ, ice = q.ice)
 end
 
-held_condensate_field(model, ρ, ::Nothing) = nothing
-held_condensate_field(model, ρ, ρqᶜˡ) = HeldCondensate(ρ, model.moisture_density, ρqᶜˡ, model.grid, model.microphysics,
-                                                      model.microphysical_fields)
+# The held condensate of the applied flux state `s` (`applied_flux_state`) on `grid`
+@inline held_condensate_field(s, grid, ::Nothing) = nothing
+@inline held_condensate_field(s, grid, ρqᶜˡ) = HeldCondensate(s.ρ, s.ρqᵛᵉ, ρqᶜˡ, grid, s.microphysics, s.microphysical_fields)
 
 # The thermodynamics of the distribution at the cell (i, j, k): with the condensate it holds there
 @inline level_thermodynamics(thermodynamics::NamedTuple{names}, i, j, k) where names =
@@ -866,28 +864,35 @@ held_condensate_field(model, ρ, ρqᶜˡ) = HeldCondensate(ρ, model.moisture_d
 @inline level_thermodynamics(::Nothing, thermodynamics, i, j, k) = thermodynamics
 @inline level_thermodynamics(held, thermodynamics, i, j, k) = merge(thermodynamics, (; held = held[i, j, k]))
 
-distributed_water_potential_temperature(model, ρθ, ρ, ::Nothing) = SpecificValue(ρθ, ρ)
+# θʷ of the applied flux state `s` on `grid`
+@inline distributed_water_potential_temperature(s, grid, ::Nothing) = SpecificValue(s.ρθ, s.ρ)
 
-distributed_water_potential_temperature(model, ρθ, ρ, ρqᶜˡ) =
-    DistributedWaterPotentialTemperature(ρθ, ρ, model.moisture_density, ρqᶜˡ, AtmosphereModels.dynamics_pressure(model.dynamics),
-                                         model.grid, model.microphysics, model.microphysical_fields,
-                                         model.thermodynamic_constants,
-                                         AtmosphereModels.liquid_ice_exner_exponent(model.formulation),
-                                         AtmosphereModels.standard_pressure(model.dynamics))
+@inline distributed_water_potential_temperature(s, grid, ρqᶜˡ) =
+    DistributedWaterPotentialTemperature(s.ρθ, s.ρ, s.ρqᵛᵉ, ρqᶜˡ, s.p, grid, s.microphysics, s.microphysical_fields, s.constants,
+                                         s.exner_exponent, s.standard_pressure)
 
-# The state the distribution reads: θʷ, qᵗ, e, w, p and the thermodynamics of the model. `e_density`
-# is the density of the specific TKE `ρe` holds: `nothing` within `update_state!`, where the tracer
-# holds its specific value, and `ρ` after the stages, where it holds its density.
+# The distributed water of the applied flux state `s` (`applied_flux_state`) on `grid`: its liquid-ice potential
+# temperature θʷ, its specific total water qʷ and the thermodynamics of the distribution, with the condensate it holds.
+# They wrap the fields of `s`, so a kernel forms them from `s` where it reads them: the microphysics and its fields,
+# which each of them carries, then reach the kernel once, in `s`, rather than three times (the arguments of a GPU kernel
+# share about 32 KiB of parameter memory).
+@inline function distributed_water(s, grid)
+    ρqᶜˡ = cloud_liquid_density(s.microphysical_fields)
+    θ = distributed_water_potential_temperature(s, grid, ρqᶜˡ)
+    qᵗ = SpecificTotalWater(s.ρqᵛᵉ, ρqᶜˡ, s.ρ)
+    thermodynamics = (constants = s.constants, standard_pressure = s.standard_pressure, exner_exponent = s.exner_exponent,
+                      phase_equilibrium = s.phase_equilibrium, held_condensate = held_condensate_field(s, grid, ρqᶜˡ))
+    return (; θ, qᵗ, thermodynamics)
+end
+
+# The state the distribution reads on the host: θʷ, qᵗ, e, w, p and the thermodynamics of the model (`distributed_water`).
+# `e_density` is the density of the specific TKE `ρe` holds: `nothing` within `update_state!`, where the tracer holds its
+# specific value, and `ρ` after the stages, where it holds its density.
 function distribution_state(model, e_density)
-    ρ = AtmosphereModels.total_density(model.dynamics)
-    ρqᶜˡ = cloud_liquid_density(model.microphysical_fields)
-    θ = distributed_water_potential_temperature(model, distribution_potential_temperature_density(model), ρ, ρqᶜˡ)
-    qᵗ = SpecificTotalWater(model.moisture_density, ρqᶜˡ, ρ)
+    s = applied_flux_state(model)
+    water = distributed_water(s, model.grid)
     e = SpecificValue(model.tracers[TKE_NAME], e_density)
-    w = model.velocities.w
-    p = AtmosphereModels.dynamics_pressure(model.dynamics)
-    thermodynamics = merge(distribution_thermodynamics(model), (; held_condensate = held_condensate_field(model, ρ, ρqᶜˡ)))
-    return (; θ, qᵗ, e, w, p, thermodynamics)
+    return (; water.θ, water.qᵗ, e, w = model.velocities.w, s.p, water.thermodynamics)
 end
 
 #####
@@ -1187,29 +1192,31 @@ end
             # w′b′ = b_θ w′θʷ′ + b_qᵛ w′qᵗ′ + (b_qᶜ - b_qᵛ) w′qˡ′, b_qᶜ that of the distributed condensate. The buoyancy production of the TKE
             # equation is not this distribution's: it is the conversion of the fluxes the closure
             # applies (`compute_applied_flux_conversions!`).
-            b_qᵛ = cl.b_qᵛ[i, j, k]
-            cl.gθ[i, j, k] = cl.b_θ[i, j, k]
-            cl.gA[i, j, k] = b_qᵛ
-            cl.Bˡ[i, j, k] = (cl.b_qᶜ[i, j, k] - b_qᵛ) * w′qˡ′
+            cl.Bˡ[i, j, k] = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * w′qˡ′
         end
     end
 
     return nothing
 end
 
-@kernel function _compute_subgrid_distribution!(moments, cloud, grid, closure, closure_fields, θ, qᵗ, e, velocities, p, thermodynamics)
+# The kernels of the subgrid cloud read its fields from `closure_fields.subgrid_cloud` and the distributed water from the
+# applied flux state `s` (`distributed_water`), so that each reaches the kernel once
+@kernel function _compute_subgrid_distribution!(closure_fields, grid, closure, e, velocities, s)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     d = closure_ij.subgrid_distribution
-    subgrid_distribution_column!(moments, cloud, i, j, grid, d, closure_ij, closure_fields, θ, qᵗ, e, velocities, p, thermodynamics)
+    fields = closure_fields.subgrid_cloud
+    water = distributed_water(s, grid)
+    subgrid_distribution_column!(fields.moments, fields.cloud, i, j, grid, d, closure_ij, closure_fields, water.θ, water.qᵗ, e,
+                                 velocities, s.p, water.thermodynamics)
 end
 
 function compute_subgrid_distribution!(fields::SubgridCloudFields, closure_fields, closure, model, e_density)
     grid = model.grid
-    s = distribution_state(model, e_density)
-    launch!(grid.architecture, grid, :xy, _compute_subgrid_distribution!,
-            fields.moments, fields.cloud, grid, closure, closure_fields, s.θ, s.qᵗ, s.e, model.velocities, s.p, s.thermodynamics)
-    compute_outside_condensate_moments!(fields, closure_fields, model, s)
+    e = SpecificValue(model.tracers[TKE_NAME], e_density)
+    launch!(grid.architecture, grid, :xy, _compute_subgrid_distribution!, closure_fields, grid, closure, e, model.velocities,
+            applied_flux_state(model))
+    compute_outside_condensate_moments!(fields, closure_fields, model)
     return nothing
 end
 
@@ -1240,12 +1247,12 @@ end
 #
 # Steady: qⁱ′sⁱ′ = τᵠ (2Kᶜ ∂z q̄ⁱ ∂z s̄ⁱ + ωⁱ sⁱ′²) / (1 + τᵠ ωⁱ), qⁱ′² = τᵠ (2Kᶜ (∂z q̄ⁱ)² + 2ωⁱ qⁱ′sⁱ′),
 # d′² = 2Kᶜ τᵠ (∂z d̄)² / (1 + 2τᵠ ωˡ). They are statistics: the water and the energy are unchanged.
-compute_outside_condensate_moments!(fields, closure_fields, model, s) = nothing
+compute_outside_condensate_moments!(fields, closure_fields, model) = nothing
 
-function compute_outside_condensate_moments!(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, model, s)
+function compute_outside_condensate_moments!(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, model)
     grid = model.grid
     launch!(grid.architecture, grid, :xy, _compute_outside_condensate_moments!, fields.moments, fields.cloud, grid,
-            closure_fields.Kᶜ, s.θ, s.qᵗ, s.p, s.thermodynamics, applied_flux_state(model))
+            closure_fields.Kᶜ, applied_flux_state(model))
     return nothing
 end
 
@@ -1261,10 +1268,12 @@ end
     return qᵛ⁺ⁱ * β * cp_over_L * Π
 end
 
-@kernel function _compute_outside_condensate_moments!(m, cl, grid, Kᶜ, θ, qʷ, p, thermodynamics, s)
+@kernel function _compute_outside_condensate_moments!(m, cl, grid, Kᶜ, s)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
+    θ, qʷ, thermodynamics = distributed_water(s, grid)
+    p = s.p
     held = thermodynamics.held_condensate
     @inbounds begin
         for k in 2:Nz
@@ -1376,7 +1385,7 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
     km = max(k - 1, 1)
     g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
     @inbounds begin
-        gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, km]) / 2
+        gAᶠ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, km]) / 2
         bˡᵛaʷ⁺ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, cl)
         bˡᵛaʷ⁻ = (cl.b_qᶜ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, cl)
     end
@@ -1393,7 +1402,7 @@ end
         Δz = Δzᶜᶜᶠ(i, j, k, grid)
         Δθ = θ[i, j, k] - θ[i, j, km]
         Δq = qᵗ[i, j, k] - qᵗ[i, j, km]
-        gθᶠ = (cl.gθ[i, j, k] + cl.gθ[i, j, km]) / 2
+        gθᶠ = (cl.b_θ[i, j, k] + cl.b_θ[i, j, km]) / 2
         c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
         c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, km), θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
     end
@@ -1418,10 +1427,7 @@ end
 function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_fields, closure, model, tracers, parameters) where {P, N}
     grid = model.grid
     arch = grid.architecture
-    s = distribution_state(model, nothing)
-    cl = fields.cloud
-    launch!(arch, grid, parameters, _solve_cloud_buoyancy_stability!, closure_fields.N², fields.solver_state, solver,
-            P == 0, P == N, ω, grid, s.θ, s.qᵗ, s.p, s.thermodynamics, fields.moments, cl,
+    launch!(arch, grid, parameters, _solve_cloud_buoyancy_stability!, closure_fields.N², solver, P == 0, P == N, ω, grid,
             closure, closure_fields, model.velocities, applied_flux_state(model), tracers[TKE_NAME])
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     # After the last pass: the latent correction of the solved state for the buoyancy production (N² unchanged)
@@ -1469,9 +1475,12 @@ end
     return x′, L′, U′
 end
 
-@kernel function _solve_cloud_buoyancy_stability!(N², state, solver, first, last, ω, grid, θ, qᵗ, p, thermodynamics, m, cl,
-                                                  closure, closure_fields, velocities, s, e)
+@kernel function _solve_cloud_buoyancy_stability!(N², solver, first, last, ω, grid, closure, closure_fields, velocities, s, e)
     i, j, k = @index(Global, NTuple)
+    fields = closure_fields.subgrid_cloud
+    state, m, cl = fields.solver_state, fields.moments, fields.cloud
+    θ, qᵗ, thermodynamics = distributed_water(s, grid)
+    p = s.p
     @inbounds begin
         interior_face = k > 1
         N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
@@ -1521,10 +1530,8 @@ end
 # conversion of the solved state without changing N² (ω = 0)
 function store_latent_correction_of_solved_stability!(fields, closure_fields, closure, model, tracers, parameters)
     grid = model.grid
-    d = distribution_state(model, nothing)
-    launch!(grid.architecture, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments,
-            grid, closure, closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, d.θ, tracers[TKE_NAME],
-            d.thermodynamics, zero(grid))
+    launch!(grid.architecture, grid, parameters, _latent_corrected_stability!, closure_fields.N², grid, closure, closure_fields,
+            model.velocities, applied_flux_state(model), tracers[TKE_NAME], zero(grid))
     return nothing
 end
 

@@ -405,9 +405,10 @@ end
     return (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
 end
 
-@kernel function _give_solved_conversions!(ρe, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, qʷ, θʷ)
+@kernel function _give_solved_conversions!(ρe, cl, grid, closure, s, Kᶜ, Kᵘ, u, v)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
+    θʷ, qʷ, _ = distributed_water(s, grid)
     Bᵖ, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     Dᵘ = implicit_momentum_dissipation(i, j, k, s, cl, @inbounds(cl.stage_time_step[1, 1, 1]))
     Bᴸˢ = solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
@@ -426,12 +427,11 @@ function give_solved_conversions!(closure_fields, closure, model)
     grid = model.grid
     cl = closure_fields.subgrid_cloud.cloud
     s = applied_flux_state(model)
-    d = distribution_state(model, nothing)
     fill_halo_regions!((model.momentum.ρu, model.momentum.ρv))
     u = SpecificValue(model.momentum.ρu, s.ρ)
     v = SpecificValue(model.momentum.ρv, s.ρ)
     launch!(grid.architecture, grid, :xyz, _give_solved_conversions!, model.tracers[TKE_NAME], cl, grid, closure, s,
-            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, d.qᵗ, d.θ)
+            closure_fields.Kᶜ, closure_fields.Kᵘ, u, v)
     return nothing
 end
 
@@ -1163,9 +1163,11 @@ end
     return nothing
 end
 
-@kernel function _latent_corrected_stability!(N², cl, m, grid, closure, closure_fields, velocities, s, qʷ, θʷ, e, thermodynamics, ω)
+@kernel function _latent_corrected_stability!(N², grid, closure, closure_fields, velocities, s, e, ω)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
+    cl = closure_fields.subgrid_cloud.cloud
+    θʷ, qʷ, thermodynamics = distributed_water(s, grid)
     kₛ = max(k, 2)
     aʷ = face_condensate_flux_fraction(i, j, kₛ, cl)
     L = latent_correctionᶜᶜᶠ(i, j, kₛ, grid, closure_ij, closure_fields, velocities, s, qʷ, θʷ, e, thermodynamics, cl, aʷ)
@@ -1189,10 +1191,8 @@ function cloud_buoyancy_stability_pass!(fields::SubgridCloudFields{<:AppliedFlux
                                         parameters, ω = nothing)
     grid = model.grid
     arch = grid.architecture
-    d = distribution_state(model, nothing)
-    launch!(arch, grid, parameters, _latent_corrected_stability!, closure_fields.N², fields.cloud, fields.moments, grid, closure,
-            closure_fields, model.velocities, applied_flux_state(model), d.qᵗ, d.θ, tracers[TKE_NAME], d.thermodynamics,
-            ω)
+    launch!(arch, grid, parameters, _latent_corrected_stability!, closure_fields.N², grid, closure, closure_fields,
+            model.velocities, applied_flux_state(model), tracers[TKE_NAME], ω)
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
 end
@@ -1230,10 +1230,11 @@ end
 ##### the fraction gives (for Ri and ℓ) and the buoyancy production then use one saturated fraction.
 #####
 
-@kernel function _microphysics_latent_correction!(cl, grid, closure, s, qʷ, θʷ, thermodynamics, tracers, buoyancy, closure_fields,
-                                                  velocities, e)
+@kernel function _microphysics_latent_correction!(closure_fields, grid, closure, s, tracers, buoyancy, velocities, e)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
+    cl = closure_fields.subgrid_cloud.cloud
+    θʷ, qʷ, thermodynamics = distributed_water(s, grid)
     kₛ = max(k, 2)
     # The saturated fraction of the microphysics is the saturated share of the fluxes of both excesses
     a = saturated_stability_weightᶜᶜᶠ(i, j, kₛ, grid, closure_ij.static_stability.fraction, buoyancy, tracers, closure_fields)
@@ -1246,10 +1247,8 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergeti
     compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
     compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
     grid = model.grid
-    d = distribution_state(model, nothing)
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
-    launch!(grid.architecture, grid, parameters, _microphysics_latent_correction!, fields.cloud, grid, closure,
-            applied_flux_state(model), d.qᵗ, d.θ, d.thermodynamics, tracers, buoyancy, closure_fields, model.velocities,
-            tracers[TKE_NAME])
+    launch!(grid.architecture, grid, parameters, _microphysics_latent_correction!, closure_fields, grid, closure,
+            applied_flux_state(model), tracers, buoyancy, model.velocities, tracers[TKE_NAME])
     return nothing
 end

@@ -46,9 +46,9 @@ it. The moments of the other faces are held at those of the distribution before 
 
 After the solve `N² = N²ᶜ + aᴺ ΔN²`; then the mixing length of the closure (with its column
 envelope), the diffusivities and the distribution are formed once from it, as after the other
-solvers. `solver_state` holds `aᴺ`, the residual `|R|` after each step, the classification, the
-`ãᴺ` of the two ends, and `ãᴺ` of the final distribution at the faces, whose difference from `aᴺ` is
-the inconsistency left by the local mixing length and the explicit neighbours.
+solvers. `solver_state` holds `aᴺ`, the residual `|R|` after each step, the classification, and `ãᴺ` of
+the final distribution at the faces, whose difference from `aᴺ` is the inconsistency left by the
+local mixing length and the explicit neighbours.
 
 With `lagged_envelope = true` the mixing length inside the solve is also bounded by the
 stratification envelope `ℓˢ` of the column stored before the solve (lagged), blended as the
@@ -78,9 +78,7 @@ const BracketedAppliedFluxEnergetics = AppliedFluxEnergetics{<:Any, <:Any, <:Bra
 
 function build_solver_state(grid, ::AppliedFluxEnergetics{M, W, <:BracketedFractionSolve{N}}) where {M, W, N}
     residuals = Tuple(ZFaceField(grid) for _ in 1:N+1)
-    return (aᴺ = ZFaceField(grid), ãᴺ₀ = ZFaceField(grid), ãᴺ₁ = ZFaceField(grid), classified = ZFaceField(grid),
-            initial_residuals = ZFaceField(grid), first_guess = ZFaceField(grid), slope = ZFaceField(grid),
-            ãᴺᶠ = ZFaceField(grid), residuals)
+    return (aᴺ = ZFaceField(grid), classified = ZFaceField(grid), ãᴺᶠ = ZFaceField(grid), residuals)
 end
 
 #####
@@ -110,7 +108,7 @@ end
     eᵐⁱⁿ = closure.minimum_tke
     @inbounds begin
         g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
-        gAᶠ = (cl.gA[i, j, k] + cl.gA[i, j, k-1]) / 2
+        gAᶠ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, k-1]) / 2
         N²ᶜ = g.gθᶠ * g.∂zθ + gAᶠ * g.∂zq
         ΔN² = g.gA_c * g.∂zs
         s̄ = (mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k]) +
@@ -205,9 +203,14 @@ end
     return ifelse(inside, x, (a + b) / 2)
 end
 
-@kernel function _bracketed_fraction_solve!(N², state, solver::BracketedFractionSolve{N}, grid, closure, moments, cloud,
-                                            velocities, θ, qᵗ, e, p, thermodynamics, ℓˢ, closure_fields, s) where N
+@kernel function _bracketed_fraction_solve!(N², solver::BracketedFractionSolve{N}, grid, closure, velocities, e, closure_fields,
+                                            s) where N
     i, j, k = @index(Global, NTuple)
+    fields = closure_fields.subgrid_cloud
+    state, moments, cloud = fields.solver_state, fields.moments, fields.cloud
+    ℓˢ = closure_fields.ℓˢ
+    θ, qᵗ, thermodynamics = distributed_water(s, grid)
+    p = s.p
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
     interior_face = (k > 1) & (k ≤ Nz)
@@ -258,7 +261,6 @@ end
     gaussian_better = abs(R_g) < abs(R_rf)
     x = ifelse(gaussian_better, x_g, x_rf)
     R = ifelse(gaussian_better, R_g, R_rf)
-    x₋, ãᴺ₋ = ifelse(gaussian_better, x_rf, x_g), ifelse(gaussian_better, t_rf.ãᴺ, t_g.ãᴺ)
 
     @inbounds state.residuals[1][i, j, k] = abs(R)
 
@@ -276,29 +278,24 @@ end
         a, Aₐ = ifelse(below, x′, a), ifelse(below, R′, Aₐ)
         b, A_b = ifelse(below, b, x′), ifelse(below, A_b, R′)
         side = ifelse(below, one(FT), -one(FT))
-        x₋, ãᴺ₋ = x, x - R
         x, R = x′, R′
         @inbounds state.residuals[n+1][i, j, k] = abs(R)
     end
 
     aᴺ = ifelse(unsaturated, zero(FT), ifelse(saturated, one(FT), x))
-    slope = ifelse(abs(x - x₋) > sqrt(eps(FT)), ((x - R) - ãᴺ₋) / ifelse(abs(x - x₋) > sqrt(eps(FT)), x - x₋, one(FT)), zero(FT))
 
     @inbounds begin
         N²[i, j, k] = ifelse(interior_face, input.N²ᶜ + aᴺ * input.ΔN², N²[i, j, k])
         state.aᴺ[i, j, k] = aᴺ
-        state.ãᴺ₀[i, j, k] = t₀.ãᴺ
-        state.ãᴺ₁[i, j, k] = t₁.ãᴺ
         state.classified[i, j, k] = ifelse(unsaturated, -one(FT), ifelse(saturated, one(FT), zero(FT)))
-        state.initial_residuals[i, j, k] = ifelse(gaussian_better, -abs(R_g), abs(R_rf)) # sign: which guess was kept
-        state.first_guess[i, j, k] = ifelse(gaussian_better, x_g, x_rf)
-        state.slope[i, j, k] = slope
     end
 end
 
 # ãᴺ of the stored distribution at the faces, (N²ᵇ - N²ᶜ) / ΔN², after the solve
-@kernel function _final_condensate_flux_fraction!(ãᴺᶠ, grid, closure, cloud, Kᶜ, θ, qᵗ, p, thermodynamics)
+@kernel function _final_condensate_flux_fraction!(ãᴺᶠ, grid, closure, cloud, Kᶜ, s)
     i, j, k = @index(Global, NTuple)
+    θ, qᵗ, thermodynamics = distributed_water(s, grid)
+    p = s.p
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
     kₛ = clamp(k, 2, max(Nz, 2))
@@ -316,16 +313,15 @@ end
 function cloud_buoyancy_stability!(buoyancy_flux::BracketedAppliedFluxEnergetics, fields, closure_fields, closure, model, tracers, parameters)
     grid = model.grid
     arch = grid.architecture
-    s = distribution_state(model, nothing)
-    state = fields.solver_state
-    launch!(arch, grid, parameters, _bracketed_fraction_solve!, closure_fields.N², state, buoyancy_flux.stability_solver,
-            grid, closure, fields.moments, fields.cloud, model.velocities, s.θ, s.qᵗ, s.e, s.p, s.thermodynamics, closure_fields.ℓˢ,
-            closure_fields, applied_flux_state(model))
+    s = applied_flux_state(model)
+    e = SpecificValue(model.tracers[TKE_NAME], nothing)
+    launch!(arch, grid, parameters, _bracketed_fraction_solve!, closure_fields.N², buoyancy_flux.stability_solver, grid, closure,
+            model.velocities, e, closure_fields, s)
     # The column envelope of the mixing length, the diffusivities and the distribution, once
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
-    launch!(arch, grid, parameters, _final_condensate_flux_fraction!, state.ãᴺᶠ, grid, closure, fields.cloud, closure_fields.Kᶜ,
-            s.θ, s.qᵗ, s.p, s.thermodynamics)
+    launch!(arch, grid, parameters, _final_condensate_flux_fraction!, fields.solver_state.ãᴺᶠ, grid, closure, fields.cloud,
+            closure_fields.Kᶜ, s)
     store_latent_correction_of_solved_stability!(fields, closure_fields, closure, model, tracers, parameters)
     return nothing
 end

@@ -457,7 +457,6 @@ end
         Nz = size(model.grid, 3)
         aᴺ = column(state.aᴺ)[2:Nz]
         @test all(x -> 0 ≤ x ≤ 1, aᴺ)
-        @test all(x -> 0 ≤ x ≤ 1, column(state.ãᴺ₀)[2:Nz]) && all(x -> 0 ≤ x ≤ 1, column(state.ãᴺ₁)[2:Nz])
         classified = column(state.classified)[2:Nz]
         @test all(x -> x ∈ (-1, 0, 1), classified)
         @test all(aᴺ[classified .== -1] .== 0) && all(aᴺ[classified .== 1] .== 1)
