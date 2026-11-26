@@ -82,13 +82,58 @@ const MoistHydrostaticPotentialTemperatureModel =
 # Fluxes through the ground accumulated over the integration, per unit area. The frictional
 # heating is not a flux through a boundary: it is the potential energy that falling rain leaves
 # in the air it falls through, reported beside the fluxes.
+#
+# The accumulated fluxes are Float64 whatever the float type of the grid: over years a column holds
+# thousands of kg m⁻² of rain, where the spacing of Float32 (about 5e-4 kg m⁻² at 6000 kg m⁻²) is
+# not small beside the rain of one step, so Float32 totals would drop or round the light rain.
+# The Courant number is a running maximum, not a sum, and keeps the float type of the grid.
 function precipitation_ledger(grid)
-    return (surface_rain = Field{Center, Center, Nothing}(grid),                  # kg m⁻²
-            precipitation_energy = Field{Center, Center, Nothing}(grid),          # J m⁻²: P (cˡ T - ℒˡ₀ + Φˢ) + kinetic
-            precipitation_kinetic_energy = Field{Center, Center, Nothing}(grid),  # J m⁻²: the kinetic part, P Σ ΔB 𝒦
-            rain_frictional_heating = Field{Center, Center, Nothing}(grid),       # J m⁻²
+    return (surface_rain = accumulation_field(grid),                              # kg m⁻²
+            precipitation_energy = accumulation_field(grid),                      # J m⁻²: P (cˡ T - ℒˡ₀ + Φˢ) + kinetic
+            precipitation_kinetic_energy = accumulation_field(grid),              # J m⁻²: the kinetic part, P Σ ΔB 𝒦
+            rain_frictional_heating = accumulation_field(grid),                   # J m⁻²
             maximum_sedimentation_courant = Field{Center, Center, Nothing}(grid)) # V Δt / (physical depth)
 end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return a two-dimensional `Field{Center, Center, Nothing}` on `grid` with element type `Float64`,
+for a total accumulated over an integration. A total that grows over years while each time step
+adds a small increment loses those increments in `Float32`, whatever the float type of the grid.
+"""
+accumulation_field(grid) = Field{Center, Center, Nothing}(grid, Float64)
+
+# Add `increment` to the accumulated total `ledger[i, j, 1]`, in the element type of the total
+@inline function accumulate_ledger!(ledger, i, j, increment)
+    @inbounds ledger[i, j, 1] += convert(eltype(ledger), increment)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Restore the fields of `ledger` from the checkpointed state `from`, converting the saved data to the
+element type of each field. Checkpoints written before the accumulated totals were `Float64` hold
+them in the float type of the grid.
+"""
+function restore_ledger!(ledger::NamedTuple, from)
+    for name in keys(ledger)
+        restore_ledger_field!(ledger[name], from[name])
+    end
+    return ledger
+end
+
+restore_ledger_field!(field, ::Nothing) = nothing
+
+function restore_ledger_field!(field, from)
+    FT = eltype(field)
+    @apply_regionally data = data_with_eltype(FT, from.data)
+    Oceananigans.restore_prognostic_state!(field, merge(from, (; data)))
+    return nothing
+end
+
+data_with_eltype(FT, data::AbstractArray) = FT.(data) # on the device that holds `data`
 
 # What the sedimentation of the stages of one time step moves, with the weights of the stages in the
 # state at the end of the step (plvd_logs/3c_1M_ENERGY_DERIVATION.txt, section 5): the water through
@@ -1298,10 +1343,10 @@ end
 
         kinetic_outflow = - surface_pressure_kinetic_energy(i, j, grid, - inflow, dynamics.surface_pressure_coefficient,
                                                             velocities.u, velocities.v, g)
-        ledger.surface_rain[i, j, 1] += inflow / g
-        ledger.precipitation_energy[i, j, 1] += (enthalpy_inflow + inflow * Φˢ[i, j, 1]) / g + kinetic_outflow
-        ledger.precipitation_kinetic_energy[i, j, 1] += kinetic_outflow
-        ledger.rain_frictional_heating[i, j, 1] += friction
+        accumulate_ledger!(ledger.surface_rain, i, j, inflow / g)
+        accumulate_ledger!(ledger.precipitation_energy, i, j, (enthalpy_inflow + inflow * Φˢ[i, j, 1]) / g + kinetic_outflow)
+        accumulate_ledger!(ledger.precipitation_kinetic_energy, i, j, kinetic_outflow)
+        accumulate_ledger!(ledger.rain_frictional_heating, i, j, friction)
         ledger.maximum_sedimentation_courant[i, j, 1] = max(ledger.maximum_sedimentation_courant[i, j, 1], courant)
     end
 
@@ -1456,9 +1501,9 @@ end
         outflow = g * Δt * surface_precipitation[i, j, 1]
         kinetic_outflow = - surface_pressure_kinetic_energy(i, j, grid, - outflow, dynamics.surface_pressure_coefficient,
                                                             velocities.u, velocities.v, g)
-        ledger.surface_rain[i, j, 1] += outflow / g
-        ledger.precipitation_energy[i, j, 1] += kinetic_outflow
-        ledger.precipitation_kinetic_energy[i, j, 1] += kinetic_outflow
+        accumulate_ledger!(ledger.surface_rain, i, j, outflow / g)
+        accumulate_ledger!(ledger.precipitation_energy, i, j, kinetic_outflow)
+        accumulate_ledger!(ledger.precipitation_kinetic_energy, i, j, kinetic_outflow)
     end
 
     change_column_surface_pressure!(i, j, grid, - outflow, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
@@ -1510,9 +1555,9 @@ end
 
         kinetic_outflow = - surface_pressure_kinetic_energy(i, j, grid, - weight, dynamics.surface_pressure_coefficient,
                                                             velocities.u, velocities.v, g)
-        ledger.surface_rain[i, j, 1] += weight / g
-        ledger.precipitation_energy[i, j, 1] += enthalpy_outflow + weight * Φˢ[i, j, 1] / g + kinetic_outflow
-        ledger.precipitation_kinetic_energy[i, j, 1] += kinetic_outflow
+        accumulate_ledger!(ledger.surface_rain, i, j, weight / g)
+        accumulate_ledger!(ledger.precipitation_energy, i, j, enthalpy_outflow + weight * Φˢ[i, j, 1] / g + kinetic_outflow)
+        accumulate_ledger!(ledger.precipitation_kinetic_energy, i, j, kinetic_outflow)
     end
 
     change_column_surface_pressure!(i, j, grid, - weight, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
@@ -1572,9 +1617,9 @@ end
         enthalpy_outflow = Δt * 𝒬⁺
         kinetic_outflow = - surface_pressure_kinetic_energy(i, j, grid, - weight, dynamics.surface_pressure_coefficient,
                                                             velocities.u, velocities.v, g)
-        ledger.surface_rain[i, j, 1] += weight / g
-        ledger.precipitation_energy[i, j, 1] += enthalpy_outflow + weight * Φˢ[i, j, 1] / g + kinetic_outflow
-        ledger.precipitation_kinetic_energy[i, j, 1] += kinetic_outflow
+        accumulate_ledger!(ledger.surface_rain, i, j, weight / g)
+        accumulate_ledger!(ledger.precipitation_energy, i, j, enthalpy_outflow + weight * Φˢ[i, j, 1] / g + kinetic_outflow)
+        accumulate_ledger!(ledger.precipitation_kinetic_energy, i, j, kinetic_outflow)
     end
 
     change_column_surface_pressure!(i, j, grid, - weight, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
@@ -1665,10 +1710,10 @@ function AtmosphereModels.restore_dynamics_restart_state!(dynamics::MoistHydrost
     return dynamics
 end
 
-restore_moist_restart_state!(grid, dynamics, from) = Oceananigans.restore_prognostic_state!(dynamics.moisture.ledger, from)
+restore_moist_restart_state!(grid, dynamics, from) = restore_ledger!(dynamics.moisture.ledger, from)
 
 function restore_moist_restart_state!(::PressureLevelGrid, dynamics, from)
-    Oceananigans.restore_prognostic_state!(dynamics.moisture.ledger, from.ledger)
+    restore_ledger!(dynamics.moisture.ledger, from.ledger)
     restore_coordinate_state!(dynamics.density, from.density)
     return nothing
 end
