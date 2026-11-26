@@ -138,7 +138,7 @@ function VarianceStabilityFunctions(FT::DataType = Oceananigans.defaults.FloatTy
     return VarianceStabilityFunctions{FT}(map(C -> convert(FT, C), coefficients)...)
 end
 
-# The ratio 𝕊ᶜ / 𝕊ᴰ of the time scale, with its endpoint values (1 for EddyTurnoverTimeScale, which has no 𝕊ᴰ)
+# The endpoint values of the 𝕊ᴰ of the time scale (1 for EddyTurnoverTimeScale, which has no 𝕊ᴰ)
 variance_time_scale_dissipation(::DissipationTimeScale, sf) = (sf.ℂᴰ⁻, sf.ℂᴰ⁰, sf.ℂᴰ⁺)
 variance_time_scale_dissipation(::EddyTurnoverTimeScale, sf) = (1, 1, 1)
 

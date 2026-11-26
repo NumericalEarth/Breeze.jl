@@ -66,7 +66,8 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The derivatives `(b_θ, b_qᵛ, b_qˡ, b_qⁱ)` of the buoyancy `b` of the dynamics with respect to the
 liquid-ice potential temperature and the vapor, liquid and ice mass fractions, at fixed pressure,
-at cell center `(i, j, k)`. With ``X = Rᵐ T``, ``T = (ĉᵖ Π θˡⁱ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ) / cᵖᵐ`` and
+at cell center `(i, j, k)`, followed by the liquid-ice potential temperature `θ` and the moisture
+mass fractions `q` there. With ``X = Rᵐ T``, ``T = (ĉᵖ Π θˡⁱ + ℒˡ₀ qˡ + ℒⁱ₀ qⁱ) / cᵖᵐ`` and
 ``b = g (1 - Xᵣ / X)``, ``∂b/∂φ = (g - b) ∂ ln X / ∂φ``; `g - b` is taken from the buoyancy force
 of the dynamics, so the derivatives hold for any dynamics whose buoyancy is a function of
 ``Rᵐ T`` at fixed pressure.
@@ -992,7 +993,7 @@ end
 
 The share ``η(x) = 1 - (1 - e^{-x}) / x`` of the saturated response that a parcel displaced for an
 eddy time ``tₑ`` feels when its condensate relaxes the vapor excess at the rate ``ωᶜ``, with
-``x = tₑ ωᶜ``. Below ``x = 10⁻³`` it is the series ``x/2 - x²/6 + x³/24`` (that of ``1 - (1 - x/2 + x²/6 - x³/24)``) (``1 - (1 - e^{-x})/x`` loses
+``x = tₑ ωᶜ``. Below ``x = 10⁻³`` it is the series ``x/2 - x²/6 + x³/24`` (``1 - (1 - e^{-x})/x`` loses
 its digits to cancellation there), so that the value and its derivative are accurate and finite
 down to ``x = 0``, where ``η = 0``.
 """

@@ -4,7 +4,8 @@
 ##### The empirical coefficients (written ℂ, as elsewhere in Breeze) are fields of the component
 ##### that uses them. `closure_parameters` collects them in one `NamedTuple`, and `with_parameters`
 ##### rebuilds a closure with some of them replaced, whichever components they belong to. The
-##### names are unique across the components of a closure (the constructor checks).
+##### names are unique across the components of a closure: `closure_scalars` collects them in a `NamedTuple`,
+##### which throws on a repeated name.
 #####
 
 """

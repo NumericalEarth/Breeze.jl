@@ -16,9 +16,9 @@
 #####     Bᴸ = (b̄ᶜ - b̄ᵛ) (ℂʳˡ √(w′² qˡ′²) + Kᶜ ∂z qᶜ) + Kᶜ ΔN²ᴸᵒ,
 #####
 ##### with ΔN²ᴸᵒ the part of the latent correction of the ice and the liquid on ice outside the distributed water
-##### (zero without a `CondensateFluxFraction`), unchanged. In large-eddy simulations of cumulus the flux of liquid
+##### (zero without a `CondensateFluxFraction`), which the relation does not change. In large-eddy simulations of cumulus the flux of liquid
 ##### is up wherever there is liquid, while the gradient of the saturation excess that the default reads changes sign
-##### within the cloud layer. The energy is drawn from the internal energy as before, so the budget closes. The static
+##### within the cloud layer. The energy is drawn from the internal energy, as that of the default is, so the budget closes. The static
 ##### stability is not changed.
 #####
 

@@ -21,9 +21,7 @@
 ##### shared, the coefficients are this closure's own. The time stepping is the closure's: the
 ##### moments are diagnosed once per stage, after the diffusivities, and there is no split solve.
 #####
-##### The fields of part 1 (the second moments at faces, w′², w′³ and the cloud at centers) are stored,
-##### so that a microphysics correlation may later read the spread of the saturation deficit or
-##### the skewness through `subgrid_statisticsᶜᶜᶜ` without changing this structure.
+##### The fields of part 1 (the second moments at faces, w′², w′³ and the cloud at centers) are stored.
 #####
 
 using Oceananigans.Grids: znode
@@ -308,8 +306,8 @@ the variances. It must satisfy ``0 < (ℂʳ)² < 1 - ℂᵍ₁`` (≈ 0.6 with `
 [`DoubleGaussianPDF`](@ref)); above that the components of the double-Gaussian PDF have no width. SHOC's
 own diffusivity, ``0.1 τ e``, corresponds to ``(ℂʳ)² = 0.15``. The default, `nothing`, imposes no bound.
 
-`time_scale` is [`StratificationLimitedMomentTimeScale`](@ref) (the default, SHOC's),
-[`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref). The latter two derive `τ` from
+`time_scale` is [`DissipationTimeScale`](@ref) (the default), [`EddyTurnoverTimeScale`](@ref),
+[`StratificationLimitedMomentTimeScale`](@ref) or [`ReturnToIsotropyTimeScale`](@ref) (SHOC's). The first two derive `τ` from
 the scalar-variance budget with the same `ℓ`, `√e` and `Ri` as `Kᶜ`, so that the squared
 correlation of `w` with θˡⁱ and qᵗ is a function of `Ri` alone, bounded by a bound on `ℂᵠ`.
 
@@ -1087,7 +1085,7 @@ end
 
 
             # The variance of a moisture-like scalar of unit gradient, with the same machinery: its dissipation time
-            # is that of the budgets of the condensate outside the distribution (`outside_condensate_moments`)
+            # is that of the budgets of the condensate outside the distribution (`compute_outside_condensate_moments!`)
             _, unit_variance, _ = interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / Δz, zero(FT), Δz, zero(FT), zero(FT), zero(FT))
             _, unit_variance, _ = local_scalar_second_moments(d.variance_stability_functions, i, j, k, grid, closure, velocities,
                                                               closure_fields, e, zero(FT), Δz, Δz, zero(FT), unit_variance, zero(FT))

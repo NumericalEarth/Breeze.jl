@@ -13,10 +13,9 @@
 ##### The last argument, `scale`, is a positive magnitude characteristic of the clipped quantity,
 ##### a parameter or a literal. `HardClipping` ignores it.
 #####
-##### Not routed through the policy, in any configuration: the discrete search for the boundary
-##### layer top, the cold-surface fallback of the diffusivities, and guards against round-off
-##### whose bound the exact value already satisfies (interpolated positive quantities, `C ≤ 1`,
-##### `qˡ ≥ 0`, the variance of `s`). They use `max`, `min` or `hard_floor` directly.
+##### Not routed through the policy, in any configuration: guards against round-off whose bound
+##### the exact value already satisfies (interpolated positive quantities, `C ≤ 1`, `qˡ ≥ 0`, the
+##### variance of `s`). They use `max`, `min` or `hard_floor` directly.
 #####
 
 abstract type AbstractClippingPolicy <: AbstractSubgridDistributionComponent end

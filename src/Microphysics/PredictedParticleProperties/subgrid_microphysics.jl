@@ -73,7 +73,7 @@
 #     mixture in the saturated part (Gauss-Legendre quadrature) plus the uniform subsaturated part.
 #
 # Each rate is still one number per process, and every source is paired with its sink as on the
-# grid mean, so mass and energy are conserved as before. With all spreads zero the grid-mean rates
+# grid mean, so mass and energy are conserved as they are there. With all spreads zero the grid-mean rates
 # are returned unchanged.
 
 """
