@@ -432,14 +432,17 @@ const gauss_legendre_weights = (0.12793819534675185, 0.12583745634682753, 0.1216
                                 0.08619016153195298, 0.07334648141108072, 0.059298584915437,
                                 0.04427743881741972, 0.028531388628933545, 0.012341229799987141)
 
-# ∫ₗ^∞ s^β N(s; m, σ²) ds for l ≥ 0, over [max(l, m - 8σ), m + 8σ], beyond which the Gaussian is
-# below 10⁻¹⁵ of its peak. A zero spread is the point mass at the mean.
+# ∫ₗ^∞ s^β N(s; m, σ²) ds for l ≥ 0, over the part of [l, ∞) in the window [m - 8σ, m + 8σ] of s ≥ 0, beyond
+# which the Gaussian is below 10⁻¹⁵ of its peak. A zero spread is the point mass at the mean. Where l lies above the
+# window the part is empty, [hi, hi], so that the nodes stay in the window: at a node far above it s^β overflows
+# while the Gaussian underflows (the threshold of the local liquid, l = qᵗ ⟨s⁺⟩ / (χ q̄ᶜˡ), reaches 10¹⁵⁷ where q̄ᶜˡ
+# is 10⁻¹⁶⁹), and their product is NaN rather than 0.
 @inline function gaussian_partial_moment(β, m, σ, l)
     FT = typeof(m)
     R = convert(FT, 8)
     σ₊ = max(σ, floatmin(FT) / eps(FT))
-    lo = max(l, m - R * σ₊)
-    hi = max(lo, m + R * σ₊)
+    hi = max(0, m + R * σ₊)
+    lo = min(max(l, m - R * σ₊), hi)
     h = (hi - lo) / 2
     c = (hi + lo) / 2
     terms = map(gauss_legendre_nodes, gauss_legendre_weights) do x, w

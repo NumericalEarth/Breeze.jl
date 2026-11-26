@@ -190,6 +190,28 @@ end
     @test placed_cloud_liquid_moment(d, 2.47, 0.0) / 1e-3^2.47 ≈ 1 rtol = 1e-4
 end
 
+# The placement P3 formed in the lowest cell of a CASS column after the first stage, with cloud liquid of 10⁻¹⁶⁹:
+# the saturated part's local liquid reaches the autoconversion threshold 10⁻⁸ only at s ~ 10¹⁵⁷, far above the
+# window of its quadrature, where s^β overflows while the Gaussian underflows. The moment above the threshold is 0.
+@testset "P3 subgrid microphysics: partial moments at near-zero cloud liquid" begin
+    d = (; a = (0.9653098671723126, 0.0346901328276874), m = (-0.0016338398707576808, -0.001662869913752498),
+           σ = (0.0007143286336670348, 0.0007155183369953402), ξˡ = 3.3017202704273685, qᶜˡ = 9.904855745303452e-170,
+           f⁺ = 0.011055280719942148, f⁻ = 0.9889447192800578, positive_excess = 2.705510077543723e-6,
+           negative_excess = -0.0016375524368827082, mean_excess = -0.0016348469268051644, χ = 0.011055280719942218,
+           λ = 1.3363156351050678e-165, subsaturated_share = 1.0, subsaturated_liquid = 9.904855745303452e-170,
+           qᵛ⁺ˡ = 0.015235428469920211, degenerate = false, mⁱ = (-0.0016334394009483652, -0.001674013643306868),
+           k = (1.3974413392531293, 1.3978863069081005), σʳ = (0.0, 0.0), ξⁱˡ = 3.654082217150073, γⁱ = 0.0,
+           ν = 0.24128088186510618)
+    β, γ, threshold = 2.47, -1.79, 1e-8
+    @test PPP.gaussian_partial_moment(β, d.m[1], d.σ[1], 2.1863818530467257e157) == 0
+    @test placed_cloud_liquid_moment(d, β, threshold, γ) == 0
+    @test PPP.departed_liquid_moment(d, β, threshold, γ) == 0
+    @test PPP.subgrid_autoconversion_rate(d, all_processes, d.qᶜˡ, 1.2813550029476943e-5, 1.1488756787969368, 0.0) == 0
+    # Without the threshold the moment is that of the placed liquid, ~ (10⁻¹⁶⁹)^β, which underflows
+    @test placed_cloud_liquid_moment(d, β, 0.0, γ) == 0
+    @test placed_cloud_liquid_moment(d, 1.0, 0.0) ≈ d.qᶜˡ rtol = 1e-7
+end
+
 @testset "P3 subgrid microphysics: condensation at the local droplet population" begin
     # Against a fine Riemann sum of the local rate (ε(s) / ε̄) δ(s), ε ∝ N^{2/3} q^{1/3}
     for (statistics, s̄, qᶜˡ) in cases[1:3], ωᵐ in (0.0, 1e-2)
