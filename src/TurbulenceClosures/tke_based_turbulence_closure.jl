@@ -1027,6 +1027,23 @@ The integral formulation carries its stored face length at slope ``ℂˢ``.
 end
 
 #####
+##### The closure with the microphysics of a model
+#####
+
+# The statistics of the closure's own distribution need a distribution: without one they have no spread and
+# the saturated fraction would be zero in saturated air
+AtmosphereModels.validate_closure_microphysics(closure::TKEBasedTurbulenceClosure, microphysics) =
+    validate_saturated_fraction_source(closure.static_stability, closure.subgrid_distribution, microphysics_subgrid_model(microphysics))
+
+validate_saturated_fraction_source(static_stability, distribution, subgrid_model) = nothing
+
+validate_saturated_fraction_source(::MicrophysicsSaturatedFractionStability, ::Nothing, ::TurbulenceClosureStatistics) =
+    throw(ArgumentError("SaturationWeightedStaticStability() takes its saturated fraction from the statistics of the " *
+                        "microphysics, TurbulenceClosureStatistics(), which are those of the closure's subgrid " *
+                        "distribution, and the closure has none. Give the closure a subgrid_distribution " *
+                        "(DoubleGaussian()), or the microphysics its own statistics."))
+
+#####
 ##### Diffusivities
 #####
 
