@@ -86,7 +86,7 @@ end
     interior = (k > 1) & (k < size(grid, 3) + 1)
     @inbounds begin
         bᶜᵛ = (cl.b_qᶜ[i, j, kˢ] + cl.b_qᶜ[i, j, kˢ-1] - cl.b_qᵛ[i, j, kˢ] - cl.b_qᵛ[i, j, kˢ-1]) / 2
-        Δqᶜ = distributed_condensateᶜᶜᶜ(i, j, kˢ, grid, s, nothing) - distributed_condensateᶜᶜᶜ(i, j, kˢ-1, grid, s, nothing)
+        Δqᶜ = distributed_condensateᶜᶜᶜ(i, j, kˢ, grid, s) - distributed_condensateᶜᶜᶜ(i, j, kˢ-1, grid, s)
         w′² = (cl.w′²[i, j, kˢ] + cl.w′²[i, j, kˢ-1]) / 2
         qˡ′² = (cl.qˡ′²[i, j, kˢ] + cl.qˡ′²[i, j, kˢ-1]) / 2
         cl.Λᴸ[i, j, k] = ifelse(interior, bᶜᵛ * Δqᶜ / Δzᶜᶜᶠ(i, j, kˢ, grid) + cl.ΔN²ᴸᵒ[i, j, k], zero(FT))

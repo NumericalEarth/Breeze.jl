@@ -6,7 +6,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 # external subgrid cloud model (`SaturationWeightedStaticStability`).
 
 using Breeze
-using Breeze.TurbulenceClosures: TurbulenceClosures, TKE_NAME, Riᶜᶜᶠ, Riᶜᶜᶜ, richardson_number,
+using Breeze.TurbulenceClosures: TurbulenceClosures, TKE_NAME, Riᶜᶜᶠ, richardson_number,
                                  static_stabilityᶜᶜᶠ, saturated_static_stabilityᶜᶜᶠ,
                                  effective_shear_squaredᶜᶜᶠ, stratification_and_shear_numbersᶜᶜᶠ,
                                  tke_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, dissipation_stability_functionᶜᶜᶜ,

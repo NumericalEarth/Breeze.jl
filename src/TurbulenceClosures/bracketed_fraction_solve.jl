@@ -86,7 +86,7 @@ end
 #####
 
 # The squared shear of the stability functions at the face
-@inline local_shear_squaredᶜᶜᶠ(i, j, k, grid, ::GridMeanShear, closure, velocities) =
+@inline local_shear_squaredᶜᶜᶠ(i, j, k, grid, ::GridMeanShear, velocities) =
     shearᶜᶜᶠ(i, j, k, grid, velocities.u, velocities.v)
 
 @inline local_moment_time_scale(ts, ℓ, u, N², 𝕊ᴰ) = moment_time_scale(ts, ℓ, u, N²)
@@ -103,7 +103,7 @@ end
 @inline standard_normal_cdf(x) = (1 + erf(x / sqrt(convert(typeof(x), 2)))) / 2
 
 # The face's constant inputs, gathered once
-@inline function fraction_face_inputs(i, j, k, grid, closure, d, m, cl, θ, qᵗ, e, p, thermodynamics)
+@inline function fraction_face_inputs(i, j, k, grid, closure, d, cl, θ, qᵗ, e, p, thermodynamics)
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
     @inbounds begin
@@ -138,7 +138,7 @@ end
 
     # The stability functions and diffusivities of that N² and ℓ
     # with the time scale τ² = ℓ² / e of the local mixing length (not the stored one)
-    S² = local_shear_squaredᶜᶜᶠ(i, j, k, grid, closure.shear, closure, velocities)
+    S² = local_shear_squaredᶜᶜᶠ(i, j, k, grid, closure.shear, velocities)
     τ² = (ℓ / u)^2
     𝕊ᵘ, 𝕊ᶜ, _, 𝕊ᴰ = local_stability_functions(closure.stability_functions, N², S², closure.shear.minimum_shear_squared, τ²)
     K = ℓ * u
@@ -161,14 +161,14 @@ end
         stored(n) = @inbounds (m.θˡⁱ′²[i, j, n], m.w′θˡⁱ′[i, j, n], m.θˡⁱ′qᵗ′[i, j, n], m.w′qᵗ′[i, j, n], m.qᵗ′²[i, j, n])
 
         # The assumed PDF at the center below (face k is its upper face) and above (its lower face)
-        Bˡ⁻, C⁻ = center_liquid_buoyancy(i, j, k-1, grid, d, cl, w, θ, qᵗ, p, thermodynamics, stored(k-1), trial)
-        Bˡ⁺, C⁺ = center_liquid_buoyancy(i, j, k, grid, d, cl, w, θ, qᵗ, p, thermodynamics, trial, stored(k+1))
+        Bˡ⁻ = center_liquid_buoyancy(i, j, k-1, grid, d, cl, w, θ, qᵗ, p, thermodynamics, stored(k-1), trial)
+        Bˡ⁺ = center_liquid_buoyancy(i, j, k, grid, d, cl, w, θ, qᵗ, p, thermodynamics, trial, stored(k+1))
     end
 
     Bᶠ = (Bˡ⁻ + Bˡ⁺) / 2
     resolved = (Kᶜ > sqrt(floatmin(FT))) & (abs(input.ΔN²) > floatmin(FT))
     ãᴺ = ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜ * input.ΔN², one(FT)), zero(FT))
-    return (; ãᴺ = clamp(ãᴺ, zero(FT), one(FT)), raw = ãᴺ, τ, Kᶜ, C = (C⁻ + C⁺) / 2)
+    return (; ãᴺ = clamp(ãᴺ, zero(FT), one(FT)), τ, Kᶜ)
 end
 
 @inline function center_liquid_buoyancy(i, j, k, grid, d, cl, w, θ, qᵗ, p, thermodynamics, moments_l, moments_u)
@@ -182,11 +182,11 @@ end
         θᵏ = θ[i, j, k]
         w′³ = cl.w′³[i, j, k]
         thermodynamicsᵏ = level_thermodynamics(thermodynamics, i, j, k)
-        C, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
+        _, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
                                           p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], (w′³, moments_l...), (w′³, moments_u...))
         _, A_c = buoyancy_flux_coefficients(thermodynamicsᵏ, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
     end
-    return thermodynamics.constants.gravitational_acceleration / θᵏ * A_c * w′qˡ′, C
+    return thermodynamics.constants.gravitational_acceleration / θᵏ * A_c * w′qˡ′
 end
 
 #####
@@ -221,7 +221,7 @@ end
     w = velocities.w
     tol = convert(FT, solver.classification_tolerance)
     ℓᵉ = ifelse(solver.lagged_envelope, @inbounds(ℓˢ[i, j, kₛ]), FT(Inf))
-    stored_input = fraction_face_inputs(i, j, kₛ, grid, closure_ij, d, moments, cloud, θ, qᵗ, e, p, thermodynamics)
+    stored_input = fraction_face_inputs(i, j, kₛ, grid, closure_ij, d, cloud, θ, qᵗ, e, p, thermodynamics)
     # The latent response of the condensate outside the distributed water (ice and its liquid coating), with the
     # distribution and the eddy time before the solve (as the moments of the neighbouring faces)
     aʷ = face_condensate_flux_fraction(i, j, kₛ, cloud)
@@ -292,7 +292,7 @@ end
 end
 
 # ãᴺ of the stored distribution at the faces, (N²ᵇ - N²ᶜ) / ΔN², after the solve
-@kernel function _final_condensate_flux_fraction!(ãᴺᶠ, grid, closure, cloud, Kᶜ, s)
+@kernel function _final_condensate_flux_fraction!(ãᴺᶠ, grid, cloud, Kᶜ, s)
     i, j, k = @index(Global, NTuple)
     θ, qᵗ, thermodynamics = distributed_water(s, grid)
     p = s.p
@@ -319,8 +319,8 @@ function cloud_buoyancy_stability!(buoyancy_flux::BracketedAppliedFluxEnergetics
             model.velocities, e, closure_fields, s)
     # The column envelope of the mixing length, the diffusivities and the distribution, once
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
-    compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
-    launch!(arch, grid, parameters, _final_condensate_flux_fraction!, fields.solver_state.ãᴺᶠ, grid, closure, fields.cloud,
+    compute_subgrid_distribution!(fields, closure_fields, closure, model)
+    launch!(arch, grid, parameters, _final_condensate_flux_fraction!, fields.solver_state.ãᴺᶠ, grid, fields.cloud,
             closure_fields.Kᶜ, s)
     store_latent_correction_of_solved_stability!(fields, closure_fields, closure, model, tracers, parameters)
     return nothing

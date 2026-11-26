@@ -494,7 +494,7 @@ function diagnose_third_moment!(fields::SubgridCloudFields, distribution::TKEBud
     passes = third_moment_passes(distribution.third_moment)
     for pass in 1:passes
         start_pass_closure_fields!(pass_fields, closure_fields, model.grid)
-        compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
+        compute_subgrid_distribution!(fields, closure_fields, closure, model)
         solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, pass_fields, closure, model, tracers, parameters)
         compute_applied_flux_conversions!(fields, pass_fields, closure, model, tracers)
         compute_tke_budget_flux!(fields, pass_fields, closure, model, tracers, Val(true))

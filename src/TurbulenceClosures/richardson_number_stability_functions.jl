@@ -28,7 +28,6 @@ end
 
 # Without `e` and `ℓ`: the Richardson number of a shear that reads neither (`GridMeanShear`)
 @inline Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²) = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N², nothing, nothing)
-@inline Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N²) = Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N², nothing, nothing)
 
 struct RationalStabilityFunction{FT}
     ℂᵘ⁻ :: FT # momentum, unstable limit (Ri → -∞)

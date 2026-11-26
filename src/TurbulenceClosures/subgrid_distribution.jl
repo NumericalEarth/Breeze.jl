@@ -214,7 +214,6 @@ Base.summary(::ReturnToIsotropyTimeScale) = "ReturnToIsotropyTimeScale()"
 Base.show(io::IO, ts::ReturnToIsotropyTimeScale) = print(io, summary(ts))
 
 validate_moment_time_scale(stability_functions, time_scale) = nothing
-validate_moment_time_scale(stability_functions, ::Nothing) = nothing
 
 # The time scale of the second moments at face k, from the closure's ℓ, √e (u), N² and Ri there.
 # `e` and the closure fields (with the stored mixing length) are those the closure's shear reads,
@@ -688,7 +687,7 @@ build_subgrid_cloud_fields(grid, ::Nothing, solver, static_stability, tracer_nam
 function build_subgrid_cloud_fields(grid, ::Nothing, solver, ::SaturationWeightedStaticStability, tracer_names, heating_budget_flux = nothing,
                                     total_water_budget_flux = nothing)
     energetics = AppliedFluxEnergetics(solver)
-    cloud = merge(applied_flux_conversion_fields(grid, energetics, tracer_names), heating_budget_flux_fields(grid, heating_budget_flux),
+    cloud = merge(applied_flux_conversion_fields(grid, energetics), heating_budget_flux_fields(grid, heating_budget_flux),
                   total_water_budget_flux_fields(grid, total_water_budget_flux))
     return SubgridCloudFields(energetics, nothing, cloud, nothing, build_presolve_fields(grid, energetics, tracer_names))
 end
@@ -705,7 +704,7 @@ function build_subgrid_cloud_fields(grid, distribution, solver, static_stability
              w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
              vapor_excess_component_fields(grid)...,
              qⁱ′sⁱ′ = CenterField(grid), qᵈ′² = CenterField(grid),
-             applied_flux_conversion_fields(grid, energetics, tracer_names)...,
+             applied_flux_conversion_fields(grid, energetics)...,
              third_moment_fields(grid, distribution.third_moment)...,
              heating_budget_flux_fields(grid, heating_budget_flux)...,
              total_water_budget_flux_fields(grid, total_water_budget_flux)...,
@@ -718,7 +717,7 @@ end
 # (applied_flux_energetics.jl): the stage conversions (with their surface parts), the buoyancy sink
 # rate, the stored derivatives b_χ of the buoyancy and ĉᵖ Π, momentum before its solve, and the
 # conversions of the solved state and the dissipation of the last stage (diagnostics)
-function applied_flux_conversion_fields(grid, ::AppliedFluxEnergetics, tracer_names)
+function applied_flux_conversion_fields(grid, ::AppliedFluxEnergetics)
     centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :Bᴸˢ, :Bⁱ, :P, :Pⁱ, :Bˢ, :Pˢ, :ωᴮ, :b_θ, :b_qᵛ, :b_qˡ, :b_qⁱ, :b_qᶜ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_b_θ, :stage_b_qᵛ, :stage_b_qˡ, :stage_b_qⁱ, :stage_surface, :shortfall, :after_solves_ρθ, :stage_combination))
     faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid), η = ZFaceField(grid), c_q = ZFaceField(grid), c_θ = ZFaceField(grid),
              ηⁱ = ZFaceField(grid), ηʷⁱ = ZFaceField(grid), c_qⁱ = ZFaceField(grid), c_θⁱ = ZFaceField(grid))
@@ -883,16 +882,6 @@ end
     thermodynamics = (constants = s.constants, standard_pressure = s.standard_pressure, exner_exponent = s.exner_exponent,
                       phase_equilibrium = s.phase_equilibrium, held_condensate = held_condensate_field(s, grid, ρqᶜˡ))
     return (; θ, qᵗ, thermodynamics)
-end
-
-# The state the distribution reads on the host: θʷ, qᵗ, e, w, p and the thermodynamics of the model (`distributed_water`).
-# `e_density` is the density of the specific TKE `ρe` holds: `nothing` within `update_state!`, where the tracer holds its
-# specific value, and `ρ` after the stages, where it holds its density.
-function distribution_state(model, e_density)
-    s = applied_flux_state(model)
-    water = distributed_water(s, model.grid)
-    e = SpecificValue(model.tracers[TKE_NAME], e_density)
-    return (; water.θ, water.qᵗ, e, w = model.velocities.w, s.p, water.thermodynamics)
 end
 
 #####
@@ -1211,9 +1200,9 @@ end
                                  velocities, s.p, water.thermodynamics)
 end
 
-function compute_subgrid_distribution!(fields::SubgridCloudFields, closure_fields, closure, model, e_density)
+function compute_subgrid_distribution!(fields::SubgridCloudFields, closure_fields, closure, model)
     grid = model.grid
-    e = SpecificValue(model.tracers[TKE_NAME], e_density)
+    e = SpecificValue(model.tracers[TKE_NAME], nothing) # within `update_state!` the tracer holds its specific value
     launch!(grid.architecture, grid, :xy, _compute_subgrid_distribution!, closure_fields, grid, closure, e, model.velocities,
             applied_flux_state(model))
     compute_outside_condensate_moments!(fields, closure_fields, model)
@@ -1300,8 +1289,8 @@ end
             m.qⁱ′²[i, j, k] = max(0, variance)
             m.qⁱ′sⁱ′[i, j, k] = ifelse(resolved, covariance * bound / (scaleₛ * sqrt(sqrt((bound / scaleₛ)^4 + (covariance / scaleₛ)^4))), zero(FT))
             # The departure of the cloud liquid from the equilibrium condensate of the distribution
-            d⁺ = distributed_condensateᶜᶜᶜ(i, j, k, grid, s, qʷ[i, j, k]) - cl.qˡ[i, j, k]
-            d⁻ = distributed_condensateᶜᶜᶜ(i, j, k-1, grid, s, qʷ[i, j, k-1]) - cl.qˡ[i, j, k-1]
+            d⁺ = distributed_condensateᶜᶜᶜ(i, j, k, grid, s) - cl.qˡ[i, j, k]
+            d⁻ = distributed_condensateᶜᶜᶜ(i, j, k-1, grid, s) - cl.qˡ[i, j, k-1]
             ∂z_d = (d⁺ - d⁻) / Δz
             m.qᵈ′²[i, j, k] = 2 * K * τᵠ * ∂z_d * ∂z_d / (1 + 2 * τᵠ * ωˡ)
         end
@@ -1342,7 +1331,7 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergeti
     compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
     launch!(arch, grid, parameters, _set_lagged_stability!, closure_fields.N², N²₋)
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
-    compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
+    compute_subgrid_distribution!(fields, closure_fields, closure, model)
     solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
     parent(N²₋) .= parent(closure_fields.N²)
     return nothing
@@ -1362,7 +1351,7 @@ end
 function compute_subgrid_cloud!(fields::SubgridCloudFields, closure_fields, closure, model, tracers, parameters)
     compute_subgrid_cloud_buoyancy_derivatives!(fields, subgrid_distribution(closure), model)
     compute_subgrid_cloud_heating_budget_flux!(fields, subgrid_distribution(closure), closure_fields, closure, model, tracers)
-    compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
+    compute_subgrid_distribution!(fields, closure_fields, closure, model)
     solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
     return nothing
 end
@@ -1381,7 +1370,7 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
 # w′qˡ′ = aʷ w′s′, w′s′ = -Kᶜ ∂z s̄, so -Bˡ / Kᶜ = (b_qˡ - b_qᵛ) aʷ ∂z s̄, with (b_qˡ - b_qᵛ) aʷ formed at the
 # centers from the saturated share of the components there (`center_condensate_flux_fraction`) and averaged to the
 # face. Also returns ∂z s̄ and the face A_c.
-@inline function condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
+@inline function condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
     km = max(k - 1, 1)
     g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
     @inbounds begin
@@ -1418,7 +1407,7 @@ function cloud_buoyancy_stability!(buoyancy_flux::AppliedFluxEnergetics{N, W, <:
     ω = buoyancy_flux.stability_relaxation
     solve_stability_pass!(solver, Val(0), Val(N), ω, fields, closure_fields, closure, model, tracers, parameters)
     for p in 1:N
-        compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
+        compute_subgrid_distribution!(fields, closure_fields, closure, model)
         solve_stability_pass!(solver, Val(p), Val(N), ω, fields, closure_fields, closure, model, tracers, parameters)
     end
     return nothing
@@ -1483,7 +1472,7 @@ end
     p = s.p
     @inbounds begin
         interior_face = k > 1
-        N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, m, cl, θ, qᵗ, p, thermodynamics)
+        N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
         # The latent response of the condensate outside the distributed water (ice and its liquid coating), at the
         # eddy time of this pass; it moves the target and both ends of the bracket alike
         kₛ = max(k, 2)
@@ -1519,7 +1508,7 @@ function cloud_buoyancy_stability!(buoyancy_flux::AppliedFluxEnergetics, fields,
     cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
     # The extra passes of the coupling; the count is a type parameter, so the loop is unrolled when traced
     for _ in 1:stability_iterations(buoyancy_flux)
-        compute_subgrid_distribution!(fields, closure_fields, closure, model, nothing)
+        compute_subgrid_distribution!(fields, closure_fields, closure, model)
         cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters,
                                        buoyancy_flux.stability_relaxation)
     end

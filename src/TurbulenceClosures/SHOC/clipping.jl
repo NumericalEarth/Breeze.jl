@@ -39,9 +39,6 @@ Base.show(io::IO, policy::HardClipping) = print(io, summary(policy), "()")
 # `x`, between `lo` and `hi`
 @inline clip_between(::HardClipping, x, lo, hi, scale) = max(lo, min(hi, x))
 
-# The positive part of `x`
-@inline clip_negative(::HardClipping, x, scale) = ifelse(x >= 0, x, zero(x))
-
 #####
 ##### Smooth clipping
 #####
@@ -95,7 +92,6 @@ Adapt.adapt_structure(to, policy::SmoothClipping) = (width = adapt(to, policy.wi
 # hard bound guards that round-off only (the exact value is strictly inside).
 @inline clip_between(policy::SmoothClipping, x, lo, hi, scale) =
     max(lo, min(hi, smooth_clamp(x, lo, hi, policy.width * scale)))
-@inline clip_negative(policy::SmoothClipping, x, scale) = smooth_max(x, zero(x), policy.width * scale)
 
 #####
 ##### Guards that are hard in every configuration

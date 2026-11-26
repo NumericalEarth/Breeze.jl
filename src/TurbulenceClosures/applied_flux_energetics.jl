@@ -239,7 +239,7 @@ end
     return ifelse(bottom, Bˢ, zero(FT)), ifelse(bottom, Pˢ, zero(FT))
 end
 
-@kernel function _compute_applied_flux_conversions!(cl, grid, closure, s, Kᶜ, Kᵘ, u, v, e, bottom_bcs, bc_args)
+@kernel function _compute_applied_flux_conversions!(cl, grid, s, Kᶜ, Kᵘ, u, v, e, bottom_bcs, bc_args)
     i, j, k = @index(Global, NTuple)
     B, P, Bᴸ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     Bˢ, Pˢ = surface_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, u, v, bottom_bcs, bc_args)
@@ -296,7 +296,7 @@ function compute_applied_flux_conversions!(fields::SubgridCloudFields{<:AppliedF
     s = applied_flux_state(model)
     u, v = model.velocities.u, model.velocities.v
     compute_liquid_flux_conversion!(fields, closure, model, s)
-    launch!(arch, grid, :xyz, _compute_applied_flux_conversions!, cl, grid, closure, s, closure_fields.Kᶜ,
+    launch!(arch, grid, :xyz, _compute_applied_flux_conversions!, cl, grid, s, closure_fields.Kᶜ,
             closure_fields.Kᵘ, u, v, tracers[TKE_NAME], applied_flux_bottom_bcs(model), boundary_condition_args(model))
     return nothing
 end
@@ -380,8 +380,8 @@ end
         θ⁻ = θʷ[i, j, k-1]
         qʷ⁺ = qʷ[i, j, k]
         qʷ⁻ = qʷ[i, j, k-1]
-        qᶜ⁺ = distributed_condensateᶜᶜᶜ(i, j, k, grid, s, qʷ⁺)
-        qᶜ⁻ = distributed_condensateᶜᶜᶜ(i, j, k-1, grid, s, qʷ⁻)
+        qᶜ⁺ = distributed_condensateᶜᶜᶜ(i, j, k, grid, s)
+        qᶜ⁻ = distributed_condensateᶜᶜᶜ(i, j, k-1, grid, s)
         Δz = Δzᶜᶜᶠ(i, j, k, grid)
         ∂z_s = (cl.c_q[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θ[i, j, k] * (θ⁺ - θ⁻)) / Δz
         ∂z_sⁱ = (cl.c_qⁱ[i, j, k] * (qʷ⁺ - qʷ⁻) - cl.c_θⁱ[i, j, k] * (θ⁺ - θ⁻)) / Δz
@@ -709,7 +709,7 @@ function AtmosphereModels.closure_before_thermodynamic_solve!(closure_fields::TK
     return nothing
 end
 
-@kernel function _correct_tke_to_solved_conversions!(ρe, ρθ, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, Lᵉ, Δt, X, injected)
+@kernel function _correct_tke_to_solved_conversions!(ρe, cl, grid, closure, s, Kᶜ, Kᵘ, u, v, Lᵉ, Δt, X, injected)
     i, j, k = @index(Global, NTuple)
     Bᵖ, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     @inbounds begin
@@ -783,7 +783,7 @@ function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClos
     fill_halo_regions!((model.momentum.ρu, model.momentum.ρv))
     u = SpecificValue(model.momentum.ρu, ρ)
     v = SpecificValue(model.momentum.ρv, ρ)
-    launch!(grid.architecture, grid, :xyz, _correct_tke_to_solved_conversions!, model.tracers[TKE_NAME], s.ρθ, cl, grid, closure, s,
+    launch!(grid.architecture, grid, :xyz, _correct_tke_to_solved_conversions!, model.tracers[TKE_NAME], cl, grid, closure, s,
             closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, closure_fields.Lᵉ, Δt,
             recombined_stage_exchange(AtmosphereModels.closure_stage_storage(model.timestepper)),
             solved_conversions_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
@@ -792,7 +792,7 @@ function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClos
 end
 
 # Under the explicit time discretization the sinks are in the stage tendency, and so is the heating
-@kernel function _add_dissipative_heating!(Gρθ, grid, closure, closure_fields, ρe, ρ)
+@kernel function _add_dissipative_heating!(Gρθ, grid, closure_fields, ρe, ρ)
     i, j, k = @index(Global, NTuple)
     cl = closure_fields.subgrid_cloud.cloud
     @inbounds begin
@@ -809,7 +809,7 @@ function add_dissipative_heating!(Gⁿ, fields::SubgridCloudFields{<:AppliedFlux
     implicit_stage(closure, model) && return nothing
     grid = model.grid
     name = AtmosphereModels.thermodynamic_density_name(model.formulation)
-    launch!(grid.architecture, grid, :xyz, _add_dissipative_heating!, Gⁿ[name], grid, closure, closure_fields,
+    launch!(grid.architecture, grid, :xyz, _add_dissipative_heating!, Gⁿ[name], grid, closure_fields,
             model.tracers[TKE_NAME], total_density(model.dynamics))
     return nothing
 end
@@ -908,7 +908,7 @@ end
 # stratification N²ᵇ of that state and the latent correction count the condensate gradient once. In the state the
 # implicit solves leave, the condensate of saturation adjustment is that of the stage (the solves move its total water,
 # not its partition, as the conversion of the solved fluxes reads it).
-@inline function distributed_condensateᶜᶜᶜ(i, j, k, grid, s, qʷ)
+@inline function distributed_condensateᶜᶜᶜ(i, j, k, grid, s)
     @inbounds begin
         ρ = s.ρ[i, j, k]
         qᵛᵉ = s.ρqᵛᵉ[i, j, k] / ρ
@@ -1130,7 +1130,7 @@ linearized about each cell (`saturated_condensate_coefficients`), and the conden
         c_θⁱ = (c_θⁱ⁺ + c_θⁱ⁻) / 2
         ∂z_s = (c_q * (qʷ⁺ - qʷ⁻) - c_θ * (θ⁺ - θ⁻)) / Δz
         ∂z_sⁱ = (c_qⁱ * (qʷ⁺ - qʷ⁻) - c_θⁱ * (θ⁺ - θ⁻)) / Δz
-        Δqᶜ = distributed_condensateᶜᶜᶜ(i, j, k, grid, s, qʷ⁺) - distributed_condensateᶜᶜᶜ(i, j, k-1, grid, s, qʷ⁻)
+        Δqᶜ = distributed_condensateᶜᶜᶜ(i, j, k, grid, s) - distributed_condensateᶜᶜᶜ(i, j, k-1, grid, s)
         ∂z_qᶜ = Δqᶜ / Δz
         bᵛ = cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, k-1]
         bᶜᵛ = (cl.b_qᶜ[i, j, k] + cl.b_qᶜ[i, j, k-1] - bᵛ) / 2

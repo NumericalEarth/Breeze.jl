@@ -689,8 +689,6 @@ struct TKEClosureFields{K, N, L, KC, LC, SG, CS}
     column_stability :: CS
 end
 
-TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓᵐ, ℓˢ, Lᵉ, KC, LC, SG) = TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓᵐ, ℓˢ, Lᵉ, KC, LC, SG, nothing)
-
 Adapt.adapt_structure(to, fields::TKEClosureFields) =
     TKEClosureFields(adapt(to, fields.Kᵘ),
                      adapt(to, fields.Kᶜ),

@@ -9,30 +9,24 @@ Compute ice nucleation rate from deposition/condensation freezing.
 
 New ice crystals nucleate when temperature is below a threshold and the air
 is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
-The process is gated on cloud-side ice supersaturation. Breeze carries no subgrid
-cloud fraction, which is the `SCF = 1` limit: the grid cell is treated as uniformly
-cloudy, so the vapor passed in is both the grid-mean and the cloud-side value. If a
-subgrid cloud-fraction path is added, pass the cloud-side vapor state here rather
-than a grid-mean vapor state.
+Nucleation acts in the fraction of the cell where the excess over ice reaches its
+threshold (`nucleating_fraction`): all of the cell or none of it without a subgrid
+distribution, in which the vapor passed in is the value of the whole cell.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `T`: Temperature [K]
-- `qᵛ`: Cloud-side vapor mass fraction [kg/kg] (grid-mean when `SCF = 1`)
+- `qᵛ`: Vapor mass fraction [kg/kg]
 - `qᵛ⁺ⁱ`: Saturation vapor mass fraction over ice [kg/kg]
 - `nⁱ`: Current ice number concentration [1/kg]
 - `ρ`: Air density [kg/m³]
+- `distribution`: Subgrid distribution of `subgrid_process_distribution`, or `nothing`
+- `qᵛ⁺ˡ`: Saturation vapor mass fraction over liquid [kg/kg], on which the distribution is centred
 
 # Returns
 - Tuple `(nucleated_mass_rate, nucleated_number_rate)`: mass rate [kg/kg/s]
   and number rate [1/kg/s]
 """
-@inline deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ) =
-    deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ, nothing, qᵛ⁺ⁱ)
-
-# `distribution` is the subgrid distribution of `subgrid_process_distribution` (or `nothing`), and
-# `qᵛ⁺ˡ` the saturation over liquid it is centred on: nucleation acts in the fraction of the cell
-# where the excess over ice reaches its threshold (`nucleating_fraction`).
 @inline function deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ, distribution, qᵛ⁺ˡ)
     FT = typeof(T)
     parameters = p3.process_rates
@@ -47,9 +41,7 @@ than a grid-mean vapor state.
     freezing_temperature = parameters.freezing_temperature
     floors = parameters.floors
 
-    # Ice supersaturation, evaluated cloud-side; in the `SCF = 1` limit `qᵛ` is
-    # both the grid-mean and the cloud-side value.
-    # The threshold is inclusive.
+    # The fraction of the cell at or above the supersaturation threshold over ice (the threshold is inclusive)
     fraction = nucleating_fraction(distribution, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, floors.saturation_mass_fraction)
     nucleation_active = (T < ℂⁿᵘᶜˡ₁) & (fraction > 0)
 

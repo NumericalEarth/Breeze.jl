@@ -6,7 +6,7 @@ using Oceananigans.Grids: znodes
 using Breeze.TurbulenceClosures: convert_eltype, column_stability_field, diffusivity_stability_functionsᶜᶜᶠ,
                                  dissipation_stability_functionᶜᶜᶜ, shoc_distribution
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: trainable_parameter_names, is_calibratable, component_scalar_names,
-                                      clip_max, clip_min, clip_between, clip_negative,
+                                      clip_max, clip_min, clip_between,
                                       hard_floor, third_moment_bound, limit_third_moment, third_moment,
                                       bound_stratification_number, assumed_pdf, plume_saturation, plume_liquid_water_temperature, plume_variance,
                                       smooth_scalar_plumes, isotropy_ratio, shoc_dissipation_coefficient
@@ -43,7 +43,6 @@ derivative(f, x, parameters...) =
         end
 
         for x in values
-            @test same_bits(clip_negative(policy, x, scale), ifelse(x >= 0, x, zero(FT)))
             @test same_bits(clip_between(policy, x, -1, 1, 1), max(-1, min(1, x)))
             # The two sites that nest the other way in shoc.F90 have the same value
             @test same_bits(clip_between(policy, x, 0, 100, 1), min(100, max(0, x)))
@@ -78,11 +77,9 @@ derivative(f, x, parameters...) =
                 @test FT(0.01) ≤ clip_between(policy, x, FT(0.01), FT(0.99), 1) ≤ FT(0.99)
                 @test -1 ≤ clip_between(policy, x, -1, 1, 1) ≤ 1
                 @test abs(clip_between(policy, x, -1, 1, 1) - clamp(x, -1, 1)) ≤ δ
-                @test clip_negative(policy, x, scale) ≥ 0
             end
             # Strictly inside the bounds where the argument is within a few bounds of them
             @test FT(0.01) < clip_between(policy, FT(-1), FT(0.01), FT(0.99), 1) < clip_between(policy, FT(2), FT(0.01), FT(0.99), 1) < FT(0.99)
-            @test clip_negative(policy, -scale, scale) > 0
         end
 
         # The width → 0 limit is the hard bound
