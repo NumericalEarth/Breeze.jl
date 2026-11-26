@@ -24,7 +24,7 @@ const DEFAULT_STABILITY_COEFFICIENT_BOUNDS = (0.05, 20)
 
 # The width δ of the blend of the turbulent Richardson numbers of the unstable and stable sides, in units
 # of the larger of the two: the blend is 1 - δ²/(4 Riᵗ²) + O(δ⁴) complete at |Riᵗ| (= 0.984 at |Riᵗ| = 1)
-const RICHARDSON_BLEND_WIDTH = 1 / 4
+const RICHARDSON_BLEND_WIDTH = 1 // 4
 
 
 # The largest logarithmic slope |∂ ln 𝕊 / ∂ Riᵗ| over Riᵗ of a function whose three values are within
@@ -301,19 +301,16 @@ number `αˢ ≥ 0`: the blend ``Riᵗ⁻ + (Riᵗ⁺ - Riᵗ⁻)(1 + s)/2`` of 
     D⁺ = sf.ℂᴿⁱ⁺ * αˢ + sf.ℂᵅ
     Riᵗ⁻ = αᴺ / D⁻
     Riᵗ⁺ = αᴺ / D⁺
-    # |x| capped at 10¹⁵, where s = ±1 to rounding, so that x² stays finite in Float32
-    X = convert(typeof(Riᵗ⁻), 1e15)
-    x = clamp(αᴺ / (RICHARDSON_BLEND_WIDTH * min(D⁻, D⁺)), -X, X)
-    s = x / sqrt(1 + x^2)
+    # s = x / √(1 + x²) with x = αᴺ / (δ min(D⁻, D⁺)), formed without x² so that it is finite for any αᴺ
+    δD = RICHARDSON_BLEND_WIDTH * min(D⁻, D⁺)
+    s = αᴺ / hypot(δD, αᴺ)
     return Riᵗ⁻ + (Riᵗ⁺ - Riᵗ⁻) * (1 + s) / 2
 end
 
-# v = Riᵗ / √(1 + Riᵗ²) ∈ [-1, 1]. |Riᵗ| is capped at 10¹⁵, where v = ±1 to rounding, so that Riᵗ² stays finite in Float32
+# v = Riᵗ / √(1 + Riᵗ²) ∈ [-1, 1], formed without Riᵗ² so that it is finite for any Riᵗ
 @inline function bounded_richardson_coordinate(sf::TRStabilityFunction, αᴺ, αˢ)
     Riᵗ = turbulent_richardson_number(sf, αᴺ, αˢ)
-    R = convert(typeof(Riᵗ), 1e15)
-    Riᵗ = clamp(Riᵗ, -R, R)
-    return Riᵗ / sqrt(1 + Riᵗ^2)
+    return Riᵗ / hypot(one(Riᵗ), Riᵗ)
 end
 
 @inline evaluate_log_quadratic((l⁰, A, B), v) = exp(l⁰ + v * (A + B * v))
@@ -371,13 +368,16 @@ end
 
 # At the center, where the dissipation lives: N² and S² reconstructed from the two faces, as for the
 # Richardson number, and the time scale of the reconstructed mixing length bounded by the penetration
-# time 1 / N of the center, so that α_N ≤ 1 there as at the faces.
+# time ℂˡᵇ / N of the center with the blending of the mixing length, as the length of the faces is by
+# ℂˡᵇ √e / N: α_N ≤ (ℂˡᵇ)² there as at the faces.
 @inline function stratification_and_shear_numbersᶜᶜᶜ(i, j, k, grid, closure, velocities, N², e, ℓ)
     S² = ℑbzᵃᵃᶜ(i, j, k, grid, effective_shear_squaredᶜᶜᶠ, closure, velocities, e, ℓ) + closure.shear.minimum_shear_squared
     N²ᵢ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
-    τ²ʷ = (ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, ℓ) / turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e))^2
+    τʷ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, ℓ) / turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
     stratified = N²ᵢ > 0
-    τ² = ifelse(stratified, min(τ²ʷ, 1 / ifelse(stratified, N²ᵢ, one(N²ᵢ))), τ²ʷ)
+    τᵇ = buoyancy_length_coefficient(closure.mixing_length) / sqrt(ifelse(stratified, N²ᵢ, one(N²ᵢ)))
+    τ = blend(length_blending(closure.mixing_length), τʷ, ifelse(stratified, τᵇ, convert(typeof(τᵇ), Inf)))
+    τ² = τ * τ
     return τ² * N²ᵢ, τ² * S²
 end
 
