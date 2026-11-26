@@ -366,7 +366,7 @@ Base.summary(d::DoubleGaussian) = string("DoubleGaussian(", nameof(typeof(d.assu
 #####
 
 """
-    SinglePass()
+$(TYPEDEF)
 
 The `solver` of [`TKEBasedTurbulenceClosure`](@ref) (the default). With
 `static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(...))` the static
@@ -379,7 +379,7 @@ its `aᴺ`, then the mixing length and the diffusivities from that `N²`; the co
 struct SinglePass end
 
 """
-    DampedFixedPoint(; iterations = 1, relaxation = 1)
+$(TYPEDEF)
 
 The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of the static stability
 `N²` and the saturated fraction `aᴺ = w′qᶜ′ / w′s′` (see [`SinglePass`](@ref)) by damped fixed-point
@@ -395,14 +395,25 @@ struct DampedFixedPoint{W}
     relaxation :: W
 end
 
-function DampedFixedPoint(; iterations = 1, relaxation = 1)
+validate_coupling_iterations(iterations) =
     iterations >= 0 || throw(ArgumentError("iterations must be ≥ 0, got $iterations."))
+
+validate_coupling_relaxation(relaxation) =
     0 < relaxation <= 1 || throw(ArgumentError("relaxation must be in (0, 1], got $relaxation."))
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return a [`DampedFixedPoint`](@ref) of `iterations ≥ 0` passes with `relaxation` in `(0, 1]`.
+"""
+function DampedFixedPoint(; iterations = 1, relaxation = 1)
+    validate_coupling_iterations(iterations)
+    validate_coupling_relaxation(relaxation)
     return DampedFixedPoint(Int(iterations), relaxation)
 end
 
 """
-    SecantIteration(; iterations = 1, relaxation = 1)
+$(TYPEDEF)
 
 The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of `N²` and `aᴺ` (see
 [`DampedFixedPoint`](@ref)) as the scalar root `r(N²) = N²ᵇ(N²) - N² = 0` of each interior face
@@ -415,10 +426,19 @@ struct SecantIteration{W}
     relaxation :: W
 end
 
-SecantIteration(; iterations = 1, relaxation = 1) = SecantIteration(Int(iterations), relaxation)
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return a [`SecantIteration`](@ref) of `iterations ≥ 0` steps with `relaxation` in `(0, 1]`.
+"""
+function SecantIteration(; iterations = 1, relaxation = 1)
+    validate_coupling_iterations(iterations)
+    validate_coupling_relaxation(relaxation)
+    return SecantIteration(Int(iterations), relaxation)
+end
 
 """
-    BisectionIteration(; iterations = 1, relaxation = 1, final_interpolation = true)
+$(TYPEDEF)
 
 The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of `N²` and `aᴺ` (see
 [`SecantIteration`](@ref)) by halving the bracket of `N²ᶜ` and `N²ˢ` per face by the sign of
@@ -426,17 +446,23 @@ The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of 
 secant step of the last two passes, kept in the bracket, so that the result varies continuously
 with the parameters.
 """
-struct BisectionIteration{W}
+struct BisectionIteration
     iterations :: Int
-    relaxation :: W
     final_interpolation :: Bool
 end
 
-BisectionIteration(; iterations = 1, relaxation = 1, final_interpolation = true) =
-    BisectionIteration(Int(iterations), relaxation, final_interpolation)
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return a [`BisectionIteration`](@ref) of `iterations ≥ 0` halvings.
+"""
+function BisectionIteration(; iterations = 1, final_interpolation = true)
+    validate_coupling_iterations(iterations)
+    return BisectionIteration(Int(iterations), final_interpolation)
+end
 
 """
-    LaggedStability(; iterations = 0, relaxation = 1)
+$(TYPEDEF)
 
 The `solver` of [`TKEBasedTurbulenceClosure`](@ref) whose first distribution is formed with the `N²`
 of the previous evaluation of the closure fields (the previous stage, or the previous step) at the
@@ -449,25 +475,34 @@ struct LaggedStability{W}
     relaxation :: W
 end
 
-LaggedStability(; iterations = 0, relaxation = 1) = LaggedStability(Int(iterations), relaxation)
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return a [`LaggedStability`](@ref) followed by `iterations ≥ 0` passes with `relaxation` in `(0, 1]`.
+"""
+function LaggedStability(; iterations = 0, relaxation = 1)
+    validate_coupling_iterations(iterations)
+    validate_coupling_relaxation(relaxation)
+    return LaggedStability(Int(iterations), relaxation)
+end
 
 const IteratedCouplingSolver = Union{DampedFixedPoint, SecantIteration, BisectionIteration, LaggedStability}
 
 coupling_iterations(::SinglePass) = 0
 coupling_iterations(s::IteratedCouplingSolver) = s.iterations
-coupling_relaxation(::SinglePass) = 1
-coupling_relaxation(s::IteratedCouplingSolver) = s.relaxation
+coupling_relaxation(::Union{SinglePass, BisectionIteration}) = 1
+coupling_relaxation(s::Union{DampedFixedPoint, SecantIteration, LaggedStability}) = s.relaxation
 
 convert_eltype(::Type{FT}, s::SinglePass) where FT = s
 convert_eltype(::Type{FT}, s::DampedFixedPoint) where FT = DampedFixedPoint(s.iterations, convert(FT, s.relaxation))
 convert_eltype(::Type{FT}, s::SecantIteration) where FT = SecantIteration(s.iterations, convert(FT, s.relaxation))
-convert_eltype(::Type{FT}, s::BisectionIteration) where FT = BisectionIteration(s.iterations, convert(FT, s.relaxation), s.final_interpolation)
+convert_eltype(::Type{FT}, s::BisectionIteration) where FT = s
 convert_eltype(::Type{FT}, s::LaggedStability) where FT = LaggedStability(s.iterations, convert(FT, s.relaxation))
 
 Base.summary(::SinglePass) = "SinglePass()"
 Base.summary(s::DampedFixedPoint) = string("DampedFixedPoint(iterations = ", s.iterations, ", relaxation = ", s.relaxation, ")")
 Base.summary(s::SecantIteration) = string("SecantIteration(iterations = ", s.iterations, ", relaxation = ", s.relaxation, ")")
-Base.summary(s::BisectionIteration) = string("BisectionIteration(iterations = ", s.iterations, ", relaxation = ", s.relaxation,
+Base.summary(s::BisectionIteration) = string("BisectionIteration(iterations = ", s.iterations,
                                              ", final_interpolation = ", s.final_interpolation, ")")
 Base.summary(s::LaggedStability) = string("LaggedStability(iterations = ", s.iterations, ", relaxation = ", s.relaxation, ")")
 Base.show(io::IO, s::Union{SinglePass, IteratedCouplingSolver}) = print(io, summary(s))
