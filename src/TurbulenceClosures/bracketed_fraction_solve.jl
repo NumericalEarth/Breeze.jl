@@ -103,14 +103,14 @@ end
 @inline standard_normal_cdf(x) = (1 + erf(x / sqrt(convert(typeof(x), 2)))) / 2
 
 # The face's constant inputs, gathered once
-@inline function fraction_face_inputs(i, j, k, grid, closure, d, cl, θ, qᵗ, e, p, thermodynamics)
+@inline function fraction_face_inputs(i, j, k, grid, closure, d, cl, s, θ, qᵗ, e, p, thermodynamics)
     sm = d.second_moments
     eᵐⁱⁿ = closure.minimum_tke
     @inbounds begin
-        g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
+        g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
         gAᶠ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, k-1]) / 2
         N²ᶜ = g.gθᶠ * g.∂zθ + gAᶠ * g.∂zq
-        ΔN² = g.gA_c * g.∂zs
+        ΔN² = g.bᶜᵛ * g.∂zs
         s̄ = (mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k]) +
              mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k-1), θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])) / 2
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
@@ -188,11 +188,13 @@ end
         θᵏ = θ[i, j, k]
         w′³ = cl.w′³[i, j, k]
         thermodynamicsᵏ = level_thermodynamics(thermodynamics, i, j, k)
-        _, qˡ, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
+        _, _, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
                                           p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], (w′³, moments_l...), (w′³, moments_u...))
-        _, A_c = buoyancy_flux_coefficients(thermodynamicsᵏ, p[i, j, k], θᵏ, qᵗ[i, j, k], qˡ)
+        # The buoyancy of the flux of liquid with the derivatives of the model's buoyancy, as the stored Bˡ of the
+        # distribution has it
+        Bˡ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * w′qˡ′
     end
-    return thermodynamics.constants.gravitational_acceleration / θᵏ * A_c * w′qˡ′
+    return Bˡ
 end
 
 #####
@@ -227,7 +229,7 @@ end
     w = velocities.w
     tol = convert(FT, solver.classification_tolerance)
     ℓᵉ = ifelse(solver.lagged_envelope, @inbounds(ℓˢ[i, j, kₛ]), FT(Inf))
-    stored_input = fraction_face_inputs(i, j, kₛ, grid, closure_ij, d, cloud, θ, qᵗ, e, p, thermodynamics)
+    stored_input = fraction_face_inputs(i, j, kₛ, grid, closure_ij, d, cloud, s, θ, qᵗ, e, p, thermodynamics)
     # The latent response of the condensate outside the distributed water (ice and its liquid coating), with the
     # distribution and the eddy time before the solve (as the moments of the neighbouring faces)
     aʷ = face_condensate_flux_fraction(i, j, kₛ, cloud)
@@ -306,8 +308,8 @@ end
     Nz = size(grid, 3)
     kₛ = clamp(k, 2, max(Nz, 2))
     @inbounds begin
-        g = saturation_excess_gradientᶜᶜᶠ(i, j, kₛ, grid, cloud, θ, qᵗ, p, thermodynamics)
-        ΔN² = g.gA_c * g.∂zs
+        g = saturation_excess_gradientᶜᶜᶠ(i, j, kₛ, grid, cloud, s, θ, qᵗ, thermodynamics)
+        ΔN² = g.bᶜᵛ * g.∂zs
         Bᶠ = (cloud.Bˡ[i, j, kₛ] + cloud.Bˡ[i, j, kₛ-1]) / 2
         ãᴺ = condensate_flux_fraction(FT, Bᶠ, Kᶜ[i, j, kₛ], ΔN²)
         ãᴺᶠ[i, j, k] = ifelse((k > 1) & (k ≤ Nz), ãᴺ, zero(FT))

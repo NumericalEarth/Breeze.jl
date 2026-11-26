@@ -28,7 +28,7 @@ using Oceananigans.Grids: znode
 using Oceananigans.Operators: Δzᶜᶜᶠ
 
 using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
-                                      third_moment, limit_third_moment, assumed_pdf, buoyancy_flux_coefficients,
+                                      third_moment, limit_third_moment, assumed_pdf,
                                       plume_liquid_water_temperature, plume_saturation,
                                       rate_norm_factor, linear_interp, hard_floor, component_vapor_excess,
                                       representable_skewness, within_component_share, ice_saturation_thermodynamics,
@@ -1406,10 +1406,10 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
 # N²ᵇ = N²ᶜ - Bˡ / Kᶜ, with Bˡ / Kᶜ in the form in which Kᶜ cancels: Bˡ = (b_qˡ - b_qᵛ) w′qˡ′ and
 # w′qˡ′ = aʷ w′s′, w′s′ = -Kᶜ ∂z s̄, so -Bˡ / Kᶜ = (b_qˡ - b_qᵛ) aʷ ∂z s̄, with (b_qˡ - b_qᵛ) aʷ formed at the
 # centers from the saturated share of the components there (`center_condensate_flux_fraction`) and averaged to the
-# face. Also returns ∂z s̄ and the face A_c.
-@inline function condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
+# face. Also returns ∂z s̄ and the face b̄ᶜ - b̄ᵛ.
+@inline function condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
     km = max(k - 1, 1)
-    g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
+    g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
     @inbounds begin
         gAᶠ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, km]) / 2
         bˡᵛaʷ⁺ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, cl)
@@ -1417,25 +1417,28 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
     end
     N²ᶜ = g.gθᶠ * g.∂zθ + gAᶠ * g.∂zq
     N²ᵇ = N²ᶜ + (bˡᵛaʷ⁺ + bˡᵛaʷ⁻) / 2 * g.∂zs
-    return N²ᶜ, N²ᵇ, g.∂zs, g.gA_c
+    return N²ᶜ, N²ᵇ, g.∂zs, g.bᶜᵛ
 end
 
-# Across the face k (between the centers k - 1 and k): the gradients of θʷ and qʷ, that of SHOC's linearized saturation
-# excess, ∂z s̄ = c̄_q ∂z qʷ - c̄_θ ∂z θʷ, the face b̄_θ (`gθᶠ`) and b̄_θ Ā_c (`gA_c`), so that N²ˢ - N²ᶜ = gA_c ∂z s̄
-@inline function saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
+# Across the face k (between the centers k - 1 and k): the gradients of θʷ and qʷ, that of the saturation excess
+# linearized about the state of each cell, ∂z s̄ = c̄_q ∂z qʷ - c̄_θ ∂z θʷ (`saturated_condensate_coefficients`), the face
+# b̄_θ (`gθᶠ`) and the buoyancy of condensate in place of vapor, b̄ᶜ - b̄ᵛ, so that N²ˢ - N²ᶜ = (b̄ᶜ - b̄ᵛ) ∂z s̄: the one
+# linearization of the bracket, of the target of the solve and of the latent correction
+@inline function saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
     km = max(k - 1, 1)
     @inbounds begin
         Δz = Δzᶜᶜᶠ(i, j, k, grid)
         Δθ = θ[i, j, k] - θ[i, j, km]
         Δq = qᵗ[i, j, k] - qᵗ[i, j, km]
         gθᶠ = (cl.b_θ[i, j, k] + cl.b_θ[i, j, km]) / 2
-        c_q⁺, c_θ⁺, A⁺ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k])
-        c_q⁻, c_θ⁻, A⁻ = saturation_excess_coefficients(level_thermodynamics(thermodynamics, i, j, km), θ[i, j, km], qᵗ[i, j, km], p[i, j, km])
+        bᶜᵛ = (cl.b_qᶜ[i, j, k] + cl.b_qᶜ[i, j, km] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, km]) / 2
+        c_q⁺, c_θ⁺ = saturated_condensate_coefficients(thermodynamics, i, j, k, grid, s, θ[i, j, k])
+        c_q⁻, c_θ⁻ = saturated_condensate_coefficients(thermodynamics, i, j, km, grid, s, θ[i, j, km])
     end
     ∂zθ = Δθ / Δz
     ∂zq = Δq / Δz
     ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
-    return (; Δz, Δθ, Δq, ∂zθ, ∂zq, gθᶠ, ∂zs, gA_c = gθᶠ * (A⁺ + A⁻) / 2)
+    return (; Δz, Δθ, Δq, ∂zθ, ∂zq, gθᶠ, ∂zs, bᶜᵛ)
 end
 
 function cloud_buoyancy_stability!(buoyancy_flux::AppliedFluxEnergetics{N, W, <:Union{SecantIteration, BisectionIteration}},
@@ -1459,17 +1462,6 @@ function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_f
     # After the last pass: the latent correction of the solved state for the buoyancy production (N² unchanged)
     P == N && store_latent_correction_of_solved_stability!(fields, closure_fields, closure, model, tracers, parameters)
     return nothing
-end
-
-# SHOC's linearization of the saturation excess at a level, s′ = c_q qᵗ′ - c_θ θˡⁱ′, and A_c
-@inline function saturation_excess_coefficients(thermodynamics, θ, qᵗ, p)
-    Tˡ = plume_liquid_water_temperature(thermodynamics, θ, qᵗ, p)
-    qᵛ⁺, β, cp_over_L, Π = plume_saturation(thermodynamics, Tˡ, qᵗ, p)
-    opbq = 1 + β * qᵛ⁺
-    c_θ = ((1 + β * qᵗ) / (opbq * opbq)) * cp_over_L * β * qᵛ⁺ * Π
-    c_q = 1 / opbq
-    _, A_c = buoyancy_flux_coefficients(thermodynamics, p, θ, qᵗ, zero(θ))
-    return c_q, c_θ, A_c
 end
 
 @inline secant_root(x, r, x₋, r₋, fallback) =
@@ -1509,7 +1501,7 @@ end
     p = s.p
     @inbounds begin
         interior_face = k > 1
-        N²ᶜ, G, ∂zs, gA_c = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, cl, θ, qᵗ, p, thermodynamics)
+        N²ᶜ, G, ∂zs, bᶜᵛ = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
         # The latent response of the condensate outside the distributed water (ice and its liquid coating), at the
         # eddy time of this pass; it moves the target and both ends of the bracket alike
         kₛ = max(k, 2)
@@ -1518,7 +1510,7 @@ end
                                  thermodynamics, cl, aʷ).outside
         N²ᶜ += X
         G += X
-        N²ˢ = N²ᶜ + gA_c * ∂zs
+        N²ˢ = N²ᶜ + bᶜᵛ * ∂zs
         L = min(N²ᶜ, N²ˢ)
         U = max(N²ᶜ, N²ˢ)
 
