@@ -288,12 +288,12 @@ true
 @inline vapor_excess_correlation(source, statistics, cell) =
     subgrid_vapor_excess_correlation(statistics, cell.saturation_excess)
 
-# ξˡ = 1 + ℒˡ ∂qᵛ⁺ˡ/∂T / cᵖᵈ, with P3's dry-air heat capacity convention
+# ξˡ = 1 + ℒˡ ∂qᵛ⁺ˡ/∂T / cᵖᵈ, with ∂ ln qᵛ⁺ˡ/∂T that of the model's saturation vapor pressure and P3's dry-air heat
+# capacity convention
 @inline function p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
     FT = typeof(T)
-    Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
-    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
-    return 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
+    ∂qᵛ⁺ˡ∂T = qᵛ⁺ˡ * saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface())
+    return 1 + ℒˡ * ∂qᵛ⁺ˡ∂T / cᵖᵈ
 end

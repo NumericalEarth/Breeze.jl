@@ -127,13 +127,14 @@ using SpecialFunctions: erf, erfc
 using Adapt: Adapt
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU, on_architecture
-using Breeze.AtmosphereModels: prognostic_field_names
+using Breeze.AtmosphereModels: prognostic_field_names, resolved_spread
 using Breeze.AtmosphereModels.Diagnostics: Diagnostics
 using Breeze.Microphysics: thermodynamic_adjustment_factor
 using Breeze.Thermodynamics: WarmPhaseEquilibrium,
                              MoistureMassFractions,
                              PlanarIceSurface,
                              PlanarLiquidSurface,
+                             saturation_vapor_pressure_log_slope,
                              ThermodynamicConstants,
                              adjustment_saturation_specific_humidity,
                              air_pressure,

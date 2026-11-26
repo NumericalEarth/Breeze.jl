@@ -316,14 +316,14 @@ end
 end
 
 # ξⁱˡ = 1 + ℒˡ ∂qᵛ⁺ⁱ/∂T / cᵖᵈ: the saturation excess over ice that the evaporation of cloud liquid returns, per unit of
-# liquid (the liquid cools the air by ℒˡ / cᵖᵈ and lowers qᵛ⁺ⁱ), with P3's dry-air heat capacity convention
+# liquid (the liquid cools the air by ℒˡ / cᵖᵈ and lowers qᵛ⁺ⁱ), with ∂ ln qᵛ⁺ⁱ/∂T that of the model's saturation
+# vapor pressure and P3's dry-air heat capacity convention
 @inline function p3_ice_liquid_psychrometric_correction(qᵛ⁺ⁱ, T, constants)
     FT = typeof(T)
-    Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
-    ℒⁱ = sublimation_latent_heat(constants, T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
-    return 1 + ℒˡ * qᵛ⁺ⁱ * ℒⁱ / (Rᵛ * T^2 * cᵖᵈ)
+    ∂qᵛ⁺ⁱ∂T = qᵛ⁺ⁱ * saturation_vapor_pressure_log_slope(T, constants, PlanarIceSurface())
+    return 1 + ℒˡ * ∂qᵛ⁺ⁱ∂T / cᵖᵈ
 end
 
 # The saturation excess over ice of the components of the mixture, regressed on the excess over liquid s within each
@@ -361,7 +361,11 @@ end
 ##### Gaussian integrals over intervals of s
 #####
 
-# Upper tail 1 - Φ(z), with the argument clamped where the tail is below round-off
+# The spread of a Gaussian as a divisor (`AtmosphereModels.resolved_spread`): a zero spread is the point mass at the
+# mean, which the callers select where σ = 0.
+
+# Upper tail 1 - Φ(z). The argument is held at ±40, beyond which the tail is 0 or 1 and the density 0 in every float
+# type, so that their derivatives are finite there (z e^{-z²/2} is ∞ × 0 for an infinite z): no value changes.
 @inline function gaussian_upper_tail(z)
     FT = typeof(z)
     zᶜ = clamp(z, -convert(FT, 40), convert(FT, 40))
@@ -378,7 +382,7 @@ end
 # u = ∞. A zero spread is the point mass at the mean.
 @inline function gaussian_interval_moments(m, σ, l, u, bounded)
     FT = typeof(m)
-    σ₊ = max(σ, floatmin(FT) / eps(FT))
+    σ₊ = resolved_spread(σ)
     zˡ = (l - m) / σ₊
     zᵘ = (u - m) / σ₊
     tailᵘ = ifelse(bounded, gaussian_upper_tail(zᵘ), zero(FT))
@@ -403,7 +407,7 @@ end
 # they are small, unlike 1 - P(s > 0) and s̄ - ⟨s; s > 0⟩. A zero spread is the point mass at the mean.
 @inline function gaussian_lower_moments(m, σ)
     FT = typeof(m)
-    σ₊ = max(σ, floatmin(FT) / eps(FT))
+    σ₊ = resolved_spread(σ)
     z = m / σ₊
     P = gaussian_upper_tail(z)
     M = min(0, m * P - σ₊ * gaussian_density(z))
@@ -440,20 +444,10 @@ const gauss_legendre_weights = (0.12793819534675185, 0.12583745634682753, 0.1216
 @inline function gaussian_partial_moment(β, m, σ, l)
     FT = typeof(m)
     R = convert(FT, 8)
-    σ₊ = max(σ, floatmin(FT) / eps(FT))
+    σ₊ = resolved_spread(σ)
     hi = max(0, m + R * σ₊)
     lo = min(max(l, m - R * σ₊), hi)
-    h = (hi - lo) / 2
-    c = (hi + lo) / 2
-    terms = map(gauss_legendre_nodes, gauss_legendre_weights) do x, w
-        s⁺ = c + h * convert(FT, x)
-        s⁻ = c - h * convert(FT, x)
-        z⁺ = (s⁺ - m) / σ₊
-        z⁻ = (s⁻ - m) / σ₊
-        convert(FT, w) * (positive_power(s⁺, β) * exp(-z⁺^2 / 2) +
-                          positive_power(s⁻, β) * exp(-z⁻^2 / 2))
-    end
-    quadrature = sum(terms) * h / (sqrt(2 * FT(π)) * σ₊)
+    quadrature, = gauss_legendre_interval(s -> (positive_power(s, β),), lo, hi, m, σ₊)
     point_mass = ifelse(m >= l, positive_power(m, β), zero(FT))
     return ifelse(σ > 0, quadrature, point_mass)
 end
@@ -470,19 +464,10 @@ end
     FT = typeof(d.qᶜˡ)
     R = convert(FT, 8)
     components = map(d.a, d.m, d.σ, ntuple(identity, length(d.a))) do aᵢ, m, σ, i
-        σ₊ = max(σ, floatmin(FT) / eps(FT))
+        σ₊ = resolved_spread(σ)
         lo = max(zero(FT), m - R * σ₊)
         hi = max(lo, m + R * σ₊)
-        h = (hi - lo) / 2
-        c = (hi + lo) / 2
-        terms = map(gauss_legendre_nodes, gauss_legendre_weights) do x, w
-            s⁺ = c + h * convert(FT, x)
-            s⁻ = c - h * convert(FT, x)
-            z⁺ = (s⁺ - m) / σ₊
-            z⁻ = (s⁻ - m) / σ₊
-            convert(FT, w) * (f(s⁺, i) * exp(-z⁺^2 / 2) + f(s⁻, i) * exp(-z⁻^2 / 2))
-        end
-        quadrature = sum(terms) * h / (sqrt(2 * FT(π)) * σ₊)
+        quadrature, = gauss_legendre_interval(s -> (f(s, i),), lo, hi, m, σ₊)
         point_mass = ifelse(m > 0, f(max(m, floatmin(FT)), i), zero(FT))
         aᵢ * ifelse(σ > 0, quadrature, point_mass)
     end
@@ -752,14 +737,14 @@ smooth in ``s`` within each part, so those are integrated over ``s`` with the 24
         # At given s the local excess over ice is Gaussian in the residual: its exceedance and partial mean
         function conditional(s)
             μ = bᵢ + ifelse(s > 0, (kᵢ - λⁱ) * s, kᵢ * s - d.ξⁱˡ * qᵘ)
-            z = (μ - c) / max(σʳᵢ, floatmin(FT) / eps(FT))
+            z = (μ - c) / resolved_spread(σʳᵢ)
             Φ = gaussian_upper_tail(-z)
             φ = gaussian_density(z)
             return (Φ, μ * Φ + σʳᵢ * φ)
         end
-        σ₊ = max(σᵢ, floatmin(FT) / eps(FT))
-        lower = gauss_legendre_interval(s -> conditional(s), min(mᵢ - R * σ₊, zero(FT)), min(mᵢ + R * σ₊, zero(FT)), mᵢ, σ₊)
-        upper = gauss_legendre_interval(s -> conditional(s), max(mᵢ - R * σ₊, zero(FT)), max(mᵢ + R * σ₊, zero(FT)), mᵢ, σ₊)
+        σ₊ = resolved_spread(σᵢ)
+        lower = gauss_legendre_interval(conditional, min(mᵢ - R * σ₊, zero(FT)), min(mᵢ + R * σ₊, zero(FT)), mᵢ, σ₊)
+        upper = gauss_legendre_interval(conditional, max(mᵢ - R * σ₊, zero(FT)), max(mᵢ + R * σ₊, zero(FT)), mᵢ, σ₊)
         point = ifelse(σᵢ > 0, (lower[1] + upper[1], lower[2] + upper[2]), conditional(mᵢ))
         # Without a residual the conditional exceedance is a step, integrated exactly over intervals of s
         exact = ice_excess_exceedance_without_residual(d, c, aᵢ, mᵢ, σᵢ, bᵢ, kᵢ, qᵘ, λⁱ)
@@ -769,7 +754,10 @@ smooth in ``s`` within each part, so those are integrated over ``s`` with the 24
     return sum(map(first, terms)), sum(map(last, terms))
 end
 
-# ∫ₗᵒ^ʰⁱ f(s) N(s; m, σ²) ds by the 24-point Gauss-Legendre rule, for f returning a tuple
+# ∫ₗᵒ^ʰⁱ f(s) N(s; m, σ²) ds by the 24-point Gauss-Legendre rule, for f returning a tuple: the one rule of the partial
+# moments, of the quadrature over the saturated part and of the exceedance of the excess over ice. Their intervals
+# are cut at 8σ from the mean, where the Gaussian is e⁻³² ≈ 10⁻¹⁴ of its peak and the mass beyond is 10⁻¹⁵: an
+# integration domain at the precision of the rule, not a bound on the integrand.
 @inline function gauss_legendre_interval(f, lo, hi, m, σ)
     FT = typeof(m)
     h = (hi - lo) / 2
@@ -781,8 +769,7 @@ end
         n⁻ = exp(-((s⁻ - m) / σ)^2 / 2)
         map((y⁺, y⁻) -> convert(FT, w) * (y⁺ * n⁺ + y⁻ * n⁻), f(s⁺), f(s⁻))
     end
-    scale = h / (sqrt(2 * FT(π)) * σ)
-    return map(x -> x * scale, reduce((x, y) -> x .+ y, terms))
+    return map(x -> x * h / (sqrt(2 * FT(π)) * σ), reduce((x, y) -> x .+ y, terms))
 end
 
 # One component without a residual: the set δⁱ ≥ c is an interval of s in each part

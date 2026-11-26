@@ -115,6 +115,12 @@ end
                                    closure, closure_fields, model_fields) =
     (; a = statistics.a, μ = statistics.μ, σ = statistics.σ)
 
+# The spread σ of a Gaussian as a divisor: σ itself wherever a standard score x / σ is representable, and otherwise
+# the smallest spread whose reciprocal times any difference is finite. A spread below it is the point mass at the
+# mean, whose distribution function is the step that x / σ₊ → ±∞ gives; the one treatment of a vanishing spread for
+# the saturated fraction and for the partial moments of the microphysics.
+@inline resolved_spread(σ) = max(σ, floatmin(typeof(σ)) / eps(typeof(σ)))
+
 """
     saturated_fraction(statistics)
 
@@ -141,7 +147,7 @@ julia> saturated_fraction((; a = (0.5, 0.5), μ = (1e-3, -1e-3), σ = (0.0, 0.0)
 @inline function saturated_fraction(::Val{false}, statistics)
     terms = map(statistics.a, statistics.μ, statistics.σ) do aᵢ, μᵢ, σᵢ
         FT = typeof(μᵢ / one(σᵢ))
-        Q = μᵢ / max(σᵢ, floatmin(FT))
+        Q = μᵢ / resolved_spread(convert(FT, σᵢ))
         aᵢ * erfc(-Q / sqrt(FT(2))) / 2
     end
     return sum(terms)
