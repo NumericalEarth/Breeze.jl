@@ -100,13 +100,12 @@ of the dynamics, so the derivatives hold for any dynamics whose buoyancy is a fu
     ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
     ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
 
-    qᵗ = q.vapor + q.liquid + q.ice
-    ĉᵖ = cᵖᵈ + qᵗ * (cᵖᵛ - cᵖᵈ)
-    R̂ = Rᵈ + qᵗ * (Rᵛ - Rᵈ)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    R̂ = vapor_equivalent_gas_constant(q, constants)
     κ = exner_exponent(s.exner_exponent, q, constants)
     κ′ = exner_exponent_moisture_derivative(s.exner_exponent, R̂, ĉᵖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
     ln_p = log(p / s.standard_pressure)
-    Π = exp(κ * ln_p)
+    Π = (p / s.standard_pressure)^κ
 
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
@@ -135,8 +134,7 @@ end
     constants = s.constants
     κ = exner_exponent(s.exner_exponent, q, constants)
     Π = (@inbounds(s.p[i, j, k]) / s.standard_pressure)^κ
-    qᵗ = q.vapor + q.liquid + q.ice
-    ĉᵖ = constants.dry_air.heat_capacity + qᵗ * (constants.vapor.heat_capacity - constants.dry_air.heat_capacity)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
     # The derivative with respect to the condensate of the distributed water: liquid and ice in the proportion of its
     # phase equilibrium at the temperature of the cell (liquid for a microphysics with prognostic cloud liquid)
     λ, _ = distributed_condensate_liquid_fraction(s.phase_equilibrium, @inbounds(s.T[i, j, k]))
@@ -372,14 +370,18 @@ solved_conversions_before_tke_solve(::SubgridCloudFields{<:AppliedFluxEnergetics
 # The TKE is solved after the thermodynamic variable where the time stepper allows (`closure_prognostics_solved_last`)
 AtmosphereModels.solved_after_thermodynamic_variable(::FlavorOfTKEClosure, name) = name === TKE_NAME
 
-# The dissipation of backward Euler itself in the momentum solve of the stage, |u - u⁻|² / (2 Δt), at the cell k
-@inline function implicit_momentum_dissipation(i, j, k, s, cl, Δt)
-    @inbounds begin
-        ρᵢ = s.ρ[i, j, k]
-        Δu = (s.ρu[i, j, k] - cl.ρu⁻[i, j, k]) / ρᵢ
-        Δv = (s.ρv[i, j, k] - cl.ρv⁻[i, j, k]) / ρᵢ
-    end
-    return (Δu * Δu + Δv * Δv) / (2 * Δt)
+# The dissipation of backward Euler itself in the momentum solve of the stage, |u - u⁻|² / (2 Δt), at the cell k:
+# the squared increments of the horizontal momentum interpolated from their faces to the center, as the kinetic
+# energy of the stage combination is (`_stage_combination_kinetic_energy!`)
+@inline function squared_increment(i, j, k, grid, ρu, ρu⁻)
+    @inbounds δ = ρu[i, j, k] - ρu⁻[i, j, k]
+    return δ * δ
+end
+
+@inline function implicit_momentum_dissipationᶜᶜᶜ(i, j, k, grid, s, cl, Δt)
+    δ² = ℑxᶜᵃᵃ(i, j, k, grid, squared_increment, s.ρu, cl.ρu⁻) + ℑyᵃᶜᵃ(i, j, k, grid, squared_increment, s.ρv, cl.ρv⁻)
+    ρᵢ = @inbounds s.ρ[i, j, k]
+    return δ² / (ρᵢ * ρᵢ) / (2 * Δt)
 end
 
 # b̄ᶜ - b̄ᵛ, b̄ⁱ - b̄ᵛ and b̄ˡ - b̄ᵛ at the interior face k: the buoyancy of vapor that becomes distributed condensate, ice
@@ -432,7 +434,7 @@ end
     closure_ij = getclosure(i, j, closure)
     θʷ, qʷ, _ = distributed_water(s, grid)
     Bᵖ, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
-    Dᵘ = implicit_momentum_dissipation(i, j, k, s, cl, @inbounds(cl.stage_time_step[1, 1, 1]))
+    Dᵘ = implicit_momentum_dissipationᶜᶜᶜ(i, j, k, grid, s, cl, @inbounds(cl.stage_time_step[1, 1, 1]))
     Bᴸˢ = solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
     Pⁱ = Pᵖ + Dᵘ
     Bⁱ = max(Bᵖ + Bᴸˢ, zero(Bᵖ))
@@ -694,8 +696,9 @@ function AtmosphereModels.closure_before_implicit_solve!(closure_fields::TKEClos
                                                           closure::FlavorOfTKEClosure, model, name)
     implicit_stage(closure, model) || return nothing
     cl = closure_fields.subgrid_cloud.cloud
-    name === :ρu && (parent(cl.ρu⁻) .= parent(model.momentum.ρu))
-    name === :ρv && (parent(cl.ρv⁻) .= parent(model.momentum.ρv))
+    # The halos too: the increment of the solve is interpolated to the centers (`implicit_momentum_dissipationᶜᶜᶜ`)
+    name === :ρu && (interior(cl.ρu⁻) .= interior(model.momentum.ρu); fill_halo_regions!(cl.ρu⁻))
+    name === :ρv && (interior(cl.ρv⁻) .= interior(model.momentum.ρv); fill_halo_regions!(cl.ρv⁻))
     pre = closure_fields.subgrid_cloud.presolve
     name ∈ keys(pre) && (parent(pre[name]) .= parent(Oceananigans.prognostic_fields(model)[name]))
     # Momentum is solved: the TKE receives what that solve converted before its own solve
@@ -737,7 +740,7 @@ end
     @inbounds begin
         ρᵢ = s.ρ[i, j, k]
         e = ρe[i, j, k] / ρᵢ
-        Dᵘ = implicit_momentum_dissipation(i, j, k, s, cl, Δt)
+        Dᵘ = implicit_momentum_dissipationᶜᶜᶜ(i, j, k, grid, s, cl, Δt)
         B = cl.B[i, j, k]
         # what the stage gave: P and B⁺ explicitly, -ωᴮ e implicitly; what the solves converted:
         # Pᵖ + Dᵘ + Pˢ and Bᵖ + Bˢ
@@ -976,13 +979,12 @@ of percent there.
     cᵖᵛ = constants.vapor.heat_capacity
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    qᵗ = q.vapor + q.liquid + q.ice
-    ĉᵖ = cᵖᵈ + qᵗ * (cᵖᵛ - cᵖᵈ)
-    R̂ = Rᵈ + qᵗ * (Rᵛ - Rᵈ)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    R̂ = vapor_equivalent_gas_constant(q, constants)
     κ = exner_exponent(s.exner_exponent, q, constants)
     κ′ = exner_exponent_moisture_derivative(s.exner_exponent, R̂, ĉᵖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
     ln_p = log(p / s.standard_pressure)
-    Π = exp(κ * ln_p)
+    Π = (p / s.standard_pressure)^κ
 
     qᵛ⁺ = saturation_specific_humidity(T, p / (Rᵐ * T), constants, saturation_surface(equilibrium, T))
     ℒ, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, T)
