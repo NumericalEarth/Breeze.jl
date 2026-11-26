@@ -41,6 +41,7 @@
 using Oceananigans.Grids: znode
 using Oceananigans.Operators: Δzᶜᶜᶠ
 using Oceananigans.Models: boundary_condition_args
+using SpecialFunctions: erfc
 
 using Oceananigans.BoundaryConditions: BoundaryCondition, Flux, Bottom, total_boundary_flux
 
@@ -1244,8 +1245,7 @@ end
 
 function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergetics, Nothing}, closure_fields, closure, model, tracers, parameters)
     compute_buoyancy_derivatives!(fields, model)
-    compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
-    compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
+    compute_budget_fluxes!(fields, closure_fields, closure, model, tracers)
     grid = model.grid
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
     launch!(grid.architecture, grid, parameters, _microphysics_latent_correction!, closure_fields, grid, closure,

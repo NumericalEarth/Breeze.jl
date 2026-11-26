@@ -19,7 +19,7 @@
 ##### when traced.
 #####
 
-using SpecialFunctions: erf, erfc
+using SpecialFunctions: erf
 
 """
     BracketedFractionSolve(iterations = 3; classification_tolerance = 1e-8, lagged_envelope = false)
@@ -166,9 +166,15 @@ end
     end
 
     Bᶠ = (Bˡ⁻ + Bˡ⁺) / 2
-    resolved = (Kᶜ > sqrt(floatmin(FT))) & (abs(input.ΔN²) > floatmin(FT))
-    ãᴺ = ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜ * input.ΔN², one(FT)), zero(FT))
+    ãᴺ = condensate_flux_fraction(FT, Bᶠ, Kᶜ, input.ΔN²)
     return (; ãᴺ = clamp(ãᴺ, zero(FT), one(FT)), τ, Kᶜ)
+end
+
+# ãᴺ = -Bᶠ / (Kᶜ ΔN²) of the latent buoyancy flux Bᶠ at a face, zero where the diffusivity or the latent stratification
+# ΔN² vanishes
+@inline function condensate_flux_fraction(FT, Bᶠ, Kᶜ, ΔN²)
+    resolved = (Kᶜ > sqrt(floatmin(FT))) & (abs(ΔN²) > floatmin(FT))
+    return ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜ * ΔN², one(FT)), zero(FT))
 end
 
 @inline function center_liquid_buoyancy(i, j, k, grid, d, cl, w, θ, qᵗ, p, thermodynamics, moments_l, moments_u)
@@ -303,9 +309,7 @@ end
         g = saturation_excess_gradientᶜᶜᶠ(i, j, kₛ, grid, cloud, θ, qᵗ, p, thermodynamics)
         ΔN² = g.gA_c * g.∂zs
         Bᶠ = (cloud.Bˡ[i, j, kₛ] + cloud.Bˡ[i, j, kₛ-1]) / 2
-        Kᶜᵢ = Kᶜ[i, j, kₛ]
-        resolved = (Kᶜᵢ > sqrt(floatmin(FT))) & (abs(ΔN²) > floatmin(FT))
-        ãᴺ = ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜᵢ * ΔN², one(FT)), zero(FT))
+        ãᴺ = condensate_flux_fraction(FT, Bᶠ, Kᶜ[i, j, kₛ], ΔN²)
         ãᴺᶠ[i, j, k] = ifelse((k > 1) & (k ≤ Nz), ãᴺ, zero(FT))
     end
 end

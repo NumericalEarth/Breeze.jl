@@ -1327,8 +1327,7 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergeti
     arch = grid.architecture
     N²₋ = fields.solver_state.N²₋
     compute_buoyancy_derivatives!(fields, model)
-    compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
-    compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
+    compute_budget_fluxes!(fields, closure_fields, closure, model, tracers)
     launch!(arch, grid, parameters, _set_lagged_stability!, closure_fields.N², N²₋)
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     compute_subgrid_distribution!(fields, closure_fields, closure, model)
@@ -1340,17 +1339,22 @@ end
 # The buoyancy derivatives of the prognostic state, unless the third moment computed them already
 compute_subgrid_cloud_buoyancy_derivatives!(fields, distribution, model) = compute_buoyancy_derivatives!(fields, model)
 
-# The heating budget flux of the prognostic state (heating_budget_flux.jl), likewise
-function compute_subgrid_cloud_heating_budget_flux!(fields, distribution, closure_fields, closure, model, tracers)
+# The budget fluxes of the prognostic state, of the diabatic heating (heating_budget_flux.jl) and of the total water
+# (total_water_budget_flux.jl)
+function compute_budget_fluxes!(fields, closure_fields, closure, model, tracers)
     compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
     compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
     return nothing
 end
 
+# The budget fluxes, likewise unless the third moment computed them already
+compute_subgrid_cloud_budget_fluxes!(fields, distribution, closure_fields, closure, model, tracers) =
+    compute_budget_fluxes!(fields, closure_fields, closure, model, tracers)
+
 # Within `update_state!`, after the diffusivities and before the implicit coefficient
 function compute_subgrid_cloud!(fields::SubgridCloudFields, closure_fields, closure, model, tracers, parameters)
     compute_subgrid_cloud_buoyancy_derivatives!(fields, subgrid_distribution(closure), model)
-    compute_subgrid_cloud_heating_budget_flux!(fields, subgrid_distribution(closure), closure_fields, closure, model, tracers)
+    compute_subgrid_cloud_budget_fluxes!(fields, subgrid_distribution(closure), closure_fields, closure, model, tracers)
     compute_subgrid_distribution!(fields, closure_fields, closure, model)
     solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
     return nothing

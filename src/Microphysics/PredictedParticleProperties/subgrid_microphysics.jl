@@ -850,14 +850,7 @@ sum to the grid-mean excesses ``qᵛ - qᵛ⁺ˡ`` and ``qᵛ - qᵛ⁺ⁱ``.
     q̄ = d.qᶜˡ
     ψ = d.subsaturated_share
     qᵘ = d.subsaturated_liquid  # the cloud liquid of the subsaturated part, q⊖
-    moments = map(d.a, d.m, d.σ, d.mⁱ, d.k) do aᵢ, mᵢ, σᵢ, mⁱᵢ, kᵢ
-        bᵢ = mⁱᵢ - kᵢ * mᵢ
-        P⁺, M⁺ = gaussian_interval_moments(mᵢ, σᵢ, zero(FT), zero(FT), false)
-        P⁻, M⁻ = gaussian_lower_moments(mᵢ, σᵢ)
-        (aᵢ * (bᵢ * P⁺ + kᵢ * M⁺), aᵢ * (bᵢ * P⁻ + kᵢ * M⁻))
-    end
-    sⁱ⁺ = sum(map(first, moments))
-    sⁱ⁻ = sum(map(last, moments))
+    sⁱ⁺, sⁱ⁻ = ice_excess_part_sums(d)
     s⁺ = d.positive_excess
     saturated_rate = safe_ratio(positive_power(d.χ, convert(FT, 2//3)) *
                                 positive_power(safe_ratio(d.χ, s⁺, zero(FT)), convert(FT, 1//3)) *

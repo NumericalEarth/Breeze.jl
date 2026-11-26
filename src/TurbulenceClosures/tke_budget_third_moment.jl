@@ -489,8 +489,7 @@ function diagnose_third_moment!(fields::SubgridCloudFields, distribution::TKEBud
     fill!(parent(cl.w′³ᵇ), 0)
     compute_buoyancy_derivatives!(fields, model)
     # The heating budget flux reads the prognostic state and the heating alone, like the buoyancy derivatives
-    compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
-    compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
+    compute_budget_fluxes!(fields, closure_fields, closure, model, tracers)
     passes = third_moment_passes(distribution.third_moment)
     for pass in 1:passes
         start_pass_closure_fields!(pass_fields, closure_fields, model.grid)
@@ -503,9 +502,9 @@ function diagnose_third_moment!(fields::SubgridCloudFields, distribution::TKEBud
 end
 
 # The buoyancy derivatives depend on the prognostic state alone: those of `diagnose_third_moment!` stand,
-# and so does the heating budget flux
+# and so do the budget fluxes
 compute_subgrid_cloud_buoyancy_derivatives!(fields, ::TKEBudgetDistribution, model) = nothing
-compute_subgrid_cloud_heating_budget_flux!(fields, ::TKEBudgetDistribution, closure_fields, closure, model, tracers) = nothing
+compute_subgrid_cloud_budget_fluxes!(fields, ::TKEBudgetDistribution, closure_fields, closure, model, tracers) = nothing
 
 # After the conversions of the applied fluxes the stage uses: their budget, for the transport of TKE and as a diagnostic
 compute_tke_budget!(fields::SubgridCloudFields, ::TKEBudgetDistribution, closure_fields, closure, model, tracers) =

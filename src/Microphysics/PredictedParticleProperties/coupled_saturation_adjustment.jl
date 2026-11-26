@@ -447,10 +447,7 @@ end
     # The subsaturated part, at its moments
     _, part = ice_exchange_parts(d)
     ε⁻ = max(uniform_relaxation + εⁱ⁻ * c + εᶜˡ * d.subsaturated_share, rate_scale)
-    PΔ = part.Pδⁱ - part.Pδ
-    T⁻ = (1 - exp(-ε⁻ * τ)) / τ
-    PD = part.P * external_driver - PΔ * c * εⁱ⁻
-    subsaturated = (εⁱ⁻ / ε⁻) * (PD * (1 - T⁻ / ε⁻) + part.Pδ * T⁻) / ξⁱ + PΔ * εⁱ⁻ / ξⁱ
+    subsaturated = local_ice_growth(εⁱ⁻, c, ξⁱ, ε⁻, τ, part.P * external_driver, part.Pδ, part.Pδⁱ - part.Pδ)
 
     return ifelse(d.degenerate, grid_mean, saturated + subsaturated)
 end
