@@ -29,7 +29,6 @@ using Oceananigans.Operators: Δzᶜᶜᶠ
 
 using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
                                       third_moment, limit_third_moment, assumed_pdf,
-                                      liquid_water_temperature, component_saturation,
                                       rate_norm_factor, linearly_interpolate, component_vapor_excess,
                                       representable_skewness, within_component_share, ice_saturation_thermodynamics,
                                       saturation_surface, condensate_latent_heat_and_log_slope,
@@ -1275,8 +1274,9 @@ end
 #
 #     production down both gradients; the deposition ωⁱ sⁱ′ of each fluctuation of the excess onto the ice, which
 #     correlates the ice with the excess; and the excess the ice consumes, which decorrelates them at ωⁱ. sⁱ′² =
-#     qᵗ′² - 2aⁱ θ′qᵗ′ + aⁱ² θ′² and ∂z s̄ⁱ = ∂z qʷ - aⁱ ∂z θʷ come from the distribution's moments, aⁱ = ∂qᵛ⁺ⁱ/∂θ of the
-#     level. The covariance is bounded by the realizability |qⁱ′sⁱ′| < (qⁱ′² sⁱ′²)^{1/2} in the rational form of
+#     vⁱ_q² qᵗ′² - 2vⁱ_q vⁱ_θ θ′qᵗ′ + vⁱ_θ² θ′² and ∂z s̄ⁱ = vⁱ_q ∂z qʷ - vⁱ_θ ∂z θʷ come from the distribution's moments,
+#     with the coefficients of the vapor excess over ice at fixed condensate linearized about the state of each cell
+#     (`vapor_excess_coefficients`, the numerators of the coefficients of the latent correction). The covariance is bounded by the realizability |qⁱ′sⁱ′| < (qⁱ′² sⁱ′²)^{1/2} in the rational form of
 #     `realizable_correlation`. Sedimentation with a uniform fall speed transports the variance without producing
 #     it locally; the production by fluctuations of the fall speed (with the size of the particles) is omitted.
 #   * the departure d = qᶜˡ - qᶜ of the cloud liquid from the distribution's equilibrium condensate qᶜ (its mean
@@ -1299,20 +1299,12 @@ end
 @inline outside_ice(::Nothing, i, j, k) = 0
 @inline outside_ice(held, i, j, k) = held[i, j, k].ice
 
-# aⁱ = ∂qᵛ⁺ⁱ/∂θ of the level, in the linearization of the distribution's statistics (`component_vapor_excess`)
-@inline function ice_saturation_slope(thermodynamics, θ, qʷ, p)
-    ice = ice_saturation_thermodynamics(thermodynamics)
-    Tˡ = liquid_water_temperature(ice, θ, qʷ, p)
-    qᵛ⁺ⁱ, β, ĉᵖℒ⁻¹, Π = component_saturation(ice, Tˡ, qʷ, p)
-    return qᵛ⁺ⁱ * β * ĉᵖℒ⁻¹ * Π
-end
-
 @kernel function _compute_outside_condensate_moments!(m, cl, grid, Kᶜ, s)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
     θ, qʷ, thermodynamics = distributed_water(s, grid)
-    p = s.p
+    ice = ice_saturation_thermodynamics(thermodynamics)
     held = thermodynamics.held_condensate
     @inbounds begin
         for k in 2:Nz
@@ -1320,10 +1312,13 @@ end
             K = Kᶜ[i, j, k]
             resolved = K > 0
             τᵠ = ifelse(resolved, m.unit_variance[i, j, k] / (2 * ifelse(resolved, K, one(FT))), zero(FT))
-            aⁱ = (ice_saturation_slope(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qʷ[i, j, k], p[i, j, k]) +
-                  ice_saturation_slope(level_thermodynamics(thermodynamics, i, j, k-1), θ[i, j, k-1], qʷ[i, j, k-1], p[i, j, k-1])) / 2
-            sⁱ′² = max(0, m.qᵗ′²[i, j, k] - 2 * aⁱ * m.θˡⁱ′qᵗ′[i, j, k] + aⁱ * aⁱ * m.θˡⁱ′²[i, j, k])
-            ∂z_sⁱ = ((qʷ[i, j, k] - qʷ[i, j, k-1]) - aⁱ * (θ[i, j, k] - θ[i, j, k-1])) / Δz
+            # The vapor excess over ice sⁱ = vⁱ_q qʷ - vⁱ_θ θʷ, linearized about the state of each cell
+            vⁱ_q⁺, vⁱ_θ⁺ = vapor_excess_coefficients(ice, i, j, k, grid, s, θ[i, j, k])
+            vⁱ_q⁻, vⁱ_θ⁻ = vapor_excess_coefficients(ice, i, j, k-1, grid, s, θ[i, j, k-1])
+            vⁱ_q = (vⁱ_q⁺ + vⁱ_q⁻) / 2
+            vⁱ_θ = (vⁱ_θ⁺ + vⁱ_θ⁻) / 2
+            sⁱ′² = max(0, vⁱ_q * vⁱ_q * m.qᵗ′²[i, j, k] - 2 * vⁱ_q * vⁱ_θ * m.θˡⁱ′qᵗ′[i, j, k] + vⁱ_θ * vⁱ_θ * m.θˡⁱ′²[i, j, k])
+            ∂z_sⁱ = (vⁱ_q * (qʷ[i, j, k] - qʷ[i, j, k-1]) - vⁱ_θ * (θ[i, j, k] - θ[i, j, k-1])) / Δz
             ∂z_qⁱ = (convert(FT, outside_ice(held, i, j, k)) - convert(FT, outside_ice(held, i, j, k-1))) / Δz
             ω⁺ = cell_phase_relaxation_rates(i, j, k, grid, s)
             ω⁻ = cell_phase_relaxation_rates(i, j, k-1, grid, s)

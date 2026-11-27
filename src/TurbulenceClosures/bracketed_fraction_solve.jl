@@ -99,13 +99,6 @@ end
 @inline local_moment_time_scale(ts::EddyTurnoverTimeScale, ℓ, u, N², 𝕊ᴰ) = 2 * ℓ / (ts.ℂᵠ * u)
 @inline local_moment_time_scale(ts::DissipationTimeScale, ℓ, u, N², 𝕊ᴰ) = 2 * ℓ / (ts.ℂᵠ * 𝕊ᴰ * u)
 
-# SHOC's saturation excess of the mean state at a level, s = qᵗ - qᵛ⁺ (1 + β qᵗ) / (1 + β qᵛ⁺)
-@inline function mean_saturation_excess(thermodynamics, θ, qᵗ, p)
-    Tˡ = liquid_water_temperature(thermodynamics, θ, qᵗ, p)
-    qᵛ⁺, β, _, _ = component_saturation(thermodynamics, Tˡ, qᵗ, p)
-    return qᵗ - qᵛ⁺ * (1 + β * qᵗ) / (1 + β * qᵛ⁺)
-end
-
 # The face's constant inputs, gathered once
 @inline function fraction_face_inputs(i, j, k, grid, closure, d, cl, s, θ, qᵗ, e, p, thermodynamics)
     sm = d.second_moments
@@ -115,8 +108,8 @@ end
         b_qᵛᶠ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, k-1]) / 2
         N²ᶜ = g.b_θᶠ * g.∂zθ + b_qᵛᶠ * g.∂zq
         ΔN² = g.bᶜᵛ * g.∂zs
-        s̄ = (mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k]) +
-             mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k-1), θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])) / 2
+        s̄ = (mean_saturation_excess(thermodynamics, i, j, k, grid, s, θ[i, j, k], qᵗ[i, j, k]) +
+             mean_saturation_excess(thermodynamics, i, j, k-1, grid, s, θ[i, j, k-1], qᵗ[i, j, k-1])) / 2
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
         w′²ᶠ = (vertical_velocity_variance(sm, max(e[i, j, k], eᵐⁱⁿ)) +
                 vertical_velocity_variance(sm, max(e[i, j, k-1], eᵐⁱⁿ))) / 2

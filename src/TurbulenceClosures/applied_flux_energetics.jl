@@ -963,7 +963,7 @@ The linearization of the assumed PDF is about the temperature of the water all v
 cloud is off by ``ℒ qᶜ / ĉᵖ`` (several kelvin in a deep cloud) and misses the saturated stratification by tens
 of percent there.
 """
-@inline function saturated_condensate_coefficients(thermodynamics, i, j, k, grid, s, θʷ)
+@inline function cell_saturation_linearization(thermodynamics, i, j, k, grid, s, θʷ)
     constants = thermodynamics.constants
     equilibrium = thermodynamics.phase_equilibrium
     @inbounds begin
@@ -991,9 +991,45 @@ of percent there.
     ∂qᵛ⁺∂T = qᵛ⁺ * log_slope
     B = θʷ * Π * ((cᵖᵛ - cᵖᵈ) + ĉᵖ * ln_p * κ′) - (cᵖᵛ - cᵖᵈ) * T
     D = 1 - qᵛ⁺ * Rᵛ / Rᵐ + ∂qᵛ⁺∂T * ℒ / cᵖᵐ
-    c_q = (1 - qᵛ⁺ * (Rᵛ - Rᵈ) / Rᵐ - ∂qᵛ⁺∂T * B / cᵖᵐ) / D
-    c_θ = ∂qᵛ⁺∂T * ĉᵖ * Π / (cᵖᵐ * D)
-    return c_q, c_θ
+    v_q = 1 - qᵛ⁺ * (Rᵛ - Rᵈ) / Rᵐ - ∂qᵛ⁺∂T * B / cᵖᵐ
+    v_θ = ∂qᵛ⁺∂T * ĉᵖ * Π / cᵖᵐ
+    return (; qᵛ⁺, v_q, v_θ, D)
+end
+
+@inline function saturated_condensate_coefficients(thermodynamics, i, j, k, grid, s, θʷ)
+    lin = cell_saturation_linearization(thermodynamics, i, j, k, grid, s, θʷ)
+    return lin.v_q / lin.D, lin.v_θ / lin.D
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The coefficients `(v_q, v_θ)` of the change of the vapor excess over the surface of `thermodynamics` at fixed
+condensate, ``δ(qᵛ - qᵛ⁺) = v_q δqʷ - v_θ δθʷ`` at fixed pressure, linearized about the state of center `k`: the
+numerators of [`saturated_condensate_coefficients`](@ref), before the latent feedback `D` of the condensate that
+the excess would form.
+"""
+@inline function vapor_excess_coefficients(thermodynamics, i, j, k, grid, s, θʷ)
+    lin = cell_saturation_linearization(thermodynamics, i, j, k, grid, s, θʷ)
+    return lin.v_q, lin.v_θ
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The saturation excess ``s̄`` of the mean state of center `k` in the linearization of
+[`saturated_condensate_coefficients`](@ref) about the cell's own state: its equilibrium condensate ``qᶜ`` of the
+distributed water plus its vapor excess over the surface of `thermodynamics`, condensed with the latent feedback `D`,
+
+    s̄ = qᶜ + (qʷ - qᶜ - qᵛ⁺(T)) / D,
+
+so that ``s̄ = qᶜ`` in saturated air, ``s̄ < 0`` is the deficit in subsaturated air, and ``δs̄ = c_q δqʷ - c_θ δθʷ`` in
+both.
+"""
+@inline function mean_saturation_excess(thermodynamics, i, j, k, grid, s, θʷ, qʷ)
+    lin = cell_saturation_linearization(thermodynamics, i, j, k, grid, s, θʷ)
+    qᶜ = distributed_condensateᶜᶜᶜ(i, j, k, grid, s)
+    return qᶜ + (qʷ - qᶜ - lin.qᵛ⁺) / lin.D
 end
 
 # The rates (s⁻¹) at which the condensate of the cell absorbs vapor excess, from the microphysics
