@@ -37,9 +37,9 @@ end
 
 # wv_sat_scream.F90, MurphyKoop_svp over liquid
 function murphy_koop_saturation_vapor_pressure(T::FT) where FT
-    log_T = log(T)
-    exponent = FT(54.842763) - (FT(6763.22) / T) - (FT(4.210) * log_T) + (FT(0.000367) * T) +
-               (tanh(FT(0.0415) * (T - FT(218.8))) * (FT(53.878) - (FT(1331.22) / T) - (FT(9.44523) * log_T) + FT(0.014025) * T))
+    ln_T = log(T)
+    exponent = FT(54.842763) - (FT(6763.22) / T) - (FT(4.210) * ln_T) + (FT(0.000367) * T) +
+               (tanh(FT(0.0415) * (T - FT(218.8))) * (FT(53.878) - (FT(1331.22) / T) - (FT(9.44523) * ln_T) + FT(0.014025) * T))
     return exp(exponent)
 end
 
@@ -60,9 +60,9 @@ end
 function SimplifiedHigherOrderClosures.buoyancy_flux_coefficients(shoc::ShocThermodynamics, p, θˡⁱ, qᵗ, qˡ)
     c = shoc.constants
     ε = c.dry_air_gas_constant / c.vapor_gas_constant
-    A_q = ((1 - ε) / ε) * c.reference_potential_temperature
-    A_c = (c.latent_heat / c.heat_capacity) / shoc_exner_function(c, p) - (1 / ε) * c.reference_potential_temperature
-    return A_q, A_c
+    Aᵗ = ((1 - ε) / ε) * c.reference_potential_temperature
+    Aᶜ = (c.latent_heat / c.heat_capacity) / shoc_exner_function(c, p) - (1 / ε) * c.reference_potential_temperature
+    return Aᵗ, Aᶜ
 end
 
 # Thermodynamic constants of Breeze with the constants of shoc.F90: the gas constants, one
@@ -131,18 +131,18 @@ end
 
         # The buoyancy flux coefficients are those of the model's buoyancy, a function of Rᵐ T: with these constants
         # (one heat capacity, a dry Exner exponent) and the level at the reference potential temperature of shoc.F90,
-        # A_q = θ (Rᵛ - Rᵈ) / Rᵐ and A_c = ℒ / (cᵖ Π) - θ Rᵛ / Rᵐ, which are those of shoc.F90 with the gas constant
+        # Aᵗ = θ (Rᵛ - Rᵈ) / Rᵐ and Aᶜ = ℒ / (cᵖ Π) - θ Rᵛ / Rᵐ, which are those of shoc.F90 with the gas constant
         # Rᵐ of the level's air in place of that of dry air
         qˡ = FT(2e-4)
         θ = c.reference_potential_temperature
         θˡⁱ₀ = θ - (c.latent_heat / c.heat_capacity) / shoc_exner_function(c, p) * qˡ
-        A_qˢ, A_cˢ = buoyancy_flux_coefficients(shoc, p, θˡⁱ₀, qᵗ, qˡ)
-        A_q, A_c = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ₀, qᵗ, qˡ)
+        Aᵗˢ, Aᶜˢ = buoyancy_flux_coefficients(shoc, p, θˡⁱ₀, qᵗ, qˡ)
+        Aᵗ, Aᶜ = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ₀, qᵗ, qˡ)
         Rᵈ = dry_air_gas_constant(constants)
         Rᵛ = vapor_gas_constant(constants)
         Rᵐ = mixture_gas_constant(MoistureMassFractions(qᵗ - qˡ, qˡ, zero(FT)), constants)
-        @test A_q * Rᵐ / Rᵈ ≈ A_qˢ rtol = 10 * roundoff
-        @test A_c + θ * (Rᵛ / Rᵐ - Rᵛ / Rᵈ) ≈ A_cˢ rtol = 10 * roundoff
+        @test Aᵗ * Rᵐ / Rᵈ ≈ Aᵗˢ rtol = 10 * roundoff
+        @test Aᶜ + θ * (Rᵛ / Rᵐ - Rᵛ / Rᵈ) ≈ Aᶜˢ rtol = 10 * roundoff
     end
 
     # The assumed PDF of a level at 900 hPa and 285 K near saturation: the two agree within the
@@ -176,7 +176,7 @@ end
     for thermodynamics in (model_thermodynamics(FT), matching_thermodynamics(FT, shoc_constants(FT))),
         (p, θˡⁱ, qᵗ, qˡ) in ((9e4, 290.0, 0.012, 0.0), (9e4, 290.0, 0.012, 4e-4), (7e4, 300.0, 0.006, 1e-3), (1e5, 285.0, 0.0, 0.0))
 
-        A_q, A_c = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qˡ)
+        Aᵗ, Aᶜ = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qˡ)
         δθ, δq = 1e-4, 1e-8
         ∂θ = (log_specific_volume(thermodynamics, p, θˡⁱ + δθ, qᵗ, qˡ) - log_specific_volume(thermodynamics, p, θˡⁱ - δθ, qᵗ, qˡ)) / 2δθ
         ∂qᵗ = (log_specific_volume(thermodynamics, p, θˡⁱ, qᵗ + δq, qˡ) - log_specific_volume(thermodynamics, p, θˡⁱ, qᵗ - δq, qˡ)) / 2δq
@@ -184,8 +184,8 @@ end
         # one-sided where there is no water or no liquid to take away
         qᵗ == 0 && (∂qᵗ = (log_specific_volume(thermodynamics, p, θˡⁱ, 2δq, qˡ) - log_specific_volume(thermodynamics, p, θˡⁱ, 0.0, qˡ)) / 2δq)
         qˡ == 0 && qᵗ > 0 && (∂qˡ = (log_specific_volume(thermodynamics, p, θˡⁱ, qᵗ, 2δq) - log_specific_volume(thermodynamics, p, θˡⁱ, qᵗ, 0.0)) / 2δq)
-        @test A_q ≈ ∂qᵗ / ∂θ rtol = 1e-5
-        qᵗ > 0 && @test A_c ≈ ∂qˡ / ∂θ rtol = 1e-5
+        @test Aᵗ ≈ ∂qᵗ / ∂θ rtol = 1e-5
+        qᵗ > 0 && @test Aᶜ ≈ ∂qˡ / ∂θ rtol = 1e-5
     end
 end
 

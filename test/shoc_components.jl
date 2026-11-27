@@ -489,11 +489,11 @@ function shoc_time_scale_and_diffusivities(e, N², I, ℓ)
 end
 
 @testset "ColumnStabilityDamping: the time scale and diffusivities of shoc.F90, regular through N² = 0 [$FT]" for FT in test_float_types()
-    sf = ColumnStabilityDamping(FT)
-    @test summary(sf) == "ColumnStabilityDamping{$FT}"
-    @test convert_eltype(Float32, sf).ℂᶜ === 0.1f0
-    @test shoc_dissipation_coefficient(sf) ≈ shoc_time_scale_and_diffusivities(0.1, 0.0, 0.0, 100.0)[4] rtol = 1e-6
-    @test column_stability_field(RectilinearGrid(size = 4, z = (0, 1), topology = (Flat, Flat, Bounded)), sf) isa Field
+    damping = ColumnStabilityDamping(FT)
+    @test summary(damping) == "ColumnStabilityDamping{$FT}"
+    @test convert_eltype(Float32, damping).ℂᶜ === 0.1f0
+    @test shoc_dissipation_coefficient(damping) ≈ shoc_time_scale_and_diffusivities(0.1, 0.0, 0.0, 100.0)[4] rtol = 1e-6
+    @test column_stability_field(RectilinearGrid(size = 4, z = (0, 1), topology = (Flat, Flat, Bounded)), damping) isa Field
 
     roundoff = FT == Float32 ? 1e-5 : 1e-12
     λ⁻ = 0.1^2 / 4 # the damping of unstable air, ℂᶜ² / 4
@@ -504,7 +504,7 @@ end
         τ₀ = shoc_time_scale_and_diffusivities(e, 0.0, I, ℓ)[1]
         τˢ = N² < 0 ? τ₀ / (1 + λ⁻ * abs(N²) * τ₀^2) : τˢ
         Kˢ = 0.1 * τˢ * e
-        s = isotropy_ratio(sf, FT(λ), FT(ℓ), sqrt(FT(e)), FT(N²))
+        s = isotropy_ratio(damping, FT(λ), FT(ℓ), sqrt(FT(e)), FT(N²))
         τ = s * ℓ / sqrt(e)
         # The time scale is no longer than with the switch at N² = 0, and shorter by at most the damping the regular
         # stable and unstable parts add to it, (λ + ℂᶜ² / 4) (√(αᴺ² + 1) - |αᴺ|) / 2 with αᴺ = N² τ₀²: half the sum of
@@ -515,8 +515,8 @@ end
         bound = (τˢ / 20000)^2
         @test τ ≤ τˢ * (1 + roundoff)
         @test (τˢ - τ) / τˢ ≤ regular + bound + roundoff
-        @test abs(sf.ℂᶜ * s * ℓ * sqrt(e) - Kˢ) / Kˢ ≤ regular + bound + roundoff
-        @test abs(sf.ℂᵘ * s * ℓ * sqrt(e) - Kˢ) / Kˢ ≤ regular + bound + roundoff
+        @test abs(damping.ℂᶜ * s * ℓ * sqrt(e) - Kˢ) / Kˢ ≤ regular + bound + roundoff
+        @test abs(damping.ℂᵘ * s * ℓ * sqrt(e) - Kˢ) / Kˢ ≤ regular + bound + roundoff
     end
 
     # Far from N² = 0 on the scale τ₀⁻² the time scale is that of the switch
@@ -525,7 +525,7 @@ end
         for αᴺ in (-1e4, -1e2, 1e2, 1e4)
             N² = αᴺ / τ₀^2
             τˢ = N² < 0 ? τ₀ / (1 + λ⁻ * abs(N²) * τ₀^2) : τ₀ / (1 + λ * N² * τ₀^2)
-            τ = isotropy_ratio(sf, FT(λ), FT(ℓ), sqrt(FT(e)), FT(N²)) * ℓ / sqrt(e)
+            τ = isotropy_ratio(damping, FT(λ), FT(ℓ), sqrt(FT(e)), FT(N²)) * ℓ / sqrt(e)
             @test isapprox(τ, τˢ; rtol = (λ + λ⁻) / (4 * abs(αᴺ)) + (τˢ / 20000)^2 + roundoff)
         end
     end
@@ -535,13 +535,13 @@ end
     if FT == Float64
         e, ℓ, λ = 0.5, 400.0, 0.04
         τ₀ = shoc_time_scale_and_diffusivities(e, 0.0, 0.0, ℓ)[1]
-        time_scale(N²) = isotropy_ratio(sf, λ, ℓ, sqrt(e), N²) * ℓ / sqrt(e)
+        time_scale(N²) = isotropy_ratio(damping, λ, ℓ, sqrt(e), N²) * ℓ / sqrt(e)
         h = 1e-3 / τ₀^2
         below = (time_scale(0.0) - time_scale(-h)) / h
         above = (time_scale(h) - time_scale(0.0)) / h
         kink = (λ + λ⁻) * τ₀^3
         @test abs(above - below) < 1e-2 * kink
-        @test isapprox(derivative((N², sf, λ, ℓ, u) -> isotropy_ratio(sf, λ, ℓ, u, N²), 0.0, sf, λ, ℓ, sqrt(e)) * ℓ / sqrt(e),
+        @test isapprox(derivative((N², damping, λ, ℓ, u) -> isotropy_ratio(damping, λ, ℓ, u, N²), 0.0, damping, λ, ℓ, sqrt(e)) * ℓ / sqrt(e),
                        (above + below) / 2; rtol = 1e-4)
         # In neutral air the damping is half the sum of the stable and the unstable ones
         @test time_scale(0.0) ≈ τ₀ / (1 + (λ + λ⁻) / 2) rtol = (τ₀ / 20000)^2
@@ -560,48 +560,48 @@ end
 end
 
 @testset "The stability damping of the column [$FT]" for FT in test_float_types()
-    sf = ColumnStabilityDamping(FT)
-    ℂᵝ₁, ℂᵝ₂, ℂᵝ₃, ℂᵝ₄ = sf.ℂᵝ₁, sf.ℂᵝ₂, sf.ℂᵝ₃, sf.ℂᵝ₄
+    damping = ColumnStabilityDamping(FT)
+    ℂᵝ₁, ℂᵝ₂, ℂᵝ₃, ℂᵝ₄ = damping.ℂᵝ₁, damping.ℂᵝ₂, damping.ℂᵝ₃, damping.ℂᵝ₄
     clamped(I) = clamp(ℂᵝ₁ + (I - ℂᵝ₄) * ℂᵝ₃, ℂᵝ₁, ℂᵝ₂) # shoc.F90
     middle = ℂᵝ₄ + (ℂᵝ₂ - ℂᵝ₁) / (2 * ℂᵝ₃)             # where the line is midway between its bounds
 
     # Between its bounds by construction, for an integrated stability of any size and sign, and increasing
     integrals = vcat(-FT(10) .^ range(FT(6), FT(-6); length = 49), zero(FT), FT(10) .^ range(FT(-6), FT(6); length = 49), middle)
     sort!(integrals)
-    dampings = [column_stability_damping(sf, I) for I in integrals]
+    dampings = [column_stability_damping(damping, I) for I in integrals]
     @test all(λ -> λ isa FT, dampings)
     @test all(λ -> ℂᵝ₁ * (1 - 4eps(FT)) ≤ λ ≤ ℂᵝ₂ * (1 + 4eps(FT)), dampings)
     @test all(k -> dampings[k+1] ≥ dampings[k] * (1 - 4eps(FT)), 1:length(dampings)-1)
-    @test issorted([column_stability_damping(sf, I) for I in range(FT(-0.05), FT(0.15); length = 201)])
-    @test ℂᵝ₁ < column_stability_damping(sf, FT(-0.05)) < column_stability_damping(sf, FT(0.15)) < ℂᵝ₂
+    @test issorted([column_stability_damping(damping, I) for I in range(FT(-0.05), FT(0.15); length = 201)])
+    @test ℂᵝ₁ < column_stability_damping(damping, FT(-0.05)) < column_stability_damping(damping, FT(0.15)) < ℂᵝ₂
 
     # The limits are the bounds, and the line of shoc.F90 where it is midway between them
-    @test column_stability_damping(sf, FT(-1e6)) ≈ ℂᵝ₁
-    @test column_stability_damping(sf, FT(1e6)) ≈ ℂᵝ₂
-    @test column_stability_damping(sf, middle) ≈ (ℂᵝ₁ + ℂᵝ₂) / 2
-    @test column_stability_damping(sf, middle) ≈ clamped(middle)
+    @test column_stability_damping(damping, FT(-1e6)) ≈ ℂᵝ₁
+    @test column_stability_damping(damping, FT(1e6)) ≈ ℂᵝ₂
+    @test column_stability_damping(damping, middle) ≈ (ℂᵝ₁ + ℂᵝ₂) / 2
+    @test column_stability_damping(damping, middle) ≈ clamped(middle)
     # The line meets ℂᵝ₁ at I = ℂᵝ₄; there λ - ℂᵝ₁ = (1 - 2^(-1/4)) / 2 of ℂᵝ₂ - ℂᵝ₁
-    @test (column_stability_damping(sf, ℂᵝ₄) - ℂᵝ₁) / (ℂᵝ₂ - ℂᵝ₁) ≈ (1 - FT(2)^(-FT(1) / 4)) / 2 rtol = FT == Float32 ? 1e-4 : 1e-10
+    @test (column_stability_damping(damping, ℂᵝ₄) - ℂᵝ₁) / (ℂᵝ₂ - ℂᵝ₁) ≈ (1 - FT(2)^(-FT(1) / 4)) / 2 rtol = FT == Float32 ? 1e-4 : 1e-10
     # Never farther from the clamped line than that, and close to it far from its two kinks
-    @test all(I -> abs(column_stability_damping(sf, I) - clamped(I)) ≤ (1 - FT(2)^(-FT(1) / 4)) / 2 * (ℂᵝ₂ - ℂᵝ₁) * (1 + 16eps(FT)), integrals)
-    @test isapprox(column_stability_damping(sf, FT(-0.2)), clamped(FT(-0.2)); atol = 1e-4 * (ℂᵝ₂ - ℂᵝ₁))
-    @test isapprox(column_stability_damping(sf, FT(0.3)), clamped(FT(0.3)); atol = 1e-4 * (ℂᵝ₂ - ℂᵝ₁))
+    @test all(I -> abs(column_stability_damping(damping, I) - clamped(I)) ≤ (1 - FT(2)^(-FT(1) / 4)) / 2 * (ℂᵝ₂ - ℂᵝ₁) * (1 + 16eps(FT)), integrals)
+    @test isapprox(column_stability_damping(damping, FT(-0.2)), clamped(FT(-0.2)); atol = 1e-4 * (ℂᵝ₂ - ℂᵝ₁))
+    @test isapprox(column_stability_damping(damping, FT(0.3)), clamped(FT(0.3)); atol = 1e-4 * (ℂᵝ₂ - ℂᵝ₁))
 
     if FT == Float64
         # Its slope at the middle is ℂᵝ₃, and continuous everywhere: at the kinks of the clamped line too
         h = 1e-7
-        slope(I) = (column_stability_damping(sf, I + h) - column_stability_damping(sf, I - h)) / 2h
+        slope(I) = (column_stability_damping(damping, I + h) - column_stability_damping(damping, I - h)) / 2h
         @test slope(middle) ≈ ℂᵝ₃ rtol = 1e-6
         for I in (ℂᵝ₄, 2 * middle - ℂᵝ₄)
             @test isapprox(slope(I - h), slope(I + h); rtol = 1e-4)
             @test 0 < slope(I) < ℂᵝ₃
         end
-        @test derivative((I, sf) -> column_stability_damping(sf, I), middle, sf) ≈ ℂᵝ₃
+        @test derivative((I, damping) -> column_stability_damping(damping, I), middle, damping) ≈ ℂᵝ₃
     end
 
     # The weight of a level in the integral over the lower troposphere: in (0, 1), increasing with the pressure,
     # one half at the pressure of the coefficient, with the limits of the switch of shoc.F90
-    pᴵ = sf.stability_integration_pressure
+    pᴵ = damping.stability_integration_pressure
     pressures = FT(10) .^ range(FT(0), FT(7); length = 141)
     weights = [lower_troposphere_weight(p, pᴵ) for p in pressures]
     @test all(weight -> weight isa FT && 0 ≤ weight ≤ 1, weights)
