@@ -114,3 +114,16 @@ end
         @test isapprox(Pz, Pz₀, atol=atol)
     end
 end
+
+@testset "Compressible velocities are finite one point past the interior [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (4, 4, 4), extent = (1, 1, 1), halo = (3, 3, 3),
+                           topology = (Bounded, Bounded, Bounded))
+    model = AtmosphereModel(grid; dynamics = CompressibleDynamics(; reference_potential_temperature = 300))
+    set!(model; θ = 300, u = 1, v = 1, ρ = 1)
+
+    # Interpolating at the last cell center reads the first halo point with weight zero.
+    for velocity in model.velocities
+        @test all(isfinite, Array(parent(velocity)))
+    end
+end

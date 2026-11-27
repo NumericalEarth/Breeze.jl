@@ -167,18 +167,14 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density, boundary_condition_args(model)...)
     fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
-    # Per-dim launch size from `Base.length(::Face, ::AbstractTopology, N)`:
-    # N+1 for Bounded (covers the boundary face), N for Periodic (halo refilled by
-    # the trailing `fill_halo_regions!(model.velocities)`), N for Flat.
-    Nx, Ny, Nz = size(grid)
-    TX, TY, TZ = topology(grid)
-    launch!(arch, grid, KernelParameters(1:length(Face(), TX(), Nx),
-                                         1:length(Face(), TY(), Ny),
-                                         1:length(Face(), TZ(), Nz)),
-            _compute_velocities!,
-            model.velocities.u, model.velocities.v, model.velocities.w,
-            model.momentum.ρu,   model.momentum.ρv,   model.momentum.ρw,
-            grid, model.dynamics)
+    # Each component over its own interior, `size(velocity)`: N+1 along its face direction when
+    # Bounded (the boundary face), N elsewhere. Computed one point further, a component divides by
+    # density halo values that are not set, and the NaN left there survives the halo fill below.
+    (; u, v, w) = model.velocities
+    (; ρu, ρv, ρw) = model.momentum
+    launch!(arch, grid, size(u), _compute_velocity!, u, ρu, grid, ℑxᶠᵃᵃ, density)
+    launch!(arch, grid, size(v), _compute_velocity!, v, ρv, grid, ℑyᵃᶠᵃ, density)
+    launch!(arch, grid, size(w), _compute_velocity!, w, ρw, grid, ℑzᵃᵃᶠ, density)
 
     foreach(mask_immersed_field!, model.velocities)
     fill_halo_regions!(model.velocities)
@@ -325,12 +321,9 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     return nothing
 end
 
-@kernel function _compute_velocities!(u, v, w, ρu, ρv, ρw, grid, dynamics)
+@kernel function _compute_velocity!(velocity, momentum, grid, ℑρ, ρ)
     i, j, k = @index(Global, NTuple)
-    ρ = continuity_density(dynamics)
-    @inbounds u[i, j, k] = ρu[i, j, k] / ℑxᶠᵃᵃ(i, j, k, grid, ρ)
-    @inbounds v[i, j, k] = ρv[i, j, k] / ℑyᵃᶠᵃ(i, j, k, grid, ρ)
-    @inbounds w[i, j, k] = ρw[i, j, k] / ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+    @inbounds velocity[i, j, k] = momentum[i, j, k] / ℑρ(i, j, k, grid, ρ)
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
