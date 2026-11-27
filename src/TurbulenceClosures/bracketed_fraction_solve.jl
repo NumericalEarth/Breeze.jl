@@ -3,9 +3,14 @@
 #####
 ##### The static stability of `SaturationWeightedStaticStability(CondensateFluxFraction(...))` is
 ##### N² = N²ᶜ + aᴺ ΔN², ΔN² = N²ˢ - N²ᶜ, with aᴺ = w′qˡ′ / w′s′ of the distribution formed with that N².
-##### Written as a scalar root per face, R(aᴺ) = aᴺ - ãᴺ(aᴺ) on aᴺ ∈ [0, 1], where ãᴺ is the liquid flux
-##### fraction of the distribution with the local mixing length and diffusivities of N²ᶜ + aᴺ ΔN².
-##### ãᴺ is clamped to [0, 1], so R(0) ≤ 0 ≤ R(1) and [0, 1] brackets a root.
+##### Written as a scalar problem per face for the unknown aᴺ ∈ [0, 1] with the residual R(aᴺ) = aᴺ - ãᴺ(aᴺ), where ãᴺ is
+##### the liquid flux fraction of the distribution with the local mixing length and diffusivities of N²ᶜ + aᴺ ΔN².
+##### ãᴺ is the ratio of two fluxes and is not bounded; the unknown is: it is a share of the flux of the saturation
+##### excess, and N² lies between N²ᶜ and N²ˢ. The solution on the interval is the root of R where the residual changes
+##### sign across it, R(0) < 0 < R(1), and otherwise the end out of which the residual points: aᴺ = 0 where R(0) ≥ 0
+##### (even at the unsaturated stability the distribution condenses no part of the flux, ãᴺ(0) ≤ 0), and aᴺ = 1 where
+##### R(0) < 0 and R(1) ≤ 0 (at the saturated stability it condenses all of it, ãᴺ(1) ≥ 1). No computed value is
+##### clipped, and every iterate lies in the bracket.
 #####
 ##### Locality. ãᴺ at a face is made a function of that face's aᴺ alone:
 #####   * the mixing length inside the solve is the local one, the blend of ℂˢ z and √e / N of the
@@ -19,8 +24,6 @@
 ##### when traced.
 #####
 
-using SpecialFunctions: erf
-
 """
     BracketedFractionSolve(iterations = 3; classification_tolerance = 1e-8, lagged_envelope = false)
 
@@ -30,17 +33,20 @@ saturated fraction `aᴺ ∈ [0, 1]` at each interior face:
 
     R(aᴺ) = aᴺ - ãᴺ(N²ᶜ + aᴺ ΔN²),    ΔN² = N²ˢ - N²ᶜ,
 
-with `ãᴺ = w′qˡ′ / w′s′` (clamped to `[0, 1]`) of the distribution formed at the face with the local
+with `ãᴺ = w′qˡ′ / w′s′` of the distribution formed at the face with the local
 mixing length (the blend of `ℂˢ z` and `√e / N`), the stability functions, `Kᶜ` and the moment time
 scale of that `N²`, the third moment at the face, and the assumed PDF at the two centers next to
 it. The moments of the other faces are held at those of the distribution before the solve.
 
-1. `ãᴺ` at both ends of the bracket: `R(0) ≤ 0 ≤ R(1)`. Where `ãᴺ ≤ tol` at both ends the face is
-   classified unsaturated (`aᴺ = 0`); where `ãᴺ ≥ 1 - tol` at both, saturated (`aᴺ = 1`), with
-   `tol = classification_tolerance`. These faces take no further step (their values are discarded).
-2. Two first guesses: the regula falsi point of the ends, and the single-Gaussian fraction
-   `Φ(s̄ / σₛ)`, with `σₛ² = τ Kᶜ (∂z s̄)²` at the regula falsi point (`σₛ² = (2 / ℂᵠ)(𝕊ᶜ / 𝕊ᴰ) ℓ² (∂z s̄)²`
-   with [`DissipationTimeScale`](@ref)). Both narrow the bracket; the one with the smaller `|R|` is kept.
+1. `ãᴺ` at both ends of the interval. Where the residual does not change sign across it the solution is the end
+   out of which it points: `aᴺ = 0` where `R(0) ≥ 0`, and `aᴺ = 1` where `R(0) < 0` and `R(1) ≤ 0` (`ãᴺ` is a ratio of
+   fluxes and is not bounded; the unknown is). Where `ãᴺ ≤ tol` at both ends the face is also classified unsaturated
+   (`aᴺ = 0`); where `ãᴺ ≥ 1 - tol` at both, saturated (`aᴺ = 1`), with `tol = classification_tolerance`. These faces
+   take no further step (their values are discarded).
+2. Two first guesses: the regula falsi point of the ends, and the fraction `(1 + t / √(1 + t²)) / 2` of the saturation
+   excess in spread units, `t = s̄ / σₛ`, with `σₛ² = τ Kᶜ (∂z s̄)²` at the regula falsi point
+   (`σₛ² = (2 / ℂᵠ)(𝕊ᶜ / 𝕊ᴰ) ℓ² (∂z s̄)²` with [`DissipationTimeScale`](@ref)). Both narrow the bracket; the one with the
+   smaller `|R|` is kept.
 3. `iterations` Illinois steps (regula falsi, halving the weight of an end kept twice), with
    bisection where a step would leave the bracket. Every iterate lies in `[0, 1]`.
 
@@ -100,8 +106,6 @@ end
     return qᵗ - qᵛ⁺ * (1 + β * qᵗ) / (1 + β * qᵛ⁺)
 end
 
-@inline standard_normal_cdf(x) = (1 + erf(x / sqrt(convert(typeof(x), 2)))) / 2
-
 # The face's constant inputs, gathered once
 @inline function fraction_face_inputs(i, j, k, grid, closure, d, cl, s, θ, qᵗ, e, p, thermodynamics)
     sm = d.second_moments
@@ -145,6 +149,8 @@ end
     Kᵘ = min(𝕊ᵘ * K, closure.maximum_viscosity)
     Kᶜ = min(𝕊ᶜ * K, closure.maximum_tracer_diffusivity)
     τ = local_moment_time_scale(d.time_scale, ℓ, u, N², 𝕊ᴰ)
+    # τ ∝ ℓ / u is 0 / 0 only where the turbulent velocity vanishes (`minimum_tke = 0` and e ≤ 0 at both cells of the
+    # face), where the mixing length vanishes with it. The moments of still air are zero, which τ = 0 gives.
     τ = ifelse(isfinite(τ), τ, zero(FT))
 
     # The second moments at the face
@@ -167,7 +173,7 @@ end
 
     Bᶠ = (Bˡ⁻ + Bˡ⁺) / 2
     ãᴺ = condensate_flux_fraction(FT, Bᶠ, Kᶜ, input.ΔN²)
-    return (; ãᴺ = clamp(ãᴺ, zero(FT), one(FT)), τ, Kᶜ)
+    return (; ãᴺ, τ, Kᶜ)
 end
 
 # ãᴺ = -Bᶠ / (Kᶜ ΔN²) of the latent buoyancy flux Bᶠ at a face, zero where the diffusivity or the latent stratification
@@ -201,7 +207,8 @@ end
 ##### The solve
 #####
 
-# The regula falsi point of a bracket (a, Rₐ ≤ 0), (b, R_b ≥ 0); bisection where it is not inside
+# The regula falsi point of a bracket (a, Rₐ ≤ 0), (b, R_b ≥ 0); bisection where it is not inside. The choice keeps the
+# iterate of the root search inside its bracket: it is part of the algorithm, not a bound on a physical quantity.
 @inline function bracketed_step(a, Rₐ, b, R_b)
     FT = typeof(a)
     ΔR = R_b - Rₐ
@@ -222,7 +229,7 @@ end
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
     interior_face = (k > 1) & (k ≤ Nz)
-    kₛ = clamp(k, 2, max(Nz, 2)) # a valid face for the boundary threads, whose result is discarded
+    kₛ = clamp(k, 2, max(Nz, 2)) # an index, not a value: a valid face for the boundary threads, whose result is discarded
 
     closure_ij = getclosure(i, j, closure)
     d = closure_ij.subgrid_distribution
@@ -242,17 +249,23 @@ end
     # The two ends
     t₀ = ãᴺ(zero(FT))
     t₁ = ãᴺ(one(FT))
-    a, Rₐ = zero(FT), -t₀.ãᴺ          # R(0) = -ãᴺ(0) ≤ 0
-    b, R_b = one(FT), one(FT) - t₁.ãᴺ # R(1) = 1 - ãᴺ(1) ≥ 0
-    unsaturated = (t₀.ãᴺ ≤ tol) & (t₁.ãᴺ ≤ tol)
-    saturated = (t₀.ãᴺ ≥ 1 - tol) & (t₁.ãᴺ ≥ 1 - tol)
+    a, Rₐ = zero(FT), -t₀.ãᴺ          # R(0) = -ãᴺ(0)
+    b, R_b = one(FT), one(FT) - t₁.ãᴺ # R(1) = 1 - ãᴺ(1)
+    # The unknown lives on [0, 1]: where the residual does not change sign across the interval, the solution is the
+    # end out of which it points
+    lower_end = Rₐ ≥ 0
+    upper_end = !lower_end & (R_b ≤ 0)
+    unsaturated = lower_end | ((t₀.ãᴺ ≤ tol) & (t₁.ãᴺ ≤ tol))
+    saturated = !unsaturated & (upper_end | ((t₀.ãᴺ ≥ 1 - tol) & (t₁.ãᴺ ≥ 1 - tol)))
 
-    # Two first guesses: the regula falsi point of the ends, and the single-Gaussian fraction
+    # Two first guesses: the regula falsi point of the ends, and the fraction (1 + t / √(1 + t²)) / 2 of the saturation
+    # excess in spread units, t = s̄ / σₛ, written with the hypotenuse so that it is in [0, 1] for any s̄ and σₛ ≥ 0
+    # (one half where both vanish: the smallest positive number keeps the quotient defined there)
     x_rf = bracketed_step(a, Rₐ, b, R_b)
     t_rf = ãᴺ(x_rf)
     R_rf = x_rf - t_rf.ãᴺ
-    σₛ = sqrt(max(t_rf.τ * t_rf.Kᶜ, zero(FT))) * abs(input.∂zs)
-    x_g = clamp(standard_normal_cdf(input.s̄ / max(σₛ, floatmin(FT))), zero(FT), one(FT))
+    σₛ = sqrt(t_rf.τ * t_rf.Kᶜ) * abs(input.∂zs)
+    x_g = (1 + input.s̄ / (hypot(input.s̄, σₛ) + floatmin(FT))) / 2
     t_g = ãᴺ(x_g)
     R_g = x_g - t_g.ãᴺ
 

@@ -1468,6 +1468,7 @@ end
 
 # The first pass: r at the closure's stability; the next point is N²ᵇ (secant) or the bracket's middle (bisection)
 @inline function first_stability_update(::SecantIteration, x, r, G, L, U)
+    # The `clamp` keeps the iterate of the root search inside its bracket: algorithmic, not a bound on a physical quantity
     return clamp(G, L, U), L, U
 end
 
@@ -1479,6 +1480,7 @@ end
 end
 
 @inline function stability_update(::SecantIteration, last_pass, ω, x, r, x₋, r₋, L, U)
+    # The `clamp` keeps the iterate of the root search inside its bracket: algorithmic, not a bound on a physical quantity
     return clamp(secant_root(x, r, x₋, r₋, x + ω * r), L, U), L, U
 end
 
@@ -1487,6 +1489,7 @@ end
     U′ = ifelse(r > 0, U, min(U, x))
     middle = (L′ + U′) / 2
     interpolate = last_pass & b.final_interpolation
+    # The `clamp` keeps the interpolated iterate inside the bisection bracket: algorithmic, not a bound on a physical quantity
     x′ = ifelse(interpolate, clamp(secant_root(x, r, x₋, r₋, middle), L′, U′), middle)
     return x′, L′, U′
 end
