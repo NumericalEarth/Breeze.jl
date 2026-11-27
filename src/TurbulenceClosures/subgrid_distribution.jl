@@ -1308,7 +1308,7 @@ end
             ∂z_qⁱ = (convert(FT, outside_ice(held, i, j, k)) - convert(FT, outside_ice(held, i, j, k-1))) / Δz
             ω⁺ = cell_phase_relaxation_rates(i, j, k, grid, s)
             ω⁻ = cell_phase_relaxation_rates(i, j, k-1, grid, s)
-            ωⁱ = (ω⁺.ωⁱ + ω⁻.ωⁱ) / 2
+            ωⁱ = (ω⁺.ωᵈⁱ + ω⁻.ωᵈⁱ) / 2
             ωˡ = (ω⁺.ωˡ + ω⁻.ωˡ) / 2
             covariance = τᵠ * (2 * K * ∂z_qⁱ * ∂z_sⁱ + ωⁱ * sⁱ′²) / (1 + τᵠ * ωⁱ)
             variance = τᵠ * (2 * K * ∂z_qⁱ * ∂z_qⁱ + 2 * ωⁱ * covariance)
@@ -1618,7 +1618,7 @@ vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterF
                                        σ₁ = CenterField(grid), σ₂ = CenterField(grid), ωᵐ = CenterField(grid),
                                        μⁱ₁ = CenterField(grid), μⁱ₂ = CenterField(grid),
                                        σⁱ₁ = CenterField(grid), σⁱ₂ = CenterField(grid),
-                                       ρⁱ₁ = CenterField(grid), ρⁱ₂ = CenterField(grid))
+                                       𝕏ⁱ₁ = CenterField(grid), 𝕏ⁱ₂ = CenterField(grid))
 
 @inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, r₁, r₂))
     @inbounds begin
@@ -1631,8 +1631,8 @@ vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterF
         components.μⁱ₂[i, j, k] = μⁱ₂
         components.σⁱ₁[i, j, k] = σⁱ₁
         components.σⁱ₂[i, j, k] = σⁱ₂
-        components.ρⁱ₁[i, j, k] = r₁
-        components.ρⁱ₂[i, j, k] = r₂
+        components.𝕏ⁱ₁[i, j, k] = r₁
+        components.𝕏ⁱ₂[i, j, k] = r₂
     end
     return nothing
 end
@@ -1645,7 +1645,7 @@ end
                   ωᵐ = components.ωᵐ[i, j, k],
                   μⁱ = (components.μⁱ₁[i, j, k], components.μⁱ₂[i, j, k]),
                   σⁱ = (components.σⁱ₁[i, j, k], components.σⁱ₂[i, j, k]),
-                  ρⁱ = (components.ρⁱ₁[i, j, k], components.ρⁱ₂[i, j, k]),
+                  𝕏ⁱ = (components.𝕏ⁱ₁[i, j, k], components.𝕏ⁱ₂[i, j, k]),
                   ice_covariance = components.qⁱ′sⁱ′[i, j, k], departure_variance = components.qᵈ′²[i, j, k])
     end
 end

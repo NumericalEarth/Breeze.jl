@@ -211,6 +211,7 @@ end
     # on its negative part (their difference is the mean, δqⁱ)
     excess = qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * dt_safety
     qdep_cap = available_ice_excess(distribution, qᵛ - qᵛ⁺ⁱ, excess) / ξⁱ_after
+    # (Round-off guard: the mean of the positive part of the excess is not below its mean.)
     qsub_cap = max(0, qdep_cap - δqⁱ)
 
     # Deposition cap

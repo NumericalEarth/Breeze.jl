@@ -34,7 +34,7 @@ using Breeze.Thermodynamics: ThermodynamicConstants, MoistureMassFractions, Liqu
                              mixture_gas_constant, saturation_specific_humidity
 using Breeze.Microphysics: SaturationAdjustment, adjust_thermodynamic_state
 using Breeze.Solvers: SecantSolver
-using Breeze.AtmosphereModels: PrescribedPlumeStatistics, supersaturation_statistics
+using Breeze.AtmosphereModels: PrescribedMixtureStatistics, supersaturation_statistics
 using Breeze.Microphysics.PredictedParticleProperties: subgrid_vapor_excess_correlation
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, scalar_component_parameters, component_saturation,
                                                                liquid_water_temperature, component_condensate,
@@ -323,10 +323,10 @@ end
 
 The statistics of the vapor excess over liquid that P3's `SubgridCondensation` reads. Until the
 closure-side `TurbulenceClosureStatistics` lands, they are formed here from the closure's plumes
-and passed through `PrescribedPlumeStatistics`; switch this one function when it does.
+and passed through `PrescribedMixtureStatistics`; switch this one function when it does.
 """
 vapor_excess_statistics(cp) =
-    PrescribedPlumeStatistics((cp.a, 1 - cp.a), (cp.plumes[1].μ, cp.plumes[2].μ), (cp.plumes[1].σ, cp.plumes[2].σ))
+    PrescribedMixtureStatistics((cp.a, 1 - cp.a), (cp.plumes[1].μ, cp.plumes[2].μ), (cp.plumes[1].σ, cp.plumes[2].σ))
 
 standard_normal_cdf(x) = (1 + erf(x / sqrt(2))) / 2
 

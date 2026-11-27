@@ -659,7 +659,8 @@ end
     # concrete for GPU compilation). The rate functions that need a heat capacity all use
     # the dry-air `cᵖᵈ` psychrometric convention (`liquid_psychrometric_correction` /
     # `ice_psychrometric_correction`), which is a scheme constant rather than a per-cell
-    # quantity, so no cᵖᵐ is carried here.
+    # quantity, so no cᵖᵐ is carried here. (The subgrid distribution forms its own psychrometric corrections with the
+    # mixture heat capacity of `q`, see `p3_liquid_psychrometric_correction`.)
     state = P3DerivedState{FT, typeof(q), typeof(lookups)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
                                                            Fˡ, Nᶜˡ, cloud.nᶜˡ,
                                                            cloud.μᶜˡ, cloud.λᶜˡ,
@@ -670,12 +671,12 @@ end
     # === PHASE 1 & 2 RATES ===
     # Subgrid supersaturation correlation of cloud condensation; `nothing` for `GridMeanCondensation`
     Γ = cloud_condensation_correlation(p3.condensation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
-                                       ℳ_adjusted.qᶜˡ, T, P, ρ, constants)
+                                       ℳ_adjusted.qᶜˡ, q, T, P, ρ, constants)
 
     # The placement of cloud liquid that every process reads, at the cloud's phase relaxation rate;
     # `nothing` unless `processes = AllProcesses()`. It sets the condensation correlation Γ too.
     distribution = subgrid_process_distribution(p3.condensation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
-                                                ℳ_adjusted.qᶜˡ, T, constants, p3, ρ, transport, cloud, qᵛ⁺ⁱ, ℳ_adjusted.qⁱ)
+                                                ℳ_adjusted.qᶜˡ, q, T, constants, p3, ρ, transport, cloud, qᵛ⁺ⁱ, ℳ_adjusted.qⁱ)
     Γ = placed_condensation_correlation(distribution, Γ)
 
     phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,

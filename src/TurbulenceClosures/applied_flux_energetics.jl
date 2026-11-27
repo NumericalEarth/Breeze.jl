@@ -1045,7 +1045,7 @@ end
     ω⁺ = cell_phase_relaxation_rates(i, j, k, grid, s)
     ω⁻ = cell_phase_relaxation_rates(i, j, k-1, grid, s)
     ωˡ = (ω⁺.ωˡ + ω⁻.ωˡ) / 2
-    ωⁱ = (ω⁺.ωⁱ + ω⁻.ωⁱ) / 2
+    ωⁱ = (ω⁺.ωᵈⁱ + ω⁻.ωᵈⁱ) / 2
     ωʷⁱ = (ω⁺.ωʷⁱ + ω⁻.ωʷⁱ) / 2
     ωˢ = ωˡ + ωⁱ + ωʷⁱ
     ωᵘ = ωⁱ + ωʷⁱ
@@ -1092,23 +1092,17 @@ end
     return ifelse(resolved, secant, component_saturated_fraction((μ₁ + μ₂) / 2, σ))
 end
 
-# The mean E[max(s, 0)] and the saturated fraction P(s > 0) of a Gaussian of mean μ and spread σ (a step where σ = 0)
+# The mean E[max(s, 0)] and the saturated fraction P(s > 0) of a Gaussian of mean μ and spread σ, with the
+# `standard_score` of μ, regular at σ = 0 (where they are the step of the point mass, max(μ, 0) and [μ > 0])
 @inline function component_saturated_excess(μ, σ)
     FT = typeof(μ)
-    z = standardized_excess(μ, σ)
+    z = standard_score(μ, zero(FT), σ)
     Φ = erfc(-z / sqrt(FT(2))) / 2
     φ = exp(-z * z / 2) / sqrt(2 * FT(π))
-    return ifelse(σ > 0, μ * Φ + σ * φ, max(μ, zero(FT)))
+    return μ * Φ + σ * φ
 end
 
-@inline component_saturated_fraction(μ, σ) =
-    ifelse(σ > 0, erfc(-standardized_excess(μ, σ) / sqrt(2 * one(μ))) / 2, ifelse(μ > 0, one(μ), zero(μ)))
-
-@inline function standardized_excess(μ, σ)
-    FT = typeof(μ)
-    σ₊ = max(σ, floatmin(FT) / eps(FT))
-    return clamp(μ / σ₊, -convert(FT, 40), convert(FT, 40))
-end
+@inline component_saturated_fraction(μ, σ) = erfc(-standard_score(μ, zero(μ), σ) / sqrt(2 * one(μ))) / 2
 
 # aʷ of the distribution at the face k: the average of its centers
 @inline face_condensate_flux_fraction(i, j, k, cl) =

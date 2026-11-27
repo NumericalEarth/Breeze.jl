@@ -50,8 +50,8 @@ only_condensation = subgrid_p3(CloudCondensationOnly())
 function ice_placement(statistics, s̄, qᶜˡ, s̄ⁱ; ξˡ = 1.05, ξⁱˡ = 1.06, ωˡ = 0.05)
     a, m, σ = PPP.shifted_mixture(statistics, s̄)
     d = placed_cloud_liquid(MixingEvaporationBalance(), a, m, σ, s̄, ξˡ, qᶜˡ, 1e-3, ωˡ, statistics.ωᵐ)
-    mⁱ, k, σʳ = PPP.ice_excess_mixture(statistics, d, s̄ⁱ)
-    return merge(d, (; mⁱ, k, σʳ, ξⁱˡ))
+    mⁱ, βⁱ, σʳ = PPP.ice_excess_mixture(statistics, d, s̄ⁱ)
+    return merge(d, (; mⁱ, βⁱ, σʳ, ξⁱˡ))
 end
 
 # The points s, their weights, and the excess over ice sⁱ(s) of each component at them
@@ -61,9 +61,9 @@ function riemann_ice(d; n = 400_000)
     Δ = (hi - lo) / n
     s = lo .+ Δ .* ((1:n) .- 0.5)
     q = ifelse.(s .> 0, d.χ * d.qᶜˡ .* s ./ d.positive_excess, d.subsaturated_liquid)
-    components = map(zip(d.a, d.m, d.σ, d.mⁱ, d.k)) do (a, m, σ, mⁱ, k)
+    components = map(zip(d.a, d.m, d.σ, d.mⁱ, d.βⁱ)) do (a, m, σ, mⁱ, βⁱ)
         w = a .* Δ .* exp.(-((s .- m) ./ σ) .^ 2 ./ 2) ./ (sqrt(2π) * σ)
-        (w, mⁱ .+ k .* (s .- m))
+        (w, mⁱ .+ βⁱ .* (s .- m))
     end
     return s, q, components
 end
@@ -102,7 +102,7 @@ end
     # Statistics without the excess over ice give it the offsets and spreads of the excess over liquid
     prescribed = (; a = statistics.a, μ = statistics.μ, σ = statistics.σ, f⁺ = statistics.f⁺, ωᵐ = statistics.ωᵐ)
     dᵖ = ice_placement(prescribed, s̄, qᶜˡ, s̄ⁱ)
-    @test all(dᵖ.k .== 1)
+    @test all(dᵖ.βⁱ .== 1)
     @test all(dᵖ.mⁱ .- s̄ⁱ .≈ dᵖ.m .- s̄)
 end
 
@@ -110,10 +110,10 @@ end
     # (the residual is integrated in closed form at each s)
 
     statistics = merge(ice_mixture(0.2, 4e-4, -1e-4, 1.2e-4, 1e-4, 4.5e-4, -1.1e-4, 1.1e-4, 0.9e-4; ωᵐ = 1e-2),
-                       (; ρⁱ = (0.9, 0.7)))
+                       (; 𝕏ⁱ = (0.9, 0.7)))
     s̄, qᶜˡ, s̄ⁱ = 1e-5, 6e-5, 1.4e-4
     d = ice_placement(statistics, s̄, qᶜˡ, s̄ⁱ)
-    @test all(d.k .≈ (0.9 * 1.1e-4 / 1.2e-4, 0.7 * 0.9e-4 / 1e-4))
+    @test all(d.βⁱ .≈ (0.9 * 1.1e-4 / 1.2e-4, 0.7 * 0.9e-4 / 1e-4))
     @test all(d.σʳ .≈ (1.1e-4 * sqrt(1 - 0.81), 0.9e-4 * sqrt(1 - 0.49)))
     # Against a Riemann sum over s and the residual
     s, q, components = riemann_ice(d; n = 4000)
@@ -178,7 +178,7 @@ end
 
 @testset "P3 subgrid ice: the placement of the ice and the departure of the cloud liquid" begin
     statistics = merge(ice_mixture(0.3, 2e-4, -0.9e-4, 0.6e-4, 0.5e-4, 2.2e-4, -1e-4, 0.55e-4, 0.45e-4; ωᵐ = 1e-3),
-                       (; ρⁱ = (0.95, 0.9)))
+                       (; 𝕏ⁱ = (0.95, 0.9)))
     d = ice_placement(statistics, 2e-5, 5e-5, 9e-5)
     qⁱ = 2e-5
     S⁺, S⁻ = PPP.ice_excess_part_sums(d)
@@ -258,7 +258,7 @@ total_water(model) = (μ = model.microphysical_fields; ρ = column_values(model.
     stats = Breeze.AtmosphereModels.supersaturation_statistics(TurbulenceClosureStatistics(), 1, 1, 30, model.grid,
                                                               model.closure, model.closure_fields, nothing)
     @test all(stats.μⁱ .> stats.μ)
-    @test all(abs.(stats.ρⁱ) .≤ 1 + 1e-12)
+    @test all(abs.(stats.𝕏ⁱ) .≤ 1 + 1e-12)
     # The second moments of the ice and of the departure of the cloud liquid: realizable and finite
     m = model.closure_fields.subgrid_cloud.moments
     qⁱ′² = column_values(m.qⁱ′²)

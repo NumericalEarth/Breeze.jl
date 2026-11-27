@@ -23,12 +23,16 @@
 #
 # Droplet number is placed with the liquid in the same proportions, uniformly in each part:
 # Nᶜˡ = χ N̄ᶜˡ / f⁺ in the saturated part and ψ N̄ᶜˡ in the subsaturated part.
-# Rain, ice, its liquid coating and the ice number fill the cell, independently of s.
+# Rain and the liquid coating of ice fill the cell, independently of s. The ice fills the cell in two parts,
+# q̄ⁱ (1 + γⁱ f⁻) in the saturated part and q̄ⁱ (1 - γⁱ f⁺) in the subsaturated part, its number with its mass; the
+# contrast γⁱ follows from the covariance of the ice with the excess over ice where the statistics carry one
+# (`ice_placement_contrast`), and is zero (uniform ice) otherwise.
 #
 # The local vapor excess over liquid is δ(s) = s - ξˡ qᶜˡ(s): (1 - λ) s in the saturated part,
 # λ = χ ξˡ q̄ᶜˡ / ⟨s⁺⟩, and s - ξˡ q⊖ in the subsaturated part. Its cell mean is the grid-mean
-# δqᵛ⁺ˡ for any χ. So the vapor exchange of rain, ice and the ice coating, linear in δ, keeps its
-# grid-mean rate exactly, and only what is nonlinear in the local state changes.
+# δqᵛ⁺ˡ for any χ. So the vapor exchange of rain and of the liquid coating of ice, linear in δ, keeps its
+# grid-mean rate exactly. The vapor exchange of the dry ice does not: the ice shares the local excess with the
+# cloud liquid of each part, so it is evaluated in each part (below).
 #
 # Condensation of cloud liquid, at the local droplet population. Droplets of gamma size
 # distribution relax the vapor at ε = 2π ρ Dᵛ N (μᶜˡ + 1)/λᶜˡ ∝ N^{2/3} qᶜˡ^{1/3} at a fixed shape,
@@ -52,14 +56,14 @@
 # which is 0 ≤ ψᵇ ≤ 1: 0 without mixing or without liquid, 1 (uniform liquid, χ = f⁺) when mixing
 # is fast against evaporation. Liquid beyond the equilibrium condensate ⟨s⁺⟩ / ξˡ of the saturated
 # part cannot be at equilibrium anywhere in the cell; it is spread uniformly over the cell, as the
-# uniform part ε = q̄ᶜˡ - ⟨s⁺⟩ / ξˡ of the liquid, so that the subsaturated part holds at least
-# ψᵉ = ε / q̄ᶜˡ:
+# uniform part ε = (q̄ᶜˡ - ⟨s⁺⟩ / ξˡ)₊ of the liquid, the share ψᵉ = ε / q̄ᶜˡ of it. The balance places the rest of
+# the liquid, so that the subsaturated part holds, relative to the cell mean,
 #
-#   ψ = max(ψᵇ, ψᵉ),   ψᵉ = max(0, 1 - ⟨s⁺⟩ / (ξˡ q̄ᶜˡ)).
+#   ψ = ψᵉ + (1 - ψᵉ) ψᵇ = 1 - (1 - ψᵉ) (1 - ψᵇ),   ψᵉ = (1 - ⟨s⁺⟩ / (ξˡ q̄ᶜˡ))₊,
 #
-# The saturated part then holds its equilibrium condensate and its share f⁺ ε of the excess
-# (λ = f⁺ ξˡ q̄ᶜˡ / ⟨s⁺⟩ + f⁻ ≥ 1), and the placement is continuous as either part vanishes: χ → 1
-# with f⁻ → 0, χ → 0 with f⁺ → 0, and q⊖ ≤ q̄ᶜˡ throughout. (Placing all of ε in the subsaturated
+# which lies in [0, 1] and is at least ψᵇ and ψᵉ by construction. Without mixing (ψᵇ = 0) the saturated part
+# holds its equilibrium condensate and its share f⁺ ε of the excess. The placement is continuous as either part
+# vanishes: χ → 1 with f⁻ → 0, χ → 0 with f⁺ → 0, and q⊖ ≤ q̄ᶜˡ throughout. (Placing all of ε in the subsaturated
 # part instead makes q⊖ = ε / f⁻ and its evaporation diverge as the subsaturated part vanishes.)
 # `SaturatedPartLiquid` fixes ψ = 0 (χ = 1).
 #
@@ -70,7 +74,12 @@
 #   * deposition nucleation, in the part where the excess over ice δ + qᵛ⁺ˡ - qᵛ⁺ⁱ reaches its
 #     threshold: that fraction times the grid-mean (ungated) rate;
 #   * KK2000 autoconversion and accretion, powers of the local qᶜˡ and Nᶜˡ: partial moments of the
-#     mixture in the saturated part (Gauss-Legendre quadrature) plus the uniform subsaturated part.
+#     mixture in the saturated part (Gauss-Legendre quadrature) plus the uniform subsaturated part;
+#   * the vapor exchange of the dry ice, in each part at its local excesses over liquid and over ice and against the
+#     cloud liquid of that part: integrated over s in the saturated part and evaluated at the moments of the
+#     subsaturated part (`subgrid_ice_growth`);
+#   * the cap on the vapor sinks of ice (deposition and nucleation): the cell mean of the positive part of the
+#     local excess over ice (`available_ice_excess`), not the positive part of the grid mean.
 #
 # Each rate is still one number per process, and every source is paired with its sink as on the
 # grid mean, so mass and energy are conserved as they are there. With all spreads zero the grid-mean rates
@@ -110,8 +119,11 @@ nonlinear in the local state: the condensation of cloud liquid at its local drop
 droplet activation, deposition nucleation of ice, autoconversion and accretion. All read one
 placement of the cloud liquid: a fraction ``χ`` in the saturated part ``s > 0``, as
 ``χ q̄ᶜˡ s / ⟨s⁺⟩``, and ``1 - χ`` spread over the subsaturated part, with the droplet number
-placed in the same proportions. Rain and ice fill the cell independently of ``s``; their vapor
-exchange, linear in the local vapor excess, keeps its grid-mean rate.
+placed in the same proportions. Rain and the liquid coating of ice fill the cell independently of ``s``;
+their vapor exchange, linear in the local vapor excess, keeps its grid-mean rate. The dry ice is placed in
+the two parts with its covariance with the excess over ice (uniformly without one); it exchanges vapor in
+each part at the local excesses and against the cloud liquid of that part, and its vapor sinks are capped
+by the positive part of the local excess over ice.
 
 `liquid_placement` sets ``χ``: [`MixingEvaporationBalance`](@ref) (the default), the steady state of
 mixing and evaporation, which reads the mixing rate `ωᵐ` of the statistics (0 when they have
@@ -158,8 +170,8 @@ end
     a = map(x -> convert(FT, x), statistics.a)
     μ = map(x -> convert(FT, x), statistics.μ)
     σ = map(x -> convert(FT, x), statistics.σ)
-    plume_mean = sum(map(*, a, μ))
-    m = map(μᵢ -> s̄ + μᵢ - plume_mean, μ)
+    mixture_mean = sum(map(*, a, μ))
+    m = map(μᵢ -> s̄ + μᵢ - mixture_mean, μ)
     return a, m, σ
 end
 
@@ -175,9 +187,11 @@ Return the subgrid distribution and placement of cloud liquid that the P3 proces
 `nothing` when they use their grid-mean forms: for [`GridMeanCondensation`](@ref) and for
 [`SubgridCondensation`](@ref) with `processes = CloudCondensationOnly()`. With
 [`AllProcesses`](@ref) the arguments are the statistics of the cell, its vapor, saturation and cloud
-liquid, the temperature, the thermodynamic constants, and the scheme, density, transport properties
-and cloud droplet distribution from which the cloud's phase relaxation rate `ωˡ` is formed; the result is [`placed_cloud_liquid`](@ref) of the mixture about P3's grid mean
-``s̄ = qᵛ - qᵛ⁺ˡ + ξˡ qᶜˡ``.
+liquid, its moisture mass fractions `q`, the temperature, the thermodynamic constants, and the scheme,
+density, transport properties and cloud droplet distribution from which the cloud's phase relaxation
+rate `ωˡ` is formed; the result is [`placed_cloud_liquid`](@ref) of the mixture about P3's grid mean
+``s̄ = qᵛ - qᵛ⁺ˡ + ξˡ qᶜˡ``, with the excess over ice, the placement of the ice and the departure of the
+cloud liquid from its placement.
 """
 @inline subgrid_process_distribution(::GridMeanCondensation, args...) = nothing
 
@@ -186,21 +200,21 @@ and cloud droplet distribution from which the cloud's phase relaxation rate `ω�
 
 @inline subgrid_process_distribution(::CloudCondensationOnly, args...) = nothing
 
-@inline function subgrid_process_distribution(processes::AllProcesses, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, constants,
+@inline function subgrid_process_distribution(processes::AllProcesses, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, q, T, constants,
                                               p3, ρ, transport, cloud, qᵛ⁺ⁱ = qᵛ⁺ˡ, qⁱ = zero(qᵛ))
     FT = typeof(qᵛ)
-    ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
-    ωˡ = p3_cloud_phase_relaxation_rate(p3, qᵛ⁺ˡ, qᶜˡ, T, ρ, transport, cloud, constants)
+    ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, q, T, constants)
+    ωˡ = p3_cloud_phase_relaxation_rate(p3, ξˡ, qᶜˡ, ρ, transport, cloud)
     q̄ᶜˡ = max(0, qᶜˡ)
     s̄ = qᵛ - qᵛ⁺ˡ + ξˡ * q̄ᶜˡ
     a, m, σ = shifted_mixture(statistics, s̄)
     ωᵐ = mixing_rate(statistics, FT)
     d = placed_cloud_liquid(processes.liquid_placement, a, m, σ, s̄, ξˡ, q̄ᶜˡ, qᵛ⁺ˡ, ωˡ, ωᵐ)
     # The saturation excess of the distributed water over ice, sⁱ = qᵛ - qᵛ⁺ⁱ + ξⁱˡ qᶜˡ, about P3's own grid mean
-    ξⁱˡ = p3_ice_liquid_psychrometric_correction(qᵛ⁺ⁱ, T, constants)
+    ξⁱˡ = p3_ice_liquid_psychrometric_correction(qᵛ⁺ⁱ, q, T, constants)
     s̄ⁱ = qᵛ - qᵛ⁺ⁱ + ξⁱˡ * q̄ᶜˡ
-    mⁱ, k, σʳ = ice_excess_mixture(statistics, d, s̄ⁱ)
-    dⁱ = merge(d, (; mⁱ, k, σʳ, ξⁱˡ))
+    mⁱ, βⁱ, σʳ = ice_excess_mixture(statistics, d, s̄ⁱ)
+    dⁱ = merge(d, (; mⁱ, βⁱ, σʳ, ξⁱˡ))
     # The placement of the ice between the two parts and the departure of the cloud liquid from its placement
     γⁱ = ice_placement_contrast(statistics, dⁱ, max(0, qⁱ))
     ν = liquid_departure_scale(statistics, dⁱ)
@@ -250,11 +264,11 @@ end
 # residual of the regression on s averages out)
 @inline function ice_excess_part_sums(d)
     FT = typeof(d.qᶜˡ)
-    sums = map(d.a, d.m, d.σ, d.mⁱ, d.k) do aᵢ, mᵢ, σᵢ, mⁱᵢ, kᵢ
-        bᵢ = mⁱᵢ - kᵢ * mᵢ
+    sums = map(d.a, d.m, d.σ, d.mⁱ, d.βⁱ) do aᵢ, mᵢ, σᵢ, mⁱᵢ, βⁱᵢ
+        bᵢ = mⁱᵢ - βⁱᵢ * mᵢ
         P⁺, M⁺ = gaussian_interval_moments(mᵢ, σᵢ, zero(FT), zero(FT), false)
         P⁻, M⁻ = gaussian_lower_moments(mᵢ, σᵢ)
-        (aᵢ * (bᵢ * P⁺ + kᵢ * M⁺), aᵢ * (bᵢ * P⁻ + kᵢ * M⁻))
+        (aᵢ * (bᵢ * P⁺ + βⁱᵢ * M⁺), aᵢ * (bᵢ * P⁻ + βⁱᵢ * M⁻))
     end
     return sum(map(first, sums)), sum(map(last, sums))
 end
@@ -287,9 +301,9 @@ const gauss_hermite_weights = (0.37301225767907614, 0.11723990766175905, 0.00963
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The cell mean of ``qᶜˡ^β (Nᶜˡ/N̄ᶜˡ)^γ`` above `threshold` with the departure of the cloud liquid from its placement,
-``qᶜˡ = q(s) (1 + ν ζ)``: ``Σⱼ wⱼ (1 + ν ζⱼ)^β ⟨q^β (N/N̄)^γ; q ≥ qᵗ / (1 + ν ζⱼ)⟩`` (``qᵗ`` the `threshold`) over the 8-point
-Gauss-Hermite rule in ``ζ``, with the placed moments of [`placed_cloud_liquid_moment`](@ref). Without a departure
-(``ν = 0``) it is that placed moment.
+``qᶜˡ = q(s) (1 + ν ζ)``: ``Σⱼ wⱼ (1 + ν ζⱼ)^β ⟨q^β (N/N̄)^γ⟩ⱼ`` over the 8-point Gauss-Hermite rule in ``ζ``, with
+``⟨⋅⟩ⱼ`` the placed moment of [`placed_cloud_liquid_moment`](@ref) over the part where ``q (1 + ν ζⱼ)`` reaches
+`threshold`. Without a departure (``ν = 0``) it is that placed moment.
 """
 @inline departed_liquid_moment(d::NamedTuple{names}, β, threshold, γ = zero(β)) where names =
     departed_liquid_moment(Val(:ν ∈ names), d, β, threshold, γ)
@@ -315,23 +329,23 @@ end
     return ifelse(d.ν > 0, sum(terms), placed)
 end
 
-# ξⁱˡ = 1 + ℒˡ ∂qᵛ⁺ⁱ/∂T / cᵖᵈ: the saturation excess over ice that the evaporation of cloud liquid returns, per unit of
-# liquid (the liquid cools the air by ℒˡ / cᵖᵈ and lowers qᵛ⁺ⁱ), with ∂ ln qᵛ⁺ⁱ/∂T that of the model's saturation
-# vapor pressure and P3's dry-air heat capacity convention
-@inline function p3_ice_liquid_psychrometric_correction(qᵛ⁺ⁱ, T, constants)
-    FT = typeof(T)
+# ξⁱˡ = 1 + ℒˡ ∂qᵛ⁺ⁱ/∂T / cᵖᵐ: the saturation excess over ice that the evaporation of cloud liquid returns, per unit of
+# liquid (the liquid cools the air by ℒˡ / cᵖᵐ and lowers qᵛ⁺ⁱ), with ∂ ln qᵛ⁺ⁱ/∂T that of the model's saturation
+# vapor pressure and the mixture heat capacity cᵖᵐ of the cell's moisture mass fractions `q` (see
+# `p3_liquid_psychrometric_correction`)
+@inline function p3_ice_liquid_psychrometric_correction(qᵛ⁺ⁱ, q, T, constants)
     ℒˡ = vaporization_latent_heat(constants, T)
-    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
     ∂qᵛ⁺ⁱ∂T = qᵛ⁺ⁱ * saturation_vapor_pressure_log_slope(T, constants, PlanarIceSurface())
-    return 1 + ℒˡ * ∂qᵛ⁺ⁱ∂T / cᵖᵈ
+    return 1 + ℒˡ * ∂qᵛ⁺ⁱ∂T / cᵖᵐ
 end
 
 # The saturation excess over ice of the components of the mixture, regressed on the excess over liquid s within each
-# component: sⁱ = mⁱᵢ + kᵢ (s - mᵢ) + rᵢ, kᵢ = ρᵢ σⁱᵢ / σᵢ, with the residual rᵢ ~ N(0, (σʳᵢ)²), σʳᵢ = σⁱᵢ √(1 - ρᵢ²),
-# independent of s, and ρᵢ the within-component correlation of the two excesses that the statistics carry (both are
+# component: sⁱ = mⁱᵢ + βⁱᵢ (s - mᵢ) + rᵢ, βⁱᵢ = 𝕏ⁱᵢ σⁱᵢ / σᵢ, with the residual rᵢ ~ N(0, (σʳᵢ)²), σʳᵢ = σⁱᵢ √(1 - 𝕏ⁱᵢ²),
+# independent of s, and 𝕏ⁱᵢ the within-component correlation of the two excesses that the statistics carry (both are
 # linear in the same fluctuations of θ and qᵗ and differ in ∂qᵛ⁺/∂T). The means are placed about P3's grid mean s̄ⁱ
 # with the offsets of the statistics. Statistics without the excess over ice (prescribed ones) give it the offsets
-# and spreads of the excess over liquid (kᵢ = 1, no residual); without a correlation, ρᵢ = 1.
+# and spreads of the excess over liquid (βⁱᵢ = 1, no residual); without a correlation, 𝕏ⁱᵢ = 1.
 @inline ice_excess_mixture(statistics::NamedTuple{names}, d, s̄ⁱ) where names =
     ice_excess_mixture(Val(:μⁱ ∈ names), statistics, d, s̄ⁱ)
 
@@ -340,29 +354,31 @@ end
     return mⁱ, map(mᵢ -> one(mᵢ), d.m), map(mᵢ -> zero(mᵢ), d.m)
 end
 
-@inline excess_correlation(statistics::NamedTuple{names}, FT) where names = excess_correlation(Val(:ρⁱ ∈ names), statistics, FT)
-@inline excess_correlation(::Val{true}, statistics, FT) = map(x -> convert(FT, x), statistics.ρⁱ)
+@inline excess_correlation(statistics::NamedTuple{names}, FT) where names = excess_correlation(Val(:𝕏ⁱ ∈ names), statistics, FT)
+@inline excess_correlation(::Val{true}, statistics, FT) = map(x -> convert(FT, x), statistics.𝕏ⁱ)
 @inline excess_correlation(::Val{false}, statistics, FT) = map(x -> one(FT), statistics.μⁱ)
 
 @inline function ice_excess_mixture(::Val{true}, statistics, d, s̄ⁱ)
     FT = typeof(s̄ⁱ)
     μⁱ = map(x -> convert(FT, x), statistics.μⁱ)
     σⁱ = map(x -> convert(FT, x), statistics.σⁱ)
-    ρ = excess_correlation(statistics, FT)
-    plume_mean = sum(map(*, d.a, μⁱ))
-    mⁱ = map(μⁱᵢ -> s̄ⁱ + μⁱᵢ - plume_mean, μⁱ)
-    k = map((ρᵢ, σⁱᵢ, σᵢ) -> safe_ratio(ρᵢ * σⁱᵢ, σᵢ, one(FT)), ρ, σⁱ, d.σ)
-    # (round-off can put |ρ| a hair above 1); with no spread of s the residual is all of σⁱ
-    σʳ = map((ρᵢ, σⁱᵢ, σᵢ) -> ifelse(σᵢ > 0, σⁱᵢ * sqrt(max(0, 1 - ρᵢ * ρᵢ)), σⁱᵢ), ρ, σⁱ, d.σ)
-    return mⁱ, k, σʳ
+    𝕏ⁱ = excess_correlation(statistics, FT)
+    mixture_mean = sum(map(*, d.a, μⁱ))
+    mⁱ = map(μⁱᵢ -> s̄ⁱ + μⁱᵢ - mixture_mean, μⁱ)
+    # Without a spread of s the slope multiplies s - mᵢ = 0 and its value does not enter
+    βⁱ = map((𝕏ⁱᵢ, σⁱᵢ, σᵢ) -> safe_ratio(𝕏ⁱᵢ * σⁱᵢ, σᵢ, one(FT)), 𝕏ⁱ, σⁱ, d.σ)
+    # With no spread of s the residual is all of σⁱ. (Round-off guard: a correlation satisfies 𝕏ⁱ² ≤ 1 exactly, which
+    # the quotient of rounded moments that forms it can exceed by a few ϵ.)
+    σʳ = map((𝕏ⁱᵢ, σⁱᵢ, σᵢ) -> ifelse(σᵢ > 0, σⁱᵢ * sqrt(max(0, 1 - 𝕏ⁱᵢ * 𝕏ⁱᵢ)), σⁱᵢ), 𝕏ⁱ, σⁱ, d.σ)
+    return mⁱ, βⁱ, σʳ
 end
 
 #####
 ##### Gaussian integrals over intervals of s
 #####
 
-# The spread of a Gaussian as a divisor (`AtmosphereModels.resolved_spread`): a zero spread is the point mass at the
-# mean, which the callers select where σ = 0.
+# The standard scores are those of `AtmosphereModels.standard_score`, regular at a zero spread, where they give the
+# point mass at the mean; no integral here divides by a spread.
 
 # Upper tail 1 - Φ(z). The argument is held at ±40, beyond which the tail is 0 or 1 and the density 0 in every float
 # type, so that their derivatives are finite there (z e^{-z²/2} is ∞ × 0 for an infinite z): no value changes.
@@ -382,13 +398,14 @@ end
 # u = ∞. A zero spread is the point mass at the mean.
 @inline function gaussian_interval_moments(m, σ, l, u, bounded)
     FT = typeof(m)
-    σ₊ = resolved_spread(σ)
-    zˡ = (l - m) / σ₊
-    zᵘ = (u - m) / σ₊
+    zˡ = standard_score(l, m, σ)
+    zᵘ = standard_score(u, m, σ)
     tailᵘ = ifelse(bounded, gaussian_upper_tail(zᵘ), zero(FT))
     φᵘ = ifelse(bounded, gaussian_density(zᵘ), zero(FT))
+    # (Round-off guard: the score increases with the bound and the tail decreases with the score, so the exact
+    # difference is not negative.)
     P = max(0, gaussian_upper_tail(zˡ) - tailᵘ)
-    M = m * P + σ₊ * (gaussian_density(zˡ) - φᵘ)
+    M = m * P + σ * (gaussian_density(zˡ) - φᵘ)
     nonempty = !bounded | (u > l)
     return ifelse(nonempty, P, zero(FT)), ifelse(nonempty, M, zero(FT))
 end
@@ -406,11 +423,10 @@ end
 # The probability and first moment of one Gaussian over s ≤ 0, from its lower tail: accurate where
 # they are small, unlike 1 - P(s > 0) and s̄ - ⟨s; s > 0⟩. A zero spread is the point mass at the mean.
 @inline function gaussian_lower_moments(m, σ)
-    FT = typeof(m)
-    σ₊ = resolved_spread(σ)
-    z = m / σ₊
+    z = standard_score(m, zero(m), σ)
     P = gaussian_upper_tail(z)
-    M = min(0, m * P - σ₊ * gaussian_density(z))
+    # (Round-off guard: the exact mean of s over s ≤ 0 is not positive; the two terms cancel where z is large.)
+    M = min(0, m * P - σ * gaussian_density(z))
     return P, M
 end
 
@@ -436,20 +452,22 @@ const gauss_legendre_weights = (0.12793819534675185, 0.12583745634682753, 0.1216
                                 0.08619016153195298, 0.07334648141108072, 0.059298584915437,
                                 0.04427743881741972, 0.028531388628933545, 0.012341229799987141)
 
-# ∫ₗ^∞ s^β N(s; m, σ²) ds for l ≥ 0, over the part of [l, ∞) in the window [m - 8σ, m + 8σ] of s ≥ 0, beyond
-# which the Gaussian is below 10⁻¹⁵ of its peak. A zero spread is the point mass at the mean. Where l lies above the
-# window the part is empty, [hi, hi], so that the nodes stay in the window: at a node far above it s^β overflows
-# while the Gaussian underflows (the threshold of the local liquid, l = qᵗ ⟨s⁺⟩ / (χ q̄ᶜˡ), reaches 10¹⁵⁷ where q̄ᶜˡ
-# is 10⁻¹⁶⁹), and their product is NaN rather than 0.
+# ∫ₗ^∞ s^β N(s; m, σ²) ds for l ≥ 0, as the probability of s ≥ l times the mean of s^β over that part,
+#
+#   [1 - Φ(zˡ)] Σⱼ wⱼ φ(zⱼ) (m + σ zⱼ)^β / Σⱼ wⱼ φ(zⱼ),   zˡ = (l - m) / σ,
+#
+# with the Gauss-Legendre nodes zⱼ of the standard variable over the part of [zˡ, ∞) in the window [-8, 8], beyond
+# which the Gaussian is below 10⁻¹⁵ of its peak (`gaussian_window_mean`). The probability is exact and the mean lies
+# between the least and the greatest s^β of the nodes, so a zero spread gives the point mass at the mean, m^β where
+# m > l, with no division by the spread. Where l lies above the window the probability is zero and the nodes stay at
+# its upper edge: at a node far above it s^β overflows (a threshold of the local liquid reaches 10¹⁵⁷ times its mean
+# where q̄ᶜˡ is 10⁻¹⁶⁹).
 @inline function gaussian_partial_moment(β, m, σ, l)
     FT = typeof(m)
     R = convert(FT, 8)
-    σ₊ = resolved_spread(σ)
-    hi = max(0, m + R * σ₊)
-    lo = min(max(l, m - R * σ₊), hi)
-    quadrature, = gauss_legendre_interval(s -> (positive_power(s, β),), lo, hi, m, σ₊)
-    point_mass = ifelse(m >= l, positive_power(m, β), zero(FT))
-    return ifelse(σ > 0, quadrature, point_mass)
+    zˡ = standard_score(l, m, σ)
+    mean, = gaussian_window_mean(s -> (positive_power(s, β),), clamp(zˡ, -R, R), R, m, σ)
+    return gaussian_upper_tail(zˡ) * mean
 end
 
 # s^β for s > 0 and 0 otherwise, with a base that keeps the derivative in β finite at s = 0
@@ -458,24 +476,24 @@ end
     return ifelse(positive, ifelse(positive, s, one(s))^β, zero(s))
 end
 
-# Σᵢ aᵢ ∫₀^∞ f(s, i) N(s; mᵢ, σᵢ²) ds, with the 24-point Gauss-Legendre rule of `gaussian_partial_moment` over
-# [max(0, mᵢ - 8σᵢ), mᵢ + 8σᵢ]; a zero spread is the point mass at the mean. `f(s, i)` returns a number.
+# Σᵢ aᵢ ∫₀^∞ f(s, i) N(s; mᵢ, σᵢ²) ds: the probability of s > 0 times the mean of f over that part, as in
+# `gaussian_partial_moment`; a zero spread is the point mass at the mean. `f(s, i)` returns a number, finite for
+# every s.
 @inline function positive_part_quadrature(f, d)
     FT = typeof(d.qᶜˡ)
     R = convert(FT, 8)
-    components = map(d.a, d.m, d.σ, ntuple(identity, length(d.a))) do aᵢ, m, σ, i
-        σ₊ = resolved_spread(σ)
-        lo = max(zero(FT), m - R * σ₊)
-        hi = max(lo, m + R * σ₊)
-        quadrature, = gauss_legendre_interval(s -> (f(s, i),), lo, hi, m, σ₊)
-        point_mass = ifelse(m > 0, f(max(m, floatmin(FT)), i), zero(FT))
-        aᵢ * ifelse(σ > 0, quadrature, point_mass)
+    components = map(d.a, d.m, d.σ, ntuple(identity, length(d.a))) do aᵢ, mᵢ, σᵢ, i
+        z⁰ = standard_score(zero(FT), mᵢ, σᵢ)
+        mean, = gaussian_window_mean(s -> (f(s, i),), clamp(z⁰, -R, R), R, mᵢ, σᵢ)
+        aᵢ * gaussian_upper_tail(z⁰) * mean
     end
     return sum(components)
 end
 
-@inline mixture_partial_moment(d, β, l) =
-    sum(map((aᵢ, mᵢ, σᵢ) -> aᵢ * gaussian_partial_moment(β, mᵢ, σᵢ, l), d.a, d.m, d.σ))
+@inline mixture_partial_moment(a, m, σ, β, l) =
+    sum(map((aᵢ, mᵢ, σᵢ) -> aᵢ * gaussian_partial_moment(β, mᵢ, σᵢ, l), a, m, σ))
+
+@inline mixture_partial_moment(d::NamedTuple, β, l) = mixture_partial_moment(d.a, d.m, d.σ, β, l)
 
 # a / b where b > 0, and `fallback` otherwise
 @inline safe_ratio(a, b, fallback) = ifelse(b > 0, a / ifelse(b > 0, b, one(b)), fallback)
@@ -517,9 +535,12 @@ end
     evaporation = ωˡ * (-s⁻)
     exchange = f⁻ * ωᵐ * q̄ᶜˡ
     ψᵇ = safe_ratio(exchange, evaporation + exchange, zero(FT))
-    # The liquid beyond the saturated part's equilibrium condensate ⟨s⁺⟩ / ξˡ, spread over the cell
+    # The share of the liquid beyond the saturated part's equilibrium condensate ⟨s⁺⟩ / ξˡ, spread over the cell: the
+    # positive part of the excess (the regime of a cell with more liquid than that condensate, not a numerical
+    # bound), at most 1 since ⟨s⁺⟩ ≥ 0
     ψᵉ = max(0, 1 - safe_ratio(s⁺, ξˡ * q̄ᶜˡ, one(FT)))
-    return max(ψᵇ, ψᵉ)
+    # The excess is uniform and the balance places the rest: in [0, 1] and at least ψᵇ and ψᵉ by construction
+    return ψᵉ + (1 - ψᵉ) * ψᵇ
 end
 
 """
@@ -557,10 +578,11 @@ Return the cell mean of ``qᶜˡ(s)^β (Nᶜˡ(s) / N̄ᶜˡ)^γ`` over the part
 ``qᶜˡ(s) ≥`` `threshold`, at the placement `d` (see [`placed_cloud_liquid`](@ref)):
 
 ```math
-(χ / f⁺)^γ (χ q̄ᶜˡ / ⟨s⁺⟩)^β Σᵢ aᵢ ∫_{sᵗ}^∞ s^β N(s; mᵢ, σᵢ²) ds + f⁻ ψ^γ q⊖^β [q⊖ ≥ qᵗ],
+(χ / f⁺)^γ Σᵢ aᵢ ∫_{q ≥ threshold} q^β N(q; g mᵢ, (g σᵢ)²) dq + f⁻ ψ^γ q⊖^β [q⊖ ≥ threshold],
 ```
 
-with ``sᵗ = qᵗ ⟨s⁺⟩ / (χ q̄ᶜˡ)``. Without cloud liquid, or where `d` is degenerate, the result is
+with ``g = χ q̄ᶜˡ / ⟨s⁺⟩``: the local liquid of the saturated part, ``q = g s``, is Gaussian in each component
+with mean ``g mᵢ`` and spread ``g σᵢ``. Without cloud liquid, or where `d` is degenerate, the result is
 the grid-mean ``q̄ᶜˡ^β`` gated at the threshold.
 """
 @inline function placed_cloud_liquid_moment(d, β, threshold, γ = zero(β))
@@ -572,9 +594,12 @@ the grid-mean ``q̄ᶜˡ^β`` gated at the threshold.
     s⁺ₛ = ifelse(saturated_present, s⁺, one(FT))
     saturated_liquidₛ = ifelse(saturated_present, saturated_liquid, one(FT))
     f⁺ₛ = ifelse(saturated_present, d.f⁺, one(FT))
-    sᵗ = max(0, threshold) * s⁺ₛ / saturated_liquidₛ
     q̄ₛ = ifelse(q̄ > 0, q̄, one(FT))
-    saturated = (saturated_liquidₛ / (f⁺ₛ * q̄ₛ))^γ * (saturated_liquidₛ / s⁺ₛ)^β * mixture_partial_moment(d, β, sᵗ)
+    # The moment of the local liquid q = g s itself, so that no threshold of s is formed (it overflows where the
+    # liquid is tiny)
+    g = saturated_liquidₛ / s⁺ₛ
+    liquid_moment = mixture_partial_moment(d.a, map(mᵢ -> g * mᵢ, d.m), map(σᵢ -> g * σᵢ, d.σ), β, max(0, threshold))
+    saturated = (saturated_liquidₛ / (f⁺ₛ * q̄ₛ))^γ * liquid_moment
     saturated = ifelse(saturated_present, saturated, zero(FT))
 
     subsaturated_present = (d.subsaturated_liquid > 0) & (d.f⁻ > 0)
@@ -686,7 +711,8 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the fraction of the cell where deposition nucleation of ice acts: where the local vapor
-excess over ice reaches `ℂⁿᵘᶜˡ₂` times `qᵛ⁺ⁱ`. On the grid mean (`d = nothing`) it is 1 or 0. With
+excess over ice reaches `ℂⁿᵘᶜˡ₂` times `qᵛ⁺ⁱ`. On the grid mean (`d = nothing`) it is 1 or 0, with the
+supersaturation formed over `qᵛ⁺ⁱ` no smaller than `minimum_saturation`, as the grid-mean scheme forms it. With
 a placement the local excess over ice is ``δ(s) + qᵛ⁺ˡ - qᵛ⁺ⁱ``, the local vapor excess over liquid
 shifted by the difference of the saturations of the cell, so the fraction is that where
 ``δ(s) ≥ ℂⁿᵘᶜˡ₂ qᵛ⁺ⁱ - qᵛ⁺ˡ + qᵛ⁺ⁱ``.
@@ -700,16 +726,18 @@ end
 @inline nucleating_fraction(d::NamedTuple{names}, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation) where names =
     nucleating_fraction(Val(:mⁱ ∈ names), d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation)
 
-# A placement without the excess over ice: the local excess over liquid shifted by the difference of the saturations
+# A placement without the excess over ice: the local excess over liquid shifted by the difference of the saturations.
+# The threshold is ℂⁿᵘᶜˡ₂ qᵛ⁺ⁱ on the excess itself: the supersaturation is not formed, so the saturation is not a divisor.
 @inline function nucleating_fraction(::Val{false}, d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation)
-    threshold = ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, minimum_saturation) - qᵛ⁺ˡ + qᵛ⁺ⁱ
+    threshold = ℂⁿᵘᶜˡ₂ * qᵛ⁺ⁱ - qᵛ⁺ˡ + qᵛ⁺ⁱ
     P, _ = vapor_excess_exceedance(d, threshold)
     return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation), P)
 end
 
-# The fraction where the local vapor excess over ice, δⁱ(s) = sⁱ(s) - ξⁱˡ qᶜˡ(s), reaches the threshold
+# The fraction where the local vapor excess over ice, δⁱ(s) = sⁱ(s) - ξⁱˡ qᶜˡ(s), reaches the threshold ℂⁿᵘᶜˡ₂ qᵛ⁺ⁱ
+# (the supersaturation is not formed, so the saturation is not a divisor)
 @inline function nucleating_fraction(::Val{true}, d, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation)
-    P, _ = ice_excess_exceedance(d, ℂⁿᵘᶜˡ₂ * max(qᵛ⁺ⁱ, minimum_saturation))
+    P, _ = ice_excess_exceedance(d, ℂⁿᵘᶜˡ₂ * qᵛ⁺ⁱ)
     return ifelse(d.degenerate, nucleating_fraction(nothing, qᵛ, qᵛ⁺ˡ, qᵛ⁺ⁱ, ℂⁿᵘᶜˡ₂, minimum_saturation), P)
 end
 
@@ -719,74 +747,87 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Return the fraction `P` of the cell where the local vapor excess over ice ``δⁱ`` reaches `threshold` [kg kg⁻¹], and the
 mean of ``δⁱ`` over that part times `P`, at the placement `d` with the excess over ice of
 [`subgrid_process_distribution`](@ref). Within component ``i`` the excess of the
-distributed water over ice is ``sⁱ = bᵢ + kᵢ s``, ``bᵢ = mⁱᵢ - kᵢ mᵢ + rᵢ``, and the local vapor excess over ice is
-``δⁱ = sⁱ - ξⁱˡ qᶜˡ(s)``: ``bᵢ + kᵢ s - ξⁱˡ q⊖`` where ``s ≤ 0`` and ``bᵢ + (kᵢ - ξⁱˡ λ / ξˡ) s`` where ``s > 0``, so at a
+distributed water over ice is ``sⁱ = bᵢ + βⁱᵢ s``, ``bᵢ = mⁱᵢ - βⁱᵢ mᵢ + rᵢ``, and the local vapor excess over ice is
+``δⁱ = sⁱ - ξⁱˡ qᶜˡ(s)``: ``bᵢ + βⁱᵢ s - ξⁱˡ q⊖`` where ``s ≤ 0`` and ``bᵢ + (βⁱᵢ - ξⁱˡ λ / ξˡ) s`` where ``s > 0``, so at a
 given residual the set ``δⁱ ≥`` `threshold` is an interval of ``s`` in each part. At given ``s`` the local excess is
 Gaussian in the residual, independent of ``s``, with the exceedance ``Φ(z)`` and partial mean ``μ Φ(z) + σʳ φ(z)``,
-smooth in ``s`` within each part, so those are integrated over ``s`` with the 24-point Gauss-Legendre rule in each part
-(the exact form needs the bivariate normal distribution function); without a residual, over the exact intervals.
+smooth in ``s`` within each part, so in each part their mean over ``s`` is formed with the 24-point Gauss-Legendre rule
+and weighted by the probability of the part (the exact form needs the bivariate normal distribution function);
+without a residual, over the exact intervals.
 """
 @inline function ice_excess_exceedance(d, threshold)
     FT = typeof(threshold)
     c = threshold
-    qᵘ = d.subsaturated_liquid  # the cloud liquid of the subsaturated part, q⊖
+    qᶜˡ⁻ = d.subsaturated_liquid  # the cloud liquid of the subsaturated part, q⊖
     λⁱ = d.ξⁱˡ * d.λ / d.ξˡ
     R = convert(FT, 8)
-    terms = map(d.a, d.m, d.σ, d.mⁱ, d.k, d.σʳ) do aᵢ, mᵢ, σᵢ, mⁱᵢ, kᵢ, σʳᵢ
-        bᵢ = mⁱᵢ - kᵢ * mᵢ
+    terms = map(d.a, d.m, d.σ, d.mⁱ, d.βⁱ, d.σʳ) do aᵢ, mᵢ, σᵢ, mⁱᵢ, βⁱᵢ, σʳᵢ
+        bᵢ = mⁱᵢ - βⁱᵢ * mᵢ
         # At given s the local excess over ice is Gaussian in the residual: its exceedance and partial mean
         function conditional(s)
-            μ = bᵢ + ifelse(s > 0, (kᵢ - λⁱ) * s, kᵢ * s - d.ξⁱˡ * qᵘ)
-            z = (μ - c) / resolved_spread(σʳᵢ)
+            μ = bᵢ + ifelse(s > 0, (βⁱᵢ - λⁱ) * s, βⁱᵢ * s - d.ξⁱˡ * qᶜˡ⁻)
+            z = standard_score(μ, c, σʳᵢ)
             Φ = gaussian_upper_tail(-z)
             φ = gaussian_density(z)
             return (Φ, μ * Φ + σʳᵢ * φ)
         end
-        σ₊ = resolved_spread(σᵢ)
-        lower = gauss_legendre_interval(conditional, min(mᵢ - R * σ₊, zero(FT)), min(mᵢ + R * σ₊, zero(FT)), mᵢ, σ₊)
-        upper = gauss_legendre_interval(conditional, max(mᵢ - R * σ₊, zero(FT)), max(mᵢ + R * σ₊, zero(FT)), mᵢ, σ₊)
-        point = ifelse(σᵢ > 0, (lower[1] + upper[1], lower[2] + upper[2]), conditional(mᵢ))
+        # The subsaturated part s ≤ 0 and the saturated part s > 0, each its probability times the mean over it;
+        # with a zero spread of s both means are `conditional(mᵢ)`
+        z⁰ = standard_score(zero(FT), mᵢ, σᵢ)
+        z⁰ᶜ = clamp(z⁰, -R, R)
+        lower = gaussian_window_mean(conditional, -R, z⁰ᶜ, mᵢ, σᵢ)
+        upper = gaussian_window_mean(conditional, z⁰ᶜ, R, mᵢ, σᵢ)
+        P⁻ = gaussian_upper_tail(-z⁰)
+        P⁺ = gaussian_upper_tail(z⁰)
+        quadrature = (P⁻ * lower[1] + P⁺ * upper[1], P⁻ * lower[2] + P⁺ * upper[2])
         # Without a residual the conditional exceedance is a step, integrated exactly over intervals of s
-        exact = ice_excess_exceedance_without_residual(d, c, aᵢ, mᵢ, σᵢ, bᵢ, kᵢ, qᵘ, λⁱ)
+        exact = ice_excess_exceedance_without_residual(d, c, mᵢ, σᵢ, bᵢ, βⁱᵢ, qᶜˡ⁻, λⁱ)
         resolved = σʳᵢ > 0
-        (aᵢ * ifelse(resolved, point[1], exact[1]), aᵢ * ifelse(resolved, point[2], exact[2]))
+        (aᵢ * ifelse(resolved, quadrature[1], exact[1]), aᵢ * ifelse(resolved, quadrature[2], exact[2]))
     end
     return sum(map(first, terms)), sum(map(last, terms))
 end
 
-# ∫ₗᵒ^ʰⁱ f(s) N(s; m, σ²) ds by the 24-point Gauss-Legendre rule, for f returning a tuple: the one rule of the partial
-# moments, of the quadrature over the saturated part and of the exceedance of the excess over ice. Their intervals
-# are cut at 8σ from the mean, where the Gaussian is e⁻³² ≈ 10⁻¹⁴ of its peak and the mass beyond is 10⁻¹⁵: an
-# integration domain at the precision of the rule, not a bound on the integrand.
-@inline function gauss_legendre_interval(f, lo, hi, m, σ)
+# The mean of f(m + σ z) over the standard normal variable z between zˡ and zᵘ,
+#
+#   Σⱼ wⱼ φ(zⱼ) f(m + σ zⱼ) / Σⱼ wⱼ φ(zⱼ),
+#
+# by the 24-point Gauss-Legendre rule over [zˡ, zᵘ], for f returning a tuple: the one rule of the partial moments, of
+# the quadrature over the saturated part and of the exceedance of the excess over ice. The callers keep [zˡ, zᵘ]
+# within |z| ≤ 8, where the Gaussian is e⁻³² ≈ 10⁻¹⁴ of its peak and the mass beyond is 10⁻¹⁵: an integration domain
+# at the precision of the rule, not a bound on the integrand. The weights wⱼ φ(zⱼ) are positive there, so the mean is
+# bounded by the values of f at the nodes; over an empty interval it is f at that point, and with σ = 0 it is f(m).
+@inline function gaussian_window_mean(f, zˡ, zᵘ, m, σ)
     FT = typeof(m)
-    h = (hi - lo) / 2
-    c = (hi + lo) / 2
+    h = (zᵘ - zˡ) / 2
+    c = (zᵘ + zˡ) / 2
     terms = map(gauss_legendre_nodes, gauss_legendre_weights) do x, w
-        s⁺ = c + h * convert(FT, x)
-        s⁻ = c - h * convert(FT, x)
-        n⁺ = exp(-((s⁺ - m) / σ)^2 / 2)
-        n⁻ = exp(-((s⁻ - m) / σ)^2 / 2)
-        map((y⁺, y⁻) -> convert(FT, w) * (y⁺ * n⁺ + y⁻ * n⁻), f(s⁺), f(s⁻))
+        z⁺ = c + h * convert(FT, x)
+        z⁻ = c - h * convert(FT, x)
+        n⁺ = convert(FT, w) * exp(-z⁺^2 / 2)
+        n⁻ = convert(FT, w) * exp(-z⁻^2 / 2)
+        (n⁺ + n⁻, map((y⁺, y⁻) -> y⁺ * n⁺ + y⁻ * n⁻, f(m + σ * z⁺), f(m + σ * z⁻)))
     end
-    return map(x -> x * h / (sqrt(2 * FT(π)) * σ), reduce((x, y) -> x .+ y, terms))
+    weight = sum(map(first, terms))
+    sums = reduce((x, y) -> x .+ y, map(last, terms))
+    return map(x -> x / weight, sums)
 end
 
 # One component without a residual: the set δⁱ ≥ c is an interval of s in each part
-@inline function ice_excess_exceedance_without_residual(d, c, aᵢ, mᵢ, σᵢ, bᵢ, kᵢ, qᵘ, λⁱ)
+@inline function ice_excess_exceedance_without_residual(d, c, mᵢ, σᵢ, bᵢ, βⁱᵢ, qᶜˡ⁻, λⁱ)
     FT = typeof(c)
-    # Subsaturated part: kᵢ s ≥ Aᵢ with s ≤ 0
-        Aᵢ = c + d.ξⁱˡ * qᵘ - bᵢ
-        kₛ = ifelse(kᵢ > 0, kᵢ, one(FT))
-        P_sloped, M_sloped = gaussian_interval_moments(mᵢ, σᵢ, min(Aᵢ / kₛ, zero(FT)), zero(FT), true)
-        P_level, M_level = gaussian_lower_moments(mᵢ, σᵢ)
-        reached = Aᵢ <= 0
-        P⁻ = ifelse(kᵢ > 0, P_sloped, ifelse(reached, P_level, zero(FT)))
-        M⁻ = ifelse(kᵢ > 0, M_sloped, ifelse(reached, M_level, zero(FT)))
-        # Saturated part: rᵢ s ≥ Bᵢ with s > 0
-        rᵢ = kᵢ - λⁱ
-        P⁺, M⁺ = positive_linear_exceedance(mᵢ, σᵢ, rᵢ, c - bᵢ)
-    return (P⁻ + P⁺, (bᵢ - d.ξⁱˡ * qᵘ) * P⁻ + kᵢ * M⁻ + bᵢ * P⁺ + rᵢ * M⁺)
+    # Subsaturated part: βⁱᵢ s ≥ Aᵢ with s ≤ 0
+    Aᵢ = c + d.ξⁱˡ * qᶜˡ⁻ - bᵢ
+    βⁱₛ = ifelse(βⁱᵢ > 0, βⁱᵢ, one(FT))
+    P_sloped, M_sloped = gaussian_interval_moments(mᵢ, σᵢ, min(Aᵢ / βⁱₛ, zero(FT)), zero(FT), true)
+    P_level, M_level = gaussian_lower_moments(mᵢ, σᵢ)
+    reached = Aᵢ <= 0
+    P⁻ = ifelse(βⁱᵢ > 0, P_sloped, ifelse(reached, P_level, zero(FT)))
+    M⁻ = ifelse(βⁱᵢ > 0, M_sloped, ifelse(reached, M_level, zero(FT)))
+    # Saturated part: rᵢ s ≥ c - bᵢ with s > 0
+    rᵢ = βⁱᵢ - λⁱ
+    P⁺, M⁺ = positive_linear_exceedance(mᵢ, σᵢ, rᵢ, c - bᵢ)
+    return (P⁻ + P⁺, (bᵢ - d.ξⁱˡ * qᶜˡ⁻) * P⁻ + βⁱᵢ * M⁻ + bᵢ * P⁺ + rᵢ * M⁺)
 end
 
 """
@@ -807,6 +848,7 @@ the cell mean of the positive part of the local excess shifted by `excess - grid
 @inline function available_ice_excess(::Val{true}, d, grid_excess, excess)
     shift = excess - grid_excess
     P, M = ice_excess_exceedance(d, -shift)
+    # (Round-off guard: M + shift P is the cell mean of the local excess over the part where it is not negative.)
     return ifelse(d.degenerate, max(0, excess), max(0, M + shift * P))
 end
 
@@ -836,7 +878,7 @@ sum to the grid-mean excesses ``qᵛ - qᵛ⁺ˡ`` and ``qᵛ - qᵛ⁺ⁱ``.
     FT = typeof(d.qᶜˡ)
     q̄ = d.qᶜˡ
     ψ = d.subsaturated_share
-    qᵘ = d.subsaturated_liquid  # the cloud liquid of the subsaturated part, q⊖
+    qᶜˡ⁻ = d.subsaturated_liquid  # the cloud liquid of the subsaturated part, q⊖
     sⁱ⁺, sⁱ⁻ = ice_excess_part_sums(d)
     s⁺ = d.positive_excess
     saturated_rate = safe_ratio(positive_power(d.χ, convert(FT, 2//3)) *
@@ -844,6 +886,6 @@ sum to the grid-mean excesses ``qᵛ - qᵛ⁺ˡ`` and ``qᵛ - qᵛ⁺ⁱ``.
                                 mixture_partial_moment(d, convert(FT, 1//3), zero(FT)),
                                 positive_power(d.f⁺, convert(FT, 2//3)), zero(FT))
     saturated = (; P = d.f⁺, Pδ = (1 - d.λ) * s⁺, Pδⁱ = sⁱ⁺ - d.ξⁱˡ * d.χ * q̄, Pr = saturated_rate)
-    subsaturated = (; P = d.f⁻, Pδ = d.negative_excess - d.ξˡ * d.f⁻ * qᵘ, Pδⁱ = sⁱ⁻ - d.ξⁱˡ * d.f⁻ * qᵘ, Pr = d.f⁻ * ψ)
+    subsaturated = (; P = d.f⁻, Pδ = d.negative_excess - d.ξˡ * d.f⁻ * qᶜˡ⁻, Pδⁱ = sⁱ⁻ - d.ξⁱˡ * d.f⁻ * qᶜˡ⁻, Pr = d.f⁻ * ψ)
     return saturated, subsaturated
 end

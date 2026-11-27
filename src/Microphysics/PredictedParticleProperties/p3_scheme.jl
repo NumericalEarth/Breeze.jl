@@ -162,8 +162,12 @@ condenses its own cloud liquid; a turbulence closure supplies at most statistics
   see [`SubgridCondensation`](@ref Breeze.Microphysics.PredictedParticleProperties.SubgridCondensation).
 
 Here ``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ`` is the phase relaxation rate of the cloud droplets
-(`AtmosphereModels.phase_relaxation_rate`). Rain, ice, activation and collection keep their
-grid-mean form.
+(`AtmosphereModels.phase_relaxation_rate`). With the default
+`processes = CloudCondensationOnly()` of `SubgridCondensation`, rain, ice, activation and
+collection keep their grid-mean form; with `processes = AllProcesses()` the distribution also
+enters activation, the deposition nucleation of ice, autoconversion, accretion, the vapor exchange
+of the dry ice and the cap on the vapor sinks of ice (see
+[`AllProcesses`](@ref Breeze.Microphysics.PredictedParticleProperties.AllProcesses)).
 
 The `cloud_relaxation` keyword selects ``ωˡ``:
 

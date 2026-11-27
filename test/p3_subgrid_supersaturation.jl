@@ -67,7 +67,7 @@ subgrid_rates(σ, qᵛ, qᶜˡ, constants; p3 = subgrid_p3, kw...) =
     @test subgrid_supersaturation_statistics(1, 1, 1, nothing, GridMeanCondensation(), nothing) === nothing
     @test subgrid_supersaturation_fields(GridMeanCondensation(), nothing) === nothing
     @test cloud_condensation_correlation(GridMeanCondensation(), gaussian(1e-3), 1e-2, 1.1e-2, 0.0,
-                                         285.0, 9e4, 1.1, nothing) === nothing
+                                         nothing, 285.0, 9e4, 1.1, nothing) === nothing
     @test PPP.cloud_vapor_excess(nothing, -0.0) === -0.0
     @test PPP.cloud_vapor_excess(1e-4, -3e-4) ≈ -2e-4
 
@@ -118,7 +118,7 @@ end
     for σ in (3e-3, 6e-3, 2e-2)
         rates = subgrid_rates(σ, qᵛ, qᶜˡ, constants; T, qʳ)
         Γ = cloud_condensation_correlation(subgrid_p3.condensation, gaussian(σ), qᵛ, qᵛ⁺ˡ, qᶜˡ,
-                                           T, 9e4, 1.0, constants)
+                                           MoistureMassFractions(qᵛ, qᶜˡ + qʳ, 0.0), T, 9e4, 1.0, constants)
         excess = qᵛ - qᵛ⁺ˡ + Γ
         @test 0 < (rates.condensation + rates.ccn_activation_mass) * τ ≤ excess * (1 + 1e-12)
     end
@@ -333,24 +333,25 @@ end
 
 @testset "P3 subgrid supersaturation: a statistics source supplies Γ" begin
     constants = ThermodynamicConstants(Float64)
-    T, P, ρ = 285.0, 9e4, 1.0
+    T, p, ρ = 285.0, 9e4, 1.0
     qᵛ⁺ = cell_saturation(9.5e-3, 0.0, constants; T)
     qᵛ, qᶜˡ = qᵛ⁺ - 3e-4, 2e-4
+    q = MoistureMassFractions(qᵛ, qᶜˡ, 0.0)
     qᵛ⁺ˡ = cell_saturation(qᵛ, qᶜˡ, constants; T)
-    ξˡ = PPP.p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+    ξˡ = PPP.p3_liquid_psychrometric_correction(qᵛ⁺ˡ, q, T, constants)
     s̄ = qᵛ - qᵛ⁺ˡ + ξˡ * qᶜˡ
 
     # The Gaussian default is the truncation about s̄, bitwise
     for σ in (0.0, 1e-4, 3e-3)
         g = gaussian(σ)
-        @test cloud_condensation_correlation(SubgridCondensation(PrescribedStatistics(σ)), g, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) ===
+        @test cloud_condensation_correlation(SubgridCondensation(PrescribedStatistics(σ)), g, qᵛ, qᵛ⁺ˡ, qᶜˡ, q, T, p, ρ, constants) ===
               PPP.subgrid_vapor_excess_correlation(g, s̄)
     end
 
     # The supplied Γ reaches the condensation rate
     h = 3e-3
     distribution = AtmosphereModels.supersaturation_statistics(UniformStatistics(h), 1, 1, 1, nothing, nothing, nothing, nothing)
-    Γᵘ = cloud_condensation_correlation(SubgridCondensation(UniformStatistics(h)), distribution, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants)
+    Γᵘ = cloud_condensation_correlation(SubgridCondensation(UniformStatistics(h)), distribution, qᵛ, qᵛ⁺ˡ, qᶜˡ, q, T, p, ρ, constants)
     @test Γᵘ ≈ (h - s̄)^2 / 4h
     @test Γᵘ != PPP.subgrid_vapor_excess_correlation(distribution, s̄)
     uniform = uniform_rates(h, qᵛ, qᶜˡ, constants; T)
@@ -392,12 +393,23 @@ end
     Δt = 1e4  # ωˡ Δt ≫ 1: one stage reaches the target
     stage = PPP.LiquidRelaxationStage(Δt, qᶜˡ, 2e8, true)
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, nothing, T, 0.0, 0.0, distribution, stage)
-    Γ = cloud_condensation_correlation(p3.condensation, distribution, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, 9e4, ρ, constants)
-    ξˡ = PPP.p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+    q = 𝒰.moisture_mass_fractions
+    Γ = cloud_condensation_correlation(p3.condensation, distribution, qᵛ, qᵛ⁺ˡ, qᶜˡ, q, T, 9e4, ρ, constants)
+    # Γ is formed about the saturation excess with the psychrometric correction of the subgrid distribution, which
+    # divides the latent heating by the mixture heat capacity: s̄ + Γ = ⟨s⁺⟩
+    ξˡ = PPP.p3_liquid_psychrometric_correction(qᵛ⁺ˡ, q, T, constants)
     s̄ = qᵛ - qᵛ⁺ˡ + ξˡ * qᶜˡ
-    target = PPP.liquid_equilibrium_condensate(Γ, s̄, ξˡ)
-    @test target ≈ (s̄ + h)^2 / (4h) / ξˡ
+    positive_excess = (s̄ + h)^2 / (4h)
+    @test s̄ + Γ ≈ positive_excess
+    # The implicit relaxation forms its target with the psychrometric correction of the coupled rates, which divides
+    # by the heat capacity of dry air
+    ξᶜ = PPP.liquid_psychrometric_correction(constants, PPP.vaporization_latent_heat(constants, T), qᵛ⁺ˡ, T)
+    target = PPP.liquid_equilibrium_condensate(Γ, qᵛ - qᵛ⁺ˡ + ξᶜ * qᶜˡ, ξᶜ)
     @test qᶜˡ + Δt * (rates.condensation + rates.ccn_activation_mass) ≈ target rtol = 1e-3
+    # That target is (⟨s⁺⟩ + (ξᶜ - ξˡ) qᶜˡ) / ξᶜ: it departs from the equilibrium condensate ⟨s⁺⟩ / ξˡ of the
+    # distribution by the relative difference of the two corrections times |ξˡ qᶜˡ / ⟨s⁺⟩ - 1|
+    @test ξᶜ != ξˡ
+    @test target ≈ positive_excess / ξˡ rtol = abs(ξᶜ - ξˡ) / ξᶜ * abs(ξˡ * qᶜˡ / positive_excess - 1) * (1 + 1e-6)
 end
 
 #####

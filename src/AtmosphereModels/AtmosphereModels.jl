@@ -51,11 +51,11 @@ export
     # Subgrid supersaturation statistics and the phase relaxation rate
     AbstractSupersaturationStatistics,
     PrescribedStatistics,
-    PrescribedPlumeStatistics,
+    PrescribedMixtureStatistics,
     supersaturation_statistics,
     supersaturation_statistics_model_fields,
     saturated_fraction,
-    resolved_spread,
+    standard_score,
     phase_relaxation_rate,
     phase_relaxation_rates,
     instantaneous_phase_relaxation,

@@ -176,9 +176,9 @@ end
 @inline cloud_phase_relaxation_rate(::CondensationTimescaleRelaxation, p3, coefficients) =
     1 / convert(typeof(coefficients.ξˡ), p3.cloud.condensation_timescale)
 
-# The phase relaxation rate ωˡ = εˡ / ξˡ of the cloud liquid of a cell, as the coupled solver forms it
-@inline function p3_cloud_phase_relaxation_rate(p3, qᵛ⁺ˡ, qᶜˡ, T, ρ, transport, cloud, constants)
-    ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+# The phase relaxation rate ωˡ = εˡ / ξˡ of the cloud liquid of a cell, with the relaxation coefficient εˡ of the
+# coupled solver and the psychrometric correction ξˡ of the subgrid distribution
+@inline function p3_cloud_phase_relaxation_rate(p3, ξˡ, qᶜˡ, ρ, transport, cloud)
     cloud_relaxation = cloud_relaxation_coefficient(p3.cloud_relaxation, p3, ξˡ, qᶜˡ, ρ, transport.Dᵛ,
                                                     cloud.μᶜˡ, cloud.λᶜˡ, cloud.nᶜˡ)
     return cloud_phase_relaxation_rate(p3.cloud_relaxation, p3, (; cloud_relaxation, ξˡ))
@@ -344,7 +344,7 @@ cloud/precipitation fraction framework is handled separately.
     # With the subgrid distribution of every process, the dry ice exchanges vapor in each part of the cell at the
     # local vapor excesses and against the cloud liquid of that part
     raw_ice_growth = subgrid_ice_growth(distribution, raw_ice_growth, coefficients, external_driver,
-                                        rain_relaxation + coating_relaxation, τ, FT(floors.rate_scale))
+                                        rain_relaxation + coating_relaxation, τ)
     # Liquid-on-ice coating uses `ξˡ` (like cloud) since the surface condenses
     # vapor as liquid; no Bergeron contribution because the surface is already
     # at liquid saturation.
@@ -400,10 +400,12 @@ end
 # grid mean, at the local vapor excess over liquid δ, the local excess over ice δⁱ (whose difference Δ = δⁱ - δ replaces
 # qᵛ⁺ˡ - qᵛ⁺ⁱ, also in the Bergeron driver) and the local total relaxation ε, whose cloud liquid relaxes at r εᶜˡ:
 #
-#   G = (εⁱ / ε) [D (1 - T / ε) + δ T] / ξⁱ + Δ εⁱ / ξⁱ,   D = D̄ - Δ c εⁱ,   T = (1 - e^{-ε τ}) / τ.
+#   G = (εⁱ / ε) [D (1 - ϖ / ε) + δ ϖ] / ξⁱ + Δ εⁱ / ξⁱ,   D = D̄ - Δ c εⁱ,   ϖ = (1 - e^{-ε τ}) / τ,
+#
+# with ϖ the transient response over the time scale τ.
 #
 # In the saturated part s > 0 the cloud liquid is the placed equilibrium condensate, so δ = (1 - λ) s,
-# δⁱ = bᵢ + (kᵢ - ξⁱˡ λ / ξˡ) s and r(s) = (χ / f⁺)^{2/3} (χ s / ⟨s⁺⟩)^{1/3} (ε ∝ Nᶜˡ^{2/3} qᶜˡ^{1/3} at a fixed droplet
+# δⁱ = bᵢ + (βⁱᵢ - ξⁱˡ λ / ξˡ) s and r(s) = (χ / f⁺)^{2/3} (χ s / ⟨s⁺⟩)^{1/3} (ε ∝ Nᶜˡ^{2/3} qᶜˡ^{1/3} at a fixed droplet
 # shape): G is integrated over s with the Gauss-Legendre rule of the placement. G is linear in δⁱ at given ε, so the
 # residual of the excess over ice, independent of s, averages out exactly. In the subsaturated part the cloud liquid
 # is uniform, r = ψ, so G is evaluated at the part's moments (`ice_exchange_parts`), weighted by its fraction. With
@@ -414,13 +416,20 @@ end
 # `uniform_relaxation` is the relaxation of the rain and the liquid coating, which fill the cell.
 @inline subgrid_ice_growth(::Nothing, grid_mean, args...) = grid_mean
 
-@inline function local_ice_growth(εⁱ, c, ξⁱ, ε, τ, external_driver, δ, Δ)
-    T = (1 - exp(-ε * τ)) / τ
-    D = external_driver - Δ * c * εⁱ
-    return (εⁱ / ε) * (D * (1 - T / ε) + δ * T) / ξⁱ + Δ * εⁱ / ξⁱ
+# G at one point. Its limit without relaxation, ε → 0, is taken exactly and no rate is a divisor there: the ice is
+# part of the total (εⁱ c ≤ ε), so its share εⁱ / ε is then zero, and ϖ / ε → 1 (ϖ is formed with `expm1`, so that
+# 1 - ϖ / ε vanishes with ε τ instead of rounding to 1).
+@inline function local_ice_growth(ice_relaxation, ice_liquid_coupling, ξⁱ, total_relaxation, τ, external_driver,
+                                  vapor_excess, excess_difference)
+    transient_response = -expm1(-total_relaxation * τ) / τ
+    share = safe_ratio(ice_relaxation, total_relaxation, zero(total_relaxation))
+    relative_transient_response = safe_ratio(transient_response, total_relaxation, one(total_relaxation))
+    driver = external_driver - excess_difference * ice_liquid_coupling * ice_relaxation
+    return share * (driver * (1 - relative_transient_response) + vapor_excess * transient_response) / ξⁱ +
+           excess_difference * ice_relaxation / ξⁱ
 end
 
-@inline function subgrid_ice_growth(d, grid_mean, coefficients, external_driver, uniform_relaxation, τ, rate_scale)
+@inline function subgrid_ice_growth(d, grid_mean, coefficients, external_driver, uniform_relaxation, τ)
     FT = typeof(grid_mean)
     scale⁺, scale⁻ = ice_part_scales(d)
     εⁱ⁺ = coefficients.dry_ice_relaxation * scale⁺
@@ -435,17 +444,17 @@ end
                     positive_power(safe_ratio(d.χ, s⁺, zero(FT)), convert(FT, 1//3))
     λⁱ = d.ξⁱˡ * d.λ / d.ξˡ
     saturated = positive_part_quadrature(d) do s, i
-        @inbounds bᵢ = d.mⁱ[i] - d.k[i] * d.m[i]
-        @inbounds kᵢ = d.k[i]
-        ε = max(uniform_relaxation + εⁱ⁺ * c + εᶜˡ * droplet_scale * positive_power(s, convert(FT, 1//3)), rate_scale)
+        @inbounds βⁱᵢ = d.βⁱ[i]
+        @inbounds bᵢ = d.mⁱ[i] - βⁱᵢ * d.m[i]
+        ε = uniform_relaxation + εⁱ⁺ * c + εᶜˡ * droplet_scale * positive_power(s, convert(FT, 1//3))
         δ = (1 - d.λ) * s
-        δⁱ = bᵢ + (kᵢ - λⁱ) * s
+        δⁱ = bᵢ + (βⁱᵢ - λⁱ) * s
         local_ice_growth(εⁱ⁺, c, ξⁱ, ε, τ, external_driver, δ, δⁱ - δ)
     end
 
     # The subsaturated part, at its moments
     _, part = ice_exchange_parts(d)
-    ε⁻ = max(uniform_relaxation + εⁱ⁻ * c + εᶜˡ * d.subsaturated_share, rate_scale)
+    ε⁻ = uniform_relaxation + εⁱ⁻ * c + εᶜˡ * d.subsaturated_share
     subsaturated = local_ice_growth(εⁱ⁻, c, ξⁱ, ε⁻, τ, part.P * external_driver, part.Pδ, part.Pδⁱ - part.Pδ)
 
     return ifelse(d.degenerate, grid_mean, saturated + subsaturated)
@@ -465,20 +474,23 @@ end
 # drops. The phase relaxation rates are the coefficients of the vapor excess in the condensation
 # rates:
 #
-#   ωˡ = εˡ / ξˡ,   ωⁱ = ℂᵈⁱᶠᶠ₁ εⁱ / ξⁱ + εʷⁱ / ξˡ,   ωᶜ = ωˡ + ωⁱ,
+#   ωˡ = εˡ / ξˡ,   ωᵈⁱ = ℂᵈⁱᶠᶠ₁ εⁱ / ξⁱ,   ωʷⁱ = εʷⁱ / ξˡ,   ωⁱ = ωᵈⁱ + ωʷⁱ,   ωᶜ = ωˡ + ωⁱ,
 #
 # with εⁱ the dry-ice and εʷⁱ the liquid-coated-ice coefficient (one of them is zero) and ℂᵈⁱᶠᶠ₁
-# the deposition calibration factor. Rain is not condensate that the subgrid condensation acts
+# the deposition calibration factor. With `CondensationTimescaleRelaxation` εˡ = ξˡ / τ, so that
+# ωˡ = 1 / τ with τ the condensation timescale of the cloud droplets. Rain is not condensate that the subgrid condensation acts
 # on and is not included. The same εˡ and ξˡ drive `coupled_saturation_adjustment_rates`.
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return the phase relaxation rates `(; ωˡ, ωⁱ, ωᶜ)` [s⁻¹] of P3 at density `ρ`, microphysical state
-`ℳ` and thermodynamic state `𝒰`: the coefficients of the vapor excess in the condensation rate
-of cloud liquid (``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ``) and the vapor exchange of ice (``ωⁱ``), and their sum
-``ωᶜ = ωˡ + ωⁱ``; and the two parts of ``ωⁱ``, the deposition on dry ice ``ωᵈⁱ`` and the condensation on the
-liquid coating of ice ``ωʷⁱ``.
+Return the phase relaxation rates `(; ωˡ, ωⁱ, ωᶜ, ωʷⁱ, ωᵈⁱ)` [s⁻¹] of P3 at density `ρ`, microphysical state
+`ℳ` and thermodynamic state `𝒰`, the coefficients of the vapor excess in the rates of vapor exchange:
+
+- `ωˡ`, of the condensation of cloud liquid: ``4π Dᵛ Nᶜˡ r̄ / ξˡ`` with `DiffusionalGrowthRelaxation`, and
+  ``1 / τ``, ``τ`` the condensation timescale of the cloud droplets, with `CondensationTimescaleRelaxation`;
+- `ωᵈⁱ`, of the deposition on dry ice, and `ωʷⁱ`, of the condensation on the liquid coating of ice;
+- `ωⁱ`, of the ice, ``ωᵈⁱ + ωʷⁱ``, and `ωᶜ`, of all of the condensate, ``ωˡ + ωⁱ``.
 """
 @inline function p3_phase_relaxation_rates(p3, ρ, ℳ, 𝒰, constants)
     T = temperature(𝒰, constants)

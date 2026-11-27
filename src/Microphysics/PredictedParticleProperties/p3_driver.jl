@@ -672,13 +672,13 @@ end
     return p3_phase_relaxation_rates(p3, ρ, ℳ, 𝒰, constants).ωᶜ
 end
 
-# The distributed condensate of P3 is its cloud liquid, ωˡ; outside it, filling the cell, its dry ice condenses on ice,
-# ωⁱ, and the liquid coating of its ice on liquid, ωʷⁱ.
+# The distributed condensate of P3 is its cloud liquid, ωˡ; outside it, filling the cell, vapor deposits on its dry ice,
+# ωᵈⁱ, and condenses on the liquid coating of its ice, ωʷⁱ.
 @inline function AM.phase_relaxation_rates(i, j, k, grid, p3::P3, μ, 𝒰, constants)
     ρ = density(𝒰, constants)
     ℳ = p3_relaxation_microphysical_state(i, j, k, p3, μ, ρ)
     ω = p3_phase_relaxation_rates(p3, ρ, ℳ, 𝒰, constants)
-    return (; ωˡ = ω.ωˡ, ωⁱ = ω.ωᵈⁱ, ωʷⁱ = ω.ωʷⁱ)
+    return (; ωˡ = ω.ωˡ, ωᵈⁱ = ω.ωᵈⁱ, ωʷⁱ = ω.ωʷⁱ)
 end
 
 # The microphysical state that the phase relaxation rate reads, at density ρ (no velocities).

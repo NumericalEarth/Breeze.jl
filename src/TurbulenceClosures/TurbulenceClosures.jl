@@ -81,7 +81,7 @@ using ..AtmosphereModels: AtmosphereModels
 using ..BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions, DefaultGustiness, TKEGustiness
 
 using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, standard_pressure, total_density, thermodynamic_state_density,
-                              precipitating_mass_fraction
+                              precipitating_mass_fraction, standard_score
 using Breeze.AtmosphereModels.Diagnostics: microphysics_phase_equilibrium, condensate_phase_equilibrium
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics, SubgridCondensation
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturation_specific_humidity,
