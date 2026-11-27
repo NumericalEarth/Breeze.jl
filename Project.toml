@@ -34,6 +34,9 @@ BreezeNumericalRadiationExt = "NumericalRadiation"
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 BreezeReactantExt = "Reactant"
 
+[sources]
+Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl", rev = "main"}
+
 [compat]
 Adapt = "4.3.0"
 Artifacts = "<0.0.1, 1"
