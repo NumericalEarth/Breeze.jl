@@ -242,11 +242,7 @@ end
     return (wˡᵒʷ * Bˡᵒʷ + wᵘᵖ * Bᵘᵖ) / ρΔz, (wˡᵒʷ * Pˡᵒʷ + wᵘᵖ * Pᵘᵖ) / ρΔz, (wˡᵒʷ * Lˡᵒʷ + wᵘᵖ * Lᵘᵖ) / ρΔz
 end
 
-# The latent part of the buoyancy production at a face, Kᶜ ΔN²ᴸ (see `_latent_corrected_stability!`), or with a
-# `LiquidFluxVarianceRelation` that of its flux of liquid (liquid_flux_variance_relation.jl)
-@inline latent_conversionᶜᶜᶠ(i, j, k, grid, cl, Kᶜ) = latent_conversionᶜᶜᶠ(has_field(cl, Val(:Bˡᶠ)), i, j, k, grid, cl, Kᶜ)
-@inline latent_conversionᶜᶜᶠ(::Val{true}, i, j, k, grid, cl, Kᶜ) = @inbounds Kᶜ[i, j, k] * cl.Λᴸ[i, j, k] + cl.Bˡᶠ[i, j, k]
-@inline latent_conversionᶜᶜᶠ(::Val{false}, i, j, k, grid, cl, Kᶜ) = @inbounds Kᶜ[i, j, k] * cl.ΔN²ᴸ[i, j, k]
+@inline latent_conversionᶜᶜᶠ(i, j, k, grid, cl, Kᶜ) = @inbounds Kᶜ[i, j, k] * cl.ΔN²ᴸ[i, j, k]
 
 # The conversions of the surface fluxes within the bottom half-cell: the work of the surface
 # stress on the lowest level, -u₁ 𝒯ˣ - v₁ 𝒯ʸ (𝒯 the upward flux of ρu, ρv), and the dynamic
@@ -274,8 +270,7 @@ end
     Bˢ, Pˢ = surface_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, u, v, bottom_bcs, bc_args)
     # The conversions of the budget fluxes (zero without them); their latent parts are drawn from the internal energy with Bᴸ
     Gᑫ = store_heating_flux_conversions!(cl, i, j, k, grid, s.ρ)
-    Gᵇ = store_budget_flux_conversions!(cl, i, j, k, grid, s.ρ)
-    B = B + Bˢ + Bᴸ + Gᑫ + Gᵇ
+    B = B + Bˢ + Bᴸ + Gᑫ
     @inbounds begin
         cl.B[i, j, k] = B
         cl.Bᴸ[i, j, k] = Bᴸ
@@ -324,7 +319,6 @@ function compute_applied_flux_conversions!(fields::SubgridCloudFields{<:AppliedF
     cl = fields.cloud
     s = applied_flux_state(model)
     u, v = model.velocities.u, model.velocities.v
-    compute_liquid_flux_conversion!(fields, closure, model, s)
     launch!(arch, grid, :xyz, _compute_applied_flux_conversions!, cl, grid, s, closure_fields.Kᶜ,
             closure_fields.Kᵘ, u, v, tracers[TKE_NAME], applied_flux_bottom_bcs(model), boundary_condition_args(model))
     return nothing
@@ -422,9 +416,7 @@ end
         bᶜᵛ, bⁱᵛ, bˡᵛ = latent_buoyancy_derivativesᶜᶜᶠ(i, j, k, cl)
         condensate = bᶜᵛ * (cl.η[i, j, k] * ∂z_qᶜ - cl.aᴺ[i, j, k] * ∂z_s)
         outside = - bⁱᵛ * cl.ηⁱ[i, j, k] * ∂z_sⁱ - bˡᵛ * cl.ηʷⁱ[i, j, k] * ∂z_s
-        # with a `LiquidFluxVarianceRelation` the condensate part is that of its flux of liquid, less the applied flux
-        return Kᶜ[i, j, k] * (solved_condensate_conversion(cl, condensate, bᶜᵛ * ∂z_qᶜ) + outside) +
-               liquid_flux_buoyancy(cl, i, j, k)
+        return Kᶜ[i, j, k] * (condensate + outside)
     end
 end
 
@@ -471,12 +463,12 @@ end
 # The buoyancy production in the stage tendency: the positive part of all of it, or, where the conversions of the solved
 # state are given before the TKE solve, of the stage-state conversions of the surface fluxes and of the heating budget flux
 @inline explicit_buoyancy_conversion(cl, i, j, k, B, injected) =
-    @inbounds ifelse(injected, max(cl.Bˢ[i, j, k] + budget_flux_conversions(cl, i, j, k), zero(B)), max(B, zero(B)))
+    @inbounds ifelse(injected, max(cl.Bˢ[i, j, k] + heating_flux_conversion(cl, i, j, k), zero(B)), max(B, zero(B)))
 
 # The stage-state conversions the correction after the solves counts as converted: with the conversions of the solved
 # state given before the TKE solve, the latent part is that of the solved state, not of the stage
 @inline stage_state_conversion(cl, i, j, k, injected) =
-    @inbounds cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + budget_flux_conversions(cl, i, j, k) + ifelse(injected, zero(cl.Bᴸ[i, j, k]), cl.Bᴸ[i, j, k])
+    @inbounds cl.Pˢ[i, j, k] + cl.Bˢ[i, j, k] + heating_flux_conversion(cl, i, j, k) + ifelse(injected, zero(cl.Bᴸ[i, j, k]), cl.Bᴸ[i, j, k])
 
 #####
 ##### The floor of e in the buoyancy sink rate
@@ -1228,11 +1220,10 @@ end
         cl.ηʷⁱ[i, j, k] = ifelse(interior, L.ηʷⁱ, zero(FT))
         cl.ΔN²ᴸ[i, j, k] = ifelse(interior, L.ΔN²ᴸ, zero(FT))
     end
-    store_outside_latent_correction!(cl, i, j, k, interior, L)
     return nothing
 end
 
-@kernel function _latent_corrected_stability!(N², grid, closure, closure_fields, velocities, s, e, ω)
+@kernel function _latent_corrected_stability!(N², grid, closure, closure_fields, velocities, s, e)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     cl = closure_fields.subgrid_cloud.cloud
@@ -1250,18 +1241,18 @@ end
         N²⁰ = N²[i, j, k]
         N²⁺ = condensate_flux_stratification(closure_ij.static_stability.fraction.stratification, N²ᵉ, N²ᵇ, L.bᶜᵛ,
                                              cl.qˡ[i, j, kₛ] - cl.qˡ[i, j, kₛ-1], L.Δqᶜ, L.Δz, N²⁰)
-        N²[i, j, k] = ifelse(interior, relax_stability(N²⁰, N²⁺, ω), N²⁰)
+        N²[i, j, k] = ifelse(interior, N²⁺, N²⁰)
     end
 end
 
 # The pass of the stability coupling with the energetics of the applied fluxes: the latent-corrected N², then the
 # mixing length and the diffusivities from it
 function applied_flux_stability_pass!(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, closure, model, tracers,
-                                        parameters, ω = nothing)
+                                      parameters)
     grid = model.grid
     arch = grid.architecture
     launch!(arch, grid, parameters, _latent_corrected_stability!, closure_fields.N², grid, closure, closure_fields,
-            model.velocities, applied_flux_state(model), tracers[TKE_NAME], ω)
+            model.velocities, applied_flux_state(model), tracers[TKE_NAME])
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     return nothing
 end

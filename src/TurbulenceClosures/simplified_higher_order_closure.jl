@@ -157,8 +157,7 @@ SimplifiedHigherOrderClosure{VerticallyImplicitTimeDiscretization}
 │   ├── stratification_number_bound: RationalSaturatedStratificationNumber{Float64}
 │   ├── skewness: PolynomialSaturatedSkewness{Float64}
 │   └── assumed_pdf: DoubleGaussianPDF{Float64}
-├── minimum_tke: 1.0e-6
-└── solver: SinglePass()
+└── minimum_tke: 1.0e-6
 ```
 """
 function SimplifiedHigherOrderClosure(time_discretization = VerticallyImplicitTimeDiscretization(),
@@ -204,10 +203,7 @@ function Base.show(io::IO, closure::SimplifiedHigherOrderClosure)
               "│   ├── third_moment: ", summary(d.third_moment), '\n',
               "│   ├── stratification_number_bound: ", summary(d.stratification_number_bound), '\n',
               "│   ├── skewness: ", summary(d.skewness), '\n',
-              "│   ", isnothing(d.liquid_flux) ? "└" : "├", "── assumed_pdf: ", summary(d.assumed_pdf), '\n')
-    isnothing(d.liquid_flux) || print(io, "│   └── liquid_flux: ", summary(d.liquid_flux), '\n')
+              "│   └── assumed_pdf: ", summary(d.assumed_pdf), '\n')
     isnothing(closure.heating_budget_flux) || print(io, "├── heating_budget_flux: ", summary(closure.heating_budget_flux), '\n')
-    isnothing(closure.total_water_budget_flux) || print(io, "├── total_water_budget_flux: ", summary(closure.total_water_budget_flux), '\n')
-    print(io, "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
-              "└── solver: ", summary(closure.solver))
+    print(io, "└── minimum_tke: ", prettysummary(closure.minimum_tke))
 end

@@ -514,12 +514,8 @@ the static stability with the saturated fraction of the distribution.
 `heating_budget_flux` is `nothing` by default. A [`HeatingBudgetFlux`](@ref) adds a flux of θˡⁱ that
 carries diabatic heating (radiation, ...) from where it acts to where the turbulence is, and its
 energy conversion ``G`` to the TKE equation, ``P + B + G - ε``.
-
-`total_water_budget_flux` is `nothing` by default. A [`TotalWaterBudgetFlux`](@ref) adds a flux of qᵗ, alongside the
-flux down the gradient, that carries every non-turbulent tendency of the water (forcing, microphysics, sedimentation,
-the surface flux) from where it acts to where the turbulence is, and its energy conversion to the TKE equation.
 """
-struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV, HB, SB} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
+struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, HB} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
     mixing_length :: ML                   # the primary mixing length ℓ
     stability_functions :: SF             # 𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ
     static_stability :: SS                # how N² is diagnosed
@@ -527,9 +523,7 @@ struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV, HB, SB} <: Abst
     shear :: SH                           # the squared shear S² and its floor S²ᵐⁱⁿ in Ri = N² / (S² + S²ᵐⁱⁿ)
     negative_tke_damping_time_scale :: FT # time scale on which negative e is damped, s
     subgrid_distribution :: SD            # `nothing`, or a `DoubleGaussian`
-    solver :: SV                          # solver of the coupling of N² and the saturated fraction
     heating_budget_flux :: HB             # `nothing`, or a `HeatingBudgetFlux`
-    total_water_budget_flux :: SB              # `nothing`, or a `TotalWaterBudgetFlux`
 end
 
 const TKEClosureArray{TD} = AbstractArray{<:TKEBasedTurbulenceClosure{TD}} where TD
@@ -542,9 +536,7 @@ function Adapt.adapt_structure(to, closure::TKEBasedTurbulenceClosure{TD}) where
                                          adapt(to, closure.shear),
                                          adapt(to, closure.negative_tke_damping_time_scale),
                                          adapt(to, closure.subgrid_distribution),
-                                         closure.solver,
-                                         adapt(to, closure.heating_budget_flux),
-                                         adapt(to, closure.total_water_budget_flux))
+                                         adapt(to, closure.heating_budget_flux))
 end
 
 """Either a single `TKEBasedTurbulenceClosure` or an ensemble array of them."""
@@ -555,15 +547,12 @@ function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::S
                                        shear::SH,
                                        negative_tke_damping_time_scale::FT,
                                        subgrid_distribution::SD = nothing,
-                                       solver::SV = SinglePass(),
-                                       heating_budget_flux::HB = nothing,
-                                       total_water_budget_flux::SB = nothing) where {TD, ML, SF, SS, FT, SH, SD, SV, HB, SB}
-    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV, HB, SB}(mixing_length, stability_functions, static_stability,
+                                       heating_budget_flux::HB = nothing) where {TD, ML, SF, SS, FT, SH, SD, HB}
+    return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, HB}(mixing_length, stability_functions, static_stability,
                                                                          minimum_tke,
                                                                          shear,
                                                                          negative_tke_damping_time_scale,
-                                                                         subgrid_distribution, solver, heating_budget_flux,
-                                                                         total_water_budget_flux)
+                                                                         subgrid_distribution, heating_budget_flux)
 end
 
 """
@@ -601,10 +590,6 @@ that redistributes diabatic heating over the turbulent layer, with its conversio
 It needs the energetics of the applied fluxes, that is, a `subgrid_distribution` or a
 [`SaturationWeightedStaticStability`](@ref).
 
-`total_water_budget_flux` (default `nothing`) is a [`TotalWaterBudgetFlux`](@ref): the turbulent flux of qᵗ that
-redistributes every non-turbulent tendency of the water and its surface flux over the turbulent layer, with its
-conversion in the TKE equation. It needs the same energetics.
-
 ```jldoctest
 using Breeze
 
@@ -626,9 +611,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    # CATKE's value; atmospheric turbulence evolves faster than the
                                    # ocean's, so a shorter time scale may be more appropriate here.
                                    negative_tke_damping_time_scale = 1minute,
-                                   solver = SinglePass(),
-                                   heating_budget_flux = nothing,
-                                   total_water_budget_flux = nothing) where TD
+                                   heating_budget_flux = nothing) where TD
 
     shear = with_minimum_shear_squared(shear, minimum_shear_squared)
     validate_shear(shear)
@@ -637,15 +620,12 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
     stability_functions = convert_eltype(FT, stability_functions)
     static_stability = convert_eltype(FT, static_stability)
     subgrid_distribution = convert_eltype(FT, subgrid_distribution)
-    solver = convert_eltype(FT, solver)
-    validate_subgrid_coupling(static_stability, subgrid_distribution, solver)
+    validate_subgrid_coupling(static_stability, subgrid_distribution)
     isnothing(subgrid_distribution) ||
         validate_variance_stability_functions(stability_functions, subgrid_distribution.variance_stability_functions)
     isnothing(subgrid_distribution) || validate_moment_time_scale(stability_functions, subgrid_distribution.time_scale)
     heating_budget_flux = convert_eltype(FT, heating_budget_flux)
     validate_heating_budget_flux(heating_budget_flux, static_stability, subgrid_distribution)
-    total_water_budget_flux = convert_eltype(FT, total_water_budget_flux)
-    validate_total_water_budget_flux(total_water_budget_flux, static_stability, subgrid_distribution, time_discretization)
 
     return TKEBasedTurbulenceClosure{TD}(mixing_length,
                                          stability_functions,
@@ -654,9 +634,7 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                          convert_eltype(FT, shear),
                                          convert(FT, negative_tke_damping_time_scale),
                                          subgrid_distribution,
-                                         solver,
-                                         heating_budget_flux,
-                                         total_water_budget_flux)
+                                         heating_budget_flux)
 end
 
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
@@ -799,8 +777,8 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
     implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Lᵉ : ZeroField() for name in tracer_names)
 
-    subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_distribution(closure), closure_solver(closure), closure_static_stability(closure), tracer_names,
-                                               heating_budget_flux(closure), total_water_budget_flux(closure))
+    subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_distribution(closure), closure_static_stability(closure), tracer_names,
+                                               heating_budget_flux(closure))
 
     column_stability = column_stability_field(grid, closure_stability_functions(closure))
 
@@ -811,8 +789,6 @@ end
 # The subgrid cloud formulation of a closure or of an ensemble of closures (which share one)
 subgrid_distribution(closure::TKEBasedTurbulenceClosure) = closure.subgrid_distribution
 subgrid_distribution(closure::TKEClosureArray) = first(closure).subgrid_distribution
-closure_solver(closure::TKEBasedTurbulenceClosure) = closure.solver
-closure_solver(closure::TKEClosureArray) = first(closure).solver
 closure_static_stability(closure::TKEBasedTurbulenceClosure) = closure.static_stability
 closure_static_stability(closure::TKEClosureArray) = first(closure).static_stability
 closure_stability_functions(closure::TKEBasedTurbulenceClosure) = closure.stability_functions
@@ -1404,10 +1380,6 @@ function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, clos
     arch = grid.architecture
     ρ = AtmosphereModels.total_density(model.dynamics)
 
-    # The microphysical tendency of the water that `update_state!` recorded for this stage, for the total water budget
-    # flux of the next evaluation of the closure fields
-    carry_microphysical_water_tendency!(closure_fields.subgrid_cloud, total_water_budget_flux(closure), model)
-
     launch!(arch, grid, :xyz, _add_tke_tendencies!,
             Gⁿ[TKE_NAME], grid, closure, closure_fields,
             model.velocities, model.tracers[TKE_NAME], ρ, solved_conversions_before_tke_solve(closure_fields.subgrid_cloud, closure, model))
@@ -1416,7 +1388,6 @@ function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, clos
     add_shear_production_heating!(Gⁿ, closure_stability_functions(closure), closure_fields.subgrid_cloud, closure_fields, closure, model)
     draw_latent_conversion!(Gⁿ, closure_fields.subgrid_cloud, closure, model)
     add_heating_budget_flux_tendency!(Gⁿ, closure_fields.subgrid_cloud, heating_budget_flux(closure), model)
-    add_total_water_budget_flux_tendency!(Gⁿ, closure_fields.subgrid_cloud, total_water_budget_flux(closure), model)
 
     return nothing
 end
@@ -1444,19 +1415,7 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
               "├── negative_tke_damping_time_scale: ", prettysummary(closure.negative_tke_damping_time_scale), '\n',
               "├── subgrid_distribution: ", summary(closure.subgrid_distribution), "\n")
     isnothing(closure.heating_budget_flux) || print(io, "├── heating_budget_flux: ", summary(closure.heating_budget_flux), "\n")
-    isnothing(closure.total_water_budget_flux) || print(io, "├── total_water_budget_flux: ", summary(closure.total_water_budget_flux), "\n")
-    print(io, "└── solver: ", summary(closure.solver))
 end
 
-# What a restart needs of the closure fields: the microphysical tendency of the water that `TotalWaterBudgetFlux`
-# carries from one stage to the next (`carried_fields`). `update_state!` recomputes the others. (The static stability
-# that a `LaggedStability` solver reads from the evaluation before is not saved: a restart starts it from the
-# `initial_stability`.)
-Oceananigans.prognostic_state(closure_fields::TKEClosureFields) = Oceananigans.prognostic_state(carried_fields(closure_fields.subgrid_cloud))
-
-function Oceananigans.restore_prognostic_state!(closure_fields::TKEClosureFields, from)
-    Oceananigans.restore_prognostic_state!(carried_fields(closure_fields.subgrid_cloud), from)
-    return closure_fields
-end
-
+Oceananigans.prognostic_state(::TKEClosureFields) = nothing
 Oceananigans.restore_prognostic_state!(closure_fields::TKEClosureFields, ::Nothing) = closure_fields

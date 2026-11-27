@@ -251,7 +251,7 @@ liquid, which condenses over liquid; P3's ice enters through its relaxation rate
 
 $(TYPEDFIELDS)
 """
-struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, R, VT, VS, FT, LF}
+struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, VT, VS, FT}
     "Time scale of the moments ([`StratificationLimitedMomentTimeScale`](@ref), [`DissipationTimeScale`](@ref), [`EddyTurnoverTimeScale`](@ref) or [`ReturnToIsotropyTimeScale`](@ref))"
     time_scale :: TS
     "Second moments ([`DowngradientSecondMoments`](@ref)); `ℂᶠ`… of the surface are not used"
@@ -264,16 +264,12 @@ struct DoubleGaussian{TS, SM, TM, SB, SK, PDF, R, VT, VS, FT, LF}
     skewness :: SK
     "Assumed PDF ([`EqualWidthDoubleGaussianPDF`](@ref), [`DoubleGaussianPDF`](@ref) or [`SmoothDoubleGaussianPDF`](@ref)), with the clipping policy of its bounds"
     assumed_pdf :: PDF
-    "Maximum flux correlation of w with θˡⁱ and with qᵗ at the faces, |w′a′| / √(w′² a′²) ≲ ℂʳ, or `nothing` for no bound"
-    ℂʳ :: R
     "Vertical transport of θˡⁱ′², qᵗ′² and θˡⁱ′qᵗ′ ([`ScalarVarianceTransport`](@ref)), or `nothing` for the local diagnosis"
     variance_transport :: VT
     "Stability functions of the local scalar variances and covariance ([`VarianceStabilityFunctions`](@ref)), or `nothing` for `ℂᵛ τ Kᶜ ∂z a ∂z b`"
     variance_stability_functions :: VS
     "Mixing time of air between the saturated and subsaturated parts of the distribution, in eddy turnover times ℓ / √e"
     ℂᵐ :: FT
-    "The flux of liquid of the latent part of the buoyancy production of the TKE: `nothing` for that of the saturated share of the fluxes, or [`LiquidFluxVarianceRelation`](@ref)"
-    liquid_flux :: LF
 end
 
 Adapt.@adapt_structure DoubleGaussian
@@ -298,13 +294,6 @@ bound on the skewness is a bound on the weight of the updraft component: with 1.
 than 0.06, with 4.58 no less than 0.01. Large-eddy simulations of cumulus have a skewness of 2 to
 5 in the cloud layer, where the saturated updrafts cover 0.5 to 5 %.
 
-`ℂʳ` is the maximum flux correlation: where the down-gradient variance ``a′²`` of ``a = θˡⁱ`` or
-``qᵗ`` is too small for the down-gradient flux, ``(w′a′)² > (ℂʳ)² w′² a′²``, the variance is raised
-smoothly to ``(w′a′)² / ((ℂʳ)² w′²)`` (see `bound_flux_correlation`), and ``θˡⁱ′qᵗ′`` is scaled with
-the variances. It must satisfy ``0 < (ℂʳ)² < 1 - ℂᵍ₁`` (≈ 0.6 with ``ℂᵍ₁ = 0.4`` of
-[`DoubleGaussianPDF`](@ref)); above that the components of the double-Gaussian PDF have no width. SHOC's
-own diffusivity, ``0.1 τ e``, corresponds to ``(ℂʳ)² = 0.15``. The default, `nothing`, imposes no bound.
-
 `time_scale` is [`DissipationTimeScale`](@ref) (the default), [`EddyTurnoverTimeScale`](@ref),
 [`StratificationLimitedMomentTimeScale`](@ref) or [`ReturnToIsotropyTimeScale`](@ref) (SHOC's). The first two derive `τ` from
 the scalar-variance budget with the same `ℓ`, `√e` and `Ri` as `Kᶜ`, so that the squared
@@ -321,10 +310,6 @@ them (`AllProcesses` of P3's `SubgridCondensation`). The default, 1, is one eddy
 ``ℓ / √e``: the time an eddy of the mixing length takes to carry air across the boundary of the
 saturated part.
 
-`liquid_flux` is the flux of liquid whose buoyancy is the latent part of the buoyancy production of the TKE:
-`nothing` (the default), the share of the flux of the saturation excess that the saturated part of the distribution
-carries, or a [`LiquidFluxVarianceRelation`](@ref), `w′qˡ′ = ℂʳˡ √(w′² qˡ′²)` with the liquid variance of the
-distribution.
 """
 function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              time_scale = DissipationTimeScale(FT; ℂᵠ = 1.3),
@@ -333,25 +318,21 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              stratification_number_bound = RationalSaturatedStratificationNumber(FT),
                              assumed_pdf = EqualWidthDoubleGaussianPDF(FT),
                              skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = representable_skewness(assumed_pdf)),
-                             ℂʳ = nothing,
                              variance_transport = nothing,
                              variance_stability_functions = nothing,
-                             ℂᵐ = 1,
-                             liquid_flux = nothing)
-    ℂʳ = isnothing(ℂʳ) ? nothing : convert(FT, ℂʳ)
+                             ℂᵐ = 1)
     variance_transport = convert_component(FT, variance_transport)
     variance_stability_functions = convert_component(FT, variance_stability_functions)
-    liquid_flux = convert_component(FT, liquid_flux)
     return DoubleGaussian(time_scale, second_moments, third_moment, stratification_number_bound,
-                               skewness, assumed_pdf, ℂʳ, variance_transport,
-                               variance_stability_functions, convert(FT, ℂᵐ), liquid_flux)
+                               skewness, assumed_pdf, variance_transport,
+                               variance_stability_functions, convert(FT, ℂᵐ))
 end
 
 convert_eltype(::Type{FT}, d::DoubleGaussian) where FT =
     DoubleGaussian(convert_eltype(FT, d.time_scale), map(c -> convert_component(FT, c),
                         (d.second_moments, d.third_moment, d.stratification_number_bound, d.skewness,
-                         d.assumed_pdf, d.ℂʳ, d.variance_transport,
-                         d.variance_stability_functions, d.ℂᵐ, d.liquid_flux))...)
+                         d.assumed_pdf, d.variance_transport,
+                         d.variance_stability_functions, d.ℂᵐ))...)
 
 convert_component(FT, ::Nothing) = nothing
 convert_component(FT, c) = convert_eltype(FT, c)
@@ -361,202 +342,10 @@ Base.summary(d::DoubleGaussian) = string("DoubleGaussian(", nameof(typeof(d.assu
                                               d.third_moment === nothing ? "none" : nameof(typeof(d.third_moment)), ")")
 
 #####
-##### The solver of the coupling of the static stability and the saturated fraction
-#####
-
-"""
-$(TYPEDEF)
-
-The `solver` of [`TKEBasedTurbulenceClosure`](@ref) (the default). With
-`static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(...))` the static
-stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²⁺` and the saturated fraction `aᴺ = w′qᶜ′ / w′s′` of the subgrid
-distribution depend on each other: `aᴺ` is computed from the distribution, which is computed with
-the diffusivities, mixing length and moment time scale of `N²`. `SinglePass` computes the
-distribution once, with the `initial_stability` of [`CondensateFluxFraction`](@ref), then `N²` from
-its `aᴺ`, then the mixing length and the diffusivities from that `N²`; the coupling is not iterated.
-"""
-struct SinglePass end
-
-"""
-$(TYPEDEF)
-
-The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of the static stability
-`N²` and the saturated fraction `aᴺ = w′qᶜ′ / w′s′` (see [`SinglePass`](@ref)) by damped fixed-point
-iteration: after the single pass, `iterations` more passes each compute the distribution with the
-stored `N²`, mixing length and `Kᶜ`, then `N²ᵇ = (1 - aᴺ) N²ᶜ + aᴺ N²⁺` from it, and update
-`N² ← (1 - ω) N² + ω N²ᵇ` at the interior faces with `ω = relaxation` (`0 < ω ≤ 1`), before the
-mixing length and the diffusivities are formed again. `ω = 1` is the plain fixed-point iteration;
-`ω < 1` damps the pass-to-pass oscillation between the stable and unstable branches. The passes are
-unrolled when the closure is compiled.
-"""
-struct DampedFixedPoint{W}
-    iterations :: Int
-    relaxation :: W
-end
-
-validate_coupling_iterations(iterations) =
-    iterations >= 0 || throw(ArgumentError("iterations must be ≥ 0, got $iterations."))
-
-validate_coupling_relaxation(relaxation) =
-    0 < relaxation <= 1 || throw(ArgumentError("relaxation must be in (0, 1], got $relaxation."))
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return a [`DampedFixedPoint`](@ref) of `iterations ≥ 0` passes with `relaxation` in `(0, 1]`.
-"""
-function DampedFixedPoint(; iterations = 1, relaxation = 1)
-    validate_coupling_iterations(iterations)
-    validate_coupling_relaxation(relaxation)
-    return DampedFixedPoint(Int(iterations), relaxation)
-end
-
-"""
-$(TYPEDEF)
-
-The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of `N²` and `aᴺ` (see
-[`DampedFixedPoint`](@ref)) as the scalar root `r(N²) = N²ᵇ(N²) - N² = 0` of each interior face
-(the coupling to the neighbouring faces is lagged): `iterations` secant steps from the last two
-passes, kept in the bracket `[min(N²ᶜ, N²⁺), max(N²ᶜ, N²⁺)]`, falling back to the damped step
-`N² + ω r` where the secant denominator is tiny.
-"""
-struct SecantIteration{W}
-    iterations :: Int
-    relaxation :: W
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return a [`SecantIteration`](@ref) of `iterations ≥ 0` steps with `relaxation` in `(0, 1]`.
-"""
-function SecantIteration(; iterations = 1, relaxation = 1)
-    validate_coupling_iterations(iterations)
-    validate_coupling_relaxation(relaxation)
-    return SecantIteration(Int(iterations), relaxation)
-end
-
-"""
-$(TYPEDEF)
-
-The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of `N²` and `aᴺ` (see
-[`SecantIteration`](@ref)) by halving the bracket of `N²ᶜ` and `N²⁺` per face by the sign of
-`r(N²) = N²ᵇ - N²`, `iterations` times. With `final_interpolation` the last pass instead takes the
-secant step of the last two passes, kept in the bracket, so that the result varies continuously
-with the parameters.
-"""
-struct BisectionIteration
-    iterations :: Int
-    final_interpolation :: Bool
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return a [`BisectionIteration`](@ref) of `iterations ≥ 0` halvings.
-"""
-function BisectionIteration(; iterations = 1, final_interpolation = true)
-    validate_coupling_iterations(iterations)
-    return BisectionIteration(Int(iterations), final_interpolation)
-end
-
-"""
-$(TYPEDEF)
-
-The `solver` of [`TKEBasedTurbulenceClosure`](@ref) whose first distribution is formed with the `N²`
-of the previous evaluation of the closure fields (the previous stage, or the previous step) at the
-interior faces, instead of the `initial_stability`; the `initial_stability` on the first evaluation.
-`iterations` damped fixed-point passes follow (see [`DampedFixedPoint`](@ref)). With
-`iterations = 0` this lags `N²` by one evaluation, as SHOC lags `wthv_sec`.
-"""
-struct LaggedStability{W}
-    iterations :: Int
-    relaxation :: W
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return a [`LaggedStability`](@ref) followed by `iterations ≥ 0` passes with `relaxation` in `(0, 1]`.
-"""
-function LaggedStability(; iterations = 0, relaxation = 1)
-    validate_coupling_iterations(iterations)
-    validate_coupling_relaxation(relaxation)
-    return LaggedStability(Int(iterations), relaxation)
-end
-
-const IteratedCouplingSolver = Union{DampedFixedPoint, SecantIteration, BisectionIteration, LaggedStability}
-
-coupling_iterations(::SinglePass) = 0
-coupling_iterations(s::IteratedCouplingSolver) = s.iterations
-coupling_relaxation(::Union{SinglePass, BisectionIteration}) = 1
-coupling_relaxation(s::Union{DampedFixedPoint, SecantIteration, LaggedStability}) = s.relaxation
-
-convert_eltype(::Type{FT}, s::SinglePass) where FT = s
-convert_eltype(::Type{FT}, s::DampedFixedPoint) where FT = DampedFixedPoint(s.iterations, convert(FT, s.relaxation))
-convert_eltype(::Type{FT}, s::SecantIteration) where FT = SecantIteration(s.iterations, convert(FT, s.relaxation))
-convert_eltype(::Type{FT}, s::BisectionIteration) where FT = s
-convert_eltype(::Type{FT}, s::LaggedStability) where FT = LaggedStability(s.iterations, convert(FT, s.relaxation))
-
-Base.summary(::SinglePass) = "SinglePass()"
-Base.summary(s::DampedFixedPoint) = string("DampedFixedPoint(iterations = ", s.iterations, ", relaxation = ", s.relaxation, ")")
-Base.summary(s::SecantIteration) = string("SecantIteration(iterations = ", s.iterations, ", relaxation = ", s.relaxation, ")")
-Base.summary(s::BisectionIteration) = string("BisectionIteration(iterations = ", s.iterations,
-                                             ", final_interpolation = ", s.final_interpolation, ")")
-Base.summary(s::LaggedStability) = string("LaggedStability(iterations = ", s.iterations, ", relaxation = ", s.relaxation, ")")
-Base.show(io::IO, s::Union{SinglePass, IteratedCouplingSolver}) = print(io, summary(s))
-
-#####
 ##### The energetics of the applied fluxes (applied_flux_energetics.jl) with the solver of the coupling
 #####
 
-"""
-$(TYPEDEF)
-
-Internal: the energy conversions of the TKE equation from the fluxes the closure applies to the
-mean state, held by the fields of a closure with a subgrid distribution, with the solver of the
-coupling of the static stability and the saturated fraction (`N` extra passes, a type parameter so
-that they are unrolled, with relaxation `ω`).
-
-Every scalar the closure mixes (θˡⁱ, vapor, cloud liquid, rain, ice, ...) is diffused with `Kᶜ`
-and momentum with `Kᵘ`; the buoyancy production is the exact discrete conversion of those fluxes,
-
-    Bᶠ = -Kᶜ Σ_χ b_χᶠ δz χ,    b_χ = ∂b/∂χ,
-
-with `b` the buoyancy of the dynamics and its exact derivatives with respect to θˡⁱ and the vapor,
-liquid and ice mass fractions (all liquid and all ice, so that the latent heat inside θˡⁱ and the
-loading of every condensate species are counted), and the shear production is `Kᵘ S²` at the faces.
-Both are moved from the faces to the centers with half-cell, density-weighted volumes, so that
-`Σ ρ Δz B` is the change of the dynamic enthalpy and `Σ ρ Δz P` the loss of mean kinetic energy
-that the fluxes cause. The positive part of `B` enters the stage tendency; the negative part enters
-the implicit linear coefficient, with `e` floored only at a tiny value so that the implicit sink
-removes exactly the energy the mean state gains wherever `e > 0`. The dissipation `ε` that the TKE
-equation removes heats the air, `ρ ĉᵖ Π ∂t θˡⁱ += ρ ε`. The surface stress work and the surface
-buoyancy flux are converted within the bottom half-cell. Under the vertically implicit time
-discretization the stage tendency carries the conversions of the stage state; after the implicit
-solves of each SSP Runge–Kutta stage the closure corrects the TKE to the conversions of the solved
-state (including the dissipation of backward Euler itself) and heats the air by what the implicit
-sinks removed from the solved `e`, so the energy budget of the stage closes to round-off. Where
-`e ≈ 0` cannot pay what the solved fluxes converted, the shortfall is taken from the internal
-energy instead of driving `e` negative. The acoustic Runge–Kutta time stepper does not call these
-hooks.
-"""
-struct AppliedFluxEnergetics{N, W, S}
-    stability_relaxation :: W
-    stability_solver :: S
-    AppliedFluxEnergetics{N}(ω::W, solver::S) where {N, W, S} = new{N, W, S}(ω, solver)
-end
-
-AppliedFluxEnergetics(solver) = AppliedFluxEnergetics{coupling_iterations(solver)}(coupling_relaxation(solver), solver)
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The number of extra passes of the distribution and the static stability (the type parameter).
-"""
-stability_iterations(::AppliedFluxEnergetics{N}) where N = N
-
-Base.summary(b::AppliedFluxEnergetics) = string("AppliedFluxEnergetics(", summary(b.stability_solver), ")")
+struct AppliedFluxEnergetics end
 
 #####
 ##### The saturated fraction of the static stability from the distribution: the condensate flux fraction
@@ -666,19 +455,10 @@ const CondensateFluxFractionStability = SaturationWeightedStaticStability{<:Cond
 ##### Validation of the keywords of the closure
 #####
 
-function validate_subgrid_coupling(static_stability, distribution, solver)
+function validate_subgrid_coupling(static_stability, distribution)
     if static_stability isa CondensateFluxFractionStability && isnothing(distribution)
         throw(ArgumentError("SaturationWeightedStaticStability(CondensateFluxFraction(...)) needs a subgrid_distribution, " *
                             "whose condensate flux gives the saturated fraction."))
-    end
-    if static_stability isa CondensateFluxFractionStability && !(static_stability.fraction.stratification isa LatentStratification) &&
-       !(solver isa Union{SinglePass, DampedFixedPoint, LaggedStability})
-        throw(ArgumentError("$(summary(static_stability.fraction.stratification)) is solved by SinglePass, DampedFixedPoint or " *
-                            "LaggedStability; $(summary(solver)) solves the coupling of the latent stratification only."))
-    end
-    if coupling_iterations(solver) > 0 && !(static_stability isa CondensateFluxFractionStability)
-        throw(ArgumentError("A solver with iterations > 0 solves the coupling of the static stability with the " *
-                            "distribution; it needs static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(...))."))
     end
     return nothing
 end
@@ -697,36 +477,31 @@ variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵛ′`, the part `Bˡ =
 flux carried by the condensate flux, and the shear and buoyancy production `P` and `B` of the TKE
 equation from the applied fluxes).
 """
-struct SubgridCloudFields{BF, M, C, S, P}
+struct SubgridCloudFields{BF, M, C, P}
     energetics :: BF
     moments :: M
     cloud :: C
-    solver_state :: S
     presolve :: P # every closure scalar just before its implicit solve (the stage energy budget), or `nothing`
 end
 
 
 Adapt.adapt_structure(to, f::SubgridCloudFields) =
-    SubgridCloudFields(f.energetics, adapt(to, f.moments), adapt(to, f.cloud), adapt(to, f.solver_state),
+    SubgridCloudFields(f.energetics, adapt(to, f.moments), adapt(to, f.cloud),
                        adapt(to, f.presolve))
 
 # Without a distribution: the plain closure, or, with a saturated fraction from the microphysics
 # (or any fraction other than the distribution's), the energetics of the applied fluxes with the
 # latent conversion of the condensate flux that the fraction implies
-build_subgrid_cloud_fields(grid, ::Nothing, solver, static_stability, tracer_names, heating_budget_flux = nothing,
-                           total_water_budget_flux = nothing) = nothing
+build_subgrid_cloud_fields(grid, ::Nothing, static_stability, tracer_names, heating_budget_flux = nothing) = nothing
 
-function build_subgrid_cloud_fields(grid, ::Nothing, solver, ::SaturationWeightedStaticStability, tracer_names, heating_budget_flux = nothing,
-                                    total_water_budget_flux = nothing)
-    energetics = AppliedFluxEnergetics(solver)
-    cloud = merge(applied_flux_conversion_fields(grid, energetics), heating_budget_flux_fields(grid, heating_budget_flux),
-                  total_water_budget_flux_fields(grid, total_water_budget_flux))
-    return SubgridCloudFields(energetics, nothing, cloud, nothing, build_presolve_fields(grid, energetics, tracer_names))
+function build_subgrid_cloud_fields(grid, ::Nothing, ::SaturationWeightedStaticStability, tracer_names, heating_budget_flux = nothing)
+    energetics = AppliedFluxEnergetics()
+    cloud = merge(applied_flux_conversion_fields(grid, energetics), heating_budget_flux_fields(grid, heating_budget_flux))
+    return SubgridCloudFields(energetics, nothing, cloud, build_presolve_fields(grid, energetics, tracer_names))
 end
 
-function build_subgrid_cloud_fields(grid, distribution, solver, static_stability, tracer_names, heating_budget_flux = nothing,
-                                    total_water_budget_flux = nothing)
-    energetics = AppliedFluxEnergetics(solver)
+function build_subgrid_cloud_fields(grid, distribution, static_stability, tracer_names, heating_budget_flux = nothing)
+    energetics = AppliedFluxEnergetics()
     moments = (τ = ZFaceField(grid), third_moment_location_fields(grid, third_moment_location(distribution.third_moment))...,
                θˡⁱ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡⁱ′qᵗ′ = ZFaceField(grid),
                w′θˡⁱ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid),
@@ -738,10 +513,8 @@ function build_subgrid_cloud_fields(grid, distribution, solver, static_stability
              qⁱ′sⁱ′ = CenterField(grid), qᵈ′² = CenterField(grid),
              applied_flux_conversion_fields(grid, energetics)...,
              third_moment_fields(grid, distribution.third_moment)...,
-             heating_budget_flux_fields(grid, heating_budget_flux)...,
-             total_water_budget_flux_fields(grid, total_water_budget_flux)...,
-             liquid_flux_fields(grid, distribution.liquid_flux)...)
-    return SubgridCloudFields(energetics, moments, cloud, build_solver_state(grid, energetics),
+             heating_budget_flux_fields(grid, heating_budget_flux)...)
+    return SubgridCloudFields(energetics, moments, cloud,
                               build_presolve_fields(grid, energetics, tracer_names))
 end
 
@@ -760,16 +533,6 @@ end
 # Every closure scalar just before its solve (diagnostic: the stage's energy budget)
 build_presolve_fields(grid, ::AppliedFluxEnergetics, tracer_names) = NamedTuple(name => CenterField(grid) for name in tracer_names)
 
-# The last pass (N², r) and the bracket of the secant and the bisection, at the faces
-build_solver_state(grid, ::AppliedFluxEnergetics{N, W, <:Union{SinglePass, DampedFixedPoint}}) where {N, W} = nothing
-
-function build_solver_state(grid, ::AppliedFluxEnergetics{N, W, <:LaggedStability}) where {N, W}
-    N²₋ = ZFaceField(grid)
-    fill!(parent(N²₋), NaN) # not yet evaluated
-    return (; N²₋)
-end
-build_solver_state(grid, ::AppliedFluxEnergetics{N, W, <:Union{SecantIteration, BisectionIteration}}) where {N, W} =
-    (x₋ = ZFaceField(grid), r₋ = ZFaceField(grid), lower = ZFaceField(grid), upper = ZFaceField(grid))
 #####
 ##### Specific values from densities, for the kernels
 #####
@@ -947,39 +710,6 @@ end
 @inline third_moment_diagnosis(tm, i, j, k, d, cl, g, algebraic_arguments) =
     subgrid_third_moment(tm, d, g, algebraic_arguments...)
 
-# Raise θˡⁱ′² and qᵗ′² smoothly to (w′a′)² / ((ℂʳ)² w′²) where the down-gradient variances are too
-# small for the down-gradient fluxes (|correlation with w| > ℂʳ), and scale θˡⁱ′qᵗ′ with them so that
-# the θˡⁱ-qᵗ correlation is unchanged. With `Kᶜ` and `τ` of this closure, Kᶜ / (τ w′²) (the squared
-# correlation) is often above 1 - ℂᵍ₁ = 0.6, where the components of the double-Gaussian PDF have no
-# width and its cloud fraction is all or nothing in each component (0, a, 1 - a or 1); the bound needs
-# 0 < (ℂʳ)² < 1 - ℂᵍ₁. SHOC's own diffusivity, 0.1 τ e, gives (ℂʳ)² = 0.15.
-#
-# The floor is a smooth maximum with continuous derivative and no branch on the state,
-#
-#     smooth_maximum(a, b) = (a + b + √((a - b)² + (δ b)²)) / 2,   δ = 0.1,
-#
-# so smooth_maximum(a, 0) = a exactly, smooth_maximum ≥ max(a, b), and the excess, δ b / 2 at a = b,
-# decays as (δ b)² / (4 |a - b|) away from it. `floatmin` under the root keeps the derivative
-# finite where a = b = 0.
-@inline bound_flux_correlation(::Nothing, w′², θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′) = (θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′)
-
-@inline function variance_floor_smooth_maximum(a, b, FT)
-    δb = b / 10 # δ = 0.1
-    return (a + b + sqrt((a - b) * (a - b) + δb * δb + floatmin(FT))) / 2
-end
-
-@inline function bound_flux_correlation(ℂʳ, w′², θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′)
-    FT = typeof(θˡⁱ′²)
-    d = ℂʳ * ℂʳ * w′²
-    resolved = d > floatmin(FT)
-    dₛ = ifelse(resolved, d, one(FT))
-    θ² = variance_floor_smooth_maximum(θˡⁱ′², ifelse(resolved, w′θˡⁱ′ * w′θˡⁱ′ / dₛ, zero(FT)), FT)
-    q² = variance_floor_smooth_maximum(qᵗ′², ifelse(resolved, w′qᵗ′ * w′qᵗ′ / dₛ, zero(FT)), FT)
-    fθ = ifelse(θˡⁱ′² > 0, θ² / ifelse(θˡⁱ′² > 0, θˡⁱ′², one(FT)), one(FT))
-    fq = ifelse(qᵗ′² > 0, q² / ifelse(qᵗ′² > 0, qᵗ′², one(FT)), one(FT))
-    return θ², q², θˡⁱ′qᵗ′ * sqrt(fθ * fq)
-end
-
 # w′³ at the interior face k, with the numerics of `diag_third_shoc_moments` of `shoc.F90`: the time scale, N² and
 # the mixing length are those of the face; w′² and θˡⁱ are interpolated to it from the centers k - 1 and k; the
 # gradients of center quantities (w′², e) are compact across the face, over the distance of the two centers, and
@@ -1134,7 +864,6 @@ end
 
             # The fluxes of θˡⁱ and qᵗ that the turbulence carries include the budget fluxes (zero without them)
             w′θˡⁱ′ += applied_heating_flux(cl, i, j, k)
-            w′qᵗ′ += applied_budget_flux_q(cl, i, j, k)
 
 
             # The variance of a moisture-like scalar of unit gradient, with the same machinery: its dissipation time
@@ -1177,15 +906,6 @@ end
         # With a transport of the scalar second moments, their steady budget (scalar_variance_transport.jl)
         transport_scalar_variances!(d.variance_transport, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
 
-        # The variances no smaller than the fluxes allow at the largest correlation with w
-        for k in 2:Nz
-            w′²ᶠ = (cl.w′²[i, j, k] + cl.w′²[i, j, k-1]) / 2
-            θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′ = bound_flux_correlation(d.ℂʳ, w′²ᶠ, m.θˡⁱ′²[i, j, k], m.qᵗ′²[i, j, k], m.θˡⁱ′qᵗ′[i, j, k],
-                                                       m.w′θˡⁱ′[i, j, k], m.w′qᵗ′[i, j, k])
-            m.θˡⁱ′²[i, j, k] = θˡⁱ′²
-            m.qᵗ′²[i, j, k] = qᵗ′²
-            m.θˡⁱ′qᵗ′[i, j, k] = θˡⁱ′qᵗ′
-        end
         m.θˡⁱ′²[i, j, 1] = m.θˡⁱ′²[i, j, k′]
         m.qᵗ′²[i, j, 1] = m.qᵗ′²[i, j, k′]
         m.θˡⁱ′qᵗ′[i, j, 1] = m.θˡⁱ′qᵗ′[i, j, k′]
@@ -1356,31 +1076,6 @@ end
 ##### Coupling to the closure
 #####
 
-# With the lagged stability: the stability of the previous evaluation, the mixing length and the
-# diffusivities from it, then the distribution and the passes; the final N² is kept for the next one
-@kernel function _set_lagged_stability!(N², N²₋)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        previous = N²₋[i, j, k]
-        N²[i, j, k] = ifelse((k > 1) & !isnan(previous), previous, N²[i, j, k])
-    end
-end
-
-function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergetics{N, W, <:LaggedStability}, <:NamedTuple},
-                                closure_fields, closure, model, tracers, parameters) where {N, W}
-    grid = model.grid
-    arch = grid.architecture
-    N²₋ = fields.solver_state.N²₋
-    compute_buoyancy_derivatives!(fields, model)
-    compute_budget_fluxes!(fields, closure_fields, closure, model, tracers)
-    launch!(arch, grid, parameters, _set_lagged_stability!, closure_fields.N², N²₋)
-    compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
-    compute_subgrid_distribution!(fields, closure_fields, closure, model)
-    solve_static_stability!(closure.static_stability, fields.energetics, fields, closure_fields, closure, model, tracers, parameters)
-    parent(N²₋) .= parent(closure_fields.N²)
-    return nothing
-end
-
 # The buoyancy derivatives of the prognostic state, unless the third moment computed them already
 compute_subgrid_cloud_buoyancy_derivatives!(fields, distribution, model) = compute_buoyancy_derivatives!(fields, model)
 
@@ -1388,7 +1083,6 @@ compute_subgrid_cloud_buoyancy_derivatives!(fields, distribution, model) = compu
 # (total_water_budget_flux.jl)
 function compute_budget_fluxes!(fields, closure_fields, closure, model, tracers)
     compute_heating_budget_flux!(fields, heating_budget_flux(closure), closure_fields, closure, model, tracers)
-    compute_total_water_budget_flux!(fields, total_water_budget_flux(closure), closure_fields, closure, model, tracers)
     return nothing
 end
 
@@ -1410,9 +1104,6 @@ end
 solve_static_stability!(static_stability, energetics, args...) = nothing
 solve_static_stability!(::CondensateFluxFractionStability, energetics, args...) = applied_flux_stability!(energetics, args...)
 
-# The update of the stored N² toward the N²ᵇ of a pass: N²ᵇ itself, or the blend with the relaxation ω
-@inline relax_stability(N², N²ᵇ, ::Nothing) = N²ᵇ
-@inline relax_stability(N², N²ᵇ, ω) = (1 - ω) * N² + ω * N²ᵇ
 
 # The stratification of the mixed variables N²ᶜ = Σ b̄_χ δz χ at the interior face k and the latent-corrected
 # N²ᵇ = N²ᶜ - Bˡ / Kᶜ, with Bˡ / Kᶜ in the form in which Kᶜ cancels: Bˡ = (b_qˡ - b_qᵛ) w′qˡ′ and
@@ -1453,120 +1144,8 @@ end
     return (; Δz, Δθ, Δq, ∂zθ, ∂zq, b_θᶠ, ∂zs, bᶜᵛ)
 end
 
-function applied_flux_stability!(energetics::AppliedFluxEnergetics{N, W, <:Union{SecantIteration, BisectionIteration}},
-                                   fields, closure_fields, closure, model, tracers, parameters) where {N, W}
-    solver = energetics.stability_solver
-    ω = energetics.stability_relaxation
-    solve_stability_pass!(solver, Val(0), Val(N), ω, fields, closure_fields, closure, model, tracers, parameters)
-    for p in 1:N
-        compute_subgrid_distribution!(fields, closure_fields, closure, model)
-        solve_stability_pass!(solver, Val(p), Val(N), ω, fields, closure_fields, closure, model, tracers, parameters)
-    end
-    return nothing
-end
-
-function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_fields, closure, model, tracers, parameters) where {P, N}
-    grid = model.grid
-    arch = grid.architecture
-    launch!(arch, grid, parameters, _solve_applied_flux_stability!, closure_fields.N², solver, P == 0, P == N, ω, grid,
-            closure, closure_fields, model.velocities, applied_flux_state(model), tracers[TKE_NAME])
-    compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
-    # After the last pass: the latent correction of the solved state for the buoyancy production (N² unchanged)
-    P == N && store_latent_correction_of_solved_stability!(fields, closure_fields, closure, model, tracers, parameters)
-    return nothing
-end
-
-@inline secant_root(x, r, x₋, r₋, fallback) =
-    (Δr = r - r₋; ok = abs(Δr) > sqrt(floatmin(typeof(x))) * (abs(r) + abs(r₋)) + floatmin(typeof(x));
-     ifelse(ok, x - r * (x - x₋) / ifelse(ok, Δr, one(Δr)), fallback))
-
-# The first pass: r at the closure's stability; the next point is N²ᵇ (secant) or the bracket's middle (bisection)
-@inline function first_stability_update(::SecantIteration, x, r, G, L, U)
-    # The `clamp` keeps the iterate of the root search inside its bracket: algorithmic, not a bound on a physical quantity
-    return clamp(G, L, U), L, U
-end
-
-@inline function first_stability_update(::BisectionIteration, x, r, G, L, U)
-    inside = (L < x) & (x < U)
-    L′ = ifelse(inside & (r > 0), x, L)
-    U′ = ifelse(inside & (r <= 0), x, U)
-    return (L′ + U′) / 2, L′, U′
-end
-
-@inline function stability_update(::SecantIteration, last_pass, ω, x, r, x₋, r₋, L, U)
-    # The `clamp` keeps the iterate of the root search inside its bracket: algorithmic, not a bound on a physical quantity
-    return clamp(secant_root(x, r, x₋, r₋, x + ω * r), L, U), L, U
-end
-
-@inline function stability_update(b::BisectionIteration, last_pass, ω, x, r, x₋, r₋, L, U)
-    L′ = ifelse(r > 0, max(L, x), L)
-    U′ = ifelse(r > 0, U, min(U, x))
-    middle = (L′ + U′) / 2
-    interpolate = last_pass & b.final_interpolation
-    # The `clamp` keeps the interpolated iterate inside the bisection bracket: algorithmic, not a bound on a physical quantity
-    x′ = ifelse(interpolate, clamp(secant_root(x, r, x₋, r₋, middle), L′, U′), middle)
-    return x′, L′, U′
-end
-
-@kernel function _solve_applied_flux_stability!(N², solver, first_pass, last_pass, ω, grid, closure, closure_fields, velocities, s, e)
-    i, j, k = @index(Global, NTuple)
-    fields = closure_fields.subgrid_cloud
-    state, m, cl = fields.solver_state, fields.moments, fields.cloud
-    θ, qᵗ, thermodynamics = distributed_water(s, grid)
-    p = s.p
-    @inbounds begin
-        interior_face = k > 1
-        N²ᶜ, G, ∂zs, bᶜᵛ = condensate_flux_stabilityᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
-        # The latent response of the condensate outside the distributed water (ice and its liquid coating), at the
-        # eddy time of this pass; it moves the target and both ends of the bracket alike
-        kₛ = max(k, 2)
-        aʷ = face_condensate_flux_fraction(i, j, kₛ, cl)
-        X = latent_correctionᶜᶜᶠ(i, j, kₛ, grid, getclosure(i, j, closure), closure_fields, velocities, s, qᵗ, θ, e,
-                                 thermodynamics, cl, aʷ).outside
-        N²ᶜ += X
-        G += X
-        N²⁺ = N²ᶜ + bᶜᵛ * ∂zs
-        L = min(N²ᶜ, N²⁺)
-        U = max(N²ᶜ, N²⁺)
-
-        x = N²[i, j, k]
-        r = G - x
-        x₋ = state.x₋[i, j, k]
-        r₋ = state.r₋[i, j, k]
-        L₋ = ifelse(first_pass, L, state.lower[i, j, k])
-        U₋ = ifelse(first_pass, U, state.upper[i, j, k])
-
-        x₀, L₀, U₀ = first_stability_update(solver, x, r, G, L, U)
-        xₙ, Lₙ, Uₙ = stability_update(solver, last_pass, ω, x, r, x₋, r₋, L₋, U₋)
-        x′ = ifelse(first_pass, x₀, xₙ)
-
-        state.x₋[i, j, k] = x
-        state.r₋[i, j, k] = r
-        state.lower[i, j, k] = ifelse(first_pass, L₀, Lₙ)
-        state.upper[i, j, k] = ifelse(first_pass, U₀, Uₙ)
-        N²[i, j, k] = ifelse(interior_face, x′, N²[i, j, k])
-    end
-end
-
-function applied_flux_stability!(energetics::AppliedFluxEnergetics, fields, closure_fields, closure, model, tracers, parameters)
+applied_flux_stability!(::AppliedFluxEnergetics, fields, closure_fields, closure, model, tracers, parameters) =
     applied_flux_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
-    # The extra passes of the coupling; the count is a type parameter, so the loop is unrolled when traced
-    for _ in 1:stability_iterations(energetics)
-        compute_subgrid_distribution!(fields, closure_fields, closure, model)
-        applied_flux_stability_pass!(fields, closure_fields, closure, model, tracers, parameters,
-                                       energetics.stability_relaxation)
-    end
-    return nothing
-end
-
-# The latent correction of the state a solver of the coupling left, stored for the buoyancy production and the
-# conversion of the solved state without changing N² (ω = 0)
-function store_latent_correction_of_solved_stability!(fields, closure_fields, closure, model, tracers, parameters)
-    grid = model.grid
-    launch!(grid.architecture, grid, parameters, _latent_corrected_stability!, closure_fields.N², grid, closure, closure_fields,
-            model.velocities, applied_flux_state(model), tracers[TKE_NAME], zero(grid))
-    return nothing
-end
 
 # The buoyancy production of the TKE equation: the conversion of the applied fluxes
 @inline tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields) =
@@ -1578,7 +1157,7 @@ end
 
 SimplifiedHigherOrderClosures.closure_components(closure::TKEBasedTurbulenceClosure) =
     (closure.mixing_length, closure.stability_functions, closure.static_stability, closure.shear, closure.subgrid_distribution,
-     closure.heating_budget_flux, closure.total_water_budget_flux)
+     closure.heating_budget_flux)
 
 SimplifiedHigherOrderClosures.rebuild_component(::Nothing, scalars, n) = nothing, n
 
@@ -1612,12 +1191,12 @@ function SimplifiedHigherOrderClosures.with_parameters(closure::TKEBasedTurbulen
         component, n = SimplifiedHigherOrderClosures.rebuild_component(component, promoted, n)
         components = (components..., component)
     end
-    mixing_length, stability_functions, static_stability, shear, subgrid_distribution, heating_budget_flux, total_water_budget_flux = components
+    mixing_length, stability_functions, static_stability, shear, subgrid_distribution, heating_budget_flux = components
 
     return TKEBasedTurbulenceClosure{TD}(mixing_length, stability_functions, static_stability,
                                          closure.minimum_tke, shear,
-                                         closure.negative_tke_damping_time_scale, subgrid_distribution, closure.solver,
-                                         heating_budget_flux, total_water_budget_flux)
+                                         closure.negative_tke_damping_time_scale, subgrid_distribution,
+                                         heating_budget_flux)
 end
 
 #####

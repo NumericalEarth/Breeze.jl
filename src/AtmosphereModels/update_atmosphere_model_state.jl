@@ -548,37 +548,8 @@ function compute_scalar_tendencies!(model, model_fields, advecting_velocities, k
     ##### Fused microphysics tendencies (no-op by default; schemes opt in)
     #####
 
-    # A closure may carry the microphysical part of these tendencies to its next evaluation: it reads them on each
-    # side of the microphysical sources
-    record_microphysical_tendencies!(BeforeMicrophysicalSources(), model.closure_fields, model.closure, model)
     compute_microphysical_tendencies!(model)
-    record_microphysical_tendencies!(AfterMicrophysicalSources(), model.closure_fields, model.closure, model)
 
-    return nothing
-end
-
-#####
-##### The microphysical part of the scalar tendencies, for a closure that carries it between evaluations
-#####
-
-struct BeforeMicrophysicalSources end
-struct AfterMicrophysicalSources end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Let `closure` read the scalar tendencies `model.timestepper.Gⁿ` on each `side` of the microphysical sources
-(`BeforeMicrophysicalSources()`, then `AfterMicrophysicalSources()`), wherever the model builds them, so that the
-closure can hold their microphysical part: the difference of the two. A no-op for closures that hold none.
-"""
-record_microphysical_tendencies!(side, closure_fields, closure, model) = nothing
-
-record_microphysical_tendencies!(side, ::Tuple{}, ::Tuple{}, model) = nothing
-
-function record_microphysical_tendencies!(side, closure_fields::Tuple{F, Vararg},
-                                          closures::Tuple{C, Vararg}, model) where {F, C}
-    record_microphysical_tendencies!(side, first(closure_fields), first(closures), model)
-    record_microphysical_tendencies!(side, Base.tail(closure_fields), Base.tail(closures), model)
     return nothing
 end
 
@@ -676,36 +647,10 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
     # TODO: should we call tracer_density_to_specific!(model) here?
     foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    names = keys(prognostic_model_fields)
-    foreach(q -> compute_stage_z_bcs!(Gⁿ[q], prognostic_model_fields[q],
-                                      closure_applies_bottom_flux(model.closure, model, names[q]), args...),
-            field_indices)
+    foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
 
     return nothing
 end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Whether `closure` itself applies the bottom boundary flux of the prognostic field `name`, in which
-case the tendencies of the Runge–Kutta stages leave that flux out (the boundary condition is left
-untouched: it stays the one place the flux is specified, and the closure reads it from there).
-The default is `false`; an operator-split closure that applies the surface fluxes inside its own
-implicit solve, once per step in `step_closure_prognostics!`, adds a method.
-"""
-closure_applies_bottom_flux(closure, model, name) = false
-
-closure_applies_bottom_flux(closures::Tuple, model, name) =
-    any(closure -> closure_applies_bottom_flux(closure, model, name), closures)
-
-# Add the top and bottom boundary fluxes of `c` to `Gc`, or only the top one where a closure
-# applies the bottom one.
-function compute_stage_z_bcs!(Gc, c, closure_applies_bottom, args...)
-    closure_applies_bottom || return compute_z_bcs!(Gc, c, args...)
-    return compute_z_bcs!(Gc, Gc.grid, c, nothing, c.boundary_conditions.top, args...)
-end
-
-compute_stage_z_bcs!(::Nothing, c, closure_applies_bottom, args...) = nothing
 
 #####
 ##### Closure tendencies
