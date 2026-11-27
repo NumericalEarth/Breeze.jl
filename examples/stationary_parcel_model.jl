@@ -102,25 +102,16 @@ nothing #hide
 
 # ## Define microphysics schemes with different parameters
 
+import ClimaParams
 import CloudMicrophysics.Parameters as CMP
 one_moment_cloud_microphysics_categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories
 precipitation_boundary_condition = ImpenetrableBoundaryCondition()
 
-## Process parameters, like the condensation timescale τ_relax, live in the
-## `process_params` field of `Microphysics1MParams`; to customize one we rebuild
-## the parameter container with the entry we want overridden.
+## CloudMicrophysics reads its parameters, like the condensation timescale τ_relax,
+## from a ClimaParams parameter dictionary, where we override them by name.
 function one_moment_parameters(τ_relax)
-    parameters = CMP.Microphysics1MParams(Float64)
-    process_params = merge(parameters.process_params, (; cloud_liquid_formation = (; τ_relax)))
-    return CMP.Microphysics1MParams(;
-        parameters.processes,
-        process_params,
-        parameters.cloud,
-        parameters.precip,
-        parameters.air_properties,
-        parameters.terminal_velocity,
-        parameters.max_latent_heating_rate,
-    )
+    override_file = Dict("condensation_evaporation_timescale" => Dict("value" => τ_relax))
+    return CMP.Microphysics1MParams(ClimaParams.create_toml_dict(Float64; override_file))
 end
 
 ## First, a slow scheme

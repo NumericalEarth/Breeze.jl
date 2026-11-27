@@ -3,6 +3,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 using Breeze
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudIce, CloudLiquid, Microphysics1MParams
+import ClimaParams
 using Oceananigans
 using Test
 
@@ -164,16 +165,10 @@ end
 @testset "Warm snow collection respects heat and donor budgets [$FT]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
     # Isolate cloud-liquid collection by snow and its associated melting.
-    parameters = Microphysics1MParams(FT; rain_autoconversion = nothing, rain_condensation_evaporation = nothing,
-                                     snow_deposition_sublimation = nothing, snow_melt = nothing)
-    parameters = Microphysics1MParams(;
-        parameters.processes,
-        process_params = merge(parameters.process_params, (; cloud_liquid_snow_accretion = (; e = FT(1)))),
-        parameters.cloud,
-        parameters.precip,
-        parameters.air_properties,
-        parameters.terminal_velocity,
-        parameters.max_latent_heating_rate)
+    override_file = Dict("cloud_liquid_snow_collision_efficiency" => Dict("value" => FT(1)))
+    parameters = Microphysics1MParams(ClimaParams.create_toml_dict(FT; override_file);
+                                      rain_autoconversion = nothing, rain_condensation_evaporation = nothing,
+                                      snow_deposition_sublimation = nothing, snow_melt = nothing)
     categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
     no_formation = ConstantRateCondensateFormation(zero(FT))
     cloud_formations = (saturation_adjustment_1M(FT).cloud_formation,
