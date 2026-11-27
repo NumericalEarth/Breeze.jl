@@ -217,7 +217,7 @@ jobs:
           earlyoom -m 2 -s 100 -r 60 --prefer 'julia'
         background: true
       - name: Run tests
-        uses: julia-actions/julia-runtest@6e050c8013b833b1195105ff2fce9cd802f53271 # v1.12.0
+        uses: julia-actions/julia-runtest@e89ac6c957d7c4d7e0cb3162f12d8290a008f9d1 # v1.13.0
         with:
           check_bounds: "${{ matrix.check-bounds }}"
           optimize: "0"
@@ -304,7 +304,7 @@ jobs:
           mkdir -vp "${TMPDIR}"
           echo "TMPDIR=${TMPDIR}" | tee -a "${GITHUB_ENV}"
       - name: Run tests
-        uses: julia-actions/julia-runtest@6e050c8013b833b1195105ff2fce9cd802f53271 # v1.12.0
+        uses: julia-actions/julia-runtest@e89ac6c957d7c4d7e0cb3162f12d8290a008f9d1 # v1.13.0
         with:
           check_bounds: "auto"
           optimize: "0"
