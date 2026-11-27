@@ -644,21 +644,6 @@ so that the energy budget still closes (`add_shear_production_heating!`).
 # The stored face field as a kernel function, for the boundary-aware reconstruction `ℑbzᵃᵃᶜ`
 @inline face_valueᶜᶜᶠ(i, j, k, grid, field) = @inbounds field[i, j, k]
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The buoyancy penetration depth ``ℓᵇ = \\sqrt{e} / N`` at (Center, Center, Face): how far an eddy
-with kinetic energy ``e`` — floored at `minimum_tke` and reconstructed at the face from the cell
-centers — penetrates air of static stability ``N²`` before its kinetic energy is spent against
-buoyancy, with the frequency ``N`` of the mixing length's `buoyancy_frequency` rule. Infinite where
-``N² ≤ 0``, so that neutral and unstable air is no obstacle.
-"""
-@inline function buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
-    u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
-    N²ᵢ = @inbounds N²[i, j, k]
-    N = sqrt(max(N²ᵢ, zero(N²ᵢ)))
-    return inv(N / u)
-end
 
 # The inverse of the buoyancy length ℂˡᵇ √e / N at a face: zero where N² ≤ 0
 @inline inverse_buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²) =

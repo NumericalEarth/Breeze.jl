@@ -65,31 +65,6 @@ using Oceananigans.Fields: AbstractField, interior
 """
 $(TYPEDEF)
 
-The source of the heating of a [`HeatingBudgetFlux`](@ref) that is the radiative heating of the
-model: the flux divergence of `model.radiation`, as a tendency of θˡⁱ. Without radiation it is zero.
-"""
-struct RadiativeHeating end
-
-"""
-$(TYPEDEF)
-
-A source of the heating of a [`HeatingBudgetFlux`](@ref) that is prescribed: `tendency` is a field
-at the cell centers (or an array that broadcasts with the interior of one) that holds the tendency of θˡⁱ in
-K s⁻¹, for example the field of a `Forcing` of θ that a callback updates with a parameterized
-radiative cooling. The closure reads it at every evaluation of its fields and does not change it.
-
-$(TYPEDFIELDS)
-"""
-struct PrescribedHeating{F}
-    "Tendency of θˡⁱ at the cell centers, K s⁻¹"
-    tendency :: F
-end
-
-Adapt.adapt_structure(to, heating::PrescribedHeating) = PrescribedHeating(adapt(to, heating.tendency))
-
-"""
-$(TYPEDEF)
-
 A turbulent flux of θˡⁱ that redistributes diabatic heating over the turbulent layer, and its
 energy conversion in the TKE equation of [`TKEBasedTurbulenceClosure`](@ref),
 
@@ -112,15 +87,11 @@ that adds its tendency of θˡⁱ (K s⁻¹) to the center field `𝒬`.
 
 $(TYPEDFIELDS)
 """
-struct HeatingBudgetFlux{H, FT}
+struct HeatingBudgetFlux{FT}
     "Share of the destabilizing flux that is applied to θˡⁱ and converted, in [0, 1]"
     ℂᑫ :: FT
     "Exchange length of the redistributed heating in mixing lengths, `Λ = ℂᑫᴸ ℓ`; positive and finite"
     ℂᑫᴸ :: FT
-    "Coefficient of the conversion of the flux driven by cooling in the damped local third moment of `TKEBudgetThirdMoment`; not negative"
-    ℂʷᑫ :: FT
-    "Sources of the heating"
-    heating :: H
 end
 
 """
@@ -140,11 +111,10 @@ below a radiatively cooled anvil, where the large-eddy simulations have positive
 [`heating_budget_flux_bounds`](@ref) gives an interval for each coefficient for a calibration.
 """
 function HeatingBudgetFlux(FT::DataType = Oceananigans.defaults.FloatType;
-                           ℂᑫ = 0.5, ℂᑫᴸ = 8, ℂʷᑫ = 0, heating = RadiativeHeating())
+                           ℂᑫ = 0.5, ℂᑫᴸ = 8)
     0 <= ℂᑫ <= 1 || throw(ArgumentError("ℂᑫ must lie in [0, 1], got $(ℂᑫ)."))
     0 < ℂᑫᴸ < Inf || throw(ArgumentError("ℂᑫᴸ must be positive and finite (the levels of still air must not exchange), got $(ℂᑫᴸ)."))
-    ℂʷᑫ >= 0 || throw(ArgumentError("ℂʷᑫ must not be negative, got $(ℂʷᑫ)."))
-    return HeatingBudgetFlux(convert(FT, ℂᑫ), convert(FT, ℂᑫᴸ), convert(FT, ℂʷᑫ), heating)
+    return HeatingBudgetFlux(convert(FT, ℂᑫ), convert(FT, ℂᑫᴸ))
 end
 
 """
@@ -154,20 +124,16 @@ The interval of each coefficient of a [`HeatingBudgetFlux`](@ref) for a calibrat
 `NamedTuple` of `(lower, upper)`: the share `ℂᑫ` in `[0, 1]`, the exchange length `ℂᑫᴸ` in
 `[1, 32]` mixing lengths and the local third-moment coefficient `ℂʷᑫ` in `[0, 2]`.
 """
-heating_budget_flux_bounds() = (ℂᑫ = (0.0, 1.0), ℂᑫᴸ = (1.0, 32.0), ℂʷᑫ = (0.0, 2.0))
+heating_budget_flux_bounds() = (ℂᑫ = (0.0, 1.0), ℂᑫᴸ = (1.0, 32.0))
 
 convert_eltype(::Type{FT}, hb::HeatingBudgetFlux) where FT =
-    HeatingBudgetFlux(convert(FT, hb.ℂᑫ), convert(FT, hb.ℂᑫᴸ), convert(FT, hb.ℂʷᑫ), hb.heating)
+    HeatingBudgetFlux(convert(FT, hb.ℂᑫ), convert(FT, hb.ℂᑫᴸ))
 
 Adapt.adapt_structure(to, hb::HeatingBudgetFlux) =
-    HeatingBudgetFlux(adapt(to, hb.ℂᑫ), adapt(to, hb.ℂᑫᴸ), adapt(to, hb.ℂʷᑫ), adapt(to, hb.heating))
+    HeatingBudgetFlux(adapt(to, hb.ℂᑫ), adapt(to, hb.ℂᑫᴸ))
 
 Base.summary(hb::HeatingBudgetFlux) =
-    string("HeatingBudgetFlux(ℂᑫ = ", prettysummary(hb.ℂᑫ), ", ℂᑫᴸ = ", prettysummary(hb.ℂᑫᴸ), ", ℂʷᑫ = ", prettysummary(hb.ℂʷᑫ),
-           ", heating = ", heating_summary(hb.heating), ")")
-
-heating_summary(heating) = string(nameof(typeof(heating)))
-heating_summary(heating::Tuple) = string("(", join(map(heating_summary, heating), ", "), ")")
+    string("HeatingBudgetFlux(ℂᑫ = ", prettysummary(hb.ℂᑫ), ", ℂᑫᴸ = ", prettysummary(hb.ℂᑫᴸ), ")")
 
 Base.show(io::IO, hb::HeatingBudgetFlux) = print(io, summary(hb))
 
@@ -186,12 +152,10 @@ function validate_heating_budget_flux(hb::HeatingBudgetFlux, static_stability, d
 end
 
 # The coefficients are the scalars of the component; the sources are kept
-@inline SimplifiedHigherOrderClosures.component_scalars(hb::HeatingBudgetFlux) = (hb.ℂᑫ, hb.ℂᑫᴸ, hb.ℂʷᑫ)
-SimplifiedHigherOrderClosures.component_scalar_names(::HeatingBudgetFlux, name) = (:ℂᑫ, :ℂᑫᴸ, :ℂʷᑫ)
+@inline SimplifiedHigherOrderClosures.component_scalars(hb::HeatingBudgetFlux) = (hb.ℂᑫ, hb.ℂᑫᴸ)
+SimplifiedHigherOrderClosures.component_scalar_names(::HeatingBudgetFlux, name) = (:ℂᑫ, :ℂᑫᴸ)
 @inline SimplifiedHigherOrderClosures.rebuild_component(hb::HeatingBudgetFlux, scalars, n) =
-    HeatingBudgetFlux(promote(scalars[n], scalars[n+1], scalars[n+2])..., hb.heating), n + 3
-@inline SimplifiedHigherOrderClosures.map_scalars(f, hb::HeatingBudgetFlux) =
-    HeatingBudgetFlux(f(hb.ℂᑫ), f(hb.ℂᑫᴸ), f(hb.ℂʷᑫ), hb.heating)
+    HeatingBudgetFlux(promote(scalars[n], scalars[n+1])...), n + 2
 
 #####
 ##### Fields: the heating, the heating as redistributed, the applied flux and its conversions, the flux
@@ -202,50 +166,12 @@ SimplifiedHigherOrderClosures.component_scalar_names(::HeatingBudgetFlux, name) 
 heating_budget_flux_fields(grid, ::Nothing) = NamedTuple()
 
 heating_budget_flux_fields(grid, ::HeatingBudgetFlux) =
-    (𝒬 = CenterField(grid), sᑫ = CenterField(grid), sᑫᶜ = CenterField(grid), heating_work = CenterField(grid),
-     dissipative_heating_rate = CenterField(grid),
-     Jᑫ = ZFaceField(grid), Jᑫᶜ = ZFaceField(grid),
-     Gᑫ = CenterField(grid), Gᑫᴸ = CenterField(grid), Gᑫᶜ = CenterField(grid))
+    (𝒬 = CenterField(grid), sᑫ = CenterField(grid), heating_work = CenterField(grid),
+     dissipative_heating_rate = CenterField(grid), Jᑫ = ZFaceField(grid), Gᑫ = CenterField(grid), Gᑫᴸ = CenterField(grid))
 
 #####
 ##### The heating: the tendency of θˡⁱ of each source, added to 𝒬
 #####
-
-"""
-    add_diabatic_heating!(𝒬, source, model, fields)
-
-Add the tendency of θˡⁱ (K s⁻¹) of the diabatic `source` of a [`HeatingBudgetFlux`](@ref) to the
-center field `𝒬`. `fields` are the fields of the closure's applied-flux energetics; `fields.cloud.ĉᵖΠ`
-is the enthalpy coefficient `d(cᵖᵐ T)/dθˡⁱ` at the centers. Extend it for a source of another kind.
-"""
-function add_diabatic_heating! end
-
-add_diabatic_heating!(𝒬, sources::Tuple, model, fields) = foreach(source -> add_diabatic_heating!(𝒬, source, model, fields), sources)
-
-# In a kernel rather than a broadcast over the interior views, which a `ReactantState` array outside a traced
-# function would index element by element
-function add_diabatic_heating!(𝒬, source::PrescribedHeating, model, fields)
-    grid = model.grid
-    tendency = source.tendency
-    launch!(grid.architecture, grid, :xyz, _add_prescribed_heating!, 𝒬, interior_data(tendency), interior_size(tendency))
-    return nothing
-end
-
-# The values of a prescribed tendency, indexed from 1 over the interior, and the size of that interior: the data of
-# a field (a reduced field keeps its data, not the field, so the kernel needs no field method), or an array
-interior_data(tendency::AbstractField) = tendency.data
-interior_data(tendency::AbstractArray) = tendency
-interior_size(tendency::AbstractField) = size(interior(tendency))
-interior_size(tendency::AbstractArray) = size(tendency)
-
-# A prescribed tendency broadcasts with the interior: a dimension of size one is read at its single index
-@kernel function _add_prescribed_heating!(𝒬, tendency, Nᵗ)
-    i, j, k = @index(Global, NTuple)
-    iᵗ = ifelse(Nᵗ[1] == 1, 1, i)
-    jᵗ = ifelse(Nᵗ[2] == 1, 1, j)
-    kᵗ = ifelse(Nᵗ[3] == 1, 1, k)
-    @inbounds 𝒬[i, j, k] += tendency[iᵗ, jᵗ, kᵗ]
-end
 
 # ∂t θˡⁱ = -∂z ℐ / (ρ ĉᵖ Π), as the tendency of ρθ applies it (∂θˡⁱ/∂h = θˡⁱ / (ĉᵖ Π θˡⁱ))
 @kernel function _add_radiative_heating!(𝒬, flux_divergence, ρ, ĉᵖΠ)
@@ -253,7 +179,7 @@ end
     @inbounds 𝒬[i, j, k] += flux_divergence[i, j, k] / (ρ[i, j, k] * ĉᵖΠ[i, j, k])
 end
 
-function add_diabatic_heating!(𝒬, ::RadiativeHeating, model, fields)
+function add_radiative_heating!(𝒬, model, fields)
     flux_divergence = AtmosphereModels.radiation_flux_divergence(model.radiation)
     isnothing(flux_divergence) && return nothing
     grid = model.grid
@@ -264,15 +190,6 @@ end
 #####
 ##### The redistributed heating and the flux, column by column
 #####
-
-# The cooling part of a heating, its smooth negative part with the scale `scale` (an array of the centers), as an array
-# of the centers
-struct CoolingPart{Q, S}
-    heating :: Q
-    scale :: S
-end
-
-@inline Base.getindex(c::CoolingPart, i, j, k) = @inbounds smooth_negative_part(c.heating[i, j, k], c.scale[i, j, k])
 
 # One thread per column: the rate ε / (ĉᵖ Π) at which the dissipation heats the air, the redistributed heatings, then ρJ
 # at the faces from the ground, (ρJ)ₖ₊½ = (ρJ)ₖ₋½ + ρ Δz (𝒬 - s), whose smooth positive part over ρ at the face is the
@@ -288,22 +205,16 @@ end
     @inbounds for k in 1:Nz
         rate[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields) / cl.ĉᵖΠ[i, j, k]
     end
-    cooling = CoolingPart(cl.𝒬, rate)
-    exchange_amplitudes!(cl.sᑫ, cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, TurbulentShape(e, closure_ij.minimum_tke),
-                         cl.𝒬, cooling, ρ, ℓᵐ)
+    exchange_amplitudes!(cl.sᑫ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, TurbulentShape(e, closure_ij.minimum_tke), cl.𝒬, ρ, ℓᵐ)
     below = zero(FT)
-    belowᶜ = zero(FT)
     @inbounds begin
         cl.Jᑫ[i, j, 1] = zero(FT)
-        cl.Jᑫᶜ[i, j, 1] = zero(FT)
         for k in 1:Nz
             ρΔz = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
             below += ρΔz * (cl.𝒬[i, j, k] - cl.sᑫ[i, j, k])
-            belowᶜ += ρΔz * (cooling[i, j, k] - cl.sᑫᶜ[i, j, k])
             ρᶠ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
             δ = ℓᵐ[i, j, k+1] * (rate[i, j, k] + rate[i, j, min(k + 1, Nz)]) / 2
             cl.Jᑫ[i, j, k+1] = ifelse(k < Nz, hb.ℂᑫ * smooth_positive_part(below / ρᶠ, δ), zero(FT))
-            cl.Jᑫᶜ[i, j, k+1] = ifelse(k < Nz, smooth_positive_part(belowᶜ / ρᶠ, δ), zero(FT))
         end
     end
 end
@@ -316,7 +227,7 @@ function compute_heating_budget_flux!(fields, hb::HeatingBudgetFlux, closure_fie
     grid = model.grid
     cl = fields.cloud
     fill!(parent(cl.𝒬), 0)
-    add_diabatic_heating!(cl.𝒬, hb.heating, model, fields)
+    add_radiative_heating!(cl.𝒬, model, fields)
     launch!(grid.architecture, grid, :xy, _compute_heating_budget_flux!, cl, grid, closure, closure_fields,
             tracers[TKE_NAME], model.velocities, total_density(model.dynamics))
     return nothing
@@ -337,9 +248,8 @@ end
         latent = -bᶜᵛ * cl.aᴺ[i, j, k] * cl.c_θ[i, j, k] - bⁱᵛ * cl.ηⁱ[i, j, k] * cl.c_θⁱ[i, j, k] -
                  bˡᵛ * cl.ηʷⁱ[i, j, k] * cl.c_θ[i, j, k]
         J = cl.Jᑫ[i, j, k]
-        Jᶜ = cl.Jᑫᶜ[i, j, k]
     end
-    return b_θ * J, latent * J, (b_θ + latent) * Jᶜ
+    return b_θ * J, latent * J
 end
 
 # From the two faces of the cell k to its center (`half_cell_conversionᶜᶜᶜ`)
@@ -356,11 +266,10 @@ end
 @inline store_heating_flux_conversions!(::Val{false}, cl, i, j, k, grid, ρ) = zero(grid_float_type(grid))
 
 @inline function store_heating_flux_conversions!(::Val{true}, cl, i, j, k, grid, ρ)
-    dry, latent, cooling = heating_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
+    dry, latent = heating_flux_conversionsᶜᶜᶜ(i, j, k, grid, ρ, cl)
     @inbounds begin
         cl.Gᑫ[i, j, k] = dry + latent
         cl.Gᑫᴸ[i, j, k] = latent
-        cl.Gᑫᶜ[i, j, k] = cooling
     end
     return dry + latent
 end
@@ -368,13 +277,6 @@ end
 # The stored conversion, the applied flux at a face and the conversion that the cooling alone would drive; zero without the flux
 @inline heating_flux_conversion(cl, i, j, k) = stored_or_zero(cl, Val(:Gᑫ), i, j, k, eltype(cl.B))
 @inline applied_heating_flux(cl, i, j, k) = stored_or_zero(cl, Val(:Jᑫ), i, j, k, eltype(cl.w′²))
-@inline cooling_flux_conversion(cl, i, j, k) = stored_or_zero(cl, Val(:Gᑫᶜ), i, j, k, eltype(cl.B))
-
-# The conversion of the flux that the cooling drives with its coefficient ℂʷᑫ in the damped local third moment;
-# `nothing` without a heating budget flux
-@inline cooling_conversion(::Nothing, Gᑫᶜ) = nothing
-@inline cooling_conversion(hb::HeatingBudgetFlux, Gᑫᶜ) = (Gᑫᶜ, hb.ℂʷᑫ)
-
 #####
 ##### The flux in the stage tendency of ρθ, with the draw of the latent part of its conversion on the internal energy
 #####

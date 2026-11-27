@@ -7,7 +7,7 @@ export TKEBasedTurbulenceClosure,
        IntegralMixingLength,
        GradientLimitedMixingLength,
        ConstantStabilityFunctions,
-       RationalStabilityFunction, SurfaceLayerSimilarity,
+       RationalStabilityFunction,
        TurbulentRichardsonStabilityFunction,
        DryStaticStability,
        MoistStaticStability,
@@ -18,7 +18,7 @@ export TKEBasedTurbulenceClosure,
        ColumnStabilityDamping,
        DowngradientSecondMoments,
        AlgebraicThirdMoment, TKEBudgetThirdMoment,
-       HeatingBudgetFlux, RadiativeHeating, PrescribedHeating, heating_budget_flux_bounds,
+       HeatingBudgetFlux, heating_budget_flux_bounds,
        RationalSaturatedStratificationNumber,
        PolynomialSaturatedSkewness,
        DoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
@@ -261,7 +261,6 @@ include("per_column_coefficients.jl")
 include("shear.jl")
 include("richardson_number_stability_functions.jl")
 include("turbulent_richardson_stability_functions.jl")
-include("surface_layer_similarity.jl")
 
 include("SHOC/SimplifiedHigherOrderClosures.jl")
 using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures,

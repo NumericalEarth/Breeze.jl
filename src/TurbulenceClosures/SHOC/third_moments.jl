@@ -80,7 +80,7 @@ The stratification number enters the expression through the closure's
 
 $(TYPEDFIELDS)
 """
-struct AlgebraicThirdMoment{FT, L} <: AbstractSubgridDistributionComponent
+struct AlgebraicThirdMoment{FT} <: AbstractSubgridDistributionComponent
     "Coefficient `c` of the diagnostic third moment of vertical velocity (`c_diag_3rd_mom`)"
     ℂʷ₂ :: FT
     "Numerator of `a₀` (literal `0.52`)"
@@ -102,7 +102,6 @@ struct AlgebraicThirdMoment{FT, L} <: AbstractSubgridDistributionComponent
     "Weight of `f₄` in `ω₂` (literal `5/4`)"
     ℂʷ₁₁ :: FT
     "Where the third moment is diagnosed: `Face()` (the default, as `shoc.F90`) or `Center()`"
-    location :: L
 end
 
 """
@@ -113,19 +112,15 @@ argument. `location` is where the third moment is diagnosed: at the faces (`Face
 stencils of `shoc.F90`, and interpolated to the centers where the assumed PDF reads it, or at the centers
 (`Center()`).
 """
-function AlgebraicThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; location = Face(), kw...)
+function AlgebraicThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; kw...)
     defaults = (ℂʷ₂ = 7, ℂʷ₃ = 0.52, ℂʷ₄ = 0.87, ℂʷ₅ = 0.5, ℂʷ₆ = 0.6, ℂʷ₇ = 2.4, ℂʷ₈ = 0.6, ℂʷ₉ = 1.2, ℂʷ₁₀ = 1.5, ℂʷ₁₁ = 1.25)
     names = keys(defaults)
     all(name -> name ∈ names, keys(kw)) ||
-        throw(ArgumentError("$(setdiff(keys(kw), names)) are not fields of AlgebraicThirdMoment; its fields are $(names) and location."))
-    validate_third_moment_location(location)
+        throw(ArgumentError("$(setdiff(keys(kw), names)) are not fields of AlgebraicThirdMoment; its fields are $(names)."))
     values = map(value -> convert(FT, value), Tuple(merge(defaults, NamedTuple(kw))))
-    return AlgebraicThirdMoment(values..., location)
+    return AlgebraicThirdMoment(values...)
 end
 
-validate_third_moment_location(::Union{Face, Center}) = nothing
-validate_third_moment_location(location) =
-    throw(ArgumentError("The location of a third moment is Face() or Center(), not $(location)."))
 
 Adapt.@adapt_structure AlgebraicThirdMoment
 

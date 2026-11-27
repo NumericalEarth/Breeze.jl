@@ -123,11 +123,7 @@ simulations of BOMEX, ARM cumulus, ASTEX and DYCOMS.
 
 $(TYPEDFIELDS)
 """
-# The amplitude of the sinks that balance the budget: one per column, or one per level exchanged between neighbours
-struct ColumnSinkAmplitude end
-struct ExchangedSinkAmplitude end
-
-struct TKEBudgetThirdMoment{N, FT, L, A} <: SimplifiedHigherOrderClosures.AbstractSubgridDistributionComponent
+struct TKEBudgetThirdMoment{FT} <: SimplifiedHigherOrderClosures.AbstractSubgridDistributionComponent
     "Coefficient of the budget flux with the sink shape `e`"
     ℂʷᵉ :: FT
     "Coefficient of the budget flux with the sink shape `ε`"
@@ -136,29 +132,14 @@ struct TKEBudgetThirdMoment{N, FT, L, A} <: SimplifiedHigherOrderClosures.Abstra
     ℂʷᴸ :: FT
     "Amplitude of the dependence of the ratio `r` on the stratification number, in (-1, 1)"
     ℂʷʳ :: FT
-    "Coefficient of the buoyant source `√e B₊` of the damped local third moment"
-    ℂʷᵇ :: FT
     "Coefficient of the latent source `√e (1 - aᶜ) Bˡ₊` of the damped local third moment"
     ℂʷˡ :: FT
-    "Coefficient of the gradient production `-w′² ∂z w′²` of the damped local third moment"
-    ℂʷᵍ :: FT
     "Coefficient of the stratification number in the damping `D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ)` of the local third moment; not negative"
     ℂʷᴺ :: FT
     "Share of the production that the budget flux with the sink shape `e` transports in the TKE equation, in [0, 1]"
     ℂʷᵀ :: FT
     "Width `δ` in the stratification number over which the damping passes from one to `1 + ℂʷᴺ αᴺ`; positive"
     stratification_damping_width :: FT
-    "Share of the TKE of the cell below in the sink shape `e` of a cell, `ωᵉₖ = eₖ + ℂʷᵒ eₖ₋₁`: the overshoot of the budget flux into the cell above a turbulent layer; not negative"
-    ℂʷᵒ :: FT
-    "Where the third moment is diagnosed: `Face()` (the default) or `Center()`"
-    location :: L
-    "The amplitude of the sinks: `ExchangedSinkAmplitude()`, or `ColumnSinkAmplitude()` (constructed with `ℂʷᴸ = Inf`)"
-    sink_amplitude :: A
-
-    TKEBudgetThirdMoment{N}(ℂʷᵉ::FT, ℂʷᵋ::FT, ℂʷᴸ::FT, ℂʷʳ::FT, ℂʷᵇ::FT, ℂʷˡ::FT, ℂʷᵍ::FT, ℂʷᴺ::FT, ℂʷᵀ::FT,
-                            stratification_damping_width::FT, ℂʷᵒ::FT, location::L = Face(),
-                            sink_amplitude::A = ExchangedSinkAmplitude()) where {N, FT, L, A} =
-        new{N, FT, L, A}(ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width, ℂʷᵒ, location, sink_amplitude)
 end
 
 """
@@ -182,60 +163,19 @@ come closer to them with a larger coefficient: with the hand-tuned stability fun
 unchanged.
 """
 function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
-                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷᵇ = 0, ℂʷˡ = 8, ℂʷᵍ = 0, ℂʷᴺ = 0, ℂʷᵀ = 0,
-                              stratification_damping_width = 1, passes = 1, ℂʷᵒ = 0, location = Face())
+                              ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷˡ = 8, ℂʷᴺ = 0, ℂʷᵀ = 0,
+                              stratification_damping_width = 1)
     abs(ℂʷʳ) < 1 || throw(ArgumentError("ℂʷʳ must lie in (-1, 1) for a positive ratio, got $(ℂʷʳ)."))
     0 <= ℂʷᵀ <= 1 || throw(ArgumentError("ℂʷᵀ must lie in [0, 1], got $(ℂʷᵀ)."))
     ℂʷᴺ >= 0 || throw(ArgumentError("ℂʷᴺ must not be negative (the damping must not vanish), got $(ℂʷᴺ)."))
-    ℂʷᴸ > 0 || throw(ArgumentError("ℂʷᴸ must be positive (Inf for one sink amplitude per column), got $(ℂʷᴸ)."))
+    0 < ℂʷᴸ < Inf || throw(ArgumentError("ℂʷᴸ must be positive and finite, got $(ℂʷᴸ)."))
     stratification_damping_width > 0 ||
         throw(ArgumentError("stratification_damping_width must be positive, got $(stratification_damping_width)."))
-    ℂʷᵒ >= 0 || throw(ArgumentError("ℂʷᵒ must not be negative, got $(ℂʷᵒ)."))
-    passes isa Integer && passes >= 1 || throw(ArgumentError("passes must be a positive integer, got $(passes)."))
-    scalars = (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷᵇ, ℂʷˡ, ℂʷᵍ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width, ℂʷᵒ)
-    SimplifiedHigherOrderClosures.validate_third_moment_location(location)
-    # The amplitude is chosen here, once: a kernel does not branch on a coefficient
-    sink_amplitude = isfinite(ℂʷᴸ) ? ExchangedSinkAmplitude() : ColumnSinkAmplitude()
-    return TKEBudgetThirdMoment{Int(passes)}(map(c -> convert(FT, c), scalars)..., location, sink_amplitude)
+    scalars = (ℂʷᵉ, ℂʷᵋ, ℂʷᴸ, ℂʷʳ, ℂʷˡ, ℂʷᴺ, ℂʷᵀ, stratification_damping_width)
+    return TKEBudgetThirdMoment(map(c -> convert(FT, c), scalars)...)
 end
 
-# The number of passes is a type parameter, so that the loop over them is unrolled when traced
-third_moment_passes(::TKEBudgetThirdMoment{N}) where N = N
-
-# The amplitude of the sinks is chosen by the constructor from ℂʷᴸ; a rebuild (`with_parameters`) that replaces ℂʷᴸ
-# keeps it, so a replacement that would need the other amplitude is an error (an exchange over Λ = Inf ℓ gives NaN,
-# and a finite ℂʷᴸ would be ignored by the amplitude of the column). Traced scalars are not checked.
-SimplifiedHigherOrderClosures.component_constructor(::Type{<:TKEBudgetThirdMoment{N}}) where N =
-    (args...) -> validate_sink_amplitude(TKEBudgetThirdMoment{N}(args...))
-
-function validate_sink_amplitude(tm::TKEBudgetThirdMoment)
-    validate_sink_amplitude(tm.sink_amplitude, tm.ℂʷᴸ)
-    return tm
-end
-
-validate_sink_amplitude(amplitude, ℂʷᴸ) = nothing
-
-validate_sink_amplitude(::ExchangedSinkAmplitude, ℂʷᴸ::AbstractFloat) =
-    isfinite(ℂʷᴸ) || throw(ArgumentError("ℂʷᴸ = $(ℂʷᴸ) replaces the finite exchange length of a TKEBudgetThirdMoment " *
-                                         "that exchanges its sink amplitude; construct it with ℂʷᴸ = Inf for one " *
-                                         "amplitude per column."))
-
-validate_sink_amplitude(::ColumnSinkAmplitude, ℂʷᴸ::AbstractFloat) =
-    isinf(ℂʷᴸ) || throw(ArgumentError("ℂʷᴸ = $(ℂʷᴸ) replaces Inf in a TKEBudgetThirdMoment with one sink amplitude " *
-                                      "per column; construct it with a finite ℂʷᴸ to exchange the amplitude."))
-
-# The scalars are adapted one by one and the location passes through unchanged, so that the adapted closure infers
-# (inside a kernel, `getclosure` adapts the closure of each column)
-Adapt.adapt_structure(to, tm::TKEBudgetThirdMoment{N}) where N =
-    TKEBudgetThirdMoment{N}(adapt(to, tm.ℂʷᵉ), adapt(to, tm.ℂʷᵋ), adapt(to, tm.ℂʷᴸ), adapt(to, tm.ℂʷʳ), adapt(to, tm.ℂʷᵇ),
-                            adapt(to, tm.ℂʷˡ), adapt(to, tm.ℂʷᵍ), adapt(to, tm.ℂʷᴺ), adapt(to, tm.ℂʷᵀ),
-                            adapt(to, tm.stratification_damping_width), adapt(to, tm.ℂʷᵒ), tm.location, tm.sink_amplitude)
-
-SimplifiedHigherOrderClosures.type_parameter_summary(tm::TKEBudgetThirdMoment{N, FT}) where {N, FT} = string("{", N, ", ", FT, "}")
-
-# The third moment before its limiter, at its location
-third_moment_location_field(grid, ::Face) = ZFaceField(grid)
-third_moment_location_field(grid, ::Center) = CenterField(grid)
+Adapt.@adapt_structure TKEBudgetThirdMoment
 
 const TKEBudgetDistribution = DoubleGaussian{<:Any, <:Any, <:TKEBudgetThirdMoment}
 
@@ -248,7 +188,7 @@ third_moment_fields(grid, third_moment) = NamedTuple()
 
 third_moment_fields(grid, tm::TKEBudgetThirdMoment) =
     (Fᵉ = CenterField(grid), Fᵋ = CenterField(grid), uᵉ = CenterField(grid), uᵋ = CenterField(grid), εʷ = CenterField(grid),
-     w′³ᵇ = third_moment_location_field(grid, tm.location), Tᵉ = CenterField(grid), budget_work = CenterField(grid),
+     w′³ᵇ = ZFaceField(grid), Tᵉ = CenterField(grid), budget_work = CenterField(grid),
      NamedTuple(pass_name(name) => ZFaceField(grid) for name in PASS_CLOSURE_FIELD_NAMES)...,
      NamedTuple(pass_name(name) => CenterField(grid) for name in PASS_CLOSURE_CENTER_FIELD_NAMES)...)
 
@@ -329,14 +269,6 @@ end
 
 @inline Base.getindex(s::SumOfArrays, i, j, k) = @inbounds s.a[i, j, k] + s.b[i, j, k]
 
-# A second source of `nothing` is none
-@inline source_value(source, i, j, k, FT) = @inbounds source[i, j, k]
-@inline source_value(::Nothing, i, j, k, FT) = zero(FT)
-@inline store_source!(s, i, j, k, value) = @inbounds s[i, j, k] = value
-@inline store_source!(::Nothing, i, j, k, value) = nothing
-@inline eliminate_source!(s, work, i, j, k) = @inbounds s[i, j, k] -= work[i, j, k] * s[i, j, k+1]
-@inline eliminate_source!(::Nothing, work, i, j, k) = nothing
-
 # Two sources of the column, `source₁` and `source₂` (arrays of the centers, per unit mass), as the turbulence
 # redistributes them, `s₁` and `s₂`: each c ω with the `shape` ω (an array of the centers) and an amplitude c exchanged
 # between neighbouring levels over the length ℂᴸ ℓ,
@@ -347,7 +279,7 @@ end
 # matrix, which is diagonally dominant by columns, once for the two right-hand sides; `work` holds the eliminated upper
 # diagonal. `s₁` may be the array of the shape (the shape of a level is read before its `s₁` is stored). The one solve
 # of the sinks of `TKEBudgetThirdMoment` and of the budget fluxes of the heating and of the total water.
-@inline function exchange_amplitudes!(s₁, s₂, work, i, j, grid, ℂᴸ, shape, source₁, source₂, ρ, ℓᵐ)
+@inline function exchange_amplitudes!(s₁, work, i, j, grid, ℂᴸ, shape, source₁, ρ, ℓᵐ)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
     tiny = sqrt(floatmin(FT))
@@ -355,7 +287,6 @@ end
         ω⁻ = zero(FT)
         c′ = zero(FT)
         d′₁ = zero(FT)
-        d′₂ = zero(FT)
         a⁻ = zero(FT) # the exchange coefficient at the face below
         ω = shape[i, j, 1]
         for k in 1:Nz
@@ -379,46 +310,22 @@ end
             end
             pivot = diagonal - lower * c′
             d′₁ = (m * source₁[i, j, k] - lower * d′₁) / pivot
-            d′₂ = (m * source_value(source₂, i, j, k, FT) - lower * d′₂) / pivot
             c′ = upper / pivot
             work[i, j, k] = c′
             s₁[i, j, k] = d′₁
-            store_source!(s₂, i, j, k, d′₂)
             ω⁻ = ω
             ω = ω⁺
         end
         for k in Nz-1:-1:1
             s₁[i, j, k] -= work[i, j, k] * s₁[i, j, k+1]
-            eliminate_source!(s₂, work, i, j, k)
         end
     end
     return nothing
 end
 
 # The sink of the column, `u` holding its shape ω on entry and the sink that balances ρ Δz (P + B) on exit
-@inline balance_sink!(u, work, i, j, grid, ::ExchangedSinkAmplitude, ℂʷᴸ, cl, ρ, ℓᵐ) =
-    exchange_amplitudes!(u, nothing, work, i, j, grid, ℂʷᴸ, u, SumOfArrays(cl.P, cl.B), nothing, ρ, ℓᵐ)
-
-# One amplitude for the column, c = Σ ρ Δz (P + B) / Σ ρ Δz ω
-@inline function balance_sink!(u, work, i, j, grid, ::ColumnSinkAmplitude, ℂʷᴸ, cl, ρ, ℓᵐ)
-    Nz = size(grid, 3)
-    FT = grid_float_type(grid)
-    tiny = sqrt(floatmin(FT))
-    @inbounds begin
-        Π = zero(FT)
-        Ω = zero(FT)
-        for k in 1:Nz
-            m = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
-            Π += m * (cl.P[i, j, k] + cl.B[i, j, k])
-            Ω += m * u[i, j, k]
-        end
-        c = Π / (Ω + tiny)
-        for k in 1:Nz
-            u[i, j, k] *= c
-        end
-    end
-    return nothing
-end
+@inline balance_sink!(u, work, i, j, grid, ℂʷᴸ, cl, ρ, ℓᵐ) =
+    exchange_amplitudes!(u, work, i, j, grid, ℂʷᴸ, u, SumOfArrays(cl.P, cl.B), ρ, ℓᵐ)
 
 #####
 ##### The damped local third moment
@@ -442,8 +349,6 @@ end
     return ifelse(x >= 0, (x + s) / 2, δ * δ / (2 * (s - x)))
 end
 
-@inline smooth_negative_part(x, δ) = -smooth_positive_part(-x, δ)
-@inline smooth_minimum(a, b, δ) = b - smooth_positive_part(b - a, δ)
 
 # D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ) ≥ 1: one in unstable air, 1 + ℂʷᴺ αᴺ in stable air, with slope in (0, ℂʷᴺ)
 @inline stratification_damping(ℂʷᴺ, δ, αᴺ) = 1 + ℂʷᴺ * δ * smooth_positive_part(αᴺ / δ)
@@ -454,43 +359,12 @@ end
 # positive part B₊ and of the smooth minimum. With a `HeatingBudgetFlux` the buoyant source is signed by origin
 # (`cooling = (Gᑫᶜ, ℂʷᑫ)`, `nothing` without one): of B₊, the part Gᶜ = min(Gᑫᶜ, B₊) that the flux driven by cooling
 # converts is carried by downdrafts, and the source is ℂʷᵇ (B₊ - Gᶜ) - ℂʷᑫ Gᶜ.
-@inline buoyant_source(::Nothing, ℂʷᵇ, B₊, ε) = ℂʷᵇ * B₊
-
-@inline function buoyant_source(cooling::Tuple, ℂʷᵇ, B₊, ε)
-    Gᑫᶜ, ℂʷᑫ = cooling
-    Gᶜ = smooth_minimum(Gᑫᶜ, B₊, ε)
-    return ℂʷᵇ * (B₊ - Gᶜ) - ℂʷᑫ * Gᶜ
-end
-
 # The latent source (1 - aᶜ) Bˡ₊ at the center k, with the scale aᶜ ε of the positive part of Bˡ: none in clear air
 @inline latent_sourceᶜᶜᶜ(i, j, k, cl) =
     @inbounds (1 - cl.aᶜ[i, j, k]) * smooth_positive_part(cl.Bˡ[i, j, k], cl.aᶜ[i, j, k] * cl.εʷ[i, j, k])
 
-# At the face k: (w′²)² differenced across the face, between the centers k - 1 and k
-@inline function local_variance_gradient(::Face, i, j, k, grid, w′²)
-    w′²ᵘ = @inbounds w′²[i, j, k]
-    w′²ˡ = @inbounds w′²[i, j, k-1]
-    return (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δzᶜᶜᶠ(i, j, k, grid))
-end
-
-# At the center k: (w′²)² differenced across the neighbouring centers (one-sided at the two ends of the column)
-@inline function local_variance_gradient(::Center, i, j, k, grid, w′²)
-    Nz = size(grid, 3)
-    kᵘ = min(k + 1, Nz)
-    kˡ = max(k - 1, 1)
-    Δz = ifelse(k < Nz, Δzᶜᶜᶠ(i, j, k + 1, grid), zero(grid_float_type(grid))) +
-         ifelse(k > 1, Δzᶜᶜᶠ(i, j, k, grid), zero(grid_float_type(grid)))
-    w′²ᵘ = @inbounds w′²[i, j, kᵘ]
-    w′²ˡ = @inbounds w′²[i, j, kˡ]
-    return ifelse(kᵘ > kˡ, (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δz), zero(Δz))
-end
-
-@inline function damped_local_third_moment(location, i, j, k, grid, tm, w′², τ, u, αᴺ, B, ε, cooling, latent_source)
-    w′²∂zw′² = local_variance_gradient(location, i, j, k, grid, w′²)
-    B₊ = smooth_positive_part(B, ε)
-    source = buoyant_source(cooling, tm.ℂʷᵇ, B₊, ε) + tm.ℂʷˡ * latent_source
-    return τ * (u * source - tm.ℂʷᵍ * w′²∂zw′²) / stratification_damping(tm.ℂʷᴺ, tm.stratification_damping_width, αᴺ)
-end
+@inline damped_local_third_moment(tm, τ, u, αᴺ, latent_source) =
+    τ * (u * (tm.ℂʷˡ * latent_source)) / stratification_damping(tm.ℂʷᴺ, tm.stratification_damping_width, αᴺ)
 
 #####
 ##### The budget of one evaluation: sinks, fluxes, the transport of TKE and, with `diagnose = Val(true)`, the third moment
@@ -505,13 +379,12 @@ end
     @inbounds for k in 1:size(grid, 3)
         # The shape e (`turbulent_shape`: none where e ≤ 0). With ℂʷᵒ > 0 the shape reaches one cell above the turbulence
         # (the overshoot); the cell below the first is none
-        e⁻ = ifelse(k > 1, turbulent_shape(e[i, j, max(k - 1, 1)], eᵐⁱⁿ), zero(grid_float_type(grid)))
-        cl.uᵉ[i, j, k] = turbulent_shape(e[i, j, k], eᵐⁱⁿ) + tm.ℂʷᵒ * e⁻
+        cl.uᵉ[i, j, k] = turbulent_shape(e[i, j, k], eᵐⁱⁿ)
         cl.εʷ[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
         cl.uᵋ[i, j, k] = cl.εʷ[i, j, k]
     end
-    balance_sink!(cl.uᵉ, cl.budget_work, i, j, grid, tm.sink_amplitude, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
-    balance_sink!(cl.uᵋ, cl.budget_work, i, j, grid, tm.sink_amplitude, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
+    balance_sink!(cl.uᵉ, cl.budget_work, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
+    balance_sink!(cl.uᵋ, cl.budget_work, i, j, grid, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
     N² = closure_fields.N²
     # The fluxes F at the centers: the integral of ρ (P + B - u) from the ground, the cell of the center counted half
     belowᵉ = zero(grid_float_type(grid))
@@ -526,10 +399,8 @@ end
         belowᵋ += rᵋ
 
         cl.Tᵉ[i, j, k] = tm.ℂʷᵀ * (cl.uᵉ[i, j, k] - cl.P[i, j, k] - cl.B[i, j, k])
-
-        diagnose_center_third_moment!(tm.location, diagnose, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², cl.Fᵉ[i, j, k], cl.Fᵋ[i, j, k])
     end
-    diagnose_face_third_moments!(tm.location, diagnose, cl, i, j, grid, tm, closure_ij, e, ℓᵐ, N², ρ)
+    diagnose_face_third_moments!(diagnose, cl, i, j, grid, tm, closure_ij, e, ℓᵐ, N², ρ)
 end
 
 # The third moment at the interior face k, with ℓ, √e and N² of the face; one stratification number αᴺ = τ₃² N² for
@@ -537,14 +408,13 @@ end
 # at the face; the buoyancy production and the latent source are averaged from the two centers. Only in the passes
 # of `diagnose_third_moment!` (`Val(true)`). Diagnosed at the faces, as `shoc.F90` diagnoses its third moment, and
 # interpolated to the centers with the other moments.
-@inline diagnose_face_third_moments!(location, ::Val{false}, args...) = nothing
-@inline diagnose_face_third_moments!(::Center, ::Val{true}, args...) = nothing
+@inline diagnose_face_third_moments!(::Val{false}, args...) = nothing
 
 # The faces of the column in a loop of their own, after the fluxes at the centers: a branch on `k > 1` in the loop
 # over the centers lets LLVM peel the first center and leave the rest a loop whose exit flag is carried, whose
 # iteration count the reverse pass of Enzyme (under Reactant) cannot recover to cache its values. The integrals
 # of the cells below each face are summed again, in the order and with the operations of the loop over the centers.
-@inline function diagnose_face_third_moments!(::Face, ::Val{true}, cl, i, j, grid, tm, closure_ij, e, ℓᵐ, N², ρ)
+@inline function diagnose_face_third_moments!(::Val{true}, cl, i, j, grid, tm, closure_ij, e, ℓᵐ, N², ρ)
     belowᵉ = zero(grid_float_type(grid))
     belowᵋ = zero(grid_float_type(grid))
     @inbounds for k in 1:size(grid, 3)-1
@@ -564,33 +434,9 @@ end
         τ = ℓ / u
         αᴺ = τ * τ * N²[i, j, k]
         r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
-        B = (cl.B[i, j, k] + cl.B[i, j, k-1]) / 2
-        ε = (cl.εʷ[i, j, k] + cl.εʷ[i, j, k-1]) / 2
-        Gᑫᶜ = (cooling_flux_conversion(cl, i, j, k) + cooling_flux_conversion(cl, i, j, k-1)) / 2
-        cooling = cooling_conversion(closure_ij.heating_budget_flux, Gᑫᶜ)
         latent = (latent_sourceᶜᶜᶜ(i, j, k, cl) + latent_sourceᶜᶜᶜ(i, j, k-1, cl)) / 2
         cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * ρFᵉ + tm.ℂʷᵋ * ρFᵋ) / ρᶠ +
-                           damped_local_third_moment(Face(), i, j, k, grid, tm, cl.w′², τ, u, αᴺ, B, ε, cooling, latent)
-    end
-    return nothing
-end
-
-# The third moment at the center, with ℓ, √e and N² as the distribution forms them there; one stratification number
-# αᴺ = τ₃² N² for the ratio and for the damping. Only in the passes of `diagnose_third_moment!` (`Val(true)`).
-@inline diagnose_center_third_moment!(location, ::Val{false}, args...) = nothing
-@inline diagnose_center_third_moment!(::Face, ::Val{true}, args...) = nothing
-
-@inline function diagnose_center_third_moment!(::Center, ::Val{true}, cl, i, j, k, grid, tm, closure_ij, e, ℓᵐ, N², Fᵉ, Fᵋ)
-    @inbounds begin
-        ℓ = (ℓᵐ[i, j, k] + ℓᵐ[i, j, k+1]) / 2
-        u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure_ij, e)
-        τ = ℓ / u
-        αᴺ = τ * τ * (N²[i, j, k] + N²[i, j, k+1]) / 2
-        r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
-        cooling = cooling_conversion(closure_ij.heating_budget_flux, cooling_flux_conversion(cl, i, j, k))
-        cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * Fᵉ + tm.ℂʷᵋ * Fᵋ) +
-                           damped_local_third_moment(Center(), i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k],
-                                                     cl.εʷ[i, j, k], cooling, latent_sourceᶜᶜᶜ(i, j, k, cl))
+                           damped_local_third_moment(tm, τ, u, αᴺ, latent)
     end
     return nothing
 end
@@ -623,14 +469,11 @@ function diagnose_third_moment!(fields::SubgridCloudFields, distribution::TKEBud
     compute_buoyancy_derivatives!(fields, model)
     # The heating budget flux reads the prognostic state and the heating alone, like the buoyancy derivatives
     compute_budget_fluxes!(fields, closure_fields, closure, model, tracers)
-    passes = third_moment_passes(distribution.third_moment)
-    for pass in 1:passes
-        start_pass_closure_fields!(pass_fields, closure_fields, model.grid)
-        compute_subgrid_distribution!(fields, closure_fields, closure, model)
-        solve_static_stability!(closure.static_stability, fields.energetics, fields, pass_fields, closure, model, tracers, parameters)
-        compute_applied_flux_conversions!(fields, pass_fields, closure, model, tracers)
-        compute_tke_budget_flux!(fields, pass_fields, closure, model, tracers, Val(true))
-    end
+    start_pass_closure_fields!(pass_fields, closure_fields, model.grid)
+    compute_subgrid_distribution!(fields, closure_fields, closure, model)
+    solve_static_stability!(closure.static_stability, fields.energetics, fields, pass_fields, closure, model, tracers, parameters)
+    compute_applied_flux_conversions!(fields, pass_fields, closure, model, tracers)
+    compute_tke_budget_flux!(fields, pass_fields, closure, model, tracers, Val(true))
     return nothing
 end
 

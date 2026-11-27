@@ -40,11 +40,8 @@ It transports variance against the gradient where the skewness and the fluxes ar
 
 $(TYPEDFIELDS)
 """
-struct ScalarVarianceTransport{FT, TM}
-    "Ratio of the diffusivity of the scalar second moments to the closure's `Kᶜ`"
-    ℂᵛᵗ :: FT
-    "`Val(true)` for the third moment of the PDF components, `Val(false)` for none"
-    component_third_moment :: TM
+struct ScalarVarianceTransport{FT}
+    ℂᵛᵗ :: FT # ratio of the diffusivity of the scalar second moments to Kᶜ
 end
 
 Adapt.@adapt_structure ScalarVarianceTransport
@@ -54,44 +51,22 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`ScalarVarianceTransport`](@ref).
 """
-function ScalarVarianceTransport(FT::DataType = Oceananigans.defaults.FloatType; ℂᵛᵗ = 1, component_third_moment = false)
+function ScalarVarianceTransport(FT::DataType = Oceananigans.defaults.FloatType; ℂᵛᵗ = 1)
     ℂᵛᵗ ≥ 0 || throw(ArgumentError("ℂᵛᵗ must be non-negative, got $ℂᵛᵗ"))
-    return ScalarVarianceTransport(convert(FT, ℂᵛᵗ), Val(component_third_moment))
+    return ScalarVarianceTransport(convert(FT, ℂᵛᵗ))
 end
 
-convert_eltype(::Type{FT}, t::ScalarVarianceTransport) where FT = ScalarVarianceTransport(convert(FT, t.ℂᵛᵗ), t.component_third_moment)
+convert_eltype(::Type{FT}, t::ScalarVarianceTransport) where FT = ScalarVarianceTransport(convert(FT, t.ℂᵛᵗ))
 
 scalar_variance_transport_fields(grid, ::Nothing) = NamedTuple()
 scalar_variance_transport_fields(grid, ::ScalarVarianceTransport) = (variance_transport_work = ZFaceField(grid),)
 
 # The third moments w′θˡⁱ′², w′qᵗ′², w′θˡⁱ′qᵗ′ at the center k
-@inline component_scalar_third_moments(::Val{false}, d, m, cl, i, j, k) = (zero(eltype(cl.w′²)), zero(eltype(cl.w′²)), zero(eltype(cl.w′²)))
-
-@inline function component_scalar_third_moments(::Val{true}, d, m, cl, i, j, k)
-    @inbounds begin
-        w′² = cl.w′²[i, j, k]
-        w′³ = cl.w′³[i, j, k]
-        Sk = w′³ / (w′² * sqrt(w′²))
-        w′²ᵇ = (1 - within_component_share(d.assumed_pdf, Sk)) * w′²
-        r = w′³ / (w′²ᵇ * w′²ᵇ)
-        w′θ = (m.w′θˡⁱ′[i, j, k] + m.w′θˡⁱ′[i, j, k+1]) / 2
-        w′q = (m.w′qᵗ′[i, j, k] + m.w′qᵗ′[i, j, k+1]) / 2
-    end
-    return r * w′θ * w′θ, r * w′q * w′q, r * w′θ * w′q
-end
-
-# The third moment w′³ at the centers from the local moments, for the third-moment flux of the solve
-@inline local_center_third_moments!(::Val{false}, args...) = nothing
-
-@inline local_center_third_moments!(::Val{true}, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e) =
-    third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
-
 @inline transport_scalar_variances!(::Nothing, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e) = nothing
 
 @inline function transport_scalar_variances!(t::ScalarVarianceTransport, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
-    local_center_third_moments!(t.component_third_moment, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
     work = m.variance_transport_work
     Kᶜ = closure_fields.Kᶜ
     @inbounds begin
@@ -101,34 +76,24 @@ end
         dq = zero(FT)
         dθq = zero(FT)
         a⁻ = zero(FT) # Kᵛ / Δz at the center below the face (zero below face 2: no flux through the bottom)
-        Tθ⁻ = zero(FT)
-        Tq⁻ = zero(FT)
-        Tθq⁻ = zero(FT)
         for k in 2:Nz
             a = zero(FT)
-            Tθ = zero(FT)
-            Tq = zero(FT)
-            Tθq = zero(FT)
             if k < Nz # the center k, between the faces k and k + 1; none above face Nz: no flux through the top
                 a = t.ℂᵛᵗ * (Kᶜ[i, j, k] + Kᶜ[i, j, k+1]) / 2 / Δzᶜᶜᶜ(i, j, k, grid)
-                Tθ, Tq, Tθq = component_scalar_third_moments(t.component_third_moment, d, m, cl, i, j, k)
             end
             r = m.τ[i, j, k] / 2 / Δzᶜᶜᶠ(i, j, k, grid)
             lower = -r * a⁻
             upper = -r * a
             pivot = 1 + r * (a + a⁻) - lower * c′
-            dθ = (m.θˡⁱ′²[i, j, k] - r * (Tθ - Tθ⁻) - lower * dθ) / pivot
-            dq = (m.qᵗ′²[i, j, k] - r * (Tq - Tq⁻) - lower * dq) / pivot
-            dθq = (m.θˡⁱ′qᵗ′[i, j, k] - r * (Tθq - Tθq⁻) - lower * dθq) / pivot
+            dθ = (m.θˡⁱ′²[i, j, k] - lower * dθ) / pivot
+            dq = (m.qᵗ′²[i, j, k] - lower * dq) / pivot
+            dθq = (m.θˡⁱ′qᵗ′[i, j, k] - lower * dθq) / pivot
             c′ = upper / pivot
             work[i, j, k] = c′
             m.θˡⁱ′²[i, j, k] = dθ
             m.qᵗ′²[i, j, k] = dq
             m.θˡⁱ′qᵗ′[i, j, k] = dθq
             a⁻ = a
-            Tθ⁻ = Tθ
-            Tq⁻ = Tq
-            Tθq⁻ = Tθq
         end
         for k in Nz-1:-1:2
             m.θˡⁱ′²[i, j, k] -= work[i, j, k] * m.θˡⁱ′²[i, j, k+1]

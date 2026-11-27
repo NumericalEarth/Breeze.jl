@@ -189,8 +189,6 @@ validate_moment_time_scale(stability_functions, time_scale) = nothing
 # The time scale of the second moments at face k, from the closure's ℓ, √e (u), N² and Ri there.
 # `e` and the closure fields (with the stored mixing length) are those the closure's shear reads,
 # so that `𝕊ᴰ` sees the same stratification and shear numbers as the diffusivities.
-@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts, closure, velocities, closure_fields, e, ℓ, u) =
-    moment_time_scale(ts, ℓ, u, @inbounds closure_fields.N²[i, j, k])
 
 @inline function moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::DissipationTimeScale, closure, velocities, closure_fields, e, ℓ, u)
     𝕊ᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
@@ -201,7 +199,6 @@ end
     return_to_isotropy_time_scaleᶜᶜᶠ(i, j, k, grid, closure.stability_functions, closure, closure_fields, ℓ, u)
 
 # The time scale of the third-moment diagnosis: the stored second-moment time scale, or its own
-@inline third_moment_time_scale(::StratificationLimitedMomentTimeScale, τ, ℓ, u, N²) = τ
 @inline third_moment_time_scale(::ReturnToIsotropyTimeScale, τ, ℓ, u, N²) = τ
 @inline third_moment_time_scale(ts::DissipationTimeScale, τ, ℓ, u, N²) =
     moment_time_scale(ts.third_moment_time_scale, ℓ, u, N²)
@@ -457,7 +454,7 @@ build_subgrid_cloud_fields(grid, ::Nothing, static_stability, tracer_names, heat
 
 function build_subgrid_cloud_fields(grid, distribution, static_stability, tracer_names, heating_budget_flux = nothing)
     energetics = AppliedFluxEnergetics()
-    moments = (τ = ZFaceField(grid), third_moment_location_fields(grid, third_moment_location(distribution.third_moment))...,
+    moments = (τ = ZFaceField(grid), w′³ = ZFaceField(grid),
                θˡⁱ′² = ZFaceField(grid), qᵗ′² = ZFaceField(grid), θˡⁱ′qᵗ′ = ZFaceField(grid),
                w′θˡⁱ′ = ZFaceField(grid), w′qᵗ′ = ZFaceField(grid),
                unit_variance = ZFaceField(grid), qⁱ′² = ZFaceField(grid), qⁱ′sⁱ′ = ZFaceField(grid), qᵈ′² = ZFaceField(grid),
@@ -657,7 +654,6 @@ end
 ##### The column computation of the distribution
 #####
 
-@inline subgrid_third_moment(::Nothing, d, g, args...) = zero(eltype(args[1]))
 @inline subgrid_third_moment(tm, d, g, args...) = third_moment(tm, d.stratification_number_bound, g, args...)
 
 # The third moment at the face or the center k before its limiter: from the local arguments of the algebraic diagnosis,
@@ -698,23 +694,7 @@ end
     return w′³
 end
 
-# Where the third moment is diagnosed (`Face()` or `Center()`): the `location` of the third-moment component, the faces
-# without one
-third_moment_location(tm) = tm.location
-third_moment_location(::Nothing) = Face()
-
-# The face field of w′³ of a third moment diagnosed at the faces; the centers hold w′³ in `cloud.w′³` either way
-third_moment_location_fields(grid, ::Face) = (w′³ = ZFaceField(grid),)
-third_moment_location_fields(grid, ::Center) = NamedTuple()
-
-# `Face()`: w′³ at the faces (zero at the bottom and the top), then interpolated linearly to the centers, as `shoc.F90`
-# interpolates its interface w′³ to the levels, and limited there, where the PDF forms the skewness w′³ / (w′²)^{3/2}
-# with the center w′² (`shoc.F90` limits at the interfaces; the bound of a ratio formed at the centers holds there). `Center()`: w′³ at the centers,
-# which needs the gradients of the center quantities w′² and e across two cells.
-@inline third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, g, θ, e) =
-    third_moment_profile!(third_moment_location(d.third_moment), m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
-
-@inline function third_moment_profile!(::Face, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
+@inline function third_moment_profile!(m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
     Nz = size(grid, 3)
     FT = grid_float_type(grid)
     ccc = (Center(), Center(), Center())
@@ -732,55 +712,6 @@ third_moment_location_fields(grid, ::Center) = NamedTuple()
             w′³ = linearly_interpolate(zᵘ, zˡ, m.w′³[i, j, k+1], m.w′³[i, j, k], zᶜ)
             cl.w′³[i, j, k] = limit_third_moment(d.skewness, cl.w′²[i, j, k], w′³)
         end
-    end
-    return nothing
-end
-
-# The third moment diagnosed at the center k (`Center()`), where the PDF forms the skewness w′³ / (w′²)^{3/2}. The second moments of the faces
-# k and k+1 are differenced across the cell (compact), w′² and e across the neighbouring centers, and the
-# coefficients are the averages of the two faces. `lower` and `upper` are (τ, ℓ, N², θˡⁱ′², w′θˡⁱ′) at the
-# faces k and k+1; `w′θˡⁱ′ᶜ` is the flux interpolated to the center; `g` is the gravitational acceleration.
-@inline function center_third_moment(i, j, k, grid, d, closure, cl, g, θ, e, w′θˡⁱ′ᶜ, lower, upper)
-    FT = grid_float_type(grid)
-    Nz = size(grid, 3)
-    eᵐⁱⁿ = closure.minimum_tke
-    ccc = (Center(), Center(), Center())
-    τˡ, ℓˡ, N²ˡ, θˡⁱ′²ˡ, w′θˡⁱ′ˡ = lower
-    τᵘ, ℓᵘ, N²ᵘ, θˡⁱ′²ᵘ, w′θˡⁱ′ᵘ = upper
-    @inbounds begin
-        kᵘ = min(k + 1, Nz)
-        kˡ = max(k - 1, 1)
-        ℓ = (ℓˡ + ℓᵘ) / 2
-        N² = (N²ˡ + N²ᵘ) / 2
-        u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
-        τ³ = third_moment_time_scale(d.time_scale, (τˡ + τᵘ) / 2, ℓ, u, N²)
-        τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
-        w′² = cl.w′²[i, j, k]
-        Δzʷ = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
-        compact_inverse_spacing = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
-        algebraic_arguments = (τ³, N², w′², θ[i, j, k],
-                               compact_inverse_spacing, 1 / Δzᶜᶜᶜ(i, j, k, grid),
-                               θˡⁱ′²ᵘ - θˡⁱ′²ˡ,
-                               w′θˡⁱ′ᵘ - w′θˡⁱ′ˡ,
-                               cl.w′²[i, j, kᵘ] - cl.w′²[i, j, kˡ],
-                               max(e[i, j, kᵘ], eᵐⁱⁿ) - max(e[i, j, kˡ], eᵐⁱⁿ),
-                               w′θˡⁱ′ᶜ)
-        w′³ = third_moment_diagnosis(d.third_moment, i, j, k, d, cl, g, algebraic_arguments)
-    end
-    return limit_third_moment(d.skewness, w′², w′³)
-end
-
-@inline function third_moment_profile!(::Center, m, cl, i, j, grid, d, closure, closure_fields, g, θ, e)
-    ccc = (Center(), Center(), Center())
-    ccf = (Center(), Center(), Face())
-    @inbounds for k in 1:size(grid, 3)
-        zᶜ = znode(i, j, k, grid, ccc...)
-        zˡ = znode(i, j, k, grid, ccf...)
-        zᵘ = znode(i, j, k+1, grid, ccf...)
-        w′θˡⁱ′ᶜ = linearly_interpolate(zᵘ, zˡ, m.w′θˡⁱ′[i, j, k+1], m.w′θˡⁱ′[i, j, k], zᶜ)
-        lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k])
-        upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡⁱ′²[i, j, k+1], m.w′θˡⁱ′[i, j, k+1])
-        cl.w′³[i, j, k] = center_third_moment(i, j, k, grid, d, closure, cl, g, θ, e, w′θˡⁱ′ᶜ, lower, upper)
     end
     return nothing
 end

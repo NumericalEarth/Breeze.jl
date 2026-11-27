@@ -66,24 +66,4 @@ function closure_parameters(closure)
     return NamedTuple{names}(map(name -> scalars[name], names))
 end
 
-"""
-The empirical coefficients of the components of SHOC that have a dimension: the eddy turnover
-time scale `ℂˡ₅` (s) of [`BlendedMixingLength`](@ref).
-"""
-const DIMENSIONAL_COEFFICIENTS = (:ℂˡ₅,)
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return the names of the coefficients of `closure` that a calibration may train: those of
-[`closure_parameters`](@ref) except the dimensional ones (`DIMENSIONAL_COEFFICIENTS`).
-
-Not every name returned can be determined independently of the others: the five `ℂᴰ` of
-[`ColumnStabilityDamping`](@ref) enter through one product, and `ℂˡ₂` of
-[`BlendedMixingLength`](@ref) only divides by `ℂˡ₁`.
-"""
-trainable_parameter_names(closure) =
-    filter(name -> name ∉ DIMENSIONAL_COEFFICIENTS, keys(closure_parameters(closure)))
-
-# Extended by each closure (`TKEBasedTurbulenceClosure`: subgrid_distribution.jl)
 function with_parameters end

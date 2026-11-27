@@ -235,34 +235,6 @@ function stability_coefficient_bounds(lower = DEFAULT_STABILITY_COEFFICIENT_BOUN
     return NamedTuple{TURBULENT_RICHARDSON_COEFFICIENTS}(intervals)
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Whether every coefficient of `sf` is within its interval of `bounds`
-([`stability_coefficient_bounds`](@ref) by default).
-"""
-within_bounds(sf::TRStabilityFunction, bounds = stability_coefficient_bounds()) =
-    all(name -> bounds[name][1] ≤ getfield(sf, name) ≤ bounds[name][2], TURBULENT_RICHARDSON_COEFFICIENTS)
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The value within `(lower, upper)` of the unconstrained real number `θ`,
-``\\exp[\\ln lower + \\ln(upper / lower) σ(θ)]`` with ``σ(θ) = 1 / (1 + e^{-θ})``: for calibration code
-that needs unconstrained parameters. [`unbounded_coefficient`](@ref) is its inverse.
-"""
-@inline bounded_coefficient(θ, lower, upper) = exp(log(lower) + log(upper / lower) / (1 + exp(-θ)))
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The unconstrained real number whose [`bounded_coefficient`](@ref) in `(lower, upper)` is `C`.
-"""
-function unbounded_coefficient(C, lower, upper)
-    σ = log(C / lower) / log(upper / lower)
-    return log(σ / (1 - σ))
-end
-
 @inline convert_eltype(::Type{FT}, sf::TRStabilityFunction) where FT =
     TurbulentRichardsonStabilityFunction(map(C -> convert(FT, C), stability_coefficients(sf))...)
 
