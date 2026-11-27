@@ -36,8 +36,8 @@ using Breeze.Microphysics: SaturationAdjustment, adjust_thermodynamic_state
 using Breeze.Solvers: SecantSolver
 using Breeze.AtmosphereModels: PrescribedPlumeStatistics, supersaturation_statistics
 using Breeze.Microphysics.PredictedParticleProperties: subgrid_vapor_excess_correlation
-using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, scalar_plume_parameters, plume_saturation,
-                                                               plume_liquid_water_temperature, plume_condensate,
+using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, scalar_component_parameters, component_saturation,
+                                                               liquid_water_temperature, component_condensate,
                                                                buoyancy_flux_coefficients, DoubleGaussianPDF, HardClipping
 using SpecialFunctions: erf
 
@@ -102,12 +102,12 @@ Base.@kwdef struct LevelMoments
 end
 
 function saturation_at_mean(level::LevelMoments, thermo)
-    Tˡ = plume_liquid_water_temperature(thermo, level.θ̄, 0.0, level.p)
-    qᵛ⁺ = first(plume_saturation(thermo, Tˡ, 0.0, level.p))
+    Tˡ = liquid_water_temperature(thermo, level.θ̄, 0.0, level.p)
+    qᵛ⁺ = first(component_saturation(thermo, Tˡ, 0.0, level.p))
     # one fixed-point pass for the qᵗ dependence of Π and of qᵛ⁺
     q̄ = qᵛ⁺ + level.δq
-    Tˡ = plume_liquid_water_temperature(thermo, level.θ̄, q̄, level.p)
-    qᵛ⁺ = first(plume_saturation(thermo, Tˡ, q̄, level.p))
+    Tˡ = liquid_water_temperature(thermo, level.θ̄, q̄, level.p)
+    qᵛ⁺ = first(component_saturation(thermo, Tˡ, q̄, level.p))
     return qᵛ⁺
 end
 
@@ -222,7 +222,7 @@ function column_thermodynamics(θ, q, p, thermo)
     ρˡ = p / (mixture_gas_constant(MoistureMassFractions(q), constants) * Tˡ)
     δqᵛ = q - saturation_specific_humidity(Tˡ, ρˡ, constants, PlanarLiquidSurface())
 
-    qᵛ⁺, β = plume_saturation(thermo, Tˡ, q, p)
+    qᵛ⁺, β = component_saturation(thermo, Tˡ, q, p)
     s = qˡ > 0 ? qˡ : (q - qᵛ⁺) / (1 + β * qᵛ⁺)
     return (; qˡ, T, α, δqᵛ, s)
 end
@@ -284,27 +284,27 @@ end
 
 The double Gaussian that the closure reconstructs from the moments of a cell, per plume, with the
 closure's functions: the plume weight from Sk_w (as `assumed_pdf` computes it), the scalar plume
-parameters (`scalar_plume_parameters`), the within-plume correlation, and each plume's saturation
-(`plume_saturation`) and equilibrium condensate (`plume_condensate`).
+parameters (`scalar_component_parameters`), the within-plume correlation, and each plume's saturation
+(`component_saturation`) and equilibrium condensate (`component_condensate`).
 """
 function closure_plumes(m, p, thermo; pdf = manufactured_pdf)
     cp = manufactured_clipping
     sqrtw2 = sqrt(m.w′²)
     Sk = m.w′³ / m.w′²^(3/2)
     ℂᵍ₁ = pdf.ℂᵍ₁
-    a = clamp((1 - Sk / sqrt(4 * (1 - ℂᵍ₁)^3 + Sk^2)) / 2, pdf.plume_fraction_min, pdf.plume_fraction_max)
+    a = clamp((1 - Sk / sqrt(4 * (1 - ℂᵍ₁)^3 + Sk^2)) / 2, pdf.minimum_updraft_fraction, pdf.maximum_updraft_fraction)
     ŵ₁ = sqrt((1 - a) / a) * sqrt(1 - ℂᵍ₁)
     ŵ₂ = -sqrt(a / (1 - a)) * sqrt(1 - ℂᵍ₁)
-    sθ, sq = max(pdf.thl_tol, sqrt(m.θ′²)), max(pdf.rt_tol, sqrt(m.q′²))
-    θ₁, θ₂, vθ₁, vθ₂, σθ₁, σθ₂ = scalar_plume_parameters(cp, m.w′θ′, sqrtw2, sθ, m.θ′², pdf.thl_tol, m.θ̄, ŵ₁, ŵ₂, Sk, a, false, pdf)
-    q₁, q₂, vq₁, vq₂, σq₁, σq₂ = scalar_plume_parameters(cp, m.w′q′, sqrtw2, sq, m.q′², pdf.rt_tol, m.q̄, ŵ₁, ŵ₂, Sk, a, true, pdf)
+    sθ, sq = max(pdf.potential_temperature_tolerance, sqrt(m.θ′²)), max(pdf.total_water_tolerance, sqrt(m.q′²))
+    θ₁, θ₂, vθ₁, vθ₂, σθ₁, σθ₂ = scalar_component_parameters(cp, m.w′θ′, sqrtw2, sθ, m.θ′², pdf.potential_temperature_tolerance, m.θ̄, ŵ₁, ŵ₂, Sk, a, false, pdf)
+    q₁, q₂, vq₁, vq₂, σq₁, σq₂ = scalar_component_parameters(cp, m.w′q′, sqrtw2, sq, m.q′², pdf.total_water_tolerance, m.q̄, ŵ₁, ŵ₂, Sk, a, true, pdf)
     denominator = a * σq₁ * σθ₁ + (1 - a) * σq₂ * σθ₂
     r = clamp((m.θ′q′ - a * (q₁ - m.q̄) * (θ₁ - m.θ̄) - (1 - a) * (q₂ - m.q̄) * (θ₂ - m.θ̄)) / denominator, -1, 1)
 
     plume(θᵢ, qᵢ, vθ, vq, σθ, σq) = begin
-        Tˡ = plume_liquid_water_temperature(thermo, θᵢ, qᵢ, p)
-        qᵛ⁺, β, cp_over_L, Π = plume_saturation(thermo, Tˡ, qᵢ, p)
-        s, σs, Q, C = plume_condensate(qᵢ, qᵛ⁺, β, cp_over_L, Π, vθ, vq, σθ, σq, r)
+        Tˡ = liquid_water_temperature(thermo, θᵢ, qᵢ, p)
+        qᵛ⁺, β, cp_over_L, Π = component_saturation(thermo, Tˡ, qᵢ, p)
+        s, σs, Q, C = component_condensate(qᵢ, qᵛ⁺, β, cp_over_L, Π, vθ, vq, σθ, σq, r)
         dqᵛ⁺dθ = cp_over_L * β * qᵛ⁺ * Π
         # The vapor excess over liquid without condensate, as P3 defines its saturation, and its spread
         ρ = p / (mixture_gas_constant(MoistureMassFractions(qᵢ), thermo.constants) * Tˡ)
@@ -355,8 +355,8 @@ function analytic_diagnostics(m, p, thermo; w′qˡ′_given = nothing, pdf = ma
     w′b′ˡⁱⁿ = g / m.θ̄ * (m.w′θ′ + A_q * m.w′q′ + A_c * w′qˡ′ˢ)
 
     # The linearized saturation excess at the cell mean: s = c_q qᵗ′ - c_θ θˡⁱ′
-    Tˡ = plume_liquid_water_temperature(thermo, m.θ̄, m.q̄, p)
-    qᵛ⁺, β, cp_over_L, Π = plume_saturation(thermo, Tˡ, m.q̄, p)
+    Tˡ = liquid_water_temperature(thermo, m.θ̄, m.q̄, p)
+    qᵛ⁺, β, cp_over_L, Π = component_saturation(thermo, Tˡ, m.q̄, p)
     c_θ = ((1 + β * m.q̄) / (1 + β * qᵛ⁺)^2) * cp_over_L * β * qᵛ⁺ * Π
     c_q = 1 / (1 + β * qᵛ⁺)
     w′s′ = c_q * m.w′q′ - c_θ * m.w′θ′

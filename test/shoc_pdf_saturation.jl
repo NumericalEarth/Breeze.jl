@@ -11,8 +11,8 @@ using Breeze.Thermodynamics: CondensedPhase, WarmPhaseEquilibrium, MixedPhaseEqu
                              liquid_latent_heat, ice_latent_heat
 using Breeze.AtmosphereModels.Diagnostics: condensate_phase_equilibrium
 using Breeze.Microphysics: NonEquilibriumCloudFormation
-using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, assumed_pdf, plume_saturation,
-                                                               plume_liquid_water_temperature, buoyancy_flux_coefficients,
+using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures, assumed_pdf, component_saturation,
+                                                               liquid_water_temperature, buoyancy_flux_coefficients,
                                                                distribution_thermodynamics
 using Oceananigans
 using Test
@@ -39,23 +39,23 @@ function murphy_koop_liquid_svp(t::FT) where FT
     return exp(tmp)
 end
 
-SimplifiedHigherOrderClosures.plume_liquid_water_temperature(f::FortranThermodynamics, thl, qw, pval) =
-    (c = f.constants; thl / (c.basepres / pval)^(c.rgas / c.cp))
+SimplifiedHigherOrderClosures.liquid_water_temperature(f::FortranThermodynamics, θˡⁱ, qᵗ, p) =
+    (c = f.constants; θˡⁱ / (c.basepres / p)^(c.rgas / c.cp))
 
-function SimplifiedHigherOrderClosures.plume_saturation(f::FortranThermodynamics, Tl, qw, pval)
-    FT = typeof(Tl)
+function SimplifiedHigherOrderClosures.component_saturation(f::FortranThermodynamics, Tˡ, qᵗ, p)
+    FT = typeof(Tˡ)
     c = f.constants
-    esval = murphy_koop_liquid_svp(Tl)
-    qs = FT(0.622) * esval / max(esval, pval - esval)
-    beta = (c.rgas / c.rv) * (c.lcond / (c.rgas * Tl)) * (c.lcond / (c.cp * Tl))
-    return qs, beta, c.cp / c.lcond, (pval / c.basepres)^(c.rgas / c.cp)
+    esval = murphy_koop_liquid_svp(Tˡ)
+    qᵛ⁺ = FT(0.622) * esval / max(esval, p - esval)
+    β = (c.rgas / c.rv) * (c.lcond / (c.rgas * Tˡ)) * (c.lcond / (c.cp * Tˡ))
+    return qᵛ⁺, β, c.cp / c.lcond, (p / c.basepres)^(c.rgas / c.cp)
 end
 
-function SimplifiedHigherOrderClosures.buoyancy_flux_coefficients(f::FortranThermodynamics, pval, thl, qw, ql)
+function SimplifiedHigherOrderClosures.buoyancy_flux_coefficients(f::FortranThermodynamics, p, θˡⁱ, qᵗ, qˡ)
     c = f.constants
     epsterm = c.rgas / c.rv
     A_q = ((1 - epsterm) / epsterm) * c.basetemp
-    A_c = (c.lcond / c.cp) * (c.basepres / pval)^(c.rgas / c.cp) - (1 / epsterm) * c.basetemp
+    A_c = (c.lcond / c.cp) * (c.basepres / p)^(c.rgas / c.cp) - (1 / epsterm) * c.basetemp
     return A_q, A_c
 end
 
@@ -107,11 +107,11 @@ end
     for p in FT[1e5, 9e4, 7e4], T in FT[275, 285, 295, 303]
         qw = FT(0.01)
         θˡ = T * (c.basepres / p)^(c.rgas / c.cp)
-        @test plume_liquid_water_temperature(thermo, θˡ, qw, p) ≈
-              plume_liquid_water_temperature(fixed, θˡ, qw, p) rtol = rtol_round
+        @test liquid_water_temperature(thermo, θˡ, qw, p) ≈
+              liquid_water_temperature(fixed, θˡ, qw, p) rtol = rtol_round
 
-        qs_f, β_f, r_f, Π_f = plume_saturation(fixed, T, qw, p)
-        qs_n, β_n, r_n, Π_n = plume_saturation(thermo, T, qw, p)
+        qs_f, β_f, r_f, Π_f = component_saturation(fixed, T, qw, p)
+        qs_n, β_n, r_n, Π_n = component_saturation(thermo, T, qw, p)
         es = saturation_vapor_pressure(T, thermo.constants, PlanarLiquidSurface())
         # Same constants: β = ℒ² / (Rᵛ cᵖ T²) in both (the model's ∂ ln qᵛ⁺ / ∂T at fixed density of the
         # component's air is ∂ ln e_s / ∂T)
@@ -135,7 +135,7 @@ end
     # difference of the vapor pressures
     p = FT(9e4)
     θˡ = FT(285) * (c.basepres / p)^(c.rgas / c.cp)
-    qs = first(plume_saturation(fixed, FT(285), zero(FT), p))
+    qs = first(component_saturation(fixed, FT(285), zero(FT), p))
     moments = (FT(0.05), FT(0.25), FT(-0.25), FT(-1.3e-4), FT(2.9e-4), FT(4e-7))
     for pdf in (DoubleGaussianPDF(FT), SmoothDoubleGaussianPDF(FT; clipping = HardClipping())), qᵗ in (FT(0.99), FT(1.02), FT(1.05)) .* qs
         a = assumed_pdf(pdf, fixed, FT(1020), FT(980), FT(1000), p, θˡ, zero(FT), qᵗ, FT(0.6), moments, moments)
@@ -151,8 +151,8 @@ end
 # The derivative of the saturation specific humidity with respect to temperature by centered
 # differences, at fixed total water and pressure
 function centered_slope(thermo, T, qw, p; δ = 1e-3)
-    q₊ = first(plume_saturation(thermo, T + δ, qw, p))
-    q₋ = first(plume_saturation(thermo, T - δ, qw, p))
+    q₊ = first(component_saturation(thermo, T + δ, qw, p))
+    q₋ = first(component_saturation(thermo, T - δ, qw, p))
     return (q₊ - q₋) / 2δ
 end
 
@@ -165,7 +165,7 @@ end
 
     # β q_s = (ℒ / ĉᵖ) ∂q_s/∂T, inside and outside the ramp of the liquid fraction
     for (thermo, T) in ((warm, 285.0), (warm, 250.0), (mixed, 285.0), (mixed, 255.0), (mixed, 238.0), (mixed, 225.0))
-        qs, β, cp_over_L, _ = plume_saturation(thermo, FT(T), qw, p)
+        qs, β, cp_over_L, _ = component_saturation(thermo, FT(T), qw, p)
         @test β * qs * cp_over_L ≈ centered_slope(thermo, FT(T), qw, p) rtol = 1e-5
     end
 
@@ -173,15 +173,15 @@ end
     ε = Breeze.Thermodynamics.dry_air_gas_constant(constants) / Breeze.Thermodynamics.vapor_gas_constant(constants)
     # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) at the density ρ = p / (Rᵐ T) of the air with its total water as vapor
     q_over(surface, T) = (e = saturation_vapor_pressure(T, constants, surface); (ε * (1 - qw) + qw) * e / p)
-    @test first(plume_saturation(mixed, 285.0, qw, p)) ≈ q_over(PlanarLiquidSurface(), 285.0) rtol = 1e-12
-    @test first(plume_saturation(mixed, 225.0, qw, p)) ≈ q_over(PlanarIceSurface(), 225.0) rtol = 1e-12
-    qs_mid = first(plume_saturation(mixed, 253.15, qw, p))
+    @test first(component_saturation(mixed, 285.0, qw, p)) ≈ q_over(PlanarLiquidSurface(), 285.0) rtol = 1e-12
+    @test first(component_saturation(mixed, 225.0, qw, p)) ≈ q_over(PlanarIceSurface(), 225.0) rtol = 1e-12
+    qs_mid = first(component_saturation(mixed, 253.15, qw, p))
     @test q_over(PlanarIceSurface(), 253.15) < qs_mid < q_over(PlanarLiquidSurface(), 253.15)
-    @test first(plume_saturation(warm, 253.15, qw, p)) ≈ q_over(PlanarLiquidSurface(), 253.15) rtol = 1e-12
+    @test first(component_saturation(warm, 253.15, qw, p)) ≈ q_over(PlanarLiquidSurface(), 253.15) rtol = 1e-12
 
     # The latent heat of the condensate: sublimation below homogeneous nucleation
-    _, _, cp_over_L_ice, _ = plume_saturation(mixed, 225.0, qw, p)
-    _, _, cp_over_L_liq, _ = plume_saturation(warm, 225.0, qw, p)
+    _, _, cp_over_L_ice, _ = component_saturation(mixed, 225.0, qw, p)
+    _, _, cp_over_L_liq, _ = component_saturation(warm, 225.0, qw, p)
     @test cp_over_L_liq / cp_over_L_ice ≈ ice_latent_heat(225.0, constants) / liquid_latent_heat(225.0, constants) rtol = 1e-12
 
     # In a supercooled level the mixed-phase plumes condense more, and sooner, than the liquid ones
@@ -189,7 +189,7 @@ end
     Π = first((p / 1e5)^Breeze.Thermodynamics.exner_exponent(VaporEquivalentExponent(),
                                                              Breeze.Thermodynamics.MoistureMassFractions(qw), constants))
     θˡ = T / Π
-    qs_liquid = first(plume_saturation(warm, T, qw, p))
+    qs_liquid = first(component_saturation(warm, T, qw, p))
     moments = (0.05, 0.25, -0.25, -1.3e-5, 2.9e-5, 4e-9)
     for qᵗ in (0.95, 1.0) .* qs_liquid
         lw = assumed_pdf(DoubleGaussianPDF(FT), warm, 1020.0, 980.0, 1000.0, p, θˡ, 0.0, qᵗ, 0.6, moments, moments)
@@ -201,7 +201,7 @@ end
 
 # The vapor excess of the components that the microphysics reads is defined wherever the assumed PDF is: it takes the
 # component temperature of the PDF, so with variances wide enough that a component's liquid-water temperature falls
-# below `Tl_min` both are finite (the vapor excess formed at Π θˡⁱ took a power of a negative temperature there)
+# below `minimum_liquid_water_temperature` both are finite (the vapor excess formed at Π θˡⁱ took a power of a negative temperature there)
 @testset "The component vapor excess is defined wherever the assumed PDF is" begin
     FT = Float64
     thermo = model_thermodynamics(FT)

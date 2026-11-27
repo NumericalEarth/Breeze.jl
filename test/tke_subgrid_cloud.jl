@@ -8,7 +8,7 @@ using Breeze
 using Breeze.Microphysics.PredictedParticleProperties: GridMeanCondensation, SubgridCondensation
 using Breeze.TurbulenceClosures: SpecificValue, dissipation_stability_functionᶜᶜᶠ, tracer_stability_functionᶜᶜᶠ, SubgridCloudFields, tke_buoyancy_productionᶜᶜᶜ, buoyancy_productionᶜᶜᶠ, moment_time_scale, ℑbzᵃᵃᶜ
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: representable_skewness
-using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment, linear_interp,
+using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: assumed_pdf, third_moment, limit_third_moment, linearly_interpolate,
                                                               distribution_thermodynamics
 using Breeze.AtmosphereModels.Diagnostics: condensate_phase_equilibrium
 
@@ -223,7 +223,7 @@ end
         floors = (0.0, -99999999.99, -99999999.99, -99999999.99, 0.0)
         for k in 1:size(grid, 3)
             # The second moments interpolated to the center, with the third moment diagnosed there
-            mᶜ = map((u, l, f) -> max(f, linear_interp(zf[k+1], zf[k], u, l, zc[k])), moments(k+1), moments(k), floors)
+            mᶜ = map((u, l, f) -> max(f, linearly_interpolate(zf[k+1], zf[k], u, l, zc[k])), moments(k+1), moments(k), floors)
             w′²ᶜ = column(cl.w′²)[k]
             w′³ᶜ = column(cl.w′³)[k]
             @test abs(w′³ᶜ) ≤ d.skewness.maximum_skewness * w′²ᶜ^1.5 * (1 + 1e-12)
@@ -702,26 +702,26 @@ end
     thermodynamics = distribution_thermodynamics(model)
     components = Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures.skewed_scalar_components
     p = 9.0e4; θ̄ = 293.0; q̄ = 11.0e-3; w′² = 0.4
-    θv = 0.04; qv = 4e-7; θq = -0.5 * sqrt(θv * qv); wθ = -0.02 * sqrt(w′² * θv); wq = 0.45 * sqrt(w′² * qv)
+    θˡⁱ′² = 0.04; qᵗ′² = 4e-7; θˡⁱ′qᵗ′ = -0.5 * sqrt(θˡⁱ′² * qᵗ′²); w′θˡⁱ′ = -0.02 * sqrt(w′² * θˡⁱ′²); w′qᵗ′ = 0.45 * sqrt(w′² * qᵗ′²)
     for pdf in (SkewedScalarDoubleGaussianPDF(), SkewedScalarDoubleGaussianPDF(; ℂᵍᵏ = 2, ℂᵍᶜ = 0.3)), w′³ in (0.0, 0.3, -0.2)
-        m = components(pdf, thermodynamics, p, θ̄, q̄, w′², w′³, θv, wθ, θq, wq, qv)
+        m = components(pdf, thermodynamics, p, θ̄, q̄, w′², w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)
         a = m.a
         @test 0 < a < 1
         # the means and the covariance of θˡⁱ and qᵗ
         @test a * m.θ₁ + (1 - a) * m.θ₂ ≈ θ̄ rtol=1e-14
         @test a * m.q₁ + (1 - a) * m.q₂ ≈ q̄ rtol=1e-14
-        @test m.θv_c + a * (1 - a) * (m.θ₁ - m.θ₂)^2 ≈ θv rtol=1e-10
-        @test m.qv_c + a * (1 - a) * (m.q₁ - m.q₂)^2 ≈ qv rtol=1e-10
-        @test m.θq_c + a * (1 - a) * (m.θ₁ - m.θ₂) * (m.q₁ - m.q₂) ≈ θq rtol=1e-10 atol=1e-20
-        @test m.θv_c * m.qv_c ≥ m.θq_c^2 # positive semidefinite within the components
+        @test m.θˡⁱ′²ᵢ + a * (1 - a) * (m.θ₁ - m.θ₂)^2 ≈ θˡⁱ′² rtol=1e-10
+        @test m.qᵗ′²ᵢ + a * (1 - a) * (m.q₁ - m.q₂)^2 ≈ qᵗ′² rtol=1e-10
+        @test m.θˡⁱ′qᵗ′ᵢ + a * (1 - a) * (m.θ₁ - m.θ₂) * (m.q₁ - m.q₂) ≈ θˡⁱ′qᵗ′ rtol=1e-10 atol=1e-20
+        @test m.θˡⁱ′²ᵢ * m.qᵗ′²ᵢ ≥ m.θˡⁱ′qᵗ′ᵢ^2 # positive semidefinite within the components
         # the skewness of the saturation excess s = c_q q - c_θ θ of the mixture is the one the third moment implies,
         # ℂᵍᵏ Sk_w r̂³ / (1 - ℂᵍ₀)³, with the within-component share ℂᵍᶜ of its variance
         c_θ, c_q = m.c_θ, m.c_q
         s₁ = c_q * (m.q₁ - q̄) - c_θ * (m.θ₁ - θ̄); s₂ = c_q * (m.q₂ - q̄) - c_θ * (m.θ₂ - θ̄)
-        σs² = c_θ^2 * θv + c_q^2 * qv - 2c_θ * c_q * θq
-        @test a * (1 - a) * (s₁ - s₂)^2 ≈ (1 - pdf.ℂᵍᶜ) * σs² rtol=1e-10
-        r = (c_q * wq - c_θ * wθ) / sqrt(w′² * σs²); r̂ = r / (1 + r^4)^(1/4)
-        Sk_s = (a * s₁^3 + (1 - a) * s₂^3) / σs²^1.5
+        σₛ² = c_θ^2 * θˡⁱ′² + c_q^2 * qᵗ′² - 2c_θ * c_q * θˡⁱ′qᵗ′
+        @test a * (1 - a) * (s₁ - s₂)^2 ≈ (1 - pdf.ℂᵍᶜ) * σₛ² rtol=1e-10
+        r = (c_q * w′qᵗ′ - c_θ * w′θˡⁱ′) / sqrt(w′² * σₛ²); r̂ = r / (1 + r^4)^(1/4)
+        Sk_s = (a * s₁^3 + (1 - a) * s₂^3) / σₛ²^1.5
         @test Sk_s ≈ pdf.ℂᵍᵏ * w′³ / w′²^1.5 * r̂^3 / (1 - pdf.ℂᵍ₀)^3 rtol=1e-9 atol=1e-14
         # positive skewness of w and an upward flux of the excess: the moist component is the narrow tail
         w′³ > 0 && @test a < 1 / 2 && s₁ > 0
@@ -731,12 +731,12 @@ end
     # without skewness, as the within-component share tends to one, the components tend to the mean (the single Gaussian);
     # with skewness the share between the components carries it, and ℂᵍᶜ = 1 is excluded
     pdf = SkewedScalarDoubleGaussianPDF(; ℂᵍᶜ = 1 - 1e-8)
-    m = components(pdf, thermodynamics, p, θ̄, q̄, w′², 0.0, θv, wθ, θq, wq, qv)
+    m = components(pdf, thermodynamics, p, θ̄, q̄, w′², 0.0, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)
     @test isapprox(m.θ₁, θ̄; atol = 1e-3) && isapprox(m.θ₂, θ̄; atol = 1e-3)
     @test_throws ArgumentError SkewedScalarDoubleGaussianPDF(; ℂᵍᶜ = 1)
     # a skewed mixture of a subsaturated mean has more cloud than the unskewed one
     q̄ˢ = 7.0e-3
-    moments = (0.3, θv, wθ, θq, wq, qv)
+    moments = (0.3, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)
     C₀, qˡ₀ = assumed_pdf(SkewedScalarDoubleGaussianPDF(), thermodynamics, 1.0, 0.0, 0.5, p, θ̄, 0.0, q̄ˢ, w′², (0.0, moments[2:end]...), (0.0, moments[2:end]...))
     Cᵏ, qˡᵏ = assumed_pdf(SkewedScalarDoubleGaussianPDF(), thermodynamics, 1.0, 0.0, 0.5, p, θ̄, 0.0, q̄ˢ, w′², moments, moments)
     @test Cᵏ > C₀ > 0 && qˡᵏ > qˡ₀ > 0

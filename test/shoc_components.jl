@@ -6,10 +6,10 @@ using Oceananigans.Grids: znodes
 using Breeze.TurbulenceClosures: convert_eltype, column_stability_field, diffusivity_stability_functionsᶜᶜᶠ,
                                  dissipation_stability_functionᶜᶜᶜ, shoc_distribution
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: trainable_parameter_names, is_calibratable, component_scalar_names,
-                                      clip_max, clip_min, clip_between,
+                                      clipped_maximum, clipped_minimum, clip_between,
                                       hard_floor, third_moment_bound, limit_third_moment, third_moment,
-                                      bound_stratification_number, assumed_pdf, plume_saturation, plume_liquid_water_temperature, plume_variance,
-                                      smooth_scalar_plumes, isotropy_ratio, shoc_dissipation_coefficient
+                                      bound_stratification_number, assumed_pdf, component_saturation, liquid_water_temperature, component_variance,
+                                      smooth_scalar_components, isotropy_ratio, shoc_dissipation_coefficient
 using Breeze.Thermodynamics: VaporEquivalentExponent, WarmPhaseEquilibrium
 using Enzyme: Enzyme
 using Test
@@ -37,8 +37,8 @@ derivative(f, x, parameters...) =
     @testset "HardClipping is the idiom of each call site" begin
         policy = HardClipping()
         for a in values, b in values
-            @test same_bits(clip_max(policy, a, b, scale), max(a, b))
-            @test same_bits(clip_min(policy, a, b, scale), min(a, b))
+            @test same_bits(clipped_maximum(policy, a, b, scale), max(a, b))
+            @test same_bits(clipped_minimum(policy, a, b, scale), min(a, b))
             @test same_bits(hard_floor(a, b), ifelse(a < b, b, a))
         end
 
@@ -50,7 +50,7 @@ derivative(f, x, parameters...) =
         end
 
         # An integer bound keeps the type of the clipped value
-        @test clip_max(policy, 0, FT(-1), scale) isa FT
+        @test clipped_maximum(policy, 0, FT(-1), scale) isa FT
         @test clip_between(policy, FT(2), 0, 100, 1) isa FT
     end
 
@@ -67,11 +67,11 @@ derivative(f, x, parameters...) =
             for a in finite, b in finite
                 # One-sided, and within δ / 2 of the hard bound (to round-off)
                 roundoff = 4eps(FT) * (abs(a) + abs(b))
-                @test clip_max(policy, a, b, scale) ≥ max(a, b) - roundoff
-                @test clip_min(policy, a, b, scale) ≤ min(a, b) + roundoff
-                @test clip_max(policy, a, b, scale) - max(a, b) ≤ δ / 2 + roundoff
-                @test min(a, b) - clip_min(policy, a, b, scale) ≤ δ / 2 + roundoff
-                @test clip_max(policy, a, b, scale) isa FT
+                @test clipped_maximum(policy, a, b, scale) ≥ max(a, b) - roundoff
+                @test clipped_minimum(policy, a, b, scale) ≤ min(a, b) + roundoff
+                @test clipped_maximum(policy, a, b, scale) - max(a, b) ≤ δ / 2 + roundoff
+                @test min(a, b) - clipped_minimum(policy, a, b, scale) ≤ δ / 2 + roundoff
+                @test clipped_maximum(policy, a, b, scale) isa FT
             end
             for x in finite
                 @test FT(0.01) ≤ clip_between(policy, x, FT(0.01), FT(0.99), 1) ≤ FT(0.99)
@@ -86,20 +86,20 @@ derivative(f, x, parameters...) =
         narrow = SmoothClipping(sqrt(eps(FT)))
         for a in finite, b in finite
             tolerance = sqrt(eps(FT)) * (1 + abs(a) + abs(b))
-            @test isapprox(clip_max(narrow, a, b, scale), max(a, b); atol = tolerance)
-            @test isapprox(clip_min(narrow, a, b, scale), min(a, b); atol = tolerance)
+            @test isapprox(clipped_maximum(narrow, a, b, scale), max(a, b); atol = tolerance)
+            @test isapprox(clipped_minimum(narrow, a, b, scale), min(a, b); atol = tolerance)
         end
 
         # The smooth bound has a continuous slope at the bound, where the hard one has a kink:
-        # the one-sided slopes of clip_max(0, x) at x = 0 are both 1/2, against 0 and 1
+        # the one-sided slopes of clipped_maximum(0, x) at x = 0 are both 1/2, against 0 and 1
         if FT == Float64
             policy = SmoothClipping(FT(0.1))
             h = FT(1e-6)
-            below = (clip_max(policy, 0, zero(FT), scale) - clip_max(policy, 0, -h, scale)) / h
-            above = (clip_max(policy, 0, h, scale) - clip_max(policy, 0, zero(FT), scale)) / h
+            below = (clipped_maximum(policy, 0, zero(FT), scale) - clipped_maximum(policy, 0, -h, scale)) / h
+            above = (clipped_maximum(policy, 0, h, scale) - clipped_maximum(policy, 0, zero(FT), scale)) / h
             @test isapprox(below, 0.5; atol = 1e-4)
             @test isapprox(above, 0.5; atol = 1e-4)
-            @test (clip_max(hard, 0, zero(FT), scale) - clip_max(hard, 0, -h, scale)) / h == 0
+            @test (clipped_maximum(hard, 0, zero(FT), scale) - clipped_maximum(hard, 0, -h, scale)) / h == 0
         end
     end
 
@@ -379,8 +379,8 @@ derivative(f, x, parameters...) =
         # Saturation of the level's air with its total water as vapor: a fixed point in qᵗ
         qᵛ⁺ = zero(FT)
         for _ in 1:4
-            Tˡ = plume_liquid_water_temperature(thermodynamics, θˡ, qᵛ⁺, pressure)
-            qᵛ⁺ = first(plume_saturation(thermodynamics, Tˡ, qᵛ⁺, pressure))
+            Tˡ = liquid_water_temperature(thermodynamics, θˡ, qᵛ⁺, pressure)
+            qᵛ⁺ = first(component_saturation(thermodynamics, Tˡ, qᵛ⁺, pressure))
         end
         pdf_of(pdf, qᵗ, w_sec, moments) =
             assumed_pdf(pdf, thermodynamics, FT(1020), FT(980), FT(1000), pressure, θˡ, zero(FT), qᵗ,
@@ -389,7 +389,7 @@ derivative(f, x, parameters...) =
         # Away from the switches (resolved variances, plumes well apart) the smooth PDF is the
         # original one as its tolerances vanish, and within a few percent of it with the
         # tolerances of shoc.F90, which are a sixth of the standard deviation of total water here
-        sharp_pdf = SmoothDoubleGaussianPDF(FT; clipping = hard, thl_tol = 1e-5, rt_tol = 1e-7, w_tol = 1e-4, minimum_saturation_spread = 1e-9)
+        sharp_pdf = SmoothDoubleGaussianPDF(FT; clipping = hard, potential_temperature_tolerance = 1e-5, total_water_tolerance = 1e-7, vertical_velocity_tolerance = 1e-4, minimum_saturation_spread = 1e-9)
         w_sec = FT(0.6)
         for w3 in FT[-0.2, 0.05, 0.4], qᵗ in (FT(0.97), FT(1.0), FT(1.03)) .* qᵛ⁺
             moments = (w3, FT(0.25), FT(-0.25), FT(-1.3e-4), FT(2.9e-4), FT(4e-7))
@@ -424,21 +424,21 @@ derivative(f, x, parameters...) =
         # vertical velocity variance across w_tol² and in the scalar variance across its tolerance²
         variable = (FT(1e-4), FT(0.02), FT(-2e-3), FT(-2e-6), FT(3e-6), FT(4e-8))
         step(pdf, f) = maximum(abs, f(pdf, 1 + FT(1e-3)) .- f(pdf, 1 - FT(1e-3)))
-        across_calm(pdf, x) = pdf_of(pdf, qᵛ⁺, original_pdf.w_tol^2 * x, variable)[1:2]
+        across_calm(pdf, x) = pdf_of(pdf, qᵛ⁺, original_pdf.vertical_velocity_tolerance^2 * x, variable)[1:2]
         across_uniform(pdf, x) = pdf_of(pdf, qᵛ⁺, FT(0.3), (variable[1], variable[2], variable[3], variable[4], variable[5],
-                                                         original_pdf.rt_tol^2 * x))[1:2]
+                                                         original_pdf.total_water_tolerance^2 * x))[1:2]
         @test step(smooth_pdf, across_calm)[1] < 1e-3
         @test step(smooth_pdf, across_uniform)[1] < 1e-3
 
         # The in-plume variance ratio tends to one as the correlation with w vanishes
         w̃₁, w̃₂ = sqrt(FT(0.6)), -sqrt(FT(0.6))
-        _, _, ratio₁, ratio₂ = smooth_scalar_plumes(smooth_pdf, hard, zero(FT), w̃₁, w̃₂, zero(FT), FT(0.5), true)
+        _, _, ratio₁, ratio₂ = smooth_scalar_components(smooth_pdf, hard, zero(FT), w̃₁, w̃₂, zero(FT), FT(0.5), true)
         @test ratio₁ ≈ 1 && ratio₂ ≈ 1
         # and is that of the original where the original is defined
         corr = FT(0.3)
-        x̃₁, x̃₂, ratio₁, ratio₂ = smooth_scalar_plumes(smooth_pdf, hard, corr, w̃₁, w̃₂, zero(FT), FT(0.5), false)
-        @test ratio₁ ≈ plume_variance(hard, true, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT), FT(100))
-        @test ratio₂ ≈ plume_variance(hard, false, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT), FT(100))
+        x̃₁, x̃₂, ratio₁, ratio₂ = smooth_scalar_components(smooth_pdf, hard, corr, w̃₁, w̃₂, zero(FT), FT(0.5), false)
+        @test ratio₁ ≈ component_variance(hard, true, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT), FT(100))
+        @test ratio₂ ≈ component_variance(hard, false, x̃₁, x̃₂, FT(0.5), zero(FT), one(FT), FT(100))
 
         # A spread of the saturation deficit that does not vanish: the cloud fraction passes
         # through one half at saturation instead of jumping

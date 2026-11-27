@@ -155,7 +155,6 @@ const stability_function_kinds = (momentum_stability_function, tracer_stability_
 
 endpoint_triples(r) = ((r.ℂᵘ⁻, r.ℂᵘ⁰, r.ℂᵘ⁺), (r.ℂᶜ⁻, r.ℂᶜ⁰, r.ℂᶜ⁺), (r.ℂᵉ⁻, r.ℂᵉ⁰, r.ℂᵉ⁺), (r.ℂᴰ⁻, r.ℂᴰ⁰, r.ℂᴰ⁺))
 
-const TRSF = TurbulentRichardsonStabilityFunction
 
 # The rational functions of the Richardson number with the values of `sf` and its two transition scales ℂᴿⁱ±
 same_values_rational(sf) = RationalStabilityFunction(; (name => getfield(sf, name) for name in fieldnames(RationalStabilityFunction)[1:12])...,
@@ -166,8 +165,8 @@ stratification_number_of(sf, v) = sf.ℂᵅ * v / sqrt(1 - v^2)
 
 @testset "TurbulentRichardsonStabilityFunction: construction [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    sf = TRSF()
-    @test sf isa TRSF{FT}
+    sf = TurbulentRichardsonStabilityFunction()
+    @test sf isa TurbulentRichardsonStabilityFunction{FT}
     @test isbits(sf)
     @test adapt(Array, sf) === sf
     @test TKEBasedTurbulenceClosure().stability_functions === sf
@@ -177,18 +176,18 @@ stratification_number_of(sf, v) = sf.ℂᵅ * v / sqrt(1 - v^2)
     @test minimum_stratification_scale() ≈ 4.18637 * (1 / 2 + 2 * sqrt(6) / 9) rtol=1e-5
     @test sf.ℂᴿⁱ⁻ === FT(16) && sf.ℂᴿⁱ⁺ === FT(0.33)
 
-    @test_throws ArgumentError TRSF(ℂᵘ⁰ = 0)
-    @test_throws ArgumentError TRSF(ℂᵅ = -1)
+    @test_throws ArgumentError TurbulentRichardsonStabilityFunction(ℂᵘ⁰ = 0)
+    @test_throws ArgumentError TurbulentRichardsonStabilityFunction(ℂᵅ = -1)
     @test_throws ArgumentError stability_coefficient_bounds(1e-3, 4)
     @test startswith(sprint(show, sf), "TurbulentRichardsonStabilityFunction{$FT}\n├── Riᵗ → -∞")
 
     # The bounds: independent intervals, ℂᵅ above the width condition
     bounds = stability_coefficient_bounds()
-    @test keys(bounds) == fieldnames(TRSF)[1:15]
+    @test keys(bounds) == fieldnames(TurbulentRichardsonStabilityFunction)[1:15]
     @test bounds.ℂᵘ⁰ == (0.05, 20) && bounds.ℂᴿⁱ⁻ == (0.05, 20) && bounds.ℂᴿⁱ⁺ == (0.05, 20)
     @test bounds.ℂᵅ[1] ≈ 0.6987 * 1.04433 * log(400) rtol=1e-3
     @test stability_coefficient_bounds(0.01, 100).ℂᵅ[1] ≈ 6.4355 * 1.044331 rtol=1e-4
-    @test !within_bounds(TRSF(ℂᵅ = 1))
+    @test !within_bounds(TurbulentRichardsonStabilityFunction(ℂᵅ = 1))
     for θ in (-30.0, -1.0, 0.0, 2.5, 30.0)
         C = bounded_coefficient(θ, 0.05, 20)
         @test 0.05 ≤ C ≤ 20
@@ -198,11 +197,11 @@ stratification_number_of(sf, v) = sf.ℂᵅ * v / sqrt(1 - v^2)
     # The parameters are the fifteen values, and replacing them rebuilds the cached logarithms
     closure = TKEBasedTurbulenceClosure()
     names = keys(closure_parameters(closure))
-    @test fieldnames(TRSF)[1:15] ⊆ names
+    @test fieldnames(TurbulentRichardsonStabilityFunction)[1:15] ⊆ names
     @test :quadratic_coefficients ∉ names
     changed = with_parameters(closure; ℂᶜ⁻ = 2.0, ℂᴿⁱ⁺ = 0.2, ℂᵅ = 6.0)
-    @test changed.stability_functions == TRSF(FT; ℂᶜ⁻ = 2, ℂᴿⁱ⁺ = 0.2, ℂᵅ = 6)
-    @test changed.stability_functions.quadratic_coefficients == TRSF(FT; ℂᶜ⁻ = 2).quadratic_coefficients
+    @test changed.stability_functions == TurbulentRichardsonStabilityFunction(FT; ℂᶜ⁻ = 2, ℂᴿⁱ⁺ = 0.2, ℂᵅ = 6)
+    @test changed.stability_functions.quadratic_coefficients == TurbulentRichardsonStabilityFunction(FT; ℂᶜ⁻ = 2).quadratic_coefficients
     @test closure_parameters(with_parameters(closure)) == closure_parameters(closure)
 end
 
@@ -212,7 +211,7 @@ end
     lower, upper = 0.05, 20
     for trial in 1:200
         C() = FT(bounded_coefficient(8 * (uniform() - 1/2), lower, upper))
-        sf = TRSF(FT; ℂᵘ⁻ = C(), ℂᵘ⁰ = C(), ℂᵘ⁺ = C(), ℂᶜ⁻ = C(), ℂᶜ⁰ = C(), ℂᶜ⁺ = C(), ℂᵉ⁻ = C(), ℂᵉ⁰ = C(), ℂᵉ⁺ = C(),
+        sf = TurbulentRichardsonStabilityFunction(FT; ℂᵘ⁻ = C(), ℂᵘ⁰ = C(), ℂᵘ⁺ = C(), ℂᶜ⁻ = C(), ℂᶜ⁰ = C(), ℂᶜ⁺ = C(), ℂᵉ⁻ = C(), ℂᵉ⁰ = C(), ℂᵉ⁺ = C(),
                   ℂᴰ⁻ = C(), ℂᴰ⁰ = C(), ℂᴰ⁺ = C(), ℂᴿⁱ⁻ = C(), ℂᴿⁱ⁺ = C(),
                   ℂᵅ = FT(bounded_coefficient(uniform(), minimum_stratification_scale(), upper)))
         for (f, (C⁻, C⁰, C⁺)) in zip(stability_function_kinds, endpoint_triples(sf))
@@ -236,7 +235,7 @@ end
 end
 
 @testset "TurbulentRichardsonStabilityFunction: smooth through N² = 0 without shear, Ri with strong shear [$(FT)]" for FT in test_float_types()
-    sf = TRSF(FT)
+    sf = TurbulentRichardsonStabilityFunction(FT)
     for (f, (C⁻, C⁰, C⁺)) in zip(stability_function_kinds, endpoint_triples(sf))
         # The derivative at N² = 0 without shear is ½ ln(ℂ⁺/ℂ⁻) / ℂᵅ from either side
         slope = log(C⁺ / C⁻) / 2 / sf.ℂᵅ
@@ -370,7 +369,7 @@ end
 @testset "The spike test: cb(K) in the shear-free moist column" begin
     Oceananigans.defaults.FloatType = Float64
     # The default and the functions of the Richardson number with its values
-    default = TRSF()
+    default = TurbulentRichardsonStabilityFunction()
     cbᵗ, Kᵗ = spike_column(default)
     cbᴿ, Kᴿ = spike_column(same_values_rational(default))
     @info "spike test, default values" cbᵗ cbᴿ
@@ -381,7 +380,7 @@ end
     @test cbᵗ < 1.5 * cbᴿ
     # The rational functions' own coefficients, whose ratios are far from one (outside the bounds)
     rational = RationalStabilityFunction()
-    cbᵗ, Kᵗ = spike_column(TRSF(; (name => getfield(rational, name) for name in fieldnames(RationalStabilityFunction)[1:12])...))
+    cbᵗ, Kᵗ = spike_column(TurbulentRichardsonStabilityFunction(; (name => getfield(rational, name) for name in fieldnames(RationalStabilityFunction)[1:12])...))
     cbᴿ, Kᴿ = spike_column(rational)
     @info "spike test, the rational functions' values" cbᵗ cbᴿ maximum(Kᵗ)
     @test maximum(Kᵗ) > 100
@@ -394,7 +393,7 @@ end
     # smoother: cbᵗ = 0.031 against cbᴿ = 0.035 with the default wall coefficient ℂˢ = 1.30 (more than twofold
     # with the former 0.75)
     former_distribution() = DoubleGaussian(third_moment = TKEBudgetThirdMoment(ℂʷˡ = 0), skewness = PolynomialSaturatedSkewness(maximum_skewness = 0.85))
-    cbᵗ, Kᵗ = spike_column(TRSF(; (name => getfield(rational, name) for name in fieldnames(RationalStabilityFunction)[1:12])...);
+    cbᵗ, Kᵗ = spike_column(TurbulentRichardsonStabilityFunction(; (name => getfield(rational, name) for name in fieldnames(RationalStabilityFunction)[1:12])...);
                            subgrid_distribution = former_distribution())
     cbᴿ, Kᴿ = spike_column(rational; subgrid_distribution = former_distribution())
     @info "spike test, the rational functions' values, no latent source and the skewness bounded at 0.85" cbᵗ cbᴿ maximum(Kᵗ)
@@ -505,7 +504,7 @@ end
 @testset "Stability functions and static stability combine [$(FT), $name]" for FT in test_float_types(), name in (:bomex, :rico)
     Oceananigans.defaults.FloatType = FT
     case = column_cases[name]
-    functions = (TRSF(), RationalStabilityFunction())
+    functions = (TurbulentRichardsonStabilityFunction(), RationalStabilityFunction())
     stabilities = (MoistStaticStability(), SaturationWeightedStaticStability(MixingLengthWeight(FT(100))))
     states = [state(run_steps!(column_model(TKEBasedTurbulenceClosure(; stability_functions, static_stability), case)))
               for stability_functions in functions, static_stability in stabilities]
@@ -536,8 +535,8 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
     Oceananigans.BoundaryConditions.fill_halo_regions!(e)
     buoyancy, tracers = buoyancy_force(model), buoyancy_tracers(model)
 
-    with_scalar(name, C) = TKEBasedTurbulenceClosure(stability_functions = TRSF(; (name => C,)...))
-    default = TRSF()
+    with_scalar(name, C) = TKEBasedTurbulenceClosure(stability_functions = TurbulentRichardsonStabilityFunction(; (name => C,)...))
+    default = TurbulentRichardsonStabilityFunction()
 
     for k in (3, 8, 14, 20, 30)
         # Stable and unstable interfaces, through the TKE diffusivity's stability function and, at

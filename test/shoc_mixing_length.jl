@@ -95,16 +95,16 @@ column(f) = Array{Float64}(interior(f))[1, 1, :]
     N² = column(fields.N²)
     ℓ = column(fields.ℓᵐ)
 
-    # l∞ of shoc.F90 from the TKE floored at `minimum_tke`, kept in ℓˢ
-    l∞ = fortran_asymptotic_length(max.(e, eᵐⁱⁿ), zc, Δz)
-    @test all(isapprox.(column(fields.ℓˢ), l∞; rtol = FT == Float32 ? 1e-4 : 1e-10))
+    # ℓ∞ of shoc.F90 from the TKE floored at `minimum_tke`, kept in ℓˢ
+    ℓ∞ = fortran_asymptotic_length(max.(e, eᵐⁱⁿ), zc, Δz)
+    @test all(isapprox.(column(fields.ℓˢ), ℓ∞; rtol = FT == Float32 ? 1e-4 : 1e-10))
 
     # The faces: √e reconstructed from the centers, the stored N²
     Nz = size(grid, 3)
     rtol = FT == Float32 ? 1e-4 : 1e-10
     for k in 2:Nz
         u = (sqrt(max(e[k-1], eᵐⁱⁿ)) + sqrt(max(e[k], eᵐⁱⁿ))) / 2
-        ℓᶠ = fortran_mixing_length(u^2, N²[k], zf[k], l∞, Inf)
+        ℓᶠ = fortran_mixing_length(u^2, N²[k], zf[k], ℓ∞, Inf)
         ℓᶠ > 20 || continue
         @test abs(ℓ[k] - ℓᶠ) / ℓᶠ ≤ bound_fraction(ℓᶠ, Inf) + rtol
     end
@@ -114,7 +114,7 @@ column(f) = Array{Float64}(interior(f))[1, 1, :]
     compute!(e_field)
     for k in 2:Nz-1
         ℓᶜ = mixing_lengthᶜᶜᶜ(1, 1, k, grid, closure, e_field, fields)
-        ℓᶠ = fortran_mixing_length(max(e[k], eᵐⁱⁿ), (N²[k] + N²[k+1]) / 2, zc[k], l∞, Inf)
+        ℓᶠ = fortran_mixing_length(max(e[k], eᵐⁱⁿ), (N²[k] + N²[k+1]) / 2, zc[k], ℓ∞, Inf)
         ℓᶠ > 20 || continue
         @test abs(ℓᶜ - ℓᶠ) / ℓᶠ ≤ bound_fraction(ℓᶠ, Inf) + rtol
     end
