@@ -18,7 +18,9 @@ using Breeze.AtmosphereModels:
     dynamics_prognostic_fields,
     implicit_advection_velocities,
     implicit_step_scheme,
-    implicit_sedimentation_step!
+    implicit_sedimentation_step!,
+    implicit_thermodynamic_solve!,
+    implicit_diffusion_density
 
 using Breeze.CompressibleEquations: CompressibleDynamics, implicit_steps_in_place!, implicit_step_scratch,
                                      compute_transport_density_tendency!
@@ -264,18 +266,23 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
 
     θ_name = thermodynamic_density_name(model.formulation)
     θ_advection = field_advection_scheme(model.advection, θ_name)
-    θ_scheme = postloop_thermodynamic_scheme(θ_advection, diffusion_density)
+    θ_scheme = postloop_thermodynamic_scheme(θ_advection, implicit_diffusion_density(model.formulation, model))
     θ_velocities = merge(slow_thermodynamic_velocities(model), (; w))
-
-    # One request per field: (field, closure tracer index, scheme, velocities).
-    requests = [(prognostic.ρu, nothing, momentum_scheme, (; w)),
-                (prognostic.ρv, nothing, momentum_scheme, (; w)),
-                (prognostic.ρw, nothing, momentum_scheme, (; w)),
-                (prognostic[θ_name], closure_scalar_index(model, θ_name), θ_scheme, θ_velocities)]
-
     scratch = implicit_step_scratch(model.timestepper.substepper, implicit_solver)
-    implicit_steps_in_place!(requests, implicit_solver, scratch, model.closure, model.closure_fields,
-                             model.clock, fields(model), Δt, ρᵈ)
+
+    # One request per field: (field, closure tracer index, scheme, velocities). The formulation
+    # chooses the field its thermodynamic solve acts on (`implicit_thermodynamic_solve!`: the
+    # prognostic density itself, or the static energy for total energy); the momentum solves
+    # join it so that one column sweep covers all four fields.
+    implicit_thermodynamic_solve!(model.formulation, model, Δt_stage) do ρᵡ
+        requests = [(prognostic.ρu, nothing, momentum_scheme, (; w)),
+                    (prognostic.ρv, nothing, momentum_scheme, (; w)),
+                    (prognostic.ρw, nothing, momentum_scheme, (; w)),
+                    (ρᵡ, closure_scalar_index(model, θ_name), θ_scheme, θ_velocities)]
+
+        implicit_steps_in_place!(requests, implicit_solver, scratch, model.closure, model.closure_fields,
+                                 model.clock, fields(model), Δt, ρᵈ)
+    end
 
     return nothing
 end

@@ -154,7 +154,8 @@ for arch in arches
                     substepper.density_perturbation,
                     substepper.density_potential_temperature_perturbation,
                     ρw′, ρu′, ρv′, grid, model.dynamics, Δτ, zero(FT),
-                    Gⁿ.ρᵈ, Gⁿ.ρθ, one(FT), substepper.linearization_potential_temperature)
+                    Gⁿ.ρᵈ, Gⁿ.ρθ, one(FT), substepper.linearization_potential_temperature,
+                    substepper.linearization_density_weight)
 
             # Compare every predictor cell with the finite-volume divergence of the actual face fluxes.
             divergence = (diff(ρu_values; dims=1) + diff(ρv_values; dims=2)) / FT(1kilometers)

@@ -25,7 +25,10 @@ export ThermodynamicConstants, ReferenceState, ExnerReferenceState, compute_refe
        PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
        # Phase equilibrium types
        AbstractPhaseEquilibrium, WarmPhaseEquilibrium, MixedPhaseEquilibrium,
-       equilibrated_surface
+       equilibrated_surface,
+       # Moist entropy
+       MoistEntropyState, moist_entropy, temperature_from_moist_entropy,
+       mixture_isochoric_heat_capacity
 
 using DocStringExtensions: TYPEDEF
 using Oceananigans: Oceananigans
@@ -40,5 +43,6 @@ include("tetens_formula.jl")
 include("flatau_polynomial.jl")
 include("reference_states.jl")
 include("dynamic_states.jl")
+include("moist_entropy.jl")
 
 end # module

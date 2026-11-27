@@ -45,6 +45,8 @@ export
     SingleColumnGrid,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
+    TotalEnergyFormulation,
+    MoistEntropyFormulation,
     VaporEquivalentExponent,
     DryExponent,
     RadiativeTransferModel,
@@ -90,6 +92,7 @@ export
     static_energy,
     total_energy,
     total_energy_density_name,
+    reference_temperature,
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
@@ -292,6 +295,9 @@ using .StaticEnergyFormulations: StaticEnergyFormulation
 include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
 using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
+include("MoistEntropyFormulations/MoistEntropyFormulations.jl")
+using .MoistEntropyFormulations: MoistEntropyFormulation
+
 # TerrainFollowingDiscretization (needed by CompressibleEquations for terrain physics)
 include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")
 using .TerrainFollowingDiscretization
@@ -330,6 +336,11 @@ using .Advection
 
 include("Forcings/Forcings.jl")
 using .Forcings
+
+# Total energy is supported by the compressible dynamics only, and extends its acoustic
+# linearization, the microphysics' saturation adjustment and the time steppers' implicit solve.
+include("TotalEnergyFormulations/TotalEnergyFormulations.jl")
+using .TotalEnergyFormulations: TotalEnergyFormulation
 
 include("VerticalGrids.jl")
 using .VerticalGrids

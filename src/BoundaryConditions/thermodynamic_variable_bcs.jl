@@ -32,7 +32,7 @@ and pressure ``ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ`` gi
 input ``𝒬ᵀ = ρ cᵖᵐ \\overline{w'T'}`` reaches ``θ`` as ``Jᶿ = 𝒬ᵀ / (ĉᵖ Π)``. The condensate term
 cancels, so the conversion holds saturated as well as dry. This is the same conversion the ``ρE``
 interior forcing and the radiative flux divergence apply. In the same spirit,
-[`BulkSensibleHeatFlux`](@ref) refers its wall temperature to ``θ``, though at the wall pressure
+[`BulkSensibleHeatFlux`](@ref Breeze.BoundaryConditions.BulkSensibleHeatFlux) refers its wall temperature to ``θ``, though at the wall pressure
 rather than the pressure of the adjacent cell.
 
 The heat capacity and Exner function use moisture fractions from the microphysics scheme and the

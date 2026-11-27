@@ -65,7 +65,7 @@ using Test
             set!(ρu′, 0)
             set!(ρv′, 0)
             launch!(default_arch, grid, :xyz, _apply_direct_divergence_damping!,
-                    ρu′, ρv′, grid, δ, θᴸ, α)
+                    ρu′, ρv′, grid, δ, θᴸ, substepper.linearization_density_weight, α)
             @test Array(interior(ρu′)) ≈ α .* Array(interior(direct_gradient_x))
             @test Array(interior(ρv′)) ≈ α .* Array(interior(direct_gradient_y))
             if formulation isa LinearDecay

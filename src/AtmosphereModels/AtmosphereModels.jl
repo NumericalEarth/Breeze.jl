@@ -24,6 +24,7 @@ export
     thermodynamic_density_name,
     thermodynamic_density,
     total_energy_density_name,
+    reference_temperature,
     DefaultTemperatureSolver,
     default_temperature_solver,
     # Helpers

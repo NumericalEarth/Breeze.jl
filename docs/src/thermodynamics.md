@@ -1036,7 +1036,9 @@ and ``qᵗ``; and no function is both. Every formulation therefore computes at l
 source, and the choice of ``χ`` decides which. The cost of omitting a term ``X`` from the right
 side is an energy error: ``χ`` is then wrong by ``X \, \mathrm{d} t``, which at fixed pressure
 and composition is an enthalpy error of ``X \, \mathrm{d} t / χ_h``, or ``ρ X / χ_h`` per unit
-volume and time.
+volume and time. The coefficients of the static energy and the moist entropy, and the comparison
+of all of Breeze's thermodynamic variables, are on the page
+[Choosing a thermodynamic variable](@ref thermodynamic-formulations).
 
 ### The equation for the liquid-ice potential temperature
 

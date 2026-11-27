@@ -78,7 +78,9 @@ using Breeze.Thermodynamics: absolute_zero_latent_heat, mixture_heat_capacity, m
                              vapor_gas_constant, ExnerReferenceState, temperature, temperature_and_sensitivity,
                              equilibrated_surface, saturation_vapor_pressure,
                              PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
-                             LiquidIceDensityState
+                             LiquidIceDensityState, temperature_from_moist_entropy, vapor_entropy, liquid_entropy,
+                             ice_entropy
+using Breeze.MoistEntropyFormulations: MoistEntropyFormulations, MoistEntropyFormulation
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 
 using ReactantCore: @trace
@@ -95,5 +97,6 @@ include("compressible_time_stepping.jl")
 include("tridiagonal_column_batches.jl")
 include("acoustic_substepping.jl")
 include("terrain_compressible_physics.jl")
+include("moist_entropy_compressible.jl")
 
 end # module
