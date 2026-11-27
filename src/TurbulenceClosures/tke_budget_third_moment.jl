@@ -247,7 +247,7 @@ const TKEBudgetDistribution = DoubleGaussian{<:Any, <:Any, <:TKEBudgetThirdMomen
 third_moment_fields(grid, third_moment) = NamedTuple()
 
 third_moment_fields(grid, tm::TKEBudgetThirdMoment) =
-    (Fᵉ = CenterField(grid), Fᵋ = CenterField(grid), uᵉ = CenterField(grid), uᵋ = CenterField(grid), ε = CenterField(grid),
+    (Fᵉ = CenterField(grid), Fᵋ = CenterField(grid), uᵉ = CenterField(grid), uᵋ = CenterField(grid), εʷ = CenterField(grid),
      w′³ᵇ = third_moment_location_field(grid, tm.location), Tᵉ = CenterField(grid), budget_work = CenterField(grid),
      NamedTuple(pass_name(name) => ZFaceField(grid) for name in PASS_CLOSURE_FIELD_NAMES)...)
 
@@ -455,7 +455,7 @@ end
 
 # The latent source (1 - aᶜ) Bˡ₊ at the center k, with the scale aᶜ ε of the positive part of Bˡ: none in clear air
 @inline latent_sourceᶜᶜᶜ(i, j, k, cl) =
-    @inbounds (1 - cl.aᶜ[i, j, k]) * smooth_positive_part(cl.Bˡ[i, j, k], cl.aᶜ[i, j, k] * cl.ε[i, j, k])
+    @inbounds (1 - cl.aᶜ[i, j, k]) * smooth_positive_part(cl.Bˡ[i, j, k], cl.aᶜ[i, j, k] * cl.εʷ[i, j, k])
 
 # At the face k: (w′²)² differenced across the face, between the centers k - 1 and k
 @inline function local_variance_gradient(::Face, i, j, k, grid, w′²)
@@ -498,8 +498,8 @@ end
         # (the overshoot); the cell below the first is none
         e⁻ = ifelse(k > 1, turbulent_shape(e[i, j, max(k - 1, 1)], eᵐⁱⁿ), zero(grid_float_type(grid)))
         cl.uᵉ[i, j, k] = turbulent_shape(e[i, j, k], eᵐⁱⁿ) + tm.ℂʷᵒ * e⁻
-        cl.ε[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
-        cl.uᵋ[i, j, k] = cl.ε[i, j, k]
+        cl.εʷ[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
+        cl.uᵋ[i, j, k] = cl.εʷ[i, j, k]
     end
     balance_sink!(cl.uᵉ, cl.budget_work, i, j, grid, tm.sink_amplitude, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
     balance_sink!(cl.uᵋ, cl.budget_work, i, j, grid, tm.sink_amplitude, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
@@ -556,7 +556,7 @@ end
         αᴺ = τ * τ * N²[i, j, k]
         r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
         B = (cl.B[i, j, k] + cl.B[i, j, k-1]) / 2
-        ε = (cl.ε[i, j, k] + cl.ε[i, j, k-1]) / 2
+        ε = (cl.εʷ[i, j, k] + cl.εʷ[i, j, k-1]) / 2
         Gᑫᶜ = (cooling_flux_conversion(cl, i, j, k) + cooling_flux_conversion(cl, i, j, k-1)) / 2
         cooling = cooling_conversion(closure_ij.heating_budget_flux, Gᑫᶜ)
         latent = (latent_sourceᶜᶜᶜ(i, j, k, cl) + latent_sourceᶜᶜᶜ(i, j, k-1, cl)) / 2
@@ -581,7 +581,7 @@ end
         cooling = cooling_conversion(closure_ij.heating_budget_flux, cooling_flux_conversion(cl, i, j, k))
         cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * Fᵉ + tm.ℂʷᵋ * Fᵋ) +
                            damped_local_third_moment(Center(), i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k],
-                                                     cl.ε[i, j, k], cooling, latent_sourceᶜᶜᶜ(i, j, k, cl))
+                                                     cl.εʷ[i, j, k], cooling, latent_sourceᶜᶜᶜ(i, j, k, cl))
     end
     return nothing
 end

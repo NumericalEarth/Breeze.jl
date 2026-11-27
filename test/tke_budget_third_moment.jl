@@ -237,7 +237,7 @@ end
     @test length(partly_cloudy) >= 3
     # w′³ᵇ lives at the faces: the source of the two centers next to the face, averaged, times ℓ of the face
     ℓᵐ = Array(interior(unskewed.closure_fields.ℓᵐ))[1, 1, :]
-    ε = column(cl₀.ε)
+    ε = column(cl₀.εʷ)
     @test all(ε .>= 0) && maximum(ε) > 0
     L = (1 .- aᶜ) .* (Bˡ .+ sqrt.(Bˡ .^ 2 .+ (aᶜ .* ε) .^ 2)) ./ 2
     Nz = length(aᶜ)
