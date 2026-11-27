@@ -1,42 +1,3 @@
-#####
-##### `TKEBasedTurbulenceClosure`: a vertical eddy-diffusivity closure with prognostic turbulent
-##### kinetic energy, in the spirit of CATKE (Wagner et al. 2025)
-#####
-#####   Kᵘ = 𝕊ᵘ ℓ √e,   Kᶜ = 𝕊ᶜ ℓ √e,   Kᵉ = 𝕊ᵉ ℓ √e,   ε = 𝕊ᴰ e^{3/2} / ℓ
-#####   ℓ  = a mixing-length formulation built on the buoyancy penetration depth ℓᵇ = √e / N and the wall length ℂˢ z
-#####   ∂ₜ(ρe) + ∇·(ρ u e) = ∂z(ρ Kᵉ ∂z e) + ρ (P + B − ε),   P = Kᵘ S²,  B = −Kᶜ N²
-#####
-##### The static stability N² is diagnosed once per stage at the cell interfaces and stored with the
-##### closure fields, so that the mixing length, the buoyancy flux and the stability functions all
-##### see one value. `MoistStaticStability` (the default without a subgrid distribution) is the gradient of the
-##### buoyancy of the dynamics, ∂z_b, where the air is subsaturated, and the buoyancy frequency of a saturated
-##### displacement where it is saturated; `DryStaticStability` is ∂z_b everywhere (static_stability.jl). With a
-##### subgrid distribution the default is the latent static stability of the distribution,
-##### `SaturationWeightedStaticStability(CondensateFluxFraction())` (subgrid_distribution.jl).
-#####
-##### Three formulations of the mixing length share the wall coefficient ℂˢ and are computed column by
-##### column, once per stage, into `closure_fields.ℓᵐ`: `LocalMinimumMixingLength`, ℓ = min(ℂˢ z, ℓᵇ),
-##### which knows only the ground and the stratification at the eddy's own level; `IntegralMixingLength`,
-##### the parcel lengths of Bougeault & Lacarrère (1989), a walk per face; and the default
-##### `GradientLimitedMixingLength`, with separate wall coefficient ℂˢ and interior slope ℂⁱ — the lower envelope of
-##### every level's penetration depth, two sweeps per column, the construction of NEMO's TKE scheme —
-##### which bounds ℓ by the stratified air above and below an elevated neutral or unstable layer, where
-##### the local minimum lets it grow to the distance to the ground.
-#####
-##### The stability functions 𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ are functions of the turbulent Richardson number
-##### (`TurbulentRichardsonStabilityFunction`, the default, in turbulent_richardson_stability_functions.jl),
-##### rational functions of the Richardson number (`RationalStabilityFunction`, in
-##### richardson_number_stability_functions.jl), or constants (`ConstantStabilityFunctions`).
-#####
-##### The tracer `ρe` is advected and vertically diffused (with Kᵉ) by the dynamical core like every
-##### other scalar. Following CATKE, the sinks — dissipation, the negative part of the buoyancy flux
-##### and the damping of negative TKE — enter the same vertically implicit tridiagonal solve as the
-##### diffusion, through the linear coefficient `Lᵉ` and `implicit_linear_coefficient`, and the
-##### sources — shear production and the positive part of the buoyancy flux — enter the stage
-##### tendency through `compute_closure_tendencies!`. Under an explicit time discretization the
-##### sinks are added to the tendency as well.
-#####
-
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities:
     shearᶜᶜᶠ, ℑbzᵃᵃᶜ, mask_diffusivity, turbulent_velocityᶜᶜᶜ
 
@@ -46,54 +7,23 @@ using Oceananigans.Units: minute
 #####
 ##### Stability functions
 #####
-
 """
 $(TYPEDEF)
 
 Constant stability functions for [`TKEBasedTurbulenceClosure`](@ref): the mixing lengths for
 momentum, tracers and turbulent kinetic energy are constant multiples of the primary length ``ℓ``,
-
-```math
-ℓᵘ = ℂᵘ ℓ, \\qquad ℓᶜ = ℂᶜ ℓ, \\qquad ℓᵉ = ℂᵉ ℓ,
-```
-
-and the dissipation length is ``ℓᴰ = ℓ / ℂᴰ``, so that ``ε = ℂᴰ e^{3/2} / ℓ``.
-
-The turbulent Prandtl number is ``Pr = ℂᵘ / ℂᶜ`` and the TKE Schmidt number ``ℂᵘ / ℂᵉ``. In a
-neutral constant-stress layer, where ``ℓ = ℂˢ z`` with ``ℂˢ`` the wall coefficient of
-[`AbstractMixingLength`](@ref), production balances dissipation at ``e / u_\\star² = 1 / \\sqrt{ℂᵘ ℂᴰ}``
-with a logarithmic wind profile of von Kármán constant ``κ = ℂˢ (ℂᵘ³ / ℂᴰ)^{1/4}``; in stratified
-steady state, where ``ℓ = \\sqrt{e} / N``, the gradient Richardson number is
-``Ri^\\dagger = ℂᵘ / (ℂᶜ + ℂᴰ)``.
-
-The defaults are the Mellor–Yamada coefficients of [Nakanishi and Niino (2009)](@cite NakanishiNiino2009)
-re-expressed for this normalization of the mixing length (``κ = 0.4``, ``e/u_\\star² = 4.2``,
-``Pr = 0.74``, ``Ri^\\dagger = 0.25``); they are placeholders for calibration. The conversion from
-the normalization ``ℓ = \\min(z, Cᴺ \\sqrt{e} / N)`` is [`absorb_stratification_coefficient`](@ref).
-
-Fields
-======
-
-$(TYPEDFIELDS)
 """
 Base.@kwdef struct ConstantStabilityFunctions{FT}
-    "momentum stability function, ``ℓᵘ = ℂᵘ ℓ``"
     ℂᵘ :: FT = 0.149
-    "tracer stability function, ``ℓᶜ = ℂᶜ ℓ``"
     ℂᶜ :: FT = 0.201
-    "turbulent kinetic energy stability function, ``ℓᵉ = ℂᵉ ℓ``"
     ℂᵉ :: FT = 0.298
-    "dissipation stability function, ``ℓᴰ = ℓ / ℂᴰ``"
     ℂᴰ :: FT = 0.388
 end
 
-## `Base.@kwdef` on a `{FT}` struct requires every field to share one type, so mixed
-## integer/float keyword arguments — `ConstantStabilityFunctions(ℂᵉ = 1)` — are promoted here.
 ConstantStabilityFunctions(ℂᵘ, ℂᶜ, ℂᵉ, ℂᴰ) = ConstantStabilityFunctions(promote(ℂᵘ, ℂᶜ, ℂᵉ, ℂᴰ)...)
 
 Base.summary(sf::ConstantStabilityFunctions{FT}) where FT = "ConstantStabilityFunctions{$FT}"
 
-# The lines under the stability functions' summary, with `prefix` for nesting in the closure's show
 function show_stability_function_lines(io::IO, sf::ConstantStabilityFunctions, prefix)
     print(io, prefix, "├── ℂᵘ: ", prettysummary(sf.ℂᵘ), '\n',
               prefix, "├── ℂᶜ: ", prettysummary(sf.ℂᶜ), '\n',
@@ -110,34 +40,16 @@ end
 #####
 ##### Mixing length
 #####
-
 """
 $(TYPEDEF)
 
 Supertype of the formulations of the primary mixing length ``ℓ`` of [`TKEBasedTurbulenceClosure`](@ref).
 All are built from two lengths: the wall length ``ℂˢ z``, ``ℂˢ`` times the height above the surface,
 and the buoyancy penetration depth
-
-```math
-ℓᵇ = \\frac{\\sqrt{e}}{N},
-```
-
-how far an eddy with kinetic energy ``e`` penetrates air of buoyancy frequency ``N`` before its kinetic
-energy is spent against buoyancy — infinite where ``N² ≤ 0``. Each formulation carries a wall coefficient
-``ℂˢ``; the gradient-limited form also carries an independent interior slope ``ℂⁱ``.
-The penetration depth carries no coefficient. The standalone default ``ℂˢ = 1.316`` is the reciprocal of
-Deardorff's coefficient ``0.76`` of the stratification length ([Deardorff 1980](@cite Deardorff1980)),
-which the equivalent normalization ``ℓ = \\min(z, 0.76 \\sqrt{e} / N)`` carries on ``ℓᵇ`` instead; see
-[`absorb_stratification_coefficient`](@ref). In a neutral surface layer every formulation gives
-``ℓ = ℂˢ z`` and in uniformly stratified air every formulation gives ``ℓ = ℓᵇ``; they differ in what
-else bounds ``ℓ``. The formulations are [`LocalMinimumMixingLength`](@ref),
-[`IntegralMixingLength`](@ref) and the default [`GradientLimitedMixingLength`](@ref).
 """
 abstract type AbstractMixingLength end
 
-# The inverse of the buoyancy length ℂˡᵇ u / N of the mixing length `ml`, with u = √e: zero where N² ≤ 0
 @inline inverse_buoyancy_length(ml, u, N²) = sqrt(max(N², zero(N²))) / (buoyancy_length_coefficient(ml) * u)
-
 """
 $(TYPEDEF)
 
@@ -147,7 +59,6 @@ at the eddy's own level ([Deardorff 1980](@cite Deardorff1980)).
 Base.@kwdef struct LocalMinimumMixingLength{FT} <: AbstractMixingLength
     ℂˢ :: FT = 1.316 # coefficient of the wall length ℓ = ℂˢ z
 end
-
 """
 $(TYPEDEF)
 
@@ -157,16 +68,11 @@ The mixing length from the parcel displacements of [Bougeault and Lacarrère (19
 Base.@kwdef struct IntegralMixingLength{FT} <: AbstractMixingLength
     ℂˢ :: FT = 1.316 # coefficient of the wall length ℓ = ℂˢ z
 end
-
 """
 $(TYPEDEF)
 
 A gradient-limited mixing length with wall coefficient ``ℂˢ``, interior slope ``ℂⁱ`` and buoyancy-length
 coefficient ``ℂˡᵇ`` ([Gaspar et al. 1990](@cite Gaspar1990)):
-
-```math
-ℓ(z) = \\min\\left(ℂˢ z, \\min_{z′ > 0} [ℂˡᵇ ℓᵇ(z′) + ℂⁱ |z - z′|]\\right), \\qquad ℓᵇ = \\sqrt{e} / N.
-```
 """
 struct GradientLimitedMixingLength{FT} <: AbstractMixingLength
     ℂˢ :: FT  # wall length coefficient
@@ -207,54 +113,11 @@ Base.show(io::IO, ml::GradientLimitedMixingLength) =
 #####
 ##### The closure
 #####
-
 """
 $(TYPEDEF)
 
 A vertical eddy-diffusivity closure carrying one prognostic equation for the subgrid turbulent
 kinetic energy ``e``, in the spirit of CATKE ([Wagner et al. 2025](@cite Wagner25catke)):
-
-```math
-Kᵘ = 𝕊ᵘ ℓ \\sqrt{e}, \\qquad Kᶜ = 𝕊ᶜ ℓ \\sqrt{e}, \\qquad Kᵉ = 𝕊ᵉ ℓ \\sqrt{e}, \\qquad
-ε = 𝕊ᴰ e^{3/2} / ℓ,
-```
-
-```math
-∂_t (ρ e) + ∇ ⋅ (ρ 𝐮 e) = ∂_z (ρ Kᵉ ∂_z e) + ρ (P + B - ε), \\qquad P = Kᵘ S², \\qquad B = -Kᶜ N²,
-```
-
-where ``Kᵘ``, ``Kᶜ`` and ``Kᵉ`` are the eddy diffusivities of momentum, scalars and turbulent
-kinetic energy, ``S²`` the squared vertical shear, ``N²`` the squared buoyancy frequency, ``ℓ`` the
-primary mixing length ([`AbstractMixingLength`](@ref): [`GradientLimitedMixingLength`](@ref) by default,
-[`LocalMinimumMixingLength`](@ref) or [`IntegralMixingLength`](@ref)), and ``𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ`` stability functions
-([`TurbulentRichardsonStabilityFunction`](@ref) by default, [`RationalStabilityFunction`](@ref) or
-[`ConstantStabilityFunctions`](@ref)). ``N²`` is
-diagnosed once per time-step stage at the cell
-interfaces by the `static_stability` component ([`MoistStaticStability`](@ref) by default without a subgrid
-distribution, [`SaturationWeightedStaticStability`](@ref)`(`[`CondensateFluxFraction`](@ref)`())` by default with one,
-or [`DryStaticStability`](@ref)) and stored with the closure fields. The prognostic TKE density is
-the tracer `ρe`, which the
-closure adds to the model; it is advected and vertically diffused like every other scalar, and the
-closure applies the local production, buoyancy flux and dissipation.
-
-The square root of ``e`` is floored at `minimum_tke` wherever it enters a diffusivity or a length
-scale, and negative ``e`` — which advection can produce — is damped on
-`negative_tke_damping_time_scale` rather than clipped. The squared shear ``S²`` and its floor ``S²ᵐⁱⁿ`` come from
-the `shear` component, [`GridMeanShear`](@ref), the shear of the resolved wind. They enter the
-Richardson number ``Ri = N² / (S² + S²ᵐⁱⁿ)`` of [`RationalStabilityFunction`](@ref) and the shear
-number ``τ² (S² + S²ᵐⁱⁿ)`` in the turbulent Richardson number of
-[`TurbulentRichardsonStabilityFunction`](@ref), whose functions are smooth in ``N²`` through neutral
-where the shear vanishes.
-
-`subgrid_distribution` is `nothing` by default. A [`DoubleGaussian`](@ref) adds the subgrid
-distribution of θˡⁱ, qᵗ and w from the closure's ``ℓ``, ``e`` and ``Kᶜ``; with it the shear and
-buoyancy production of the TKE equation are the energy conversions of the fluxes the closure
-applies to the mean state, and the dissipated energy heats the air. `solver` solves the coupling of
-the static stability with the saturated fraction of the distribution.
-
-`heating_budget_flux` is `nothing` by default. A [`HeatingBudgetFlux`](@ref) adds a flux of θˡⁱ that
-carries diabatic heating (radiation, ...) from where it acts to where the turbulence is, and its
-energy conversion ``G`` to the TKE equation, ``P + B + G - ε``.
 """
 struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, HB} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
     mixing_length :: ML                   # the primary mixing length ℓ
@@ -279,7 +142,6 @@ function Adapt.adapt_structure(to, closure::TKEBasedTurbulenceClosure{TD}) where
                                          adapt(to, closure.subgrid_distribution),
                                          adapt(to, closure.heating_budget_flux))
 end
-
 """Either a single `TKEBasedTurbulenceClosure` or an ensemble array of them."""
 const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureArray{TD}} where TD
 
@@ -295,7 +157,6 @@ function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::S
                                                                          negative_tke_damping_time_scale,
                                                                          subgrid_distribution, heating_budget_flux)
 end
-
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -306,39 +167,6 @@ stability and numerical parameters. The default stability functions are
 starting values for calibration. The default mixing length has the
 wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} = 1.299067385616381`` of the neutral values of the
 default stability functions (von Kármán's constant 0.4 in the surface layer) and the interior slope of the provisional calibration, 1.5609936948461662.
-
-`shear` is the squared shear ``S²`` of the stability functions, [`GridMeanShear`](@ref). It carries the floor ``S²ᵐⁱⁿ > 0`` (default `1e-10` s⁻²) as
-`shear.minimum_shear_squared`; the keyword `minimum_shear_squared`, if given, replaces the floor
-of `shear`. The floor makes the stability functions continuous where the shear vanishes,
-as in uniform or absent wind, where ``N² / S²`` would jump between the stable and unstable limits
-with the sign of a rounding-level ``N²``. There the stability functions pass from neutral to their
-limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``; where ``S² ≫ S²ᵐⁱⁿ`` they are unchanged to relative order
-``S²ᵐⁱⁿ / S²``. The shear does not enter [`ConstantStabilityFunctions`](@ref).
-
-`subgrid_distribution` (default `nothing`) is a [`DoubleGaussian`](@ref), or `nothing` for none.
-The default `static_stability` follows it: [`MoistStaticStability`](@ref) without a distribution, and with one
-the latent static stability of the distribution, `SaturationWeightedStaticStability(CondensateFluxFraction())`, which
-weights the saturated static stability by the condensate flux fraction of the distribution, so that the static
-stability and the buoyancy production of the TKE are one ([`LatentStratification`](@ref)). In dry air the condensate
-flux vanishes and it is the stratification of the buoyancy derivatives of the dynamics, which differs from the
-``g ∂_z \\ln θᵨ`` of [`MoistStaticStability`](@ref) by the factor ``ρ / ρᵣ`` of the derivative of
-``b = -g (ρ - ρᵣ) / ρᵣ``. `solver`
-([`SinglePass`](@ref) by default, [`DampedFixedPoint`](@ref), [`BracketedFractionSolve`](@ref), ...)
-solves that coupling.
-
-`heating_budget_flux` (default `nothing`) is a [`HeatingBudgetFlux`](@ref): the turbulent flux of θˡⁱ
-that redistributes diabatic heating over the turbulent layer, with its conversion in the TKE equation.
-It needs the energetics of the applied fluxes, that is, a `subgrid_distribution` or a
-[`SaturationWeightedStaticStability`](@ref).
-
-```jldoctest
-using Breeze
-
-TKEBasedTurbulenceClosure(minimum_shear_squared=1e-12).shear
-
-# output
-GridMeanShear(minimum_shear_squared = 1.0e-12)
-```
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;
@@ -349,8 +177,6 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    minimum_tke = 1e-6,
                                    shear = GridMeanShear(),
                                    minimum_shear_squared = nothing,
-                                   # CATKE's value; atmospheric turbulence evolves faster than the
-                                   # ocean's, so a shorter time scale may be more appropriate here.
                                    negative_tke_damping_time_scale = 1minute,
                                    heating_budget_flux = nothing) where TD
 
@@ -381,8 +207,6 @@ end
 TKEBasedTurbulenceClosure(FT::DataType; kw...) =
     TKEBasedTurbulenceClosure(VerticallyImplicitTimeDiscretization(), FT; kw...)
 
-# The static stability of the closure without one given: the latent static stability of the subgrid distribution where
-# there is one, `MoistStaticStability()` otherwise
 default_static_stability(::Nothing) = MoistStaticStability()
 default_static_stability(subgrid_distribution) = SaturationWeightedStaticStability(CondensateFluxFraction())
 
@@ -393,29 +217,6 @@ default_static_stability(subgrid_distribution) = SaturationWeightedStaticStabili
 @inline convert_eltype(::Type{FT}, ::Nothing) where FT = nothing
 @inline convert_eltype(::Type{FT}, ss::SaturationWeightedStaticStability) where FT = ss
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Convert the parameters of the normalization ``ℓ = \\min(z, Cᴺ \\sqrt{e} / N)`` — a coefficient
-``Cᴺ`` on the stratification length and none on the wall distance — to the present
-``ℓ = \\min(ℂˢ z, \\sqrt{e} / N)``, returning the equivalent [`LocalMinimumMixingLength`](@ref) and
-[`ConstantStabilityFunctions`](@ref). The two lengths differ by the factor ``Cᴺ`` everywhere, so
-the diffusivities and the dissipation rate are unchanged when ``ℂˢ = 1 / Cᴺ``, the diffusivity
-coefficients are multiplied by ``Cᴺ`` and the dissipation coefficient is divided by it.
-
-```jldoctest
-using Breeze
-using Breeze.TurbulenceClosures: absorb_stratification_coefficient
-
-mixing_length, stability_functions =
-    absorb_stratification_coefficient(0.76, ConstantStabilityFunctions(ℂᵘ=0.196, ℂᶜ=0.265, ℂᵉ=0.392, ℂᴰ=0.295))
-
-mixing_length
-
-# output
-LocalMinimumMixingLength{Float64} (ℂˢ = 1.31579)
-```
-"""
 function absorb_stratification_coefficient(Cᴺ, sf::ConstantStabilityFunctions)
     mixing_length = LocalMinimumMixingLength(ℂˢ = 1 / Cᴺ)
     stability_functions = ConstantStabilityFunctions(ℂᵘ = Cᴺ * sf.ℂᵘ, ℂᶜ = Cᴺ * sf.ℂᶜ, ℂᵉ = Cᴺ * sf.ℂᵉ, ℂᴰ = sf.ℂᴰ / Cᴺ)
@@ -425,14 +226,11 @@ end
 #####
 ##### Tracer wiring
 #####
-
 """The name of the prognostic TKE tracer, which holds the density ``ρ e``."""
 const TKE_NAME = :ρe
 
 Oceananigans.TurbulenceClosures.closure_required_tracers(::FlavorOfTKEClosure) = tuple(TKE_NAME)
 
-# Bulk surface fluxes constructed without a gustiness take theirs from the subgrid TKE
-# next to the wall, in the floating-point type of the closure
 const TKEClosureOf{FT} = TKEBasedTurbulenceClosure{<:Any, <:Any, <:Any, <:Any, FT} where FT
 
 AtmosphereBoundaryConditions.materialize_gustiness(::DefaultGustiness, ::TKEClosureOf{FT}) where FT =
@@ -452,14 +250,6 @@ end
 ##### Closure fields
 #####
 
-"""
-$(TYPEDEF)
-
-Precomputed fields for [`TKEBasedTurbulenceClosure`](@ref): the three diffusivities, the static
-stability ``N²``, the mixing length ``ℓ`` and the implicit linear coefficient. Unlike CATKE's, the
-mixing length is stored, because its nonlocal formulations are computed column by column rather than
-pointwise; `closure_fields.ℓᵐ` is the diagnostic of ``ℓ`` from the model state.
-"""
 struct TKEClosureFields{K, N, L, KC, LC, SG, CS, C}
     Kᵘ :: K # eddy diffusivity for momentum, at (Center, Center, Face)
     Kᶜ :: K # eddy diffusivity for scalars, at (Center, Center, Face)
@@ -467,17 +257,11 @@ struct TKEClosureFields{K, N, L, KC, LC, SG, CS, C}
     N² :: N # static stability, at (Center, Center, Face)
     ℓᵐ :: N # the primary mixing length, at (Center, Center, Face)
     ℓˢ :: N # stratification-only envelope, before capping at the surface length
-    # The stratification-only envelope at (Center, Center, Center), for the center mixing length of
-    # `GradientLimitedMixingLength`: the upward sweep of the face below and the downward sweep of the
-    # face above, each carried half a cell (`fill_mixing_length!`)
     ℓˢᶜ :: C
-    # The linear implicit coefficient of the TKE equation, ∂ₜe = Lᵉ e + ⋯, at (Center, Center, Center):
-    # the dissipation rate, the negative part of the buoyancy flux and the damping of negative TKE.
     Lᵉ :: L
     tupled_tracer_diffusivities :: KC         # per-tracer diffusivity lookup, by closure-scalar position
     tupled_implicit_linear_coefficients :: LC # `Lᵉ` for the TKE tracer, zero for every other
     subgrid_cloud :: SG # the fields of the subgrid cloud formulation, or `nothing`
-    # One value per column that the stability functions read (`column_stability_field`), or `nothing`
     column_stability :: CS
 end
 
@@ -512,12 +296,8 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     ℓˢᶜ = CenterField(grid)
     Lᵉ = CenterField(grid)
 
-    # Indexed by the `Val(id)` the model hands to `diffusivity` and `implicit_linear_coefficient`:
-    # TKE is transported with `Kᵉ` and damped with `Lᵉ`, every other scalar is transported with
-    # `Kᶜ` and has no linear coefficient.
     tracer_diffusivities = NamedTuple(name => name === TKE_NAME ? Kᵉ : Kᶜ for name in tracer_names)
     implicit_linear_coefficients = NamedTuple(name => name === TKE_NAME ? Lᵉ : ZeroField() for name in tracer_names)
-
     subgrid_cloud = build_subgrid_cloud_fields(grid, subgrid_distribution(closure), closure_static_stability(closure), tracer_names,
                                                heating_budget_flux(closure))
 
@@ -527,7 +307,6 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
                             column_stability)
 end
 
-# The subgrid cloud formulation of a closure or of an ensemble of closures (which share one)
 subgrid_distribution(closure::TKEBasedTurbulenceClosure) = closure.subgrid_distribution
 subgrid_distribution(closure::TKEClosureArray) = first(closure).subgrid_distribution
 closure_static_stability(closure::TKEBasedTurbulenceClosure) = closure.static_stability
@@ -535,43 +314,13 @@ closure_static_stability(closure::TKEClosureArray) = first(closure).static_stabi
 closure_stability_functions(closure::TKEBasedTurbulenceClosure) = closure.stability_functions
 closure_stability_functions(closure::TKEClosureArray) = first(closure).stability_functions
 
-#####
-##### Stability functions that read one value of the whole column
-#####
-##### Stability functions are pointwise, except those that also read one number of the column (the
-##### damping of `ColumnStabilityDamping` by the stability integrated over the lower column). Such
-##### stability functions extend `column_stability_field` to allocate the field of that number and
-##### `compute_column_stability!` to fill it from the stored static stability, after the static
-##### stability and before the diffusivities, every time the diffusivities are formed.
-#####
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The field of one value per column that `stability_functions` read, or `nothing` (the default) for
-stability functions of the local state only.
-"""
 column_stability_field(grid, stability_functions) = nothing
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Fill `column_stability` (of [`column_stability_field`](@ref)) from the static stability `N²` stored at the faces and
-the state of `model`, over the columns of the volume kernel `parameters`. Nothing to do without a column value.
-"""
 compute_column_stability!(::Nothing, grid, closure, N², model; parameters = :xyz) = nothing
 compute_column_stability!(λ, grid, closure, N², model; parameters = :xyz) =
     compute_column_stability!(closure_stability_functions(closure), λ, grid, closure, N², model; parameters)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The return-to-isotropy time scale of `stability_functions` at the face `k`, from the mixing length `ℓ`, the
-turbulent velocity `u` and the closure fields there, for the moments of a subgrid distribution with a
-`ReturnToIsotropyTimeScale`. Stability functions that have one extend it.
-"""
 function return_to_isotropy_time_scaleᶜᶜᶠ end
-
 @inline Oceananigans.TurbulenceClosures.viscosity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
 @inline Oceananigans.TurbulenceClosures.diffusivity_location(::FlavorOfTKEClosure) = (Center(), Center(), Face())
 
@@ -580,35 +329,15 @@ function return_to_isotropy_time_scaleᶜᶜᶠ end
 @inline Oceananigans.TurbulenceClosures.diffusivity(::FlavorOfTKEClosure, fields, ::Val{id}) where id =
     fields.tupled_tracer_diffusivities[id]
 
-# The vertically implicit tridiagonal solve of the host model carries a linear term, so that
-# `(1 - Δt Lᵉ - Δt ∂z Kᵉ ∂z) eⁿ⁺¹ = e⋆` — the sinks of the TKE equation are solved together with
-# its vertical diffusion, every stage. Momentum (`id = nothing`) and the other scalars fall back
-# to zero.
 @inline Oceananigans.TurbulenceClosures.implicit_linear_coefficient(i, j, k, grid,
                                                                     closure::FlavorOfTKEClosure{<:VerticallyImplicitTimeDiscretization},
                                                                     fields, ::Val{id}, args...) where id =
     @inbounds fields.tupled_implicit_linear_coefficients[id][i, j, k]
 
-#####
-##### Stability functions: dispatch on the stability-function type. The arguments beyond the
-##### closure — the velocities, the stored N², the specific TKE and the stored mixing length — are
-##### what a Richardson-number-dependent variant needs.
-#####
-
 const ConstantStabilityClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ConstantStabilityFunctions}
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The fraction `ℂᴾ` of the shear production `P` (the kinetic energy the momentum fluxes take from the mean flow)
-that the TKE equation receives: one, unless `stability_functions` hold a shear production coefficient of their
-own. With the energetics of the applied fluxes (a subgrid distribution) the rest, `(1 - ℂᴾ) P`, heats the air,
-so that the energy budget still closes (`add_shear_production_heating!`).
-"""
 @inline shear_production_fraction(stability_functions) = 1
 
-# The three stability functions of the diffusivities at (Center, Center, Face). Stability functions that also read a
-# value of the column (`column_stability_field`) extend this method, which has the closure fields.
 @inline diffusivity_stability_functionsᶜᶜᶠ(i, j, k, grid, closure, velocities, e, closure_fields) =
     (momentum_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ),
      tracer_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ),
@@ -620,41 +349,13 @@ so that the energy budget still closes (`add_shear_production_heating!`).
 @inline dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.ℂᴰ
 @inline dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ConstantStabilityClosure, args...) = closure.stability_functions.ℂᴰ
 
-#####
-##### Computing the mixing length, column by column, into `closure_fields.ℓᵐ`
-#####
-##### The mixing lengths of this section and of other files (`BlendedMixingLength` of SHOC) keep to
-##### this contract:
-#####
-#####   * `closure` is read only for `closure.mixing_length` (and its coefficients) and for
-#####     `closure.minimum_tke`, the floor of `e` inside `turbulent_velocityᶜᶜᶜ`;
-#####   * `e` is an array of the specific turbulent kinetic energy at cell centers `1:Nz+1` (the
-#####     reconstruction at the top face reads the cell above the top);
-#####   * `N²` is an array at faces `1:Nz+1`;
-#####   * `fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, i, j, grid, mixing_length, closure, e, N²)` writes the
-#####     face arrays `ℓ` and `ℓˢ` of column `(i, j)` and, for `GradientLimitedMixingLength`, the
-#####     center array `ℓˢᶜ`; a formulation that needs no center array extends the method without it,
-#####     `fill_mixing_length!(ℓ, ℓˢ, i, j, grid, mixing_length, closure, e, N²)`.
-#####     `mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)` reads only `closure_fields.ℓˢ`,
-#####     `closure_fields.ℓˢᶜ` and `closure_fields.N²` (`ℓˢ` holds whatever the center reconstruction
-#####     needs: the stratification envelope, or for `BlendedMixingLength` its asymptotic length `ℓ∞`
-#####     of the column; `ℓˢᶜ` the envelope at the centers of the gradient-limited length).
-#####
-
-# The stored face field as a kernel function, for the boundary-aware reconstruction `ℑbzᵃᵃᶜ`
 @inline face_valueᶜᶜᶠ(i, j, k, grid, field) = @inbounds field[i, j, k]
 
-
-# The inverse of the buoyancy length ℂˡᵇ √e / N at a face: zero where N² ≤ 0
 @inline inverse_buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²) =
     inverse_buoyancy_length(closure.mixing_length, ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e), @inbounds(N²[i, j, k]))
 
-# The buoyancy length ℂˡᵇ √e / N at a face: infinite where N² ≤ 0
 @inline buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²) = inv(inverse_buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²))
 
-# The local minimum at a face: the ground — or an immersed bottom — through the wall length, and
-# the stratification there through the buoyancy length, combined as inverse lengths, which are finite where
-# the buoyancy length is not
 @inline function local_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
     λᵇ = inverse_buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
@@ -662,7 +363,6 @@ so that the energy budget still closes (`add_shear_production_heating!`).
     return ifelse(isnan(ℓ), d, ℓ)
 end
 
-# The local minimum at a cell center, with N² reconstructed from the two adjacent faces
 @inline function local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²)
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
     N²ᶜ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
@@ -671,7 +371,6 @@ end
     return ifelse(isnan(ℓ), d, ℓ)
 end
 
-# `LocalMinimumMixingLength`: the local minimum at every face
 @inline function fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ::LocalMinimumMixingLength, closure, e, N²)
     for k in 1:grid.Nz+1
         @inbounds ℓ[i, j, k] = local_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
@@ -680,22 +379,9 @@ end
     return nothing
 end
 
-# A formulation without a center envelope fills the faces alone
 @inline fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, i, j, grid, ml, closure, e, N²) =
     fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml, closure, e, N²)
 
-# Sweep the stratification envelope of the buoyancy length ℂˡᵇ √e / N at ℂⁱ, then apply the wall bound ℂˢ z separately.
-# Neither the ground nor the domain top seeds the stratification envelope. Every combination of
-# two lengths goes through the blending of the mixing length: the minimum, or a `HarmonicBlend`,
-# which each sweep applies recursively (see its docstring for what that implies).
-#
-# The envelope at center k combines the upward sweep at face k, which holds the bounds of the faces
-# 1, …, k, with the downward sweep at face k + 1 alone, which holds those of the faces k + 1, …, Nz + 1,
-# each carried half a cell at ℂⁱ: the two share no bound, so a blend counts each bound once. The
-# downward sweep alone is formed first, from the penetration depths, and kept at the centers;
-# the face envelope is then the upward sweep swept downward, as before. With `HardMinimum` the
-# center envelope is min(ℓˢ[k], ℓˢ[k+1]) + ℂⁱ Δz / 2 of the face envelope, to the bit: a bound that
-# reaches face k + 1 from below has passed face k with no more than its length there.
 @inline function fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, i, j, grid, ml::GradientLimitedMixingLength, closure, e, N²)
     FT = grid_float_type(grid)
     Nz = grid.Nz
@@ -705,7 +391,6 @@ end
             ℓᵇ = buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
             ℓˢ[i, j, k] = ifelse(isnan(ℓᵇ), FT(Inf), ℓᵇ)
         end
-        # The downward sweep alone at face k + 1, kept at center k
         ℓᵈᵒʷⁿ = ℓˢ[i, j, Nz+1]
         for k in Nz:-1:1
             ℓˢᶜ[i, j, k] = ℓᵈᵒʷⁿ
@@ -714,7 +399,6 @@ end
         for k in 2:Nz+1
             ℓˢ[i, j, k] = min(ℓˢ[i, j, k], ℓˢ[i, j, k-1] + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k-1, grid))
         end
-        # The upward sweep at face k with the downward sweep at face k + 1, each carried half a cell
         for k in 1:Nz
             Δℓ = ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k, grid) / 2
             ℓˢᶜ[i, j, k] = min(ℓˢ[i, j, k] + Δℓ, ℓˢᶜ[i, j, k] + Δℓ)
@@ -730,12 +414,7 @@ end
     return nothing
 end
 
-# `IntegralMixingLength`: Bougeault & Lacarrère's parcel walks from every face. The environment's
-# buoyancy relative to the parcel, Δb, grows by N² Δz across each cell — N² at the cell from the two
-# faces — and crossing a cell costs the energy Δb Δz + N² Δz² / 2. The parcel stops inside the cell
-# where the accumulated cost reaches its energy e★, at the distance that solves the quadratic.
 @inline function crossing_distance(Δb, N², Δz, r)
-    # Δb s + N² s² / 2 = r, in the form that is stable as N² → 0 and valid for either sign of N²
     s = 2r / (Δb + sqrt(max(Δb^2 + 2 * N² * r, 0)))
     return clamp(s, 0, Δz)
 end
@@ -788,55 +467,31 @@ end
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Compute the primary mixing length at every face of every column, by the formulation of
-`closure.mixing_length` ([`LocalMinimumMixingLength`](@ref), [`IntegralMixingLength`](@ref) or
-[`GradientLimitedMixingLength`](@ref)), from the specific turbulent kinetic energy `e` at the cell
-centers and the stored static stability `N²` at the faces. One thread per column.
-"""
 @kernel function _compute_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, grid, closure, e, N²)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
     fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, i, j, grid, closure_ij.mixing_length, closure_ij, e, N²)
 end
 
-# One thread per column. A backend that runs loops over k slowly inside a kernel (Reactant, where
-# they become one round of launches per level on GPU) may extend this for a whole-array form.
 compute_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, grid, closure, e, N²; parameters = :xyz) =
     launch!(grid.architecture, grid, column_kernel_parameters(parameters),
             _compute_mixing_length!, ℓ, ℓˢ, ℓˢᶜ, grid, closure, e, N²)
 
-# The horizontal part of the volume kernel parameters, for kernels that run one thread per column.
 column_kernel_parameters(::Symbol) = :xy
 column_kernel_parameters(::KernelParameters{S, O}) where {S, O} = KernelParameters(S[1:2], O[1:2])
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The mixing length at cell center `(i, j, k)`, where the dissipation lives with ``e``. For the local
-minimum it is the local minimum at the center, with ``N²`` reconstructed from the two adjacent faces.
-For the gradient-limited formulation, the uncapped stratification envelope at the center — the
-upward sweep of the face below blended with the downward sweep of the face above, each carried half a
-cell at slope ``ℂⁱ`` (`closure_fields.ℓˢᶜ`) — is bounded by the center's local penetration depth and
-wall length ``ℂˢ z``.
-The integral formulation carries its stored face length at slope ``ℂˢ``.
-"""
 @inline mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields) =
     mixing_lengthᶜᶜᶜ(i, j, k, grid, closure.mixing_length, closure, e, closure_fields)
 
 @inline mixing_lengthᶜᶜᶜ(i, j, k, grid, ::LocalMinimumMixingLength, closure, e, closure_fields) =
     local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²)
 
-# The gradient-limited length: the envelope at the center (see `fill_mixing_length!`)
 @inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::GradientLimitedMixingLength, closure, e, closure_fields)
     ℓᶠ = @inbounds closure_fields.ℓˢᶜ[i, j, k]
     return min(ℓᶠ, local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²))
 end
 
 @inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::AbstractMixingLength, closure, e, closure_fields)
-    # Carry the stored face length at the interior slope
     ℓˢ = closure_fields.ℓˢ
     ℓᶠ = @inbounds min(ℓˢ[i, j, k], ℓˢ[i, j, k+1]) + interior_slope(ml) * Δzᶜᶜᶜ(i, j, k, grid) / 2
     return min(ℓᶠ, local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²))
@@ -850,7 +505,6 @@ end
 ##### Diffusivities
 #####
 
-# The static stability at the faces, diagnosed once per stage and read by everything downstream
 @kernel function _compute_tke_static_stability!(N², grid, closure, tracers, buoyancy, closure_fields)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
@@ -863,9 +517,6 @@ end
     closure_ij = getclosure(i, j, closure)
     e = tracers[TKE_NAME]
 
-    # The one diffusivity the closure forms, ℓ √e — with the stored mixing length and √e floored
-    # at the minimum TKE and reconstructed from the centers to the face — which the stability
-    # functions scale into Kᵘ, Kᶜ and Kᵉ.
     ℓᵐ = closure_fields.ℓᵐ
     ℓ = @inbounds ℓᵐ[i, j, k]
     K = ℓ * ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure_ij, e)
@@ -884,31 +535,10 @@ end
     end
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Shear production ``Kᵘ S²`` at (Center, Center, Face).
-"""
 @inline shear_productionᶜᶜᶠ(i, j, k, grid, Kᵘ, u, v) = @inbounds Kᵘ[i, j, k] * shearᶜᶜᶠ(i, j, k, grid, u, v)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Buoyancy production ``-Kᶜ N²`` at (Center, Center, Face) from the stored diffusivity and static
-stability; negative in stable stratification.
-"""
 @inline buoyancy_productionᶜᶜᶠ(i, j, k, grid, Kᶜ, N²) = @inbounds -Kᶜ[i, j, k] * N²[i, j, k]
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The dissipation rate ``ε = 𝕊ᴰ e^{3/2} / ℓ`` at cell centers, from the specific turbulent kinetic
-energy field `e`, the velocities and the closure fields, whose stored ``ℓ`` and ``N²`` it reads;
-a diagnostic, evaluated in a `KernelFunctionOperation` at (Center, Center, Center) to compare the
-closure's TKE budget with a large-eddy simulation's. The power ``e^{3/2}`` is that of positive ``e``: zero or
-negative ``e`` dissipates nothing, whatever the mixing length there (which vanishes with ``e`` where
-`minimum_tke = 0`).
-"""
 @inline function dissipationᶜᶜᶜ(i, j, k, grid, closure, e, velocities, closure_fields)
     eᵢ = @inbounds e[i, j, k]
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
@@ -918,52 +548,26 @@ negative ``e`` dissipates nothing, whatever the mixing length there (which vanis
     return ifelse(turbulent, 𝕊ᴰ * e₊ * sqrt(e₊) / ℓ, zero(eᵢ))
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The rate at which the sinks of the TKE equation remove turbulent kinetic energy, ``-Lᵉ ≥ 0``:
-the dissipation rate ``ω = 𝕊ᴰ \\sqrt{e} / ℓ`` — or, where ``e`` is negative, the damping rate
-``1/τ`` — plus the buoyancy sink rate ``ωᴮ = -B⁻ / \\max(e, eᵐⁱⁿ)``, the negative part of the
-buoyancy flux divided by ``e`` floored at `minimum_tke` ``eᵐⁱⁿ``. Above the floor the buoyancy
-sink ``ωᴮ e`` is ``-B⁻``; below it the sink falls linearly with ``e``, continuously at
-``e = eᵐⁱⁿ``. Following CATKE, these are the terms treated implicitly in ``e``, so that ``e``
-stays positive for any time step.
-"""
 @inline function tke_sink_rate(i, j, k, grid, closure, e, B, velocities, closure_fields)
     eᵢ = @inbounds e[i, j, k]
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
     𝕊ᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
 
-    # `minimum_tke` floors only the turbulent velocity of the mixing length above; the dissipation
-    # rate follows √e all the way down, so that ε ∝ e^{3/2} below the floor too (as in CATKE).
-    # The `abs` keeps the unselected branch of the `ifelse` from taking √ of a negative number.
     τ = closure.negative_tke_damping_time_scale
     ω = ifelse(eᵢ < 0, 1 / τ, 𝕊ᴰ * sqrt(abs(eᵢ)) / ℓ)
 
-    # The buoyancy sink rate: -B⁻ / e above the floor and -B⁻ / eᵐⁱⁿ below it, so that the
-    # implicit sink ωᴮ e is continuous at e = eᵐⁱⁿ and vanishes linearly with e
     B⁻ = min(0, B)
     ωᴮ = -B⁻ / buoyancy_sink_tke(i, j, k, grid, closure_fields.subgrid_cloud, closure, e)
 
     return ω + ωᴮ
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The buoyancy production of the TKE equation at cell centers: ``-Kᶜ N²``, formed at the faces and
-reconstructed to the center, or, with the energetics of the applied fluxes of a
-subgrid distribution, the exact conversion of the scalar fluxes the closure applies.
-"""
 @inline tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields) =
     tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields)
 
 @inline tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, ::Nothing, closure_fields) =
     ℑbzᵃᵃᶜ(i, j, k, grid, buoyancy_productionᶜᶜᶠ, closure_fields.Kᶜ, closure_fields.N²)
 
-# The linear implicit coefficient Lᵉ of `∂t e = Lᵉ e + ⋯`, at cell centers, from the stored `Kᶜ`,
-# `N²` and the raw specific TKE. Launched after the diffusivity kernel, since it reads `Kᶜ` at the
-# faces above and below the cell.
 @kernel function _compute_tke_implicit_linear_coefficient!(Lᵉ, grid, closure, closure_fields, velocities, tracers)
     i, j, k = @index(Global, NTuple)
 
@@ -977,10 +581,6 @@ subgrid distribution, the exact conversion of the scalar fluxes the closure appl
     @inbounds Lᵉ[i, j, k] = - ω * active
 end
 
-# Called from `update_state!`, where every tracer — `ρe` included — momentarily holds its specific
-# value, so the kernels read `e` directly from the tracer. The static stability is diagnosed
-# first, then the mixing length column by column from it; the diffusivities and the implicit
-# coefficient then read both stored fields.
 function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
                                                          closure::FlavorOfTKEClosure,
                                                          model; parameters = :xyz)
@@ -990,9 +590,6 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
 
     compute_stability_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
 
-    # The third moment of the distribution from the TKE budget (`TKEBudgetThirdMoment`): a function of the
-    # prognostic state, diagnosed before the distribution the stage uses; it leaves the stability, the mixing
-    # length and the diffusivities as they are here
     diagnose_third_moment!(closure_fields.subgrid_cloud, subgrid_distribution(closure), closure_fields, closure, model, tracers, parameters)
 
     compute_subgrid_cloud!(closure_fields.subgrid_cloud, closure_fields, closure, model, tracers, parameters)
@@ -1005,8 +602,6 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     return nothing
 end
 
-# The static stability of the prognostic state, then the mixing length column by column from it and the
-# diffusivities from both
 function compute_stability_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     grid = model.grid
     arch = grid.architecture
@@ -1020,12 +615,6 @@ function compute_stability_and_diffusivities!(closure_fields, closure, model, tr
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-From the static stability stored in `closure_fields.N²`: the mixing length, column by column, the value of the
-column that the stability functions read, if any, and the diffusivities.
-"""
 function compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     grid = model.grid
     compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, closure_fields.ℓˢᶜ, grid, closure, tracers[TKE_NAME],
@@ -1035,39 +624,23 @@ function compute_mixing_length_and_diffusivities!(closure_fields, closure, model
     return nothing
 end
 
-# The subgrid distribution, if any, after the diffusivities (subgrid_distribution.jl)
 compute_subgrid_cloud!(::Nothing, closure_fields, closure, model, tracers, parameters) = nothing
 
 #####
 ##### The TKE equation: sources in the stage tendency
 #####
 
-# Under a vertically implicit time discretization the sinks live in the tridiagonal solve; under
-# an explicit one they are added to the tendency here as `Lᵉ e`, from the stored rate `Lᵉ` that the
-# last `update_state!` computed from the same stage state as `Kᵘ` and `Kᶜ`.
 @inline explicit_tke_sinks(i, j, k, grid, ::TKEBasedTurbulenceClosure{<:VerticallyImplicitTimeDiscretization},
                            closure_fields, e) = zero(grid)
 
 @inline explicit_tke_sinks(i, j, k, grid, ::TKEBasedTurbulenceClosure{<:ExplicitTimeDiscretization},
                            closure_fields, e) = @inbounds closure_fields.Lᵉ[i, j, k] * e
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Add the local sources of the TKE equation, ``ρ (P + B⁺)`` — shear production, formed from ``Kᵘ``
-and the velocities at the current Runge–Kutta stage, and the positive
-part of the buoyancy flux, formed at faces where ``Kᶜ`` and ``N²`` live and reconstructed to
-centers — to the tendency of the `ρe` tracer. Under an explicit time discretization the sinks
-``ρ Lᵉ e`` are added too.
-"""
 @kernel function _add_tke_tendencies!(Gρe, grid, closure, closure_fields, velocities, ρe, ρ, injected)
     i, j, k = @index(Global, NTuple)
 
     closure_ij = getclosure(i, j, closure)
 
-    # Retain CATKE's metric-weighted spatial reconstruction, but use the current stage's
-    # shear in both slots: averaging with the start of the full step changes the RHS
-    # integrated by Runge–Kutta and can make production negative when the shear reverses.
     u, v = velocities.u, velocities.v
     P = shear_production_fraction(closure_ij.stability_functions) *
         explicit_tke_shear_productionᶜᶜᶜ(i, j, k, grid, closure_fields.subgrid_cloud, closure_fields, u, v, injected)
@@ -1078,14 +651,11 @@ centers — to the tendency of the `ρe` tracer. Under an explicit time discreti
     e = @inbounds ρe[i, j, k] / ρᵢ
     sinks = explicit_tke_sinks(i, j, k, grid, closure_ij, closure_fields, e)
 
-    # The transport of TKE by the flux of its budget (`TKEBudgetThirdMoment` with ℂʷᵀ > 0); zero otherwise
     T = tke_budget_transportᶜᶜᶜ(i, j, k, grid, closure_ij.subgrid_distribution, closure_fields.subgrid_cloud)
 
     @inbounds Gρe[i, j, k] += ρᵢ * (P + B⁺ + T + sinks)
 end
 
-# Called by the time steppers at the start of every stage, after the flux boundary conditions have
-# been added to the tendencies; the tracers hold their density-weighted values here.
 function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, closure::FlavorOfTKEClosure, model)
     grid = model.grid
     arch = grid.architecture

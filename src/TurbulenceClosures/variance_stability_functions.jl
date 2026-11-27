@@ -1,85 +1,19 @@
-#####
-##### Stability functions of the scalar variances and covariance of the subgrid distribution
-#####
-##### The local diagnosis of the second moments of θˡⁱ and qᵗ is ℂᵛ τ Kᶜ ∂z a ∂z b. With the time scale of
-##### the scalar-variance budget, τ = 2ℓ / (ℂᵠ 𝕊ᴰ √e), and Kᶜ = 𝕊ᶜ ℓ √e, it is
-#####
-#####     θˡⁱ′² = (2ℂᵛ₁ / ℂᵠ) (𝕊ᶜ / 𝕊ᴰ) ℓ² (∂z θˡⁱ)²,
-#####
-##### a stability function borrowed from those of the flux and of the dissipation. `VarianceStabilityFunctions`
-##### gives the variances and the covariance stability functions of their own,
-#####
-#####     θˡⁱ′² = 𝕊ᵛ₁ ℓ² (∂z θˡⁱ)²,   qᵗ′² = 𝕊ᵛ₂ ℓ² (∂z qᵗ)²,   θˡⁱ′qᵗ′ = 𝕊ᵛ₃ ℓ² ∂z θˡⁱ ∂z qᵗ,
-#####     𝕊ᵛ₃ = 𝕏ᵛ √(𝕊ᵛ₁ 𝕊ᵛ₂),
-#####
-##### of the turbulent Richardson number of the closure's `TurbulentRichardsonStabilityFunction`.
-#####
-
 """
 $(TYPEDEF)
 
 Stability functions of the local diagnosis of the scalar second moments of the [`DoubleGaussian`](@ref)
 of [`TKEBasedTurbulenceClosure`](@ref), in place of the ratio ``𝕊ᶜ / 𝕊ᴰ`` that the diagnosis
 ``ℂᵛ τ Kᶜ ∂_z a ∂_z b`` inherits from the time scale ``τ`` and the diffusivity ``Kᶜ``:
-
-```math
-θˡⁱ′² = 𝕊ᵛ₁ ℓ² (∂_z θˡⁱ)², \\qquad qᵗ′² = 𝕊ᵛ₂ ℓ² (∂_z qᵗ)², \\qquad
-θˡⁱ′qᵗ′ = 𝕊ᵛ₃ ℓ² ∂_z θˡⁱ ∂_z qᵗ, \\qquad 𝕊ᵛ₃ = 𝕏ᵛ \\sqrt{𝕊ᵛ₁ 𝕊ᵛ₂},
-```
-
-with ``ℓ`` the closure's mixing length at the face. The functions are of the coordinate
-``v = Riᵗ / \\sqrt{1 + Riᵗ²} ∈ (-1, 1)`` of the turbulent Richardson number of the closure's
-[`TurbulentRichardsonStabilityFunction`](@ref), formed at the face as for ``Kᶜ``. As each function of
-that type, ``𝕊ᵛ₁`` and ``𝕊ᵛ₂`` are the exponentials of the quadratics in ``v`` that take the values
-``ℂᵛ⁻, ℂᵛ⁰, ℂᵛ⁺`` (strongly unstable, neutral, strongly stable) at ``v = -1, 0, 1``:
-
-```math
-\\ln 𝕊ᵛ = \\ln ℂᵛ⁰ + \\tfrac{1}{2} \\ln(ℂᵛ⁺ / ℂᵛ⁻) \\, v + \\left[\\tfrac{1}{2} \\ln(ℂᵛ⁺ ℂᵛ⁻) - \\ln ℂᵛ⁰\\right] v².
-```
-
-The correlation of θˡⁱ and qᵗ is ``r = 𝕏ᵛ \\operatorname{sign}(∂_z θˡⁱ ∂_z qᵗ)``, with ``𝕏ᵛ`` the
-quadratic Bernstein polynomial of ``t = (1 + v) / 2 ∈ (0, 1)`` with the control values
-``ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺``:
-
-```math
-𝕏ᵛ = (1 - t)² ℂᵛ₃⁻ + 2 t (1 - t) ℂᵛ₃ᵐ + t² ℂᵛ₃⁺,
-```
-
-a convex combination of the three, so ``|r| ≤ 1`` wherever ``|ℂᵛ₃^{-,m,+}| ≤ 1``. ``𝕏ᵛ = ℂᵛ₃⁻`` and
-``ℂᵛ₃⁺`` in the strongly unstable and stable limits, and ``(ℂᵛ₃⁻ + 2 ℂᵛ₃ᵐ + ℂᵛ₃⁺) / 4`` at neutral.
-``ℂᵛ₃⁻ = ℂᵛ₃ᵐ = ℂᵛ₃⁺ = 1`` is the perfect correlation of the down-gradient diagnosis.
-
-The fluxes ``-Kᶜ ∂_z a`` are unchanged; the moment time scale ``τ`` is still that of the third
-moment. A [`ScalarVarianceTransport`](@ref) takes these moments as its local diagnosis, and the
-flux-correlation bound ``ℂʳ`` of the [`DoubleGaussian`](@ref) applies to them after it.
-
-The nine coefficients are scalars of [`closure_parameters`](@ref) and [`with_parameters`](@ref).
-[`VarianceStabilityFunctions`](@ref)`(sf, time_scale, second_moments)` gives those that reproduce
-the down-gradient diagnosis.
-
-Fields
-======
-
-$(TYPEDFIELDS)
 """
 struct VarianceStabilityFunctions{FT}
-    "variance of θˡⁱ, strongly unstable"
     ℂᵛ₁⁻ :: FT
-    "variance of θˡⁱ, neutral"
     ℂᵛ₁⁰ :: FT
-    "variance of θˡⁱ, strongly stable"
     ℂᵛ₁⁺ :: FT
-    "variance of qᵗ, strongly unstable"
     ℂᵛ₂⁻ :: FT
-    "variance of qᵗ, neutral"
     ℂᵛ₂⁰ :: FT
-    "variance of qᵗ, strongly stable"
     ℂᵛ₂⁺ :: FT
-    "correlation of θˡⁱ and qᵗ, strongly unstable (the first control value of ``𝕏ᵛ``)"
     ℂᵛ₃⁻ :: FT
-    "correlation of θˡⁱ and qᵗ, middle control value of ``𝕏ᵛ``"
     ℂᵛ₃ᵐ :: FT
-    "correlation of θˡⁱ and qᵗ, strongly stable (the last control value of ``𝕏ᵛ``)"
     ℂᵛ₃⁺ :: FT
 end
 
@@ -107,7 +41,6 @@ function validate_variance_stability_coefficients(coefficients)
                             "but they are $((ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺))"))
     return nothing
 end
-
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -116,18 +49,6 @@ the default [`DoubleGaussian`](@ref) with the default [`TurbulentRichardsonStabi
 ``ℂᵛ_i^{-,0,+} = (2 ℂᵛ_i / ℂᵠ) ℂᶜ^{-,0,+} / ℂᴰ^{-,0,+}`` with ``ℂᵛ_i = 1`` and ``ℂᵠ = 1.3``, and the
 perfect correlation ``ℂᵛ₃ = 1``. The variance coefficients must be positive and the correlation
 coefficients within ``[-1, 1]``.
-
-```jldoctest
-using Breeze
-
-VarianceStabilityFunctions(; ℂᵛ₁⁺ = 1.2, ℂᵛ₂⁺ = 1.2)
-
-# output
-VarianceStabilityFunctions{Float64}
-├── 𝕊ᵛ₁ (ℂᵛ₁⁻, ℂᵛ₁⁰, ℂᵛ₁⁺): 1.54801, 0.683608, 1.2
-├── 𝕊ᵛ₂ (ℂᵛ₂⁻, ℂᵛ₂⁰, ℂᵛ₂⁺): 1.54801, 0.683608, 1.2
-└── 𝕏ᵛ  (ℂᵛ₃⁻, ℂᵛ₃ᵐ, ℂᵛ₃⁺): 1.0, 1.0, 1.0
-```
 """
 function VarianceStabilityFunctions(FT::DataType = Oceananigans.defaults.FloatType;
                                     ℂᵛ₁⁻ = 1.5480121696035578, ℂᵛ₁⁰ = 0.6836078066514023, ℂᵛ₁⁺ = 0.3096024339207115,
@@ -138,9 +59,7 @@ function VarianceStabilityFunctions(FT::DataType = Oceananigans.defaults.FloatTy
     return VarianceStabilityFunctions{FT}(map(C -> convert(FT, C), coefficients)...)
 end
 
-# The endpoint values of the 𝕊ᴰ of the time scale (1 for EddyTurnoverTimeScale, which has no 𝕊ᴰ)
 variance_time_scale_dissipation(::DissipationTimeScale, sf) = (sf.ℂᴰ⁻, sf.ℂᴰ⁰, sf.ℂᴰ⁺)
-
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -148,16 +67,6 @@ The [`VarianceStabilityFunctions`](@ref) that reproduce the down-gradient diagno
 ``ℂᵛ τ Kᶜ ∂_z a ∂_z b`` of a [`DoubleGaussian`](@ref) with the time scale `time_scale`
 ([`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref)) and the second moments
 `second_moments` ([`DowngradientSecondMoments`](@ref)) in a closure with the stability functions `sf`:
-
-```math
-ℂᵛ_i^{-,0,+} = \\frac{2 ℂᵛ_i}{ℂᵠ} \\frac{ℂᶜ^{-,0,+}}{ℂᴰ^{-,0,+}} \\quad (i = 1, 2), \\qquad
-ℂᵛ₃^{-,m,+} = \\frac{ℂᵛ₃}{\\sqrt{ℂᵛ₁ ℂᵛ₂}}
-```
-
-(``ℂᴰ = 1`` for [`EddyTurnoverTimeScale`](@ref)). The logarithm of a function of the family is linear in
-the logarithms of its three values, so ``𝕊ᵛ_i = (2 ℂᵛ_i / ℂᵠ) 𝕊ᶜ / 𝕊ᴰ`` exactly, and the moments agree to
-rounding. It requires ``ℂᵛ₃² ≤ ℂᵛ₁ ℂᵛ₂``, the
-realizability of the down-gradient covariance.
 """
 function VarianceStabilityFunctions(sf::TurbulentRichardsonStabilityFunction, time_scale,
                                     second_moments::DowngradientSecondMoments)
@@ -178,12 +87,6 @@ end
 ##### Evaluation
 #####
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-The functions ``(𝕊ᵛ₁, 𝕊ᵛ₂, 𝕏ᵛ)`` of `vs` at the coordinate ``v = Riᵗ / \\sqrt{1 + Riᵗ²}``. The logarithms
-are taken here, from the coefficients, so that the functions follow coefficients replaced or traced.
-"""
 @inline function variance_stability_functions(vs::VarianceStabilityFunctions, v)
     𝕊ᵛ₁ = evaluate_log_quadratic(log_quadratic_coefficients(vs.ℂᵛ₁⁻, vs.ℂᵛ₁⁰, vs.ℂᵛ₁⁺), v)
     𝕊ᵛ₂ = evaluate_log_quadratic(log_quadratic_coefficients(vs.ℂᵛ₂⁻, vs.ℂᵛ₂⁰, vs.ℂᵛ₂⁺), v)
@@ -193,8 +96,6 @@ are taken here, from the coefficients, so that the functions follow coefficients
     return 𝕊ᵛ₁, 𝕊ᵛ₂, 𝕏ᵛ
 end
 
-# The local scalar second moments at the interior face k from the differences Δθ, Δq across it and its
-# spacing Δz. Without variance stability functions: the down-gradient diagnosis, unchanged.
 @inline local_scalar_second_moments(::Nothing, i, j, k, grid, closure, velocities, closure_fields, e, Δθ, Δq, Δz,
                                     θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′) = (θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′)
 
