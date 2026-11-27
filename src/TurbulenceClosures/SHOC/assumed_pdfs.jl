@@ -3,33 +3,33 @@
 #####
 ##### An assumed-PDF component implements
 #####
-#####     assumed_pdf(pdf, thermodynamics, zi_u, zi_l, zt_k, pval, thl, w, qw, w_sec, moments_l, moments_u)
-#####         -> (cldfrac, ql, ql2, wqls, wthv_sec)
+#####     assumed_pdf(pdf, thermodynamics, zᶠ⁺, zᶠ⁻, zᶜ, p, θˡⁱ, w, qᵗ, w′², moments_below, moments_above)
+#####         -> (aᶜ, qˡ, qˡ′², w′qˡ′, w′θᵛ′)
 #####
-##### for a level at height `zt_k` between the interfaces at `zi_l` and `zi_u`: from the pressure,
+##### for a level at height `zᶜ` between the interfaces at `zᶠ⁻` and `zᶠ⁺`: from the pressure,
 ##### the means and the vertical velocity variance of the level and the interface moments
-##### `(w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec)` below and above it, the subgrid cloud
+##### `(w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)` below and above it, the subgrid cloud
 ##### fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux. The
 ##### `clipping` policy of the PDF (`HardClipping` or `SmoothClipping`) imposes its bounds: of the
-##### weight of the updraft plume, of the correlations and of the within-plume variances.
+##### weight of the updraft component, of the correlations and of the within-component variances.
 #####
 
 """
 $(TYPEDEF)
 
 The Analytic Double Gaussian 1 of Larson et al. (2002) as E3SM `shoc.F90` computes it
-(`shoc_assumed_pdf`): two Gaussian plumes in vertical velocity, θˡⁱ and qᵗ whose weights, means
+(`shoc_assumed_pdf`): two Gaussian components in vertical velocity, θˡⁱ and qᵗ whose weights, means
 and widths follow from the first three moments of vertical velocity and the second moments of
 the scalars, each condensing where it is saturated. The Fortran switches are kept: where the
-vertical velocity variance is below `w_tol²` or a scalar variance below its tolerance squared,
-the plumes collapse onto the mean.
+vertical velocity variance is below `vertical_velocity_tolerance²` or a scalar variance below its tolerance
+squared, the components collapse onto the mean.
 
 | coefficient | `shoc.F90` | default | meaning |
 |:------------|:-----------|:--------|:--------|
-| `ℂᵍ₁` | `w2_1`, `w2_2` (literal `0.4`) | 0.4 | within-plume fraction of the vertical velocity variance |
+| `ℂᵍ₁` | `w2_1`, `w2_2` (literal `0.4`) | 0.4 | within-component fraction of the vertical velocity variance |
 | `ℂᵍ₂` | literal `1.2`    | 1.2    | skewness of total water relative to that of vertical velocity |
-| `ℂᵍ₃` | literal `0.2`    | 0.2    | plume separation below which total water is unskewed |
-| `ℂᵍ₄` | literal `0.4`    | 0.4    | plume separation above which total water takes the full skewness `ℂᵍ₂ Skew_w` |
+| `ℂᵍ₃` | literal `0.2`    | 0.2    | component separation below which total water is unskewed |
+| `ℂᵍ₄` | literal `0.4`    | 0.4    | component separation above which total water takes the full skewness `ℂᵍ₂ Sk` |
 
 Between `ℂᵍ₃` and `ℂᵍ₄` the skewness of total water ramps linearly; the Fortran writes the width
 of the ramp as the literal `0.2`, which is taken here as `ℂᵍ₄ - ℂᵍ₃` so that the ramp stays
@@ -40,28 +40,28 @@ are tolerances and bounds, not empirical coefficients, and the `clipping` policy
 $(TYPEDFIELDS)
 """
 struct DoubleGaussianPDF{FT, CP} <: AbstractSubgridDistributionComponent
-    "Within-plume fraction of the vertical velocity variance (literal `0.4`)"
+    "Within-component fraction of the vertical velocity variance (literal `0.4`)"
     ℂᵍ₁ :: FT
     "Skewness of total water relative to that of vertical velocity (literal `1.2`)"
     ℂᵍ₂ :: FT
-    "Plume separation below which total water is unskewed (literal `0.2`)"
+    "Component separation below which total water is unskewed (literal `0.2`)"
     ℂᵍ₃ :: FT
-    "Plume separation above which total water is fully skewed (literal `0.4`)"
+    "Component separation above which total water is fully skewed (literal `0.4`)"
     ℂᵍ₄ :: FT
-    "Standard deviation of θˡⁱ below which it is uniform, K"
-    thl_tol :: FT
-    "Standard deviation of qᵗ below which it is uniform, kg kg⁻¹"
-    rt_tol :: FT
-    "Standard deviation of vertical velocity below which the air is calm, m s⁻¹"
-    w_tol :: FT
-    "Lowest liquid water temperature of a plume, K"
-    Tl_min :: FT
-    "Lowest fraction of the first plume (literal `0.01`)"
-    plume_fraction_min :: FT
-    "Highest fraction of the first plume (literal `0.99`)"
-    plume_fraction_max :: FT
-    "Highest variance of a scalar within a plume over its variance (literal `100`)"
-    plume_variance_ratio_max :: FT
+    "Standard deviation of θˡⁱ below which it is uniform, K (`thl_tol`)"
+    potential_temperature_tolerance :: FT
+    "Standard deviation of qᵗ below which it is uniform, kg kg⁻¹ (`rt_tol`)"
+    total_water_tolerance :: FT
+    "Standard deviation of vertical velocity below which the air is calm, m s⁻¹ (`w_tol`)"
+    vertical_velocity_tolerance :: FT
+    "Lowest liquid water temperature of a component, K"
+    minimum_liquid_water_temperature :: FT
+    "Lowest weight of the updraft component (literal `0.01`)"
+    minimum_updraft_fraction :: FT
+    "Highest weight of the updraft component (literal `0.99`)"
+    maximum_updraft_fraction :: FT
+    "Highest variance of a scalar within a component over its variance (literal `100`)"
+    maximum_component_variance_ratio :: FT
     "How the bounds are imposed: [`HardClipping`](@ref) or [`SmoothClipping`](@ref)"
     clipping :: CP
 end
@@ -74,8 +74,11 @@ Return a `DoubleGaussianPDF` with the values of E3SM `shoc.F90`, its bounds impo
 """
 DoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; clipping = HardClipping(), kw...) =
     component_from_keywords(DoubleGaussianPDF, FT,
-                            (ℂᵍ₁ = 0.4, ℂᵍ₂ = 1.2, ℂᵍ₃ = 0.2, ℂᵍ₄ = 0.4, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2, Tl_min = 100,
-                             plume_fraction_min = 0.01, plume_fraction_max = 0.99, plume_variance_ratio_max = 100), kw,
+                            (ℂᵍ₁ = 0.4, ℂᵍ₂ = 1.2, ℂᵍ₃ = 0.2, ℂᵍ₄ = 0.4,
+                             potential_temperature_tolerance = 1e-2, total_water_tolerance = 1e-4,
+                             vertical_velocity_tolerance = 2e-2, minimum_liquid_water_temperature = 100,
+                             minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99,
+                             maximum_component_variance_ratio = 100), kw,
                             TurbulenceClosures.convert_eltype(FT, clipping))
 
 Adapt.@adapt_structure DoubleGaussianPDF
@@ -121,13 +124,13 @@ struct EqualWidthDoubleGaussianPDF{FT, CP} <: AbstractSubgridDistributionCompone
     "Curvature of the within-component fraction in the skewness of w (in the sigmoid's argument)"
     ℂᵍˢˢ :: FT
     "Standard deviation of θˡⁱ below which it is uniform, K"
-    thl_tol :: FT
+    potential_temperature_tolerance :: FT
     "Standard deviation of qᵗ below which it is uniform, kg kg⁻¹"
-    rt_tol :: FT
+    total_water_tolerance :: FT
     "Standard deviation of vertical velocity below which the air is calm, m s⁻¹"
-    w_tol :: FT
+    vertical_velocity_tolerance :: FT
     "Lowest liquid water temperature of a component, K"
-    Tl_min :: FT
+    minimum_liquid_water_temperature :: FT
     "Lowest weight of the updraft component"
     minimum_updraft_fraction :: FT
     "Highest weight of the updraft component"
@@ -145,20 +148,16 @@ bounds imposed smoothly by default. Every field is a keyword argument.
 function EqualWidthDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; ℂᵍ₀ = 0.4, clipping = SmoothClipping(FT), kw...)
     0 < ℂᵍ₀ < 1 || throw(ArgumentError("ℂᵍ₀ must be in (0, 1), got $ℂᵍ₀"))
     return component_from_keywords(EqualWidthDoubleGaussianPDF, FT,
-                                   (ℂᵍ₀ = ℂᵍ₀, ℂᵍˢ = 0, ℂᵍˢˢ = 0, thl_tol = 1e-2, rt_tol = 1e-4, w_tol = 2e-2,
-                                    Tl_min = 100, minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99), kw,
+                                   (ℂᵍ₀ = ℂᵍ₀, ℂᵍˢ = 0, ℂᵍˢˢ = 0,
+                                    potential_temperature_tolerance = 1e-2, total_water_tolerance = 1e-4,
+                                    vertical_velocity_tolerance = 2e-2, minimum_liquid_water_temperature = 100,
+                                    minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99), kw,
                                    TurbulenceClosures.convert_eltype(FT, clipping))
 end
 
 Adapt.@adapt_structure EqualWidthDoubleGaussianPDF
 
 const ComponentDoubleGaussianPDF = Union{DoubleGaussianPDF, EqualWidthDoubleGaussianPDF}
-
-# The bounds of the weight of the updraft component
-@inline minimum_updraft_fraction(pdf::DoubleGaussianPDF) = pdf.plume_fraction_min
-@inline maximum_updraft_fraction(pdf::DoubleGaussianPDF) = pdf.plume_fraction_max
-@inline minimum_updraft_fraction(pdf::EqualWidthDoubleGaussianPDF) = pdf.minimum_updraft_fraction
-@inline maximum_updraft_fraction(pdf::EqualWidthDoubleGaussianPDF) = pdf.maximum_updraft_fraction
 
 # The within-component fraction of the vertical velocity variance: SHOC's constant, or ℂᵍ(Sk)
 @inline within_component_share(pdf::DoubleGaussianPDF, Sk) = pdf.ℂᵍ₁
@@ -181,55 +180,60 @@ end
 # which grows without bound as a↑ → 0 or 1 and is largest, for the weights the PDF allows, at the least weight of
 # either component. Beyond it the PDF holds a↑ at its bound and has less skewness than it was given.
 @inline representable_skewness(pdf::ComponentDoubleGaussianPDF) =
-    representable_skewness(minimum_updraft_fraction(pdf), maximum_updraft_fraction(pdf), within_component_share(pdf, zero(pdf.w_tol)))
+    representable_skewness(pdf.minimum_updraft_fraction, pdf.maximum_updraft_fraction,
+                           within_component_share(pdf, zero(pdf.vertical_velocity_tolerance)))
 
 @inline function representable_skewness(aᵐⁱⁿ, aᵐᵃˣ, c)
     a = max(aᵐⁱⁿ, 1 - aᵐᵃˣ)
     return (1 - 2a) * (1 - c) * sqrt((1 - c) / (a * (1 - a)))
 end
 
-# shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters share one form: the plume
-# means and variances of a scalar from its variance `sec`, its flux correlation with w, and the
-# skewness `skew` of the scalar (identically zero for thetal, where `dothetal_skew = false`).
-@inline function plume_variance(cp, first_plume, x1_1, x1_2, a, skew, sec, ratio_max)
-    one_minus = 1 - a * (x1_1 * x1_1) - (1 - a) * (x1_2 * x1_2)
-    third = skew - a * (x1_1 * x1_1 * x1_1) - (1 - a) * (x1_2 * x1_2 * x1_2)
-    numerator = ifelse(first_plume, 3 * x1_2 * one_minus - third, -3 * x1_1 * one_minus + third)
-    denominator = ifelse(first_plume, 3 * a * (x1_2 - x1_1), 3 * (1 - a) * (x1_2 - x1_1))
-    # Where the plume means coincide the Fortran forms 0/0 and MAX(0, NaN) drops it; that is zero.
+# shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters share one form: the component
+# means and variances of a scalar from its variance, its flux correlation with w, and the
+# skewness of the scalar (identically zero for θˡⁱ, where `dothetal_skew = false`). `x̂₁` and `x̂₂` are the
+# component means relative to the mean, in units of the standard deviation.
+@inline function component_variance(clipping, first_component, x̂₁, x̂₂, a, skewness, variance, maximum_ratio)
+    unexplained = 1 - a * (x̂₁ * x̂₁) - (1 - a) * (x̂₂ * x̂₂)
+    third = skewness - a * (x̂₁ * x̂₁ * x̂₁) - (1 - a) * (x̂₂ * x̂₂ * x̂₂)
+    numerator = ifelse(first_component, 3 * x̂₂ * unexplained - third, -3 * x̂₁ * unexplained + third)
+    denominator = ifelse(first_component, 3 * a * (x̂₂ - x̂₁), 3 * (1 - a) * (x̂₂ - x̂₁))
+    # Where the component means coincide the Fortran forms 0/0 and MAX(0, NaN) drops it; that is zero.
     degenerate = denominator == 0
     ratio = ifelse(degenerate, zero(numerator), numerator / ifelse(degenerate, one(denominator), denominator))
-    return clip_between(cp, ratio, 0, ratio_max, 1) * sec
+    return clip_between(clipping, ratio, 0, maximum_ratio, 1) * variance
 end
 
-@inline function scalar_plume_parameters(cp, flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed, p::DoubleGaussianPDF)
-    FT = typeof(sec)
-    corrtest = clip_between(cp, flux / (sqrtw2 * sqrt_sec), -1, 1, 1)
+# The means `x₁`, `x₂`, variances `x′²₁`, `x′²₂` and spreads of a scalar in the two components, from its `flux`, its
+# standard deviation `σ` (bounded below by its `tolerance`), its `variance` and its mean `x̄`; `σw` is the standard
+# deviation of vertical velocity and `ŵ₁`, `ŵ₂` the component velocities in units of it.
+@inline function scalar_component_parameters(clipping, flux, σw, σ, variance, tolerance, x̄, ŵ₁, ŵ₂, Sk, a, skewed, pdf::DoubleGaussianPDF)
+    FT = typeof(variance)
+    r = clip_between(clipping, flux / (σw * σ), -1, 1, 1)
 
-    uniform = (sec <= tol * tol) | (abs(w1_2 - w1_1) <= 0)
+    uniform = (variance <= tolerance * tolerance) | (abs(ŵ₂ - ŵ₁) <= 0)
 
-    # tilde plume means
-    x1_1 = (-1 * corrtest) / ifelse(uniform, one(FT), w1_2)
-    x1_2 = (-1 * corrtest) / ifelse(uniform, one(FT), w1_1)
+    # the normalized component means
+    x̂₁ = (-1 * r) / ifelse(uniform, one(FT), ŵ₂)
+    x̂₂ = (-1 * r) / ifelse(uniform, one(FT), ŵ₁)
 
-    tsign = abs(x1_2 - x1_1)
-    skew_qw = ifelse(tsign > p.ℂᵍ₄, p.ℂᵍ₂ * Skew_w,
-                     ifelse(tsign <= p.ℂᵍ₃, zero(FT),
-                            ((p.ℂᵍ₂ * Skew_w) / (p.ℂᵍ₄ - p.ℂᵍ₃)) * (tsign - p.ℂᵍ₃)))
-    skew = ifelse(skewed, skew_qw, zero(FT))
+    separation = abs(x̂₂ - x̂₁)
+    ramped_skewness = ifelse(separation > pdf.ℂᵍ₄, pdf.ℂᵍ₂ * Sk,
+                             ifelse(separation <= pdf.ℂᵍ₃, zero(FT),
+                                    ((pdf.ℂᵍ₂ * Sk) / (pdf.ℂᵍ₄ - pdf.ℂᵍ₃)) * (separation - pdf.ℂᵍ₃)))
+    skewness = ifelse(skewed, ramped_skewness, zero(FT))
 
-    x2_1 = plume_variance(cp, true, x1_1, x1_2, a, skew, sec, p.plume_variance_ratio_max)
-    x2_2 = plume_variance(cp, false, x1_1, x1_2, a, skew, sec, p.plume_variance_ratio_max)
+    x′²₁ = component_variance(clipping, true, x̂₁, x̂₂, a, skewness, variance, pdf.maximum_component_variance_ratio)
+    x′²₂ = component_variance(clipping, false, x̂₁, x̂₂, a, skewness, variance, pdf.maximum_component_variance_ratio)
 
-    x1_1 = x1_1 * sqrt_sec + x_first
-    x1_2 = x1_2 * sqrt_sec + x_first
+    x₁ = x̂₁ * σ + x̄
+    x₂ = x̂₂ * σ + x̄
 
-    x1_1 = ifelse(uniform, x_first, x1_1)
-    x1_2 = ifelse(uniform, x_first, x1_2)
-    x2_1 = ifelse(uniform, zero(FT), x2_1)
-    x2_2 = ifelse(uniform, zero(FT), x2_2)
+    x₁ = ifelse(uniform, x̄, x₁)
+    x₂ = ifelse(uniform, x̄, x₂)
+    x′²₁ = ifelse(uniform, zero(FT), x′²₁)
+    x′²₂ = ifelse(uniform, zero(FT), x′²₂)
 
-    return x1_1, x1_2, x2_1, x2_2, zero_safe_sqrt(x2_1), zero_safe_sqrt(x2_2)
+    return x₁, x₂, x′²₁, x′²₂, zero_safe_sqrt(x′²₁), zero_safe_sqrt(x′²₂)
 end
 
 # The correlation of w with a scalar that the components carry, bounded smoothly so that the
@@ -251,117 +255,119 @@ end
 end
 
 # The equal share of the within-component variance (EqualWidthDoubleGaussianPDF)
-@inline function scalar_plume_parameters(cp, flux, sqrtw2, sqrt_sec, sec, tol, x_first, w1_1, w1_2, Skew_w, a, skewed,
-                                         p::EqualWidthDoubleGaussianPDF)
-    FT = typeof(sec)
-    r₀ = clip_between(cp, flux / (sqrtw2 * sqrt_sec), -1, 1, 1)
-    uniform = (sec <= tol * tol) | (abs(w1_2 - w1_1) <= 0)
-    w1_1ˢ = ifelse(uniform, one(FT), w1_1)
-    w1_2ˢ = ifelse(uniform, -one(FT), w1_2)
-    r = realizable_correlation(r₀, 1 - within_component_share(p, Skew_w), x_first, sqrt_sec, min(abs(w1_1ˢ), abs(w1_2ˢ)))
-    x1_1 = (-1 * r) / w1_2ˢ
-    x1_2 = (-1 * r) / w1_1ˢ
-    x2 = max(0, 1 - r * r / (1 - within_component_share(p, Skew_w))) * sec
-    x1_1 = ifelse(uniform, x_first, x1_1 * sqrt_sec + x_first)
-    x1_2 = ifelse(uniform, x_first, x1_2 * sqrt_sec + x_first)
-    x2 = ifelse(uniform, zero(FT), x2)
-    σ = zero_safe_sqrt(x2)
-    return x1_1, x1_2, x2, x2, σ, σ
+@inline function scalar_component_parameters(clipping, flux, σw, σ, variance, tolerance, x̄, ŵ₁, ŵ₂, Sk, a, skewed,
+                                             pdf::EqualWidthDoubleGaussianPDF)
+    FT = typeof(variance)
+    r₀ = clip_between(clipping, flux / (σw * σ), -1, 1, 1)
+    uniform = (variance <= tolerance * tolerance) | (abs(ŵ₂ - ŵ₁) <= 0)
+    ŵ₁ˢᵃᶠᵉ = ifelse(uniform, one(FT), ŵ₁)
+    ŵ₂ˢᵃᶠᵉ = ifelse(uniform, -one(FT), ŵ₂)
+    r = realizable_correlation(r₀, 1 - within_component_share(pdf, Sk), x̄, σ, min(abs(ŵ₁ˢᵃᶠᵉ), abs(ŵ₂ˢᵃᶠᵉ)))
+    x̂₁ = (-1 * r) / ŵ₂ˢᵃᶠᵉ
+    x̂₂ = (-1 * r) / ŵ₁ˢᵃᶠᵉ
+    x′²ᵢ = max(0, 1 - r * r / (1 - within_component_share(pdf, Sk))) * variance
+    x₁ = ifelse(uniform, x̄, x̂₁ * σ + x̄)
+    x₂ = ifelse(uniform, x̄, x̂₂ * σ + x̄)
+    x′²ᵢ = ifelse(uniform, zero(FT), x′²ᵢ)
+    σᵢ = zero_safe_sqrt(x′²ᵢ)
+    return x₁, x₂, x′²ᵢ, x′²ᵢ, σᵢ, σᵢ
 end
 
-# shoc_assumed_pdf_compute_s, with `cp_over_L` and `Π` of the saturation component
-@inline function plume_condensate(qw1, qs1, beta, cp_over_L, Π, thl2, qw2, sqrtthl2, sqrtqw2, r_qwthl)
-    FT = typeof(qw1)
+# shoc_assumed_pdf_compute_s for a component with total water `qᵗ`, variances `θˡⁱ′²`, `qᵗ′²`, spreads `σθ`, `σq` and
+# correlation `r` of θˡⁱ and qᵗ, with `qᵛ⁺`, `β`, `ĉᵖℒ⁻¹ = ĉᵖ / ℒ` and `Π` of `component_saturation`: the saturation
+# excess `s`, its spread `σₛ`, the condensate `qᶜ` and the saturated fraction `aᶜ` of the component
+@inline function component_condensate(qᵗ, qᵛ⁺, β, ĉᵖℒ⁻¹, Π, θˡⁱ′², qᵗ′², σθ, σq, r)
+    FT = typeof(qᵗ)
     sqrt2 = sqrt(convert(FT, 2))
     sqrt2pi = sqrt(2 * convert(FT, 3.14159265358979323))
 
-    s = qw1 - qs1 * ((1 + beta * qw1) / (1 + beta * qs1))
-    opbq = 1 + beta * qs1
-    cthl = ((1 + beta * qw1) / (opbq * opbq)) * cp_over_L * beta * qs1 * Π
-    cqt = 1 / (1 + beta * qs1)
-    tmp_val = max(0, (cthl * cthl) * thl2 + (cqt * cqt) * qw2 - 2 * cthl * sqrtthl2 * cqt * sqrtqw2 * r_qwthl)
-    std_s = zero_safe_sqrt(tmp_val)
+    s = qᵗ - qᵛ⁺ * ((1 + β * qᵗ) / (1 + β * qᵛ⁺))
+    denominator = 1 + β * qᵛ⁺
+    c_θ = ((1 + β * qᵗ) / (denominator * denominator)) * ĉᵖℒ⁻¹ * β * qᵛ⁺ * Π
+    c_q = 1 / (1 + β * qᵛ⁺)
+    σₛ² = max(0, (c_θ * c_θ) * θˡⁱ′² + (c_q * c_q) * qᵗ′² - 2 * c_θ * σθ * c_q * σq * r)
+    σₛ = zero_safe_sqrt(σₛ²)
 
-    resolved = std_s > sqrt(floatmin(FT)) * 100
-    std_safe = ifelse(resolved, std_s, one(FT))
+    resolved = σₛ > sqrt(floatmin(FT)) * 100
+    σₛˢᵃᶠᵉ = ifelse(resolved, σₛ, one(FT))
 
     # A PDF of finite width
-    C_wide = convert(FT, 0.5) * (1 + erf(s / (sqrt2 * std_safe)))
-    sos = s / std_safe
-    qn_wide = ifelse(C_wide != 0, s * C_wide + (std_safe / sqrt2pi) * exp(convert(FT, -0.5) * (sos * sos)), zero(FT))
+    wide_fraction = convert(FT, 0.5) * (1 + erf(s / (sqrt2 * σₛˢᵃᶠᵉ)))
+    ŝ = s / σₛˢᵃᶠᵉ
+    wide_condensate = ifelse(wide_fraction != 0, s * wide_fraction + (σₛˢᵃᶠᵉ / sqrt2pi) * exp(convert(FT, -0.5) * (ŝ * ŝ)), zero(FT))
 
     # A PDF of no width: all or nothing
-    C_narrow = ifelse(s > 0, one(FT), zero(FT))
-    qn_narrow = ifelse(s > 0, s, zero(FT))
+    narrow_fraction = ifelse(s > 0, one(FT), zero(FT))
+    narrow_condensate = ifelse(s > 0, s, zero(FT))
 
-    C = ifelse(resolved, C_wide, C_narrow)
-    qn = ifelse(resolved, qn_wide, qn_narrow)
+    aᶜ = ifelse(resolved, wide_fraction, narrow_fraction)
+    qᶜ = ifelse(resolved, wide_condensate, narrow_condensate)
 
     # Prevent empty clouds, or the rare occurrence of negative cloud liquid
-    empty = qn <= 0
-    C = ifelse(empty, zero(FT), C)
-    qn = ifelse(empty, zero(FT), qn)
+    empty = qᶜ <= 0
+    aᶜ = ifelse(empty, zero(FT), aᶜ)
+    qᶜ = ifelse(empty, zero(FT), qᶜ)
 
-    return s, std_s, qn, C
+    return s, σₛ, qᶜ, aᶜ
 end
 
 # The two components of the double Gaussian at a level, which `assumed_pdf` and `component_vapor_excess` share: the
-# interface moments (w3, thl_sec, wthl_sec, qwthl_sec, wqw_sec, qw_sec of the interfaces below, `moments_l`, and above,
-# `moments_u`) interpolated to the level, the weight `a` of the updraft component, the normalized vertical velocities
-# `w1_1`, `w1_2` of the components (before `shoc_assumed_pdf_tilde_to_real`), the means, variances and spreads of θˡⁱ
-# (`thl`) and qᵗ (`qw`) of each component, and their within-component correlation `r`.
-@inline function double_gaussian_components(pdf, zi_u, zi_l, zt_k, thl_first, w_first, qw_first, wsec, moments_l, moments_u)
-    cp = pdf.clipping
-    FT = typeof(thl_first)
-    largeneg = convert(FT, -99999999.99)
-    thl_tol = pdf.thl_tol
-    rt_tol = pdf.rt_tol
-    w_tol_sqd = pdf.w_tol * pdf.w_tol
+# interface moments (w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′² of the interfaces below, `moments_below`, and above,
+# `moments_above`) interpolated to the level, the weight `a` of the updraft component, the normalized vertical
+# velocities `ŵ₁`, `ŵ₂` of the components (before `shoc_assumed_pdf_tilde_to_real`), the means, variances and spreads
+# of θˡⁱ (`potential_temperature`) and qᵗ (`total_water`) of each component, and their within-component correlation `r`.
+@inline function double_gaussian_components(pdf, zᶠ⁺, zᶠ⁻, zᶜ, θˡⁱ, w, qᵗ, w′², moments_below, moments_above)
+    clipping = pdf.clipping
+    FT = typeof(θˡⁱ)
+    large_negative = convert(FT, -99999999.99)
+    potential_temperature_tolerance = pdf.potential_temperature_tolerance
+    total_water_tolerance = pdf.total_water_tolerance
+    calm_variance = pdf.vertical_velocity_tolerance * pdf.vertical_velocity_tolerance
 
-    interpolate(n, minthresh) = hard_floor(linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k), minthresh)
-    w3var = interpolate(1, largeneg)
-    thlsec = interpolate(2, zero(FT))
-    wthlsec = interpolate(3, largeneg)
-    qwthlsec = interpolate(4, largeneg)
-    wqwsec = interpolate(5, largeneg)
-    qwsec = interpolate(6, zero(FT))
+    interpolate(n, lower_bound) = hard_floor(linearly_interpolate(zᶠ⁺, zᶠ⁻, moments_above[n], moments_below[n], zᶜ), lower_bound)
+    w′³ = interpolate(1, large_negative)
+    θˡⁱ′² = interpolate(2, zero(FT))
+    w′θˡⁱ′ = interpolate(3, large_negative)
+    θˡⁱ′qᵗ′ = interpolate(4, large_negative)
+    w′qᵗ′ = interpolate(5, large_negative)
+    qᵗ′² = interpolate(6, zero(FT))
 
-    sqrtw2 = zero_safe_sqrt(wsec)
-    sqrtthl = clip_max(cp, thl_tol, zero_safe_sqrt(thlsec), thl_tol)
-    sqrtqt = clip_max(cp, rt_tol, zero_safe_sqrt(qwsec), rt_tol)
+    σw = zero_safe_sqrt(w′²)
+    σθ = clipped_maximum(clipping, potential_temperature_tolerance, zero_safe_sqrt(θˡⁱ′²), potential_temperature_tolerance)
+    σq = clipped_maximum(clipping, total_water_tolerance, zero_safe_sqrt(qᵗ′²), total_water_tolerance)
 
     # shoc_assumed_pdf_vv_parameters
-    calm = wsec <= w_tol_sqd
-    wsec_safe = ifelse(calm, one(FT), wsec)
-    Skew_w = w3var / sqrt(wsec_safe * wsec_safe * wsec_safe)
-    w2_1 = within_component_share(pdf, Skew_w)
-    omw = 1 - w2_1
-    a = clip_between(cp, convert(FT, 0.5) * (1 - Skew_w * sqrt(1 / (4 * (omw * omw * omw) + Skew_w * Skew_w))),
-                     minimum_updraft_fraction(pdf), maximum_updraft_fraction(pdf), 1)
-    sqrtw2t = sqrt(1 - w2_1)
-    w1_1 = sqrt((1 - a) / a) * sqrtw2t
-    w1_2 = -1 * sqrt(a / (1 - a)) * sqrtw2t
+    calm = w′² <= calm_variance
+    w′²ˢᵃᶠᵉ = ifelse(calm, one(FT), w′²)
+    Sk = w′³ / sqrt(w′²ˢᵃᶠᵉ * w′²ˢᵃᶠᵉ * w′²ˢᵃᶠᵉ)
+    share = within_component_share(pdf, Sk)
+    one_minus_share = 1 - share
+    a = clip_between(clipping, convert(FT, 0.5) * (1 - Sk * sqrt(1 / (4 * (one_minus_share * one_minus_share * one_minus_share) + Sk * Sk))),
+                     pdf.minimum_updraft_fraction, pdf.maximum_updraft_fraction, 1)
+    sqrt_one_minus_share = sqrt(1 - share)
+    ŵ₁ = sqrt((1 - a) / a) * sqrt_one_minus_share
+    ŵ₂ = -1 * sqrt(a / (1 - a)) * sqrt_one_minus_share
 
-    Skew_w = ifelse(calm, zero(FT), Skew_w)
+    Sk = ifelse(calm, zero(FT), Sk)
     a = ifelse(calm, convert(FT, 0.5), a)
-    w1_1 = ifelse(calm, w_first, w1_1)
-    w1_2 = ifelse(calm, w_first, w1_2)
+    ŵ₁ = ifelse(calm, w, ŵ₁)
+    ŵ₂ = ifelse(calm, w, ŵ₂)
 
     # shoc_assumed_pdf_thl_parameters and shoc_assumed_pdf_qw_parameters
-    thl = scalar_plume_parameters(cp, wthlsec, sqrtw2, sqrtthl, thlsec, thl_tol, thl_first, w1_1, w1_2, Skew_w, a, false, pdf)
-    qw = scalar_plume_parameters(cp, wqwsec, sqrtw2, sqrtqt, qwsec, rt_tol, qw_first, w1_1, w1_2, Skew_w, a, true, pdf)
+    potential_temperature = scalar_component_parameters(clipping, w′θˡⁱ′, σw, σθ, θˡⁱ′², potential_temperature_tolerance, θˡⁱ, ŵ₁, ŵ₂, Sk, a, false, pdf)
+    total_water = scalar_component_parameters(clipping, w′qᵗ′, σw, σq, qᵗ′², total_water_tolerance, qᵗ, ŵ₁, ŵ₂, Sk, a, true, pdf)
 
     # shoc_assumed_pdf_inplume_correlations
-    thl1_1, thl1_2, _, _, sqrtthl2_1, sqrtthl2_2 = thl
-    qw1_1, qw1_2, _, _, sqrtqw2_1, sqrtqw2_2 = qw
-    testvar = a * sqrtqw2_1 * sqrtthl2_1 + (1 - a) * sqrtqw2_2 * sqrtthl2_2
-    uncorrelated = testvar == 0
-    r = clip_between(cp, (qwthlsec - a * (qw1_1 - qw_first) * (thl1_1 - thl_first)
-                          - (1 - a) * (qw1_2 - qw_first) * (thl1_2 - thl_first)) /
-                         ifelse(uncorrelated, one(FT), testvar), -1, 1, 1)
+    θˡⁱ₁, θˡⁱ₂, _, _, σθ₁, σθ₂ = potential_temperature
+    qᵗ₁, qᵗ₂, _, _, σq₁, σq₂ = total_water
+    spread = a * σq₁ * σθ₁ + (1 - a) * σq₂ * σθ₂
+    uncorrelated = spread == 0
+    r = clip_between(clipping, (θˡⁱ′qᵗ′ - a * (qᵗ₁ - qᵗ) * (θˡⁱ₁ - θˡⁱ)
+                                - (1 - a) * (qᵗ₂ - qᵗ) * (θˡⁱ₂ - θˡⁱ)) /
+                               ifelse(uncorrelated, one(FT), spread), -1, 1, 1)
     r = ifelse(uncorrelated, zero(FT), r)
 
-    return (; a, w1_1, w1_2, sqrtw2, wthlsec, wqwsec, thl, qw, r)
+    return (; a, ŵ₁, ŵ₂, σw, w′θˡⁱ′, w′qᵗ′, potential_temperature, total_water, r)
 end
 
 """
@@ -369,49 +375,49 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The assumed PDF of level `k` (Analytic Double Gaussian 1 of Larson et al. 2002): return the
 subgrid cloud fraction, liquid water, liquid water variance, liquid water flux and buoyancy flux.
-The plumes condense with the `thermodynamics` of the model (`distribution_thermodynamics`): its thermodynamic
+The components condense with the `thermodynamics` of the model (`distribution_thermodynamics`): its thermodynamic
 constants and the phase equilibrium of the condensate of its microphysics.
 """
-@inline function assumed_pdf(pdf::ComponentDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first, w_first,
-                             qw_first, wsec, moments_l, moments_u)
-    cp = pdf.clipping
-    rt_tol = pdf.rt_tol
-    c = double_gaussian_components(pdf, zi_u, zi_l, zt_k, thl_first, w_first, qw_first, wsec, moments_l, moments_u)
-    a, wthlsec, wqwsec, r_qwthl_1 = c.a, c.wthlsec, c.wqwsec, c.r
-    thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 = c.thl
-    qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 = c.qw
+@inline function assumed_pdf(pdf::ComponentDoubleGaussianPDF, thermodynamics, zᶠ⁺, zᶠ⁻, zᶜ, p, θˡⁱ, w, qᵗ, w′²,
+                             moments_below, moments_above)
+    clipping = pdf.clipping
+    total_water_tolerance = pdf.total_water_tolerance
+    c = double_gaussian_components(pdf, zᶠ⁺, zᶠ⁻, zᶜ, θˡⁱ, w, qᵗ, w′², moments_below, moments_above)
+    a, w′θˡⁱ′, w′qᵗ′, r = c.a, c.w′θˡⁱ′, c.w′qᵗ′, c.r
+    θˡⁱ₁, θˡⁱ₂, θˡⁱ′²₁, θˡⁱ′²₂, σθ₁, σθ₂ = c.potential_temperature
+    qᵗ₁, qᵗ₂, qᵗ′²₁, qᵗ′²₂, σq₁, σq₂ = c.total_water
 
     # shoc_assumed_pdf_tilde_to_real
-    w1_1 = c.w1_1 * c.sqrtw2 + w_first
-    w1_2 = c.w1_2 * c.sqrtw2 + w_first
+    w₁ = c.ŵ₁ * c.σw + w
+    w₂ = c.ŵ₂ * c.σw + w
 
     # shoc_assumed_pdf_compute_temperature
-    Tl1_1 = component_liquid_water_temperature(pdf, thermodynamics, thl1_1, qw1_1, pval)
-    Tl1_2 = component_liquid_water_temperature(pdf, thermodynamics, thl1_2, qw1_2, pval)
+    Tˡ₁ = component_liquid_water_temperature(pdf, thermodynamics, θˡⁱ₁, qᵗ₁, p)
+    Tˡ₂ = component_liquid_water_temperature(pdf, thermodynamics, θˡⁱ₂, qᵗ₂, p)
 
     # shoc_assumed_pdf_compute_qs
-    qs1, beta1, cp_over_L1, Π1 = plume_saturation(thermodynamics, Tl1_1, qw1_1, pval)
-    qs2, beta2, cp_over_L2, Π2 = plume_saturation(thermodynamics, Tl1_2, qw1_2, pval)
+    qᵛ⁺₁, β₁, ĉᵖℒ⁻¹₁, Π₁ = component_saturation(thermodynamics, Tˡ₁, qᵗ₁, p)
+    qᵛ⁺₂, β₂, ĉᵖℒ⁻¹₂, Π₂ = component_saturation(thermodynamics, Tˡ₂, qᵗ₂, p)
 
     # shoc_assumed_pdf_compute_s
-    s1, std_s1, qn1, C1 = plume_condensate(qw1_1, qs1, beta1, cp_over_L1, Π1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r_qwthl_1)
-    s2, std_s2, qn2, C2 = plume_condensate(qw1_2, qs2, beta2, cp_over_L2, Π2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r_qwthl_1)
+    s₁, σₛ₁, qᶜ₁, aᶜ₁ = component_condensate(qᵗ₁, qᵛ⁺₁, β₁, ĉᵖℒ⁻¹₁, Π₁, θˡⁱ′²₁, qᵗ′²₁, σθ₁, σq₁, r)
+    s₂, σₛ₂, qᶜ₂, aᶜ₂ = component_condensate(qᵗ₂, qᵛ⁺₂, β₂, ĉᵖℒ⁻¹₂, Π₂, θˡⁱ′²₂, qᵗ′²₂, σθ₂, σq₂, r)
 
-    ql1 = clip_min(cp, qn1, qw1_1, rt_tol)
-    ql2 = clip_min(cp, qn2, qw1_2, rt_tol)
+    qˡ₁ = clipped_minimum(clipping, qᶜ₁, qᵗ₁, total_water_tolerance)
+    qˡ₂ = clipped_minimum(clipping, qᶜ₂, qᵗ₂, total_water_tolerance)
 
-    shoc_cldfrac = min(1, a * C1 + (1 - a) * C2)
-    shoc_ql = max(0, a * ql1 + (1 - a) * ql2)
+    aᶜ = min(1, a * aᶜ₁ + (1 - a) * aᶜ₂)
+    qˡ = max(0, a * qˡ₁ + (1 - a) * qˡ₂)
 
-    shoc_ql2 = a * (s1 * ql1 + C1 * (std_s1 * std_s1)) + (1 - a) * (s2 * ql2 + C2 * (std_s2 * std_s2)) - (shoc_ql * shoc_ql)
-    shoc_ql2 = max(0, shoc_ql2)
+    qˡ′² = a * (s₁ * qˡ₁ + aᶜ₁ * (σₛ₁ * σₛ₁)) + (1 - a) * (s₂ * qˡ₂ + aᶜ₂ * (σₛ₂ * σₛ₂)) - (qˡ * qˡ)
+    qˡ′² = max(0, qˡ′²)
 
-    wqls = a * ((w1_1 - w_first) * ql1) + (1 - a) * ((w1_2 - w_first) * ql2)
+    w′qˡ′ = a * ((w₁ - w) * qˡ₁) + (1 - a) * ((w₂ - w) * qˡ₂)
 
-    A_q, A_c = buoyancy_flux_coefficients(thermodynamics, pval, thl_first, qw_first, shoc_ql)
-    wthv_sec = wthlsec + A_q * wqwsec + A_c * wqls
+    A_q, A_c = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qˡ)
+    w′θᵛ′ = w′θˡⁱ′ + A_q * w′qᵗ′ + A_c * w′qˡ′
 
-    return shoc_cldfrac, shoc_ql, shoc_ql2, wqls, wthv_sec
+    return aᶜ, qˡ, qˡ′², w′qˡ′, w′θᵛ′
 end
 
 #####
@@ -429,61 +435,61 @@ density ``ρᵢ = p / (Rᵐ Tᵢ)``, and the within-component spread
 ``σᵢ² = qᵗ′²ᵢ + (∂qᵛ⁺ˡ/∂θ)² θ′²ᵢ - 2 (∂qᵛ⁺ˡ/∂θ) r σθᵢ σqᵢ``, with the model's saturation over liquid
 (the formula the microphysics uses); and the same moments of the vapor excess over ice, ``μⁱᵢ = qᵗᵢ - qᵛ⁺ⁱ(Tᵢ, ρᵢ)``
 and ``σⁱᵢ`` with ``∂qᵛ⁺ⁱ/∂θ``, for the ice outside the distributed water. Returns
-`(a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂)`, with ``ρᵢ`` the within-component correlation of the two excesses.
+`(a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, r₁, r₂)`, with ``rᵢ`` the within-component correlation of the two excesses.
 """
-@inline function component_vapor_excess(pdf::ComponentDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval,
-                                        thl_first, w_first, qw_first, wsec, moments_l, moments_u)
-    c = double_gaussian_components(pdf, zi_u, zi_l, zt_k, thl_first, w_first, qw_first, wsec, moments_l, moments_u)
+@inline function component_vapor_excess(pdf::ComponentDoubleGaussianPDF, thermodynamics, zᶠ⁺, zᶠ⁻, zᶜ, p, θˡⁱ, w, qᵗ, w′²,
+                                        moments_below, moments_above)
+    c = double_gaussian_components(pdf, zᶠ⁺, zᶠ⁻, zᶜ, θˡⁱ, w, qᵗ, w′², moments_below, moments_above)
     a, r = c.a, c.r
-    thl1_1, thl1_2, thl2_1, thl2_2, sqrtthl2_1, sqrtthl2_2 = c.thl
-    qw1_1, qw1_2, qw2_1, qw2_2, sqrtqw2_1, sqrtqw2_2 = c.qw
+    θˡⁱ₁, θˡⁱ₂, θˡⁱ′²₁, θˡⁱ′²₂, σθ₁, σθ₂ = c.potential_temperature
+    qᵗ₁, qᵗ₂, qᵗ′²₁, qᵗ′²₂, σq₁, σq₂ = c.total_water
 
     liquid = (PlanarLiquidSurface(), WarmPhaseEquilibrium())
     ice = (PlanarIceSurface(), IceSurfaceEquilibrium())
-    μ₁, σ₁, ∂₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r, liquid)
-    μ₂, σ₂, ∂₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r, liquid)
-    μⁱ₁, σⁱ₁, ∂ⁱ₁ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_1, qw1_1, thl2_1, qw2_1, sqrtthl2_1, sqrtqw2_1, r, ice)
-    μⁱ₂, σⁱ₂, ∂ⁱ₂ = component_vapor_excess_moments(pdf, thermodynamics, pval, thl1_2, qw1_2, thl2_2, qw2_2, sqrtthl2_2, sqrtqw2_2, r, ice)
-    ρ₁ = component_excess_correlation(qw2_1, thl2_1, sqrtthl2_1, sqrtqw2_1, r, ∂₁, ∂ⁱ₁, σ₁, σⁱ₁)
-    ρ₂ = component_excess_correlation(qw2_2, thl2_2, sqrtthl2_2, sqrtqw2_2, r, ∂₂, ∂ⁱ₂, σ₂, σⁱ₂)
-    return a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂
+    μ₁, σ₁, ∂₁ = component_vapor_excess_moments(pdf, thermodynamics, p, θˡⁱ₁, qᵗ₁, θˡⁱ′²₁, qᵗ′²₁, σθ₁, σq₁, r, liquid)
+    μ₂, σ₂, ∂₂ = component_vapor_excess_moments(pdf, thermodynamics, p, θˡⁱ₂, qᵗ₂, θˡⁱ′²₂, qᵗ′²₂, σθ₂, σq₂, r, liquid)
+    μⁱ₁, σⁱ₁, ∂ⁱ₁ = component_vapor_excess_moments(pdf, thermodynamics, p, θˡⁱ₁, qᵗ₁, θˡⁱ′²₁, qᵗ′²₁, σθ₁, σq₁, r, ice)
+    μⁱ₂, σⁱ₂, ∂ⁱ₂ = component_vapor_excess_moments(pdf, thermodynamics, p, θˡⁱ₂, qᵗ₂, θˡⁱ′²₂, qᵗ′²₂, σθ₂, σq₂, r, ice)
+    r₁ = component_excess_correlation(qᵗ′²₁, θˡⁱ′²₁, σθ₁, σq₁, r, ∂₁, ∂ⁱ₁, σ₁, σⁱ₁)
+    r₂ = component_excess_correlation(qᵗ′²₂, θˡⁱ′²₂, σθ₂, σq₂, r, ∂₂, ∂ⁱ₂, σ₂, σⁱ₂)
+    return a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, r₁, r₂
 end
 
 # The within-component correlation of the excesses over liquid and over ice, sˡ′ = qᵗ′ - aˡ θ′ and sⁱ′ = qᵗ′ - aⁱ θ′
 # (aˡ, aⁱ = ∂qᵛ⁺/∂θ over each surface): cov = qᵗ′² - (aˡ + aⁱ) r σθ σq + aˡ aⁱ θ′². One where either has no spread
 # (a point mass; the correlation does not enter).
-@inline function component_excess_correlation(vq, vθ, σθ, σq, r, aˡ, aⁱ, σ, σⁱ)
-    covariance = vq - (aˡ + aⁱ) * r * σθ * σq + aˡ * aⁱ * vθ
+@inline function component_excess_correlation(qᵗ′², θˡⁱ′², σθ, σq, r, aˡ, aⁱ, σ, σⁱ)
+    covariance = qᵗ′² - (aˡ + aⁱ) * r * σθ * σq + aˡ * aⁱ * θˡⁱ′²
     spread = σ * σⁱ
     resolved = spread > 0
     return ifelse(resolved, covariance / ifelse(resolved, spread, one(spread)), one(spread))
 end
 
 # The liquid-water temperature of a component of the double Gaussian, the one definition every function of the PDF uses:
-# that of the model's thermodynamics, raised to `Tl_min` where it is below (`shoc_assumed_pdf_compute_temperature`)
-@inline function component_liquid_water_temperature(pdf, thermodynamics, thl, qw, pval)
-    Tl = plume_liquid_water_temperature(thermodynamics, thl, qw, pval)
-    return ifelse(Tl <= pdf.Tl_min, pdf.Tl_min, Tl)
+# that of the model's thermodynamics, raised to `minimum_liquid_water_temperature` where it is below
+# (`shoc_assumed_pdf_compute_temperature`)
+@inline function component_liquid_water_temperature(pdf, thermodynamics, θˡⁱ, qᵗ, p)
+    Tˡ = liquid_water_temperature(thermodynamics, θˡⁱ, qᵗ, p)
+    return ifelse(Tˡ <= pdf.minimum_liquid_water_temperature, pdf.minimum_liquid_water_temperature, Tˡ)
 end
 
 # The moments of the vapor excess of a component over the surface `(surface, equilibrium)` (liquid, or ice), at the
 # temperature of the component that `assumed_pdf` condenses at, with the model's saturation over that surface (the
 # formula the microphysics uses)
-@inline function component_vapor_excess_moments(pdf, thermodynamics, pval, thl, qw, vθ, vq, σθ, σq, r, (surface, equilibrium))
+@inline function component_vapor_excess_moments(pdf, thermodynamics, p, θˡⁱ, qᵗ, θˡⁱ′², qᵗ′², σθ, σq, r, (surface, equilibrium))
     constants = thermodynamics.constants
-    Π = plume_exner_function(thermodynamics, qw, pval)
-    T = component_liquid_water_temperature(pdf, thermodynamics, thl, qw, pval)
-    Rᵐ = mixture_gas_constant(plume_moisture(thermodynamics, qw), constants)
-    qᵛ⁺ = saturation_specific_humidity(T, pval / (Rᵐ * T), constants, surface)
+    Π = component_exner_function(thermodynamics, qᵗ, p)
+    T = component_liquid_water_temperature(pdf, thermodynamics, θˡⁱ, qᵗ, p)
+    Rᵐ = mixture_gas_constant(component_moisture(thermodynamics, qᵗ), constants)
+    qᵛ⁺ = saturation_specific_humidity(T, p / (Rᵐ * T), constants, surface)
     _, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, T)
     ∂qᵛ⁺∂θ = qᵛ⁺ * log_slope * Π
-    σ = zero_safe_sqrt(max(0, vq + ∂qᵛ⁺∂θ * ∂qᵛ⁺∂θ * vθ - 2 * ∂qᵛ⁺∂θ * r * σθ * σq))
-    return qw - qᵛ⁺, σ, ∂qᵛ⁺∂θ
+    σ = zero_safe_sqrt(max(0, qᵗ′² + ∂qᵛ⁺∂θ * ∂qᵛ⁺∂θ * θˡⁱ′² - 2 * ∂qᵛ⁺∂θ * r * σθ * σq))
+    return qᵗ - qᵛ⁺, σ, ∂qᵛ⁺∂θ
 end
 
 # A PDF without a component form here supplies no spread: the microphysics' grid-mean rate
-@inline function component_vapor_excess(pdf, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first, w_first, qw_first,
-                                        wsec, moments_l, moments_u)
-    FT = typeof(thl_first)
+@inline function component_vapor_excess(pdf, thermodynamics, zᶠ⁺, zᶠ⁻, zᶜ, p, θˡⁱ, w, qᵗ, w′², moments_below, moments_above)
+    FT = typeof(θˡⁱ)
     return convert(FT, 0.5), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), one(FT), one(FT)
 end

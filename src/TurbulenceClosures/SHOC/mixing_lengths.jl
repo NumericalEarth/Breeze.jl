@@ -4,7 +4,7 @@
 ##### `BlendedMixingLength` is an `AbstractMixingLength`: the closure fills it column by column into
 ##### `closure_fields.ℓᵐ` at the faces (`fill_mixing_length!`), and reconstructs it at the centers
 ##### (`mixing_lengthᶜᶜᶜ`), where the dissipation lives with `e`. Its one number of the column, the
-##### asymptotic length `l∞`, is kept in `closure_fields.ℓˢ` (the field that holds what the center
+##### asymptotic length `ℓ∞`, is kept in `closure_fields.ℓˢ` (the field that holds what the center
 ##### reconstruction needs), at every face of the column.
 #####
 
@@ -13,10 +13,10 @@ $(TYPEDEF)
 
 The mixing length of [Bogenschutz and Krueger (2013)](@cite Bogenschutz2013) as E3SM `shoc.F90` computes it
 (`compute_shoc_mix_shoc_length`): three lengths blended by the sum of their inverse squares, the distance to
-the surface `κ z`, an asymptotic length `l∞` (the fraction `ℂˡ₄` of the height weighted by `√e` over the
+the surface `κ z`, an asymptotic length `ℓ∞` (the fraction `ℂˡ₄` of the height weighted by `√e` over the
 column) and, in stable air, the buoyancy length `√e / N`,
 
-    ℓ⁻² = (ℂˡ₁ / ℂˡ₂)² [1 / (ℂˡ₅ √e κ z) + 1 / (ℂˡ₅ √e l∞) + ℂˡ₃ N²⁺ / e] + 1 / ℓᵐᵃˣ² + 1 / Δʰ²,
+    ℓ⁻² = (ℂˡ₁ / ℂˡ₂)² [1 / (ℂˡ₅ √e κ z) + 1 / (ℂˡ₅ √e ℓ∞) + ℂˡ₃ N²⁺ / e] + 1 / ℓᵐᵃˣ² + 1 / Δʰ²,
 
 with `N²⁺` the stable part of the stored static stability and `√e` the turbulent velocity of the closure
 (`e` floored at `minimum_tke`). `shoc.F90` bounds the length with `min(maxlen, ⋅)`, `max(minlen, ⋅)` and
@@ -31,7 +31,7 @@ vanishes with them.
 | `ℂˡ₁` | `length_fac`     | 0.5    | divides the mixing length |
 | `ℂˡ₂` | literal `2.8284` | 2.8284 | prefactor of the mixing length (`2√2`, truncated as in the Fortran) |
 | `ℂˡ₃` | literal `0.01`   | 0.01   | weight of the stratification term `N² / e` |
-| `ℂˡ₄` | literal `0.1`    | 0.1    | the asymptotic length `l∞` as a fraction of the TKE-weighted mean height |
+| `ℂˡ₄` | literal `0.1`    | 0.1    | the asymptotic length `ℓ∞` as a fraction of the TKE-weighted mean height |
 | `ℂˡ₅` | `tscale`         | 400    | eddy turnover time scale, **in seconds** (the one dimensional coefficient) |
 
 $(TYPEDFIELDS)
@@ -75,29 +75,29 @@ Base.show(io::IO, ml::BlendedMixingLength) =
               ", ℂˡ₃ = ", prettysummary(ml.ℂˡ₃), ", ℂˡ₄ = ", prettysummary(ml.ℂˡ₄), ", ℂˡ₅ = ", prettysummary(ml.ℂˡ₅), ")")
 
 # The squared horizontal grid spacing that bounds the length: none along a `Flat` direction
-@inline horizontal_spacing_squared(i, j, k, grid) = Δxᶜᶜᶜ(i, j, k, grid) * Δyᶜᶜᶜ(i, j, k, grid)
-@inline horizontal_spacing_squared(i, j, k, grid::AbstractGrid{<:Any, <:Flat}) = convert(grid_float_type(grid), Inf)
-@inline horizontal_spacing_squared(i, j, k, grid::AbstractGrid{<:Any, <:Any, <:Flat}) = convert(grid_float_type(grid), Inf)
-@inline horizontal_spacing_squared(i, j, k, grid::AbstractGrid{<:Any, <:Flat, <:Flat}) = convert(grid_float_type(grid), Inf)
+@inline horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid) = Δxᶜᶜᶜ(i, j, k, grid) * Δyᶜᶜᶜ(i, j, k, grid)
+@inline horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid::AbstractGrid{<:Any, <:Flat}) = convert(grid_float_type(grid), Inf)
+@inline horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid::AbstractGrid{<:Any, <:Any, <:Flat}) = convert(grid_float_type(grid), Inf)
+@inline horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid::AbstractGrid{<:Any, <:Flat, <:Flat}) = convert(grid_float_type(grid), Inf)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The blended length at height `z` above the surface, with turbulent velocity `u = √e`, asymptotic length
-`l∞`, stable stratification `N²⁺ ≥ 0` and squared horizontal grid spacing `Δʰ²`. The sum of inverse squares
+`ℓ∞`, stable stratification `N²⁺ ≥ 0` and squared horizontal grid spacing `Δʰ²`. The sum of inverse squares
 is multiplied through by `A = ℂˡ₅ u κ z`, so that the length is `√(A / D) ℂˡ₂ / ℂˡ₁` with
-`D = 1 + κ z / l∞ + ℂˡ₃ ℂˡ₅ κ z N²⁺ / u + (ℂˡ₂ / ℂˡ₁)² A (1 / ℓᵐᵃˣ² + 1 / Δʰ²)`, finite and zero at `z = 0`.
+`D = 1 + κ z / ℓ∞ + ℂˡ₃ ℂˡ₅ κ z N²⁺ / u + (ℂˡ₂ / ℂˡ₁)² A (1 / ℓᵐᵃˣ² + 1 / Δʰ²)`, finite and zero at `z = 0`.
 """
-@inline function blended_length(ml::BlendedMixingLength, z, u, l∞, N²⁺, Δʰ²)
+@inline function blended_length(ml::BlendedMixingLength, z, u, ℓ∞, N²⁺, Δʰ²)
     κz = ml.von_karman_constant * z
     A = ml.ℂˡ₅ * u * κz
     r = ml.ℂˡ₁ / ml.ℂˡ₂
     bounds = 1 / (ml.maximum_length * ml.maximum_length) + 1 / Δʰ²
-    D = 1 + κz / l∞ + ml.ℂˡ₃ * ml.ℂˡ₅ * κz * N²⁺ / u + A * bounds / (r * r)
+    D = 1 + κz / ℓ∞ + ml.ℂˡ₃ * ml.ℂˡ₅ * κz * N²⁺ / u + A * bounds / (r * r)
     return sqrt(A / D) / r
 end
 
-# The asymptotic length l∞ = ℂˡ₄ ∫ √e z dz / ∫ √e dz over the column, from the cell centers
+# The asymptotic length ℓ∞ = ℂˡ₄ ∫ √e z dz / ∫ √e dz over the column, from the cell centers
 @inline function asymptotic_length(i, j, grid, ml::BlendedMixingLength, closure, e)
     FT = grid_float_type(grid)
     numerator = zero(FT)
@@ -112,13 +112,13 @@ end
 end
 
 @inline function TurbulenceClosures.fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml::BlendedMixingLength, closure, e, N²)
-    l∞ = asymptotic_length(i, j, grid, ml, closure, e)
+    ℓ∞ = asymptotic_length(i, j, grid, ml, closure, e)
     for k in 1:size(grid, 3)+1
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
-        N²⁺ = max(@inbounds(N²[i, j, k]), zero(l∞))
+        N²⁺ = max(@inbounds(N²[i, j, k]), zero(ℓ∞))
         z = height_above_bottomᶜᶜᶠ(i, j, k, grid)
-        @inbounds ℓ[i, j, k] = blended_length(ml, z, u, l∞, N²⁺, horizontal_spacing_squared(i, j, k, grid))
-        @inbounds ℓˢ[i, j, k] = l∞
+        @inbounds ℓ[i, j, k] = blended_length(ml, z, u, ℓ∞, N²⁺, horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid))
+        @inbounds ℓˢ[i, j, k] = ℓ∞
     end
     return nothing
 end
@@ -128,7 +128,7 @@ end
     FT = grid_float_type(grid)
     u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
     N²⁺ = max(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, closure_fields.N²), zero(FT))
-    l∞ = @inbounds closure_fields.ℓˢ[i, j, k]
+    ℓ∞ = @inbounds closure_fields.ℓˢ[i, j, k]
     z = height_above_bottomᶜᶜᶜ(i, j, k, grid)
-    return blended_length(ml, z, u, l∞, N²⁺, horizontal_spacing_squared(i, j, k, grid))
+    return blended_length(ml, z, u, ℓ∞, N²⁺, horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid))
 end

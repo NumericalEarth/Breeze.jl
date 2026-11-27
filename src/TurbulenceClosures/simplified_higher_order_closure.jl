@@ -106,8 +106,8 @@ RICO states handed to the port and to `shoc.F90`'s routines) the first four acco
   `0.622 e / (p - e)`, about 1.3 % (≈ 3 × 10⁻⁴ kg kg⁻¹ in the trade-cumulus layer) too large, so its PDF condenses less:
   on one BOMEX state the port's PDF with `shoc.F90`'s saturation reproduces `shoc.F90`'s cloud to round-off, and
   with the model's saturation it has about twice the cloud fraction and liquid water path.
-- **The asymptotic length.** `l∞` weights the height by `√e` with `e` floored at `minimum_tke`; `shoc.F90` floors
-  `e` at `mintke = 4 × 10⁻⁴` m² s⁻², which gives the free troposphere a weight `√e = 0.02` m s⁻¹. The port's `l∞`
+- **The asymptotic length.** `ℓ∞` weights the height by `√e` with `e` floored at `minimum_tke`; `shoc.F90` floors
+  `e` at `mintke = 4 × 10⁻⁴` m² s⁻², which gives the free troposphere a weight `√e = 0.02` m s⁻¹. The port's `ℓ∞`
   is 20–60 % smaller (and equal to that of `shoc.F90` with the same floor), its mixing length 10–30 % smaller,
   and the time scale, the diffusivities and the variances (`∝ τ² e`) follow.
 - **The bound of the third moment.** It saturates along a polynomial toward `1.2 √2 (w′²)^{3/2}`

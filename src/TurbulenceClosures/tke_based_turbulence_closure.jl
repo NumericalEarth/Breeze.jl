@@ -843,7 +843,7 @@ so that the energy budget still closes (`add_shear_production_heating!`).
 #####     arrays `ℓ` and `ℓˢ` of column `(i, j)`, and `mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e,
 #####     closure_fields)` reads only `closure_fields.ℓˢ` and `closure_fields.N²` (`ℓˢ` holds
 #####     whatever the center reconstruction needs: the stratification envelope, or for
-#####     `BlendedMixingLength` its asymptotic length `l∞` of the column).
+#####     `BlendedMixingLength` its asymptotic length `ℓ∞` of the column).
 #####
 
 # The stored face field as a kernel function, for the boundary-aware reconstruction `ℑbzᵃᵃᶜ`

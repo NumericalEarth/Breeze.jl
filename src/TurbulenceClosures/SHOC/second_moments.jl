@@ -4,11 +4,11 @@
 ##### A second-moment component implements
 #####
 #####     vertical_velocity_variance(sm, e) -> w′²
-#####     interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / Δz, Δθˡⁱ, Δqᵗ, Δe, Δu, Δv)
+#####     interface_second_moments(sm, τ, Kᶜ, Kᵘ, Δz⁻¹, Δθˡⁱ, Δqᵗ, Δe, Δu, Δv)
 #####         -> (θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′, w′e′, w′u′, w′v′)
 #####
 ##### the vertical velocity variance at a center, and the moments at an interior face from the time scale and
-##### the diffusivities there, the inverse distance between the adjacent centers and the differences across
+##### the diffusivities there, the inverse distance `Δz⁻¹` between the adjacent centers and the differences across
 ##### the face.
 #####
 
@@ -50,24 +50,23 @@ DowngradientSecondMoments(FT::DataType = Oceananigans.defaults.FloatType; kw...)
 
 Adapt.@adapt_structure DowngradientSecondMoments
 
-@inline vertical_velocity_variance(sm::DowngradientSecondMoments, tke_k) =
-    (sm.ℂʷ₁ * (convert(typeof(tke_k), 2) / 3)) * tke_k
+@inline vertical_velocity_variance(sm::DowngradientSecondMoments, e) =
+    (sm.ℂʷ₁ * (convert(typeof(e), 2) / 3)) * e
 
 # calc_shoc_varorcovar and calc_shoc_vertflux at an interior interface
-@inline function interface_second_moments(sm::DowngradientSecondMoments, isotropy_zi, tkh_zi, tk_zi, grid_dz,
-                                          Δthetal, Δqw, Δtke, Δu, Δv)
-    grid_dz2 = grid_dz * grid_dz
-    isotropic_diffusivity = isotropy_zi * tkh_zi
+@inline function interface_second_moments(sm::DowngradientSecondMoments, τ, Kᶜ, Kᵘ, Δz⁻¹, Δθˡⁱ, Δqᵗ, Δe, Δu, Δv)
+    Δz⁻² = Δz⁻¹ * Δz⁻¹
+    τKᶜ = τ * Kᶜ
 
-    thl_sec = sm.ℂᵛ₁ * isotropic_diffusivity * grid_dz2 * Δthetal * Δthetal
-    qw_sec = sm.ℂᵛ₂ * isotropic_diffusivity * grid_dz2 * Δqw * Δqw
-    qwthl_sec = sm.ℂᵛ₃ * isotropic_diffusivity * grid_dz2 * Δthetal * Δqw
+    θˡⁱ′² = sm.ℂᵛ₁ * τKᶜ * Δz⁻² * Δθˡⁱ * Δθˡⁱ
+    qᵗ′² = sm.ℂᵛ₂ * τKᶜ * Δz⁻² * Δqᵗ * Δqᵗ
+    θˡⁱ′qᵗ′ = sm.ℂᵛ₃ * τKᶜ * Δz⁻² * Δθˡⁱ * Δqᵗ
 
-    wthl_sec = -1 * tkh_zi * grid_dz * Δthetal
-    wqw_sec = -1 * tkh_zi * grid_dz * Δqw
-    wtke_sec = -1 * tkh_zi * grid_dz * Δtke
-    uw_sec = -1 * tk_zi * grid_dz * Δu
-    vw_sec = -1 * tk_zi * grid_dz * Δv
+    w′θˡⁱ′ = -1 * Kᶜ * Δz⁻¹ * Δθˡⁱ
+    w′qᵗ′ = -1 * Kᶜ * Δz⁻¹ * Δqᵗ
+    w′e′ = -1 * Kᶜ * Δz⁻¹ * Δe
+    w′u′ = -1 * Kᵘ * Δz⁻¹ * Δu
+    w′v′ = -1 * Kᵘ * Δz⁻¹ * Δv
 
-    return thl_sec, qw_sec, qwthl_sec, wthl_sec, wqw_sec, wtke_sec, uw_sec, vw_sec
+    return θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′, w′e′, w′u′, w′v′
 end

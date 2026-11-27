@@ -95,8 +95,8 @@ end
 
 # SHOC's saturation excess of the mean state at a level, s = qᵗ - qᵛ⁺ (1 + β qᵗ) / (1 + β qᵛ⁺)
 @inline function mean_saturation_excess(thermodynamics, θ, qᵗ, p)
-    Tˡ = plume_liquid_water_temperature(thermodynamics, θ, qᵗ, p)
-    qᵛ⁺, β, _, _ = plume_saturation(thermodynamics, Tˡ, qᵗ, p)
+    Tˡ = liquid_water_temperature(thermodynamics, θ, qᵗ, p)
+    qᵛ⁺, β, _, _ = component_saturation(thermodynamics, Tˡ, qᵗ, p)
     return qᵗ - qᵛ⁺ * (1 + β * qᵗ) / (1 + β * qᵛ⁺)
 end
 
@@ -108,8 +108,8 @@ end
     eᵐⁱⁿ = closure.minimum_tke
     @inbounds begin
         g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
-        gAᶠ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, k-1]) / 2
-        N²ᶜ = g.gθᶠ * g.∂zθ + gAᶠ * g.∂zq
+        b_qᵛᶠ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, k-1]) / 2
+        N²ᶜ = g.b_θᶠ * g.∂zθ + b_qᵛᶠ * g.∂zq
         ΔN² = g.bᶜᵛ * g.∂zs
         s̄ = (mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k), θ[i, j, k], qᵗ[i, j, k], p[i, j, k]) +
              mean_saturation_excess(level_thermodynamics(thermodynamics, i, j, k-1), θ[i, j, k-1], qᵗ[i, j, k-1], p[i, j, k-1])) / 2
@@ -177,7 +177,7 @@ end
     return ifelse(resolved, -Bᶠ / ifelse(resolved, Kᶜ * ΔN², one(FT)), zero(FT))
 end
 
-@inline function center_liquid_buoyancy(i, j, k, grid, d, cl, w, θ, qᵗ, p, thermodynamics, moments_l, moments_u)
+@inline function center_liquid_buoyancy(i, j, k, grid, d, cl, w, θ, qᵗ, p, thermodynamics, moments_below, moments_above)
     ccc = (Center(), Center(), Center())
     ccf = (Center(), Center(), Face())
     @inbounds begin
@@ -189,7 +189,7 @@ end
         w′³ = cl.w′³[i, j, k]
         thermodynamicsᵏ = level_thermodynamics(thermodynamics, i, j, k)
         _, _, _, w′qˡ′, _ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
-                                          p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], (w′³, moments_l...), (w′³, moments_u...))
+                                          p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], cl.w′²[i, j, k], (w′³, moments_below...), (w′³, moments_above...))
         # The buoyancy of the flux of liquid with the derivatives of the model's buoyancy, as the stored Bˡ of the
         # distribution has it
         Bˡ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * w′qˡ′

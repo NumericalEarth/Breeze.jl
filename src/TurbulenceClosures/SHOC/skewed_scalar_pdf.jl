@@ -39,7 +39,7 @@ struct SkewedScalarDoubleGaussianPDF{FT} <: AbstractSubgridDistributionComponent
     "Within-component fraction of the variance of the saturation excess"
     ℂᵍᶜ :: FT
     "Lowest liquid water temperature of a component, K"
-    Tl_min :: FT
+    minimum_liquid_water_temperature :: FT
 end
 
 """
@@ -50,7 +50,8 @@ within-component share of `w′²` of [`EqualWidthDoubleGaussianPDF`](@ref), `�
 (`ℂᵍᵏ = 1`) and half of the variance of the saturation excess within the components (`ℂᵍᶜ = 0.5`).
 """
 function SkewedScalarDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...)
-    pdf = component_from_keywords(SkewedScalarDoubleGaussianPDF, FT, (ℂᵍ₀ = 0.4, ℂᵍᵏ = 1, ℂᵍᶜ = 0.5, Tl_min = 100), kw)
+    pdf = component_from_keywords(SkewedScalarDoubleGaussianPDF, FT,
+                                  (ℂᵍ₀ = 0.4, ℂᵍᵏ = 1, ℂᵍᶜ = 0.5, minimum_liquid_water_temperature = 100), kw)
     0 < pdf.ℂᵍ₀ < 1 || throw(ArgumentError("ℂᵍ₀ must be in (0, 1), got $(pdf.ℂᵍ₀)"))
     0 < pdf.ℂᵍᶜ < 1 || throw(ArgumentError("ℂᵍᶜ must be in (0, 1), got $(pdf.ℂᵍᶜ)"))
     return pdf
@@ -73,52 +74,53 @@ Adapt.@adapt_structure SkewedScalarDoubleGaussianPDF
 end
 
 # The components of the mixture at a level: the weight a of the moist component, its (θ, q) and the other's, the
-# within-component variances and correlation of θˡⁱ and qᵗ, and w′s′ / σₛ² (the regression of w on s)
-@inline function skewed_scalar_components(pdf, thermodynamics, pval, θ̄, q̄, wsec, w3, θv, wθ, θq, wq, qv)
+# within-component variances and correlation of θˡⁱ and qᵗ (subscript ᵢ: those of either component), and w′s′ / σₛ²
+# (the regression of w on s)
+@inline function skewed_scalar_components(pdf, thermodynamics, p, θ̄, q̄, w′², w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)
     FT = typeof(θ̄)
     tiny = sqrt(floatmin(FT))
-    # the saturation excess s = c_q qᵗ′ - c_θ θˡⁱ′ linearized at the mean (`plume_condensate`)
-    Tl = component_liquid_water_temperature(pdf, thermodynamics, θ̄, q̄, pval)
-    qs, β, cp_over_L, Π = plume_saturation(thermodynamics, Tl, q̄, pval)
-    opbq = 1 + β * qs
-    c_θ = ((1 + β * q̄) / (opbq * opbq)) * cp_over_L * β * qs * Π
-    c_q = 1 / opbq
-    σs² = c_θ * c_θ * θv + c_q * c_q * qv - 2 * c_θ * c_q * θq
-    resolved = (σs² > tiny * tiny) & (wsec > tiny)
-    σs²ˢ = ifelse(resolved, σs², one(FT))
-    wsecˢ = ifelse(resolved, wsec, one(FT))
-    ws = c_q * wq - c_θ * wθ
+    # the saturation excess s = c_q qᵗ′ - c_θ θˡⁱ′ linearized at the mean (`component_condensate`)
+    Tˡ = component_liquid_water_temperature(pdf, thermodynamics, θ̄, q̄, p)
+    qᵛ⁺, β, ĉᵖℒ⁻¹, Π = component_saturation(thermodynamics, Tˡ, q̄, p)
+    denominator = 1 + β * qᵛ⁺
+    c_θ = ((1 + β * q̄) / (denominator * denominator)) * ĉᵖℒ⁻¹ * β * qᵛ⁺ * Π
+    c_q = 1 / denominator
+    σₛ² = c_θ * c_θ * θˡⁱ′² + c_q * c_q * qᵗ′² - 2 * c_θ * c_q * θˡⁱ′qᵗ′
+    resolved = (σₛ² > tiny * tiny) & (w′² > tiny)
+    σₛ²ˢᵃᶠᵉ = ifelse(resolved, σₛ², one(FT))
+    w′²ˢᵃᶠᵉ = ifelse(resolved, w′², one(FT))
+    w′s′ = c_q * w′qᵗ′ - c_θ * w′θˡⁱ′
 
     # the skewness of s implied by the skewness of w and the correlation of w with s
-    Sk_w = w3 / (wsecˢ * sqrt(wsecˢ))
-    r = ws / sqrt(wsecˢ * σs²ˢ)
+    Sk_w = w′³ / (w′²ˢᵃᶠᵉ * sqrt(w′²ˢᵃᶠᵉ))
+    r = w′s′ / sqrt(w′²ˢᵃᶠᵉ * σₛ²ˢᵃᶠᵉ)
     r̂ = r / sqrt(sqrt(1 + r * r * r * r))
     b = 1 - pdf.ℂᵍ₀
     Sk_s = ifelse(resolved, pdf.ℂᵍᵏ * Sk_w * r̂ * r̂ * r̂ / (b * b * b), zero(FT))
 
     # the mixture in s, and its components along the regression of (θ, q) on s
     a, ŝ₁, ŝ₂ = skewed_mixture(Sk_s, pdf.ℂᵍᶜ)
-    σs = sqrt(σs²ˢ)
-    g_θ = ifelse(resolved, (c_q * θq - c_θ * θv) / σs²ˢ, zero(FT))
-    g_q = ifelse(resolved, (c_q * qv - c_θ * θq) / σs²ˢ, zero(FT))
-    δ₁ = ŝ₁ * σs
-    δ₂ = ŝ₂ * σs
-    between = (1 - pdf.ℂᵍᶜ) * ifelse(resolved, σs², zero(FT))
-    θv_c = θv - between * g_θ * g_θ
-    qv_c = qv - between * g_q * g_q
-    θq_c = θq - between * g_θ * g_q
-    σθ_c = zero_safe_sqrt(θv_c)
-    σq_c = zero_safe_sqrt(qv_c)
-    spread = σθ_c * σq_c
-    r_c = ifelse(spread > 0, θq_c / ifelse(spread > 0, spread, one(FT)), zero(FT))
-    regression = ifelse(resolved, ws / σs²ˢ, zero(FT))
+    σₛ = sqrt(σₛ²ˢᵃᶠᵉ)
+    g_θ = ifelse(resolved, (c_q * θˡⁱ′qᵗ′ - c_θ * θˡⁱ′²) / σₛ²ˢᵃᶠᵉ, zero(FT))
+    g_q = ifelse(resolved, (c_q * qᵗ′² - c_θ * θˡⁱ′qᵗ′) / σₛ²ˢᵃᶠᵉ, zero(FT))
+    δ₁ = ŝ₁ * σₛ
+    δ₂ = ŝ₂ * σₛ
+    between = (1 - pdf.ℂᵍᶜ) * ifelse(resolved, σₛ², zero(FT))
+    θˡⁱ′²ᵢ = θˡⁱ′² - between * g_θ * g_θ
+    qᵗ′²ᵢ = qᵗ′² - between * g_q * g_q
+    θˡⁱ′qᵗ′ᵢ = θˡⁱ′qᵗ′ - between * g_θ * g_q
+    σθᵢ = zero_safe_sqrt(θˡⁱ′²ᵢ)
+    σqᵢ = zero_safe_sqrt(qᵗ′²ᵢ)
+    spread = σθᵢ * σqᵢ
+    rᵢ = ifelse(spread > 0, θˡⁱ′qᵗ′ᵢ / ifelse(spread > 0, spread, one(FT)), zero(FT))
+    regression = ifelse(resolved, w′s′ / σₛ²ˢᵃᶠᵉ, zero(FT))
     return (; a, θ₁ = θ̄ + g_θ * δ₁, q₁ = q̄ + g_q * δ₁, θ₂ = θ̄ + g_θ * δ₂, q₂ = q̄ + g_q * δ₂,
-              θv_c, qv_c, θq_c, σθ_c, σq_c, r_c, regression, c_θ, c_q)
+              θˡⁱ′²ᵢ, qᵗ′²ᵢ, θˡⁱ′qᵗ′ᵢ, σθᵢ, σqᵢ, rᵢ, regression, c_θ, c_q)
 end
 
 # The moments at the level: linearly interpolated from the interfaces below and above (non-negative variances stay so)
-@inline function skewed_scalar_level_moments(zi_u, zi_l, zt_k, moments_l, moments_u)
-    interpolate(n) = linear_interp(zi_u, zi_l, moments_u[n], moments_l[n], zt_k)
+@inline function skewed_scalar_level_moments(zᶠ⁺, zᶠ⁻, zᶜ, moments_below, moments_above)
+    interpolate(n) = linearly_interpolate(zᶠ⁺, zᶠ⁻, moments_above[n], moments_below[n], zᶜ)
     return interpolate(1), interpolate(2), interpolate(3), interpolate(4), interpolate(5), interpolate(6)
 end
 
@@ -128,48 +130,48 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The assumed PDF of level `k` for [`SkewedScalarDoubleGaussianPDF`](@ref): the subgrid cloud fraction, liquid water,
 liquid water variance, liquid water flux and buoyancy flux.
 """
-@inline function assumed_pdf(pdf::SkewedScalarDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval, thl_first, w_first,
-                             qw_first, wsec, moments_l, moments_u)
-    w3, θv, wθ, θq, wq, qv = skewed_scalar_level_moments(zi_u, zi_l, zt_k, moments_l, moments_u)
-    m = skewed_scalar_components(pdf, thermodynamics, pval, thl_first, qw_first, wsec, w3, θv, wθ, θq, wq, qv)
+@inline function assumed_pdf(pdf::SkewedScalarDoubleGaussianPDF, thermodynamics, zᶠ⁺, zᶠ⁻, zᶜ, p, θˡⁱ, w, qᵗ, w′²,
+                             moments_below, moments_above)
+    w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′² = skewed_scalar_level_moments(zᶠ⁺, zᶠ⁻, zᶜ, moments_below, moments_above)
+    m = skewed_scalar_components(pdf, thermodynamics, p, θˡⁱ, qᵗ, w′², w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)
     a = m.a
 
-    Tl₁ = component_liquid_water_temperature(pdf, thermodynamics, m.θ₁, m.q₁, pval)
-    Tl₂ = component_liquid_water_temperature(pdf, thermodynamics, m.θ₂, m.q₂, pval)
-    qs₁, β₁, cpL₁, Π₁ = plume_saturation(thermodynamics, Tl₁, m.q₁, pval)
-    qs₂, β₂, cpL₂, Π₂ = plume_saturation(thermodynamics, Tl₂, m.q₂, pval)
-    s₁, σ₁, ql₁, C₁ = plume_condensate(m.q₁, qs₁, β₁, cpL₁, Π₁, m.θv_c, m.qv_c, m.σθ_c, m.σq_c, m.r_c)
-    s₂, σ₂, ql₂, C₂ = plume_condensate(m.q₂, qs₂, β₂, cpL₂, Π₂, m.θv_c, m.qv_c, m.σθ_c, m.σq_c, m.r_c)
+    Tˡ₁ = component_liquid_water_temperature(pdf, thermodynamics, m.θ₁, m.q₁, p)
+    Tˡ₂ = component_liquid_water_temperature(pdf, thermodynamics, m.θ₂, m.q₂, p)
+    qᵛ⁺₁, β₁, ĉᵖℒ⁻¹₁, Π₁ = component_saturation(thermodynamics, Tˡ₁, m.q₁, p)
+    qᵛ⁺₂, β₂, ĉᵖℒ⁻¹₂, Π₂ = component_saturation(thermodynamics, Tˡ₂, m.q₂, p)
+    s₁, σ₁, qˡ₁, aᶜ₁ = component_condensate(m.q₁, qᵛ⁺₁, β₁, ĉᵖℒ⁻¹₁, Π₁, m.θˡⁱ′²ᵢ, m.qᵗ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ)
+    s₂, σ₂, qˡ₂, aᶜ₂ = component_condensate(m.q₂, qᵛ⁺₂, β₂, ĉᵖℒ⁻¹₂, Π₂, m.θˡⁱ′²ᵢ, m.qᵗ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ)
 
-    cloud_fraction = a * C₁ + (1 - a) * C₂
-    ql = a * ql₁ + (1 - a) * ql₂
-    # E[s qˡ] of each Gaussian component is μ qˡ + σ² C; the variance of the liquid (to round-off non-negative)
-    second₁ = s₁ * ql₁ + C₁ * σ₁ * σ₁
-    second₂ = s₂ * ql₂ + C₂ * σ₂ * σ₂
-    ql2 = max(0, a * second₁ + (1 - a) * second₂ - ql * ql)
+    aᶜ = a * aᶜ₁ + (1 - a) * aᶜ₂
+    qˡ = a * qˡ₁ + (1 - a) * qˡ₂
+    # E[s qˡ] of each Gaussian component is μ qˡ + σ² aᶜ; the variance of the liquid (to round-off non-negative)
+    second₁ = s₁ * qˡ₁ + aᶜ₁ * σ₁ * σ₁
+    second₂ = s₂ * qˡ₂ + aᶜ₂ * σ₂ * σ₂
+    qˡ′² = max(0, a * second₁ + (1 - a) * second₂ - qˡ * qˡ)
     s̄ = a * s₁ + (1 - a) * s₂
     # cov(s, qˡ), and the flux of liquid that the regression of w on s carries
-    covariance = a * (second₁ - s̄ * ql₁) + (1 - a) * (second₂ - s̄ * ql₂)
-    wql = m.regression * covariance
+    covariance = a * (second₁ - s̄ * qˡ₁) + (1 - a) * (second₂ - s̄ * qˡ₂)
+    w′qˡ′ = m.regression * covariance
 
-    A_q, A_c = buoyancy_flux_coefficients(thermodynamics, pval, thl_first, qw_first, ql)
-    wthv = wθ + A_q * wq + A_c * wql
-    return cloud_fraction, ql, ql2, wql, wthv
+    A_q, A_c = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qˡ)
+    w′θᵛ′ = w′θˡⁱ′ + A_q * w′qᵗ′ + A_c * w′qˡ′
+    return aᶜ, qˡ, qˡ′², w′qˡ′, w′θᵛ′
 end
 
 # The components in the vapor excess over liquid and over ice, for the microphysics and the saturated share of the fluxes
-@inline function component_vapor_excess(pdf::SkewedScalarDoubleGaussianPDF, thermodynamics, zi_u, zi_l, zt_k, pval,
-                                        thl_first, w_first, qw_first, wsec, moments_l, moments_u)
-    w3, θv, wθ, θq, wq, qv = skewed_scalar_level_moments(zi_u, zi_l, zt_k, moments_l, moments_u)
-    m = skewed_scalar_components(pdf, thermodynamics, pval, thl_first, qw_first, wsec, w3, θv, wθ, θq, wq, qv)
+@inline function component_vapor_excess(pdf::SkewedScalarDoubleGaussianPDF, thermodynamics, zᶠ⁺, zᶠ⁻, zᶜ, p, θˡⁱ, w, qᵗ, w′²,
+                                        moments_below, moments_above)
+    w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′² = skewed_scalar_level_moments(zᶠ⁺, zᶠ⁻, zᶜ, moments_below, moments_above)
+    m = skewed_scalar_components(pdf, thermodynamics, p, θˡⁱ, qᵗ, w′², w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)
     liquid = (PlanarLiquidSurface(), WarmPhaseEquilibrium())
     ice = (PlanarIceSurface(), IceSurfaceEquilibrium())
-    moments(θ, q, surface) = component_vapor_excess_moments(pdf, thermodynamics, pval, θ, q, m.θv_c, m.qv_c, m.σθ_c, m.σq_c, m.r_c, surface)
+    moments(θ, q, surface) = component_vapor_excess_moments(pdf, thermodynamics, p, θ, q, m.θˡⁱ′²ᵢ, m.qᵗ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ, surface)
     μ₁, σ₁, ∂₁ = moments(m.θ₁, m.q₁, liquid)
     μ₂, σ₂, ∂₂ = moments(m.θ₂, m.q₂, liquid)
     μⁱ₁, σⁱ₁, ∂ⁱ₁ = moments(m.θ₁, m.q₁, ice)
     μⁱ₂, σⁱ₂, ∂ⁱ₂ = moments(m.θ₂, m.q₂, ice)
-    ρ₁ = component_excess_correlation(m.qv_c, m.θv_c, m.σθ_c, m.σq_c, m.r_c, ∂₁, ∂ⁱ₁, σ₁, σⁱ₁)
-    ρ₂ = component_excess_correlation(m.qv_c, m.θv_c, m.σθ_c, m.σq_c, m.r_c, ∂₂, ∂ⁱ₂, σ₂, σⁱ₂)
-    return m.a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂
+    r₁ = component_excess_correlation(m.qᵗ′²ᵢ, m.θˡⁱ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ, ∂₁, ∂ⁱ₁, σ₁, σⁱ₁)
+    r₂ = component_excess_correlation(m.qᵗ′²ᵢ, m.θˡⁱ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ, ∂₂, ∂ⁱ₂, σ₂, σⁱ₂)
+    return m.a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, r₁, r₂
 end

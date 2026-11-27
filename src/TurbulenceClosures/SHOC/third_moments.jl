@@ -3,13 +3,13 @@
 #####
 ##### A third-moment component implements
 #####
-#####     third_moment(tm, g, τ_zi, N²_zi, w_sec_zi, thetal_zi, thedz, thedz2,
-#####                  Δthl_sec, Δwthl_sec, Δw_sec, Δtke, wthl) -> w3
+#####     third_moment(tm, g, τ, N², w′², θˡⁱ, compact_inverse_spacing, wide_inverse_spacing,
+#####                  Δθˡⁱ′², Δw′θˡⁱ′, Δw′², Δe, w′θˡⁱ′) -> w′³
 #####
 ##### at an interior interface: the diagnosis of the third moment from the second moments. The
 ##### method that takes a stratification number bound after the component,
 #####
-#####     third_moment(tm, stratification_number_bound, g, ...) -> w3
+#####     third_moment(tm, stratification_number_bound, g, ...) -> w′³
 #####
 ##### applies the bound to the stratification number αᴺ = τ² N² inside the diagnosis; the method
 ##### without it leaves αᴺ unbounded.
@@ -27,10 +27,10 @@
 #####
 ##### A skewness component keeps the diagnosed third moment realizable: it implements
 #####
-#####     limit_third_moment(skewness, w_sec_zi, w3) -> w3
+#####     limit_third_moment(skewness, w′², w′³) -> w′³
 #####
-##### which returns a third moment no larger in magnitude than `maximum_skewness (w'w')^{3/2}`, that
-##### is, a bounded skewness `w'³ / (w'w')^{3/2}`. The two slots are independent: any diagnosis goes
+##### which returns a third moment no larger in magnitude than `maximum_skewness (w′²)^{3/2}`, that
+##### is, a bounded skewness `w′³ / (w′²)^{3/2}`. The two slots are independent: any diagnosis goes
 ##### with any limiter.
 #####
 
@@ -39,12 +39,12 @@ $(TYPEDEF)
 
 The third moment of vertical velocity diagnosed algebraically from the second moments and their
 vertical gradients: the stationary third-moment equations of Canuto et al. (2001, J. Atmos. Sci.
-58, 1169–1172) solved for `w'³`, as E3SM `shoc.F90` computes it
+58, 1169–1172) solved for `w′³`, as E3SM `shoc.F90` computes it
 (`compute_diag_third_shoc_moment`). With the return-to-isotropy time scale `τ`, the stratification
 `N²` and the stratification number `αᴺ = τ² N²` (the notation of Oceananigans'
 `TKEDissipationVerticalDiffusivity`),
 
-    w'³ = (A₁ - ℂʷ₉ X₁ - ℂʷ₁₀ f₅) / (c - ℂʷ₉ X₀ + A₀),    c = ℂʷ₂
+    w′³ = (A₁ - ℂʷ₉ X₁ - ℂʷ₁₀ f₅) / (c - ℂʷ₉ X₀ + A₀),    c = ℂʷ₂
 
 where `f₀` to `f₅` are products of `τ`, the buoyancy parameter `g / θˡⁱ`, the second moments and
 their gradients, and
@@ -73,7 +73,7 @@ changes them as it does in `shoc.F90`:
 
 The expression has poles in stable air, where `αᴺ` reaches `1 / (a₁ + a₃)`, `1 / a₃` and `1 / a₅`
 (28.7, 58.3 and 443 with the defaults). At the first of these `X₀` and `X₁` diverge together and
-their ratio stays finite, so `w'³` itself has a finite limit there; the first singularity of `w'³`
+their ratio stays finite, so `w′³` itself has a finite limit there; the first singularity of `w′³`
 in stable air is where its denominator `c - ℂʷ₉ X₀ + A₀` vanishes, at `αᴺ ≈ 24.3`, 0.85 of the
 first pole with the defaults. The integers `3`, `5` and `2` of `a₀` to `a₅` and of
 `ω₁`, and the factors `1/2` and `2` of `f₁` and `f₂`, belong to the derivation and are not fields.
@@ -133,56 +133,56 @@ validate_third_moment_location(location) =
 
 Adapt.@adapt_structure AlgebraicThirdMoment
 
-# The third moment at an interior interface from the interface values of isotropy, Brunt-Vaisala
-# frequency, w_sec and thetal, the inverse thicknesses `thedz` and `thedz2`, and the differences
-# of the moments across the interface; `wthl` is wthl_sec at the interface.
+# The third moment at an interior interface from the interface values of the return-to-isotropy time scale `τ`, the
+# buoyancy frequency `N²`, the vertical velocity variance `w′²` and `θˡⁱ`, the inverse distances over which the
+# differences are taken (`compact_inverse_spacing` between the two adjacent nodes, `wide_inverse_spacing` across the
+# two cells), and the differences of the moments across the interface; `w′θˡⁱ′` is the flux at the interface.
 # `g` is the gravitational acceleration of the model.
 @inline third_moment(tm::AlgebraicThirdMoment, g::Number, arguments...) =
     third_moment(tm, UnboundedStratificationNumber(), g, arguments...)
 
-@inline function third_moment(tm::AlgebraicThirdMoment, stratification_number_bound, g, isotropy_zi, brunt_zi, w_sec_zi, thetal_zi, thedz, thedz2,
-                              thl_sec_diff, wthl_sec_diff, wsec_diff, tke_diff, wthl)
-    FT = typeof(wthl)
+@inline function third_moment(tm::AlgebraicThirdMoment, stratification_number_bound, g, τ, N², w′², θˡⁱ,
+                              compact_inverse_spacing, wide_inverse_spacing, Δθˡⁱ′², Δw′θˡⁱ′, Δw′², Δe, w′θˡⁱ′)
+    FT = typeof(w′θˡⁱ′)
     c = tm.ℂʷ₂
 
-    a0 = (tm.ℂʷ₃ * (1 / (c * c))) / (c - 2)
-    a1 = tm.ℂʷ₄ / (c * c)
-    a2 = tm.ℂʷ₅ / c
-    a3 = tm.ℂʷ₆ / (c * (c - 2))
-    first_pole = 1 / (a1 + a3)
+    a₀ = (tm.ℂʷ₃ * (1 / (c * c))) / (c - 2)
+    a₁ = tm.ℂʷ₄ / (c * c)
+    a₂ = tm.ℂʷ₅ / c
+    a₃ = tm.ℂʷ₆ / (c * (c - 2))
+    first_pole = 1 / (a₁ + a₃)
 
     # fterms_input_for_diag_third_shoc_moment
-    iso = isotropy_zi
-    isosqrd = iso * iso
-    αᴺ = bound_stratification_number(stratification_number_bound, isosqrd * brunt_zi, first_pole)
-    bet2 = g / thetal_zi
+    τ² = τ * τ
+    αᴺ = bound_stratification_number(stratification_number_bound, τ² * N², first_pole)
+    β = g / θˡⁱ
 
-    f0 = thedz2 * (bet2 * bet2 * bet2) * ((iso * iso) * (iso * iso)) * wthl * thl_sec_diff
-    f1 = thedz2 * (bet2 * bet2) * (iso * iso * iso) * (wthl * wthl_sec_diff + convert(FT, 0.5) * w_sec_zi * thl_sec_diff)
-    f2 = thedz * bet2 * isosqrd * wthl * wsec_diff + 2 * thedz2 * bet2 * isosqrd * w_sec_zi * wthl_sec_diff
-    f3 = thedz2 * bet2 * isosqrd * w_sec_zi * wthl_sec_diff + thedz * bet2 * isosqrd * (wthl * tke_diff)
-    f4 = thedz * iso * w_sec_zi * (wsec_diff + tke_diff)
-    f5 = thedz * iso * w_sec_zi * wsec_diff
+    f₀ = wide_inverse_spacing * (β * β * β) * ((τ * τ) * (τ * τ)) * w′θˡⁱ′ * Δθˡⁱ′²
+    f₁ = wide_inverse_spacing * (β * β) * (τ * τ * τ) * (w′θˡⁱ′ * Δw′θˡⁱ′ + convert(FT, 0.5) * w′² * Δθˡⁱ′²)
+    f₂ = compact_inverse_spacing * β * τ² * w′θˡⁱ′ * Δw′² + 2 * wide_inverse_spacing * β * τ² * w′² * Δw′θˡⁱ′
+    f₃ = wide_inverse_spacing * β * τ² * w′² * Δw′θˡⁱ′ + compact_inverse_spacing * β * τ² * (w′θˡⁱ′ * Δe)
+    f₄ = compact_inverse_spacing * τ * w′² * (Δw′² + Δe)
+    f₅ = compact_inverse_spacing * τ * w′² * Δw′²
 
     # omega_terms_diag_third_shoc_moment
-    a4 = tm.ℂʷ₇ / (3 * c + 5)
-    a5 = tm.ℂʷ₈ / (c * (3 + 5 * c))
-    omega0 = a4 / (1 - a5 * αᴺ)
-    omega1 = omega0 / (2 * c)
-    omega2 = omega1 * f3 + tm.ℂʷ₁₁ * omega0 * f4
+    a₄ = tm.ℂʷ₇ / (3 * c + 5)
+    a₅ = tm.ℂʷ₈ / (c * (3 + 5 * c))
+    ω₀ = a₄ / (1 - a₅ * αᴺ)
+    ω₁ = ω₀ / (2 * c)
+    ω₂ = ω₁ * f₃ + tm.ℂʷ₁₁ * ω₀ * f₄
 
     # x_y_terms_diag_third_shoc_moment
-    x0 = (a2 * αᴺ * (1 - a3 * αᴺ)) / (1 - (a1 + a3) * αᴺ)
-    y0 = (2 * a2 * αᴺ * x0) / (1 - a3 * αᴺ)
-    x1 = (a0 * f0 + a1 * f1 + a2 * (1 - a3 * αᴺ) * f2) / (1 - (a1 + a3) * αᴺ)
-    y1 = (2 * a2 * (αᴺ * x1 + (a0 / a1) * f0 + f1)) / (1 - a3 * αᴺ)
+    X₀ = (a₂ * αᴺ * (1 - a₃ * αᴺ)) / (1 - (a₁ + a₃) * αᴺ)
+    Y₀ = (2 * a₂ * αᴺ * X₀) / (1 - a₃ * αᴺ)
+    X₁ = (a₀ * f₀ + a₁ * f₁ + a₂ * (1 - a₃ * αᴺ) * f₂) / (1 - (a₁ + a₃) * αᴺ)
+    Y₁ = (2 * a₂ * (αᴺ * X₁ + (a₀ / a₁) * f₀ + f₁)) / (1 - a₃ * αᴺ)
 
     # aa_terms_diag_third_shoc_moment
-    aa0 = omega0 * x0 + omega1 * y0
-    aa1 = omega0 * x1 + omega1 * y1 + omega2
+    A₀ = ω₀ * X₀ + ω₁ * Y₀
+    A₁ = ω₀ * X₁ + ω₁ * Y₁ + ω₂
 
     # w3_diag_third_shoc_moment
-    return (aa1 - tm.ℂʷ₉ * x1 - tm.ℂʷ₁₀ * f5) / (c - tm.ℂʷ₉ * x0 + aa0)
+    return (A₁ - tm.ℂʷ₉ * X₁ - tm.ℂʷ₁₀ * f₅) / (c - tm.ℂʷ₉ * X₀ + A₀)
 end
 
 #####
@@ -263,35 +263,35 @@ end
 
 """
 Supertype of the components that limit the third moment of vertical velocity. Each holds
-`maximum_skewness`, the largest magnitude of the skewness `w'³ / (w'w')^{3/2}`: the bound of the
+`maximum_skewness`, the largest magnitude of the skewness `w′³ / (w′²)^{3/2}`: the bound of the
 third moment is
 
-    w'³ᵐᵃˣ = maximum_skewness (w'w')^{3/2}
+    w′³ᵐᵃˣ = maximum_skewness (w′²)^{3/2}
 
 The default, `1.2 √2 ≈ 1.697`, is the bound of E3SM `shoc.F90`, which writes it
-`w3clip √(2 w'w'³)` with `w3clip = 1.2`.
+`w3clip √(2 (w′²)³)` with `w3clip = 1.2`.
 """
 abstract type AbstractSkewnessLimiter <: AbstractSubgridDistributionComponent end
 
 # The largest skewness of E3SM `shoc.F90`: `w3clip √2` with `w3clip = 1.2`
 const default_maximum_skewness = 1.2 * sqrt(2)
 
-# The largest magnitude of the third moment; `variance` is w_sec interpolated to the interface
+# The largest magnitude of the third moment; `variance` is w′² interpolated to the interface
 @inline third_moment_bound(skewness::AbstractSkewnessLimiter, variance) =
     skewness.maximum_skewness * (variance * sqrt(variance))
 
 """
 $(TYPEDEF)
 
-A third moment whose magnitude exceeds the bound `maximum_skewness (w'w')^{3/2}` is reset to the
+A third moment whose magnitude exceeds the bound `maximum_skewness (w′²)^{3/2}` is reset to the
 constant `reset_third_moment`, whatever its sign; a third moment within the bound is unchanged.
 This is `clipping_diag_third_shoc_moments` of E3SM `shoc.F90`. The third moment jumps where it
-crosses the bound: from `±w'³ᵐᵃˣ` to `+reset_third_moment`.
+crosses the bound: from `±w′³ᵐᵃˣ` to `+reset_third_moment`.
 
 $(TYPEDFIELDS)
 """
 struct ResetAboveThresholdSkewness{FT} <: AbstractSkewnessLimiter
-    "Largest magnitude of the skewness `w'³ / (w'w')^{3/2}` (`w3clip √2` of `shoc.F90`)"
+    "Largest magnitude of the skewness `w′³ / (w′²)^{3/2}` (`w3clip √2` of `shoc.F90`)"
     maximum_skewness :: FT
     "The value a third moment beyond the bound is reset to, m³ s⁻³ (`w3clipdef` of `shoc.F90`); dimensional"
     reset_third_moment :: FT
@@ -310,25 +310,25 @@ ResetAboveThresholdSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw..
 
 Adapt.@adapt_structure ResetAboveThresholdSkewness
 
-@inline function limit_third_moment(skewness::ResetAboveThresholdSkewness, variance, w3)
+@inline function limit_third_moment(skewness::ResetAboveThresholdSkewness, variance, w′³)
     bound = third_moment_bound(skewness, variance)
-    return ifelse(abs(w3) > bound, skewness.reset_third_moment, w3)
+    return ifelse(abs(w′³) > bound, skewness.reset_third_moment, w′³)
 end
 
 """
 $(TYPEDEF)
 
-The third moment saturates toward `±w'³ᵐᵃˣ = ±maximum_skewness (w'w')^{3/2}` along an odd quintic
-polynomial. With `u = (8 / 15) w'³ / w'³ᵐᵃˣ` limited to `[-1, 1]`,
+The third moment saturates toward `±w′³ᵐᵃˣ = ±maximum_skewness (w′²)^{3/2}` along an odd quintic
+polynomial. With `u = (8 / 15) w′³ / w′³ᵐᵃˣ` limited to `[-1, 1]`,
 
-    w'³ ← (15 / 8) w'³ᵐᵃˣ u (1 - (2/3) u² + (1/5) u⁴)
+    w′³ ← (15 / 8) w′³ᵐᵃˣ u (1 - (2/3) u² + (1/5) u⁴)
 
 which
 
 - is odd, so the sign of the third moment is kept, and increasing: its slope is `(1 - u²)²`;
 - has slope one at zero: a third moment at a tenth of the bound is changed by 0.2 %, at half
   the bound by 4.6 %, at the bound by 17 %;
-- reaches the bound exactly at `|w'³| = (15 / 8) w'³ᵐᵃˣ` with zero slope and zero curvature, and is
+- reaches the bound exactly at `|w′³| = (15 / 8) w′³ᵐᵃˣ` with zero slope and zero curvature, and is
   the bound beyond, so that value, first and second derivative are continuous everywhere;
 - costs one division and no transcendental function.
 
@@ -340,7 +340,7 @@ the vertical velocity variance is not positive, and its square root is guarded t
 $(TYPEDFIELDS)
 """
 struct PolynomialSaturatedSkewness{FT} <: AbstractSkewnessLimiter
-    "Largest magnitude of the skewness `w'³ / (w'w')^{3/2}` (`w3clip √2` of `shoc.F90`)"
+    "Largest magnitude of the skewness `w′³ / (w′²)^{3/2}` (`w3clip √2` of `shoc.F90`)"
     maximum_skewness :: FT
 end
 
@@ -361,12 +361,12 @@ Adapt.@adapt_structure PolynomialSaturatedSkewness
     return skewness.maximum_skewness * (variance * zero_safe_sqrt(variance))
 end
 
-@inline function limit_third_moment(skewness::PolynomialSaturatedSkewness, variance, w3)
-    FT = typeof(w3)
+@inline function limit_third_moment(skewness::PolynomialSaturatedSkewness, variance, w′³)
+    FT = typeof(w′³)
     bound = third_moment_bound(skewness, variance)
     reach = (convert(FT, 15) / 8) * bound # the magnitude at which the bound is reached
     bounded = reach > 0
-    u = max(-one(FT), min(one(FT), w3 / ifelse(bounded, reach, one(FT))))
+    u = max(-one(FT), min(one(FT), w′³ / ifelse(bounded, reach, one(FT))))
     u² = u * u
     saturated = reach * u * (1 - u² * (convert(FT, 2) / 3 - u² / 5))
     # The polynomial is the bound at |u| = 1 but for round-off, which the hard bound removes
@@ -377,15 +377,15 @@ end
 """
 $(TYPEDEF)
 
-The third moment saturates toward `±w'³ᵐᵃˣ = ±maximum_skewness (w'w')^{3/2}` along a hyperbolic tangent,
+The third moment saturates toward `±w′³ᵐᵃˣ = ±maximum_skewness (w′²)^{3/2}` along a hyperbolic tangent,
 
-    w'³ ← w'³ᵐᵃˣ tanh(w'³ / w'³ᵐᵃˣ)
+    w′³ ← w′³ᵐᵃˣ tanh(w′³ / w′³ᵐᵃˣ)
 
-so that the skewness `w'³ / (w'w')^{3/2}` lies strictly inside `±maximum_skewness` for every input. The map
+so that the skewness `w′³ / (w′²)^{3/2}` lies strictly inside `±maximum_skewness` for every input. The map
 
-- is odd and increasing, with slope `sech²(w'³ / w'³ᵐᵃˣ)`: one at zero, positive everywhere (unlike
+- is odd and increasing, with slope `sech²(w′³ / w′³ᵐᵃˣ)`: one at zero, positive everywhere (unlike
   [`PolynomialSaturatedSkewness`](@ref), whose slope is zero beyond 15/8 of the bound), at most one;
-- has bounded sensitivity to the variance too: `∂w'³/∂w'³ᵐᵃˣ = tanh(y) - y sech²(y) ∈ [0, 1)`, `y = w'³ / w'³ᵐᵃˣ`;
+- has bounded sensitivity to the variance too: `∂w′³/∂w′³ᵐᵃˣ = tanh(y) - y sech²(y) ∈ [0, 1)`, `y = w′³ / w′³ᵐᵃˣ`;
 - changes a third moment at a tenth of the bound by 0.3 %, at half the bound by 7.6 %, at the bound by 24 %;
 - is zero, with zero slope in the variance, where the variance is not positive.
 
@@ -395,7 +395,7 @@ models were compared with (|Sk| ≲ 2 in cumulus), so the map is a guard and not
 $(TYPEDFIELDS)
 """
 struct TanhSaturatedSkewness{FT} <: AbstractSkewnessLimiter
-    "Supremum of the magnitude of the skewness `w'³ / (w'w')^{3/2}`"
+    "Supremum of the magnitude of the skewness `w′³ / (w′²)^{3/2}`"
     maximum_skewness :: FT
 end
 
@@ -409,25 +409,25 @@ TanhSaturatedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
 
 Adapt.@adapt_structure TanhSaturatedSkewness
 
-@inline function limit_third_moment(skewness::TanhSaturatedSkewness, variance, w3)
-    FT = typeof(w3)
+@inline function limit_third_moment(skewness::TanhSaturatedSkewness, variance, w′³)
+    FT = typeof(w′³)
     variance = max(variance, zero(variance))
     bound = skewness.maximum_skewness * (variance * zero_safe_sqrt(variance))
     bounded = bound > 0
-    return ifelse(bounded, bound * tanh(w3 / ifelse(bounded, bound, one(FT))), zero(FT))
+    return ifelse(bounded, bound * tanh(w′³ / ifelse(bounded, bound, one(FT))), zero(FT))
 end
 
 """
 $(TYPEDEF)
 
-A third moment beyond the bound `b = maximum_skewness (w'w')^{3/2}` is set to the bound of its
-sign: `w'³ ← max(-b, min(b, w'³))`. Continuous, with a kink at the bound; [`PolynomialSaturatedSkewness`](@ref)
+A third moment beyond the bound `b = maximum_skewness (w′²)^{3/2}` is set to the bound of its
+sign: `w′³ ← max(-b, min(b, w′³))`. Continuous, with a kink at the bound; [`PolynomialSaturatedSkewness`](@ref)
 and [`TanhSaturatedSkewness`](@ref) bound it smoothly.
 
 $(TYPEDFIELDS)
 """
 struct ClampedSkewness{FT} <: AbstractSkewnessLimiter
-    "Largest magnitude of the skewness `w'³ / (w'w')^{3/2}` (`w3clip √2` of `shoc.F90`)"
+    "Largest magnitude of the skewness `w′³ / (w′²)^{3/2}` (`w3clip √2` of `shoc.F90`)"
     maximum_skewness :: FT
 end
 
@@ -442,7 +442,7 @@ ClampedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
 Adapt.@adapt_structure ClampedSkewness
 
 # The bound is positive: the interface variance it is made of is floored
-@inline function limit_third_moment(skewness::ClampedSkewness, variance, w3)
+@inline function limit_third_moment(skewness::ClampedSkewness, variance, w′³)
     bound = third_moment_bound(skewness, variance)
-    return max(-bound, min(bound, w3))
+    return max(-bound, min(bound, w′³))
 end

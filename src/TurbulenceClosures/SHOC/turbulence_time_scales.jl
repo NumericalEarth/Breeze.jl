@@ -126,8 +126,8 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The dissipation coefficient `𝕊ᴰ = (ℂᴰ₃ + ℂᴰ₄) / ℂᴰ₅ × ℂᴰ₁³ / ℂᴰ₂⁴` of `shoc.F90` (`Cee`).
 """
 @inline function shoc_dissipation_coefficient(sf::ColumnStabilityDamping)
-    Ce = sf.ℂᴰ₁ * sf.ℂᴰ₁ * sf.ℂᴰ₁ / ((sf.ℂᴰ₂ * sf.ℂᴰ₂) * (sf.ℂᴰ₂ * sf.ℂᴰ₂))
-    return Ce / sf.ℂᴰ₅ * sf.ℂᴰ₃ + Ce / sf.ℂᴰ₅ * sf.ℂᴰ₄
+    dissipation_ratio = sf.ℂᴰ₁ * sf.ℂᴰ₁ * sf.ℂᴰ₁ / ((sf.ℂᴰ₂ * sf.ℂᴰ₂) * (sf.ℂᴰ₂ * sf.ℂᴰ₂))
+    return dissipation_ratio / sf.ℂᴰ₅ * sf.ℂᴰ₃ + dissipation_ratio / sf.ℂᴰ₅ * sf.ℂᴰ₄
 end
 
 const ColumnStabilityDampingClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ColumnStabilityDamping}

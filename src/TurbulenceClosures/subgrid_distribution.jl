@@ -29,8 +29,8 @@ using Oceananigans.Operators: Δzᶜᶜᶠ
 
 using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
                                       third_moment, limit_third_moment, assumed_pdf,
-                                      plume_liquid_water_temperature, plume_saturation,
-                                      rate_norm_factor, linear_interp, hard_floor, component_vapor_excess,
+                                      liquid_water_temperature, component_saturation,
+                                      rate_norm_factor, linearly_interpolate, hard_floor, component_vapor_excess,
                                       representable_skewness, within_component_share, ice_saturation_thermodynamics,
                                       saturation_surface, condensate_latent_heat_and_log_slope,
                                       condensate_liquid_fraction as distributed_condensate_liquid_fraction
@@ -859,7 +859,7 @@ end
 
 # The condensate a distribution does not distribute, at a cell: (liquid, ice), the rain, the liquid on ice and the ice
 # of a microphysics with prognostic cloud liquid. The assumed PDF holds it as condensate in the all-vapor state of
-# its water (`plume_moisture`).
+# its water (`component_moisture`).
 struct HeldCondensate{R, V, L, G, M, F}
     density :: R
     moisture_density :: V
@@ -938,14 +938,14 @@ end
 #
 # The floor is a smooth maximum with continuous derivative and no branch on the state,
 #
-#     smooth_max(a, b) = (a + b + √((a - b)² + (δ b)²)) / 2,   δ = 0.1,
+#     smooth_maximum(a, b) = (a + b + √((a - b)² + (δ b)²)) / 2,   δ = 0.1,
 #
-# so smooth_max(a, 0) = a exactly, smooth_max ≥ max(a, b), and the excess, δ b / 2 at a = b,
+# so smooth_maximum(a, 0) = a exactly, smooth_maximum ≥ max(a, b), and the excess, δ b / 2 at a = b,
 # decays as (δ b)² / (4 |a - b|) away from it. `floatmin` under the root keeps the derivative
 # finite where a = b = 0.
 @inline bound_flux_correlation(::Nothing, w′², θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′, w′θˡⁱ′, w′qᵗ′) = (θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′)
 
-@inline function variance_floor_smooth_max(a, b, FT)
+@inline function variance_floor_smooth_maximum(a, b, FT)
     δb = b / 10 # δ = 0.1
     return (a + b + sqrt((a - b) * (a - b) + δb * δb + floatmin(FT))) / 2
 end
@@ -955,8 +955,8 @@ end
     d = ℂʳ * ℂʳ * w′²
     resolved = d > floatmin(FT)
     dₛ = ifelse(resolved, d, one(FT))
-    θ² = variance_floor_smooth_max(θˡⁱ′², ifelse(resolved, w′θˡⁱ′ * w′θˡⁱ′ / dₛ, zero(FT)), FT)
-    q² = variance_floor_smooth_max(qᵗ′², ifelse(resolved, w′qᵗ′ * w′qᵗ′ / dₛ, zero(FT)), FT)
+    θ² = variance_floor_smooth_maximum(θˡⁱ′², ifelse(resolved, w′θˡⁱ′ * w′θˡⁱ′ / dₛ, zero(FT)), FT)
+    q² = variance_floor_smooth_maximum(qᵗ′², ifelse(resolved, w′qᵗ′ * w′qᵗ′ / dₛ, zero(FT)), FT)
     fθ = ifelse(θˡⁱ′² > 0, θ² / ifelse(θˡⁱ′² > 0, θˡⁱ′², one(FT)), one(FT))
     fq = ifelse(qᵗ′² > 0, q² / ifelse(qᵗ′² > 0, qᵗ′², one(FT)), one(FT))
     return θ², q², θˡⁱ′qᵗ′ * sqrt(fθ * fq)
@@ -981,8 +981,8 @@ end
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
         τ³ = third_moment_time_scale(d.time_scale, m.τ[i, j, k], ℓ, u, N²)
         τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
-        w′² = linear_interp(zᵘ, zˡ, cl.w′²[i, j, k], cl.w′²[i, j, k-1], zᶠ)
-        θᶠ = linear_interp(zᵘ, zˡ, θ[i, j, k], θ[i, j, k-1], zᶠ)
+        w′² = linearly_interpolate(zᵘ, zˡ, cl.w′²[i, j, k], cl.w′²[i, j, k-1], zᶠ)
+        θᶠ = linearly_interpolate(zᵘ, zˡ, θ[i, j, k], θ[i, j, k-1], zᶠ)
         algebraic_arguments = (τ³, N², w′², θᶠ,
                                1 / (zᵘ - zˡ), 1 / (Δzᶜᶜᶜ(i, j, k, grid) + Δzᶜᶜᶜ(i, j, k-1, grid)),
                                m.θˡⁱ′²[i, j, k+1] - m.θˡⁱ′²[i, j, k-1],
@@ -1026,7 +1026,7 @@ third_moment_location_fields(grid, ::Center) = NamedTuple()
             zᶜ = znode(i, j, k, grid, ccc...)
             zˡ = znode(i, j, k, grid, ccf...)
             zᵘ = znode(i, j, k+1, grid, ccf...)
-            w′³ = linear_interp(zᵘ, zˡ, m.w′³[i, j, k+1], m.w′³[i, j, k], zᶜ)
+            w′³ = linearly_interpolate(zᵘ, zˡ, m.w′³[i, j, k+1], m.w′³[i, j, k], zᶜ)
             cl.w′³[i, j, k] = limit_third_moment(d.skewness, cl.w′²[i, j, k], w′³)
         end
     end
@@ -1054,9 +1054,9 @@ end
         τ³ = ifelse(isfinite(τ³), τ³, zero(FT))
         w′² = cl.w′²[i, j, k]
         Δzʷ = znode(i, j, kᵘ, grid, ccc...) - znode(i, j, kˡ, grid, ccc...)
-        thedz = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
+        compact_inverse_spacing = ifelse(kᵘ > kˡ, 1 / Δzʷ, zero(FT))
         algebraic_arguments = (τ³, N², w′², θ[i, j, k],
-                               thedz, 1 / Δzᶜᶜᶜ(i, j, k, grid),
+                               compact_inverse_spacing, 1 / Δzᶜᶜᶜ(i, j, k, grid),
                                θˡⁱ′²ᵘ - θˡⁱ′²ˡ,
                                w′θˡⁱ′ᵘ - w′θˡⁱ′ˡ,
                                cl.w′²[i, j, kᵘ] - cl.w′²[i, j, kˡ],
@@ -1074,7 +1074,7 @@ end
         zᶜ = znode(i, j, k, grid, ccc...)
         zˡ = znode(i, j, k, grid, ccf...)
         zᵘ = znode(i, j, k+1, grid, ccf...)
-        w′θˡⁱ′ᶜ = linear_interp(zᵘ, zˡ, m.w′θˡⁱ′[i, j, k+1], m.w′θˡⁱ′[i, j, k], zᶜ)
+        w′θˡⁱ′ᶜ = linearly_interpolate(zᵘ, zˡ, m.w′θˡⁱ′[i, j, k+1], m.w′θˡⁱ′[i, j, k], zᶜ)
         lower = (m.τ[i, j, k], closure_fields.ℓᵐ[i, j, k], closure_fields.N²[i, j, k], m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k])
         upper = (m.τ[i, j, k+1], closure_fields.ℓᵐ[i, j, k+1], closure_fields.N²[i, j, k+1], m.θˡⁱ′²[i, j, k+1], m.w′θˡⁱ′[i, j, k+1])
         cl.w′³[i, j, k] = center_third_moment(i, j, k, grid, d, closure, cl, g, θ, e, w′θˡⁱ′ᶜ, lower, upper)
@@ -1181,8 +1181,8 @@ end
         # (`@inbounds` does not reach into the body of a closure: a bounds check there is an early exit of the column
         # loop, which Reactant raises to a loop of unknown trip count that Enzyme cannot differentiate)
         interface_moments(k) = @inbounds (m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k], m.θˡⁱ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
-        largeneg = convert(FT, -99999999.99)
-        floors = (zero(FT), largeneg, largeneg, largeneg, zero(FT))
+        large_negative = convert(FT, -99999999.99)
+        floors = (zero(FT), large_negative, large_negative, large_negative, zero(FT))
         for k in 1:Nz
             zᶜ = znode(i, j, k, grid, ccc...)
             zˡ = znode(i, j, k, grid, ccf...)
@@ -1192,7 +1192,7 @@ end
             w′²ᶜ = cl.w′²[i, j, k]
             mˡ = interface_moments(k)
             mᵘ = interface_moments(k+1)
-            mᶜ = map((yᵘ, yˡ, floor) -> hard_floor(linear_interp(zᵘ, zˡ, yᵘ, yˡ, zᶜ), floor), mᵘ, mˡ, floors)
+            mᶜ = map((yᵘ, yˡ, lower_bound) -> hard_floor(linearly_interpolate(zᵘ, zˡ, yᵘ, yˡ, zᶜ), lower_bound), mᵘ, mˡ, floors)
             mᶜ = (cl.w′³[i, j, k], mᶜ...)
             thermodynamicsᵏ = level_thermodynamics(thermodynamics, i, j, k)
             C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
@@ -1285,9 +1285,9 @@ end
 # aⁱ = ∂qᵛ⁺ⁱ/∂θ of the level, in the linearization of the distribution's statistics (`component_vapor_excess`)
 @inline function ice_saturation_slope(thermodynamics, θ, qʷ, p)
     ice = ice_saturation_thermodynamics(thermodynamics)
-    Tˡ = plume_liquid_water_temperature(ice, θ, qʷ, p)
-    qᵛ⁺ⁱ, β, cp_over_L, Π = plume_saturation(ice, Tˡ, qʷ, p)
-    return qᵛ⁺ⁱ * β * cp_over_L * Π
+    Tˡ = liquid_water_temperature(ice, θ, qʷ, p)
+    qᵛ⁺ⁱ, β, ĉᵖℒ⁻¹, Π = component_saturation(ice, Tˡ, qʷ, p)
+    return qᵛ⁺ⁱ * β * ĉᵖℒ⁻¹ * Π
 end
 
 @kernel function _compute_outside_condensate_moments!(m, cl, grid, Kᶜ, s)
@@ -1411,18 +1411,18 @@ solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args..
     km = max(k - 1, 1)
     g = saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
     @inbounds begin
-        gAᶠ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, km]) / 2
+        b_qᵛᶠ = (cl.b_qᵛ[i, j, k] + cl.b_qᵛ[i, j, km]) / 2
         bˡᵛaʷ⁺ = (cl.b_qᶜ[i, j, k] - cl.b_qᵛ[i, j, k]) * center_condensate_flux_fraction(i, j, k, cl)
         bˡᵛaʷ⁻ = (cl.b_qᶜ[i, j, km] - cl.b_qᵛ[i, j, km]) * center_condensate_flux_fraction(i, j, km, cl)
     end
-    N²ᶜ = g.gθᶠ * g.∂zθ + gAᶠ * g.∂zq
+    N²ᶜ = g.b_θᶠ * g.∂zθ + b_qᵛᶠ * g.∂zq
     N²ᵇ = N²ᶜ + (bˡᵛaʷ⁺ + bˡᵛaʷ⁻) / 2 * g.∂zs
     return N²ᶜ, N²ᵇ, g.∂zs, g.bᶜᵛ
 end
 
 # Across the face k (between the centers k - 1 and k): the gradients of θʷ and qʷ, that of the saturation excess
 # linearized about the state of each cell, ∂z s̄ = c̄_q ∂z qʷ - c̄_θ ∂z θʷ (`saturated_condensate_coefficients`), the face
-# b̄_θ (`gθᶠ`) and the buoyancy of condensate in place of vapor, b̄ᶜ - b̄ᵛ, so that N²ˢ - N²ᶜ = (b̄ᶜ - b̄ᵛ) ∂z s̄: the one
+# b̄_θ (`b_θᶠ`) and the buoyancy of condensate in place of vapor, b̄ᶜ - b̄ᵛ, so that N²ˢ - N²ᶜ = (b̄ᶜ - b̄ᵛ) ∂z s̄: the one
 # linearization of the bracket, of the target of the solve and of the latent correction
 @inline function saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
     km = max(k - 1, 1)
@@ -1430,7 +1430,7 @@ end
         Δz = Δzᶜᶜᶠ(i, j, k, grid)
         Δθ = θ[i, j, k] - θ[i, j, km]
         Δq = qᵗ[i, j, k] - qᵗ[i, j, km]
-        gθᶠ = (cl.b_θ[i, j, k] + cl.b_θ[i, j, km]) / 2
+        b_θᶠ = (cl.b_θ[i, j, k] + cl.b_θ[i, j, km]) / 2
         bᶜᵛ = (cl.b_qᶜ[i, j, k] + cl.b_qᶜ[i, j, km] - cl.b_qᵛ[i, j, k] - cl.b_qᵛ[i, j, km]) / 2
         c_q⁺, c_θ⁺ = saturated_condensate_coefficients(thermodynamics, i, j, k, grid, s, θ[i, j, k])
         c_q⁻, c_θ⁻ = saturated_condensate_coefficients(thermodynamics, i, j, km, grid, s, θ[i, j, km])
@@ -1438,7 +1438,7 @@ end
     ∂zθ = Δθ / Δz
     ∂zq = Δq / Δz
     ∂zs = (c_q⁺ + c_q⁻) / 2 * ∂zq - (c_θ⁺ + c_θ⁻) / 2 * ∂zθ
-    return (; Δz, Δθ, Δq, ∂zθ, ∂zq, gθᶠ, ∂zs, bᶜᵛ)
+    return (; Δz, Δθ, Δq, ∂zθ, ∂zq, b_θᶠ, ∂zs, bᶜᵛ)
 end
 
 function cloud_buoyancy_stability!(buoyancy_flux::AppliedFluxEnergetics{N, W, <:Union{SecantIteration, BisectionIteration}},
@@ -1480,20 +1480,20 @@ end
     return (L′ + U′) / 2, L′, U′
 end
 
-@inline function stability_update(::SecantIteration, last, ω, x, r, x₋, r₋, L, U)
+@inline function stability_update(::SecantIteration, last_pass, ω, x, r, x₋, r₋, L, U)
     return clamp(secant_root(x, r, x₋, r₋, x + ω * r), L, U), L, U
 end
 
-@inline function stability_update(b::BisectionIteration, last, ω, x, r, x₋, r₋, L, U)
+@inline function stability_update(b::BisectionIteration, last_pass, ω, x, r, x₋, r₋, L, U)
     L′ = ifelse(r > 0, max(L, x), L)
     U′ = ifelse(r > 0, U, min(U, x))
     middle = (L′ + U′) / 2
-    interpolate = last & b.final_interpolation
+    interpolate = last_pass & b.final_interpolation
     x′ = ifelse(interpolate, clamp(secant_root(x, r, x₋, r₋, middle), L′, U′), middle)
     return x′, L′, U′
 end
 
-@kernel function _solve_cloud_buoyancy_stability!(N², solver, first, last, ω, grid, closure, closure_fields, velocities, s, e)
+@kernel function _solve_cloud_buoyancy_stability!(N², solver, first_pass, last_pass, ω, grid, closure, closure_fields, velocities, s, e)
     i, j, k = @index(Global, NTuple)
     fields = closure_fields.subgrid_cloud
     state, m, cl = fields.solver_state, fields.moments, fields.cloud
@@ -1518,17 +1518,17 @@ end
         r = G - x
         x₋ = state.x₋[i, j, k]
         r₋ = state.r₋[i, j, k]
-        L₋ = ifelse(first, L, state.lower[i, j, k])
-        U₋ = ifelse(first, U, state.upper[i, j, k])
+        L₋ = ifelse(first_pass, L, state.lower[i, j, k])
+        U₋ = ifelse(first_pass, U, state.upper[i, j, k])
 
         x₀, L₀, U₀ = first_stability_update(solver, x, r, G, L, U)
-        xₙ, Lₙ, Uₙ = stability_update(solver, last, ω, x, r, x₋, r₋, L₋, U₋)
-        x′ = ifelse(first, x₀, xₙ)
+        xₙ, Lₙ, Uₙ = stability_update(solver, last_pass, ω, x, r, x₋, r₋, L₋, U₋)
+        x′ = ifelse(first_pass, x₀, xₙ)
 
         state.x₋[i, j, k] = x
         state.r₋[i, j, k] = r
-        state.lower[i, j, k] = ifelse(first, L₀, Lₙ)
-        state.upper[i, j, k] = ifelse(first, U₀, Uₙ)
+        state.lower[i, j, k] = ifelse(first_pass, L₀, Lₙ)
+        state.upper[i, j, k] = ifelse(first_pass, U₀, Uₙ)
         N²[i, j, k] = ifelse(interior_face, x′, N²[i, j, k])
     end
 end
@@ -1620,7 +1620,7 @@ vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterF
                                        σⁱ₁ = CenterField(grid), σⁱ₂ = CenterField(grid),
                                        ρⁱ₁ = CenterField(grid), ρⁱ₂ = CenterField(grid))
 
-@inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, ρ₁, ρ₂))
+@inline function store_vapor_excess_components!(components, i, j, k, (a, μ₁, μ₂, σ₁, σ₂, μⁱ₁, μⁱ₂, σⁱ₁, σⁱ₂, r₁, r₂))
     @inbounds begin
         components.a₁[i, j, k] = a
         components.μ₁[i, j, k] = μ₁
@@ -1631,8 +1631,8 @@ vapor_excess_component_fields(grid) = (a₁ = CenterField(grid), μ₁ = CenterF
         components.μⁱ₂[i, j, k] = μⁱ₂
         components.σⁱ₁[i, j, k] = σⁱ₁
         components.σⁱ₂[i, j, k] = σⁱ₂
-        components.ρⁱ₁[i, j, k] = ρ₁
-        components.ρⁱ₂[i, j, k] = ρ₂
+        components.ρⁱ₁[i, j, k] = r₁
+        components.ρⁱ₂[i, j, k] = r₂
     end
     return nothing
 end
