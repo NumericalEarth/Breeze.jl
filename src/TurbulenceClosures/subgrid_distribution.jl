@@ -1,13 +1,6 @@
 using Oceananigans.Grids: znode
 using Oceananigans.Operators: Δzᶜᶜᶠ
 
-using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
-                                      third_moment, limit_third_moment, assumed_pdf,
-                                      rate_norm_factor, linearly_interpolate, component_vapor_excess,
-                                      representable_skewness, within_component_share, ice_saturation_thermodynamics,
-                                      saturation_surface, condensate_latent_heat_and_log_slope,
-                                      condensate_liquid_fraction as distributed_condensate_liquid_fraction
-
 #####
 ##### The time scale of the moments
 #####
@@ -736,13 +729,13 @@ applied_flux_stability!(::AppliedFluxEnergetics, fields, closure_fields, closure
 @inline tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields) =
     @inbounds fields.cloud.B[i, j, k]
 
-SimplifiedHigherOrderClosures.closure_components(closure::TKEBasedTurbulenceClosure) =
+closure_components(closure::TKEBasedTurbulenceClosure) =
     (closure.mixing_length, closure.stability_functions, closure.static_stability, closure.shear, closure.subgrid_distribution,
      closure.heating_budget_flux)
 
-SimplifiedHigherOrderClosures.rebuild_component(::Nothing, scalars, n) = nothing, n
+rebuild_component(::Nothing, scalars, n) = nothing, n
 
-SimplifiedHigherOrderClosures.component_constructor(::Type{<:StratificationLimitedMomentTimeScale{P}}) where P =
+component_constructor(::Type{<:StratificationLimitedMomentTimeScale{P}}) where P =
     (ℂᵗ, ℂᴺ, N) -> StratificationLimitedMomentTimeScale{P, typeof(ℂᵗ)}(ℂᵗ, ℂᴺ, N)
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -753,8 +746,8 @@ stability, shear, subgrid distribution, heating budget flux) holds them. [`closu
 coefficients. The non-integer scalars are promoted with the replacements, so that traced scalars
 give a closure whose components all have the promoted scalar type.
 """
-function SimplifiedHigherOrderClosures.with_parameters(closure::TKEBasedTurbulenceClosure{TD}; kw...) where TD
-    scalars = SimplifiedHigherOrderClosures.closure_scalars(closure)
+function with_parameters(closure::TKEBasedTurbulenceClosure{TD}; kw...) where TD
+    scalars = closure_scalars(closure)
     names = keys(scalars)
     all(name -> name ∈ names, keys(kw)) ||
         throw(ArgumentError("with_parameters: $(setdiff(keys(kw), names)) are not scalars of the components of " *
@@ -766,8 +759,8 @@ function SimplifiedHigherOrderClosures.with_parameters(closure::TKEBasedTurbulen
 
     n = 1
     components = ()
-    for component in SimplifiedHigherOrderClosures.closure_components(closure)
-        component, n = SimplifiedHigherOrderClosures.rebuild_component(component, promoted, n)
+    for component in closure_components(closure)
+        component, n = rebuild_component(component, promoted, n)
         components = (components..., component)
     end
     mixing_length, stability_functions, static_stability, shear, subgrid_distribution, heating_budget_flux = components

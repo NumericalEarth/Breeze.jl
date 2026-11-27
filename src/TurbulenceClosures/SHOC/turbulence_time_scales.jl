@@ -35,12 +35,12 @@ ColumnStabilityDamping(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
 
 Adapt.@adapt_structure ColumnStabilityDamping
 
-TurbulenceClosures.convert_eltype(::Type{FT}, damping::ColumnStabilityDamping) where FT =
+convert_eltype(::Type{FT}, damping::ColumnStabilityDamping) where FT =
     map_scalars(scalar -> convert(FT, scalar), damping)
 
 Base.summary(damping::ColumnStabilityDamping{FT}) where FT = "ColumnStabilityDamping{$FT}"
 
-function TurbulenceClosures.show_stability_function_lines(io::IO, damping::ColumnStabilityDamping, prefix)
+function show_stability_function_lines(io::IO, damping::ColumnStabilityDamping, prefix)
     print(io, prefix, "├── ℂᵘ: ", prettysummary(damping.ℂᵘ), ", ℂᶜ: ", prettysummary(damping.ℂᶜ), '\n',
               prefix, "├── ℂᵝ₁: ", prettysummary(damping.ℂᵝ₁), ", ℂᵝ₂: ", prettysummary(damping.ℂᵝ₂),
                       ", ℂᵝ₃: ", prettysummary(damping.ℂᵝ₃), ", ℂᵝ₄: ", prettysummary(damping.ℂᵝ₄), '\n',
@@ -56,12 +56,12 @@ end
 
 const ColumnStabilityDampingClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ColumnStabilityDamping}
 
-@inline TurbulenceClosures.shear_production_fraction(damping::ColumnStabilityDamping) = damping.ℂᴾ
+@inline shear_production_fraction(damping::ColumnStabilityDamping) = damping.ℂᴾ
 
-@inline TurbulenceClosures.dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ColumnStabilityDampingClosure, args...) =
+@inline dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ColumnStabilityDampingClosure, args...) =
     shoc_dissipation_coefficient(closure.stability_functions)
 
-@inline TurbulenceClosures.dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ColumnStabilityDampingClosure, args...) =
+@inline dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure::ColumnStabilityDampingClosure, args...) =
     shoc_dissipation_coefficient(closure.stability_functions)
 
 @inline function isotropy_ratio(damping::ColumnStabilityDamping, λ, ℓ, u, N²)
@@ -82,7 +82,7 @@ end
     return isotropy_ratio(closure.stability_functions, λ, ℓ, u, N²)
 end
 
-@inline function TurbulenceClosures.diffusivity_stability_functionsᶜᶜᶠ(i, j, k, grid, closure::ColumnStabilityDampingClosure,
+@inline function diffusivity_stability_functionsᶜᶜᶠ(i, j, k, grid, closure::ColumnStabilityDampingClosure,
                                                                        velocities, e, closure_fields)
     ℓ = @inbounds closure_fields.ℓᵐ[i, j, k]
     u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
@@ -91,14 +91,14 @@ end
     return damping.ℂᵘ * s, damping.ℂᶜ * s, damping.ℂᶜ * s
 end
 
-@inline TurbulenceClosures.return_to_isotropy_time_scaleᶜᶜᶠ(i, j, k, grid, ::ColumnStabilityDamping, closure, closure_fields, ℓ, u) =
+@inline return_to_isotropy_time_scaleᶜᶜᶠ(i, j, k, grid, ::ColumnStabilityDamping, closure, closure_fields, ℓ, u) =
     isotropy_ratioᶜᶜᶠ(i, j, k, grid, closure, closure_fields, ℓ, u) * ℓ / u
 
 #####
 ##### The stability damping of the column
 #####
 
-TurbulenceClosures.column_stability_field(grid, ::ColumnStabilityDamping) = Field{Center, Center, Nothing}(grid)
+column_stability_field(grid, ::ColumnStabilityDamping) = Field{Center, Center, Nothing}(grid)
 
 @inline function lower_troposphere_weight(p, pᴵ)
     r = pᴵ / p
@@ -132,7 +132,7 @@ end
     @inbounds λ[i, j, 1] = column_stability_damping(damping, integral / g)
 end
 
-function TurbulenceClosures.compute_column_stability!(::ColumnStabilityDamping, λ, grid, closure, N², model; parameters = :xyz)
+function compute_column_stability!(::ColumnStabilityDamping, λ, grid, closure, N², model; parameters = :xyz)
     pressure = AtmosphereModels.dynamics_pressure(model.dynamics)
     g = model.thermodynamic_constants.gravitational_acceleration
     launch!(grid.architecture, grid, column_kernel_parameters(parameters), _compute_column_stability_damping!, λ, grid, closure, N², pressure, g)
@@ -142,11 +142,3 @@ end
 #####
 ##### The rate norm of a limit of a time scale, for `StratificationLimitedMomentTimeScale`
 #####
-
-@inline rate_norm_factor(::Val{1}, x) = 1 + x
-@inline rate_norm_factor(::Val{2}, x) = sqrt(1 + x * x)
-@inline function rate_norm_factor(::Val{4}, x)
-    x² = x * x
-    return sqrt(sqrt(1 + x² * x²))
-end
-@inline rate_norm_factor(::Val{P}, x) where P = (1 + x^P)^inv(convert(typeof(x), P))

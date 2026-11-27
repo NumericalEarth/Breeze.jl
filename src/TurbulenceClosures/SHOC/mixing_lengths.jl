@@ -27,7 +27,7 @@ BlendedMixingLength(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
 
 Adapt.@adapt_structure BlendedMixingLength
 
-TurbulenceClosures.convert_eltype(::Type{FT}, ml::BlendedMixingLength) where FT =
+convert_eltype(::Type{FT}, ml::BlendedMixingLength) where FT =
     map_scalars(scalar -> convert(FT, scalar), ml)
 
 Base.summary(ml::BlendedMixingLength{FT}) where FT = "BlendedMixingLength{$FT}"
@@ -67,7 +67,7 @@ end
     return ml.ℂˡ₄ * numerator / denominator
 end
 
-@inline function TurbulenceClosures.fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml::BlendedMixingLength, closure, e, N²)
+@inline function fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml::BlendedMixingLength, closure, e, N²)
     ℓ∞ = asymptotic_length(i, j, grid, ml, closure, e)
     for k in 1:size(grid, 3)+1
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
@@ -78,7 +78,7 @@ end
     return nothing
 end
 
-@inline function TurbulenceClosures.mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::BlendedMixingLength, closure, e, closure_fields)
+@inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::BlendedMixingLength, closure, e, closure_fields)
     u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
     N² = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, closure_fields.N²)
     ℓ∞ = @inbounds closure_fields.ℓˢ[i, j, k]

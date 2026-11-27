@@ -5,7 +5,7 @@ The third moment of vertical velocity at the cell faces (interpolated to the cen
 distribution) from the vertical integral of the
 budget of turbulent kinetic energy, with a damped local third moment,
 """
-struct TKEBudgetThirdMoment{FT} <: SimplifiedHigherOrderClosures.AbstractSubgridDistributionComponent
+struct TKEBudgetThirdMoment{FT} <: AbstractSubgridDistributionComponent
     ℂʷᵉ :: FT
     ℂʷᵋ :: FT
     ℂʷᴸ :: FT

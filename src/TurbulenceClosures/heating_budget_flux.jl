@@ -54,9 +54,9 @@ function validate_heating_budget_flux(hb::HeatingBudgetFlux, static_stability, d
     return nothing
 end
 
-@inline SimplifiedHigherOrderClosures.component_scalars(hb::HeatingBudgetFlux) = (hb.ℂᑫ, hb.ℂᑫᴸ)
-SimplifiedHigherOrderClosures.component_scalar_names(::HeatingBudgetFlux, name) = (:ℂᑫ, :ℂᑫᴸ)
-@inline SimplifiedHigherOrderClosures.rebuild_component(hb::HeatingBudgetFlux, scalars, n) =
+@inline component_scalars(hb::HeatingBudgetFlux) = (hb.ℂᑫ, hb.ℂᑫᴸ)
+component_scalar_names(::HeatingBudgetFlux, name) = (:ℂᑫ, :ℂᑫᴸ)
+@inline rebuild_component(hb::HeatingBudgetFlux, scalars, n) =
     HeatingBudgetFlux(promote(scalars[n], scalars[n+1])...), n + 2
 
 heating_budget_flux_fields(grid, ::Nothing) = NamedTuple()

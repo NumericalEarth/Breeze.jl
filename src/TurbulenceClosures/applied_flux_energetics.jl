@@ -77,7 +77,7 @@ end
     κ = exner_exponent(s.exner_exponent, q, constants)
     Π = (@inbounds(s.p[i, j, k]) / s.standard_pressure)^κ
     ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
-    λ, _ = distributed_condensate_liquid_fraction(s.phase_equilibrium, @inbounds(s.T[i, j, k]))
+    λ, _ = condensate_liquid_fraction(s.phase_equilibrium, @inbounds(s.T[i, j, k]))
     @inbounds begin
         cl.b_θ[i, j, k] = b_θ
         cl.b_qᵛ[i, j, k] = b_qᵛ

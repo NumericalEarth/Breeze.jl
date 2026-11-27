@@ -32,7 +32,7 @@ DoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; clipping = Smo
                              vertical_velocity_tolerance = 2e-2,
                              minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99,
                              maximum_component_variance_ratio = 100), kw,
-                            TurbulenceClosures.convert_eltype(FT, clipping))
+                            convert_eltype(FT, clipping))
 
 Adapt.@adapt_structure DoubleGaussianPDF
 """
@@ -67,7 +67,7 @@ function EqualWidthDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatT
                                     potential_temperature_tolerance = 1e-2, total_water_tolerance = 1e-4,
                                     vertical_velocity_tolerance = 2e-2,
                                     minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99), kw,
-                                   TurbulenceClosures.convert_eltype(FT, clipping))
+                                   convert_eltype(FT, clipping))
 end
 
 Adapt.@adapt_structure EqualWidthDoubleGaussianPDF

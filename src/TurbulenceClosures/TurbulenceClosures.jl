@@ -38,8 +38,8 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!, compute_x_bcs!, compute_y_bcs!,
                                        update_boundary_conditions!
 using Oceananigans.BuoyancyFormulations: ∂z_b
-using Oceananigans.Fields: CenterField, XFaceField, YFaceField, ZFaceField, ZeroField
-using Oceananigans.Grids: AbstractUnderlyingGrid, Bounded, Center, Face, inactive_cell
+using Oceananigans.Fields: Field, CenterField, XFaceField, YFaceField, ZFaceField, ZeroField
+using Oceananigans.Grids: AbstractGrid, AbstractUnderlyingGrid, Bounded, Center, Face, Flat, inactive_cell
 
 using Oceananigans.Operators:
     # Face-centered difference operators with area metrics
@@ -56,8 +56,8 @@ using Oceananigans.Operators:
     ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ,
     # Vertical derivative at faces, for the static stability
     ∂zᶜᶜᶠ,
-    # Cell height, for the mixing-length sweeps
-    Δzᶜᶜᶜ
+    # Cell spacings
+    Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
@@ -85,6 +85,10 @@ using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturatio
                              equilibrated_surface, absolute_zero_latent_heat, specific_heat_difference,
                              vapor_equivalent_heat_capacity, vapor_equivalent_gas_constant, MoistureMassFractions
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, hypotenuse
+using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, saturation_vapor_pressure_log_slope,
+                             saturation_vapor_pressure_liquid_fraction_log_slope, PlanarLiquidSurface, PlanarIceSurface,
+                             liquid_latent_heat, ice_latent_heat, mixture_heat_capacity, exner_exponent, mixture_gas_constant
+using SpecialFunctions: erf
 
 #####
 ##### Fallbacks for closure = nothing
@@ -262,16 +266,16 @@ include("shear.jl")
 include("richardson_number_stability_functions.jl")
 include("turbulent_richardson_stability_functions.jl")
 
-include("SHOC/SimplifiedHigherOrderClosures.jl")
-using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures,
-                                      BlendedMixingLength, ColumnStabilityDamping,
-                                      DowngradientSecondMoments,
-                                      AlgebraicThirdMoment,
-                                      RationalSaturatedStratificationNumber,
-                                      PolynomialSaturatedSkewness,
-                                      DoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
-                                      SmoothClipping,
-                                      closure_parameters, with_parameters
+include("closure_parameters.jl")
+include("clipping.jl")
+include("column_utilities.jl")
+include("SHOC/mixing_lengths.jl")
+include("SHOC/turbulence_time_scales.jl")
+include("second_moments.jl")
+include("SHOC/third_moments.jl")
+include("third_moment_limiters.jl")
+include("pdf_saturation.jl")
+include("SHOC/assumed_pdfs.jl")
 
 include("subgrid_distribution.jl")
 include("scalar_variance_transport.jl")
@@ -279,6 +283,6 @@ include("variance_stability_functions.jl")
 include("applied_flux_energetics.jl")
 include("tke_budget_third_moment.jl")
 include("heating_budget_flux.jl")
-include("simplified_higher_order_closure.jl")
+include("SHOC/simplified_higher_order_closure.jl")
 
 end # module TurbulenceClosures

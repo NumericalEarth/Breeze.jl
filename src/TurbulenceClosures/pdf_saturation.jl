@@ -90,7 +90,7 @@ end
     q₀ = component_moisture(thermodynamics, qᵗ)
     ĉᵖ = vapor_equivalent_heat_capacity(q₀, constants)
     R̂ = vapor_equivalent_gas_constant(q₀, constants)
-    ∂κ∂qᵗ = TurbulenceClosures.exner_exponent_moisture_derivative(thermodynamics.exner_exponent, R̂, ĉᵖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    ∂κ∂qᵗ = exner_exponent_moisture_derivative(thermodynamics.exner_exponent, R̂, ĉᵖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
     Π = component_exner_function(thermodynamics, qᵗ, p)
 
     Tˡ = liquid_water_temperature(thermodynamics, θˡⁱ, qᵗ, p)
