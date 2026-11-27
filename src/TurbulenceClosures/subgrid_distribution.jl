@@ -785,6 +785,25 @@ Adapt.adapt_structure(to, s::SpecificValue) = SpecificValue(adapt(to, s.field), 
 @inline Base.getindex(s::SpecificValue, i, j, k) = @inbounds s.field[i, j, k] / s.density[i, j, k]
 @inline Base.getindex(s::SpecificValue{<:Any, Nothing}, i, j, k) = @inbounds s.field[i, j, k]
 
+# The velocity of a momentum density at its faces, `ρu / ℑx ρ` at the x-faces and `ρv / ℑy ρ` at the y-faces: the
+# density of the centers interpolated to the face of the momentum, as the model diagnoses its velocities
+struct XFaceVelocity{F, R, G}
+    momentum :: F
+    density :: R
+    grid :: G
+end
+
+struct YFaceVelocity{F, R, G}
+    momentum :: F
+    density :: R
+    grid :: G
+end
+
+Adapt.adapt_structure(to, u::XFaceVelocity) = XFaceVelocity(adapt(to, u.momentum), adapt(to, u.density), adapt(to, u.grid))
+Adapt.adapt_structure(to, v::YFaceVelocity) = YFaceVelocity(adapt(to, v.momentum), adapt(to, v.density), adapt(to, v.grid))
+@inline Base.getindex(u::XFaceVelocity, i, j, k) = @inbounds u.momentum[i, j, k] / ℑxᶠᵃᵃ(i, j, k, u.grid, u.density)
+@inline Base.getindex(v::YFaceVelocity, i, j, k) = @inbounds v.momentum[i, j, k] / ℑyᵃᶠᵃ(i, j, k, v.grid, v.density)
+
 # The total water of the distribution, the vapor and the cloud liquid, (ρqᵛ + ρqᶜˡ) / ρ
 struct SpecificTotalWater{V, L, R}
     vapor :: V

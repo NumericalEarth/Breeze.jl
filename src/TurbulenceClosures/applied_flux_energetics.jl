@@ -452,8 +452,8 @@ function give_solved_conversions!(closure_fields, closure, model)
     cl = closure_fields.subgrid_cloud.cloud
     s = applied_flux_state(model)
     fill_halo_regions!((model.momentum.ρu, model.momentum.ρv))
-    u = SpecificValue(model.momentum.ρu, s.ρ)
-    v = SpecificValue(model.momentum.ρv, s.ρ)
+    u = XFaceVelocity(model.momentum.ρu, s.ρ, grid)
+    v = YFaceVelocity(model.momentum.ρv, s.ρ, grid)
     launch!(grid.architecture, grid, :xyz, _give_solved_conversions!, model.tracers[TKE_NAME], cl, grid, closure, s,
             closure_fields.Kᶜ, closure_fields.Kᵘ, u, v)
     return nothing
@@ -806,8 +806,8 @@ function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClos
     s = applied_flux_state(model)
     ρ = s.ρ
     fill_halo_regions!((model.momentum.ρu, model.momentum.ρv))
-    u = SpecificValue(model.momentum.ρu, ρ)
-    v = SpecificValue(model.momentum.ρv, ρ)
+    u = XFaceVelocity(model.momentum.ρu, ρ, grid)
+    v = YFaceVelocity(model.momentum.ρv, ρ, grid)
     launch!(grid.architecture, grid, :xyz, _correct_tke_to_solved_conversions!, model.tracers[TKE_NAME], cl, grid, closure, s,
             closure_fields.Kᶜ, closure_fields.Kᵘ, u, v, closure_fields.Lᵉ, Δt,
             recombined_stage_exchange(AtmosphereModels.closure_stage_storage(model.timestepper)),
