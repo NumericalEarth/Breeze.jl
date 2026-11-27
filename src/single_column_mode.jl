@@ -100,6 +100,9 @@ const ClosureArray = AbstractArray{<:AbstractTurbulenceClosure}
 @inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid::SingleColumnGrid, ρ, closures::ClosureArray, args...) =
     AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, getclosure(i, j, closures), args...)
 
+@inline AtmosphereModels.subgrid_dissipation(i, j, k, grid::SingleColumnGrid, ρ, closures::ClosureArray, args...) =
+    AtmosphereModels.subgrid_dissipation(i, j, k, grid, ρ, getclosure(i, j, closures), args...)
+
 # A per-column array of closures/rotations must live on the grid architecture so it can be indexed
 # inside GPU kernels. `with_tracers` has no method for a bare array of closures, so we map it over the
 # array here (mirroring Oceananigans' per-`ISSDVector` methods). See `materialize_closure`/
