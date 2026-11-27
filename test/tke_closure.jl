@@ -50,9 +50,9 @@ end
         @test closure.minimum_tke == FT(1e-6)
         @test closure.shear.minimum_shear_squared == FT(1e-10)
         @test closure.negative_tke_damping_time_scale == FT(60)
-        @test isinf(closure.maximum_viscosity)
-        @test isinf(closure.maximum_tracer_diffusivity)
-        @test isinf(closure.maximum_tke_diffusivity)
+        # the diffusivities have no caps
+        @test !any(name -> occursin("maximum", string(name)), fieldnames(typeof(closure)))
+        @test_throws MethodError TKEBasedTurbulenceClosure(FT; maximum_viscosity = 100)
 
         # The neutral log layer: von Kármán constant, surface TKE, Prandtl number; and the
         # stratified steady state: the critical Richardson number
@@ -65,14 +65,12 @@ end
     @testset "keyword arguments, promotion and float type" begin
         closure = TKEBasedTurbulenceClosure(; mixing_length = GradientLimitedMixingLength(ℂˢ = 1),
                                               stability_functions = ConstantStabilityFunctions(ℂᵘ = 0.3, ℂᶜ = 0.3, ℂᵉ = 1, ℂᴰ = 1),
-                                              maximum_viscosity = 100,
                                               minimum_tke = 1e-8,
                                               minimum_shear_squared = 1e-12,
                                               negative_tke_damping_time_scale = 10minutes)
         @test closure.mixing_length.ℂˢ === FT(1)
         @test closure.stability_functions.ℂᵘ === FT(0.3)
         @test closure.stability_functions.ℂᵉ === FT(1)
-        @test closure.maximum_viscosity === FT(100)
         @test closure.minimum_tke === FT(1e-8)
         @test closure.shear.minimum_shear_squared === FT(1e-12)
         @test closure.negative_tke_damping_time_scale === FT(600)
@@ -441,18 +439,7 @@ end
         ℓᵇ = [N²[k] > 0 ? sqrt(e₀) / sqrt(N²[k]) : Inf for k in eachindex(zf_stretched)]
         @test all(isapprox.(ℓ, brute_force_envelope(stretched, ℓᵇ, ℂˢ); rtol = 1e-6))
     end
-    @testset "diffusivity caps" begin
-        capped = TKEBasedTurbulenceClosure(maximum_viscosity = 1e-3, maximum_tracer_diffusivity = 2e-3,
-                                           maximum_tke_diffusivity = 3e-3)
-        model = AtmosphereModel(grid; closure = capped, advection = nothing)
-        set!(model; θ = 300)
-        set_tke!(model, FT(1))
-        @test maximum(column(model.closure_fields.Kᵘ)) ≈ 1e-3
-        @test maximum(column(model.closure_fields.Kᶜ)) ≈ 2e-3
-        @test maximum(column(model.closure_fields.Kᵉ)) ≈ 3e-3
-    end
-
-    @testset "a sheared, capped boundary layer stays finite and positive" begin
+    @testset "a sheared boundary layer under an inversion stays finite and positive" begin
         model = AtmosphereModel(grid; closure, advection = nothing)
         θᵢ(z) = 300 + 0.01 * max(0, z - 500)
         uᵢ(z) = 5 * min(1, z / 300)
@@ -586,8 +573,7 @@ end
     @testset "dissipation decays TKE at the analytic rate" begin
         # No TKE diffusion, no wind, no stratification: each cell decays as ∂ₜe = -ℂᴰ e^{3/2}/ℓ
         # with ℓ = ℂˢ z, i.e. e(t) = (e₀^{-1/2} + ℂᴰ t / 2ℓ)^{-2}
-        undiffused = TKEBasedTurbulenceClosure(maximum_tke_diffusivity = 0,
-                                             stability_functions = ConstantStabilityFunctions())
+        undiffused = TKEBasedTurbulenceClosure(stability_functions = ConstantStabilityFunctions(ℂᵉ = 0))
         model = AtmosphereModel(grid; closure = undiffused, advection = nothing)
         e₀ = FT(1)
         set!(model; θ = 300)
@@ -612,12 +598,11 @@ end
 
     @testset "negative TKE is damped on the damping time scale" begin
         τ = FT(60)
-        # Without tracer diffusivity the buoyancy flux -Kᶜ N² vanishes exactly. Otherwise the
+        # Without tracer diffusivity (ℂᶜ = 0) the buoyancy flux -Kᶜ N² vanishes exactly. Otherwise the
         # rounding-level N² that the stages leave in a Float32 neutral column would add its
         # buoyancy sink rate -B⁻ / eᵐⁱⁿ, which applies below the minimum TKE, to the damping.
         undiffused = TKEBasedTurbulenceClosure(mixing_length = GradientLimitedMixingLength(),
-                                               stability_functions = ConstantStabilityFunctions(),
-                                               maximum_tracer_diffusivity = 0)
+                                               stability_functions = ConstantStabilityFunctions(ℂᶜ = 0))
         model = AtmosphereModel(grid; closure = undiffused, advection = nothing)
         set!(model; θ = 300)
         set_tke!(model, FT(-0.1))

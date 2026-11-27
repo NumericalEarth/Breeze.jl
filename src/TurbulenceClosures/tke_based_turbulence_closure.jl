@@ -414,8 +414,7 @@ closure applies the local production, buoyancy flux and dissipation.
 
 The square root of ``e`` is floored at `minimum_tke` wherever it enters a diffusivity or a length
 scale, and negative ``e`` — which advection can produce — is damped on
-`negative_tke_damping_time_scale` rather than clipped. The three `maximum_*` diffusivities clip
-the diffusivities, `Inf` by default. The squared shear ``S²`` and its floor ``S²ᵐⁱⁿ`` come from
+`negative_tke_damping_time_scale` rather than clipped. The squared shear ``S²`` and its floor ``S²ᵐⁱⁿ`` come from
 the `shear` component, [`GridMeanShear`](@ref), the shear of the resolved wind. They enter the
 Richardson number ``Ri = N² / (S² + S²ᵐⁱⁿ)`` of [`RationalStabilityFunction`](@ref) and the shear
 number ``τ² (S² + S²ᵐⁱⁿ)`` in the turbulent Richardson number of
@@ -440,9 +439,6 @@ struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV, HB, SB} <: Abst
     mixing_length :: ML                   # the primary mixing length ℓ
     stability_functions :: SF             # 𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ, 𝕊ᴰ
     static_stability :: SS                # how N² is diagnosed
-    maximum_viscosity :: FT               # upper bound on Kᵘ, m² s⁻¹
-    maximum_tracer_diffusivity :: FT      # upper bound on Kᶜ, m² s⁻¹
-    maximum_tke_diffusivity :: FT         # upper bound on Kᵉ, m² s⁻¹
     minimum_tke :: FT                     # floor on e inside √e, m² s⁻²
     shear :: SH                           # the squared shear S² and its floor S²ᵐⁱⁿ in Ri = N² / (S² + S²ᵐⁱⁿ)
     negative_tke_damping_time_scale :: FT # time scale on which negative e is damped, s
@@ -458,9 +454,6 @@ function Adapt.adapt_structure(to, closure::TKEBasedTurbulenceClosure{TD}) where
     return TKEBasedTurbulenceClosure{TD}(adapt(to, closure.mixing_length),
                                          adapt(to, closure.stability_functions),
                                          adapt(to, closure.static_stability),
-                                         adapt(to, closure.maximum_viscosity),
-                                         adapt(to, closure.maximum_tracer_diffusivity),
-                                         adapt(to, closure.maximum_tke_diffusivity),
                                          adapt(to, closure.minimum_tke),
                                          adapt(to, closure.shear),
                                          adapt(to, closure.negative_tke_damping_time_scale),
@@ -474,8 +467,7 @@ end
 const FlavorOfTKEClosure{TD} = Union{TKEBasedTurbulenceClosure{TD}, TKEClosureArray{TD}} where TD
 
 function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::SF, static_stability::SS,
-                                       maximum_viscosity::FT, maximum_tracer_diffusivity::FT,
-                                       maximum_tke_diffusivity::FT, minimum_tke::FT,
+                                       minimum_tke::FT,
                                        shear::SH,
                                        negative_tke_damping_time_scale::FT,
                                        subgrid_distribution::SD = nothing,
@@ -483,8 +475,7 @@ function TKEBasedTurbulenceClosure{TD}(mixing_length::ML, stability_functions::S
                                        heating_budget_flux::HB = nothing,
                                        total_water_budget_flux::SB = nothing) where {TD, ML, SF, SS, FT, SH, SD, SV, HB, SB}
     return TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, SV, HB, SB}(mixing_length, stability_functions, static_stability,
-                                                                         maximum_viscosity, maximum_tracer_diffusivity,
-                                                                         maximum_tke_diffusivity, minimum_tke,
+                                                                         minimum_tke,
                                                                          shear,
                                                                          negative_tke_damping_time_scale,
                                                                          subgrid_distribution, solver, heating_budget_flux,
@@ -545,9 +536,6 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    stability_functions = TurbulentRichardsonStabilityFunction(),
                                    subgrid_distribution = nothing,
                                    static_stability = default_static_stability(subgrid_distribution),
-                                   maximum_viscosity = Inf,
-                                   maximum_tracer_diffusivity = Inf,
-                                   maximum_tke_diffusivity = Inf,
                                    minimum_tke = 1e-6,
                                    shear = GridMeanShear(),
                                    minimum_shear_squared = nothing,
@@ -578,9 +566,6 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
     return TKEBasedTurbulenceClosure{TD}(mixing_length,
                                          stability_functions,
                                          static_stability,
-                                         convert(FT, maximum_viscosity),
-                                         convert(FT, maximum_tracer_diffusivity),
-                                         convert(FT, maximum_tke_diffusivity),
                                          convert(FT, minimum_tke),
                                          convert_eltype(FT, shear),
                                          convert(FT, negative_tke_damping_time_scale),
@@ -1071,9 +1056,9 @@ end
 
     𝕊ᵘ, 𝕊ᶜ, 𝕊ᵉ = diffusivity_stability_functionsᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, e, closure_fields)
 
-    Kᵘ = min(𝕊ᵘ * K, closure_ij.maximum_viscosity)
-    Kᶜ = min(𝕊ᶜ * K, closure_ij.maximum_tracer_diffusivity)
-    Kᵉ = min(𝕊ᵉ * K, closure_ij.maximum_tke_diffusivity)
+    Kᵘ = 𝕊ᵘ * K
+    Kᶜ = 𝕊ᶜ * K
+    Kᵉ = 𝕊ᵉ * K
 
     FT = grid_float_type(grid)
     @inbounds begin
@@ -1323,9 +1308,6 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
     show_stability_function_lines(io, closure.stability_functions, "│   ")
     print(io, '\n',
               "├── static_stability: ", summary(closure.static_stability), '\n',
-              "├── maximum_viscosity: ", prettysummary(closure.maximum_viscosity), '\n',
-              "├── maximum_tracer_diffusivity: ", prettysummary(closure.maximum_tracer_diffusivity), '\n',
-              "├── maximum_tke_diffusivity: ", prettysummary(closure.maximum_tke_diffusivity), '\n',
               "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
               "├── shear: ")
     show(io, closure.shear)

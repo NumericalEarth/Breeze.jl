@@ -157,7 +157,7 @@ The [`VarianceStabilityFunctions`](@ref) that reproduce the down-gradient diagno
 
 (``ℂᴰ = 1`` for [`EddyTurnoverTimeScale`](@ref)). The logarithm of a function of the family is linear in
 the logarithms of its three values, so ``𝕊ᵛ_i = (2 ℂᵛ_i / ℂᵠ) 𝕊ᶜ / 𝕊ᴰ`` exactly, and the moments agree to
-rounding wherever ``Kᶜ`` is below `maximum_tracer_diffusivity`. It requires ``ℂᵛ₃² ≤ ℂᵛ₁ ℂᵛ₂``, the
+rounding. It requires ``ℂᵛ₃² ≤ ℂᵛ₁ ℂᵛ₂``, the
 realizability of the down-gradient covariance.
 """
 function VarianceStabilityFunctions(sf::TurbulentRichardsonStabilityFunction, time_scale,

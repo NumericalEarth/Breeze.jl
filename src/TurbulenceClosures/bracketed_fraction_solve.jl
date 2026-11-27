@@ -146,8 +146,8 @@ end
     τ² = (ℓ / u)^2
     𝕊ᵘ, 𝕊ᶜ, _, 𝕊ᴰ = local_stability_functions(closure.stability_functions, N², S², closure.shear.minimum_shear_squared, τ²)
     K = ℓ * u
-    Kᵘ = min(𝕊ᵘ * K, closure.maximum_viscosity)
-    Kᶜ = min(𝕊ᶜ * K, closure.maximum_tracer_diffusivity)
+    Kᵘ = 𝕊ᵘ * K
+    Kᶜ = 𝕊ᶜ * K
     τ = local_moment_time_scale(d.time_scale, ℓ, u, N², 𝕊ᴰ)
     # τ ∝ ℓ / u is 0 / 0 only where the turbulent velocity vanishes (`minimum_tke = 0` and e ≤ 0 at both cells of the
     # face), where the mixing length vanishes with it. The moments of still air are zero, which τ = 0 gives.

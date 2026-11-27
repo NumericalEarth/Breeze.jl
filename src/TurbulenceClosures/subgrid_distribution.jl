@@ -1601,8 +1601,7 @@ function SimplifiedHigherOrderClosures.with_parameters(closure::TKEBasedTurbulen
     mixing_length, stability_functions, static_stability, shear, subgrid_distribution, heating_budget_flux, total_water_budget_flux = components
 
     return TKEBasedTurbulenceClosure{TD}(mixing_length, stability_functions, static_stability,
-                                         closure.maximum_viscosity, closure.maximum_tracer_diffusivity,
-                                         closure.maximum_tke_diffusivity, closure.minimum_tke, shear,
+                                         closure.minimum_tke, shear,
                                          closure.negative_tke_damping_time_scale, subgrid_distribution, closure.solver,
                                          heating_budget_flux, total_water_budget_flux)
 end
