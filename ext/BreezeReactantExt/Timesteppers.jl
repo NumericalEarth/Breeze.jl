@@ -6,7 +6,7 @@ using Reactant: TracedRNumber, @trace
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, reconcile_state!
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics: Microphysics, DCMIP2016KesslerMicrophysics
-using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel
+using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel, MultirateInfinitesimalStep
 
 const ReactantSSPRungeKutta3Model = AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}
 
@@ -27,6 +27,25 @@ initialize_radiation!(::Nothing, model) = nothing
 function initialize_radiation!(radiation, model)
     AtmosphereModels.solve_scheduled_radiation!(radiation, model)
     AtmosphereModels.update_state_between_radiation_solves!(model)
+    return nothing
+end
+
+# The single-column multirate infinitesimal step. `time_step!` sets the outer step and the stage
+# that the next tendencies feed before it prepares the first step, so that the stage interval of
+# the first tendencies is known (`AtmosphereModels.stage_time_step`); the same is done here.
+# Without it the first step of a traced loop uses the tendencies of `set!`, which are built
+# before any step is known and so hold the explicit microphysical rates.
+const ReactantSingleColumnMultirateModel =
+    AtmosphereModel{<:AnelasticDynamics, <:Any, <:ReactantState, <:MultirateInfinitesimalStep}
+
+function TimeSteppers.prepare_first_time_step!(model::ReactantSingleColumnMultirateModel, Δt)
+    timestepper = model.timestepper
+    timestepper.current_Δt[] = Δt
+    timestepper.next_stage[] = 1
+    model.clock.last_Δt = Δt
+    reconcile_state!(model)
+    update_state!(model; compute_tendencies = isnothing(model.radiation))
+    initialize_radiation!(model.radiation, model)
     return nothing
 end
 

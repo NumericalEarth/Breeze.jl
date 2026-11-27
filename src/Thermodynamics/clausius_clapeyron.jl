@@ -66,3 +66,29 @@ pᵛ⁺(T) = pᵗʳ (T / Tᵗʳ)^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T)
 
     return pᵗʳ * (T / Tᵗʳ)^(Δcᵝ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * ℒ₀ / Rᵛ)
 end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return ``∂ \\ln pᵛ⁺ / ∂T`` over `surface` (at a fixed liquid fraction of a mixed-phase surface), the derivative of
+[`saturation_vapor_pressure`](@ref): the Clausius–Clapeyron relation ``ℒᵝ(T) / (Rᵛ T²)`` with the temperature-linear
+latent heat ``ℒᵝ(T) = ℒᵝ₀ + Δcᵝ T``.
+"""
+@inline function saturation_vapor_pressure_log_slope(T, constants::ClausiusClapeyronThermodynamicConstants, surface)
+    ℒ₀ = absolute_zero_latent_heat(constants, surface)
+    Δcᵝ = specific_heat_difference(constants, surface)
+    Rᵛ = vapor_gas_constant(constants)
+    return (ℒ₀ + Δcᵝ * T) / (Rᵛ * T * T)
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return ``∂ \\ln pᵛ⁺ / ∂λ`` at fixed temperature, with ``λ`` the liquid fraction of the mixed-phase `surface`:
+``\\ln(pᵛ⁺ˡ / pᵛ⁺ⁱ)``, because ``\\ln pᵛ⁺`` is linear in ``λ``.
+"""
+@inline function saturation_vapor_pressure_liquid_fraction_log_slope(T, constants::ClausiusClapeyronThermodynamicConstants, surface)
+    pᵛ⁺ˡ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+    return log(pᵛ⁺ˡ / pᵛ⁺ⁱ)
+end

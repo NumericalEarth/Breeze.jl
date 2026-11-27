@@ -411,6 +411,50 @@ const order_of_accuracy_cases = Dict(:TVDMISB => ((1/16, 1/32, 1/64), 1.8), :MIS
     @test log2(errors[1] / errors[3]) / log2(Δts[1] / Δts[3]) ≥ order
 end
 
+# Anelastic dynamics on a single column have no fast tendency: the step is the slow method of the
+# coefficient set, Yᵢ = Uⁿ + Σⱼ (αᵢⱼ + γᵢⱼ) (Yⱼ - Uⁿ) + Δt Σⱼ βᵢⱼ S(Yⱼ₋₁), with no substepper. A
+# tracer that decays at the rate of its specific value, ∂t(ρc) = -c / τ, follows that recursion
+# to round-off at every level, and the exact decay to the order of the slow method.
+@testset "MIS on a single column with anelastic dynamics [$coefficients, $FT]" for coefficients in (:SSPMIS43, :MIS4a, :WickerSkamarock3), FT in all_float_types()
+    grid = RectilinearGrid(default_arch, FT; size = 8, z = (0, 1000), topology = (Flat, Flat, Bounded))
+    τ = 100
+    decay(z, t, c, τ) = -c / τ
+    forcing = (; ρc = Forcing(decay, field_dependencies = :ρc, parameters = τ))
+    model = AtmosphereModel(grid; tracers = :ρc, forcing, timestepper = :MultirateInfinitesimalStep,
+                            timestepper_kwargs = (; coefficients))
+    @test model.dynamics isa AnelasticDynamics
+    @test isnothing(model.timestepper.substepper)
+
+    (; α, β, γ) = multirate_infinitesimal_step_tableau(coefficients)
+    s = size(β, 1)
+    ρ = Float64.(Array(interior(model.dynamics.reference_state.density))[1, 1, :])
+    function slow_method(Δt, λ)
+        Y = [1.0]
+        for i in 1:s
+            push!(Y, 1 + sum((α[i, j] + γ[i, j]) * (Y[j+1] - 1) for j in 1:i-1; init = 0.0) + Δt * sum(β[i, j] * λ * Y[j] for j in 1:i))
+        end
+        return Y[end]
+    end
+
+    errors = map((10, 20)) do Δt
+        set!(model.tracers.ρc, model.dynamics.reference_state.density)
+        update_state!(model)
+        t = model.clock.time
+        time_step!(model, Δt)
+        @test model.clock.time ≈ t + Δt
+        c = Float64.(Array(interior(model.tracers.ρc))[1, 1, :]) ./ ρ
+        @test c ≈ slow_method.(Δt, -1 ./ (τ .* ρ)) rtol = 100 * eps(FT)
+        maximum(abs, c .- exp.(-Δt ./ (τ .* ρ)))
+    end
+    # at least second order; in Float32 the error at these steps is round-off
+    FT == Float64 && @test errors[2] / errors[1] > 2^2.9
+end
+
+@testset "MIS with anelastic dynamics needs a single column" begin
+    grid = RectilinearGrid(default_arch; size = (4, 4, 4), extent = (1, 1, 1))
+    @test_throws ArgumentError AtmosphereModel(grid; timestepper = :MultirateInfinitesimalStep)
+end
+
 # Stages that start from combinations of earlier increments need substeps without a skew between momentum and
 # pressure: forward–backward substeps amplified the 3Δx acoustic mode of the bubble below by 1.2 per step.
 @testset "MIS substep form [$coefficients]" for coefficients in mis_coefficient_sets

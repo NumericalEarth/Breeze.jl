@@ -1,7 +1,8 @@
 using Breeze.AtmosphereModels: thermodynamic_density_name, dynamics_prognostic_fields, SplitScalarTendencies,
                                moisture_prognostic_name, microphysical_velocities, nonadvective_scalar_tendency,
                                div_ρUc, advective_tendency_storage, launch_split_scalar_tendency!,
-                               scalar_advective_tendency, specific_scalar_fields
+                               scalar_advective_tendency, specific_scalar_fields,
+                               StageRecombination, build_closure_stage_storage
 using Breeze.CompressibleEquations: compute_linearized_thermodynamic_flux_divergence!,
                                     StageEntryForceRemainder, stage_entry_force_remainder,
                                     step_start_force_state, store_step_start_force_state!,
@@ -35,7 +36,7 @@ and the thermodynamic slow tendency is the full tendency minus ``-∇·(θ (ρu)
 discretization (see `compute_linearized_thermodynamic_flux_divergence!`). With
 the `:WickerSkamarock3` coefficients the scheme reduces to `AcousticRungeKutta3`.
 """
-struct MultirateInfinitesimalStep{TB, SL, U0, TG, TI, AS, R, UN, AC, FC, ST, SS, TA, RS, MF} <: AcousticTimeStepper
+struct MultirateInfinitesimalStep{TB, SL, U0, TG, TI, AS, R, UN, AC, FC, ST, SS, TA, RS, MF, CS} <: AcousticTimeStepper
     relinearize_stages :: Bool # re-linearize the fast operator at every stage entry, as `AcousticRungeKutta3` does; first-order with a non-diagonal `β`
     fold_stage_increments :: Bool # whether the acoustic prognostics form their increments in the assembly of the next stage (see `stage_increment_source`)
     tableau :: TB # the `MultirateInfinitesimalStepTableau`
@@ -56,6 +57,7 @@ struct MultirateInfinitesimalStep{TB, SL, U0, TG, TI, AS, R, UN, AC, FC, ST, SS,
     stage :: Base.RefValue{Int} # the stage being integrated
     next_stage :: Base.RefValue{Int} # the stage the next tendency evaluation feeds (sizes the adaptive-implicit split, see `adaptive_advection_timestep`)
     current_Δt :: Base.RefValue{Float64} # the current outer step
+    closure_storage :: CS # what a turbulence closure keeps from stage to stage for its energy budget (see `StageRecombination`); `nothing` otherwise
 end
 
 """
@@ -97,6 +99,11 @@ own, which are not built yet (see `PredictedStageForcing`). `post_loop_scalar_te
 builds the scalar tendencies between stages, with the preceding loop's transport velocity, which
 does not keep a uniform mass fraction uniform, and needs less storage. Both are described in the
 [Compressible dynamics](@ref Compressible-section) section of the documentation.
+
+With `AnelasticDynamics` on a single-column grid (`topology = (Flat, Flat, Bounded)`) there is no
+fast tendency: no substepper is built and every stage is the slow method's stage alone, with the
+start states, forcing weights, stage intervals and vertically implicit solves of the method with
+acoustic substepping (see `single_column_multirate_infinitesimal_step.jl`).
 
 `moisture_forcing_names` names the moisture and condensate densities, whose tendencies the loop's
 pressure ramps with; `AtmosphereModel` provides them. With `nothing`, the time stepper cannot tell
@@ -146,7 +153,8 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
     s = number_of_stages(tableau)
     s ≥ 3 || throw(ArgumentError("MultirateInfinitesimalStep needs at least three stages; got $s."))
 
-    substepper = build_acoustic_substepper(grid, dynamics, prognostic_fields; cache_advecting_state)
+    substepper = multirate_substepper(grid, dynamics, prognostic_fields; cache_advecting_state)
+    post_loop_scalar_tendencies = multirate_post_loop_scalar_tendencies(substepper, post_loop_scalar_tendencies)
 
     storage = stage_storage(tableau)
     fold = fold_stage_increments[]
@@ -170,9 +178,16 @@ function MultirateInfinitesimalStep(grid, prognostic_fields;
 
     return MultirateInfinitesimalStep(relinearize_stages, fold, tableau, storage, U⁰, Gⁿ, implicit_solver, substepper,
                                       rounding, Uⁿ, accumulators, fast_tendency, scalar_tendencies, step_start,
-                                      transport_density_accumulator_storage(storage, grid, U⁰, fold, s), residual, transport_mass_fluxes,
-                                      Ref(1), Ref(1), Ref(NaN))
+                                      transport_density_accumulator_storage(substepper, storage, grid, U⁰, fold, s), residual, transport_mass_fluxes,
+                                      Ref(1), Ref(1), Ref(NaN), nothing)
 end
+
+# The substepper of the fast tendency (see `single_column_multirate_infinitesimal_step.jl` for
+# the dynamics that have none).
+multirate_substepper(grid, dynamics, prognostic_fields; kw...) =
+    build_acoustic_substepper(grid, dynamics, prognostic_fields; kw...)
+
+multirate_post_loop_scalar_tendencies(substepper, post_loop_scalar_tendencies) = post_loop_scalar_tendencies
 
 #####
 ##### Storage layouts
@@ -249,6 +264,9 @@ end
 # stage 1 is assembled and read when stage 2 is, just before the dry density's assembly keeps ΔY₁
 # in `U⁰`, which nothing uses until then when the dry density forms its increments in the
 # assembly. So the two share storage.
+transport_density_accumulator_storage(substepper, storage, grid, U⁰, fold, s) =
+    transport_density_accumulator_storage(storage, grid, U⁰, fold, s)
+
 function transport_density_accumulator_storage(::AccumulatorStorage, grid, U⁰, fold, s)
     second = fold ? U⁰.ρᵈ : CenterField(grid)
     return (second, ntuple(_ -> CenterField(grid), s - 2)...)
@@ -324,6 +342,10 @@ residuals_share_perturbation_storage(grid, dynamics) =
     all(T -> T === Periodic || T === Flat, topology(grid)[1:2])
 
 residuals_share_perturbation_storage(grid, ::TerrainCompressibleDynamics) = false
+
+# Without an acoustic loop nothing writes the rounding error of a stage's recovered state, which
+# the next stage's increment reads: every start state is rounded as the scalars' are instead.
+stage_residual_storage(grid, dynamics, ::Nothing) = nothing
 
 # The residual field of prognostic `name`, or `nothing` for a field that carries none: the moisture,
 # microphysical and tracer fields, and every field of a tableau that recombines no increments.
@@ -465,7 +487,48 @@ AtmosphereModels.adiabatic_twin_timestepper(ts::MultirateInfinitesimalStep, ::Sp
 
 const MultirateAcousticModel = AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:MultirateInfinitesimalStep}
 
-@inline final_stage_increment(ts::MultirateInfinitesimalStep) = (c = ts.tableau.c; c[end] - c[end-1])
+#####
+##### What the closure is told about the stage
+#####
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The [`StageRecombination`](@ref Breeze.AtmosphereModels.StageRecombination) of the stage being
+integrated: the weights ``wᵢⱼ = αᵢⱼ + γᵢⱼ`` of the earlier stages' states (and
+``wᵢ₀ = 1 - Σⱼ wᵢⱼ`` of ``Uⁿ``) in the state the stage's slow forcing produces, and the weights
+``βᵢⱼ / dᵢ`` of the slow tendencies in that forcing.
+"""
+function stage_recombination(ts::MultirateInfinitesimalStep)
+    i = ts.stage[]
+    (; α, β, γ, d) = ts.tableau
+    w = ntuple(j -> α[i, j] + γ[i, j], i - 1)
+    state_weights = (1 - sum(w; init = zero(eltype(d))), w...)
+    tendency_weights = ntuple(j -> β[i, j] / d[i], i)
+    return StageRecombination(i, length(d), state_weights, tendency_weights, ts.Uⁿ, ts.closure_storage)
+end
+
+function AtmosphereModels.materialize_closure_stage_storage(ts::MultirateInfinitesimalStep, closure_fields, closure, grid)
+    storage = build_closure_stage_storage(closure_fields, closure, grid, number_of_stages(ts.tableau))
+    return MultirateInfinitesimalStep(ts.relinearize_stages, ts.fold_stage_increments, ts.tableau, ts.storage,
+                                      ts.U⁰, ts.Gⁿ, ts.implicit_solver, ts.substepper, ts.rounding, ts.Uⁿ,
+                                      ts.accumulators, ts.fast_tendency, ts.scalar_tendencies, ts.step_start,
+                                      ts.transport_density_accumulators, ts.residual, ts.transport_mass_fluxes,
+                                      ts.stage, ts.next_stage, ts.current_Δt, storage)
+end
+
+# Before the stage's forcing is assembled, with the momentum of Yᵢ₋₁ still in the prognostic
+# fields and the closure's conversions those of Yᵢ₋₁ (see `closure_before_stage_combination!`).
+closure_before_stage_recombination!(ts::MultirateInfinitesimalStep, model, Δt_stage) =
+    closure_before_stage_combination!(model.closure_fields, model.closure, model, Δt_stage, stage_recombination(ts))
+
+AtmosphereModels.closure_stage_storage(ts::MultirateInfinitesimalStep) = ts.closure_storage
+
+@inline function final_stage_increment(ts::MultirateInfinitesimalStep)
+    c = ts.tableau.c
+    s = length(c)
+    return s == 1 ? c[1] : c[s] - c[s-1]
+end
 
 #####
 ##### Stage assembly
@@ -756,11 +819,11 @@ struct StageStartState{T, U, Z, R, K} <: AbstractArray{T, 3}
     offset :: Z
     weight :: T
     rounding :: R
-    key :: K
+    key :: K  # the key of `rounding_key`: a `UInt32`, or the Philox counter of `StochasticRounding`
 end
 
 Adapt.adapt_structure(to, s::StageStartState) =
-    StageStartState(adapt(to, s.Uⁿ), adapt(to, s.offset), adapt(to, s.weight), s.rounding, s.key)
+    StageStartState(adapt(to, s.Uⁿ), adapt(to, s.offset), adapt(to, s.weight), s.rounding, adapt(to, s.key))
 
 Base.size(s::StageStartState) = size(s.Uⁿ)
 
@@ -1726,7 +1789,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
 
     (; c, d) = ts.tableau
     s = length(d)
-    tⁿ⁺¹ = model.clock.time + Δt
+    tⁿ⁺¹ = next_time(model.clock, Δt)
 
     store_outer_step_state!(ts, model)
     store_step_start_state!(ts.step_start, model)
@@ -1740,8 +1803,9 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
             ts.next_stage[] = i + 1
             Δc = i == 1 ? c[1] : c[i] - c[i-1]
             tick_stage!(model.clock, Δc * Δt)
-            update_state!(model, callbacks; compute_tendencies = true)
-            # After `update_state!`, so that the increments are those of the state it leaves,
+            # The update after the first stage checks the radiation schedule, as in `SSPRungeKutta3`
+            update_stage_state!(model, callbacks, i)
+            # After the update, so that the increments are those of the state it leaves,
             # with its negative-moisture correction (see `stage_increment_source`).
             store_stage_increment!(ts, model, i, Δt)
             cache_transport_velocity!(model)

@@ -97,6 +97,22 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
+Return the phase equilibrium of the condensate in the water that a subgrid distribution of a turbulence closure
+distributes for `microphysics`: the condensate that is in equilibrium with the vapor on the time scale of the
+turbulence. It is the equilibrium of the saturation adjustment of a scheme that has one
+(`microphysics_phase_equilibrium`): [`WarmPhaseEquilibrium`](@ref), or [`MixedPhaseEquilibrium`](@ref), whose
+condensate is partitioned between liquid and ice by temperature. A scheme with prognostic cloud liquid (P3,
+`NonEquilibriumCloudFormation`) distributes its vapor and cloud liquid: the condensate of that water is the cloud
+liquid, which the scheme relaxes toward saturation over liquid, so the equilibrium is `WarmPhaseEquilibrium()`. The
+ice of such a scheme is not in the distributed water and not in equilibrium with the vapor (it grows and
+sublimates at its own rate); the closure accounts for it through its relaxation rate
+(`AtmosphereModels.phase_relaxation_rates`) and the saturation excess over ice.
+"""
+@inline condensate_phase_equilibrium(μ) = microphysics_phase_equilibrium(μ)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
 Compute the *saturation total specific moisture* under the assumption that all moisture is vapor at saturation,
 ``qᵗ = qᵛ⁺``. With this assumption, the equation of state for moist air can be solved in closed form, yielding an
 expression for the saturation specific humidity in terms of temperature `T` and pressure `p` alone:

@@ -858,11 +858,11 @@ end
 # temperature and hence increases the saturation specific humidity, creating a
 # negative feedback that slows the approach to equilibrium.
 #
-# The saturation derivative follows the Clausius-Clapeyron equation at fixed composition.
-# With qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T),
+# The saturation derivative is that of the model's saturation vapor pressure (`saturation_vapor_pressure_log_slope`)
+# at fixed composition. With qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T),
 #
-#   fixed pressure (anelastic, parcel): ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ ℒˡ / (Rᵛ T²),  ∂qᵛ⁺/∂qᶜˡ = -qᵛ⁺ Rᵛ / Rᵐ
-#   fixed density (compressible):       ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T),  ∂qᵛ⁺/∂qᶜˡ = 0
+#   fixed pressure (anelastic, parcel): ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ ∂ ln pᵛ⁺/∂T,  ∂qᵛ⁺/∂qᶜˡ = -qᵛ⁺ Rᵛ / Rᵐ
+#   fixed density (compressible):       ∂qᵛ⁺/∂T = qᵛ⁺ ⋅ (∂ ln pᵛ⁺/∂T - 1/T),  ∂qᵛ⁺/∂qᶜˡ = 0
 #
 # The heating response dT/dqᶜˡ follows the state's conserved enthalpy at fixed pressure,
 # or its θ–density relation and temperature solver at fixed density; see

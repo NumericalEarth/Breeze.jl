@@ -80,6 +80,11 @@ end
 # `SingleColumnMode` module extends these for per-column *arrays* (single-column ensembles), which it
 # maps/moves to the grid architecture so they can be indexed inside GPU kernels.
 materialize_closure(closure, scalar_names, arch) = with_tracers(scalar_names, closure)
+
+# Reject a closure and a microphysics that cannot work together; closures extend it
+validate_closure_microphysics(closure, microphysics) = nothing
+validate_closure_microphysics(closures::Union{Tuple, AbstractArray}, microphysics) =
+    foreach(closure -> validate_closure_microphysics(closure, microphysics), closures)
 materialize_coriolis(coriolis, arch) = coriolis
 
 """
@@ -356,8 +361,12 @@ function AtmosphereModel(grid;
     # Fill the closure's tracer-indexed diffusivities. For a per-column *array* of closures,
     # `materialize_closure` (extended in `SingleColumnMode`) maps over the array and moves it to the
     # grid architecture; a scalar closure just gets `with_tracers`.
+    validate_closure_microphysics(closure, microphysics)
     closure = materialize_closure(closure, scalar_names, arch)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
+
+    # What the closure keeps from stage to stage of a time stepper that recombines its stages.
+    timestepper = materialize_closure_stage_storage(timestepper, closure_fields, closure, grid)
 
     model = AtmosphereModel(arch,
                             grid,

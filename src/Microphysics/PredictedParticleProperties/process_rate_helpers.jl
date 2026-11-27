@@ -52,7 +52,7 @@ Cap vapor sinks and sources against the moist-adiabatic saturation-adjustment
 budget.
 
 Defining the liquid saturation-adjustment increment `δqˡ = (qᵛ - qᵛ⁺ˡ + Aˡ τ) / ξˡ` with
-the moist-static feedback factor `ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T²)`, where
+the moist-static feedback factor `ξˡ = 1 + ℒˡ qᵛ⁺ˡ (∂ ln pᵛ⁺ˡ / ∂T) / cᵖᵈ`, where
 `Aˡ = -∂ₜqᵛ⁺ˡ` is the external forcing (see `external_vapor_excess_forcing`) and
 `τ = dt_safety`:
 
@@ -63,7 +63,7 @@ the moist-static feedback factor `ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T
 
 The rescaled liquid tendencies are then carried into a post-liquid state
 `(qᵛ_after, T_after)`, and `qᵛ⁺ⁱ_after` is recomputed at `T_after` to evaluate
-`ξⁱ_after = 1 + ℒⁱ_after² qᵛ⁺ⁱ_after / (cᵖᵈ Rᵛ T_after²)`. With the ice
+`ξⁱ_after = 1 + ℒⁱ_after qᵛ⁺ⁱ_after (∂ ln pᵛ⁺ⁱ / ∂T) / cᵖᵈ`. With the ice
 increment `δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after`:
 
 - Ice-phase deposition sinks (`dep > 0`, `nuc_q`) cannot exceed
@@ -113,14 +113,13 @@ end
                                           qᵛ, qᵛ⁺ˡ, T, P, constants, dt_safety,
                                           temperature_tendency, pressure_tendency, ::Nothing)
     FT = typeof(qᵛ)
-    Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
-    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T)
 
     # Liquid-phase saturation-adjustment caps. In the SCF=1 limit the condensation
     # and evaporation budgets collapse to the same signed increment `δqˡ`;
     # condensation sees the positive part, evaporation the negative part.
-    Aˡ = external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, temperature_tendency,
+    Aˡ = external_vapor_excess_forcing(qᵛ⁺ˡ, PlanarLiquidSurface(), T, P, temperature_tendency,
                                        pressure_tendency, constants)
     δqˡ = (qᵛ - qᵛ⁺ˡ + Aˡ * dt_safety) / ξˡ
     qcon_cap = max(0, δqˡ)
@@ -156,11 +155,10 @@ end
                                           qᵛ, qᵛ⁺ˡ, T, P, constants, dt_safety,
                                           temperature_tendency, pressure_tendency, Γ)
     FT = typeof(qᵛ)
-    Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
-    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T)
 
-    Aˡ = external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, temperature_tendency,
+    Aˡ = external_vapor_excess_forcing(qᵛ⁺ˡ, PlanarLiquidSurface(), T, P, temperature_tendency,
                                        pressure_tendency, constants)
     δqˡ = (qᵛ - qᵛ⁺ˡ + Aˡ * dt_safety) / ξˡ
     δqˡᶜ = δqˡ + Γ / ξˡ
@@ -197,10 +195,10 @@ end
                                        temperature_tendency, pressure_tendency, liquid_dt = dt_safety,
                                        vapor_offset = zero(qᵛ),
                                        rain_available = convert(typeof(qᵛ), Inf),
-                                       coating_available = convert(typeof(qᵛ), Inf))
+                                       coating_available = convert(typeof(qᵛ), Inf),
+                                       distribution = nothing, qᵛ⁺ⁱ = qᵛ)
     (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap, coat_cond, coat_evap) = liquid
     FT = typeof(qᵛ)
-    Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
@@ -211,17 +209,22 @@ end
     T_after = T + liquid_change * ℒˡ / cᵖᵈ
     qᵛ⁺ⁱ_after = p3_adjustment_ice_saturation_specific_humidity(T_after, P, qᵗ, constants, freezing_temperature)
     ℒⁱ_after = sublimation_latent_heat(constants, T_after)
-    ξⁱ_after = ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, Rᵛ, T_after)
+    ξⁱ_after = ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, T_after)
 
     # Ice-phase deposition / sublimation caps. The explicit ice rates are applied over the stage,
     # so where the stage is longer than `dt_safety` the ice excess is budgeted over the stage:
     # capped over `dt_safety` alone, the rates would consume it `liquid_dt / dt_safety` times.
     ice_dt = max(dt_safety, liquid_dt)
-    Aⁱ = external_vapor_excess_forcing(qᵛ⁺ⁱ_after, ℒⁱ_after, T_after, P,
+    Aⁱ = external_vapor_excess_forcing(qᵛ⁺ⁱ_after, PlanarIceSurface(), T_after, P,
                                        temperature_tendency, pressure_tendency, constants)
     δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * ice_dt) / ξⁱ_after
-    qdep_cap = max(0, δqⁱ)
-    qsub_cap = max(0, -δqⁱ)
+    # With the subgrid distribution of every process the sinks draw on the positive part of the local excess over
+    # ice, shifted uniformly by what the liquid rates and the forcing do to the cell over `ice_dt`, and the sources
+    # on its negative part (their difference is the mean, δqⁱ)
+    excess = qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * ice_dt
+    qdep_cap = available_ice_excess(distribution, qᵛ - qᵛ⁺ⁱ, excess) / ξⁱ_after
+    # (Round-off guard: the mean of the positive part of the excess is not below its mean.)
+    qsub_cap = max(0, qdep_cap - δqⁱ)
 
     # Deposition cap
     dep_sink_total = max(0, dep) + nuc_q
@@ -546,16 +549,18 @@ end
 #####
 
 # Named for the phase each caller drives, so call sites still read as ξˡ / ξⁱ.
-@inline liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T) =
-    psychrometric_correction(ℒˡ, qᵛ⁺ˡ, p3_dry_air_heat_capacity(constants, typeof(T)), Rᵛ, T)
+@inline liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T) =
+    psychrometric_correction(ℒˡ, qᵛ⁺ˡ, p3_dry_air_heat_capacity(constants, typeof(T)),
+                             saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface()))
 
-@inline ice_psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, Rᵛ, T) =
-    psychrometric_correction(ℒⁱ, qᵛ⁺ⁱ, p3_dry_air_heat_capacity(constants, typeof(T)), Rᵛ, T)
+@inline ice_psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, T) =
+    psychrometric_correction(ℒⁱ, qᵛ⁺ⁱ, p3_dry_air_heat_capacity(constants, typeof(T)),
+                             saturation_vapor_pressure_log_slope(T, constants, PlanarIceSurface()))
 
 #####
 ##### Saturation vapor pressure at freezing
 #####
-##### Derive e_s(T₀) from the Clausius-Clapeyron or Tetens formula.
+##### e_s(T₀) from the model's saturation vapor pressure over liquid.
 #####
 
 @inline function saturation_vapor_pressure_at_freezing(constants, T₀)

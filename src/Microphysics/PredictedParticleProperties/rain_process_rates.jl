@@ -208,7 +208,9 @@ end
     qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(parameters.floors.divisor))
     e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
 
-    A = ℒˡ / (Kᵃ * T) * (ℒˡ / (Rᵛ * T) - 1)
+    # T ∂ ln pᵛ⁺ˡ / ∂T of the model's saturation vapor pressure (ℒˡ / (Rᵛ T) for the Clausius-Clapeyron formula)
+    T∂ln_pᵛ⁺ˡ∂T = T * saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface())
+    A = ℒˡ / (Kᵃ * T) * (T∂ln_pᵛ⁺ˡ∂T - 1)
     B = Rᵛ * T / (e_s * Dᵛ)
     # Φ is only ever a divisor, so the floor is the generic division guard rather than
     # a physical threshold. It never binds: A ≈ 7×10⁶ and B ≈ 9×10⁶ near freezing at

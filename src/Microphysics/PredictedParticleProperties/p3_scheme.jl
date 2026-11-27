@@ -14,7 +14,7 @@ using LazyArtifacts: LazyArtifacts
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS, SG}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NMC, AERO, WRS, SG, CR}
     # Top-level thresholds
     minimum_mass_mixing_ratio :: FT
     minimum_number_mixing_ratio :: FT
@@ -34,6 +34,8 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC, NM
     warm_rain_scheme :: WRS
     # Condensation of cloud liquid: `GridMeanCondensation()` or `SubgridCondensation(statistics)`
     condensation :: SG
+    # Phase relaxation rate of cloud liquid: `DiffusionalGrowthRelaxation()` or `CondensationTimescaleRelaxation()`
+    cloud_relaxation :: CR
 end
 
 # With grid-mean condensation
@@ -44,6 +46,15 @@ PredictedParticlePropertiesMicrophysics(minimum_mass_mixing_ratio, minimum_numbe
                                             process_rates, precipitation_boundary_condition,
                                             negative_moisture_correction, aerosol, warm_rain_scheme,
                                             GridMeanCondensation())
+
+# With the droplets' diffusional-growth relaxation
+PredictedParticlePropertiesMicrophysics(minimum_mass_mixing_ratio, minimum_number_mixing_ratio, ice, rain, cloud,
+                                        process_rates, precipitation_boundary_condition,
+                                        negative_moisture_correction, aerosol, warm_rain_scheme, condensation) =
+    PredictedParticlePropertiesMicrophysics(minimum_mass_mixing_ratio, minimum_number_mixing_ratio, ice, rain, cloud,
+                                            process_rates, precipitation_boundary_condition,
+                                            negative_moisture_correction, aerosol, warm_rain_scheme,
+                                            condensation, DiffusionalGrowthRelaxation())
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -151,8 +162,19 @@ condenses its own cloud liquid; a turbulence closure supplies at most statistics
   see [`SubgridCondensation`](@ref Breeze.Microphysics.PredictedParticleProperties.SubgridCondensation).
 
 Here ``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ`` is the phase relaxation rate of the cloud droplets
-(`AtmosphereModels.phase_relaxation_rate`). Rain, ice, activation and collection keep their
-grid-mean form.
+(`AtmosphereModels.phase_relaxation_rate`). With the default
+`processes = CloudCondensationOnly()` of `SubgridCondensation`, rain, ice, activation and
+collection keep their grid-mean form; with `processes = AllProcesses()` the distribution also
+enters activation, the deposition nucleation of ice, autoconversion, accretion, the vapor exchange
+of the dry ice and the cap on the vapor sinks of ice (see
+[`AllProcesses`](@ref Breeze.Microphysics.PredictedParticleProperties.AllProcesses)).
+
+The `cloud_relaxation` keyword selects ``ωˡ``:
+
+- `DiffusionalGrowthRelaxation()` (default): the size-dependent rate above.
+- `CondensationTimescaleRelaxation()`: the fixed rate ``ωˡ = 1 / τ``, with
+  ``τ`` = `cloud.condensation_timescale`; see
+  [`CondensationTimescaleRelaxation`](@ref Breeze.Microphysics.PredictedParticleProperties.CondensationTimescaleRelaxation).
 
 # Configuring the empirical warm-phase parameters
 
@@ -226,8 +248,10 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                                                  vapor_excess = DiagnosticVaporExcess(),
                                                  liquid_fraction = PrognosticLiquidFraction(),
                                                  warm_rain_scheme = KhairoutdinovKogan2000(),
-                                                 condensation = GridMeanCondensation())
+                                                 condensation = GridMeanCondensation(),
+                                                 cloud_relaxation = DiffusionalGrowthRelaxation())
     condensation = validate_p3_condensation(condensation)
+    cloud_relaxation = validate_p3_cloud_relaxation(cloud_relaxation)
     if isnothing(process_rates)
         process_rates = ProcessRate(FT; thermodynamic_constants,
                                     vapor_excess, liquid_fraction)
@@ -237,7 +261,8 @@ function PredictedParticlePropertiesMicrophysics(FT::DataType = Oceananigans.def
                               minimum_mass_mixing_ratio, minimum_number_mixing_ratio,
                               precipitation_boundary_condition,
                               negative_moisture_correction,
-                              aerosol, cloud, rain, process_rates, warm_rain_scheme, condensation)
+                              aerosol, cloud, rain, process_rates, warm_rain_scheme, condensation,
+                              cloud_relaxation)
 end
 
 # Shorthand alias
@@ -262,3 +287,7 @@ end
 
 # Note: prognostic_field_names is implemented in p3_microphysical_state.jl to extend
 # AtmosphereModels.prognostic_field_names
+
+# The condensate of the water a subgrid distribution distributes with P3 (vapor and cloud liquid) is its cloud liquid,
+# which P3 relaxes toward saturation over liquid; P3's ice and rain are not distributed
+@inline Diagnostics.condensate_phase_equilibrium(::PredictedParticlePropertiesMicrophysics) = WarmPhaseEquilibrium()

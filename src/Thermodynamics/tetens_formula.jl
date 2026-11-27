@@ -153,3 +153,32 @@ based on the liquid fraction.
     λ = surface.liquid_fraction
     return λ * pᵛ⁺ˡ + (1 - λ) * pᵛ⁺ⁱ
 end
+
+# ∂ ln pᵛ⁺ / ∂T of Tetens' formula, a (Tᵣ - δT) / (T - δT)²
+@inline tetens_log_slope(T, a, Tᵣ, δT) = a * (Tᵣ - δT) / ((T - δT) * (T - δT))
+
+@inline function saturation_vapor_pressure_log_slope(T, constants::TetensFormulaThermodynamicConstants, ::PlanarLiquidSurface)
+    tf = constants.saturation_vapor_pressure
+    return tetens_log_slope(T, tf.liquid_coefficient, tf.reference_temperature, tf.liquid_temperature_offset)
+end
+
+@inline function saturation_vapor_pressure_log_slope(T, constants::TetensFormulaThermodynamicConstants, ::PlanarIceSurface)
+    tf = constants.saturation_vapor_pressure
+    return tetens_log_slope(T, tf.ice_coefficient, tf.reference_temperature, tf.ice_temperature_offset)
+end
+
+# The mixed-phase surface interpolates the pressures linearly in the liquid fraction λ
+@inline function saturation_vapor_pressure_log_slope(T, constants::TetensFormulaThermodynamicConstants, surface::PlanarMixedPhaseSurface)
+    pᵛ⁺ˡ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+    ∂ˡ = saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface())
+    ∂ⁱ = saturation_vapor_pressure_log_slope(T, constants, PlanarIceSurface())
+    λ = surface.liquid_fraction
+    return (λ * pᵛ⁺ˡ * ∂ˡ + (1 - λ) * pᵛ⁺ⁱ * ∂ⁱ) / (λ * pᵛ⁺ˡ + (1 - λ) * pᵛ⁺ⁱ)
+end
+
+@inline function saturation_vapor_pressure_liquid_fraction_log_slope(T, constants::TetensFormulaThermodynamicConstants, surface)
+    pᵛ⁺ˡ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+    return (pᵛ⁺ˡ - pᵛ⁺ⁱ) / saturation_vapor_pressure(T, constants, surface)
+end

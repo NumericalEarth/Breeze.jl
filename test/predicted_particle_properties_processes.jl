@@ -1204,7 +1204,7 @@ end
 
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
         ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
-        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T)
 
         # Liquid satadj cap: cond + ccn_activation_mass + rain_cond + coat_cond ≤ qcon_cap/dt_safety
         qcon_cap = max(zero(FT), qᵛ - qᵛ⁺ˡ) / ξˡ
@@ -1221,7 +1221,7 @@ end
         T_after = T + net_liquid * ℒˡ * dt_safety / constants.dry_air.heat_capacity
         qᵛ⁺ⁱ_after = adjustment_saturation_specific_humidity(T_after, P, qᵗ, constants, PlanarIceSurface())
         ℒⁱ_after = Breeze.Thermodynamics.ice_latent_heat(T_after, constants)
-        ξⁱ_after = PPP.ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, Rᵛ, T_after)
+        ξⁱ_after = PPP.ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, T_after)
         qdep_cap = max(zero(FT), qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after
         dep_sink_total = max(zero(FT), limited.dep) + limited.nuc_q
         @test dep_sink_total * dt_safety <= qdep_cap + FT(10) * eps(FT)
@@ -1250,7 +1250,7 @@ end
 
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
         ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
-        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T)
         cons7 = FT(4 * FT(π) / 3 * 1000 * (1e-6)^3)
         deficit = Nᶜˡ / ρ * cons7
         @test (qᵛ - qᵛ⁺ˡ) / ξˡ < deficit
@@ -1308,7 +1308,7 @@ end
         # Verify the liquid evaporation cap: |cond_neg| + rain_evap + coat_evap ≤ qevp_cap/dt_safety
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
         ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
-        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T)
         qevp_cap = max(zero(FT), -(qᵛ - qᵛ⁺ˡ) / ξˡ)
         evp_total = max(zero(FT), -limited.cond) + limited.rain_evap + limited.coat_evap
         @test evp_total * dt_safety <= qevp_cap + FT(10) * eps(FT)
@@ -2599,9 +2599,9 @@ end
         ∂ₜT = -constants.gravitational_acceleration * 2 / constants.dry_air.heat_capacity
         ∂ₜp = -ρ * constants.gravitational_acceleration * 2
         ℒˡ = PPP.vaporization_latent_heat(constants, T)
-        Aˡ = PPP.external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, ∂ₜT, ∂ₜp, constants)
+        Aˡ = PPP.external_vapor_excess_forcing(qᵛ⁺ˡ, Breeze.Thermodynamics.PlanarLiquidSurface(), T, P, ∂ₜT, ∂ₜp, constants)
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
-        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+        ξˡ = PPP.liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T)
 
         @test Aˡ > 0
         @test Aˡ / ξˡ < cond

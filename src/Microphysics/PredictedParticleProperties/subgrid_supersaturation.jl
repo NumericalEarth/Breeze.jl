@@ -14,8 +14,12 @@
 #
 # Γ enters the vapor exchange of cloud liquid only: its diffusional growth and decay, the seed
 # mass with which prescribed-number droplets start that growth, and the saturation-adjustment
-# caps on those two rates. Rain, ice, aerosol activation and every collection process keep
-# their grid-mean form. Evaporation stays limited by the cloud liquid present (the clamp
+# caps on those two rates. With `processes = CloudCondensationOnly()` rain, ice, aerosol activation
+# and every collection process keep their grid-mean form. With `processes = AllProcesses()` the
+# distribution also enters activation, the deposition nucleation of ice, autoconversion, accretion,
+# the vapor exchange of the dry ice (in each of the two parts of the cell) and the cap on the vapor
+# sinks of ice (`subgrid_microphysics.jl`); the vapor exchange of rain and of the liquid coating of
+# ice keeps its grid-mean form. Evaporation stays limited by the cloud liquid present (the clamp
 # -qᶜˡ / τ in `coupled_saturation_adjustment_rates`).
 
 """
@@ -44,8 +48,8 @@ vapor excess over liquid, ``ωˡ (μ + Γ)``, where ``μ = δqᵛ⁺ˡ`` is the 
 ```
 
 with ``φ`` and ``Φ`` the standard normal density and distribution function, so that
-``μ + Γ = ⟨\\max(0, δqᵛ⁺ˡ)⟩``. The spread ``σ`` comes from
-`supersaturation_statistics(statistics, ...)`. For a mixture of Gaussian plumes with weights
+``μ + Γ = ⟨max(0, δqᵛ⁺ˡ)⟩``. The spread ``σ`` comes from
+`supersaturation_statistics(statistics, ...)`. For a mixture of Gaussian components with weights
 ``aᵢ``, offsets ``μᵢ - Σⱼ aⱼ μⱼ`` and spreads ``σᵢ``, ``Γ = Σᵢ aᵢ [σᵢ G(μ̃ᵢ / σᵢ) - μ̃ᵢ]`` with
 ``μ̃ᵢ = μ + μᵢ - Σⱼ aⱼ μⱼ``. As ``σ → 0``, ``Γ → 0`` and the grid-mean rate is recovered.
 
@@ -57,43 +61,51 @@ vanishes when the cloud liquid is the distribution's equilibrium condensate.
 $(TYPEDFIELDS)
 
 ```jldoctest
-julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation
+julia> using Breeze.Microphysics.PredictedParticleProperties: SubgridCondensation, CloudCondensationOnly
 
 julia> using Breeze.AtmosphereModels: PrescribedStatistics
 
 julia> SubgridCondensation(PrescribedStatistics(1e-4))
-SubgridCondensation{PrescribedStatistics{Float64}}(PrescribedStatistics{Float64}(0.0001))
+SubgridCondensation{PrescribedStatistics{Float64}, CloudCondensationOnly}(PrescribedStatistics{Float64}(0.0001), CloudCondensationOnly())
 ```
 """
-struct SubgridCondensation{S}
+struct SubgridCondensation{S, P}
     "Source of the subgrid statistics of the vapor excess, passed to `supersaturation_statistics`"
     statistics :: S
+    "Which processes read the distribution: `CloudCondensationOnly()` or `AllProcesses()`"
+    processes :: P
 end
 
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return [`SubgridCondensation`](@ref) with the subgrid statistics `statistics`. With
+`processes = CloudCondensationOnly()` the distribution enters cloud condensation only; with
+[`AllProcesses`](@ref) it also enters activation, the deposition nucleation of ice, autoconversion,
+accretion, the vapor exchange of the dry ice and the cap on the vapor sinks of ice.
+"""
+SubgridCondensation(statistics; processes = CloudCondensationOnly()) =
+    SubgridCondensation(statistics, validate_subgrid_processes(processes))
+
 Adapt.adapt_structure(to, condensation::SubgridCondensation) =
-    SubgridCondensation(Adapt.adapt(to, condensation.statistics))
+    SubgridCondensation(Adapt.adapt(to, condensation.statistics), condensation.processes)
 
 #####
 ##### The cell-averaged excess over zero of a Gaussian vapor excess
 #####
 
 # Γ(μ, σ) = σ G(μ/σ) - μ = σ [φ(Q) - Q Φ(-Q)], Q = μ/σ, written without the cancellation of
-# σ G(Q) - μ for large Q. The spread is floored at a tiny value so that σ = 0 gives Γ = 0 and the
-# rate is smooth in σ; `max(0, ⋅)` removes round-off below zero.
-#
-# Beyond |Q| = 40 the Gaussian tail is below round-off in Float64 (and Float32), and Γ is its limit,
-# max(0, -μ): 0 for Q > 40 and -μ for Q < -40. Q is clamped inside the formula, so that an
-# overflowing Q (σ → 0, or a huge evaporation shift) never forms ∞ ⋅ 0.
+# σ G(Q) - μ for large Q. Q is the `standard_score` of μ, regular at σ = 0, and σ̃ = μ / Q the spread it is formed
+# with (σ̃ = hypotenuse(σ, δ), δ the round-off of μ), so that σ = 0 gives the limit max(0, -μ) of the point mass without a
+# branch, and |Q| ≤ 1/ϵ keeps φ and Q Φ(-Q) finite. `max(0, ⋅)` removes the round-off of φ - Q Φ(-Q) below zero
+# far in the upper tail.
 @inline function gaussian_excess_correlation(μ, σ)
     FT = typeof(μ)
-    σ₊ = max(σ, floatmin(FT) / eps(FT))
-    Q = μ / σ₊
-    Qᵐᵃˣ = convert(FT, 40)
-    Qᶜ = clamp(Q, -Qᵐᵃˣ, Qᵐᵃˣ)
-    φ = exp(-Qᶜ^2 / 2) / sqrt(2 * FT(π))
-    Φ⁻ = erfc(Qᶜ / sqrt(FT(2))) / 2
-    tail = ifelse(Q > Qᵐᵃˣ, zero(FT), -μ)
-    return max(0, ifelse(abs(Q) > Qᵐᵃˣ, tail, σ₊ * (φ - Qᶜ * Φ⁻)))
+    Q = standard_score(μ, zero(FT), σ)
+    σ̃ = hypotenuse(σ, eps(FT) * abs(μ) + floatmin(FT))
+    φ = exp(-Q^2 / 2) / sqrt(2 * FT(π))
+    Φ⁻ = erfc(Q / sqrt(FT(2))) / 2
+    return max(0, σ̃ * (φ - Q * Φ⁻))
 end
 
 """
@@ -101,13 +113,13 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return the subgrid vapor excess correlation ``Γ ≥ 0`` [kg kg⁻¹] for the statistics `statistics`
 (see `AtmosphereModels.supersaturation_statistics`) about the grid-mean vapor excess over liquid
-`μ`, such that ``μ + Γ`` is the cell average of ``\\max(0, δqᵛ⁺ˡ)``. See [`SubgridCondensation`](@ref).
+`μ`, such that ``μ + Γ`` is the cell average of ``max(0, δqᵛ⁺ˡ)``. See [`SubgridCondensation`](@ref).
 
 ```jldoctest
 julia> using Breeze.Microphysics.PredictedParticleProperties: subgrid_vapor_excess_correlation
 
-julia> subgrid_vapor_excess_correlation((; μ = 0.0, σ = 1.0, skewness = 0.0, f⁺ = 0.5), 0.0) ≈ 1 / sqrt(2π)
-true
+julia> subgrid_vapor_excess_correlation((; μ = 0.0, σ = 1.0, skewness = 0.0, f⁺ = 0.5), 0.0)
+0.3989422804014327
 ```
 """
 @inline subgrid_vapor_excess_correlation(statistics::NamedTuple{names}, μ) where names =
@@ -117,14 +129,14 @@ true
 @inline subgrid_vapor_excess_correlation(::Val{false}, statistics, μ) =
     gaussian_excess_correlation(μ, convert(typeof(μ), statistics.σ))
 
-# Gaussian plumes, shifted so that their weighted mean is the grid-mean vapor excess μ.
+# Gaussian components, shifted so that their weighted mean is the grid-mean vapor excess μ.
 @inline function subgrid_vapor_excess_correlation(::Val{true}, statistics, μ)
     FT = typeof(μ)
-    a = map(x -> convert(FT, x), statistics.a)
-    μᵖ = map(x -> convert(FT, x), statistics.μ)
-    σᵖ = map(x -> convert(FT, x), statistics.σ)
-    plume_mean = sum(map(*, a, μᵖ))
-    terms = map((aᵢ, μᵢ, σᵢ) -> aᵢ * gaussian_excess_correlation(μ + μᵢ - plume_mean, σᵢ), a, μᵖ, σᵖ)
+    weights = map(x -> convert(FT, x), statistics.a)
+    means = map(x -> convert(FT, x), statistics.μ)
+    spreads = map(x -> convert(FT, x), statistics.σ)
+    mixture_mean = sum(map(*, weights, means))
+    terms = map((aᵢ, μᵢ, σᵢ) -> aᵢ * gaussian_excess_correlation(μ + μᵢ - mixture_mean, σᵢ), weights, means, spreads)
     return sum(terms)
 end
 
@@ -166,6 +178,17 @@ Return the subgrid statistics of cell `(i, j, k)` that the `condensation` option
 @inline seed_vapor(aerosol, Γ, qᵛ) = qᵛ
 @inline seed_vapor(::Nothing, ::Nothing, qᵛ) = qᵛ
 @inline seed_vapor(::Nothing, Γ, qᵛ) = qᵛ + Γ
+@inline seed_vapor(aerosol, Γ, qᵛ, ::Nothing) = seed_vapor(aerosol, Γ, qᵛ)
+# With `AllProcesses` activation reads the distribution instead (`activation_vapor`)
+@inline seed_vapor(aerosol, Γ, qᵛ, distribution) = qᵛ
+
+# The vapor that droplet activation sees and the fraction of the cell that activates, shared by the
+# explicit rates (`p3_phase1_rates`) and the implicit relaxation over the stage
+# (`implicit_liquid_vapor_rates`), so that both start cloud where the subgrid distribution is
+# saturated though the grid mean is not.
+@inline p3_activation_vapor(p3, Γ, qᵛ, qᵛ⁺ˡ, distribution) =
+    activation_vapor(distribution, seed_vapor(p3.aerosol, Γ, qᵛ, distribution), qᵛ⁺ˡ,
+                     activation_relative_threshold(p3.aerosol, p3))
 
 #####
 ##### The `condensation` keyword of P3
@@ -188,15 +211,16 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Return the subgrid supersaturation correlation Γ [kg kg⁻¹] of a cell: the amount added to the
 grid-mean vapor excess `qᵛ - qᵛ⁺ˡ` in the condensation and evaporation of cloud liquid. The
 arguments are the `condensation` option of P3 and the `statistics` it formed for the cell, the
-vapor, saturation and cloud liquid mass fractions, the temperature `T`, pressure `P` and density
-`ρ` that P3 evaluates its rates with, and the thermodynamic `constants`. For
+vapor, saturation and cloud liquid mass fractions, the moisture mass fractions `q` of the cell, the
+temperature `T`, pressure `p` and density `ρ` that P3 evaluates its rates with, and the
+thermodynamic `constants`. For
 [`GridMeanCondensation`](@ref) the result is `nothing` and P3 uses the grid-mean vapor excess
 unchanged.
 
 ```jldoctest
 julia> using Breeze.Microphysics.PredictedParticleProperties: cloud_condensation_correlation, cloud_vapor_excess, GridMeanCondensation
 
-julia> Γ = cloud_condensation_correlation(GridMeanCondensation(), nothing, 1e-2, 1.1e-2, 0.0, 285.0, 9e4, 1.1, nothing)
+julia> Γ = cloud_condensation_correlation(GridMeanCondensation(), nothing, 1e-2, 1.1e-2, 0.0, nothing, 285.0, 9e4, 1.1, nothing)
 
 julia> cloud_vapor_excess(Γ, -1e-3)
 -0.001
@@ -205,11 +229,11 @@ julia> cloud_vapor_excess(0.5, -1.0)
 -0.5
 ```
 """
-@inline cloud_condensation_correlation(::GridMeanCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, P, ρ, constants) = nothing
+@inline cloud_condensation_correlation(::GridMeanCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ, q, T, p, ρ, constants) = nothing
 
 # Subgrid condensation. The statistics are those of the saturation excess of total water,
 # s = qᵗ - qᵛ⁺ˡ(Tˡ), which in P3's linearization is s = δqᵛ⁺ˡ + ξˡ qᶜˡ: the vapor excess plus the
-# vapor the cloud liquid would return, ξˡ = 1 + ℒˡ ∂qᵛ⁺ˡ/∂T / cᵖᵈ accounting for the cooling by
+# vapor the cloud liquid would return, ξˡ = 1 + ℒˡ ∂qᵛ⁺ˡ/∂T / cᵖᵐ accounting for the cooling by
 # its evaporation. Cloud liquid is taken to lie where s > 0, shaped as the equilibrium condensate
 # s⁺ / ξˡ: locally qᶜˡ = λ s⁺ / ξˡ with λ = ξˡ q̄ᶜˡ / ⟨s⁺⟩, so that the local vapor excess is
 # s - λ s⁺ where s > 0 and s, with no liquid to evaporate, elsewhere. Locally cloud liquid changes
@@ -223,20 +247,55 @@ julia> cloud_vapor_excess(0.5, -1.0)
 # cloud liquid s̄ = μ and only supersaturated air condenses. As σ → 0, μ + Γ → max(μ, -ξˡ q̄ᶜˡ):
 # the grid-mean rate, with evaporation no faster than ωˡ ξˡ q̄ᶜˡ (all the liquid relaxing at
 # the droplets' rate εˡ = ωˡ ξˡ).
-@inline function cloud_condensation_correlation(::SubgridCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ,
-                                                T, P, ρ, constants)
-    ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+@inline function cloud_condensation_correlation(condensation::SubgridCondensation, statistics, qᵛ, qᵛ⁺ˡ, qᶜˡ,
+                                                q, T, p, ρ, constants)
+    ξˡ = p3_liquid_psychrometric_correction(qᵛ⁺ˡ, q, T, constants)
     μ = qᵛ - qᵛ⁺ˡ
     s̄ = μ + ξˡ * max(0, qᶜˡ)
-    return subgrid_vapor_excess_correlation(statistics, s̄)
+    cell = (; vapor_excess = μ, saturation_excess = s̄, ξˡ, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, p, ρ)
+    return vapor_excess_correlation(condensation.statistics, statistics, cell)
 end
 
-# ξˡ = 1 + ℒˡ ∂qᵛ⁺ˡ/∂T / cᵖᵈ, with P3's dry-air heat capacity convention
-@inline function p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
-    FT = typeof(T)
-    Rᵛ = FT(vapor_gas_constant(constants))
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the subgrid vapor excess correlation ``Γ`` [kg kg⁻¹] of [`SubgridCondensation`](@ref):
+cloud liquid condenses at ``ωˡ (δqᵛ⁺ˡ + Γ)`` and relaxes implicitly toward
+``max(0, s̄ + Γ) / ξˡ``. `source` is the `statistics` of `SubgridCondensation(statistics)`,
+`statistics` what `supersaturation_statistics(source, ...)` returned for the cell, and `cell` the
+named tuple `(; vapor_excess, saturation_excess, ξˡ, qᵛ, qᵛ⁺ˡ, qᶜˡ, T, p, ρ)`: the grid-mean vapor
+excess over liquid ``μ = qᵛ - qᵛ⁺ˡ``, the saturation excess of total water ``s̄ = μ + ξˡ qᶜˡ``,
+the psychrometric correction, the vapor, saturation and cloud liquid mass fractions, and the
+temperature, pressure and density P3 evaluates its rates with.
+
+The default is the truncation of a Gaussian (or a mixture of Gaussian components) about ``s̄``,
+`subgrid_vapor_excess_correlation(statistics, s̄)`. A source of statistics with a different
+distribution extends this function for its type to supply its own ``Γ``; the method must be
+pure and type-stable in the element type of `cell`.
+
+```jldoctest
+julia> using Breeze.Microphysics.PredictedParticleProperties: vapor_excess_correlation
+
+julia> using Breeze.AtmosphereModels: PrescribedStatistics
+
+julia> cell = (; vapor_excess = 0.0, saturation_excess = 0.0, ξˡ = 1.0, qᵛ = 1e-2, qᵛ⁺ˡ = 1e-2,
+               qᶜˡ = 0.0, T = 285.0, p = 9e4, ρ = 1.1);
+
+julia> vapor_excess_correlation(PrescribedStatistics(1.0), (; μ = 0.0, σ = 1.0, skewness = 0.0, f⁺ = 0.5), cell)
+0.3989422804014327
+```
+"""
+@inline vapor_excess_correlation(source, statistics, cell) =
+    subgrid_vapor_excess_correlation(statistics, cell.saturation_excess)
+
+# ξˡ = 1 + ℒˡ ∂qᵛ⁺ˡ/∂T / cᵖᵐ: the saturation excess of total water that the evaporation of cloud liquid returns, per
+# unit of liquid, with ∂ ln qᵛ⁺ˡ/∂T that of the model's saturation vapor pressure and the mixture heat capacity cᵖᵐ of
+# the cell's moisture mass fractions `q`. At fixed liquid-ice potential temperature, pressure and total water the
+# model's temperature, ĉᵖ Π θˡⁱ = cᵖᵐ T - ℒˡ₀ qˡ - ℒⁱ₀ qⁱ, changes with the liquid by dT = ℒˡ(T) dqˡ / cᵖᵐ
+# (ĉᵖ and Π do not change with the phase, ∂cᵖᵐ/∂qˡ = cˡ - cᵖᵛ, and ℒˡ(T) = ℒˡ₀ + (cᵖᵛ - cˡ) T).
+@inline function p3_liquid_psychrometric_correction(qᵛ⁺ˡ, q, T, constants)
     ℒˡ = vaporization_latent_heat(constants, T)
-    cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
-    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
-    return 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    ∂qᵛ⁺ˡ∂T = qᵛ⁺ˡ * saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface())
+    return 1 + ℒˡ * ∂qᵛ⁺ˡ∂T / cᵖᵐ
 end

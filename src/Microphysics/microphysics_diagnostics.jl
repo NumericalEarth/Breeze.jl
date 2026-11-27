@@ -16,11 +16,17 @@ using ..AtmosphereModels.Diagnostics:
     SaturationSpecificHumidityField,
     DewpointTemperature,
     DewpointTemperatureField,
-    microphysics_phase_equilibrium
+    microphysics_phase_equilibrium,
+    condensate_phase_equilibrium
 
 # Extend microphysics_phase_equilibrium for SaturationAdjustment
 @inline Diagnostics.microphysics_phase_equilibrium(μ::SaturationAdjustment) = μ.equilibrium
 @inline Diagnostics.microphysics_phase_equilibrium(μ::BulkMicrophysics) = microphysics_phase_equilibrium(μ.cloud_formation)
+
+# The condensate of bulk microphysics is that of its cloud formation: the equilibrium of its saturation
+# adjustment, or, without one, the cloud liquid of its distributed water (its cloud ice is not distributed)
+@inline Diagnostics.condensate_phase_equilibrium(μ::BulkMicrophysics) = condensate_phase_equilibrium(μ.cloud_formation)
+@inline Diagnostics.condensate_phase_equilibrium(::NonEquilibriumCloudFormation) = WarmPhaseEquilibrium()
 
 const C = Center
 

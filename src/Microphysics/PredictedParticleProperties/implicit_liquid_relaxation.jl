@@ -121,7 +121,8 @@ so the relaxation keeps its bounds.
 # `cloud_relaxation` and `rain_relaxation` are the relaxation coefficients that the coupled
 # explicit rates were built with (`coupled_saturation_adjustment_rates`), at the same state.
 @inline function implicit_liquid_vapor_rates(stage, liquid_rates, p3, ρ, ℳ, state, constants,
-                                             cloud_water_adjustment, cloud_relaxation, rain_relaxation, Γ)
+                                             cloud_water_adjustment, cloud_relaxation, rain_relaxation, Γ,
+                                             distribution = nothing)
     FT = typeof(ρ)
     parameters = p3.process_rates
     τ = parameters.sink_limiting_timescale
@@ -130,9 +131,8 @@ so the relaxation keeps its bounds.
     qᵛ⁺ˡ = state.qᵛ⁺ˡ
 
     # The psychrometric correction of the coupled explicit rates, evaluated at the same state.
-    Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
-    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T)
 
     # The vapor excess that the stage starts from. The cloud below is what the stage start
     # leaves, so the vapor and the heat must refer to that start too: the vapor that the stage
@@ -140,7 +140,9 @@ so the relaxation keeps its bounds.
     # raises the vapor excess by `ξˡ Δqᵛ`. It is exact where phase changes of liquid alone
     # separate the two states. Vapor that transport moved between them is weighted likewise,
     # and deposition by the latent heat of vaporization, for want of the heat the stage starts
-    # from; TODO: diagnose the thermodynamic state of the stage start instead.
+    # from; TODO: diagnose the thermodynamic state of the stage start instead. The cloud's
+    # equilibrium condensate is that of the subgrid distribution where the `condensation`
+    # option supplies Γ.
     vapor_excess = qᵛ - qᵛ⁺ˡ + ξˡ * stage.Δqᵛ
     # Tiny cloud in subsaturated air evaporates no slower than over `sink_limiting_timescale`
     subsaturated = vapor_excess / max(qᵛ⁺ˡ, FT(parameters.floors.divisor)) <
@@ -170,8 +172,17 @@ so the relaxation keeps its bounds.
     rain_cond = ifelse(tiny_rain, zero(FT), max(0, rain_rate))
     rain_evap = ifelse(tiny_rain, max(0, ℳ.qʳ) / τ, max(0, -rain_rate))
 
+    # Activation sees the vapor of the explicit rates (`p3_activation_vapor`): with a subgrid
+    # distribution, the mean vapor excess of the part of the cell above its threshold; with
+    # `CloudCondensationOnly`, prescribed-number droplets are seeded at the vapor that cloud liquid
+    # sees, qᵛ + Γ. Without cloud the droplets' relaxation rate is zero, so this seed is what
+    # starts cloud in a cell whose subgrid distribution is saturated and whose grid mean is not.
+    # The grid-mean vapor it sees is that of the stage start, qᵛ⁺ˡ + vapor_excess.
+    activating = p3_activation_vapor(p3, Γ, qᵛ⁺ˡ + vapor_excess, qᵛ⁺ˡ, distribution)
     activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
-                                                   qᵛ⁺ˡ + vapor_excess, qᵛ⁺ˡ, ξˡ, T, ρ)
+                                                   activating.qᵛ, qᵛ⁺ˡ, ξˡ, T, ρ)
+    activation = (; mass = activation.mass * activating.fraction,
+                    number = activation.number * activating.fraction)
 
     # Diffusional growth and the seed mass of activation draw on one vapor excess. Where they
     # ask for more together, they are scaled together, as the explicit rates are
@@ -179,9 +190,11 @@ so the relaxation keeps its bounds.
     # vanishes as `Δt` grows. The seed mass and the number take the same fraction, which keeps
     # the size of the activated droplets. Growth alone never exceeds the budget: growth on the
     # subgrid correlation Γ, and the refill of a negative remainder, are not bounded by the
-    # grid-mean excess.
+    # grid-mean excess. Nor is activation alone: it draws on the vapor excess of the part of
+    # the cell that activates, which is the grid-mean excess without a subgrid distribution.
     growth = max(0, cloud_rate) + rain_cond
-    budget = max(max(0, rain_excess), Δt * growth)
+    activation_excess = activating.fraction * (activating.qᵛ - qᵛ⁺ˡ) / ξˡ
+    budget = max(max(0, rain_excess, activation_excess), Δt * growth)
     shared_fraction = sink_limiting_factor(growth + activation.mass, budget, Δt)
     cloud_rate = ifelse(cloud_rate > 0, shared_fraction * cloud_rate, cloud_rate)
     rain_cond = shared_fraction * rain_cond

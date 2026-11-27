@@ -4,13 +4,13 @@ using Oceananigans: Face, UpdateStateCallsite, TendencyCallsite
 using Oceananigans.Advection: update_advection!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!,
                                        update_boundary_conditions!
-using Oceananigans.Grids: topology, horizontally_extended_interior_kernel_parameters,
-                          TwoSided, Connected
+using Oceananigans.Grids: Flat, topology, TwoSided, Connected
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models: boundary_condition_args
 using Oceananigans.OutputReaders: update_field_time_series!, extract_field_time_series
 using Oceananigans.TimeSteppers: TimeSteppers, Clock
 using Oceananigans.TurbulenceClosures: compute_closure_fields!
+using Oceananigans.TurbulenceClosures.Smagorinskys: LagrangianAveragedDynamicSmagorinsky
 using Oceananigans.Units: Time
 using Oceananigans.Utils: launch!, KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
@@ -51,6 +51,8 @@ function update_atmosphere_state!(update_radiation_fluxes!, model, callbacks; co
 
     Oceananigans.Models.update_model_field_time_series!(model, model.clock)
 
+    # Synchronous: nothing completes an asynchronous fill here, so on a `Distributed` grid the halos
+    # of every prognostic that is not filled again below (the tracers) would never be received.
     fill_halo_regions!(prognostic_fields(model), boundary_condition_args(model)...)
     compute_auxiliary_variables!(model)
     update_boundary_conditions!(prognostic_fields(model), model)
@@ -289,15 +291,71 @@ function compute_auxiliary_variables!(model)
     # `closure_fields === nothing`); there is nothing to compute or fill, so skip it. Field-carrying
     # closure arrays (e.g. CATKE) have non-`nothing` closure fields and are handled as usual.
     if !(model.closure isa AbstractArray && isnothing(model.closure_fields))
-        # Closure fields are computed one cell past the interior in x and y, from inputs whose
-        # halos are already filled, so that across a seam between ranks only local halos need filling.
-        closure_parameters = horizontally_extended_interior_kernel_parameters(model.grid)
-        compute_closure_fields!(model.closure_fields, model.closure, model; parameters=closure_parameters)
+        compute_extended_closure_fields!(model.closure_fields, model.closure, model)
+        # The local fill imposes the boundary conditions of the closure fields and the periodic
+        # images within a rank. Nothing is exchanged between ranks: the halo cells the tendencies
+        # read have just been computed.
         fill_halo_regions!(model.closure_fields; only_local_halos=true)
     end
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
+    return nothing
+end
+
+#####
+##### Closure fields, computed one cell into the horizontal halos
+#####
+
+# The viscous and diffusive fluxes of an interior tendency read an eddy viscosity or diffusivity one
+# cell into the halo, corners included (`νᶠᶠᶜ` at `(1, 1)` averages the centers `(0:1, 0:1)`). On a
+# `Distributed` grid a closure field that is computed in the interior alone is stale there, because
+# its halos are filled locally and never received from a neighbouring rank. So, as Oceananigans'
+# `HydrostaticFreeSurfaceModel` does with `horizontally_extended_interior_kernel_parameters`, the
+# closure fields are computed over `0:Nx+1` and `0:Ny+1`, from the halos of the velocities,
+# thermodynamic variables and tracers, which are filled (and exchanged between ranks) before the
+# closure fields are computed. A closure's own stencil reaches one further cell, to index `-1` or
+# `N+2`, which is why these closures require a halo of at least two (`required_halo_size_x`).
+#
+# The ranges are written out, rather than taken from `horizontally_extended_interior_kernel_parameters`,
+# because on a grid with an active cells map that function returns a map of the active cells only,
+# whereas `:xyz` covers every cell and column kernels need the horizontal ranges.
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the kernel parameters over which the fields of `closure` are computed on `grid`: the
+interior plus one cell into the halo in every horizontal direction that is not `Flat`.
+The fallback `:xyz` (the interior alone) applies to closures whose fields cannot be computed
+from the halos of the model state.
+"""
+function closure_fields_kernel_parameters(grid, closure)
+    Nx, Ny, Nz = size(grid)
+    TX, TY, _ = topology(grid)
+    ii = TX === Flat ? (1:Nx) : (0:Nx+1)
+    jj = TY === Flat ? (1:Ny) : (0:Ny+1)
+    return KernelParameters(ii, jj, 1:Nz)
+end
+
+# An array of closures (a per-column ensemble) is indexed by column, and has no halo columns.
+closure_fields_kernel_parameters(grid, ::AbstractArray) = :xyz
+
+# The Lagrangian-averaged coefficient is advanced in the interior by `step_closure_prognostics!`,
+# from its own previous values, so that its halos hold nothing a viscosity could be computed from.
+# TODO: on a `Distributed` grid this closure is wrong next to a rank boundary, in Oceananigans too:
+# `𝒥ᴸᴹ` and `𝒥ᴹᴹ` are time-stepped state whose halos must be exchanged after each update, as must
+# those of `Σ` and `Σ̄`, which Oceananigans fills with `only_local_halos=true` before filtering them.
+closure_fields_kernel_parameters(grid, ::LagrangianAveragedDynamicSmagorinsky) = :xyz
+
+compute_extended_closure_fields!(closure_fields, closure, model) =
+    compute_closure_fields!(closure_fields, closure, model;
+                            parameters = closure_fields_kernel_parameters(model.grid, closure))
+
+# Each closure of a tuple over its own region
+compute_extended_closure_fields!(::Tuple{}, ::Tuple{}, model) = nothing
+
+function compute_extended_closure_fields!(closure_fields::Tuple, closures::Tuple, model)
+    compute_extended_closure_fields!(first(closure_fields), first(closures), model)
+    compute_extended_closure_fields!(Base.tail(closure_fields), Base.tail(closures), model)
     return nothing
 end
 
@@ -490,8 +548,37 @@ function compute_scalar_tendencies!(model, model_fields, advecting_velocities, k
     ##### Fused microphysics tendencies (no-op by default; schemes opt in)
     #####
 
+    # A closure may carry the microphysical part of these tendencies to its next evaluation: it reads them on each
+    # side of the microphysical sources
+    record_microphysical_tendencies!(BeforeMicrophysicalSources(), model.closure_fields, model.closure, model)
     compute_microphysical_tendencies!(model)
+    record_microphysical_tendencies!(AfterMicrophysicalSources(), model.closure_fields, model.closure, model)
 
+    return nothing
+end
+
+#####
+##### The microphysical part of the scalar tendencies, for a closure that carries it between evaluations
+#####
+
+struct BeforeMicrophysicalSources end
+struct AfterMicrophysicalSources end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Let `closure` read the scalar tendencies `model.timestepper.Gⁿ` on each `side` of the microphysical sources
+(`BeforeMicrophysicalSources()`, then `AfterMicrophysicalSources()`), wherever the model builds them, so that the
+closure can hold their microphysical part: the difference of the two. A no-op for closures that hold none.
+"""
+record_microphysical_tendencies!(side, closure_fields, closure, model) = nothing
+
+record_microphysical_tendencies!(side, ::Tuple{}, ::Tuple{}, model) = nothing
+
+function record_microphysical_tendencies!(side, closure_fields::Tuple{F, Vararg},
+                                          closures::Tuple{C, Vararg}, model) where {F, C}
+    record_microphysical_tendencies!(side, first(closure_fields), first(closures), model)
+    record_microphysical_tendencies!(side, Base.tail(closure_fields), Base.tail(closures), model)
     return nothing
 end
 
@@ -589,10 +676,36 @@ function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
     # TODO: should we call tracer_density_to_specific!(model) here?
     foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    names = keys(prognostic_model_fields)
+    foreach(q -> compute_stage_z_bcs!(Gⁿ[q], prognostic_model_fields[q],
+                                      closure_applies_bottom_flux(model.closure, model, names[q]), args...),
+            field_indices)
 
     return nothing
 end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether `closure` itself applies the bottom boundary flux of the prognostic field `name`, in which
+case the tendencies of the Runge–Kutta stages leave that flux out (the boundary condition is left
+untouched: it stays the one place the flux is specified, and the closure reads it from there).
+The default is `false`; an operator-split closure that applies the surface fluxes inside its own
+implicit solve, once per step in `step_closure_prognostics!`, adds a method.
+"""
+closure_applies_bottom_flux(closure, model, name) = false
+
+closure_applies_bottom_flux(closures::Tuple, model, name) =
+    any(closure -> closure_applies_bottom_flux(closure, model, name), closures)
+
+# Add the top and bottom boundary fluxes of `c` to `Gc`, or only the top one where a closure
+# applies the bottom one.
+function compute_stage_z_bcs!(Gc, c, closure_applies_bottom, args...)
+    closure_applies_bottom || return compute_z_bcs!(Gc, c, args...)
+    return compute_z_bcs!(Gc, Gc.grid, c, nothing, c.boundary_conditions.top, args...)
+end
+
+compute_stage_z_bcs!(::Nothing, c, closure_applies_bottom, args...) = nothing
 
 #####
 ##### Closure tendencies
@@ -622,3 +735,106 @@ end
 
 compute_closure_tendencies!(Gⁿ, closure_fields::Tuple, closures::Tuple, model) =
     throw(ArgumentError("The numbers of closures and closure fields must match."))
+
+#####
+##### Closure work around the vertically implicit solves of a stage
+#####
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Hooks a closure may extend to act on the state around the vertically implicit solves of a
+Runge–Kutta stage of length `Δt` (the stage's `α Δt`), so that what it adds is formed from the
+state the solves produce:
+
+* `closure_before_stage_combination!(closure_fields, closure, model, Δt, α)` — before the explicit
+  update ``u = (1 - α) u⁰ + α (u + Δt G)`` of the stage, with the step's `Δt` and the stage's `α`.
+  A multirate infinitesimal step passes the stage's `Δt` (its ``dᵢ Δt``) and a
+  [`StageRecombination`](@ref) in place of `α`;
+* `closure_before_implicit_solve!(closure_fields, closure, model, name)` — just before the solve of
+  the prognostic `name` (after its explicit stage update);
+* `closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt)` — after the solves of
+  momentum and every tracer, before the solve of the thermodynamic variable;
+* `closure_after_implicit_solves!(closure_fields, closure, model, Δt)` — after every solve.
+
+All are no-ops by default.
+"""
+closure_before_stage_combination!(closure_fields, closure, model, Δt, α) = nothing
+closure_after_implicit_solves!(closure_fields, closure, model, Δt) = nothing
+closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt) = nothing
+closure_before_implicit_solve!(closure_fields, closure, model, name) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether the closure asks for the vertically implicit solve of its prognostic `name` to follow the solve of the
+thermodynamic variable, so that it can form, before that solve, what the solves of momentum, the tracers and the
+thermodynamic variable converted. Time steppers for which [`closure_prognostics_solved_last`](@ref) holds honor it.
+"""
+solved_after_thermodynamic_variable(closure, name) = false
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Whether a stage of the time stepper of `model` solves momentum, then the tracers, then the thermodynamic variable,
+and last the closure's prognostics for which [`solved_after_thermodynamic_variable`](@ref) holds, calling
+`closure_before_implicit_solve!` just before each of these. `false` unless a time stepper says so.
+"""
+closure_prognostics_solved_last(model) = false
+
+"""
+$(TYPEDEF)
+
+How stage ``i`` of a multirate infinitesimal step recombines the states and the slow tendencies of
+the stages before it. Without the fast tendency, the state its vertically implicit solves start
+from is
+
+```math
+Vᵢ = Σⱼ₌₀^{i-1} wᵢⱼ Yⱼ + dᵢ Δt Σⱼ₌₁^{i} bᵢⱼ Sⱼ , \\qquad Y₀ = Uⁿ , \\quad Sⱼ = S(Yⱼ₋₁) ,
+```
+
+with ``wᵢⱼ = αᵢⱼ + γᵢⱼ`` for ``j ≥ 1``, ``wᵢ₀ = 1 - Σⱼ wᵢⱼ`` and ``bᵢⱼ = βᵢⱼ / dᵢ`` (``Σⱼ bᵢⱼ = 1``).
+The weights of the states sum to one but need not be positive.
+
+Fields
+======
+
+- `stage`, `stages`: ``i`` and the number of stages ``s``.
+- `state_weights`: ``(wᵢ₀, …, wᵢ,ᵢ₋₁)``.
+- `tendency_weights`: ``(bᵢ₁, …, bᵢᵢ)``.
+- `step_start_state`: the prognostic fields of ``Uⁿ``.
+- `storage`: what the closure keeps from stage to stage (see [`closure_stage_storage`](@ref)).
+"""
+struct StageRecombination{W, B, U, S}
+    stage :: Int
+    stages :: Int
+    state_weights :: W
+    tendency_weights :: B
+    step_start_state :: U
+    storage :: S
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+What a closure keeps from stage to stage of `timestepper` (see [`StageRecombination`](@ref)), or
+`nothing` for a time stepper whose stages recombine nothing the closure accounts for.
+"""
+closure_stage_storage(timestepper) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The fields a closure with `closure_fields` keeps from stage to stage of a time stepper with
+`stages` stages that recombines them (see [`StageRecombination`](@ref)). `nothing` by default.
+"""
+build_closure_stage_storage(closure_fields, closure, grid, stages) = nothing
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return `timestepper` holding the stage storage of the closure (see
+[`build_closure_stage_storage`](@ref)). The time stepper is built before the closure fields, so
+`AtmosphereModel` calls this once both exist. The default returns `timestepper` unchanged.
+"""
+materialize_closure_stage_storage(timestepper, closure_fields, closure, grid) = timestepper

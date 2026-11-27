@@ -49,6 +49,10 @@ export
     PredictedParticlePropertiesMicrophysics,
     GridMeanCondensation,
     SubgridCondensation,
+    CloudCondensationOnly,
+    AllProcesses,
+    DiffusionalGrowthRelaxation,
+    CondensationTimescaleRelaxation,
     P3Microphysics,
     P3MicrophysicalState,
     ProcessRate,
@@ -115,7 +119,7 @@ export
     sum_aerosol_number,
     aerosol_activation_rate
 
-using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, hypotenuse
 
 using DocStringExtensions: TYPEDFIELDS, TYPEDEF
 using SpecialFunctions: erf, erfc
@@ -123,11 +127,14 @@ using SpecialFunctions: erf, erfc
 using Adapt: Adapt
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: CPU, on_architecture
-using Breeze.AtmosphereModels: prognostic_field_names
+using Breeze.AtmosphereModels: prognostic_field_names, standard_score
+using Breeze.AtmosphereModels.Diagnostics: Diagnostics
 using Breeze.Microphysics: thermodynamic_adjustment_factor
-using Breeze.Thermodynamics: MoistureMassFractions,
+using Breeze.Thermodynamics: WarmPhaseEquilibrium,
+                             MoistureMassFractions,
                              PlanarIceSurface,
                              PlanarLiquidSurface,
+                             saturation_vapor_pressure_log_slope,
                              ThermodynamicConstants,
                              adjustment_saturation_specific_humidity,
                              air_pressure,
@@ -241,6 +248,7 @@ include("rain_quadrature.jl")
 #####
 
 include("subgrid_supersaturation.jl")
+include("subgrid_microphysics.jl")
 include("process_rate_helpers.jl")
 include("tabulated_kernels.jl")
 include("cloud_droplet_activation_rates.jl")

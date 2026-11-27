@@ -120,3 +120,36 @@ interpolating the liquid and ice Flatau polynomials by `liquid_fraction`.
     λ = surface.liquid_fraction
     return λ * pᵛ⁺ˡ + (1 - λ) * pᵛ⁺ⁱ
 end
+
+# ∂ ln pᵛ⁺ / ∂T of a Flatau polynomial with `coefficients`: the derivative of the polynomial over its value, zero
+# below the temperature where the polynomial is held
+@inline function flatau_log_slope(T, fp, coefficients)
+    x = T - fp.reference_temperature
+    held = x < -fp.minimum_temperature_offset
+    xₕ = max(x, -fp.minimum_temperature_offset)
+    derivative_coefficients = ntuple(n -> n * coefficients[n + 1], Val(length(coefficients) - 1))
+    slope = evalpoly(xₕ, derivative_coefficients) / evalpoly(xₕ, coefficients)
+    return ifelse(held, zero(slope), slope)
+end
+
+@inline saturation_vapor_pressure_log_slope(T, constants::FlatauPolynomialThermodynamicConstants, ::PlanarLiquidSurface) =
+    flatau_log_slope(T, constants.saturation_vapor_pressure, constants.saturation_vapor_pressure.liquid_coefficients)
+
+@inline saturation_vapor_pressure_log_slope(T, constants::FlatauPolynomialThermodynamicConstants, ::PlanarIceSurface) =
+    flatau_log_slope(T, constants.saturation_vapor_pressure, constants.saturation_vapor_pressure.ice_coefficients)
+
+# The mixed-phase surface interpolates the pressures linearly in the liquid fraction λ
+@inline function saturation_vapor_pressure_log_slope(T, constants::FlatauPolynomialThermodynamicConstants, surface::PlanarMixedPhaseSurface)
+    pᵛ⁺ˡ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+    ∂ˡ = saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface())
+    ∂ⁱ = saturation_vapor_pressure_log_slope(T, constants, PlanarIceSurface())
+    λ = surface.liquid_fraction
+    return (λ * pᵛ⁺ˡ * ∂ˡ + (1 - λ) * pᵛ⁺ⁱ * ∂ⁱ) / (λ * pᵛ⁺ˡ + (1 - λ) * pᵛ⁺ⁱ)
+end
+
+@inline function saturation_vapor_pressure_liquid_fraction_log_slope(T, constants::FlatauPolynomialThermodynamicConstants, surface)
+    pᵛ⁺ˡ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+    return (pᵛ⁺ˡ - pᵛ⁺ⁱ) / saturation_vapor_pressure(T, constants, surface)
+end

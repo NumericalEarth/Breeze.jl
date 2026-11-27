@@ -7,7 +7,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: AtmosphereModels, PrescribedStatistics,
-                               PrescribedPlumeStatistics, supersaturation_statistics, phase_relaxation_rate,
+                               PrescribedMixtureStatistics, supersaturation_statistics, phase_relaxation_rate,
                                instantaneous_phase_relaxation
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticleProperties, GridMeanCondensation,
                                                        SubgridCondensation, P3MicrophysicalState, CloudDroplets,
@@ -63,7 +63,7 @@ end
 @testset "Supersaturation statistics interface" begin
     s = supersaturation_statistics(PrescribedStatistics(1f-4), 1, 1, 1, nothing, nothing, nothing, nothing)
     @test s === (; μ = 0f0, σ = 1f-4, skewness = 0f0, f⁺ = 0.5f0)
-    plumes = PrescribedPlumeStatistics((0.3, 0.7), (6e-4, -2e-4), (1e-4, 2e-4))
+    plumes = PrescribedMixtureStatistics((0.3, 0.7), (6e-4, -2e-4), (1e-4, 2e-4))
     @test supersaturation_statistics(plumes, 1, 1, 1, nothing, nothing, nothing, nothing) ===
           (; a = (0.3, 0.7), μ = (6e-4, -2e-4), σ = (1e-4, 2e-4))
     @test isbits(SubgridCondensation(PrescribedStatistics(1e-4)))
@@ -146,7 +146,8 @@ end
     condensation = SubgridCondensation(PrescribedStatistics(zero(FT)))
     T = FT(290)
     qᵛ⁺ˡ = FT(1.2e-2)
-    ξˡ = PPP.p3_liquid_psychrometric_correction(qᵛ⁺ˡ, T, constants)
+    q = MoistureMassFractions(qᵛ⁺ˡ, zero(FT), zero(FT))
+    ξˡ = PPP.p3_liquid_psychrometric_correction(qᵛ⁺ˡ, q, T, constants)
     @test 2 < ξˡ < 4
     σ = FT(4e-4)
     for s̄ in FT.((-5e-4, 0, 3e-4)), λ in FT.((0, 0.5, 1, 1.5))
@@ -154,7 +155,7 @@ end
         qᶜˡ = λ * FT(positive_excess) / ξˡ
         qᵛ = qᵛ⁺ˡ + s̄ - ξˡ * qᶜˡ
         Γ = PPP.cloud_condensation_correlation(condensation, gaussian(zero(FT), σ), qᵛ, qᵛ⁺ˡ, qᶜˡ,
-                                               T, FT(9e4), one(FT), constants)
+                                               q, T, FT(9e4), one(FT), constants)
         @test qᵛ - qᵛ⁺ˡ + Γ ≈ (1 - λ) * positive_excess atol = sqrt(eps(FT)) * σ
     end
 end
@@ -238,7 +239,7 @@ end
 
     grid_mean = column_model(GridMeanCondensation())
     subgrid = column_model(SubgridCondensation(PrescribedStatistics(FT(5e-4))))
-    plumes = column_model(SubgridCondensation(PrescribedPlumeStatistics(FT.((0.2, 0.8)), FT.((4e-4, -1e-4)), FT.((1e-4, 2e-4)))))
+    plumes = column_model(SubgridCondensation(PrescribedMixtureStatistics(FT.((0.2, 0.8)), FT.((4e-4, -1e-4)), FT.((1e-4, 2e-4)))))
 
     # The statistics reach the process-rate diagnostics
     @test MicrophysicalProcessRate(subgrid, :condensation).kernel_function.condensation_fields isa Tuple

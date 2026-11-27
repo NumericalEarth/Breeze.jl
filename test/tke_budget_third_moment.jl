@@ -1,0 +1,294 @@
+include(joinpath(@__DIR__, "setup.jl"))
+
+#####
+##### `TKEBudgetThirdMoment`: the third moment of the `DoubleGaussian` distribution from the vertical
+##### integral of the TKE budget with its damped local third moment, and `TanhSaturatedSkewness`. The
+##### energy budget with its transport of TKE is tested in tke_energy_budget.jl (the
+##### `budget_third_moment` paths).
+#####
+
+using Breeze
+using Breeze.TurbulenceClosures: closure_parameters, with_parameters, damped_local_third_moment, stratification_damping, smooth_positive_part,
+                                 smooth_negative_part, smooth_minimum
+using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: limit_third_moment
+
+using Oceananigans
+using Oceananigans.TimeSteppers: update_state!
+using Test
+
+column(f) = Array(interior(f))[1, 1, :]
+
+function budget_third_moment_column(third_moment; Nz = 40, skewness = TanhSaturatedSkewness(), two_layers = false)
+    grid = RectilinearGrid(CPU(); size=Nz, z=(0, 2400), topology=(Flat, Flat, Bounded))
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants; base_pressure=101500, potential_temperature=299)
+    microphysics = PredictedParticlePropertiesMicrophysics(; thermodynamic_constants = constants)
+    closure = TKEBasedTurbulenceClosure(; minimum_tke = 4e-4,
+                                        static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
+                                        subgrid_distribution = DoubleGaussian(; third_moment, skewness))
+    boundary_conditions = (ρθ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 8e-3)),
+                           ρqᵗ = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 5.2e-5)),
+                           ρu = FieldBoundaryConditions(bottom = FluxBoundaryCondition(1.17 * 0.08)))
+    model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference_state), thermodynamic_constants=constants,
+                            microphysics, closure, boundary_conditions)
+    θ₀(z) = z < 520 ? 298.7 : z < 1480 ? 298.7 + (z - 520) * 3.7 / 960 : 302.4 + (z - 1480) * 5.8 / 520
+    qᵗ₀(z) = 1e-3 * (z < 520 ? 17.0 - z * 0.7 / 520 : z < 1480 ? 16.3 - (z - 520) * 5.6 / 960 : max(4.2, 10.7 - (z - 1480) * 6.5 / 520))
+    # two layers: a second turbulent layer with shear above the inversion, separated from the first by still, stable air
+    u₀(z) = two_layers && 1800 < z < 2200 ? -8.75 + 6 * sin(π * (z - 1800) / 400) : -8.75
+    e₀(z) = two_layers ? (z < 1400 ? 0.6 * exp(-z / 500) : 1800 < z < 2200 ? 0.3 : 0.0) : 0.6 * exp(-z / 500)
+    set!(model; θ=θ₀, qᵗ=qᵗ₀, u=u₀, ρe=e₀)
+    return model, column(reference_state.density), fill(2400 / Nz, Nz)
+end
+
+@testset "TanhSaturatedSkewness" begin
+    skewness = TanhSaturatedSkewness(maximum_skewness = 2)
+    for variance in (0.0, 1e-8, 0.3), w³ in (-1e3, -0.1, 0.0, 1e-9, 0.2, 1e6)
+        limited = limit_third_moment(skewness, variance, w³)
+        @test abs(limited) <= 2 * variance^1.5
+        @test sign(limited) == sign(w³) || limited == 0
+        @test abs(limited) <= abs(w³)
+    end
+    # slope one at zero
+    @test limit_third_moment(skewness, 0.3, 1e-6) ≈ 1e-6 rtol=1e-6
+end
+
+@testset "TKEBudgetThirdMoment (ℂʷᴸ = $ℂʷᴸ)" for ℂʷᴸ in (Inf, 8)
+    third_moment = TKEBudgetThirdMoment(; ℂʷᴸ, ℂʷᵀ = 0.3)
+    model, ρ, Δz = budget_third_moment_column(third_moment)
+    names = keys(closure_parameters(model.closure))
+    @test all(name -> name ∈ names, (:ℂʷᵉ, :ℂʷᵋ, :ℂʷᴸ, :ℂʷʳ, :ℂʷᵇ, :ℂʷˡ, :ℂʷᵍ, :ℂʷᴺ, :ℂʷᵀ))
+    @test allunique(names)
+    @test with_parameters(model.closure; ℂʷᵉ = 0.2).subgrid_distribution.third_moment.ℂʷᵉ == 0.2
+    # The amplitude of the sinks is chosen with ℂʷᴸ at construction: a replacement that needs the other is an error
+    @test_throws ArgumentError with_parameters(model.closure; ℂʷᴸ = isfinite(ℂʷᴸ) ? Inf : 4.0)
+    @test with_parameters(model.closure; ℂʷᴸ = isfinite(ℂʷᴸ) ? 4.0 : Inf).subgrid_distribution.third_moment.sink_amplitude ==
+          model.closure.subgrid_distribution.third_moment.sink_amplitude
+    for n in 1:120
+        time_step!(model, 10)
+    end
+    cl = model.closure_fields.subgrid_cloud.cloud
+    m = ρ .* Δz
+    S = column(cl.P) .+ column(cl.B)
+    scale = sum(m .* abs.(S))
+    @test scale > 0
+    # each sink balances the production of the column, so each flux returns to zero at the top
+    @test abs(sum(m .* (S .- column(cl.uᵉ)))) < 1e-10 * scale
+    @test abs(sum(m .* (S .- column(cl.uᵋ)))) < 1e-10 * scale
+    # the transport conserves the TKE of the column
+    @test abs(sum(m .* column(cl.Tᵉ))) < 1e-10 * sum(m .* abs.(column(cl.Tᵉ)))
+    # surface-driven turbulence: an upward flux and a positive, bounded skewness in the layer
+    @test all(column(cl.Fᵋ)[2:6] .> 0)
+    Sk = column(cl.w′³) ./ column(cl.w′²) .^ 1.5
+    @test all(abs.(Sk) .<= 2.5 * (1 + 1e-12)) # the hyperbolic tangent rounds to one where the argument is large
+    @test all(Sk[2:6] .> 0)
+    @test minimum(column(model.tracers.ρe)) >= 0
+    # still, stable air above the layer: with the exchanged amplitude no flux reaches it, and the buoyancy sink
+    # of the floored diffusivities makes no skewness
+    # (not the two cells next to the layer, which its flux and its retreating top reach, nor the two below the
+    # top of the domain)
+    # (1e-6 m² s⁻²: the tail of the decaying top of the layer, where e is 1e-5 to 1e-4 with the default
+    # dissipation, still carries the layer's flux and skewness; the air above it has no TKE at all)
+    still = findall(<(1e-6), column(model.tracers.ρe) ./ ρ)[3:end-2]
+    @test !isempty(still)
+    @info "largest |skewness| in still air" ℂʷᴸ maximum(abs, Sk[still])
+    isfinite(ℂʷᴸ) && @test maximum(abs, Sk[still]) < 1e-3
+end
+
+@testset "TKEBudgetThirdMoment: no flux across still air between two turbulent layers" begin
+    flux_in_gap = map((Inf, 8)) do ℂʷᴸ
+        model, ρ, Δz = budget_third_moment_column(TKEBudgetThirdMoment(; ℂʷᴸ); two_layers = true)
+        for n in 1:6
+            time_step!(model, 10)
+        end
+        cl = model.closure_fields.subgrid_cloud.cloud
+        e = column(model.tracers.ρe) ./ ρ
+        gap = findall(k -> e[k] < 1e-4 && 1500 < (k - 1/2) * Δz[k] < 1800, eachindex(e))
+        @test !isempty(gap)
+        maximum(abs, column(cl.Fᵋ)[gap]) / maximum(abs, column(cl.Fᵋ))
+    end
+    @info "relative flux in the gap (one amplitude, exchanged amplitude)" flux_in_gap
+    # the still air keeps a production of order 1e-6 m² s⁻³ (the diffusivities are floored at `minimum_tke`),
+    # so the flux there is small and not zero
+    @test flux_in_gap[2] < 1e-3
+    @test flux_in_gap[2] < flux_in_gap[1] / 10
+end
+
+@testset "TKEBudgetThirdMoment: the damped local third moment" begin
+    @test_throws ArgumentError TKEBudgetThirdMoment(ℂʷᴺ = -1)
+    @test_throws ArgumentError TKEBudgetThirdMoment(passes = 0)
+    @test_throws ArgumentError TKEBudgetThirdMoment(ℂʷᵒ = -1)
+    @test TKEBudgetThirdMoment().ℂʷᵒ == 0
+
+    # The damping is at least one, increases with the stratification number with a slope of at most ℂʷᴺ, and
+    # is finite at any stratification number: the member has no pole
+    @test_throws ArgumentError TKEBudgetThirdMoment(stratification_damping_width = 0)
+    for ℂʷᴺ in (0.0, 1.0, 16.0), δ in (1.0, 0.1)
+        αs = (-1e300, -1e6, -30.0, -1.0, 0.0, 0.5, 1.0, 30.0, 1e6, 1e300)
+        D = map(α -> stratification_damping(ℂʷᴺ, δ, α), αs)
+        @test all(isfinite, D)
+        @test all(>=(1), D)
+        @test issorted(D)
+        @test all(abs(stratification_damping(ℂʷᴺ, δ, α + 1e-3) - stratification_damping(ℂʷᴺ, δ, α)) <= ℂʷᴺ * 1e-3 * (1 + 1e-8) for α in -5:0.1:5)
+        @test stratification_damping(ℂʷᴺ, δ, 40.0) ≈ 1 + 40ℂʷᴺ rtol = 1e-3
+    end
+    @test smooth_positive_part(0.0) == 1 / 2
+    @test smooth_positive_part(50.0) ≈ (50 + sqrt(2501)) / 2 rtol = 1e-14
+    @test smooth_positive_part(-800.0) > 0
+    @test smooth_positive_part(-800.0) ≈ 1 / 3200 rtol = 1e-5
+    # With a scale δ: δ smooth_positive_part(x / δ), the positive part itself where δ = 0, in either precision
+    for FT in (Float64, Float32), x in FT.((-3, -1e-3, 0, 1e-3, 3)), δ in FT.((1e-4, 0.5, 20))
+        @test smooth_positive_part(x, δ) isa FT
+        @test smooth_positive_part(x, δ) ≈ δ * smooth_positive_part(x / δ) rtol = 100eps(FT)
+        @test smooth_positive_part(x, zero(FT)) == max(x, 0)
+        @test smooth_positive_part(x, δ) >= max(x, 0) && smooth_positive_part(x, δ) > 0
+        @test smooth_negative_part(x, δ) == -smooth_positive_part(-x, δ)
+        @test smooth_positive_part(x, δ) + smooth_negative_part(x, δ) ≈ x atol = 10eps(FT) * (abs(x) + δ)
+        for y in FT.((-2, 0, 1))
+            rounding = 10eps(FT) * (abs(x) + abs(y) + δ)
+            @test smooth_minimum(x, y, zero(FT)) ≈ min(x, y) atol = rounding
+            @test smooth_minimum(x, y, δ) ≈ smooth_minimum(y, x, δ) atol = rounding
+            @test min(x, y) - δ / 2 - rounding <= smooth_minimum(x, y, δ) <= min(x, y) + rounding
+        end
+    end
+    @test isfinite(smooth_positive_part(0.0, 0.0)) && isfinite(smooth_positive_part(-1.0, 0.0))
+
+    # On a column with w′² rising and then falling: bounded by the undamped member at every stratification
+    # number, of the sign of the buoyant source where w′² is uniform, and of the sign opposite to ∂z w′² without one
+    grid = RectilinearGrid(CPU(); size=8, z=(0, 800), topology=(Flat, Flat, Bounded))
+    w′² = CenterField(grid)
+    set!(w′², z -> 0.1 + 0.4 * sin(π * z / 800))
+    damped = TKEBudgetThirdMoment(ℂʷᵇ = 0.6, ℂʷᵍ = 0.5, ℂʷᴺ = 4)
+    undamped = TKEBudgetThirdMoment(ℂʷᵇ = 0.6, ℂʷᵍ = 0.5, ℂʷᴺ = 0)
+    τ, u = 300.0, 0.5
+    for k in 2:8, B in (-1e-3, 0.0, 2e-3), αᴺ in (-1e8, -2.0, 0.0, 1.0, 1e8), ε in (0.0, 5e-4)
+        local_moment = damped_local_third_moment(Face(), 1, 1, k, grid, damped, w′², τ, u, αᴺ, B, ε, nothing, 0.0)
+        reference = damped_local_third_moment(Face(), 1, 1, k, grid, undamped, w′², τ, u, αᴺ, B, ε, nothing, 0.0)
+        @test isfinite(local_moment)
+        @test abs(local_moment) <= abs(reference)
+        @test sign(local_moment) == sign(reference)
+    end
+    gradient_only = TKEBudgetThirdMoment(ℂʷᵇ = 0, ℂʷᵍ = 1, ℂʷᴺ = 1)
+    ε = 5e-4
+    @test damped_local_third_moment(Face(), 1, 1, 2, grid, gradient_only, w′², τ, u, 0.3, 1e-3, ε, nothing, 0.0) < 0 # w′² rises with height
+    @test damped_local_third_moment(Face(), 1, 1, 7, grid, gradient_only, w′², τ, u, 0.3, 1e-3, ε, nothing, 0.0) > 0 # w′² falls with height
+    buoyant_only = TKEBudgetThirdMoment(ℂʷᵇ = 1, ℂʷᵍ = 0, ℂʷᴺ = 1)
+    buoyant(B, ε, cooling = nothing) = damped_local_third_moment(Face(), 1, 1, 3, grid, buoyant_only, w′², τ, u, 0.3, B, ε, cooling, 0.0)
+    D = stratification_damping(1.0, 1.0, 0.3)
+    @test damped_local_third_moment(Face(), 1, 1, 3, grid, buoyant_only, w′², τ, u, -0.3, 1e-3, ε, nothing, 0.0) > 0
+    # the buoyant source is the smooth positive part of B with the scale of the dissipation: a buoyancy sink is a
+    # source below that scale, and none where there is no dissipation
+    @test buoyant(-1e-3, 0.0) == 0
+    @test buoyant(2e-3, 0.0) == τ * u * 2e-3 / D
+    for B in (-1e-3, 0.0, 2e-3)
+        @test buoyant(B, ε) ≈ τ * u * (B + sqrt(B^2 + ε^2)) / 2 / D rtol = 1e-13
+    end
+    @test 0 < buoyant(-1e-3, ε) < buoyant(0.0, ε) == τ * u * ε / 2 / D
+    # signed by origin with a heating budget flux: of B₊, the part min(Gᑫᶜ, B₊) (a smooth minimum) is carried by downdrafts
+    ℂʷᑫ = 0.7
+    for B in (-1e-3, 2e-3), Gᑫᶜ in (0.0, 5e-4, 5e-3)
+        B₊ = smooth_positive_part(B, ε)
+        Gᶜ = smooth_minimum(Gᑫᶜ, B₊, ε)
+        @test buoyant(B, ε, (Gᑫᶜ, ℂʷᑫ)) ≈ τ * u * (B₊ - Gᶜ - ℂʷᑫ * Gᶜ) / D rtol = 1e-13
+    end
+    @test buoyant(2e-3, 0.0, (5e-4, ℂʷᑫ)) ≈ τ * u * (2e-3 - 5e-4 - ℂʷᑫ * 5e-4) / D rtol = 1e-13
+
+    # Through the limiter the skewness is strictly inside the bound whatever the coefficients
+    model, ρ, Δz = budget_third_moment_column(TKEBudgetThirdMoment(ℂʷᵇ = 50, ℂʷᵍ = 50, ℂʷᴺ = 0); skewness = TanhSaturatedSkewness(maximum_skewness = 1.5))
+    for n in 1:30
+        time_step!(model, 10)
+    end
+    cl = model.closure_fields.subgrid_cloud.cloud
+    @test maximum(abs, column(cl.w′³ᵇ)) > 0
+    @test all(abs.(column(cl.w′³) ./ column(cl.w′²) .^ 1.5) .<= 1.5 * (1 + 1e-12))
+end
+
+@testset "TKEBudgetThirdMoment: the latent source" begin
+    @test TKEBudgetThirdMoment().ℂʷˡ == 8
+    @test :ℂʷˡ ∈ keys(closure_parameters(TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian())))
+
+    # The source is added to the buoyant source of the damped local third moment, in proportion to ℂʷˡ
+    grid = RectilinearGrid(CPU(); size=8, z=(0, 800), topology=(Flat, Flat, Bounded))
+    w′² = CenterField(grid)
+    set!(w′², 0.3)
+    τ, u, αᴺ, source = 300.0, 0.5, 0.7, 2e-4
+    for ℂʷᴺ in (0, 2)
+        latent = TKEBudgetThirdMoment(; ℂʷˡ = 3, ℂʷᴺ)
+        D = stratification_damping(latent.ℂʷᴺ, latent.stratification_damping_width, αᴺ)
+        @test damped_local_third_moment(Face(), 1, 1, 4, grid, latent, w′², τ, u, αᴺ, -1e-3, 0.0, nothing, source) ≈ 3 * τ * u * source / D rtol = 1e-14
+        @test damped_local_third_moment(Face(), 1, 1, 4, grid, latent, w′², τ, u, αᴺ, -1e-3, 0.0, nothing, 0.0) == 0
+        @test damped_local_third_moment(Face(), 1, 1, 4, grid, TKEBudgetThirdMoment(; ℂʷˡ = 0, ℂʷᴺ), w′², τ, u, αᴺ, -1e-3, 0.0, nothing, source) == 0
+    end
+
+    # In a column with a partly cloudy layer. The third moment is diagnosed from the distribution without skewness, which
+    # is the distribution of the same column with no third moment at all: with the latent source alone,
+    # w′³ = ℂʷˡ ℓ (1 - aᶜ) Bˡ₊ of that distribution, before the limiter, with Bˡ₊ the smooth positive part of Bˡ with the
+    # scale aᶜ ε of the dissipation in the cloudy part of the cell.
+    moist(model) = set!(model; qᵗ = z -> 1e-3 * (z < 520 ? 17.6 - z * 0.7 / 520 : z < 1480 ? 16.9 - (z - 520) * 5.0 / 960 : max(4.2, 11.9 - (z - 1480) * 7.7 / 520)))
+    ℂʷˡ = 3
+    unskewed, _, _ = budget_third_moment_column(TKEBudgetThirdMoment(ℂʷᵉ = 0, ℂʷᵋ = 0, ℂʷˡ = 0))
+    skewed, _, _ = budget_third_moment_column(TKEBudgetThirdMoment(; ℂʷᵉ = 0, ℂʷᵋ = 0, ℂʷˡ))
+    moist(unskewed)
+    moist(skewed)
+    cl₀ = unskewed.closure_fields.subgrid_cloud.cloud
+    cl = skewed.closure_fields.subgrid_cloud.cloud
+    @test all(column(cl₀.w′³) .== 0)
+    aᶜ, Bˡ = column(cl₀.aᶜ), column(cl₀.Bˡ)
+    partly_cloudy = findall(k -> 0.01 < aᶜ[k] < 0.99 && Bˡ[k] > 0, eachindex(aᶜ))
+    @test length(partly_cloudy) >= 3
+    # w′³ᵇ lives at the faces: the source of the two centers next to the face, averaged, times ℓ of the face
+    ℓᵐ = Array(interior(unskewed.closure_fields.ℓᵐ))[1, 1, :]
+    ε = column(cl₀.εʷ)
+    @test all(ε .>= 0) && maximum(ε) > 0
+    L = (1 .- aᶜ) .* (Bˡ .+ sqrt.(Bˡ .^ 2 .+ (aᶜ .* ε) .^ 2)) ./ 2
+    Nz = length(aᶜ)
+    expected = [k == 1 || k == Nz + 1 ? 0.0 : ℂʷˡ * ℓᵐ[k] * (L[k] + L[k-1]) / 2 for k in 1:Nz+1]
+    w′³ᵇ = column(cl.w′³ᵇ)
+    @test w′³ᵇ ≈ expected rtol = 1e-10
+    @test all(w′³ᵇ .>= 0)
+    @test all(k -> w′³ᵇ[k] > 0 && w′³ᵇ[k+1] > 0, partly_cloudy)
+    clear = [k for k in 2:Nz if aᶜ[k] == 0 && aᶜ[k-1] == 0 && Bˡ[k] <= 0 && Bˡ[k-1] <= 0]
+    @test !isempty(clear)
+    @test all(w′³ᵇ[clear] .== 0) # no cloud and no upward flux of liquid, no latent source
+    # The skewness of the distribution the stage uses is positive in the partly cloudy layer and inside the bound
+    Sk = column(cl.w′³) ./ column(cl.w′²) .^ 1.5
+    @test all(Sk[partly_cloudy] .> 0)
+    @test all(abs.(Sk) .<= skewed.closure.subgrid_distribution.skewness.maximum_skewness * (1 + 1e-12))
+    # ... and its updraft component is the narrower one there
+    @test all(column(cl.a₁)[partly_cloudy] .< 0.5)
+
+    # Saturated air has none: the source vanishes with 1 - aᶜ
+    overcast, _, _ = budget_third_moment_column(TKEBudgetThirdMoment(; ℂʷᵉ = 0, ℂʷᵋ = 0, ℂʷˡ))
+    set!(overcast; qᵗ = z -> z < 1480 ? 0.022 : 0.004)
+    clᵒ = overcast.closure_fields.subgrid_cloud.cloud
+    saturated = findall(>(1 - 1e-9), column(clᵒ.aᶜ))
+    @test length(saturated) >= 3
+    saturated_faces = [k for k in saturated if k - 1 ∈ saturated] # faces between two saturated centers
+    @test !isempty(saturated_faces)
+    @test maximum(abs, column(clᵒ.w′³ᵇ)[saturated_faces]) <= 1e-8 * maximum(w′³ᵇ)
+end
+
+@testset "TKEBudgetThirdMoment: the closure fields are a function of the prognostic state (passes = $passes)" for passes in (1, 2)
+    third_moment = TKEBudgetThirdMoment(; passes, ℂʷᵍ = 0.2, ℂʷᴺ = 1, ℂʷᵀ = 0.3)
+    model, ρ, Δz = budget_third_moment_column(third_moment)
+    for n in 1:60
+        time_step!(model, 10)
+    end
+    names = (:w′³, :w′³ᵇ, :aᶜ, :B, :P, :Fᵉ, :Fᵋ, :Tᵉ)
+    snapshot(m) = (map(name -> column(getproperty(m.closure_fields.subgrid_cloud.cloud, name)), names)...,
+                   Array(interior(m.closure_fields.Kᶜ))[1, 1, :], Array(interior(m.closure_fields.N²))[1, 1, :])
+    first_evaluation = snapshot(model)
+    @test maximum(abs, first_evaluation[1]) > 0
+
+    # a second evaluation on the same state changes nothing
+    update_state!(model)
+    @test all(snapshot(model) .== first_evaluation)
+
+    # a model built anew and given the prognostic state alone has the same closure fields: nothing but the
+    # prognostic state needs to be checkpointed
+    restarted, _, _ = budget_third_moment_column(third_moment)
+    for (name, field) in pairs(Oceananigans.prognostic_fields(model))
+        parent(Oceananigans.prognostic_fields(restarted)[name]) .= parent(field)
+    end
+    update_state!(restarted)
+    @test all(snapshot(restarted) .== first_evaluation)
+end

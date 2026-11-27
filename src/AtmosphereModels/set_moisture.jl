@@ -44,7 +44,7 @@ end
         ρqᵗ = total_moisture_density[i, j, k]
         ρqᶜ = condensate_density[i, j, k]
     end
-    tolerance = 10eps(eltype(grid)) * max(abs(ρqᵗ), abs(ρqᶜ))
+    tolerance = 10eps(typeof(ρqᵗ)) * max(abs(ρqᵗ), abs(ρqᶜ))
     return ρqᵗ - ρqᶜ + tolerance
 end
 

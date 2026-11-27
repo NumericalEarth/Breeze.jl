@@ -17,7 +17,8 @@ Return the vapor-to-cloud mass rate [kg/kg/s] for prescribed droplet concentrati
 In supersaturated air, supply seed mass up to
 ``N^{cl} / ρ × m_{\\text{drop}}`` where ``m_{\\text{drop}} = (4π/3) ρ_w r^3``
 and the default seed radius is 1 μm. The supersaturation cap uses
-``ξˡ = 1 + ℒˡ² q^{v+ℓ} / (c_p^d R_v T²)`` with the dry-air heat capacity,
+``ξˡ = 1 + ℒˡ q^{v+ℓ} (∂ ln p^{v+ℓ} / ∂T) / c_p^d`` with the dry-air heat capacity and the slope of the
+model's saturation vapor pressure,
 consistent with `limit_vapor_rates` and `prognostic_vapor_excess_adjustment`.
 """
 @inline function prescribed_cloud_activation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, ρ, Nᶜˡ, constants)
@@ -35,8 +36,7 @@ consistent with `limit_vapor_rates` and `prognostic_vapor_excess_adjustment`.
 
     # Psychrometric correction (liquid saturation)
     ℒˡ = vaporization_latent_heat(constants, T)
-    Rᵛ = FT(vapor_gas_constant(constants))
-    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T)
 
     # Limit by the available supersaturation
     max_from_ss = max(0, (qᵛ - qᵛ⁺ˡ) / ξˡ)

@@ -16,7 +16,10 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, compute_pressu
                                 closure_scalar_index, skip_vertical_diffusion,
                                 implicit_advection_density, implicit_advection_velocities,
                                 implicit_step_scheme, implicit_sedimentation_step!,
-                                thermodynamic_density_name
+                                thermodynamic_density_name,
+                                closure_before_stage_combination!, closure_before_implicit_solve!,
+                                closure_before_thermodynamic_solve!, closure_after_implicit_solves!
+
 using Oceananigans.Utils: launch!, time_difference_in_seconds
 using Oceananigans.TurbulenceClosures: step_closure_prognostics!
 
@@ -64,6 +67,9 @@ struct SSPRungeKutta3{FT, U0, TG, TI, R} <: AbstractTimeStepper
     implicit_solver :: TI
     rounding :: R
 end
+
+# The stage solves each prognostic in the order of the prognostic fields, momentum first, the thermodynamic variable last
+AtmosphereModels.closure_prognostics_solved_last(::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}) = true
 
 # A Shu-Osher stage u^(m) = (1 - α) u^(0) + α (u^(m-1) + Δt G) sits at cₘ = αₘ (cₘ₋₁ + 1)
 AtmosphereModels.stage_abscissae(ts::SSPRungeKutta3) = (ts.α¹, ts.α² * (ts.α¹ + 1))
@@ -154,6 +160,8 @@ function ssp_rk3_substep!(model, Δt, α)
     thermodynamic_name = thermodynamic_density_name(model.formulation)
     rounding = model.timestepper.rounding
 
+    closure_before_stage_combination!(model.closure_fields, model.closure, model, kernel_Δt, α)
+
     for (field_number, (name, u, u⁰, G)) in enumerate(zip(names, prognostic, U⁰, Gⁿ))
         key = rounding_key(rounding, model.clock.iteration, model.clock.stage, field_number)
         launch_ssp_rk3_substep!(rounding, arch, grid, u, u⁰, G, kernel_Δt, α, key)
@@ -164,9 +172,12 @@ function ssp_rk3_substep!(model, Δt, α)
         # scalars with their position in the closure's scalar names (see `closure_scalar_index`).
         skip_vertical_diffusion(model, name) && continue
 
-        # The thermodynamic variable's solve waits for the tracers' solves (see below).
+        # The thermodynamic variable's solve waits for the tracers' solves (see below), and the closure's
+        # prognostics that ask for it wait for the thermodynamic variable's
         name === thermodynamic_name && continue
+        AtmosphereModels.solved_after_thermodynamic_variable(model.closure, name) && continue
 
+        closure_before_implicit_solve!(model.closure_fields, model.closure, model, name)
         implicit_stage_step!(model, name, u, α * Δt)
     end
 
@@ -175,7 +186,14 @@ function ssp_rk3_substep!(model, Δt, α)
     # variable, so the moved content takes the same transport and diffusion as the rest of the
     # field (see `implicit_sedimentation_step!`).
     isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, α * Δt, model.velocities)
+    closure_before_thermodynamic_solve!(model.closure_fields, model.closure, model, α * Δt)
     implicit_stage_step!(model, thermodynamic_name, prognostic[thermodynamic_name], α * Δt)
+    for (name, u) in zip(names, prognostic)
+        AtmosphereModels.solved_after_thermodynamic_variable(model.closure, name) || continue
+        closure_before_implicit_solve!(model.closure_fields, model.closure, model, name)
+        implicit_stage_step!(model, name, u, α * Δt)
+    end
+    closure_after_implicit_solves!(model.closure_fields, model.closure, model, α * Δt)
 
     return nothing
 end

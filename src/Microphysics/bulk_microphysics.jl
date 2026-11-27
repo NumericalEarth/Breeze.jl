@@ -11,7 +11,10 @@ using Breeze.Thermodynamics:
     mixture_heat_capacity,
     condensate_latent_energy,
     exner_exponent,
-    specific_heat_difference
+    specific_heat_difference,
+    saturation_vapor_pressure_log_slope,
+    PlanarLiquidSurface,
+    PlanarIceSurface
 
 """
 $(TYPEDEF)
@@ -117,18 +120,19 @@ Base.summary(::ConstantRateCondensateFormation) = "ConstantRateCondensateFormati
 
 # Response dqᵛ⁺/dqᶜ of the saturation specific humidity to forming condensate qᶜ from vapor at
 # fixed total water and at the constraint the thermodynamic state is closed on, with
-# qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) and d ln pᵛ⁺ / dT = ℒ / (Rᵛ T²). Forming condensate changes Rᵐ by
+# qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) and ∂ ln pᵛ⁺ / ∂T that of the model's saturation vapor pressure over the phase's surface
+# (`∂ln_pᵛ⁺∂T`, `saturation_vapor_pressure_log_slope`). Forming condensate changes Rᵐ by
 # −Rᵛ dqᶜ and cᵖᵐ by −Δcᵖ dqᶜ, where Δcᵖ = cᵖᵛ − cᶜ is the phase's `specific_heat_difference`.
 #
 # Fixed pressure: the enthalpy is conserved, so condensate heats by dT = ℒ dqᶜ / cᵖᵐ, and with
 # ρ = p / (Rᵐ T) the saturation specific humidity is qᵛ⁺ = pᵛ⁺ Rᵐ / (p Rᵛ): the heating raises
-# it at qᵛ⁺ ℒ / (Rᵛ T²) per kelvin, and the vapor lost lowers it at qᵛ⁺ Rᵛ / Rᵐ per unit qᶜ.
-@inline function saturation_response(𝒰::AbstractReferencePressureState, qᵛ⁺, T, ℒ, Δcᵖ, constants)
+# it at qᵛ⁺ ∂ ln pᵛ⁺ / ∂T per kelvin, and the vapor lost lowers it at qᵛ⁺ Rᵛ / Rᵐ per unit qᶜ.
+@inline function saturation_response(𝒰::AbstractReferencePressureState, qᵛ⁺, T, ℒ, Δcᵖ, ∂ln_pᵛ⁺∂T, constants)
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵛ = vapor_gas_constant(constants)
-    return qᵛ⁺ * (ℒ^2 / (cᵖᵐ * Rᵛ * T^2) - Rᵛ / Rᵐ)
+    return qᵛ⁺ * (ℒ * ∂ln_pᵛ⁺∂T / cᵖᵐ - Rᵛ / Rᵐ)
 end
 
 # Fixed θ and ρ: H = ĉᵖ Π θ with Π = (ρ Rᵐ T / pˢᵗ)^κ. Phase exchange holds total water,
@@ -137,7 +141,7 @@ end
 # response only when κ H = Rᵐ T, as in condensate-free air with VaporEquivalentExponent.
 # At fixed ρ, qᵛ⁺ does not depend on the composition. This is the response of the converged
 # inversion, which `NewtonSolver` and `FixedIterations` approach.
-@inline function saturation_response(𝒰::LiquidIceDensityState, qᵛ⁺, T, ℒ, Δcᵖ, constants)
+@inline function saturation_response(𝒰::LiquidIceDensityState, qᵛ⁺, T, ℒ, Δcᵖ, ∂ln_pᵛ⁺∂T, constants)
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
@@ -145,7 +149,7 @@ end
     κ = exner_exponent(𝒰.exner_exponent, q, constants)
     H = cᵖᵐ * T - condensate_latent_energy(q, constants)
     dT_dqᶜ = (ℒ - κ * H * Rᵛ / Rᵐ) / (cᵖᵐ - κ * H / T)
-    return dT_dqᶜ * qᵛ⁺ * (ℒ / (Rᵛ * T^2) - 1 / T)
+    return dT_dqᶜ * qᵛ⁺ * (∂ln_pᵛ⁺∂T - 1 / T)
 end
 
 # Fixed θ and ρ with the non-iterated inversion (`temperature_solver = nothing`), whose
@@ -155,7 +159,7 @@ end
 # cᵖᵐ dT̃ = γ (Δcᵖ - κ cᵖᵐ Rᵛ / Rᵐ) T̃ dqᶜ and cᵖᵐ d(γ Hᶜ / cᵖᵐ) = γ (ℒ₀ + Δcᵖ Hᶜ / cᵖᵐ) dqᶜ. With
 # ℒ = ℒ₀ + Δcᵖ T, (1 - κ) cᵖᵐ dT = [ℒ - κ (cᵖᵐ T̃ Rᵛ / Rᵐ + γ Δcᵖ Hᶜ / cᵖᵐ)] dqᶜ: the Exner
 # feedback of the converged inversion, cᵖᵐ - κ H / T, is replaced by its condensate-free value.
-@inline function saturation_response(𝒰::LiquidIceDensityState{<:Any, Nothing}, qᵛ⁺, T, ℒ, Δcᵖ, constants)
+@inline function saturation_response(𝒰::LiquidIceDensityState{<:Any, Nothing}, qᵛ⁺, T, ℒ, Δcᵖ, ∂ln_pᵛ⁺∂T, constants)
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
@@ -165,7 +169,7 @@ end
     Hᶜ = condensate_latent_energy(q, constants)
     T̃ = T - γ * Hᶜ / cᵖᵐ
     dT_dqᶜ = γ * (ℒ - κ * (cᵖᵐ * T̃ * Rᵛ / Rᵐ + γ * Δcᵖ * Hᶜ / cᵖᵐ)) / cᵖᵐ
-    return dT_dqᶜ * qᵛ⁺ * (ℒ / (Rᵛ * T^2) - 1 / T)
+    return dT_dqᶜ * qᵛ⁺ * (∂ln_pᵛ⁺∂T - 1 / T)
 end
 
 """
@@ -182,10 +186,11 @@ its chosen Exner exponent and the temperature its `temperature_solver` returns.
 """
 @inline thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, constants) =
     thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, liquid_latent_heat(T, constants),
-                                    specific_heat_difference(constants, constants.liquid), constants)
+                                    specific_heat_difference(constants, constants.liquid),
+                                    saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface()), constants)
 
-@inline thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, ℒ, Δcᵖ, constants) =
-    1 + saturation_response(𝒰, qᵛ⁺, T, ℒ, Δcᵖ, constants)
+@inline thermodynamic_adjustment_factor(qᵛ⁺, T, 𝒰, ℒ, Δcᵖ, ∂ln_pᵛ⁺∂T, constants) =
+    1 + saturation_response(𝒰, qᵛ⁺, T, ℒ, Δcᵖ, ∂ln_pᵛ⁺∂T, constants)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -195,7 +200,8 @@ deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_fac
 """
 @inline ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, 𝒰, constants) =
     thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, 𝒰, ice_latent_heat(T, constants),
-                                    specific_heat_difference(constants, constants.ice), constants)
+                                    specific_heat_difference(constants, constants.ice),
+                                    saturation_vapor_pressure_log_slope(T, constants, PlanarIceSurface()), constants)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -352,6 +358,14 @@ AtmosphereModels.instantaneous_phase_relaxation(bμp::BulkMicrophysics) =
 
 @inline AtmosphereModels.phase_relaxation_rate(i, j, k, grid, cloud_formation::NonEquilibriumCloudFormation, μ, 𝒰, constants) =
     constant_formation_rate(cloud_formation.liquid, grid) + constant_formation_rate(cloud_formation.ice, grid)
+
+@inline AtmosphereModels.phase_relaxation_rates(i, j, k, grid, bμp::BulkMicrophysics, μ, 𝒰, constants) =
+    AtmosphereModels.phase_relaxation_rates(i, j, k, grid, bμp.cloud_formation, μ, 𝒰, constants)
+
+# The cloud liquid is distributed; the cloud ice is not
+@inline AtmosphereModels.phase_relaxation_rates(i, j, k, grid, cloud_formation::NonEquilibriumCloudFormation, μ, 𝒰, constants) =
+    (; ωˡ = constant_formation_rate(cloud_formation.liquid, grid), ωᵈⁱ = constant_formation_rate(cloud_formation.ice, grid),
+       ωʷⁱ = zero(eltype(grid)))
 
 @inline constant_formation_rate(formation::ConstantRateCondensateFormation, grid) = convert(eltype(grid), formation.rate)
 @inline constant_formation_rate(formation, grid) = zero(eltype(grid))

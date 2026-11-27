@@ -269,7 +269,8 @@ struct P3ProcessRates{FT}
 end
 
 @inline function p3_phase1_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
-                                 temperature_tendency, pressure_tendency, Γ = nothing)
+                                 temperature_tendency, pressure_tendency, Γ = nothing,
+                                 distribution = nothing)
     FT = typeof(ρ)
 
     # Unpack derived state (field access on concrete struct — GPU-safe)
@@ -298,20 +299,21 @@ end
                                                       transport, q,
                                                       state.μᶜˡ, state.λᶜˡ, state.nᶜˡ,
                                                       temperature_tendency, pressure_tendency,
-                                                      state.lookups, Γ)
+                                                      state.lookups, Γ, distribution)
     cond = vapor_rates.condensation
 
     # Cloud droplet activation
+    activating = p3_activation_vapor(p3, Γ, qᵛ, qᵛ⁺ˡ, distribution)
     activation = compute_cloud_droplet_activation(p3.aerosol, p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.nᵃ,
-                                                  seed_vapor(p3.aerosol, Γ, qᵛ), qᵛ⁺ˡ, T, ρ, constants)
-    ccn_activation_mass = activation.mass
-    ccn_activation_number = activation.number
+                                                  activating.qᵛ, qᵛ⁺ˡ, T, ρ, constants)
+    ccn_activation_mass = activation.mass * activating.fraction
+    ccn_activation_number = activation.number * activating.fraction
 
     # =========================================================================
     # Rain processes
     # =========================================================================
-    autoconv = rain_autoconversion_rate(p3, ℳ.qᶜˡ, Nᶜˡ, ρ, ℳ.qʳ)
-    accr = rain_accretion_rate(p3, ℳ.qᶜˡ, ℳ.qʳ, ρ)
+    autoconv = subgrid_autoconversion_rate(distribution, p3, ℳ.qᶜˡ, Nᶜˡ, ρ, ℳ.qʳ)
+    accr = subgrid_accretion_rate(distribution, p3, ℳ.qᶜˡ, ℳ.qʳ, ρ)
     cloud_self = cloud_self_collection_rate(p3, ℳ.qᶜˡ, Nᶜˡ, ρ)
     rain_evap = vapor_rates.rain_evaporation
     rain_cond = vapor_rates.rain_condensation
@@ -352,7 +354,7 @@ end
 end
 
 @inline function p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
-                                 phase1::P3Phase1Rates)
+                                 phase1::P3Phase1Rates, distribution = nothing)
     FT = typeof(ρ)
     parameters = p3.process_rates
     T₀ = parameters.freezing_temperature
@@ -493,7 +495,7 @@ end
     # =========================================================================
     nucleation_existing_number = ifelse(whole_particle_clipping, zero(FT), nⁱ)
     nuc_q, nuc_n = deposition_nucleation_rate(
-        p3, T, qᵛ, qᵛ⁺ⁱ, nucleation_existing_number, ρ)
+        p3, T, qᵛ, qᵛ⁺ⁱ, nucleation_existing_number, ρ, distribution, state.qᵛ⁺ˡ)
     cloud_frz_q, cloud_frz_n = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜˡ, T, ρ)
     μʳ = zero(FT)
     rain_frz_q, rain_frz_n = immersion_freezing_rain_rate(p3, qʳ, nʳ, T, μʳ)
@@ -658,7 +660,8 @@ end
     # concrete for GPU compilation). The rate functions that need a heat capacity all use
     # the dry-air `cᵖᵈ` psychrometric convention (`liquid_psychrometric_correction` /
     # `ice_psychrometric_correction`), which is a scheme constant rather than a per-cell
-    # quantity, so no cᵖᵐ is carried here.
+    # quantity, so no cᵖᵐ is carried here. (The subgrid distribution forms its own psychrometric corrections with the
+    # mixture heat capacity of `q`, see `p3_liquid_psychrometric_correction`.)
     state = P3DerivedState{FT, typeof(q), typeof(lookups)}(nⁱ, nʳ, qᶠ, bᶠ, Fᶠ, ρᶠ,
                                                            Fˡ, Nᶜˡ, cloud.nᶜˡ,
                                                            cloud.μᶜˡ, cloud.λᶜˡ,
@@ -669,11 +672,17 @@ end
     # === PHASE 1 & 2 RATES ===
     # Subgrid supersaturation correlation of cloud condensation; `nothing` for `GridMeanCondensation`
     Γ = cloud_condensation_correlation(p3.condensation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
-                                       ℳ_adjusted.qᶜˡ, T, P, ρ, constants)
+                                       ℳ_adjusted.qᶜˡ, q, T, P, ρ, constants)
+
+    # The placement of cloud liquid that every process reads, at the cloud's phase relaxation rate;
+    # `nothing` unless `processes = AllProcesses()`. It sets the condensation correlation Γ too.
+    distribution = subgrid_process_distribution(p3.condensation, subgrid_statistics, qᵛ, qᵛ⁺ˡ,
+                                                ℳ_adjusted.qᶜˡ, q, T, constants, p3, ρ, transport, cloud, qᵛ⁺ⁱ, ℳ_adjusted.qⁱ)
+    Γ = placed_condensation_correlation(distribution, Γ)
 
     phase1 = p3_phase1_rates(p3, ρ, ℳ_adjusted, constants, state,
-                             temperature_tendency, pressure_tendency, Γ)
-    phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1)
+                             temperature_tendency, pressure_tendency, Γ, distribution)
+    phase2 = p3_phase2_rates(p3, ρ, ℳ_adjusted, constants, state, phase1, distribution)
 
     # === EXTRACT RATES INTO LOCAL VARIABLES FOR SINK LIMITING ===
     # Phase 1
@@ -785,13 +794,15 @@ end
     relaxation_stage = liquid_relaxation_stage(liquid_stage, p3.aerosol, ρ)
     liquid_rates = implicit_liquid_vapor_rates(relaxation_stage, liquid_rates, p3, ρ, ℳ_adjusted, state, constants,
                                                vapor_excess_adjustment.cloud_water_adjustment,
-                                               phase1.cloud_relaxation, phase1.rain_relaxation, Γ)
+                                               phase1.cloud_relaxation, phase1.rain_relaxation, Γ,
+                                               distribution)
     # The ice-phase caps follow whichever liquid rates were chosen, so they are evaluated once.
     vapor_rates = limit_ice_vapor_rates(liquid_rates, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
                                         dt_safety, T₀, temperature_tendency, pressure_tendency, liquid_dt,
                                         stage_vapor_offset(relaxation_stage, FT),
                                         stage_rain(relaxation_stage, FT),
-                                        stage_coating(relaxation_stage, FT))
+                                        stage_coating(relaxation_stage, FT),
+                                        distribution, qᵛ⁺ⁱ)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number
@@ -1175,8 +1186,7 @@ end
     liquid_to_ice = cloud_rim + rain_rim + cloud_frz_q + rain_frz_q +
                     cloud_hom_q + rain_hom_q + refrz -
                     complete_melt - partial_melt
-    external_forcing = external_vapor_excess_forcing(state.qᵛ⁺ˡ,
-                                                     vaporization_latent_heat(constants, state.T),
+    external_forcing = external_vapor_excess_forcing(state.qᵛ⁺ˡ, PlanarLiquidSurface(),
                                                      state.T, state.P,
                                                      temperature_tendency, pressure_tendency,
                                                      constants)

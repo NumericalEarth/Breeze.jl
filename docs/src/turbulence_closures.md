@@ -27,14 +27,14 @@ K^u = ℓ^u \sqrt{e}, \qquad K^c = ℓ^c \sqrt{e}, \qquad K^e = ℓ^e \sqrt{e},
 where each mixing length is a *stability function* times one primary length ``ℓ``,
 
 ```math
-ℓ^u = S^u ℓ, \qquad ℓ^c = S^c ℓ, \qquad ℓ^e = S^e ℓ,
+ℓ^u = \mathbb{S}^u ℓ, \qquad ℓ^c = \mathbb{S}^c ℓ, \qquad ℓ^e = \mathbb{S}^e ℓ,
 ```
 
 and the dissipation of turbulent kinetic energy follows the same pattern with a dissipation length
-``ℓ^D = ℓ / S^D``,
+``ℓ^D = ℓ / \mathbb{S}^D``,
 
 ```math
-ε = \frac{e^{3/2}}{ℓ^D} = S^D \frac{e^{3/2}}{ℓ}.
+ε = \frac{e^{3/2}}{ℓ^D} = \mathbb{S}^D \frac{e^{3/2}}{ℓ}.
 ```
 
 The turbulent kinetic energy obeys
@@ -62,9 +62,13 @@ stratification; they differ elsewhere:
 - [`LocalMinimumMixingLength`](@ref): ``ℓ = \min(ℂˢ z, ℓᵇ)``, after Deardorff (1980). In an elevated
   layer with ``N² ≤ 0``, such as a saturated cloud layer, only the distance to the ground bounds ``ℓ``,
   so the diffusivity can jump by orders of magnitude.
-- [`GradientLimitedMixingLength`](@ref) (default): ``ℓ(z) = \min(ℂˢ z, \min_{z′}[ℓᵇ(z′) + ℂⁱ |z - z′|])``,
-  which also bounds ``ℓ`` by the distance to nearby stratification, growing at slope ``ℂⁱ``.
-  The envelope before capping at the surface length is stored in `closure_fields.ℓˢ`.
+- [`GradientLimitedMixingLength`](@ref) (default): ``ℓ(z) = \min(ℂˢ z, \min_{z′}[ℂˡᵇ ℓᵇ(z′) + ℂⁱ |z - z′|])``,
+  which also bounds ``ℓ`` by the distance to nearby stratification, growing at slope ``ℂⁱ``. In stable
+  air ``ℓ → ℂˡᵇ \sqrt{e} / N``; with ``ℂˡᵇ > 1`` (1 by default) the stability functions carry the
+  stratification limit beyond ``α_N = 1``.
+  The envelope before capping at the surface length is stored in `closure_fields.ℓˢ`, and at the cell
+  centers, where the dissipation reads it, in `closure_fields.ℓˢᶜ`: the upward sweep of the face below
+  with the downward sweep alone of the face above, each carried half a cell, which hold different bounds.
 - [`IntegralMixingLength`](@ref): the parcel length of
   [Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989), ``ℓ = ℂˢ \min(ℓ↑, ℓ↓)``, where
   ``ℓ↑`` and ``ℓ↓`` are the distances a parcel with energy ``e / (2 ℂˢ²)`` travels up and down before
@@ -75,36 +79,110 @@ The mixing length is stored in `closure_fields.ℓᵐ`. The standalone construct
 ``ℂˢ = 1.316`` (`GradientLimitedMixingLength(ℂˢ=c)` also sets ``ℂⁱ = c``); the default closure uses the
 calibrated ``ℂˢ ≈ 0.788`` and ``ℂⁱ ≈ 1.78``.
 
+Each minimum above is the `blending` of the mixing length. The default, [`HardMinimum`](@ref), is
+continuous with a derivative that jumps where the binding length changes.
+[`HarmonicBlend`](@ref) replaces it with ``(ℓ₁^{-p} + ℓ₂^{-p})^{-1/p}``, which is smooth, never
+exceeds the minimum and tends to it as ``p → ∞``. In the gradient-limited length the blend is applied
+where the wall length meets the envelope and, recursively, at every step of the two sweeps that
+build the envelope. The recursion is not the ``p``-norm of all the bounds at once: every level
+between an obstacle and the level of interest adds its own bound again, so the blended envelope
+lies below the hard one by an amount that depends on ``p`` and on the grid spacing.
+
+The buoyancy length ``ℂˡᵇ \sqrt{e} / N`` enters every combination through its inverse ``N / (ℂˡᵇ \sqrt{e})``,
+which is zero in neutral and unstable air, where the stratification does not bound the length, so the combination
+of the bounds is finite there. The frequency ``N`` is the `buoyancy_frequency` of the
+[`GradientLimitedMixingLength`](@ref): [`PositivePartFrequency`](@ref), ``\sqrt{\max(N², 0)}``, by default, whose
+derivative is infinite as ``N² → 0⁺``, or [`RegularizedPositivePartFrequency`](@ref), ``N²₊ / \sqrt{N²₊ + N★²}``,
+which is zero in unstable air too, has a finite derivative at ``N² = 0`` and departs from ``\sqrt{N²}`` where
+``N ≲ N★``.
+
 ### Static stability
 
 ``N²`` enters the stratification length, the buoyancy flux, and ``Ri``. It is diagnosed once per
 stage at cell interfaces and stored in `closure_fields.N²`, according to the closure's
 `static_stability`. [`DryStaticStability`](@ref) uses ``g \, ∂_z \ln θᵨ``, with ``θᵨ`` the density
-potential temperature. [`MoistStaticStability`](@ref), the default, uses the dry value where
-subsaturated and, where saturated, the saturated buoyancy frequency of
-[Durran and Klemp (1982)](@cite DurranKlemp1982),
+potential temperature. [`MoistStaticStability`](@ref), the default without a subgrid distribution, uses the dry value where
+subsaturated and, where saturated, the static stability of a saturated displacement
+[as Durran and Klemp (1982)](@cite DurranKlemp1982) define it, in the model's own thermodynamics,
 
 ```math
-N²_s = g \left[ \frac{1 + ℒ rˢ / (Rᵈ T)}{1 + ϵ ℒ² rˢ / (cᵖᵈ Rᵈ T²)}
-               \left( ∂_z \ln θ + \frac{ℒ}{cᵖᵈ T} ∂_z rˢ \right) - ∂_z rᵗ \right],
+N²_s = ∂_z b + (b_{qᶜ} - b_{qᵛ}) (c_q ∂_z qʷ - c_θ ∂_z θʷ - ∂_z qᶜ),
 ```
 
-where ``rˢ`` and ``rᵗ`` are the saturation and total-water mixing ratios, ``ϵ = Rᵈ / Rᵛ``,
-and ``ℒ`` is the latent heat, taken from the microphysics' phase equilibrium. Saturation is tested
-using the local moist density and excludes precipitation, while the loading term includes all
-condensate. ``N²_s`` nearly vanishes
+where ``b_{qᶜ} - b_{qᵛ}`` is the buoyancy of the condensate relative to that of vapor at fixed pressure,
+``s = c_q qʷ - c_θ θʷ`` the saturation excess of the distributed water ``qʷ`` with liquid-ice potential
+temperature ``θʷ``, linearized about the cell, and ``qᶜ`` its condensate: the saturated stratification of the
+energetics of the applied fluxes, with the buoyancy gradient of the dynamics. The condensate condenses on the phase
+of the microphysics' condensate. Saturation is tested using the local moist density and excludes precipitation,
+while the loading in ``∂_z b`` includes all condensate. ``N²_s`` nearly vanishes
 on a saturated adiabat, so mixing is not shut off inside stratocumulus.
+
+[`SaturationWeightedStaticStability`](@ref) replaces the switch at grid-mean saturation with a blend,
+``N² = (1 - aᴺ) N²_d + aᴺ N²_s``, the moist-buoyancy weighting of
+[Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993). The weight ``aᴺ``, the effective
+saturated fraction, comes from the `fraction` argument, which extends
+`Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ`.
+`SaturationWeightedStaticStability()` is `SaturationWeightedStaticStability(MicrophysicsSaturatedFraction())`,
+the saturated fraction of the subgrid model that the microphysics holds. A fraction that reads the
+mixing length reads the stored `closure_fields.ℓᵐ` of the previous update, because ``N²`` is
+diagnosed before ``ℓ``. With a `subgrid_distribution` ([`DoubleGaussian`](@ref)) the fraction can be
+[`CondensateFluxFraction`](@ref), ``aᴺ = w′qᶜ′ / w′s′``; because it depends on the diffusivities,
+the closure's `solver` ([`SinglePass`](@ref), [`DampedFixedPoint`](@ref) or
+[`BracketedFractionSolve`](@ref)) solves the two together. With a distribution,
+`SaturationWeightedStaticStability(CondensateFluxFraction())` is the default: the static stability is then the
+one the buoyancy production of the TKE carries, latent part included ([`LatentStratification`](@ref)).
 
 ### Stability functions
 
-The default is [`RationalStabilityFunction`](@ref),
+The default is [`TurbulentRichardsonStabilityFunction`](@ref). Its argument is the turbulent
+Richardson number, formed from the stratification number ``α_N = τ² N²`` and the shear number
+``α_S = τ² (S² + S²ᵐⁱⁿ)`` of turbulence with the time scale ``τ = ℓ / \sqrt{e}``:
+
+```math
+Riᵗ = Riᵗ⁻ + (Riᵗ⁺ - Riᵗ⁻) \frac{1 + s}{2}, \qquad
+Riᵗ^± = \frac{α_N}{ℂᴿⁱ^± α_S + ℂᵅ}, \qquad
+s = \frac{x}{\sqrt{1 + x²}}, \qquad x = \frac{α_N}{δ \min(ℂᴿⁱ^± α_S + ℂᵅ)},
+```
+
+a blend, with ``δ = 1/4``, of a number for the unstable side and one for the stable side by a smooth
+sign of ``α_N``. It is ``Ri / ℂᴿⁱ⁻`` (unstable) or ``Ri / ℂᴿⁱ⁺`` (stable) where the shear is strong,
+with ``Ri = N² / (S² + S²ᵐⁱⁿ)``, exactly ``α_N / ℂᵅ`` where the shear vanishes, increasing in ``α_N``
+and smooth through ``N² = 0``, where its slope is the mean of the slopes of the two sides. Each of the four functions takes its strongly unstable,
+neutral and strongly stable values ``ℂ⁻, ℂ⁰, ℂ⁺`` at ``v = -1, 0, 1``, with
+``v = Riᵗ / \sqrt{1 + Riᵗ²}``, through a quadratic in ``v`` of its logarithm:
+
+```math
+\ln 𝕊 = \ln ℂ⁰ + \tfrac{1}{2} \ln(ℂ⁺ / ℂ⁻) \, v + \left[\tfrac{1}{2} \ln(ℂ⁺ ℂ⁻) - \ln ℂ⁰\right] v².
+```
+
+The functions are positive, smooth and without branches for any positive coefficients. The squared
+shear ``S²`` and its floor ``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` come from the closure's `shear`,
+[`GridMeanShear`](@ref).
+
+The fifteen coefficients are what [`closure_parameters`](@ref) lists. For a calibration,
+`Breeze.TurbulenceClosures.stability_coefficient_bounds` gives each an independent interval,
+``[0.05, 20]`` by default, except ``ℂᵅ ≥ 4.37``: at any shear the logarithmic slope of a function in
+``α_N`` is at most ``0.699 × 1.044 \ln(20 / 0.05) / ℂᵅ`` (1.044 is the largest slope of the blend), and
+this bound keeps it below one, the width condition of the stability functions. The defaults are hand-tuned starting values for calibration
+(``e / u★² = 3.75`` and ``κ = 0.4`` in the neutral surface layer, mixing decreasing with stability):
+
+| Function | Strongly unstable | Neutral | Strongly stable |
+|:--|--:|--:|--:|
+| momentum | 0.361 | 0.159 | 0.135 |
+| scalars | 0.45 | 0.199 | 0.09 |
+| TKE | 0.361 | 0.159 | 0.135 |
+| dissipation | 0.447 | 0.447 | 0.447 |
+
+with ``ℂᴿⁱ⁻ = 16``, ``ℂᴿⁱ⁺ = 0.33`` and ``ℂᵅ = 4.4``. Under strong shear ``ℂᴿⁱ⁺ = 0.33`` puts the
+stable functions halfway through their transition, ``v = 1/2``, at ``Ri = 0.20``, where turbulence
+observations show marginal stability (``v = 0.1`` at ``Ri = 0.045``, ``v = 0.9`` at ``Ri = 0.69``);
+``ℂᴿⁱ⁻ = 16`` puts the unstable halfway point at ``Ri = -9.2``. The mixing length's wall coefficient is ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 1.30`` and its
+interior slope ``ℂⁱ ≈ 1.56``.
+
+[`RationalStabilityFunction`](@ref) is
 ``S(Ri) = C⁰ + (C^± - C⁰) x / (1 + x)`` with ``x = |Ri| / Ri^±``, which is continuous but kinked at
-neutral. The Richardson number is ``Ri = N² / (S² + S²ᵐⁱⁿ)``, with the closure's
-`minimum_shear_squared` ``S²ᵐⁱⁿ = 10⁻¹⁰ \, \mathrm{s⁻²}`` by default. The floor keeps ``Ri`` finite and
-continuous where the shear vanishes, as in uniform or absent wind: there ``N² / S²`` would jump
-between the stable and unstable limits with the sign of a rounding-level ``N²``. With the floor the
-functions pass from neutral to their limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``, and where ``S² ≫ S²ᵐⁱⁿ``
-``Ri`` differs from ``N² / S²`` by the relative amount ``S²ᵐⁱⁿ / S²`` at most.
+neutral. The floor ``S²ᵐⁱⁿ`` keeps ``Ri`` finite where the shear vanishes, but there the functions
+pass from neutral to their limits over ``|N²| ∼ Ri^± S²ᵐⁱⁿ``, a step in ``N²``.
 Its calibrated coefficients (rounded) are
 
 | Function | Unstable limit | Neutral | Stable limit |
@@ -114,8 +192,8 @@ Its calibrated coefficients (rounded) are
 | TKE | 312 | 0.0735 | 16.4 |
 | dissipation | 2.59 | 0.0554 | 0.0507 |
 
-with ``Ri⁻ ≈ 6.56`` and ``Ri⁺ ≈ 15.1``. The wall coefficient follows from
-``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4}``. The coefficients, with ``ℂⁱ``, are calibrated to the
+with ``Ri⁻ ≈ 6.56`` and ``Ri⁺ ≈ 15.1``, paired with ``ℂˢ ≈ 0.788`` (``= 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4}``)
+and ``ℂⁱ ≈ 1.78``. These coefficients are calibrated to the
 [Shen et al. (2022)](@cite Shen2022) LES library of low clouds using stochastic gradient descent.
 
 [`ConstantStabilityFunctions`](@ref) give ``Pr = ℂᵘ / ℂᶜ``, a log layer with
@@ -130,7 +208,7 @@ number ``Ri^\dagger = ℂᵘ / (ℂᶜ + ℂᴰ)``. Their defaults, ``ℂᵘ = 0
 The diffusivities are computed at the cell interfaces where the fluxes live, from the stored mixing
 length and ``\sqrt{e}`` reconstructed from the cell centers and floored at `minimum_tke`.
 The numerics of the TKE equation follow CATKE. The sinks — dissipation and the negative part of the buoyancy flux, as the rate
-``-Lᵉ = Sᴰ \sqrt{e} / ℓ + |B⁻| / \max(e, eᵐⁱⁿ)`` with ``eᵐⁱⁿ`` the `minimum_tke` (so that the buoyancy
+``-Lᵉ = 𝕊ᴰ \sqrt{e} / ℓ + |B⁻| / \max(e, eᵐⁱⁿ)`` with ``eᵐⁱⁿ`` the `minimum_tke` (so that the buoyancy
 sink is continuous at ``e = eᵐⁱⁿ`` and falls linearly with ``e`` below it), and the damping of ``e``
 that advection drives negative, at the rate ``1/τ`` — enter the vertically implicit tridiagonal solve of every time-step stage together
 with the vertical diffusion of ``e``, so that ``e`` stays positive for any time step. The sources —

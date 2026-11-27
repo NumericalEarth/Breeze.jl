@@ -30,6 +30,61 @@ test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
+using Breeze.Thermodynamics: saturation_vapor_pressure, saturation_vapor_pressure_log_slope,
+                             saturation_vapor_pressure_liquid_fraction_log_slope, PlanarLiquidSurface, PlanarIceSurface
+
+# The saturation vapor pressure may be the Clausius-Clapeyron formula, Tetens' formula or the Flatau polynomial: the
+# adjustment must converge to the saturation of the formulation of its constants, and the slope the microphysics
+# linearizes with must be the derivative of that formulation.
+saturation_formulations(FT) = (ThermodynamicConstants(FT),
+                               ThermodynamicConstants(FT; saturation_vapor_pressure = Breeze.Thermodynamics.TetensFormula(FT)),
+                               ThermodynamicConstants(FT; saturation_vapor_pressure = Breeze.Thermodynamics.FlatauPolynomial(FT)))
+
+@testset "Saturation adjustment converges to the saturation of each formulation [$FT]" for FT in test_float_types()
+    pˢᵗ = FT(1e5)
+    rtol = FT === Float32 ? FT(3e-4) : FT(1e-5)
+    cases = ((WarmPhaseEquilibrium(), 300, 1, 0.03),
+             (WarmPhaseEquilibrium(), 285, 1.1, 0.012),
+             (MixedPhaseEquilibrium(FT), 290, 0.8, 0.006),
+             (MixedPhaseEquilibrium(FT), 262, 0.8, 0.004))
+    saturations = map(saturation_formulations(FT)) do constants
+        map(cases) do (equilibrium, θ, ρ, qᵗ)
+            adjustment = SaturationAdjustment(FT; equilibrium, solver = SecantSolver(FT))
+            𝒰₀ = LiquidIceDensityState(FT(θ), MoistureMassFractions(FT(qᵗ)), pˢᵗ, FT(ρ), Breeze.NewtonSolver(FT), VaporEquivalentExponent())
+            𝒰₁ = adjust_thermodynamic_state(𝒰₀, adjustment, constants)
+            T = Breeze.Thermodynamics.temperature(𝒰₁, constants)
+            q = 𝒰₁.moisture_mass_fractions
+            qᵛ⁺ = saturation_specific_humidity(T, FT(ρ), constants, equilibrium)
+            @test q.vapor + q.liquid + q.ice ≈ FT(qᵗ) rtol=5eps(FT)
+            @test q.liquid + q.ice > 0
+            @test q.vapor ≈ qᵛ⁺ rtol=rtol
+            qᵛ⁺
+        end
+    end
+    # The formulations differ, so each adjustment has its own saturation
+    @test all(saturations[2] .!= saturations[1]) && all(saturations[3] .!= saturations[1])
+end
+
+@testset "The slope of the saturation vapor pressure is the derivative of each formulation [$FT]" for FT in test_float_types()
+    rtol = FT === Float32 ? 2e-3 : 1e-7
+    for constants in saturation_formulations(FT), T in (255, 273, 290),
+        surface in (PlanarLiquidSurface(), PlanarIceSurface(), PlanarMixedPhaseSurface(FT(0.3)))
+        ln_pᵛ⁺(T) = log(Float64(saturation_vapor_pressure(FT(T), constants, surface)))
+        ΔT = FT === Float32 ? 0.5 : 1e-3
+        centered = (ln_pᵛ⁺(T + ΔT) - ln_pᵛ⁺(T - ΔT)) / 2ΔT
+        slope = @inferred saturation_vapor_pressure_log_slope(FT(T), constants, surface)
+        @test slope isa FT
+        @test slope ≈ centered rtol=rtol
+    end
+    # ∂ ln pᵛ⁺ / ∂λ of a mixed-phase surface
+    for constants in saturation_formulations(FT), T in (255, 268)
+        ln_pᵛ⁺(λ) = log(Float64(saturation_vapor_pressure(FT(T), constants, PlanarMixedPhaseSurface(FT(λ)))))
+        Δλ = FT === Float32 ? 0.05 : 1e-5
+        centered = (ln_pᵛ⁺(0.3 + Δλ) - ln_pᵛ⁺(0.3 - Δλ)) / 2Δλ
+        @test saturation_vapor_pressure_liquid_fraction_log_slope(FT(T), constants, PlanarMixedPhaseSurface(FT(0.3))) ≈ centered rtol=10rtol
+    end
+end
+
 @testset "Density-based saturation uses the selected temperature inversion [$FT]" for FT in test_float_types()
     constants = ThermodynamicConstants(FT)
     pˢᵗ = FT(1e5)
