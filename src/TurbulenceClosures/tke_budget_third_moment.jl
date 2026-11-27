@@ -249,12 +249,14 @@ third_moment_fields(grid, third_moment) = NamedTuple()
 third_moment_fields(grid, tm::TKEBudgetThirdMoment) =
     (Fᵉ = CenterField(grid), Fᵋ = CenterField(grid), uᵉ = CenterField(grid), uᵋ = CenterField(grid), εʷ = CenterField(grid),
      w′³ᵇ = third_moment_location_field(grid, tm.location), Tᵉ = CenterField(grid), budget_work = CenterField(grid),
-     NamedTuple(pass_name(name) => ZFaceField(grid) for name in PASS_CLOSURE_FIELD_NAMES)...)
+     NamedTuple(pass_name(name) => ZFaceField(grid) for name in PASS_CLOSURE_FIELD_NAMES)...,
+     NamedTuple(pass_name(name) => CenterField(grid) for name in PASS_CLOSURE_CENTER_FIELD_NAMES)...)
 
 # The closure fields that a pass recomputes (the stability, the mixing lengths and the diffusivities). A pass
 # writes them into fields of its own, so that those of the prognostic state are never overwritten and need not be
 # kept and put back.
 const PASS_CLOSURE_FIELD_NAMES = (:N², :ℓᵐ, :ℓˢ, :Kᵘ, :Kᶜ, :Kᵉ)
+const PASS_CLOSURE_CENTER_FIELD_NAMES = (:ℓˢᶜ,) # the centers, whose parents are one level shorter
 pass_name(name) = Symbol(:pass_, name)
 
 # The closure fields of a pass: those of the prognostic state with the stability, the mixing lengths and the
@@ -264,12 +266,13 @@ pass_name(name) = Symbol(:pass_, name)
 function pass_closure_fields(closure_fields::TKEClosureFields, cl)
     Kᵘ, Kᶜ, Kᵉ = cl.pass_Kᵘ, cl.pass_Kᶜ, cl.pass_Kᵉ
     tracer_diffusivities = map(K -> K === closure_fields.Kᵉ ? Kᵉ : Kᶜ, closure_fields.tupled_tracer_diffusivities)
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, cl.pass_N², cl.pass_ℓᵐ, cl.pass_ℓˢ, closure_fields.Lᵉ, tracer_diffusivities,
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, cl.pass_N², cl.pass_ℓᵐ, cl.pass_ℓˢ, cl.pass_ℓˢᶜ, closure_fields.Lᵉ, tracer_diffusivities,
                             closure_fields.tupled_implicit_linear_coefficients, closure_fields.subgrid_cloud,
                             closure_fields.column_stability)
 end
 
-# The pass starts from the closure fields of the prognostic state, halos included: one kernel for the six copies
+# The pass starts from the closure fields of the prognostic state, halos included: one kernel for the six copies at the
+# faces and one for the centers
 @kernel function _copy_parents!(destinations, sources)
     i, j, k = @index(Global, NTuple)
     # `map` over the tuples unrolls the copies
@@ -277,8 +280,14 @@ end
 end
 
 function start_pass_closure_fields!(pass_fields, closure_fields, grid)
-    destinations = map(name -> parent(getproperty(pass_fields, name)), PASS_CLOSURE_FIELD_NAMES)
-    sources = map(name -> parent(getproperty(closure_fields, name)), PASS_CLOSURE_FIELD_NAMES)
+    copy_parents!(pass_fields, closure_fields, grid, PASS_CLOSURE_FIELD_NAMES)
+    copy_parents!(pass_fields, closure_fields, grid, PASS_CLOSURE_CENTER_FIELD_NAMES)
+    return nothing
+end
+
+function copy_parents!(pass_fields, closure_fields, grid, names)
+    destinations = map(name -> parent(getproperty(pass_fields, name)), names)
+    sources = map(name -> parent(getproperty(closure_fields, name)), names)
     launch!(grid.architecture, grid, size(first(sources)), _copy_parents!, destinations, sources)
     return nothing
 end

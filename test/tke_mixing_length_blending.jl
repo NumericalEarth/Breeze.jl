@@ -4,8 +4,10 @@ include(joinpath(@__DIR__, "setup.jl"))
 # `HardMinimum` (the default) and `HarmonicBlend`.
 
 using Breeze
-using Breeze.TurbulenceClosures: TKE_NAME, blend, length_blending, fill_mixing_length!, mixing_lengthᶜᶜᶜ, convert_eltype
+using Breeze.TurbulenceClosures: TKE_NAME, blend, length_blending, fill_mixing_length!, mixing_lengthᶜᶜᶜ, convert_eltype,
+                                 buoyancy_penetration_depthᶜᶜᶠ
 using Oceananigans
+using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.TimeSteppers: update_state!
 using Adapt: adapt
 using Enzyme: Enzyme
@@ -39,7 +41,7 @@ column(field) = Array(interior(field, 1, 1, :))
 
 function state(model)
     prognostic = NamedTuple(name => column(field) for (name, field) in pairs(Oceananigans.prognostic_fields(model)))
-    closure = NamedTuple(name => column(getproperty(model.closure_fields, name)) for name in (:Kᵘ, :Kᶜ, :Kᵉ, :N², :ℓᵐ, :ℓˢ, :Lᵉ))
+    closure = NamedTuple(name => column(getproperty(model.closure_fields, name)) for name in (:Kᵘ, :Kᶜ, :Kᵉ, :N², :ℓᵐ, :ℓˢ, :ℓˢᶜ, :Lᵉ))
     return merge(prognostic, closure)
 end
 
@@ -153,6 +155,44 @@ end
     end
 end
 
+# The envelope at a center blends the upward sweep at the face below with the downward sweep alone at the face
+# above, which share no bound. Here each sweep is formed on its own from the stored penetration depths.
+@testset "The center envelope blends two sweeps that share no bound [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    for blending in (HardMinimum(), HarmonicBlend(exponent = 4))
+        mixing_length = GradientLimitedMixingLength(ℂˢ = 0.79, ℂⁱ = 1.78; blending)
+        model = run_steps!(blending_column(mixing_length); steps = 10)
+        grid, closure = model.grid, model.closure
+        Nz = grid.Nz
+        e = compute!(Field(model.tracers[TKE_NAME] / model.dynamics.reference_state.density))
+        Oceananigans.BoundaryConditions.fill_halo_regions!(e)
+        N² = model.closure_fields.N²
+        ml = closure.mixing_length
+        @allowscalar begin
+            ℓᵇ = [k == 1 ? FT(Inf) : ml.ℂˡᵇ * buoyancy_penetration_depthᶜᶜᶠ(1, 1, k, grid, closure, e, N²)
+                  for k in 1:Nz+1]
+            ℓᵇ = map(ℓ -> isnan(ℓ) ? FT(Inf) : ℓ, ℓᵇ)
+            Δz = [Δzᶜᶜᶜ(1, 1, k, grid) for k in 1:Nz]
+        end
+        up = copy(ℓᵇ)
+        for k in 2:Nz+1
+            up[k] = blend(blending, up[k], up[k-1] + ml.ℂⁱ * Δz[k-1])
+        end
+        down = copy(ℓᵇ)
+        for k in Nz:-1:1
+            down[k] = blend(blending, down[k], down[k+1] + ml.ℂⁱ * Δz[k])
+        end
+        expected = [blend(blending, up[k] + ml.ℂⁱ * Δz[k] / 2, down[k+1] + ml.ℂⁱ * Δz[k] / 2) for k in 1:Nz]
+        @test column(model.closure_fields.ℓˢᶜ) == expected
+
+        # With the hard minimum it is the smaller face envelope carried half a cell, to the bit
+        if blending isa HardMinimum
+            ℓˢ = column(model.closure_fields.ℓˢ)
+            @test expected == [min(ℓˢ[k], ℓˢ[k+1]) + ml.ℂⁱ * Δz[k] / 2 for k in 1:Nz]
+        end
+    end
+end
+
 #####
 ##### Derivatives of the gradient-limited length: Enzyme against finite differences, on the CPU
 #####
@@ -188,7 +228,8 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
         closure = TKEBasedTurbulenceClosure(; mixing_length)
         ℓ = zeros(1, 1, Nz + 1)
         ℓˢ = zeros(1, 1, Nz + 1)
-        fill_mixing_length!(ℓ, ℓˢ, 1, 1, grid, closure.mixing_length, closure, e, N²)
+        ℓˢᶜ = zeros(1, 1, Nz)
+        fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, 1, 1, grid, closure.mixing_length, closure, e, N²)
         return ℓ[1, 1, k]
     end
 
@@ -196,8 +237,9 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
         closure = TKEBasedTurbulenceClosure(; mixing_length)
         ℓ = zeros(1, 1, Nz + 1)
         ℓˢ = zeros(1, 1, Nz + 1)
-        fill_mixing_length!(ℓ, ℓˢ, 1, 1, grid, closure.mixing_length, closure, e, N²)
-        return mixing_lengthᶜᶜᶜ(1, 1, k, grid, closure, e, (; ℓˢ, N²))
+        ℓˢᶜ = zeros(1, 1, Nz)
+        fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, 1, 1, grid, closure.mixing_length, closure, e, N²)
+        return mixing_lengthᶜᶜᶜ(1, 1, k, grid, closure, e, (; ℓˢ, ℓˢᶜ, N²))
     end
 
     gradient_limited(; p = 4.0, ℂˢ = 0.79, ℂⁱ = 1.78) = GradientLimitedMixingLength(ℂˢ, ℂⁱ, HarmonicBlend(p))

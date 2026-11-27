@@ -66,7 +66,9 @@ stratification; they differ elsewhere:
   which also bounds ``ℓ`` by the distance to nearby stratification, growing at slope ``ℂⁱ``. In stable
   air ``ℓ → ℂˡᵇ \sqrt{e} / N``; with ``ℂˡᵇ > 1`` (1 by default) the stability functions carry the
   stratification limit beyond ``α_N = 1``.
-  The envelope before capping at the surface length is stored in `closure_fields.ℓˢ`.
+  The envelope before capping at the surface length is stored in `closure_fields.ℓˢ`, and at the cell
+  centers, where the dissipation reads it, in `closure_fields.ℓˢᶜ`: the upward sweep of the face below
+  with the downward sweep alone of the face above, each carried half a cell, which hold different bounds.
 - [`IntegralMixingLength`](@ref): the parcel length of
   [Bougeault and Lacarrère (1989)](@cite BougeaultLacarrere1989), ``ℓ = ℂˢ \min(ℓ↑, ℓ↓)``, where
   ``ℓ↑`` and ``ℓ↓`` are the distances a parcel with energy ``e / (2 ℂˢ²)`` travels up and down before

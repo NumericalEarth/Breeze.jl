@@ -243,6 +243,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``∂Tˡ/∂θˡⁱ`` | `∂Tˡ∂θ` | | Derivative of the liquid-water temperature of a component of an assumed PDF with respect to its liquid-ice potential temperature, ``(ĉᵖ / cᵖᵐ) Π`` |
 | ``ℓᵐ`` | `ℓᵐ` | | Stored turbulence mixing length (`closure_fields.ℓᵐ`) |
 | ``ℓˢ`` | `ℓˢ` | | Stratification-only envelope before capping at the surface length |
+| ``ℓˢᶜ`` | `ℓˢᶜ` | | Stratification-only envelope at the cell centers: the upward sweep of the face below blended with the downward sweep alone of the face above, each carried half a cell |
 | ``ℓ∞`` | `ℓ∞` | | Asymptotic length of `BlendedMixingLength`: the fraction ``ℂˡ₄`` of the height weighted by ``\sqrt{e}`` over the column, ``ℓ∞ = ℂˡ₄ ∫ \sqrt{e} z dz / ∫ \sqrt{e} dz`` (kept in `closure_fields.ℓˢ`) |
 | ``Ri⁻, Ri⁺`` | `Ri⁻`, `Ri⁺` | | Unstable and stable transition scales of the rational stability functions |
 | ``S²ᵐⁱⁿ`` | `S²ᵐⁱⁿ` | `minimum_shear_squared` | Shear floor of the Richardson number of the rational stability functions, ``Ri = N² / (S² + S²ᵐⁱⁿ)``, s⁻² |

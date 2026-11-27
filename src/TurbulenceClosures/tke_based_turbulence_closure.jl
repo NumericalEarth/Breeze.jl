@@ -657,13 +657,17 @@ stability ``N²``, the mixing length ``ℓ`` and the implicit linear coefficient
 mixing length is stored, because its nonlocal formulations are computed column by column rather than
 pointwise; `closure_fields.ℓᵐ` is the diagnostic of ``ℓ`` from the model state.
 """
-struct TKEClosureFields{K, N, L, KC, LC, SG, CS}
+struct TKEClosureFields{K, N, L, KC, LC, SG, CS, C}
     Kᵘ :: K # eddy diffusivity for momentum, at (Center, Center, Face)
     Kᶜ :: K # eddy diffusivity for scalars, at (Center, Center, Face)
     Kᵉ :: K # eddy diffusivity for turbulent kinetic energy, at (Center, Center, Face)
     N² :: N # static stability, at (Center, Center, Face)
     ℓᵐ :: N # the primary mixing length, at (Center, Center, Face)
-    ℓˢ :: N # stratification-only envelope, before capping at the surface length, for center reconstruction
+    ℓˢ :: N # stratification-only envelope, before capping at the surface length
+    # The stratification-only envelope at (Center, Center, Center), for the center mixing length of
+    # `GradientLimitedMixingLength`: the upward sweep of the face below and the downward sweep of the
+    # face above, each carried half a cell (`fill_mixing_length!`)
+    ℓˢᶜ :: C
     # The linear implicit coefficient of the TKE equation, ∂ₜe = Lᵉ e + ⋯, at (Center, Center, Center):
     # the dissipation rate, the negative part of the buoyancy flux and the damping of negative TKE.
     Lᵉ :: L
@@ -681,6 +685,7 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.N²),
                      adapt(to, fields.ℓᵐ),
                      adapt(to, fields.ℓˢ),
+                     adapt(to, fields.ℓˢᶜ),
                      adapt(to, fields.Lᵉ),
                      adapt(to, fields.tupled_tracer_diffusivities),
                      adapt(to, fields.tupled_implicit_linear_coefficients),
@@ -701,6 +706,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     N² = ZFaceField(grid)
     ℓ = ZFaceField(grid)
     ℓˢ = ZFaceField(grid)
+    ℓˢᶜ = CenterField(grid)
     Lᵉ = CenterField(grid)
 
     # Indexed by the `Val(id)` the model hands to `diffusivity` and `implicit_linear_coefficient`:
@@ -714,7 +720,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
 
     column_stability = column_stability_field(grid, closure_stability_functions(closure))
 
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients, subgrid_cloud,
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, ℓˢᶜ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients, subgrid_cloud,
                             column_stability)
 end
 
@@ -824,11 +830,14 @@ so that the energy budget still closes (`add_shear_production_heating!`).
 #####   * `e` is an array of the specific turbulent kinetic energy at cell centers `1:Nz+1` (the
 #####     reconstruction at the top face reads the cell above the top);
 #####   * `N²` is an array at faces `1:Nz+1`;
-#####   * `fill_mixing_length!(ℓ, ℓˢ, i, j, grid, mixing_length, closure, e, N²)` writes the face
-#####     arrays `ℓ` and `ℓˢ` of column `(i, j)`, and `mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e,
-#####     closure_fields)` reads only `closure_fields.ℓˢ` and `closure_fields.N²` (`ℓˢ` holds
-#####     whatever the center reconstruction needs: the stratification envelope, or for
-#####     `BlendedMixingLength` its asymptotic length `ℓ∞` of the column).
+#####   * `fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, i, j, grid, mixing_length, closure, e, N²)` writes the
+#####     face arrays `ℓ` and `ℓˢ` of column `(i, j)` and, for `GradientLimitedMixingLength`, the
+#####     center array `ℓˢᶜ`; a formulation that needs no center array extends the method without it,
+#####     `fill_mixing_length!(ℓ, ℓˢ, i, j, grid, mixing_length, closure, e, N²)`.
+#####     `mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)` reads only `closure_fields.ℓˢ`,
+#####     `closure_fields.ℓˢᶜ` and `closure_fields.N²` (`ℓˢ` holds whatever the center reconstruction
+#####     needs: the stratification envelope, or for `BlendedMixingLength` its asymptotic length `ℓ∞`
+#####     of the column; `ℓˢᶜ` the envelope at the centers of the gradient-limited length).
 #####
 
 # The stored face field as a kernel function, for the boundary-aware reconstruction `ℑbzᵃᵃᶜ`
@@ -877,11 +886,23 @@ end
     return nothing
 end
 
+# A formulation without a center envelope fills the faces alone
+@inline fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, i, j, grid, ml, closure, e, N²) =
+    fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml, closure, e, N²)
+
 # Sweep the stratification envelope of the buoyancy length ℂˡᵇ √e / N at ℂⁱ, then apply the wall bound ℂˢ z separately.
 # Neither the ground nor the domain top seeds the stratification envelope. Every combination of
 # two lengths goes through the blending of the mixing length: the minimum, or a `HarmonicBlend`,
 # which each sweep applies recursively (see its docstring for what that implies).
-@inline function fill_mixing_length!(ℓ, ℓˢ, i, j, grid, ml::GradientLimitedMixingLength, closure, e, N²)
+#
+# The envelope at center k combines the upward sweep at face k, which holds the bounds of the faces
+# 1, …, k, with the downward sweep at face k + 1 alone, which holds those of the faces k + 1, …, Nz + 1,
+# each carried half a cell at ℂⁱ: the two share no bound, so a blend counts each bound once. The
+# downward sweep alone is formed first, from the penetration depths, and kept at the centers;
+# the face envelope is then the upward sweep swept downward, as before. With `HardMinimum` the
+# center envelope is min(ℓˢ[k], ℓˢ[k+1]) + ℂⁱ Δz / 2 of the face envelope, to the bit: a bound that
+# reaches face k + 1 from below has passed face k with no more than its length there.
+@inline function fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, i, j, grid, ml::GradientLimitedMixingLength, closure, e, N²)
     FT = grid_float_type(grid)
     Nz = grid.Nz
     @inbounds begin
@@ -890,8 +911,19 @@ end
             ℓᵇ = ml.ℂˡᵇ * buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
             ℓˢ[i, j, k] = ifelse(isnan(ℓᵇ), FT(Inf), ℓᵇ)
         end
+        # The downward sweep alone at face k + 1, kept at center k
+        ℓᵈᵒʷⁿ = ℓˢ[i, j, Nz+1]
+        for k in Nz:-1:1
+            ℓˢᶜ[i, j, k] = ℓᵈᵒʷⁿ
+            ℓᵈᵒʷⁿ = blend(ml.blending, ℓˢ[i, j, k], ℓᵈᵒʷⁿ + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k, grid))
+        end
         for k in 2:Nz+1
             ℓˢ[i, j, k] = blend(ml.blending, ℓˢ[i, j, k], ℓˢ[i, j, k-1] + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k-1, grid))
+        end
+        # The upward sweep at face k with the downward sweep at face k + 1, each carried half a cell
+        for k in 1:Nz
+            Δℓ = ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k, grid) / 2
+            ℓˢᶜ[i, j, k] = blend(ml.blending, ℓˢ[i, j, k] + Δℓ, ℓˢᶜ[i, j, k] + Δℓ)
         end
         for k in Nz:-1:1
             ℓˢ[i, j, k] = blend(ml.blending, ℓˢ[i, j, k], ℓˢ[i, j, k+1] + ml.ℂⁱ * Δzᶜᶜᶜ(i, j, k, grid))
@@ -970,17 +1002,17 @@ Compute the primary mixing length at every face of every column, by the formulat
 [`GradientLimitedMixingLength`](@ref)), from the specific turbulent kinetic energy `e` at the cell
 centers and the stored static stability `N²` at the faces. One thread per column.
 """
-@kernel function _compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²)
+@kernel function _compute_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, grid, closure, e, N²)
     i, j = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
-    fill_mixing_length!(ℓ, ℓˢ, i, j, grid, closure_ij.mixing_length, closure_ij, e, N²)
+    fill_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, i, j, grid, closure_ij.mixing_length, closure_ij, e, N²)
 end
 
 # One thread per column. A backend that runs loops over k slowly inside a kernel (Reactant, where
 # they become one round of launches per level on GPU) may extend this for a whole-array form.
-compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²; parameters = :xyz) =
+compute_mixing_length!(ℓ, ℓˢ, ℓˢᶜ, grid, closure, e, N²; parameters = :xyz) =
     launch!(grid.architecture, grid, column_kernel_parameters(parameters),
-            _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
+            _compute_mixing_length!, ℓ, ℓˢ, ℓˢᶜ, grid, closure, e, N²)
 
 # The horizontal part of the volume kernel parameters, for kernels that run one thread per column.
 column_kernel_parameters(::Symbol) = :xy
@@ -991,8 +1023,10 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The mixing length at cell center `(i, j, k)`, where the dissipation lives with ``e``. For the local
 minimum it is the local minimum at the center, with ``N²`` reconstructed from the two adjacent faces.
-For the gradient-limited formulation, the uncapped stratification envelope is carried half a cell
-at slope ``ℂⁱ``, then bounded by the center's local penetration depth and wall length ``ℂˢ z``.
+For the gradient-limited formulation, the uncapped stratification envelope at the center — the
+upward sweep of the face below blended with the downward sweep of the face above, each carried half a
+cell at slope ``ℂⁱ`` (`closure_fields.ℓˢᶜ`) — is bounded by the center's local penetration depth and
+wall length ``ℂˢ z``.
 The integral formulation carries its stored face length at slope ``ℂˢ``.
 """
 @inline mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields) =
@@ -1001,12 +1035,15 @@ The integral formulation carries its stored face length at slope ``ℂˢ``.
 @inline mixing_lengthᶜᶜᶜ(i, j, k, grid, ::LocalMinimumMixingLength, closure, e, closure_fields) =
     local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²)
 
+# The gradient-limited length: the envelope at the center (see `fill_mixing_length!`)
+@inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::GradientLimitedMixingLength, closure, e, closure_fields)
+    ℓᶠ = @inbounds closure_fields.ℓˢᶜ[i, j, k]
+    return blend(length_blending(ml), ℓᶠ, local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²))
+end
+
 @inline function mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::AbstractMixingLength, closure, e, closure_fields)
-    # Carry the uncapped stratification envelope at the interior slope. Carrying the wall-capped
-    # face value would incorrectly impose ℂⁱ on the surface layer when ℂⁱ < ℂˢ.
+    # Carry the stored face length at the interior slope
     ℓˢ = closure_fields.ℓˢ
-    # The smaller of the two face envelopes is carried, whatever the blending: they hold nearly the
-    # same bounds, which a blend would count twice.
     ℓᶠ = @inbounds min(ℓˢ[i, j, k], ℓˢ[i, j, k+1]) + interior_slope(ml) * Δzᶜᶜᶜ(i, j, k, grid) / 2
     return blend(length_blending(ml), ℓᶠ, local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields.N²))
 end
@@ -1213,7 +1250,8 @@ column that the stability functions read, if any, and the diffusivities.
 """
 function compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     grid = model.grid
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²; parameters)
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, closure_fields.ℓˢᶜ, grid, closure, tracers[TKE_NAME],
+                           closure_fields.N²; parameters)
     compute_column_stability!(closure_fields.column_stability, grid, closure, closure_fields.N², model; parameters)
     launch!(grid.architecture, grid, parameters, _compute_tke_closure_fields!, closure_fields, grid, closure, model.velocities, tracers)
     return nothing
