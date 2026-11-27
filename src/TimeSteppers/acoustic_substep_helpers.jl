@@ -488,3 +488,13 @@ function implicit_substep!(model, implicit_solver, Δt_stage)
 
     return nothing
 end
+
+#####
+##### The state update between the stages of a multistage step
+#####
+
+# The update after the first stage checks the radiation schedule (`update_state!`), and those after the later stages
+# update the radiation between its solves, so that a step checks the schedule once (as in `SSPRungeKutta3`).
+update_stage_state!(model, callbacks, stage) =
+    stage == 1 ? update_state!(model, callbacks; compute_tendencies = true) :
+                 AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)

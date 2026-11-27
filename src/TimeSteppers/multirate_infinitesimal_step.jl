@@ -2131,7 +2131,7 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
 
     (; c, d) = ts.tableau
     s = length(d)
-    tⁿ⁺¹ = model.clock.time + Δt
+    tⁿ⁺¹ = next_time(model.clock, Δt)
 
     store_outer_step_state!(ts, model)
     store_step_start_state!(ts.step_start, model)
@@ -2145,8 +2145,9 @@ function OceananigansTimeSteppers.time_step!(model::MultirateAcousticModel, Δt;
             ts.next_stage[] = i + 1
             Δc = i == 1 ? c[1] : c[i] - c[i-1]
             tick_stage!(model.clock, Δc * Δt)
-            update_state!(model, callbacks; compute_tendencies = true)
-            # After `update_state!`, so that the increments are those of the state it leaves,
+            # The update after the first stage checks the radiation schedule, as in `SSPRungeKutta3`
+            update_stage_state!(model, callbacks, i)
+            # After the update, so that the increments are those of the state it leaves,
             # with its negative-moisture correction (see `stage_increment_source`).
             store_stage_increment!(ts, model, i, Δt)
             cache_transport_velocity!(model)

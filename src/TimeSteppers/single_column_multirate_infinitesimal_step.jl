@@ -137,10 +137,6 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Step forward a single-column `model` with anelastic dynamics one time step `Δt` with the slow
 method of a multirate infinitesimal step (see `single_column_multirate_stage!`).
 """
-update_stage_state!(model, callbacks, stage) =
-    stage == 1 ? update_state!(model, callbacks; compute_tendencies = true) :
-                 AtmosphereModels.update_state_between_radiation_solves!(model, callbacks)
-
 function OceananigansTimeSteppers.time_step!(model::SingleColumnMultirateModel, Δt; callbacks=[])
 
     ts = model.timestepper
