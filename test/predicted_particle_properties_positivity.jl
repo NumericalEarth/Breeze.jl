@@ -717,14 +717,18 @@ end
 
     names = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ, :ρnᵃ)
     minima = Dict(name => Inf for name in names)
+    maxima = Dict(name => -Inf for name in names)
     for _ in 1:600
         time_step!(model, 2)
         for name in names
             minima[name] = min(minima[name], minimum(getproperty(μ, name)))
+            maxima[name] = max(maxima[name], maximum(getproperty(μ, name)))
         end
     end
 
     @test maximum(μ.ρqᶜˡ) > 0
-    @test all(minima[name] ≥ 0 for name in names)
+    # Non-negative to the rounding of the largest value: on a GPU, whose fused multiply-adds round differently, the
+    # cloud droplet number reaches -6e-21 m⁻³ where its sinks remove all of it
+    @test all(minima[name] ≥ -eps(Float64) * maxima[name] for name in names)
     @test minimum(model.moisture_density) > 0
 end
