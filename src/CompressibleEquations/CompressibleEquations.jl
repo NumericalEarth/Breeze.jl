@@ -68,7 +68,8 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_
                                base_pressure, standard_pressure, thermodynamic_density,
                                thermodynamic_density_name, specific_prognostic_moisture,
                                moisture_prognostic_name, condensate_field_names, condensate_liquid_fraction,
-                               prognostic_moisture_phase_fractions, saturation_adjusted_equilibrium
+                               prognostic_moisture_phase_fractions, saturation_adjusted_equilibrium,
+                               kernel_time_step
 using Breeze.PotentialTemperatureFormulations: PotentialTemperatureFormulations, LiquidIcePotentialTemperatureFormulation
 using Breeze.Solvers: NewtonSolver
 using Breeze.RoundingTreatments: RoundToNearest, offset_rounding_key, rounded_add, rounding_key
