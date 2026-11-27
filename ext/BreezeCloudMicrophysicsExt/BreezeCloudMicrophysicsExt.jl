@@ -52,6 +52,7 @@ using Breeze.Thermodynamics:
     PlanarLiquidSurface,
     PlanarIceSurface,
     saturation_vapor_pressure,
+    saturation_vapor_pressure_log_slope,
     saturation_specific_humidity,
     supersaturation,
     liquid_latent_heat,

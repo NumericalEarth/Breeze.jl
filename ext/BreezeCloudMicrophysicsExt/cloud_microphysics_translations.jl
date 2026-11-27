@@ -53,7 +53,10 @@ See Eq. (13.28) by [Pruppacher & Klett (2010)](@cite pruppacher2010microphysics)
     ℒˡ = liquid_latent_heat(T, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
 
-    return 1 / (ℒˡ / K_therm / T * (ℒˡ / Rᵛ / T - 1) + Rᵛ * T / D_vapor / pᵛ⁺)
+    # T ∂ ln pᵛ⁺ / ∂T of the model's saturation vapor pressure (ℒˡ / (Rᵛ T) for the Clausius-Clapeyron formula)
+    T∂ln_pᵛ⁺∂T = T * saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface())
+
+    return 1 / (ℒˡ / K_therm / T * (T∂ln_pᵛ⁺∂T - 1) + Rᵛ * T / D_vapor / pᵛ⁺)
 end
 
 @inline function diffusional_growth_factor_ice(aps::AirProperties{FT}, T, constants) where {FT}
@@ -63,7 +66,9 @@ end
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
 
     # TODO: notation for the thermal diffusivity K_therm?
-    return 1 / (ℒⁱ / (K_therm * T) * (ℒⁱ / (Rᵛ * T) - 1) + Rᵛ * T / (D_vapor * pᵛ⁺))
+    T∂ln_pᵛ⁺∂T = T * saturation_vapor_pressure_log_slope(T, constants, PlanarIceSurface())
+
+    return 1 / (ℒⁱ / (K_therm * T) * (T∂ln_pᵛ⁺∂T - 1) + Rᵛ * T / (D_vapor * pᵛ⁺))
 end
 
 """
@@ -650,9 +655,12 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 
     # ARG parameters (Eq. 11, 12 in Abdul-Razzak et al. 1998)
     # α = rate of change of saturation ratio due to adiabatic cooling
-    α = pᵛ / pᵛ⁺ * (ℒˡ * g / (Rᵛ * cᵖᵐ * T^2) - g / (Rᵐ * T))
+    # with ∂ ln pᵛ⁺ / ∂T of the model's saturation vapor pressure over liquid and over ice
+    ∂ln_pᵛ⁺ˡ∂T = saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface())
+    ∂ln_pᵛ⁺ⁱ∂T = saturation_vapor_pressure_log_slope(T, constants, PlanarIceSurface())
+    α = pᵛ / pᵛ⁺ * (∂ln_pᵛ⁺ˡ∂T * g / cᵖᵐ - g / (Rᵐ * T))
     # γ = thermodynamic factor for condensation
-    γ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ^2 / (Rᵛ * cᵖᵐ * T * p)
+    γ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ∂ln_pᵛ⁺ˡ∂T * T / (cᵖᵐ * p)
 
     # Curvature coefficient (Kelvin effect)
     # Formula: A = 2σ / (ρᴸ * R_v * T)
@@ -669,7 +677,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     Kˡ = 4 * FT(π) * ρᴸ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
-    γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / (Rᵛ * cᵖᵐ * T * p)
+    γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ∂ln_pᵛ⁺ⁱ∂T * T / (cᵖᵐ * p)
     rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / (Nⁱ * ρᴵ * FT(π) * 4 / 3)), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
     Kⁱ = 4 * FT(π) * Nⁱ * rⁱ * Gⁱ * γⁱ

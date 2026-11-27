@@ -129,11 +129,13 @@ Return the psychrometric correction ``ξ``, the factor by which latent heating r
 the supersaturation available to drive a phase change,
 
 ```math
-ξ = 1 + \\frac{ℒ^2 q^{v+}}{cᵖ Rᵛ T^2}
+ξ = 1 + \\frac{ℒ}{cᵖ} \\frac{∂ q^{v+}}{∂ T} , \\qquad \\frac{∂ q^{v+}}{∂ T} = q^{v+} \\frac{∂ \\ln p^{v+}}{∂ T}
 ```
 
 with `ℒ` the latent heat of the phase being formed, `qᵛ⁺` the saturation mass fraction
-against it, and `cᵖ` the heat capacity the caller's energy budget is written with. An
+against it, `cᵖ` the heat capacity the caller's energy budget is written with, and
+`∂ln_pᵛ⁺∂T` the logarithmic slope of the saturation vapor pressure of the model's own formulation
+over that phase's surface ([`saturation_vapor_pressure_log_slope`](@ref)). An
 effective relaxation timescale is `ξ τ`, and an effective supersaturation excess is
 `(qᵛ - qᵛ⁺) / ξ`.
 
@@ -144,7 +146,7 @@ density it differentiates the state's θ–density relation for the heating resp
 keeps the ideal-gas ``-1/T`` term of ``dqᵛ⁺/dT``. The form here matches the convention of
 the P3 scheme.
 """
-@inline psychrometric_correction(ℒ, qᵛ⁺, cᵖ, Rᵛ, T) = 1 + ℒ^2 * qᵛ⁺ / (cᵖ * Rᵛ * T^2)
+@inline psychrometric_correction(ℒ, qᵛ⁺, cᵖ, ∂ln_pᵛ⁺∂T) = 1 + ℒ * qᵛ⁺ * ∂ln_pᵛ⁺∂T / cᵖ
 
 #####
 ##### Phase equilibrium types

@@ -145,11 +145,10 @@ drives diffusional growth and, with [`PrognosticVaporExcess`](@ref), the prognos
 saturation-adjustment caps in `limit_vapor_rates`. Resolved vapor transport,
 turbulent mixing, radiation, and user forcing are omitted.
 """
-@inline function external_vapor_excess_forcing(qᵛ⁺, ℒ, T, P, temperature_tendency,
+@inline function external_vapor_excess_forcing(qᵛ⁺, surface, T, P, temperature_tendency,
                                                pressure_tendency, constants)
-    FT = typeof(T)
-    Rᵛ = FT(vapor_gas_constant(constants))
-    dqᵛ⁺_dT = qᵛ⁺ * ℒ / (Rᵛ * T^2)
+    # ∂qᵛ⁺/∂T at fixed pressure and composition, with the model's saturation vapor pressure over `surface`
+    dqᵛ⁺_dT = qᵛ⁺ * saturation_vapor_pressure_log_slope(T, constants, surface)
     return qᵛ⁺ * pressure_tendency / P - dqᵛ⁺_dT * temperature_tendency
 end
 
@@ -253,8 +252,8 @@ end
     ℒⁱ = sublimation_latent_heat(constants, T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
-    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
-    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * ℒⁱ / (Rᵛ * T^2)
+    dqᵛ⁺ˡ_dT = qᵛ⁺ˡ * saturation_vapor_pressure_log_slope(T, constants, PlanarLiquidSurface())
+    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * saturation_vapor_pressure_log_slope(T, constants, PlanarIceSurface())
     # Psychrometric correction factors over liquid (ξˡ) and ice (ξⁱ) surfaces.
     ξˡ = 1 + ℒˡ * dqᵛ⁺ˡ_dT / cᵖᵈ
     ξⁱ = 1 + ℒⁱ * dqᵛ⁺ⁱ_dT / cᵖᵈ
@@ -329,7 +328,7 @@ cloud/precipitation fraction framework is handled separately.
     # the post-G&M value, not the host-advected `δqᵛ⁺ˡ`.
     vapor_excess = qᵛ - qᵛ⁺ˡ
     bergeron_driver = -(qᵛ⁺ˡ - qᵛ⁺ⁱ) * ice_liquid_coupling * dry_ice_relaxation
-    external_driver = external_vapor_excess_forcing(qᵛ⁺ˡ, ℒˡ, T, P, temperature_tendency,
+    external_driver = external_vapor_excess_forcing(qᵛ⁺ˡ, PlanarLiquidSurface(), T, P, temperature_tendency,
                                                     pressure_tendency, constants)
     total_driver = external_driver + bergeron_driver
 

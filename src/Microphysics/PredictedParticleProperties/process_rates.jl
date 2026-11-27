@@ -1174,8 +1174,7 @@ end
     liquid_to_ice = cloud_rim + rain_rim + cloud_frz_q + rain_frz_q +
                     cloud_hom_q + rain_hom_q + refrz -
                     complete_melt - partial_melt
-    external_forcing = external_vapor_excess_forcing(state.qᵛ⁺ˡ,
-                                                     vaporization_latent_heat(constants, state.T),
+    external_forcing = external_vapor_excess_forcing(state.qᵛ⁺ˡ, PlanarLiquidSurface(),
                                                      state.T, state.P,
                                                      temperature_tendency, pressure_tendency,
                                                      constants)

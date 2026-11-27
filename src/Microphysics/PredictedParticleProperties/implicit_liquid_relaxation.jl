@@ -95,9 +95,8 @@ so the relaxation keeps its bounds.
     qᵛ⁺ˡ = state.qᵛ⁺ˡ
 
     # The psychrometric correction of the coupled explicit rates, evaluated at the same state.
-    Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
-    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, Rᵛ, T)
+    ξˡ = liquid_psychrometric_correction(constants, ℒˡ, qᵛ⁺ˡ, T)
 
     # The saturation excess of total water and the cloud's equilibrium condensate, of the subgrid
     # distribution where the `condensation` option supplies Γ.
