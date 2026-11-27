@@ -385,6 +385,36 @@ result.metadata
 2. **Check GPU memory**: Use `CUDA.memory_status()` to verify memory usage
 3. **Monitor GPU temperature**: Throttling affects performance
 
+### Distributed GPU runs (MPI)
+
+Two settings mattered most for distributed GPU runs on Perlmutter (A100-40GB, 4 GPUs per node,
+Cray MPICH 9.1.0 with device buffers). The model was 512 × 512 × 256 in Float32. Times are seconds
+per time step, median of 6 windows of 20 steps, timed by the slowest rank.
+
+1. **Partition along x only (slabs, `Partition(Rx, 1)`) rather than in x and y (pencils).** On the
+   same grid and GPU count, pencils were about twice as slow. Each distributed halo fill then needs
+   x, y and corner passes, so twice the messages and about 2.6× the kernel launches.
+   Anelastic dynamics also needs `Ny % Rx == 0` for the distributed FFT solver.
+2. **Raise Cray MPICH's GPU IPC handle cache:** `export MPICH_GPU_IPC_CACHE_MAX_SIZE=4096`.
+   The default of 50 is smaller than the number of distinct halo buffers of a moist model, so
+   intra-node halo messages were slower than inter-node ones.
+
+Effect on the full-physics GATE III cases:
+
+| Case, 512 × 512 × 256 global | GPUs | pencil, default cache | slab, default cache | slab, cache 4096 |
+|---|---|---|---|---|
+| Anelastic, P3, WENO5 | 4 | 0.748 (2 × 2) | 0.434 (4 × 1) | 0.267 (4 × 1) |
+| Anelastic, P3, WENO5 | 8 | 0.810 (4 × 2) | 0.295 (8 × 1) | 0.202 (8 × 1) |
+| Compressible terrain, P3, TKE | 4 | 1.340 (2 × 2) | 0.902 (4 × 1) | 0.638 (4 × 1) |
+| Compressible terrain, P3, TKE | 8 | 1.250 (4 × 2) | not measured | 0.423 (8 × 1) |
+
+The 1-GPU times are 0.852 s (anelastic) and 2.290 s (terrain). With slabs and the larger cache,
+weak scaling at 512 × 512 × 256 per GPU stays at 0.69 (anelastic) and 0.97 (terrain) efficiency
+on 8 GPUs.
+
+Remaining cost, from profiling: halos are exchanged one field at a time and block on `MPI_Waitall`
+without overlapping computation. Communication is plain MPI; NCCL was not used.
+
 ### Comparing Results
 
 1. **Use the canonical configuration** (WENO5, Float32, no closure) as baseline
