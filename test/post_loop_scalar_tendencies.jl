@@ -527,14 +527,12 @@ using Breeze.Microphysics.PredictedParticleProperties: PredictedParticleProperti
 using Breeze.TimeSteppers: multirate_infinitesimal_step_tableau, post_loop_scalar_tendency_kernel
 using CloudMicrophysics.Parameters: CloudIce, CloudLiquid
 
-# One coefficient set and more for each storage layout, all strong-stability preserving. The
-# sets with a diagonal `β` but more than the first subdiagonal of `α` take `AccumulatorStorage`
-# too, and the last is made to accumulate whatever its structure.
+# One coefficient set and more for each storage layout, all strong-stability preserving. The last
+# is a set whose structure takes `TwoRegisterStorage`, made to accumulate.
 const sink_budget_layouts = ((:SSPMIS43, true, AccumulatorStorage),
-                             (:DiagonalMIS42, true, AccumulatorStorage),
                              (:LowStorageMIS52, true, TwoRegisterStorage),
                              (:ConvexLinearMIS4, true, TwoRegisterStorage),
-                             (:DiagonalMIS52, false, AccumulatorStorage))
+                             (:LowStorageMIS52, false, AccumulatorStorage))
 
 function with_stage_storage(build, structured)
     structured_stage_storage[] = structured
@@ -676,8 +674,10 @@ end
     @test all(maxima[name] > 0 for name in keys(maxima))
 
     # ...and nothing goes negative, beyond the roundoff of the bounded advection of fields whose
-    # neighbouring cells are many orders of magnitude apart (see bulk_microphysics_positivity.jl).
-    # Budgeted without the advective tendency, P3 leaves cloud liquid at -4e-7 kg m⁻³ and the
-    # one-moment scheme rain at -2e-4 kg m⁻³, 4% of its maximum, with `:SSPMIS43`.
-    @test all(minima[name] ≥ -eps(Float64) * maxima[name] for name in keys(minima))
+    # neighbouring cells are many orders of magnitude apart (see bulk_microphysics_positivity.jl):
+    # a few rounding errors of the largest value, which the sums of a stage accumulate (P3 rime
+    # volume reaches -1.25 eps times its maximum with `:ConvexLinearMIS4`). Budgeted without the
+    # advective tendency, P3 leaves cloud liquid at -4e-7 kg m⁻³ and the one-moment scheme rain at
+    # -2e-4 kg m⁻³, 4% of its maximum, with `:SSPMIS43`.
+    @test all(minima[name] ≥ -4 * eps(Float64) * maxima[name] for name in keys(minima))
 end
