@@ -28,6 +28,9 @@ function AtmosphereModels.compute_pressure_correction!(model::AnelasticModel, Δ
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, boundary_condition_args(model)...)
 
+    # After the fill that wrote the raw boundary data, before the solve that needs it balanced.
+    enforce_lateral_mass_balance!(model.dynamics, model.momentum)
+
     dynamics = model.dynamics
     ρŨ = model.momentum
     solver = model.pressure_solver
