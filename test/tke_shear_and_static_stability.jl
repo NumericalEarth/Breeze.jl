@@ -427,9 +427,9 @@ end
     @test_throws MethodError TurbulenceClosures.saturated_stability_weightᶜᶜᶠ(1, 1, 2, dry.grid, nothing, buoyancy, tracers, dry.closure_fields)
 
     N²ᵈ = face_field(dry, ∂z_b, buoyancy, tracers)
-    N²ˢ = face_field(dry, saturated_static_stabilityᶜᶜᶠ, buoyancy, tracers.T, tracers.qᵛᵉ)
+    N²⁺ = face_field(dry, saturated_static_stabilityᶜᶜᶠ, buoyancy, tracers.T, tracers.qᵛᵉ)
     @test column(dry.closure_fields.N²) == N²ᵈ
-    @test maximum(abs, N²ˢ[interior_faces] .- N²ᵈ[interior_faces]) > 1e-5
+    @test maximum(abs, N²⁺[interior_faces] .- N²ᵈ[interior_faces]) > 1e-5
 
     @testset "the subgrid model of the microphysics" begin
         @test SaturationWeightedStaticStability() === SaturationWeightedStaticStability(MicrophysicsSaturatedFraction())
@@ -451,7 +451,7 @@ end
         for w in FT.((0, 0.3, 1))
             model = column_model(with_weight(ConstantWeight(w)), case)
             N² = column(model.closure_fields.N²)
-            @test N²[interior_faces] ≈ ((1 - w) .* N²ᵈ .+ w .* N²ˢ)[interior_faces]
+            @test N²[interior_faces] ≈ ((1 - w) .* N²ᵈ .+ w .* N²⁺)[interior_faces]
             operation = KernelFunctionOperation{Center, Center, Face}(static_stabilityᶜᶜᶠ, model.grid, model.closure.static_stability,
                                                                       buoyancy_force(model), buoyancy_tracers(model), model.closure_fields)
             @test column(Field(operation)) == N²
@@ -470,7 +470,7 @@ end
         model = column_model(with_weight(ConstantWeight(w); mixing_length = LocalMinimumMixingLength()), case)
         closure, fields = model.closure, model.closure_fields
         N² = column(fields.N²)
-        @test N²[interior_faces] ≈ ((1 - w) .* N²ᵈ .+ w .* N²ˢ)[interior_faces]
+        @test N²[interior_faces] ≈ ((1 - w) .* N²ᵈ .+ w .* N²⁺)[interior_faces]
 
         e = max.(column(compute!(Field(specific_tke(model)))), closure.minimum_tke)
         w★ = (sqrt.(e[1:Nz-1]) .+ sqrt.(e[2:Nz])) ./ 2
@@ -495,7 +495,7 @@ end
             ℓ⁻ = column(model.closure_fields.ℓᵐ)
             update_state!(model)
             w = ℓ⁻ ./ (ℓ⁻ .+ ℓ⁰)
-            @test column(model.closure_fields.N²)[interior_faces] ≈ (N²ᵈ .+ w .* (N²ˢ .- N²ᵈ))[interior_faces]
+            @test column(model.closure_fields.N²)[interior_faces] ≈ (N²ᵈ .+ w .* (N²⁺ .- N²ᵈ))[interior_faces]
         end
         @test maximum(column(model.closure_fields.ℓᵐ)) > 0
     end
@@ -552,11 +552,11 @@ central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
             end
         end
 
-        # The weight: ∂N²/∂w = N²ˢ - N²ᵈ, and through the parameter of a weight that reads ℓ
+        # The weight: ∂N²/∂w = N²⁺ - N²ᵈ, and through the parameter of a weight that reads ℓ
         N²ᵈ = ∂z_b(1, 1, k, grid, buoyancy, tracers)
-        N²ˢ = saturated_static_stabilityᶜᶜᶠ(1, 1, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
+        N²⁺ = saturated_static_stabilityᶜᶜᶠ(1, 1, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
         in_weight = w -> static_stabilityᶜᶜᶠ(1, 1, k, grid, SaturationWeightedStaticStability(ConstantWeight(w)), buoyancy, tracers, fields)
-        @test reverse_gradient(in_weight, 0.4) ≈ N²ˢ - N²ᵈ rtol=1e-10
+        @test reverse_gradient(in_weight, 0.4) ≈ N²⁺ - N²ᵈ rtol=1e-10
         @test reverse_gradient(in_weight, 0.4) ≈ central_difference(in_weight, 0.4, 1e-4) rtol=1e-6
         in_length = ℓ⁰ -> static_stabilityᶜᶜᶠ(1, 1, k, grid, SaturationWeightedStaticStability(MixingLengthWeight(ℓ⁰)), buoyancy, tracers, fields)
         ad = reverse_gradient(in_length, 100.0)
@@ -620,9 +620,9 @@ end
     operation = KernelFunctionOperation{Center, Center, Face}(static_stabilityᶜᶜᶠ, grid, static_stability, buoyancy, tracers, fields)
     N² = column(Field(operation))
     N²ᵈ = face_field(model, ∂z_b, buoyancy, tracers)
-    N²ˢ = face_field(model, saturated_static_stabilityᶜᶜᶠ, buoyancy, tracers.T, tracers.qᵛᵉ)
+    N²⁺ = face_field(model, saturated_static_stabilityᶜᶜᶠ, buoyancy, tracers.T, tracers.qᵛᵉ)
     aᴺ = [(f⁺[max(k - 1, 1)] + f⁺[min(k, Nz)]) / 2 for k in 1:Nz+1]
-    @test N²[2:Nz] ≈ (N²ᵈ .+ aᴺ .* (N²ˢ .- N²ᵈ))[2:Nz]
+    @test N²[2:Nz] ≈ (N²ᵈ .+ aᴺ .* (N²⁺ .- N²ᵈ))[2:Nz]
     @test N²[2:Nz] != N²ᵈ[2:Nz]
     update_state!(model)
     @test column(fields.N²) == N²

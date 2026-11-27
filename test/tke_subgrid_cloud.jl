@@ -259,7 +259,7 @@ end
     @test all(isfinite, column(model.tracers.ρe))
 
     # With the condensate flux fraction, N² is the stratification of the mixed variables
-    # less the latent correction, N² = Σ b̄_χ δz χ - aᴺ (N²ᵇ - N²ˢ), with b_χ the stored derivatives
+    # less the latent correction, N² = Σ b̄_χ δz χ - aᴺ (N²ᵇ - N²⁺), with b_χ the stored derivatives
     model = tke_p3_column(DoubleGaussian(); static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(MoistStaticStability())))
     update_state!(model)
     cf = model.closure_fields

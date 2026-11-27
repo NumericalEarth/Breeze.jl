@@ -47,8 +47,8 @@ diagnosis, at the faces, from the closure's mixing length `ℓ`, turbulent veloc
 static stability `N²` there: `ℂᵗ` eddy turnover times, limited by the buoyancy period in stable air and
 then by a `p`-norm of its rate and the buoyancy rate `N⁺ / ℂᴺ`,
 
-    τ₀ = τᵉ / √(1 + τᵉ² N²⁺),    τᵉ = ℂᵗ ℓ / √e,
-    τ  = τ₀ / (1 + (τ₀ N⁺ / ℂᴺ)ᵖ)^(1/p),    N⁺ = √(N²⁺ + Nₘᵢₙ²) - Nₘᵢₙ
+    τ₀ = τᵉ / √(1 + τᵉ² N²₊),    τᵉ = ℂᵗ ℓ / √e,
+    τ  = τ₀ / (1 + (τ₀ N⁺ / ℂᴺ)ᵖ)^(1/p),    N⁺ = √(N²₊ + Nₘᵢₙ²) - Nₘᵢₙ
 
 so that `τ N⁺ < ℂᴺ`. `ℂᴺ = Inf` removes the stratification limit. The exponent `p` is a type
 parameter.
@@ -86,11 +86,11 @@ Base.summary(ts::StratificationLimitedMomentTimeScale{P}) where P =
     string("StratificationLimitedMomentTimeScale(ℂᵗ = ", prettysummary(ts.ℂᵗ), ", ℂᴺ = ", prettysummary(ts.ℂᴺ), ", p = ", P, ")")
 
 @inline function moment_time_scale(ts::StratificationLimitedMomentTimeScale{P}, ℓ, u, N²) where P
-    N²⁺ = max(N², zero(N²))
+    N²₊ = max(N², zero(N²))
     τᵉ = ts.ℂᵗ * ℓ / u
-    τ₀ = τᵉ / sqrt(1 + τᵉ * τᵉ * N²⁺)
+    τ₀ = τᵉ / sqrt(1 + τᵉ * τᵉ * N²₊)
     Nₘᵢₙ = ts.minimum_buoyancy_frequency
-    N⁺ = N²⁺ / (sqrt(N²⁺ + Nₘᵢₙ * Nₘᵢₙ) + Nₘᵢₙ)
+    N⁺ = N²₊ / (sqrt(N²₊ + Nₘᵢₙ * Nₘᵢₙ) + Nₘᵢₙ)
     return τ₀ / rate_norm_factor(Val(P), τ₀ * N⁺ / ts.ℂᴺ)
 end
 
@@ -369,7 +369,7 @@ $(TYPEDEF)
 
 The `solver` of [`TKEBasedTurbulenceClosure`](@ref) (the default). With
 `static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(...))` the static
-stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²ˢ` and the saturated fraction `aᴺ = w′qᶜ′ / w′s′` of the subgrid
+stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²⁺` and the saturated fraction `aᴺ = w′qᶜ′ / w′s′` of the subgrid
 distribution depend on each other: `aᴺ` is computed from the distribution, which is computed with
 the diffusivities, mixing length and moment time scale of `N²`. `SinglePass` computes the
 distribution once, with the `initial_stability` of [`CondensateFluxFraction`](@ref), then `N²` from
@@ -383,7 +383,7 @@ $(TYPEDEF)
 The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of the static stability
 `N²` and the saturated fraction `aᴺ = w′qᶜ′ / w′s′` (see [`SinglePass`](@ref)) by damped fixed-point
 iteration: after the single pass, `iterations` more passes each compute the distribution with the
-stored `N²`, mixing length and `Kᶜ`, then `N²ᵇ = (1 - aᴺ) N²ᶜ + aᴺ N²ˢ` from it, and update
+stored `N²`, mixing length and `Kᶜ`, then `N²ᵇ = (1 - aᴺ) N²ᶜ + aᴺ N²⁺` from it, and update
 `N² ← (1 - ω) N² + ω N²ᵇ` at the interior faces with `ω = relaxation` (`0 < ω ≤ 1`), before the
 mixing length and the diffusivities are formed again. `ω = 1` is the plain fixed-point iteration;
 `ω < 1` damps the pass-to-pass oscillation between the stable and unstable branches. The passes are
@@ -417,7 +417,7 @@ $(TYPEDEF)
 The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of `N²` and `aᴺ` (see
 [`DampedFixedPoint`](@ref)) as the scalar root `r(N²) = N²ᵇ(N²) - N² = 0` of each interior face
 (the coupling to the neighbouring faces is lagged): `iterations` secant steps from the last two
-passes, kept in the bracket `[min(N²ᶜ, N²ˢ), max(N²ᶜ, N²ˢ)]`, falling back to the damped step
+passes, kept in the bracket `[min(N²ᶜ, N²⁺), max(N²ᶜ, N²⁺)]`, falling back to the damped step
 `N² + ω r` where the secant denominator is tiny.
 """
 struct SecantIteration{W}
@@ -440,7 +440,7 @@ end
 $(TYPEDEF)
 
 The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of `N²` and `aᴺ` (see
-[`SecantIteration`](@ref)) by halving the bracket of `N²ᶜ` and `N²ˢ` per face by the sign of
+[`SecantIteration`](@ref)) by halving the bracket of `N²ᶜ` and `N²⁺` per face by the sign of
 `r(N²) = N²ᵇ - N²`, `iterations` times. With `final_interpolation` the last pass instead takes the
 secant step of the last two passes, kept in the bracket, so that the result varies continuously
 with the parameters.
@@ -571,8 +571,8 @@ flux to the flux of the saturation excess `s = c_q qᵗ - c_θ θˡⁱ` (lineari
 
     aᴺ = w′qᶜ′ / w′s′,    w′s′ = -Kᶜ ∂z s̄,
 
-so that the static stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²ˢ`, with `N²ᶜ = (g / θ)(∂z θˡⁱ + A_q ∂z qᵗ)` the
-stratification of the conserved variables and `N²ˢ = N²ᶜ + (g / θ) A_c ∂z s̄` the saturated one, is
+so that the static stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²⁺`, with `N²ᶜ = (g / θ)(∂z θˡⁱ + A_q ∂z qᵗ)` the
+stratification of the conserved variables and `N²⁺ = N²ᶜ + (g / θ) A_c ∂z s̄` the saturated one, is
 `N²ᶜ - Bˡ / Kᶜ`, `Bˡ = (g / θ) A_c w′qᶜ′`: minus the buoyancy flux of the distribution divided by
 `Kᶜ` (`Bˡ / Kᶜ` is left out where `Kᶜ` vanishes). It is evaluated in that form. For the
 double-Gaussian distribution `aᴺ` lies in `[0, 1]` up to the interpolation of the fluxes to the faces.
@@ -750,7 +750,7 @@ end
 # rate, the stored derivatives b_χ of the buoyancy and ĉᵖ Π, momentum before its solve, and the
 # conversions of the solved state and the dissipation of the last stage (diagnostics)
 function applied_flux_conversion_fields(grid, ::AppliedFluxEnergetics)
-    centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :Bᴸˢ, :Bⁱ, :P, :Pⁱ, :Bˢ, :Pˢ, :ωᴮ, :b_θ, :b_qᵛ, :b_qˡ, :b_qⁱ, :b_qᶜ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_b_θ, :stage_b_qᵛ, :stage_b_qˡ, :stage_b_qⁱ, :stage_surface, :shortfall, :after_solves_ρθ, :stage_combination))
+    centers = NamedTuple(name => CenterField(grid) for name in (:B, :Bᴸ, :Bᴸⁱ, :Bⁱ, :P, :Pⁱ, :Bˢ, :Pˢ, :ωᴮ, :b_θ, :b_qᵛ, :b_qˡ, :b_qⁱ, :b_qᶜ, :ĉᵖΠ, :Bᵖ, :Pᵖ, :ε, :given, :stage_b_θ, :stage_b_qᵛ, :stage_b_qˡ, :stage_b_qⁱ, :stage_surface, :shortfall, :after_solves_ρθ, :stage_combination))
     faces = (aʷ = ZFaceField(grid), aᴺ = ZFaceField(grid), ΔN²ᴸ = ZFaceField(grid), η = ZFaceField(grid), c_q = ZFaceField(grid), c_θ = ZFaceField(grid),
              ηⁱ = ZFaceField(grid), ηʷⁱ = ZFaceField(grid), c_qⁱ = ZFaceField(grid), c_θⁱ = ZFaceField(grid))
     return merge(centers, faces, (ρu⁻ = XFaceField(grid), ρv⁻ = YFaceField(grid),
@@ -1434,7 +1434,7 @@ end
 
 # Across the face k (between the centers k - 1 and k): the gradients of θʷ and qʷ, that of the saturation excess
 # linearized about the state of each cell, ∂z s̄ = c̄_q ∂z qʷ - c̄_θ ∂z θʷ (`saturated_condensate_coefficients`), the face
-# b̄_θ (`b_θᶠ`) and the buoyancy of condensate in place of vapor, b̄ᶜ - b̄ᵛ, so that N²ˢ - N²ᶜ = (b̄ᶜ - b̄ᵛ) ∂z s̄: the one
+# b̄_θ (`b_θᶠ`) and the buoyancy of condensate in place of vapor, b̄ᶜ - b̄ᵛ, so that N²⁺ - N²ᶜ = (b̄ᶜ - b̄ᵛ) ∂z s̄: the one
 # linearization of the bracket, of the target of the solve and of the latent correction
 @inline function saturation_excess_gradientᶜᶜᶠ(i, j, k, grid, cl, s, θ, qᵗ, thermodynamics)
     km = max(k - 1, 1)
@@ -1525,9 +1525,9 @@ end
                                  thermodynamics, cl, aʷ).outside
         N²ᶜ += X
         G += X
-        N²ˢ = N²ᶜ + bᶜᵛ * ∂zs
-        L = min(N²ᶜ, N²ˢ)
-        U = max(N²ᶜ, N²ˢ)
+        N²⁺ = N²ᶜ + bᶜᵛ * ∂zs
+        L = min(N²ᶜ, N²⁺)
+        U = max(N²ᶜ, N²⁺)
 
         x = N²[i, j, k]
         r = G - x

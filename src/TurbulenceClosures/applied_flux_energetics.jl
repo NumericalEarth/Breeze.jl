@@ -352,8 +352,8 @@ end
 #####
 #####   shear:     Pⁱ = Pᵖ + Dᵘ, the conversion of the solved momentum fluxes and the dissipation of backward Euler
 #####              itself, the fraction ℂᴾ to the TKE (the rest heats the air after the solves);
-#####   buoyancy:  Bⁱ = max(Bᵖ + Bᴸˢ, 0), the conversion of the solved scalar fluxes, Bᵖ = Σ b_χ F_χ, and its latent
-#####              part from the solved gradients, Bᴸˢ = Kᶜ η bˡᵛ (∂z qᶜ - aʷ ∂z s̄) (drawn from the internal energy
+#####   buoyancy:  Bⁱ = max(Bᵖ + Bᴸⁱ, 0), the conversion of the solved scalar fluxes, Bᵖ = Σ b_χ F_χ, and its latent
+#####              part from the solved gradients, Bᴸⁱ = Kᶜ η bˡᵛ (∂z qᶜ - aʷ ∂z s̄) (drawn from the internal energy
 #####              after the solves); its negative part stays with the implicit sink and the correction after the solves.
 #####
 ##### Its solve then diffuses the energy the solves released. Formed instead from the stage state, Kᵘ S² and Kᶜ ΔN²ᴸ
@@ -435,14 +435,14 @@ end
     θʷ, qʷ, _ = distributed_water(s, grid)
     Bᵖ, Pᵖ, _ = interior_conversionsᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, Kᵘ, u, v)
     Dᵘ = implicit_momentum_dissipationᶜᶜᶜ(i, j, k, grid, s, cl, @inbounds(cl.stage_time_step[1, 1, 1]))
-    Bᴸˢ = solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
+    Bᴸⁱ = solved_latent_conversionᶜᶜᶜ(i, j, k, grid, s, cl, Kᶜ, qʷ, θʷ)
     Pⁱ = Pᵖ + Dᵘ
-    Bⁱ = max(Bᵖ + Bᴸˢ, zero(Bᵖ))
+    Bⁱ = max(Bᵖ + Bᴸⁱ, zero(Bᵖ))
     ℂᴾ = shear_production_fraction(closure_ij.stability_functions)
     @inbounds begin
         cl.Pⁱ[i, j, k] = Pⁱ
         cl.Bⁱ[i, j, k] = Bⁱ
-        cl.Bᴸˢ[i, j, k] = Bᴸˢ
+        cl.Bᴸⁱ[i, j, k] = Bᴸⁱ
         ρe[i, j, k] += cl.stage_time_step[1, 1, 1] * s.ρ[i, j, k] * (ℂᴾ * Pⁱ + Bⁱ) * !inactive_cell(i, j, k, grid)
     end
 end
@@ -748,14 +748,14 @@ end
         # and with the solved conversions given before the TKE solve, they are given too (Pⁱ and Bⁱ)
         Pⁱ = ifelse(injected, cl.Pⁱ[i, j, k], zero(e))
         Bⁱ = ifelse(injected, cl.Bⁱ[i, j, k], zero(e))
-        Bᴸˢ = ifelse(injected, cl.Bᴸˢ[i, j, k], zero(e))
+        Bᴸⁱ = ifelse(injected, cl.Bᴸⁱ[i, j, k], zero(e))
         Pᵉ = explicit_shear_conversion(cl, i, j, k, injected)
         Bᵉ = explicit_buoyancy_conversion(cl, i, j, k, B, injected)
         given = Pᵉ + Pⁱ + Bᵉ + Bⁱ - cl.ωᴮ[i, j, k] * e
         # the latent part of the stage state was drawn from the internal energy in the stage tendency, that of the
         # solved state after the solves (as is the conversion of the heating budget flux, an explicit flux of the stage)
         stage_state = stage_state_conversion(cl, i, j, k, injected)
-        converted = Pᵖ + Dᵘ + Bᵖ + Bᴸˢ + stage_state
+        converted = Pᵖ + Dᵘ + Bᵖ + Bᴸⁱ + stage_state
         # the dissipation the implicit sinks removed from the solved e, which heats the air
         ε = (-Lᵉ[i, j, k] - cl.ωᴮ[i, j, k]) * e
         cl.Pᵖ[i, j, k] = Pᵖ + Dᵘ
@@ -770,14 +770,14 @@ end
         cl.stage_b_qˡ[i, j, k] = cl.b_qˡ[i, j, k]
         cl.stage_b_qⁱ[i, j, k] = cl.b_qⁱ[i, j, k]
         cl.stage_surface[i, j, k] = stage_state
-        cl.Bᴸˢ[i, j, k] = Bᴸˢ
+        cl.Bᴸⁱ[i, j, k] = Bᴸⁱ
         # Where the TKE cannot pay what the solved fluxes converted (e ≈ 0 while the diffusivities,
         # floored at `minimum_tke`, still mix), the shortfall is taken from the internal energy
         # instead of driving e negative: the mixing of that floor is powered by the heat of the air.
         # Benefit: e stays non-negative and the total energy still closes. The TKE also receives the
         # kinetic energy the stage combination removed from the mean flow (`stage_combination`, per volume).
         active = !inactive_cell(i, j, k, grid)
-        net = net_stage_conversion(X, i, j, k, converted, given, Pᵖ + Dᵘ - Pⁱ + Bᵖ + Bᴸˢ - Bⁱ + cl.ωᴮ[i, j, k] * e)
+        net = net_stage_conversion(X, i, j, k, converted, given, Pᵖ + Dᵘ - Pⁱ + Bᵖ + Bᴸⁱ - Bⁱ + cl.ωᴮ[i, j, k] * e)
         ρe⁺ = ρe[i, j, k] + (Δt * ρᵢ * net + cl.stage_combination[i, j, k]) * active
         ρe⁺′ = ifelse(ρe⁺ < 0, min(ρe[i, j, k], zero(ρe⁺)), ρe⁺)
         shortfall = ρe⁺′ - ρe⁺ # ≥ 0: energy the TKE did not pay
@@ -785,7 +785,7 @@ end
         cl.shortfall[i, j, k] = shortfall
         # What θˡⁱ receives after the solves: the internal energy pays the shortfall, and, with the solved conversions
         # given before the TKE solve, receives the dissipation, the share (1 - ℂᴾ) of Pⁱ and gives the latent part
-        heating = ifelse(injected, Δt * ρᵢ * (ε + (1 - ℂᴾ) * Pⁱ - Bᴸˢ), zero(e))
+        heating = ifelse(injected, Δt * ρᵢ * (ε + (1 - ℂᴾ) * Pⁱ - Bᴸⁱ), zero(e))
         cl.ε[i, j, k] = ifelse(injected, ε, cl.ε[i, j, k])
         cl.after_solves_ρθ[i, j, k] = (heating - shortfall) / cl.ĉᵖΠ[i, j, k] * active
     end
@@ -873,12 +873,12 @@ end
 #####
 ##### The latent correction of the static stability and of the buoyancy production
 #####
-##### A displacement that condenses as it goes feels the saturated stratification N²ˢ; one
+##### A displacement that condenses as it goes feels the saturated stratification N²⁺; one
 ##### without phase change feels N²ᵇ = Σ b̄_χ δz χ. With (θˡⁱ, qᵗ, qᶜ) for (θˡⁱ, vapor, cloud
 ##### condensate), a saturated displacement keeps s = 0 with its condensate following the
 ##### saturation excess s̄ at fixed pressure, so
 #####
-#####   N²ˢ - N²ᵇ = (b̄ˡ - b̄ᵛ) (∂z s̄ - ∂z qᶜ),   ∂z s̄ = c̄_q ∂z qʷ - c̄_θ ∂z θˡⁱ
+#####   N²⁺ - N²ᵇ = (b̄ˡ - b̄ᵛ) (∂z s̄ - ∂z qᶜ),   ∂z s̄ = c̄_q ∂z qʷ - c̄_θ ∂z θˡⁱ
 #####
 ##### (c_q, c_θ: the linearized saturation excess of the level with the model's thermodynamics).
 ##### The turbulence carries the condensate flux
@@ -898,9 +898,9 @@ end
 #####      = N²ᶜ + (b̄ˡ - b̄ᵛ) [η aʷ ∂z s̄ + (1 - η) ∂z qᶜ],    N²ᶜ = N²ᵇ - (b̄ˡ - b̄ᵛ) ∂z qᶜ,
 #####
 ##### N²ᶜ the stratification of the conserved variables (θˡⁱ, qʷ). With instantaneous condensation this
-##### is (1 - aʷ) N²ᶜ + aʷ N²ˢ: the unsaturated share of the distribution holds no condensate and feels
+##### is (1 - aʷ) N²ᶜ + aʷ N²⁺: the unsaturated share of the distribution holds no condensate and feels
 ##### the stratification of the conserved variables, not that of the mean condensate. (Weighting N²ᵇ
-##### and N²ˢ instead, N²ᵇ - η aʷ (N²ᵇ - N²ˢ), leaves (1 - aʷ)(b̄ˡ - b̄ᵛ) ∂z qᶜ > 0 wherever the mean
+##### and N²⁺ instead, N²ᵇ - η aʷ (N²ᵇ - N²⁺), leaves (1 - aʷ)(b̄ˡ - b̄ᵛ) ∂z qᶜ > 0 wherever the mean
 ##### condensate rises with height in partly cloudy air: a stable stratification at the base of a
 ##### well-mixed cloud layer and a buoyancy flux of the wrong sign there.)
 ##### The buoyancy production gains Bᴸ = Kᶜ ΔN²ᴸ over the conversion of the applied fluxes; that energy
@@ -1078,20 +1078,20 @@ end
 @inline saturated_response_sharesᶜᶜᶠ(::Val{true}, tₑ, aʷ, i, j, k, grid, s) = (one(tₑ), zero(tₑ), zero(tₑ))
 
 @inline function saturated_response_sharesᶜᶜᶠ(::Val{false}, tₑ, aʷ, i, j, k, grid, s)
-    ω⁺ = cell_phase_relaxation_rates(i, j, k, grid, s)
-    ω⁻ = cell_phase_relaxation_rates(i, j, k-1, grid, s)
-    ωˡ = (ω⁺.ωˡ + ω⁻.ωˡ) / 2
-    ωⁱ = (ω⁺.ωᵈⁱ + ω⁻.ωᵈⁱ) / 2
-    ωʷⁱ = (ω⁺.ωʷⁱ + ω⁻.ωʷⁱ) / 2
-    ωˢ = ωˡ + ωⁱ + ωʷⁱ
-    ωᵘ = ωⁱ + ωʷⁱ
-    FT = typeof(ωˢ)
-    ηˢ = condensing_fraction(tₑ * ωˢ)
-    ηᵘ = condensing_fraction(tₑ * ωᵘ)
+    above = cell_phase_relaxation_rates(i, j, k, grid, s)
+    below = cell_phase_relaxation_rates(i, j, k-1, grid, s)
+    ωˡ = (above.ωˡ + below.ωˡ) / 2
+    ωⁱ = (above.ωᵈⁱ + below.ωᵈⁱ) / 2
+    ωʷⁱ = (above.ωʷⁱ + below.ωʷⁱ) / 2
+    ω⁺ = ωˡ + ωⁱ + ωʷⁱ
+    ω⁻ = ωⁱ + ωʷⁱ
+    FT = typeof(ω⁺)
+    η⁺ = condensing_fraction(tₑ * ω⁺)
+    η⁻ = condensing_fraction(tₑ * ω⁻)
     share(ω, total, fallback) = ifelse(total > 0, ω / ifelse(total > 0, total, one(FT)), fallback)
-    η = share(ωˡ, ωˢ, one(FT)) * ηˢ
-    ηⁱ = aʷ * share(ωⁱ, ωˢ, zero(FT)) * ηˢ + (1 - aʷ) * share(ωⁱ, ωᵘ, zero(FT)) * ηᵘ
-    ηʷⁱ = aʷ * share(ωʷⁱ, ωˢ, zero(FT)) * ηˢ + (1 - aʷ) * share(ωʷⁱ, ωᵘ, zero(FT)) * ηᵘ
+    η = share(ωˡ, ω⁺, one(FT)) * η⁺
+    ηⁱ = aʷ * share(ωⁱ, ω⁺, zero(FT)) * η⁺ + (1 - aʷ) * share(ωⁱ, ω⁻, zero(FT)) * η⁻
+    ηʷⁱ = aʷ * share(ωʷⁱ, ω⁺, zero(FT)) * η⁺ + (1 - aʷ) * share(ωʷⁱ, ω⁻, zero(FT)) * η⁻
     return η, ηⁱ, ηʷⁱ
 end
 
@@ -1233,9 +1233,9 @@ end
         # The static stability the mixing length and the stability functions read: the latent one, that of the mean state
         # with the distribution's mean liquid, or the initial one
         N²⁰ = N²[i, j, k]
-        N²ˢ = condensate_flux_stratification(closure_ij.static_stability.fraction.stratification, N²ᵉ, N²ᵇ, L.bᶜᵛ,
+        N²⁺ = condensate_flux_stratification(closure_ij.static_stability.fraction.stratification, N²ᵉ, N²ᵇ, L.bᶜᵛ,
                                              cl.qˡ[i, j, kₛ] - cl.qˡ[i, j, kₛ-1], L.Δqᶜ, L.Δz, N²⁰)
-        N²[i, j, k] = ifelse(interior, relax_stability(N²⁰, N²ˢ, ω), N²⁰)
+        N²[i, j, k] = ifelse(interior, relax_stability(N²⁰, N²⁺, ω), N²⁰)
     end
 end
 

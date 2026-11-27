@@ -2,11 +2,11 @@
 ##### A bracketed solve of the effective saturated fraction aᴺ of `CondensateFluxFraction`, face by face
 #####
 ##### The static stability of `SaturationWeightedStaticStability(CondensateFluxFraction(...))` is
-##### N² = N²ᶜ + aᴺ ΔN², ΔN² = N²ˢ - N²ᶜ, with aᴺ = w′qˡ′ / w′s′ of the distribution formed with that N².
+##### N² = N²ᶜ + aᴺ ΔN², ΔN² = N²⁺ - N²ᶜ, with aᴺ = w′qˡ′ / w′s′ of the distribution formed with that N².
 ##### Written as a scalar problem per face for the unknown aᴺ ∈ [0, 1] with the residual R(aᴺ) = aᴺ - ãᴺ(aᴺ), where ãᴺ is
 ##### the liquid flux fraction of the distribution with the local mixing length and diffusivities of N²ᶜ + aᴺ ΔN².
 ##### ãᴺ is the ratio of two fluxes and is not bounded; the unknown is: it is a share of the flux of the saturation
-##### excess, and N² lies between N²ᶜ and N²ˢ. The solution on the interval is the root of R where the residual changes
+##### excess, and N² lies between N²ᶜ and N²⁺. The solution on the interval is the root of R where the residual changes
 ##### sign across it, R(0) < 0 < R(1), and otherwise the end out of which the residual points: aᴺ = 0 where R(0) ≥ 0
 ##### (even at the unsaturated stability the distribution condenses no part of the flux, ãᴺ(0) ≤ 0), and aᴺ = 1 where
 ##### R(0) < 0 and R(1) ≤ 0 (at the saturated stability it condenses all of it, ãᴺ(1) ≥ 1). No computed value is
@@ -31,7 +31,7 @@ The `solver` of [`TKEBasedTurbulenceClosure`](@ref) that solves the coupling of 
 [`CondensateFluxFraction`](@ref), `N² = N²ᶜ + aᴺ ΔN²`, as a bracketed scalar root in the effective
 saturated fraction `aᴺ ∈ [0, 1]` at each interior face:
 
-    R(aᴺ) = aᴺ - ãᴺ(N²ᶜ + aᴺ ΔN²),    ΔN² = N²ˢ - N²ᶜ,
+    R(aᴺ) = aᴺ - ãᴺ(N²ᶜ + aᴺ ΔN²),    ΔN² = N²⁺ - N²ᶜ,
 
 with `ãᴺ = w′qˡ′ / w′s′` of the distribution formed at the face with the local
 mixing length (the blend of `ℂˢ z` and `√e / N`), the stability functions, `Kᶜ` and the moment time
@@ -127,8 +127,8 @@ end
 
     # The local mixing length
     ℓᵈ = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
-    N²⁺ = max(N², zero(FT))
-    ℓᵇ = ifelse(N²⁺ == 0, FT(Inf), buoyancy_length_coefficient(closure.mixing_length) * u / sqrt(N²⁺))
+    N²₊ = max(N², zero(FT))
+    ℓᵇ = ifelse(N²₊ == 0, FT(Inf), buoyancy_length_coefficient(closure.mixing_length) * u / sqrt(N²₊))
     ℓ = blend(length_blending(closure.mixing_length), ℓᵈ, ℓᵇ)
     ℓ = ifelse(isnan(ℓ), ℓᵈ, ℓ)
     ℓ = blend(length_blending(closure.mixing_length), ℓ, ℓᵉ) # ℓᵉ = Inf without the lagged envelope

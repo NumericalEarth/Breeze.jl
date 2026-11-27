@@ -676,12 +676,12 @@ using Breeze.TurbulenceClosures: static_stabilityᶜᶜᶠ
         θ₀ = 288
         qᵗ₀ = 13e-3
         N²ᵈ, dry_model = stored_N²(DryStaticStability(), WarmPhaseEquilibrium(); θ = θ₀, qᵗ = qᵗ₀)
-        N²ˢ, moist_model = stored_N²(MoistStaticStability(), WarmPhaseEquilibrium(); θ = θ₀, qᵗ = qᵗ₀)
+        N²⁺, moist_model = stored_N²(MoistStaticStability(), WarmPhaseEquilibrium(); θ = θ₀, qᵗ = qᵗ₀)
 
         qˡ = column(moist_model.microphysical_fields.qˡ)
         @test all(qˡ .> 1e-4)
         @test all(N²ᵈ[interior_faces] .> 5e-5)
-        @test maximum(abs, N²ˢ[interior_faces]) < 0.1 * maximum(N²ᵈ[interior_faces])
+        @test maximum(abs, N²⁺[interior_faces]) < 0.1 * maximum(N²ᵈ[interior_faces])
     end
 
     @testset "the dry branch is selected where the air is subsaturated" begin
@@ -689,21 +689,21 @@ using Breeze.TurbulenceClosures: static_stabilityᶜᶜᶠ
         # interpolated state
         qᵗ(z) = ifelse(z < Lz / 2, 4e-3, 13e-3)
         N²ᵈ, _ = stored_N²(DryStaticStability(), WarmPhaseEquilibrium(); θ = 288, qᵗ)
-        N²ˢ, model = stored_N²(MoistStaticStability(), WarmPhaseEquilibrium(); θ = 288, qᵗ)
+        N²⁺, model = stored_N²(MoistStaticStability(), WarmPhaseEquilibrium(); θ = 288, qᵗ)
         qˡ = column(model.microphysical_fields.qˡ)
         k★ = Nz ÷ 2 + 1 # the first cloudy cell
         @test qˡ[k★-1] == 0
         @test qˡ[k★] > 0
 
         # Both centers subsaturated: exactly the dry value; both saturated: reduced stability
-        @test all(N²ˢ[2:k★-1] .== N²ᵈ[2:k★-1])
-        @test all(N²ˢ[k★+1:Nz] .< N²ᵈ[k★+1:Nz])
-        @test all(isfinite, N²ˢ)
+        @test all(N²⁺[2:k★-1] .== N²ᵈ[2:k★-1])
+        @test all(N²⁺[k★+1:Nz] .< N²ᵈ[k★+1:Nz])
+        @test all(isfinite, N²⁺)
 
         # The KernelFunctionOperation form of the same diagnostic agrees with the stored field
         op = KernelFunctionOperation{Center, Center, Face}(static_stabilityᶜᶜᶠ, grid, MoistStaticStability(),
                                                            buoyancy_force(model), buoyancy_tracers(model))
-        @test column(Field(op)) == N²ˢ
+        @test column(Field(op)) == N²⁺
     end
 
     @testset "mixed phase" begin
@@ -712,12 +712,12 @@ using Breeze.TurbulenceClosures: static_stabilityᶜᶜᶠ
         # saturated adiabat, much less stable than the dry value
         equilibrium = MixedPhaseEquilibrium()
         N²ᵈ, _ = stored_N²(DryStaticStability(), equilibrium; θ = 250, qᵗ = 1.5e-3)
-        N²ˢ, model = stored_N²(MoistStaticStability(), equilibrium; θ = 250, qᵗ = 1.5e-3)
+        N²⁺, model = stored_N²(MoistStaticStability(), equilibrium; θ = 250, qᵗ = 1.5e-3)
         qⁱ = column(model.microphysical_fields.qⁱ)
         @test all(qⁱ .> 0)
-        @test all(isfinite, N²ˢ)
+        @test all(isfinite, N²⁺)
         @test all(N²ᵈ[interior_faces] .> 0)
-        @test maximum(abs, N²ˢ[interior_faces]) < 0.2 * maximum(N²ᵈ[interior_faces])
+        @test maximum(abs, N²⁺[interior_faces]) < 0.2 * maximum(N²ᵈ[interior_faces])
     end
 end
 

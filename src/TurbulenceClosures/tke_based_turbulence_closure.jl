@@ -844,9 +844,9 @@ buoyancy. Infinite where ``N² ≤ 0``, so that neutral and unstable air is no o
 """
 @inline function buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     FT = grid_float_type(grid)
-    N²⁺ = clip(@inbounds N²[i, j, k])
-    ℓᵇ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e) / sqrt(N²⁺)
-    return ifelse(N²⁺ == 0, FT(Inf), ℓᵇ)
+    N²₊ = clip(@inbounds N²[i, j, k])
+    ℓᵇ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e) / sqrt(N²₊)
+    return ifelse(N²₊ == 0, FT(Inf), ℓᵇ)
 end
 
 # The local minimum at a face: the ground — or an immersed bottom — through the wall length, and
@@ -862,9 +862,9 @@ end
 @inline function local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²)
     FT = grid_float_type(grid)
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
-    N²⁺ = clip(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²))
-    ℓᵇ = buoyancy_length_coefficient(closure.mixing_length) * turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²⁺)
-    ℓ = blend(length_blending(closure.mixing_length), d, ifelse(N²⁺ == 0, FT(Inf), ℓᵇ))
+    N²₊ = clip(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²))
+    ℓᵇ = buoyancy_length_coefficient(closure.mixing_length) * turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²₊)
+    ℓ = blend(length_blending(closure.mixing_length), d, ifelse(N²₊ == 0, FT(Inf), ℓᵇ))
     return ifelse(isnan(ℓ), d, ℓ)
 end
 

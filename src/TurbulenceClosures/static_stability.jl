@@ -42,19 +42,19 @@ Base.show(io::IO, ss::MoistStaticStability) = print(io, summary(ss))
 
 @inline function static_stabilityᶜᶜᶠ(i, j, k, grid, ::MoistStaticStability, buoyancy, tracers)
     N²ᵈ = ∂z_b(i, j, k, grid, buoyancy, tracers)
-    N²ˢ = saturated_static_stabilityᶜᶜᶠ(i, j, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
+    N²⁺ = saturated_static_stabilityᶜᶜᶠ(i, j, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
     saturated = saturatedᶜᶜᶠ(i, j, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
-    return ifelse(saturated, N²ˢ, N²ᵈ)
+    return ifelse(saturated, N²⁺, N²ᵈ)
 end
 
 """
 $(TYPEDEF)
 
 Static stability as a blend of the dry buoyancy gradient ``N²ᵈ`` of [`DryStaticStability`](@ref)
-and the saturated buoyancy frequency ``N²ˢ`` of [Durran and Klemp (1982)](@cite DurranKlemp1982),
+and the saturated buoyancy frequency ``N²⁺`` of [Durran and Klemp (1982)](@cite DurranKlemp1982),
 
 ```math
-N² = (1 - aᴺ) N²ᵈ + aᴺ N²ˢ,
+N² = (1 - aᴺ) N²ᵈ + aᴺ N²⁺,
 ```
 
 with the weight ``aᴺ``, the effective saturated fraction — the fraction of a displacement's change
@@ -217,9 +217,9 @@ end
 
 @inline function static_stabilityᶜᶜᶠ(i, j, k, grid, ss::SaturationWeightedStaticStability, buoyancy, tracers, closure_fields)
     N²ᵈ = ∂z_b(i, j, k, grid, buoyancy, tracers)
-    N²ˢ = saturated_static_stabilityᶜᶜᶠ(i, j, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
+    N²⁺ = saturated_static_stabilityᶜᶜᶠ(i, j, k, grid, buoyancy, tracers.T, tracers.qᵛᵉ)
     aᴺ = saturated_stability_weightᶜᶜᶠ(i, j, k, grid, ss.fraction, buoyancy, tracers, closure_fields)
-    return N²ᵈ + aᴺ * (N²ˢ - N²ᵈ)
+    return N²ᵈ + aᴺ * (N²⁺ - N²ᵈ)
 end
 
 # A static stability that reads nothing of the closure fields is defined without them

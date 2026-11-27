@@ -50,9 +50,9 @@ function original_envelope(model, e = specific_tke(model))
     FT = eltype(grid)
     ℓˢ = fill(FT(Inf), Nz + 1)
     for k in 2:Nz+1
-        N²⁺ = max(N²[1, 1, k], zero(FT))
-        ℓᵇ = ℑzᵃᵃᶠ(1, 1, k, grid, turbulent_velocityᶜᶜᶜ, closure, e.data) / sqrt(N²⁺)
-        ℓᵇ = ifelse(N²⁺ == 0, FT(Inf), ℓᵇ)
+        N²₊ = max(N²[1, 1, k], zero(FT))
+        ℓᵇ = ℑzᵃᵃᶠ(1, 1, k, grid, turbulent_velocityᶜᶜᶜ, closure, e.data) / sqrt(N²₊)
+        ℓᵇ = ifelse(N²₊ == 0, FT(Inf), ℓᵇ)
         ℓˢ[k] = ifelse(isnan(ℓᵇ), FT(Inf), ℓᵇ)
     end
     for k in 2:Nz+1
@@ -103,9 +103,9 @@ end
     grid, closure = model.grid, model.closure
     N² = model.closure_fields.N²
     for k in 1:grid.Nz
-        N²⁺ = max(ℑbzᵃᵃᶜ(1, 1, k, grid, face_valueᶜᶜᶠ, N²), zero(FT))
-        ℓᵇ = turbulent_velocityᶜᶜᶜ(1, 1, k, grid, closure, e.data) / sqrt(N²⁺)
-        ℓᵇ = ifelse(N²⁺ == 0, FT(Inf), ℓᵇ)
+        N²₊ = max(ℑbzᵃᵃᶜ(1, 1, k, grid, face_valueᶜᶜᶠ, N²), zero(FT))
+        ℓᵇ = turbulent_velocityᶜᶜᶜ(1, 1, k, grid, closure, e.data) / sqrt(N²₊)
+        ℓᵇ = ifelse(N²₊ == 0, FT(Inf), ℓᵇ)
         expected = min(min(ℓˢ[k], ℓˢ[k+1]) + closure.mixing_length.ℂⁱ * Δzᶜᶜᶜ(1, 1, k, grid) / 2,
                        min(closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶜ(1, 1, k, grid), ℓᵇ))
         @test center_lengths(model, e)[k] == expected

@@ -226,7 +226,7 @@ end
         # to the accuracy of the central differences of the buoyancy here (≈1e-9)
         @test c.buoyancy_production ≈ c.buoyancy_conversion rtol=1e-7 atol=1e-7 * scale
         @test c.stored_β ≈ c.β rtol=1e-6
-        # the latent part: Kᶜ aᴺ (N²ᵇ - N²ˢ) at the faces, drawn from the internal energy
+        # the latent part: Kᶜ aᴺ (N²ᵇ - N²⁺) at the faces, drawn from the internal energy
         @test c.latent_production ≈ c.latent_conversion rtol=1e-12 atol=1e-14 * scale
     end
 end
@@ -275,13 +275,13 @@ function stage_energy_budget(model, Δt; ρe = budget_column(model.tracers.ρe))
     Δρe = sum(Δzᶜ .* (ρe .- budget_column(pre.ρe)))
     given_explicitly = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.given))
     # the latent part of the solved state (zero where the latent part is that of the stage state, in `stage_surface`)
-    converted = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ) .+ budget_column(cl.Bᴸˢ) .+ budget_column(cl.stage_surface)))
+    converted = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ) .+ budget_column(cl.Bᴸⁱ) .+ budget_column(cl.stage_surface)))
     dissipated = Δt * sum(ρ .* Δzᶜ .* budget_column(cl.ε))
     shortfall = sum(Δzᶜ .* budget_column(cl.shortfall)) # paid by the internal energy instead of the TKE
     combination = sum(Δzᶜ .* budget_column(cl.stage_combination)) # the kinetic energy the stage combination removed
     # what the solves alone converted, and the rates of the stage state: given to the TKE by its
     # tendency, and converted by the surface fluxes and the latent heat
-    solved = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ) .+ budget_column(cl.Bᴸˢ)))
+    solved = Δt * sum(ρ .* Δzᶜ .* (budget_column(cl.Pᵖ) .+ budget_column(cl.Bᵖ) .+ budget_column(cl.Bᴸⁱ)))
     given_rate = sum(ρ .* Δzᶜ .* budget_column(cl.given))
     stage_state_rate = sum(ρ .* Δzᶜ .* budget_column(cl.stage_surface))
     return (; ΔKE, Δhᵈ, Δhᵈ_rounding, Δρe, given_explicitly, converted, dissipated, shortfall, combination, solved, given_rate, stage_state_rate,
