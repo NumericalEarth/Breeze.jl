@@ -53,6 +53,9 @@ not known; the explicit rates are used then.
 are evaluated at, which is zero where the stage starts from that state. `qʳ` and `qʷⁱ` are the
 rain and the liquid coating of ice that the stage start and every other tendency leave, which
 bound what the stage can evaporate of them where the ice-phase caps project that evaporation.
+`Gᵛ` is the tendency of the vapor per unit mass accumulated so far (transport and every other
+tendency but the microphysics'): the vapor available to the stage is that of its start plus
+`Δt Gᵛ`, which bounds what condensation and activation remove over the stage.
 """
 struct LiquidRelaxationStage{FT, B}
     Δt :: FT
@@ -62,25 +65,38 @@ struct LiquidRelaxationStage{FT, B}
     Δqᵛ :: FT
     qʳ :: FT
     qʷⁱ :: FT
+    Gᵛ :: FT
 end
 
-# A stage that starts from the state the rates see, with rain and coating that do not bound
-# their evaporation (single-cell tests).
+# A stage that starts from the state the rates see, with no other vapor tendency and with rain
+# and coating that do not bound their evaporation (single-cell tests).
 LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active) =
-    LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active, zero(Δt), convert(typeof(Δt), Inf), convert(typeof(Δt), Inf))
+    LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active, zero(Δt), convert(typeof(Δt), Inf), convert(typeof(Δt), Inf), zero(Δt))
+
+# A stage with the vapor offset, rain and coating of a stage and no other vapor tendency
+LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active, Δqᵛ, qʳ, qʷⁱ) =
+    LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active, Δqᵛ, qʳ, qʷⁱ, zero(Δt))
 
 # A stage that is already evaluated (single-cell tests). The grid kernel passes one that reads
 # the tendencies where the relaxation needs them; see `GridLiquidRelaxationStage`.
 @inline liquid_relaxation_stage(stage::LiquidRelaxationStage, aerosol, ρ) = stage
 @inline liquid_relaxation_stage(::Nothing, aerosol, ρ) = nothing
 
-# What the ice-phase caps (`limit_ice_vapor_rates`) need of the stage to project the liquid
-# exchange that it applies: the vapor the stage starts with above the rate state, and the rain
-# and the liquid coating of ice that the stage leaves to evaporate. The evaporation rates of
+# What the ice-phase limits (`limit_ice_vapor_rates`) need of the stage to project the vapor it
+# leaves: the vapor the stage starts with above the rate state, the vapor tendency of every other
+# process, and the rain and the liquid coating of ice that the stage leaves to evaporate. The evaporation rates of
 # both can ask for more, and are limited to that afterwards (`p3_sink_fractions`). Without a
 # stage the projection starts from the rate state and both are budgeted afterwards.
 @inline stage_vapor_offset(::Nothing, FT) = zero(FT)
 @inline stage_vapor_offset(stage::LiquidRelaxationStage, FT) = ifelse(stage.active, stage.Δqᵛ, zero(FT))
+
+# The vapor relaxation coefficient of dry ice with which deposition is relaxed implicitly over the
+# stage (`limit_ice_vapor_rates`): zero, which keeps the explicit rate, without a stage
+@inline stage_ice_relaxation(::Nothing, εⁱ) = zero(εⁱ)
+@inline stage_ice_relaxation(stage::LiquidRelaxationStage, εⁱ) = ifelse(stage.active, εⁱ, zero(εⁱ))
+
+@inline stage_vapor_tendency(::Nothing, FT) = zero(FT)
+@inline stage_vapor_tendency(stage::LiquidRelaxationStage, FT) = ifelse(stage.active, stage.Gᵛ, zero(FT))
 
 @inline stage_rain(::Nothing, FT) = convert(FT, Inf)
 @inline stage_rain(stage::LiquidRelaxationStage, FT) = ifelse(stage.active, max(0, stage.qʳ), convert(FT, Inf))
@@ -173,16 +189,18 @@ so the relaxation keeps its bounds.
     activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
                                                    qᵛ⁺ˡ + vapor_excess, qᵛ⁺ˡ, ξˡ, T, ρ)
 
-    # Diffusional growth and the seed mass of activation draw on one vapor excess. Where they
-    # ask for more together, they are scaled together, as the explicit rates are
-    # (`limit_liquid_vapor_rates`), so activation is not left with what growth spares, which
-    # vanishes as `Δt` grows. The seed mass and the number take the same fraction, which keeps
-    # the size of the activated droplets. Growth alone never exceeds the budget: growth on the
-    # subgrid correlation Γ, and the refill of a negative remainder, are not bounded by the
-    # grid-mean excess.
+    # Diffusional growth and the seed mass of activation draw on one vapor: the vapor the stage
+    # starts with plus what every other tendency adds or removes over the stage, `Δt Gᵛ`. Where
+    # they ask for more of it together, they are scaled together, so that the vapor stays
+    # non-negative and activation is not left with what growth spares. The limit is the vapor,
+    # not its excess over saturation: each relaxation already targets saturation, and growth
+    # and activation may still remove vapor where the grid mean is subsaturated (growth on the
+    # subgrid correlation Γ, the refill of a negative cloud remainder, the seed of activation).
+    # The seed mass and the number take the same fraction, which keeps the size of the
+    # activated droplets.
+    available_vapor = max(0, qᵛ + stage.Δqᵛ + Δt * stage.Gᵛ)
     growth = max(0, cloud_rate) + rain_cond
-    budget = max(max(0, rain_excess), Δt * growth)
-    shared_fraction = sink_limiting_factor(growth + activation.mass, budget, Δt)
+    shared_fraction = sink_limiting_factor(growth + activation.mass, available_vapor, Δt)
     cloud_rate = ifelse(cloud_rate > 0, shared_fraction * cloud_rate, cloud_rate)
     rain_cond = shared_fraction * rain_cond
 

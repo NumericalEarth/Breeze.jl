@@ -105,6 +105,7 @@ struct P3Phase1Rates{FT}
     melting_number :: FT
     cloud_relaxation :: FT  # vapor relaxation coefficient of cloud liquid [s⁻¹], for the implicit liquid relaxation
     rain_relaxation :: FT   # vapor relaxation coefficient of rain [s⁻¹]
+    ice_relaxation :: FT    # vapor relaxation coefficient of dry ice [s⁻¹], for the implicit ice relaxation
 end
 
 # Phase 2 process rates: aggregation, riming, wet growth, shedding, nucleation, and warm
@@ -348,7 +349,8 @@ end
                              rain_evap, rain_cond, rain_self, rain_br,
                              dep, coat_cond, coat_evap,
                              partial_melt, complete_melt, melt_n,
-                             vapor_rates.cloud_relaxation, vapor_rates.rain_relaxation)
+                             vapor_rates.cloud_relaxation, vapor_rates.rain_relaxation,
+                             ifelse(has_total_ice, vapor_rates.ice_relaxation, zero(FT)))
 end
 
 @inline function p3_phase2_rates(p3, ρ, ℳ, constants, state::P3DerivedState,
@@ -791,7 +793,11 @@ end
                                         dt_safety, T₀, temperature_tendency, pressure_tendency, liquid_dt,
                                         stage_vapor_offset(relaxation_stage, FT),
                                         stage_rain(relaxation_stage, FT),
-                                        stage_coating(relaxation_stage, FT))
+                                        stage_coating(relaxation_stage, FT),
+                                        stage_vapor_tendency(relaxation_stage, FT),
+                                        stage_ice_relaxation(relaxation_stage,
+                                                             ifelse(whole_particle_clipping, zero(FT), phase1.ice_relaxation)),
+                                        p3.process_rates)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
     ccn_activation_number = vapor_rates.ccn_activation_number

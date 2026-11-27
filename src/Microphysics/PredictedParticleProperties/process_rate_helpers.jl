@@ -61,15 +61,9 @@ the moist-static feedback factor `ξˡ = 1 + ℒˡ² qᵛ⁺ˡ / (cᵖᵈ Rᵛ T
 - Liquid-phase evaporation sources (`cond < 0`, `rain_evap`, `coat_evap`)
   cannot exceed `max(0, -δqˡ)`.
 
-The rescaled liquid tendencies are then carried into a post-liquid state
-`(qᵛ_after, T_after)`, and `qᵛ⁺ⁱ_after` is recomputed at `T_after` to evaluate
-`ξⁱ_after = 1 + ℒⁱ_after² qᵛ⁺ⁱ_after / (cᵖᵈ Rᵛ T_after²)`. With the ice
-increment `δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after`:
-
-- Ice-phase deposition sinks (`dep > 0`, `nuc_q`) cannot exceed
-  `max(0, δqⁱ)`.
-- Ice-phase sublimation sources (`dep < 0`) cannot exceed
-  `max(0, -δqⁱ)`.
+Ice-phase deposition and nucleation sinks (`dep > 0`, `nuc_q`) are limited by the vapor the
+rescaled liquid tendencies leave, so that it stays non-negative; sublimation (`dep < 0`) is limited
+by the ice mass in the per-species budgets of `compute_p3_process_rates`.
 
 Number rates `ccn_activation_number` and `nuc_n` are scaled by the same factor as
 their companion mass rates to preserve mean particle mass.
@@ -78,7 +72,7 @@ The external forcing counts as available because the growth rates include it: th
 are evaluated from the current state, which does not yet carry the cooling and
 expansion over the next `dt_safety`. Without it the caps bind in steady ascent and
 hold the vapor excess near `A τ` rather than where diffusional growth balances
-the forcing. The ice-phase increment `δqⁱ` likewise includes `Aⁱ τ`.
+the forcing.
 
 Returns a NamedTuple of the possibly-rescaled rates.
 """
@@ -184,60 +178,79 @@ end
     return (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap, coat_cond, coat_evap)
 end
 
-# The ice-phase caps of `limit_vapor_rates`, given the liquid-phase rates `liquid` already
+# The ice-phase limits of `limit_vapor_rates`, given the liquid-phase rates `liquid` already
 # limited (the result of `limit_liquid_vapor_rates`, or the implicitly relaxed rates on the grid).
-# On the grid the liquid exchange is projected as the stage applies it: over the stage interval
-# `liquid_dt`, from the state the stage starts from (the rate state with the vapor
-# `vapor_offset` that the stage starts with above it returned, see `LiquidRelaxationStage`), and
-# with no more rain and coating evaporated than `rain_available` and `coating_available`, what
-# the stage leaves of them. Evaporation that the stage does not apply would otherwise supply
-# vapor and cooling to deposition, and carry the cell below ice saturation.
+# On the grid the liquid exchange is projected as the stage applies it, over the stage interval
+# `liquid_dt`, from the vapor the stage starts with (the rate state's with `vapor_offset`
+# returned, see `LiquidRelaxationStage`), with no more rain and coating evaporated than
+# `rain_available` and `coating_available`, what the stage leaves of them.
+#
+# Deposition onto dry ice is then relaxed implicitly over the stage where its vapor relaxation
+# coefficient `ice_relaxation` (εⁱ) is given: the excess over ice saturation x of the state the
+# liquid exchange leaves decays as x⁺ = x / (1 + ξⁱ ωⁱ Δt), with ωⁱ = ℂᵈⁱᶠᶠ εⁱ / ξⁱ the coefficient of
+# the excess in the deposition rate and ξⁱ the psychrometric correction, so that deposition and
+# sublimation approach ice saturation and never pass it, for any stage interval. The explicit rate
+# `dep` is kept without it (gridless rates, before the first time step).
+#
+# Deposition and nucleation draw on the vapor that the liquid exchange leaves plus what every
+# other tendency adds over the stage, `liquid_dt * vapor_tendency`, and are limited by it so that
+# it stays non-negative; not by its excess over ice saturation. Sublimation is limited by the ice
+# mass, which the per-species budgets of `compute_p3_process_rates` (and on the grid the Patankar
+# fractions of the ice) bound, the ice number following it.
 @inline function limit_ice_vapor_rates(liquid, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
                                        dt_safety, freezing_temperature,
                                        temperature_tendency, pressure_tendency, liquid_dt = dt_safety,
                                        vapor_offset = zero(qᵛ),
                                        rain_available = convert(typeof(qᵛ), Inf),
-                                       coating_available = convert(typeof(qᵛ), Inf))
+                                       coating_available = convert(typeof(qᵛ), Inf),
+                                       vapor_tendency = zero(qᵛ),
+                                       ice_relaxation = zero(qᵛ),
+                                       parameters = nothing)
     (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap, coat_cond, coat_evap) = liquid
+    FT = typeof(qᵛ)
+
+    # The vapor and temperature the liquid exchange leaves over the stage
+    evaporated = min(rain_evap * liquid_dt, rain_available) + min(coat_evap * liquid_dt, coating_available)
+    liquid_change = (cond + ccn_activation_mass + rain_cond + coat_cond) * liquid_dt - evaporated - vapor_offset
+    qᵛ_after = qᵛ - liquid_change
+    dep = implicit_ice_deposition(parameters, dep, ice_relaxation, qᵛ_after, liquid_change, T, P, qᵗ, constants,
+                                  freezing_temperature, liquid_dt)
+
+    # Deposition and nucleation, over the stage where it is longer than `dt_safety`
+    available_vapor = max(0, qᵛ_after + liquid_dt * vapor_tendency)
+    ice_dt = max(dt_safety, liquid_dt)
+    dep_sink_total = max(0, dep) + nuc_q
+    f_dep = sink_limiting_factor(dep_sink_total, available_vapor, ice_dt)
+
+    nuc_q = nuc_q * f_dep
+    nuc_n = nuc_n * f_dep
+    dep = max(0, dep) * f_dep + min(0, dep)
+
+    return (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap,
+            dep, coat_cond, coat_evap, nuc_q, nuc_n)
+end
+
+# The explicit deposition rate, where no relaxation coefficient is given
+@inline implicit_ice_deposition(::Nothing, dep, εⁱ, qᵛ, liquid_change, T, P, qᵗ, constants, freezing_temperature, Δt) = dep
+
+# Deposition onto dry ice relaxed implicitly over the stage `Δt` (see `limit_ice_vapor_rates`), at the
+# state the liquid exchange leaves: its vapor `qᵛ` and the temperature its latent heat sets. A zero
+# coefficient (no dry ice, or no stage) keeps the explicit rate `dep`.
+@inline function implicit_ice_deposition(parameters, dep, εⁱ, qᵛ, liquid_change, T, P, qᵗ, constants,
+                                         freezing_temperature, Δt)
     FT = typeof(qᵛ)
     Rᵛ = FT(vapor_gas_constant(constants))
     ℒˡ = vaporization_latent_heat(constants, T)
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
-
-    # Ice-phase cap, after netting the rescaled liquid tendencies into qᵛ and T.
-    evaporated = min(rain_evap * liquid_dt, rain_available) + min(coat_evap * liquid_dt, coating_available)
-    liquid_change = (cond + ccn_activation_mass + rain_cond + coat_cond) * liquid_dt - evaporated - vapor_offset
-    qᵛ_after = qᵛ - liquid_change
     T_after = T + liquid_change * ℒˡ / cᵖᵈ
-    qᵛ⁺ⁱ_after = p3_adjustment_ice_saturation_specific_humidity(T_after, P, qᵗ, constants, freezing_temperature)
-    ℒⁱ_after = sublimation_latent_heat(constants, T_after)
-    ξⁱ_after = ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, Rᵛ, T_after)
-
-    # Ice-phase deposition / sublimation caps. The explicit ice rates are applied over the stage,
-    # so where the stage is longer than `dt_safety` the ice excess is budgeted over the stage:
-    # capped over `dt_safety` alone, the rates would consume it `liquid_dt / dt_safety` times.
-    ice_dt = max(dt_safety, liquid_dt)
-    Aⁱ = external_vapor_excess_forcing(qᵛ⁺ⁱ_after, ℒⁱ_after, T_after, P,
-                                       temperature_tendency, pressure_tendency, constants)
-    δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * ice_dt) / ξⁱ_after
-    qdep_cap = max(0, δqⁱ)
-    qsub_cap = max(0, -δqⁱ)
-
-    # Deposition cap
-    dep_sink_total = max(0, dep) + nuc_q
-    f_dep = sink_limiting_factor(dep_sink_total, qdep_cap, ice_dt)
-
-    nuc_q = nuc_q * f_dep
-    nuc_n = nuc_n * f_dep
-
-    # Sublimation cap
-    sub_total = max(0, -dep)
-    f_sub = sink_limiting_factor(sub_total, qsub_cap, ice_dt)
-
-    dep = max(0, dep) * f_dep + min(0, dep) * f_sub
-
-    return (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap,
-            dep, coat_cond, coat_evap, nuc_q, nuc_n)
+    qᵛ⁺ⁱ = p3_adjustment_ice_saturation_specific_humidity(T_after, P, qᵗ, constants, freezing_temperature)
+    ℒⁱ = sublimation_latent_heat(constants, T_after)
+    ξⁱ = ice_psychrometric_correction(constants, ℒⁱ, qᵛ⁺ⁱ, Rᵛ, T_after)
+    x = qᵛ - qᵛ⁺ⁱ
+    ℂᵈⁱᶠᶠ = ifelse(x < 0, FT(parameters.calibration_factor_sublimation), FT(parameters.calibration_factor_deposition))
+    ωⁱ = ℂᵈⁱᶠᶠ * εⁱ / ξⁱ
+    relaxed = ωⁱ * x / (1 + ξⁱ * ωⁱ * Δt)
+    return ifelse(εⁱ > 0, relaxed, dep)
 end
 
 """

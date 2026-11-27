@@ -209,8 +209,8 @@ struct GridLiquidRelaxationStage{I, G, S}
 end
 
 # What the stage start and every other tendency leave of the cloud, the rain and the liquid
-# coating of ice, per unit mass, and the vapor that the stage starts with above the current
-# fields, which the rates are evaluated at.
+# coating of ice, per unit mass, the vapor that the stage starts with above the current
+# fields, which the rates are evaluated at, and the vapor tendency accumulated so far.
 @inline function liquid_relaxation_stage(grid_stage::GridLiquidRelaxationStage, aerosol, ρ)
     i, j, k = grid_stage.i, grid_stage.j, grid_stage.k
     G = grid_stage.tendencies
@@ -223,10 +223,12 @@ end
     qʷⁱ = AM.stage_remainder(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ)) / ρ
     @inbounds ρqᵛ = stage.current.ρqᵛ[i, j, k]
     Δqᵛ = (AM.stage_start_value(i, j, k, stage, Val(:ρqᵛ)) - ρqᵛ) / ρ
+    Gᵛ = AM.accumulated_tendency(i, j, k, G.ρqᵛ, stage, Val(:ρqᵛ)) / ρ
     unbounded = convert(typeof(Δt), Inf)
     return LiquidRelaxationStage(Δt, ifelse(active, qᶜˡ, zero(qᶜˡ)), ifelse(active, nᶜˡ, zero(nᶜˡ)), active,
                                  ifelse(active, Δqᵛ, zero(Δqᵛ)),
-                                 ifelse(active, qʳ, unbounded), ifelse(active, qʷⁱ, unbounded))
+                                 ifelse(active, qʳ, unbounded), ifelse(active, qʷⁱ, unbounded),
+                                 ifelse(active, Gᵛ, zero(Gᵛ)))
 end
 
 @inline liquid_interval(s::GridLiquidRelaxationStage, fallback) =
