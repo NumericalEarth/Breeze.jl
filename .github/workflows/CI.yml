@@ -253,6 +253,80 @@ jobs:
           files: lcov.info
         continue-on-error: true
 
+  test-distributed-gpu:
+    needs: check-files
+    if: ${{ needs.check-files.outputs.files == 'true' }}
+    name: Distributed MPI tests - Julia ${{ matrix.version }} - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    container:
+      image: ghcr.io/numericalearth/breeze-docker-images:test-julia_${{ matrix.version }}
+      options: --gpus=all
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - "1.13.2"
+        os:
+          - aws-linux-nvidia-gpu-t4x4
+    steps:
+      - name: "Check out repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Show versioninfo
+        run: |
+          julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
+          nvidia-smi
+      - name: Prepare test environment
+        shell: bash
+        run: |
+          git config --global --add safe.directory ${PWD}
+          # The Docker image forces the CUDA runtime through a global `LocalPreferences.toml`,
+          # which is ignored by the test environment, see the `test` job above.
+          cp -v /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
+      - name: Instantiate test environment
+        timeout-minutes: 30
+        shell: bash
+        run: |
+          julia --project=test --color=yes -e 'using Pkg; Pkg.instantiate()'
+      - name: Ensure all GPUs are usable
+        shell: bash
+        run: |
+          julia --project=test -O0 --color=yes -e '
+          using CUDA
+          CUDA.versioninfo()
+          @assert CUDA.functional(true)
+          @assert length(CUDA.devices()) >= 4 "Expected at least 4 GPUs, found $(length(CUDA.devices()))"
+          '
+      - name: Set TMPDIR and create directory
+        shell: bash
+        run: |
+          export TMPDIR="${GITHUB_WORKSPACE}/tmp"
+          mkdir -vp "${TMPDIR}"
+          echo "TMPDIR=${TMPDIR}" | tee -a "${GITHUB_ENV}"
+      - name: Run tests
+        uses: julia-actions/julia-runtest@6e050c8013b833b1195105ff2fce9cd802f53271 # v1.12.0
+        with:
+          check_bounds: "auto"
+          optimize: "0"
+          test_args: "--verbose --quickfail distributed"
+      - name: "Upload Manifest"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        timeout-minutes: 2
+        with:
+          name: manifest-distributed-${{ matrix.version }}-${{ matrix.os }}
+          path: '**/Manifest*.toml'
+          retention-days: 90
+          overwrite: false
+      - name: "Process Julia coverage files"
+        uses: julia-actions/julia-processcoverage@03114f09f119417c3242a9fb6e0b722676aedf38 # v1.2.2
+      - name: "Upload coverage data to CodeCov"
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+        continue-on-error: true
+
   # Fake test job, to launch when no relevant files are modified: we need this is launch a
   # job with the required name, even when we don't actually want to run CI.
   fake-test:
