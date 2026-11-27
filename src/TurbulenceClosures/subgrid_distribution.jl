@@ -161,8 +161,8 @@ function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              stratification_number_bound = RationalSaturatedStratificationNumber(FT),
                              assumed_pdf = EqualWidthDoubleGaussianPDF(FT),
                              skewness = PolynomialSaturatedSkewness(FT; maximum_skewness = representable_skewness(assumed_pdf)),
-                             variance_transport = nothing,
-                             variance_stability_functions = nothing,
+                             variance_transport = ScalarVarianceTransport(FT),
+                             variance_stability_functions = VarianceStabilityFunctions(FT),
                              ℂᵐ = 1)
     variance_transport = convert_component(FT, variance_transport)
     variance_stability_functions = convert_component(FT, variance_stability_functions)

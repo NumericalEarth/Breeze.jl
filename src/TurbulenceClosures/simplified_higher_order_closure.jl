@@ -21,6 +21,8 @@ shoc_distribution(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
                        stratification_number_bound = RationalSaturatedStratificationNumber(FT),
                        skewness = PolynomialSaturatedSkewness(FT),
                        assumed_pdf = DoubleGaussianPDF(FT),
+                       variance_transport = nothing,
+                       variance_stability_functions = nothing,
                        kw...)
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -34,10 +36,11 @@ function SimplifiedHigherOrderClosure(time_discretization = VerticallyImplicitTi
                                       stability_functions = ColumnStabilityDamping(Float64),
                                       static_stability = SaturationWeightedStaticStability(CondensateFluxFraction(stratification = MeanLiquidStratification())),
                                       subgrid_distribution = shoc_distribution(Float64),
+                                      heating_budget_flux = nothing,
                                       kw...)
 
     return TKEBasedTurbulenceClosure(time_discretization, FT; mixing_length, stability_functions, static_stability,
-                                     subgrid_distribution, kw...)
+                                     subgrid_distribution, heating_budget_flux, kw...)
 end
 
 SimplifiedHigherOrderClosure(FT::DataType; kw...) =

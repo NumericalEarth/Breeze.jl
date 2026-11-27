@@ -172,13 +172,13 @@ function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitT
                                    FT = Oceananigans.defaults.FloatType;
                                    mixing_length = GradientLimitedMixingLength(ℂˢ = 1.299067385616381, ℂⁱ = 1.5609936948461662),
                                    stability_functions = TurbulentRichardsonStabilityFunction(),
-                                   subgrid_distribution = nothing,
+                                   subgrid_distribution = DoubleGaussian(FT),
                                    static_stability = default_static_stability(subgrid_distribution),
                                    minimum_tke = 1e-6,
                                    shear = GridMeanShear(),
                                    minimum_shear_squared = nothing,
                                    negative_tke_damping_time_scale = 1minute,
-                                   heating_budget_flux = nothing) where TD
+                                   heating_budget_flux = HeatingBudgetFlux(FT)) where TD
 
     shear = with_minimum_shear_squared(shear, minimum_shear_squared)
     validate_shear(shear)
