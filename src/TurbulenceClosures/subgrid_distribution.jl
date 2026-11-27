@@ -7,7 +7,7 @@
 #####     `ℂᵛ τ Kᶜ ∂z a ∂z b` and `-Kᶜ ∂z a`, with the closure's `Kᶜ` and a moment time scale `τ` built
 #####     from its `ℓ`, `e` and `N²`; `w′² = ℂʷ₁ (2/3) e`; the third moment w′³ and its limiter; and the
 #####     assumed double-Gaussian distribution, condensing on the condensate phase of the microphysics, which gives the cloud fraction aᶜ,
-#####     the cloud liquid, the condensate flux w′qᶜ′ and the buoyancy flux w′θᵛ′ = w′θˡⁱ′ + A_q w′qᵗ′ + A_c w′qᶜ′.
+#####     the cloud liquid, the condensate flux w′qᶜ′ and the buoyancy flux w′θᵛ′ = w′θˡⁱ′ + Aᵗ w′qᵗ′ + Aᶜ w′qᶜ′.
 #####   * the energetics (`AppliedFluxEnergetics`, internal): the TKE equation takes its shear and
 #####     buoyancy production from the energy the fluxes the closure applies take from the mean state
 #####     (applied_flux_energetics.jl), and the dissipated energy heats the air.
@@ -571,9 +571,9 @@ flux to the flux of the saturation excess `s = c_q qᵗ - c_θ θˡⁱ` (lineari
 
     aᴺ = w′qᶜ′ / w′s′,    w′s′ = -Kᶜ ∂z s̄,
 
-so that the static stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²⁺`, with `N²ᶜ = (g / θ)(∂z θˡⁱ + A_q ∂z qᵗ)` the
-stratification of the conserved variables and `N²⁺ = N²ᶜ + (g / θ) A_c ∂z s̄` the saturated one, is
-`N²ᶜ - Bˡ / Kᶜ`, `Bˡ = (g / θ) A_c w′qᶜ′`: minus the buoyancy flux of the distribution divided by
+so that the static stability `N² = (1 - aᴺ) N²ᶜ + aᴺ N²⁺`, with `N²ᶜ = (g / θ)(∂z θˡⁱ + Aᵗ ∂z qᵗ)` the
+stratification of the conserved variables and `N²⁺ = N²ᶜ + (g / θ) Aᶜ ∂z s̄` the saturated one, is
+`N²ᶜ - Bˡ / Kᶜ`, `Bˡ = (g / θ) Aᶜ w′qᶜ′`: minus the buoyancy flux of the distribution divided by
 `Kᶜ` (`Bˡ / Kᶜ` is left out where `Kᶜ` vanishes). It is evaluated in that form. For the
 double-Gaussian distribution `aᴺ` lies in `[0, 1]` up to the interpolation of the fluxes to the faces.
 
@@ -693,7 +693,7 @@ $(TYPEDEF)
 The fields of the [`DoubleGaussian`](@ref) subgrid distribution in the closure fields of
 [`TKEBasedTurbulenceClosure`](@ref): the second moments at faces (`τ`, `θˡⁱ′²`, `qᵗ′²`, `θˡⁱ′qᵗ′`,
 `w′θˡⁱ′`, `w′qᵗ′`) and the cloud at centers (`w′²`, `w′³`, cloud fraction `aᶜ`, liquid `qˡ`, its
-variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵛ′`, the part `Bˡ = (g / θ) A_c w′qˡ′` of its buoyancy
+variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵛ′`, the part `Bˡ = (g / θ) Aᶜ w′qˡ′` of its buoyancy
 flux carried by the condensate flux, and the shear and buoyancy production `P` and `B` of the TKE
 equation from the applied fluxes).
 """

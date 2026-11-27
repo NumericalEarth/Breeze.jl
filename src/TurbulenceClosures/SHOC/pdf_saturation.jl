@@ -10,13 +10,13 @@
 ##### the conversion `cᵖᵐ / ℒ` and the derivative `∂Tˡ/∂θˡⁱ` with which the derivative of `qᵛ⁺` with
 ##### respect to `θˡⁱ` is `(cᵖᵐ / ℒ) β qᵛ⁺ ∂Tˡ/∂θˡⁱ`, and the two coefficients of the buoyancy flux
 #####
-#####     w′θᵛ′ = w′θˡⁱ′ + A_q w′qᵗ′ + A_c w′qᶜ′.
+#####     w′θᵛ′ = w′θˡⁱ′ + Aᵗ w′qᵗ′ + Aᶜ w′qᶜ′.
 #####
 ##### They are
 #####
 #####     liquid_water_temperature(thermodynamics, θˡⁱ, qᵗ, p) -> Tˡ
 #####     component_saturation(thermodynamics, Tˡ, qᵗ, p) -> (qᵛ⁺, β, cᵖᵐ / ℒ, ∂Tˡ/∂θˡⁱ)
-#####     buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qᶜ) -> (A_q, A_c)
+#####     buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qᶜ) -> (Aᵗ, Aᶜ)
 #####
 ##### where `thermodynamics` is that of the model that holds the closure (`distribution_thermodynamics`).
 #####
@@ -53,7 +53,7 @@ The buoyancy flux is that of the model's buoyancy, a function of `Rᵐ T` at fix
 mean state of the level (its `θˡⁱ`, its water and its mean condensate `qᶜ`) and normalized by its derivative with
 respect to `θˡⁱ` (`buoyancy_flux_coefficients`):
 
-    A_q = (∂ ln(Rᵐ T)/∂qᵗ) / (∂ ln(Rᵐ T)/∂θˡⁱ),    A_c = (∂ ln(Rᵐ T)/∂qᶜ) / (∂ ln(Rᵐ T)/∂θˡⁱ),    cᵖᵐ T = ĉᵖ Π θˡⁱ + ℒ₀ qᶜ,
+    Aᵗ = (∂ ln(Rᵐ T)/∂qᵗ) / (∂ ln(Rᵐ T)/∂θˡⁱ),    Aᶜ = (∂ ln(Rᵐ T)/∂qᶜ) / (∂ ln(Rᵐ T)/∂θˡⁱ),    cᵖᵐ T = ĉᵖ Π θˡⁱ + ℒ₀ qᶜ,
 
 so that `w′b′ = (∂b/∂θˡⁱ) w′θᵛ′`.
 
@@ -171,14 +171,14 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The coefficients `(A_q, A_c)` of the buoyancy flux `w′θᵛ′ = w′θˡⁱ′ + A_q w′qᵗ′ + A_c w′qᶜ′` of a level with
+The coefficients `(Aᵗ, Aᶜ)` of the buoyancy flux `w′θᵛ′ = w′θˡⁱ′ + Aᵗ w′qᵗ′ + Aᶜ w′qᶜ′` of a level with
 liquid-ice potential temperature `θˡⁱ`, distributed water `qᵗ` and mean condensate `qᶜ` at pressure `p`: the
 derivatives of the model's `ln(Rᵐ T)` (its buoyancy is a function of `Rᵐ T` at fixed pressure) with respect to the
 water and to the condensate, over its derivative with respect to `θˡⁱ`. With `cᵖᵐ T = ĉᵖ Π θˡⁱ + ℒ₀ qᶜ`, the gas
 constant `Rᵐ` and the heat capacity `cᵖᵐ` of the level with its condensate, and `θ̃ = cᵖᵐ T / (ĉᵖ Π)`,
 
-    A_q = θ̃ ((Rᵛ - Rᵈ) / Rᵐ - (cᵖᵛ - cᵖᵈ) / cᵖᵐ) + θˡⁱ ((cᵖᵛ - cᵖᵈ) / ĉᵖ + ln(p / pˢᵗ) ∂κ/∂qᵗ),
-    A_c = ℒ(T) / (ĉᵖ Π) - θ̃ Rᵛ / Rᵐ,
+    Aᵗ = θ̃ ((Rᵛ - Rᵈ) / Rᵐ - (cᵖᵛ - cᵖᵈ) / cᵖᵐ) + θˡⁱ ((cᵖᵛ - cᵖᵈ) / ĉᵖ + ln(p / pˢᵗ) ∂κ/∂qᵗ),
+    Aᶜ = ℒ(T) / (ĉᵖ Π) - θ̃ Rᵛ / Rᵐ,
 
 with `ℒ` the latent heat of the condensate of the phase equilibrium. In dry air without condensate these are
 `θˡⁱ (Rᵛ - Rᵈ) / Rᵈ` and `ℒ / (cᵖᵈ Π) - θˡⁱ Rᵛ / Rᵈ`.
@@ -209,7 +209,7 @@ with `ℒ` the latent heat of the condensate of the phase equilibrium. In dry ai
     ℒ = λ * liquid_latent_heat(T, constants) + (1 - λ) * ice_latent_heat(T, constants)
 
     θ̃ = cᵖᵐ * T / (ĉᵖ * Π)
-    A_q = θ̃ * ((Rᵛ - Rᵈ) / Rᵐ - (cᵖᵛ - cᵖᵈ) / cᵖᵐ) + θˡⁱ * ((cᵖᵛ - cᵖᵈ) / ĉᵖ + log(p / thermodynamics.standard_pressure) * ∂κ∂qᵗ)
-    A_c = ℒ / (ĉᵖ * Π) - θ̃ * Rᵛ / Rᵐ
-    return A_q, A_c
+    Aᵗ = θ̃ * ((Rᵛ - Rᵈ) / Rᵐ - (cᵖᵛ - cᵖᵈ) / cᵖᵐ) + θˡⁱ * ((cᵖᵛ - cᵖᵈ) / ĉᵖ + log(p / thermodynamics.standard_pressure) * ∂κ∂qᵗ)
+    Aᶜ = ℒ / (ĉᵖ * Π) - θ̃ * Rᵛ / Rᵐ
+    return Aᵗ, Aᶜ
 end

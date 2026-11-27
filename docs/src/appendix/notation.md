@@ -260,6 +260,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``aʷ`` | `aʷ` | | Flux-weighted saturated fraction: the share of the flux of the saturation excess carried by saturated air |
 | ``N²ᵇ, N²ᶜ`` | `N²ᵇ`, `N²ᶜ` | | Stratification of a displacement without phase change: ``N²ᵇ = Σ b_χ ∂_z χ`` of the model's state, with the condensate ``qᶜ`` of the microphysics, and ``N²ᶜ = b_θ ∂_z θʷ + b_qᵛ ∂_z qʷ`` of the distributed water held all vapor, so that ``N²ᵇ - N²ᶜ = (b_qᶜ - b_qᵛ) ∂_z qᶜ`` |
 | ``q̄ˡ`` | `q̄ˡ` | | Mean liquid of the subgrid distribution; `MeanLiquidStratification` reads ``N² = N²ᵇ + (b_qˡ - b_qᵛ) ∂_z (q̄ˡ - qᶜ)`` |
+| ``Aᵗ, Aᶜ`` | `Aᵗ`, `Aᶜ` | `buoyancy_flux_coefficients` | Coefficients of the buoyancy flux of the assumed PDF, ``w′θᵛ′ = w′θˡⁱ′ + Aᵗ w′qᵗ′ + Aᶜ w′qᶜ′``, from the model's buoyancy (`A_q`, `A_c` in E3SM's `shoc.F90`) |
 | ``b_χ`` | `b_θ`, `b_qᵛ`, `b_qᶜ`, `b_qⁱ` | | Derivatives ``∂b/∂χ`` of the buoyancy with respect to the mixed variables ``χ ∈ \{θˡⁱ, qᵛ, qᶜ, qⁱ\}`` (the distributed condensate ``qᶜ`` and the ice outside it), from the model's thermodynamics |
 | ``S``                               | `S`    |                                     | Vertical shear magnitude, ``S² = (∂_z u)² + (∂_z v)²``, s⁻¹                     |
 | ``N^2``                             | `N²`   |                                     | Squared Brunt–Väisälä frequency, s⁻². (Bare ``N`` is the acoustic substep count, below) |

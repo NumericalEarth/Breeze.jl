@@ -224,8 +224,8 @@ end
 
     w′qˡ′ = a * ((w₁ - w) * qˡ₁) + (1 - a) * ((w₂ - w) * qˡ₂)
 
-    A_q, A_c = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qˡ)
-    w′θᵛ′ = w′θˡⁱ′ + A_q * w′qᵗ′ + A_c * w′qˡ′
+    Aᵗ, Aᶜ = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qˡ)
+    w′θᵛ′ = w′θˡⁱ′ + Aᵗ * w′qᵗ′ + Aᶜ * w′qˡ′
 
     return aᶜ, qˡ, qˡ′², w′qˡ′, w′θᵛ′
 end

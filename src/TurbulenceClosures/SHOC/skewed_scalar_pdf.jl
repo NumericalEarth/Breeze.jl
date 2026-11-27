@@ -152,8 +152,8 @@ liquid water variance, liquid water flux and buoyancy flux.
     covariance = a * (second₁ - s̄ * qˡ₁) + (1 - a) * (second₂ - s̄ * qˡ₂)
     w′qˡ′ = m.regression * covariance
 
-    A_q, A_c = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qˡ)
-    w′θᵛ′ = w′θˡⁱ′ + A_q * w′qᵗ′ + A_c * w′qˡ′
+    Aᵗ, Aᶜ = buoyancy_flux_coefficients(thermodynamics, p, θˡⁱ, qᵗ, qˡ)
+    w′θᵛ′ = w′θˡⁱ′ + Aᵗ * w′qᵗ′ + Aᶜ * w′qˡ′
     return aᶜ, qˡ, qˡ′², w′qˡ′, w′θᵛ′
 end
 

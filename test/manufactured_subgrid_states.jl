@@ -348,14 +348,14 @@ function analytic_diagnostics(m, p, thermodynamics; w′qˡ′_given = nothing, 
     moments = (m.w′³, m.θ′², m.w′θ′, m.θ′q′, m.w′q′, m.q′²)
     aᶜ, qˡ, _, w′qˡ′, w′θᵛ′ = assumed_pdf(pdf, thermodynamics, 1.0, 0.0, 0.5, p, m.θ̄, m.w̄, m.q̄, m.w′², moments, moments)
 
-    A_q, A_c = buoyancy_flux_coefficients(thermodynamics, p, m.θ̄, m.q̄, qˡ)
+    Aᵗ, Aᶜ = buoyancy_flux_coefficients(thermodynamics, p, m.θ̄, m.q̄, qˡ)
     # ∂b/∂θˡⁱ = g ĉᵖ Π / (cᵖᵐ T) at the cell mean with its mean liquid, from the model's functions
     q = MoistureMassFractions(m.q̄ - qˡ, qˡ, zero(qˡ))
     𝒰 = LiquidIcePotentialTemperatureState(m.θ̄, q, thermodynamics.standard_pressure, p)
     Π = (p / thermodynamics.standard_pressure)^exner_exponent(thermodynamics.exner_exponent, q, constants)
     ∂b∂θ = g * vapor_equivalent_heat_capacity(q, constants) * Π / (mixture_heat_capacity(q, constants) * temperature(𝒰, constants))
     w′b′ = ∂b∂θ * w′θᵛ′
-    w′b′ˡⁱⁿ = ∂b∂θ * (m.w′θ′ + A_q * m.w′q′ + A_c * something(w′qˡ′_given, w′qˡ′))
+    w′b′ˡⁱⁿ = ∂b∂θ * (m.w′θ′ + Aᵗ * m.w′q′ + Aᶜ * something(w′qˡ′_given, w′qˡ′))
 
     # The linearized saturation excess at the cell mean: s = c_q qᵗ′ - c_θ θˡⁱ′
     Tˡ = liquid_water_temperature(thermodynamics, m.θ̄, m.q̄, p)

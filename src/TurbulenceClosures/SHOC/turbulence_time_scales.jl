@@ -123,17 +123,17 @@ ColumnStabilityDamping(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
 
 Adapt.@adapt_structure ColumnStabilityDamping
 
-TurbulenceClosures.convert_eltype(::Type{FT}, sf::ColumnStabilityDamping) where FT =
-    map_scalars(scalar -> convert(FT, scalar), sf)
+TurbulenceClosures.convert_eltype(::Type{FT}, damping::ColumnStabilityDamping) where FT =
+    map_scalars(scalar -> convert(FT, scalar), damping)
 
-Base.summary(sf::ColumnStabilityDamping{FT}) where FT = "ColumnStabilityDamping{$FT}"
+Base.summary(damping::ColumnStabilityDamping{FT}) where FT = "ColumnStabilityDamping{$FT}"
 
-function TurbulenceClosures.show_stability_function_lines(io::IO, sf::ColumnStabilityDamping, prefix)
-    print(io, prefix, "├── ℂᵘ: ", prettysummary(sf.ℂᵘ), ", ℂᶜ: ", prettysummary(sf.ℂᶜ), '\n',
-              prefix, "├── ℂᵝ₁: ", prettysummary(sf.ℂᵝ₁), ", ℂᵝ₂: ", prettysummary(sf.ℂᵝ₂),
-                      ", ℂᵝ₃: ", prettysummary(sf.ℂᵝ₃), ", ℂᵝ₄: ", prettysummary(sf.ℂᵝ₄), '\n',
-              prefix, "├── 𝕊ᴰ: ", prettysummary(shoc_dissipation_coefficient(sf)), '\n',
-              prefix, "└── ℂᴾ: ", prettysummary(sf.ℂᴾ))
+function TurbulenceClosures.show_stability_function_lines(io::IO, damping::ColumnStabilityDamping, prefix)
+    print(io, prefix, "├── ℂᵘ: ", prettysummary(damping.ℂᵘ), ", ℂᶜ: ", prettysummary(damping.ℂᶜ), '\n',
+              prefix, "├── ℂᵝ₁: ", prettysummary(damping.ℂᵝ₁), ", ℂᵝ₂: ", prettysummary(damping.ℂᵝ₂),
+                      ", ℂᵝ₃: ", prettysummary(damping.ℂᵝ₃), ", ℂᵝ₄: ", prettysummary(damping.ℂᵝ₄), '\n',
+              prefix, "├── 𝕊ᴰ: ", prettysummary(shoc_dissipation_coefficient(damping)), '\n',
+              prefix, "└── ℂᴾ: ", prettysummary(damping.ℂᴾ))
     return nothing
 end
 
@@ -142,14 +142,14 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The dissipation coefficient `𝕊ᴰ = (ℂᴰ₃ + ℂᴰ₄) / ℂᴰ₅ × ℂᴰ₁³ / ℂᴰ₂⁴` of `shoc.F90` (`Cee`).
 """
-@inline function shoc_dissipation_coefficient(sf::ColumnStabilityDamping)
-    dissipation_ratio = sf.ℂᴰ₁ * sf.ℂᴰ₁ * sf.ℂᴰ₁ / ((sf.ℂᴰ₂ * sf.ℂᴰ₂) * (sf.ℂᴰ₂ * sf.ℂᴰ₂))
-    return dissipation_ratio / sf.ℂᴰ₅ * sf.ℂᴰ₃ + dissipation_ratio / sf.ℂᴰ₅ * sf.ℂᴰ₄
+@inline function shoc_dissipation_coefficient(damping::ColumnStabilityDamping)
+    dissipation_ratio = damping.ℂᴰ₁ * damping.ℂᴰ₁ * damping.ℂᴰ₁ / ((damping.ℂᴰ₂ * damping.ℂᴰ₂) * (damping.ℂᴰ₂ * damping.ℂᴰ₂))
+    return dissipation_ratio / damping.ℂᴰ₅ * damping.ℂᴰ₃ + dissipation_ratio / damping.ℂᴰ₅ * damping.ℂᴰ₄
 end
 
 const ColumnStabilityDampingClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:ColumnStabilityDamping}
 
-@inline TurbulenceClosures.shear_production_fraction(sf::ColumnStabilityDamping) = sf.ℂᴾ
+@inline TurbulenceClosures.shear_production_fraction(damping::ColumnStabilityDamping) = damping.ℂᴾ
 
 @inline TurbulenceClosures.dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::ColumnStabilityDampingClosure, args...) =
     shoc_dissipation_coefficient(closure.stability_functions)
@@ -160,17 +160,17 @@ const ColumnStabilityDampingClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:
 # `τ √e / ℓ` from the stability damping `λ` of the column, the length `ℓ`, the turbulent velocity `u` and
 # the static stability `N²`: τ₀ √e / ℓ = 2 / 𝕊ᴰ damped by the stratification (by the column's λ in stable air, by
 # ℂᶜ² / 4 in unstable air), then bounded by τᵐᵃˣ. Finite at ℓ = 0.
-@inline function isotropy_ratio(sf::ColumnStabilityDamping, λ, ℓ, u, N²)
-    s₀ = 2 / shoc_dissipation_coefficient(sf)
+@inline function isotropy_ratio(damping::ColumnStabilityDamping, λ, ℓ, u, N²)
+    s₀ = 2 / shoc_dissipation_coefficient(damping)
     τ₀ = s₀ * ℓ / u
     # The stable and unstable parts of αᴺ = N² τ₀², regular through zero: (√(αᴺ² + 1) ± αᴺ) / 2. In stable air the
     # damping of the column; in unstable air ℂᶜ² / 4, which bounds τ by 1 / (ℂᶜ |N|)
     αᴺ = N² * τ₀ * τ₀
     α̃ᴺ = sqrt(αᴺ * αᴺ + 1)
-    λ⁻ = sf.ℂᶜ * sf.ℂᶜ / 4
+    λ⁻ = damping.ℂᶜ * damping.ℂᶜ / 4
     s = s₀ / (1 + (λ * (α̃ᴺ + αᴺ) + λ⁻ * (α̃ᴺ - αᴺ)) / 2)
     τᵈ = s * ℓ / u
-    x = τᵈ / sf.maximum_time_scale
+    x = τᵈ / damping.maximum_time_scale
     return s / sqrt(1 + x * x)
 end
 
@@ -185,8 +185,8 @@ end
     ℓ = @inbounds closure_fields.ℓᵐ[i, j, k]
     u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
     s = isotropy_ratioᶜᶜᶠ(i, j, k, grid, closure, closure_fields, ℓ, u)
-    sf = closure.stability_functions
-    return sf.ℂᵘ * s, sf.ℂᶜ * s, sf.ℂᶜ * s
+    damping = closure.stability_functions
+    return damping.ℂᵘ * s, damping.ℂᶜ * s, damping.ℂᶜ * s
 end
 
 # The return-to-isotropy time scale τ = (τ √e / ℓ) ℓ / √e at a face, for the moments
@@ -213,29 +213,29 @@ end
 # ℂᵝ₁ and ℂᵝ₂, saturating toward them, λ̄ + δ / (1 + (δ / Δλ)⁴)^(1/4). With x = δ / Δλ and R = (1 + x⁴)^(1/4) it is
 # the weighted mean ℂᵝ₁ (1 - t) / 2 + ℂᵝ₂ (1 + t) / 2 with t = x / R, evaluated with 1 - |t| = 1 / (R (R + |x|) (R² + x²))
 # (from R⁴ - x⁴ = 1), a positive number that is no difference, so that both weights are positive.
-@inline function column_stability_damping(sf::ColumnStabilityDamping, I)
-    Δλ = (sf.ℂᵝ₂ - sf.ℂᵝ₁) / 2
-    x = ((I - sf.ℂᵝ₄) * sf.ℂᵝ₃ - Δλ) / Δλ
+@inline function column_stability_damping(damping::ColumnStabilityDamping, I)
+    Δλ = (damping.ℂᵝ₂ - damping.ℂᵝ₁) / 2
+    x = ((I - damping.ℂᵝ₄) * damping.ℂᵝ₃ - Δλ) / Δλ
     x² = x * x
     R² = sqrt(1 + x² * x²)
     R = sqrt(R²)
     smaller = 1 / (2 * R * (R + abs(x)) * (R² + x²)) # the weight of the bound the line is farther from, in (0, 1/2]
     rising = x > 0
-    return sf.ℂᵝ₁ * ifelse(rising, smaller, 1 - smaller) + sf.ℂᵝ₂ * ifelse(rising, 1 - smaller, smaller)
+    return damping.ℂᵝ₁ * ifelse(rising, smaller, 1 - smaller) + damping.ℂᵝ₂ * ifelse(rising, 1 - smaller, smaller)
 end
 
 # I = ∫ N² w(p) dz / g with N² at the centers from the two adjacent faces and the weight w of the lower troposphere
 @kernel function _compute_column_stability_damping!(λ, grid, closure, N², pressure, g)
     i, j = @index(Global, NTuple)
-    sf = getclosure(i, j, closure).stability_functions
+    damping = getclosure(i, j, closure).stability_functions
     FT = grid_float_type(grid)
     integral = zero(FT)
     for k in 1:size(grid, 3)
         N²ᶜ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
-        weight = lower_troposphere_weight(@inbounds(pressure[i, j, k]), sf.stability_integration_pressure)
+        weight = lower_troposphere_weight(@inbounds(pressure[i, j, k]), damping.stability_integration_pressure)
         integral += weight * N²ᶜ * Δzᶜᶜᶜ(i, j, k, grid)
     end
-    @inbounds λ[i, j, 1] = column_stability_damping(sf, integral / g)
+    @inbounds λ[i, j, 1] = column_stability_damping(damping, integral / g)
 end
 
 function TurbulenceClosures.compute_column_stability!(::ColumnStabilityDamping, λ, grid, closure, N², model; parameters = :xyz)
