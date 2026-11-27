@@ -1286,9 +1286,9 @@ function AtmosphereModels.compute_closure_tendencies!(Gⁿ, closure_fields, clos
     arch = grid.architecture
     ρ = AtmosphereModels.total_density(model.dynamics)
 
-    # The non-turbulent tendency of the water of the stage, before the closure adds its own, for the total water budget flux
-    # of the next evaluation of the closure fields
-    store_budget_sources!(closure_fields.subgrid_cloud, total_water_budget_flux(closure), Gⁿ, model)
+    # The microphysical tendency of the water that `update_state!` recorded for this stage, for the total water budget
+    # flux of the next evaluation of the closure fields
+    carry_microphysical_water_tendency!(closure_fields.subgrid_cloud, total_water_budget_flux(closure), model)
 
     launch!(arch, grid, :xyz, _add_tke_tendencies!,
             Gⁿ[TKE_NAME], grid, closure, closure_fields,
@@ -1333,6 +1333,15 @@ function Base.show(io::IO, closure::TKEBasedTurbulenceClosure)
     print(io, "└── solver: ", summary(closure.solver))
 end
 
-# All closure fields are recomputed by update_state! from the prognostic state alone.
-Oceananigans.prognostic_state(::TKEClosureFields) = nothing
+# What a restart needs of the closure fields: the microphysical tendency of the water that `TotalWaterBudgetFlux`
+# carries from one stage to the next (`carried_fields`). `update_state!` recomputes the others. (The static stability
+# that a `LaggedStability` solver reads from the evaluation before is not saved: a restart starts it from the
+# `initial_stability`.)
+Oceananigans.prognostic_state(closure_fields::TKEClosureFields) = Oceananigans.prognostic_state(carried_fields(closure_fields.subgrid_cloud))
+
+function Oceananigans.restore_prognostic_state!(closure_fields::TKEClosureFields, from)
+    Oceananigans.restore_prognostic_state!(carried_fields(closure_fields.subgrid_cloud), from)
+    return closure_fields
+end
+
 Oceananigans.restore_prognostic_state!(closure_fields::TKEClosureFields, ::Nothing) = closure_fields

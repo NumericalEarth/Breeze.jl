@@ -58,8 +58,9 @@
 ##### distribution without skewness (a function of the prognostic state alone), and with `passes > 1`
 ##### again from the budget of the distribution that has the third moment of the pass before, a
 ##### fixed-point iteration from that start. The distribution, the stability and the conversions that the
-##### stage uses are then computed with that third moment. The closure fields are therefore functions
-##### of the prognostic state: nothing is stored between evaluations.
+##### stage uses are then computed with that third moment. The third moment is therefore a function of the
+##### prognostic state and of what the budget fluxes read; of these only the microphysical tendency of the water of a
+##### `TotalWaterBudgetFlux` (𝒬ᵠᵐ) is carried from the stage before, and it is checkpointed with the model.
 #####
 ##### With ℂʷᵀ > 0 the same flux, with the sink shape e, is also a transport of TKE in the TKE
 ##### equation: ∂t e += ℂʷᵀ (uᵉ - (P + B)). It moves the share ℂʷᵀ of the production from where it is
@@ -102,7 +103,9 @@ stands for the suppression of the third moment in stably stratified air; it has 
 member has no pole. It tends to one in unstable air and to `1 + ℂʷᴺ αᴺ` in stable air, over the width
 `δ = stratification_damping_width` in `αᴺ`.
 
-No third moment is stored between evaluations of the closure fields. Within one evaluation the
+No third moment is stored between evaluations of the closure fields (the budget it integrates reads the conversion
+of a [`TotalWaterBudgetFlux`](@ref), whose microphysical tendency of the water is that of the stage before and is
+checkpointed with the model). Within one evaluation the
 third moment is diagnosed `passes` times: first from the budget of the distribution without
 skewness, then from the budget of the distribution with the third moment of the pass before.
 The limiter in the `skewness` slot of [`DoubleGaussian`](@ref) ([`TanhSaturatedSkewness`](@ref), ...)

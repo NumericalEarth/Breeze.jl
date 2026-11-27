@@ -38,7 +38,8 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans
 using Oceananigans.Architectures: on_architecture
-using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!
+using Oceananigans.BoundaryConditions: BoundaryConditions, FieldBoundaryConditions, fill_halo_regions!, compute_x_bcs!, compute_y_bcs!,
+                                       update_boundary_conditions!
 using Oceananigans.BuoyancyFormulations: ∂z_b
 using Oceananigans.Fields: CenterField, XFaceField, YFaceField, ZFaceField, ZeroField
 using Oceananigans.Grids: AbstractUnderlyingGrid, Bounded, Center, Face, inactive_cell

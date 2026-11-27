@@ -22,12 +22,21 @@
 ##### conserves the water. Where the air is still the levels do not exchange, s = 𝒬 and Jᵠ = 0: the tendency stays where
 ##### it acts. The surface flux is carried up over the turbulent layer.
 #####
-##### The tendencies 𝒬ᵠ are those of the model: the stage tendencies of the distributed water (the moisture density and
-##### the cloud liquid) that the model has built when the closure adds its own (`compute_closure_tendencies!`), that is
-##### everything but the closure's fluxes. They are stored at each stage and the flux of the next evaluation of the
-##### closure fields reads them, so the flux of a stage carries the tendencies of the stage before it (none in the first
-##### stage of a run): the microphysics of a stage reads the distribution, which reads the flux, so the flux cannot read
-##### the microphysics of its own stage.
+##### The tendencies 𝒬ᵠ are those of the model, in two parts, 𝒬ᵠ = 𝒬ᵠᵈ + 𝒬ᵠᵐ:
+#####
+#####   * 𝒬ᵠᵈ, the part that does not read the subgrid distribution, is diagnosed within the stage, before the
+#####     distribution: the transport of the distributed water (the moisture density and the cloud liquid) by the
+#####     resolved flow and by the sedimentation velocity of the cloud liquid, their forcing, and their boundary fluxes
+#####     (the surface flux enters the lowest cell), evaluated with the model's own functions (`scalar_tendency` without
+#####     a closure, and the boundary conditions) from the state of the stage.
+#####   * 𝒬ᵠᵐ, the microphysical part (phase changes and process rates), reads the distribution, which reads the flux:
+#####     the flux of a stage cannot read the microphysics of its own stage, and reads that of the stage before. The
+#####     model records it where it adds the microphysical sources to the stage tendencies
+#####     (`record_microphysical_tendencies!`), as the difference of the tendencies of the distributed water across
+#####     them. It is state carried between stages, and it is checkpointed (`Oceananigans.prognostic_state` of the
+#####     closure fields), so that a restart continues exactly; it is zero until a stage has built its tendencies, so the
+#####     first stage of a run carries no microphysical tendency. A microphysics that updates the state outside the
+#####     stage tendencies (an operator-split update) gives none.
 #####
 ##### The closure applies the share ℂᵇᵠ of the flux to the moisture density, as vapor (the microphysics condenses what the
 ##### vapor brings), ∂t (ρ qᵛ) = ... - ∂z (ρ ℂᵇᵠ Jᵠ), and gives its energy conversion to the TKE equation as an applied
@@ -59,12 +68,13 @@ conversion, the energy it takes from the mean state (with the latent part of the
 from the internal energy). The subgrid distribution receives the total flux of qᵗ; its variances stay those of the
 gradient, which vanish with the turbulence.
 
-The tendencies are those the model built in the stage before (stored when the closure adds its own tendencies), so
-the first stage of a run has no budget flux. The lag is structural: the microphysics of a stage reads the subgrid
-distribution (P3's `SubgridCondensation`), which reads the flux, so the flux cannot read the microphysical tendency of
-its own stage. On eight CfSite windows the effect of the flux on the 4 h state and on the first-hour TKE has the same
-sign and size at time steps of 300 s and 30 s. The closure needs `VerticallyImplicitTimeDiscretization`, under which
-the stage tendencies hold none of its own vertical fluxes.
+The tendency is `𝒬ᵠ = 𝒬ᵠᵈ + 𝒬ᵠᵐ`. The part `𝒬ᵠᵈ` that does not read the subgrid distribution (the transport by the
+resolved flow and by the sedimentation of the cloud liquid, the forcing and the boundary fluxes) is diagnosed within the
+stage from its state. The microphysical part `𝒬ᵠᵐ` is that of the stage before, recorded when the model adds the
+microphysical sources to the stage tendencies and checkpointed with the model: the microphysics of a stage reads the
+subgrid distribution (P3's `SubgridCondensation`), which reads the flux, so the flux cannot read the microphysical
+tendency of its own stage, and the first stage of a run carries none. The closure needs
+`VerticallyImplicitTimeDiscretization`, under which its own vertical fluxes are applied by the implicit solves.
 
 $(TYPEDFIELDS)
 """
@@ -130,38 +140,154 @@ function validate_total_water_budget_flux(::TotalWaterBudgetFlux, static_stabili
 end
 
 #####
-##### Fields: the stored tendency, the tendency as redistributed, a work array, the applied flux and its conversions
+##### Fields: the tendency and its carried microphysical part, the tendency as redistributed, a work array, the applied
+##### flux and its conversions
 #####
 
 total_water_budget_flux_fields(grid, ::Nothing) = NamedTuple()
 
+# `𝒬ᵠᵐ` is the microphysical tendency that the flux reads, of the stage before; `stage_microphysical_water_tendency`
+# is that of the stage being built, which becomes `𝒬ᵠᵐ` once the stage has its tendencies
 total_water_budget_flux_fields(grid, ::TotalWaterBudgetFlux) =
-    (𝒬ᵠ = CenterField(grid), sᵠ = CenterField(grid), budget_work = CenterField(grid), Jᵠ = ZFaceField(grid),
+    (𝒬ᵠ = CenterField(grid), 𝒬ᵠᵐ = CenterField(grid), stage_microphysical_water_tendency = CenterField(grid),
+     sᵠ = CenterField(grid), budget_work = CenterField(grid), Jᵠ = ZFaceField(grid),
      Gᵇ = CenterField(grid), Gᵇᴸ = CenterField(grid))
 
 #####
-##### The tendency of the stage, without the closure's: stored when the closure adds its own
+##### The part of the tendency that does not read the distribution, diagnosed from the state of the stage
 #####
 
-# The tendency of the distributed water, (Gρqᵛᵉ + Gρqᶜˡ) / ρ
-@kernel function _store_budget_sources!(cl, q_tendency)
+# The arguments of `AtmosphereModels.scalar_tendency` that belong to one scalar: its specific field, the position among
+# the closure scalars (not read without a closure), its name, forcing and advection scheme
+distributed_water_scalar(model, c, name) = (c, Val(1), Val(name), model.forcing[name], model.advection[name])
+
+cloud_liquid_scalar(model, ::Nothing) = nothing
+cloud_liquid_scalar(model, ρqᶜˡ) = distributed_water_scalar(model, AtmosphereModels.specific_scalar_fields(model).ρqᶜˡ, :ρqᶜˡ)
+
+@inline transport_and_forcing(i, j, k, grid, ::Nothing, common) = zero(grid)
+@inline transport_and_forcing(i, j, k, grid, scalar, common) = AtmosphereModels.scalar_tendency(i, j, k, grid, scalar..., common...)
+
+# The tendency of the density of the distributed water by transport (resolved and sedimenting) and forcing
+@kernel function _compute_water_transport_and_forcing!(tendency, grid, moisture, cloud_liquid, common)
     i, j, k = @index(Global, NTuple)
-    @inbounds cl.𝒬ᵠ[i, j, k] = q_tendency[i, j, k]
+    @inbounds tendency[i, j, k] = transport_and_forcing(i, j, k, grid, moisture, common) +
+                                  transport_and_forcing(i, j, k, grid, cloud_liquid, common)
 end
 
-store_budget_sources!(fields, ::Nothing, Gⁿ, model) = nothing
+@kernel function _sum_water_tendency!(cl, density_tendency, ρ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds cl.𝒬ᵠ[i, j, k] = density_tendency[i, j, k] / ρ[i, j, k] + cl.𝒬ᵠᵐ[i, j, k]
+end
+
+# The boundary fluxes of the prognostic field `name`, as the stage tendencies receive them
+function add_boundary_fluxes!(tendency, model, name)
+    c = Oceananigans.prognostic_fields(model)[name]
+    arguments = (model.grid.architecture, boundary_condition_args(model)...)
+    compute_x_bcs!(tendency, c, arguments...)
+    compute_y_bcs!(tendency, c, arguments...)
+    AtmosphereModels.compute_stage_z_bcs!(tendency, c, AtmosphereModels.closure_applies_bottom_flux(model.closure, model, name), arguments...)
+    return nothing
+end
+
+add_boundary_fluxes!(tendency, model, name, ::Nothing) = nothing
+add_boundary_fluxes!(tendency, model, name, field) = add_boundary_fluxes!(tendency, model, name)
+
+# 𝒬ᵠ = 𝒬ᵠᵈ + 𝒬ᵠᵐ. The diagnosed part is what `compute_tendencies!` and `compute_flux_bc_tendencies!` give the moisture
+# density and the cloud liquid outside the microphysical sources and the closure: the model's `scalar_tendency`, without
+# a closure, and its boundary fluxes. The closure fields are computed before the model refreshes its forcings and
+# boundary conditions for the stage, so those of the distributed water are refreshed here (both refreshes are
+# idempotent within a stage).
+function diagnose_water_tendency!(cl, model)
+    grid = model.grid
+    arch = grid.architecture
+    moisture_name = AtmosphereModels.moisture_prognostic_name(model.microphysics)
+    ρqᶜˡ = cloud_liquid_density(model.microphysical_fields)
+    prognostic = Oceananigans.prognostic_fields(model)
+
+    AtmosphereModels.compute_forcing!(model.forcing[moisture_name])
+    isnothing(ρqᶜˡ) || AtmosphereModels.compute_forcing!(model.forcing.ρqᶜˡ)
+    update_boundary_conditions!(isnothing(ρqᶜˡ) ? (prognostic[moisture_name],) : (prognostic[moisture_name], prognostic.ρqᶜˡ), model)
+
+    moisture = distributed_water_scalar(model, AtmosphereModels.specific_prognostic_moisture(model), moisture_name)
+    cloud_liquid = cloud_liquid_scalar(model, ρqᶜˡ)
+    common = (model.dynamics, model.formulation, model.thermodynamic_constants, AtmosphereModels.specific_prognostic_moisture(model),
+              AtmosphereModels.transport_velocities(model), model.microphysics, model.microphysical_fields, nothing, nothing,
+              model.clock, Oceananigans.fields(model))
+
+    density_tendency = cl.budget_work
+    launch!(arch, grid, :xyz, _compute_water_transport_and_forcing!, density_tendency, grid, moisture, cloud_liquid, common)
+    add_boundary_fluxes!(density_tendency, model, moisture_name)
+    add_boundary_fluxes!(density_tendency, model, :ρqᶜˡ, ρqᶜˡ)
+    launch!(arch, grid, :xyz, _sum_water_tendency!, cl, density_tendency, total_density(model.dynamics))
+    return nothing
+end
+
+#####
+##### The microphysical part of the tendency, recorded where the model adds the microphysical sources to the stage
+##### tendencies and carried to the next stage
+#####
 
 cloud_liquid_tendency(Gⁿ, ::Nothing) = nothing
 cloud_liquid_tendency(Gⁿ, ρqᶜˡ) = Gⁿ.ρqᶜˡ
 
-function store_budget_sources!(fields, ::TotalWaterBudgetFlux, Gⁿ, model)
+# The tendency of the distributed water, (Gρqᵛᵉ + Gρqᶜˡ) / ρ
+function distributed_water_tendency(Gⁿ, model)
+    moisture_name = AtmosphereModels.moisture_prognostic_name(model.microphysics)
+    return SpecificTotalWater(getproperty(Gⁿ, moisture_name), cloud_liquid_tendency(Gⁿ, cloud_liquid_density(model.microphysical_fields)),
+                              total_density(model.dynamics))
+end
+
+# Before the microphysical sources, minus the tendency of the distributed water (`kept = 0`, `sign = -1`); after them,
+# plus it (`kept = 1`, `sign = 1`): the difference is the microphysical tendency
+@kernel function _record_microphysical_water_tendency!(recorded, water_tendency, kept, sign)
+    i, j, k = @index(Global, NTuple)
+    @inbounds recorded[i, j, k] = kept * recorded[i, j, k] + sign * water_tendency[i, j, k]
+end
+
+@kernel function _carry_microphysical_water_tendency!(cl)
+    i, j, k = @index(Global, NTuple)
+    @inbounds cl.𝒬ᵠᵐ[i, j, k] = cl.stage_microphysical_water_tendency[i, j, k]
+end
+
+record_microphysical_water_tendency!(side, fields, ::Nothing, model) = nothing
+
+function record_microphysical_water_tendency!(::AtmosphereModels.BeforeMicrophysicalSources, fields, ::TotalWaterBudgetFlux, model)
     grid = model.grid
-    ρ = total_density(model.dynamics)
-    q_name = AtmosphereModels.moisture_prognostic_name(model.microphysics)
-    q_tendency = SpecificTotalWater(getproperty(Gⁿ, q_name), cloud_liquid_tendency(Gⁿ, cloud_liquid_density(model.microphysical_fields)), ρ)
-    launch!(grid.architecture, grid, :xyz, _store_budget_sources!, fields.cloud, q_tendency)
+    launch!(grid.architecture, grid, :xyz, _record_microphysical_water_tendency!, fields.cloud.stage_microphysical_water_tendency,
+            distributed_water_tendency(model.timestepper.Gⁿ, model), 0, -1)
     return nothing
 end
+
+# A time stepper that builds the scalar tendencies outside `update_state!` builds them once in a stage, after the
+# closure has added its tendencies: the recorded tendency is carried at once
+function record_microphysical_water_tendency!(::AtmosphereModels.AfterMicrophysicalSources, fields, ::TotalWaterBudgetFlux, model)
+    grid = model.grid
+    launch!(grid.architecture, grid, :xyz, _record_microphysical_water_tendency!, fields.cloud.stage_microphysical_water_tendency,
+            distributed_water_tendency(model.timestepper.Gⁿ, model), 1, 1)
+    AtmosphereModels.scalar_tendencies_in_update_state(model.timestepper) ||
+        launch!(grid.architecture, grid, :xyz, _carry_microphysical_water_tendency!, fields.cloud)
+    return nothing
+end
+
+AtmosphereModels.record_microphysical_tendencies!(side, closure_fields, closure::FlavorOfTKEClosure, model) =
+    record_microphysical_water_tendency!(side, closure_fields.subgrid_cloud, total_water_budget_flux(closure), model)
+
+carry_microphysical_water_tendency!(fields, ::Nothing, model) = nothing
+
+# Once in a stage, when the closure adds its tendencies: `update_state!` has recorded the microphysical tendency of the
+# stage (and records the same again if it is called again), and the next evaluation of the closure fields reads it
+function carry_microphysical_water_tendency!(fields, ::TotalWaterBudgetFlux, model)
+    grid = model.grid
+    AtmosphereModels.scalar_tendencies_in_update_state(model.timestepper) &&
+        launch!(grid.architecture, grid, :xyz, _carry_microphysical_water_tendency!, fields.cloud)
+    return nothing
+end
+
+# What a restart needs of the closure fields: the carried microphysical tendency
+carried_fields(::Nothing) = nothing
+carried_fields(fields) = carried_fields(has_field(fields.cloud, Val(:𝒬ᵠᵐ)), fields.cloud)
+carried_fields(::Val{false}, cl) = nothing
+carried_fields(::Val{true}, cl) = (; cl.𝒬ᵠᵐ)
 
 #####
 ##### The redistributed tendency and the flux, column by column
@@ -191,6 +317,7 @@ compute_total_water_budget_flux!(fields, ::Nothing, closure_fields, closure, mod
 # Within `update_state!`, after the mixing length and before the distribution, which receives the flux
 function compute_total_water_budget_flux!(fields, ::TotalWaterBudgetFlux, closure_fields, closure, model, tracers)
     grid = model.grid
+    diagnose_water_tendency!(fields.cloud, model)
     launch!(grid.architecture, grid, :xy, _compute_total_water_budget_flux!, fields.cloud, grid, closure, closure_fields.ℓᵐ,
             tracers[TKE_NAME], total_density(model.dynamics))
     return nothing

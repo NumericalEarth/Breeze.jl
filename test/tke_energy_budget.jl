@@ -695,7 +695,8 @@ end
 
 #####
 ##### The total water budget flux: a flux of qᵗ in flux form, zero at the boundaries and in still air, built from the
-##### tendencies the model gave the water at the stage before; the TKE equation receives its conversion
+##### tendencies the model gives the water: the transport, forcing and boundary fluxes of the stage and the microphysical
+##### tendency of the stage before; the TKE equation receives its conversion
 #####
 
 # The tendencies of the stage without the closure's (`update_state!` and the boundary fluxes, as the time steppers build
@@ -716,11 +717,22 @@ end
     Nz = size(model.grid, 3)
     cl = model.closure_fields.subgrid_cloud.cloud
     sb = model.closure.total_water_budget_flux
-    # before the first stage nothing is stored: no flux
-    @test all(==(0), budget_column(cl.Jᵠ))
+    # before the first stage no microphysical tendency is carried: the flux redistributes the forcing and the surface
+    # flux, diagnosed from the state, which with the microphysical tendency of the stage are the tendencies of the model
+    @test all(==(0), budget_column(cl.𝒬ᵠᵐ))
+    @test budget_column(cl.Jᵠ)[2] > 0
+    diagnosed = budget_column(cl.𝒬ᵠ)
+    microphysical = budget_column(cl.stage_microphysical_water_tendency)
+    @test maximum(abs, microphysical) > 0
     source, _ = stage_tendencies!(model)
-    @test budget_column(cl.𝒬ᵠ) ≈ source rtol=10eps(FT)
+    @test diagnosed .+ microphysical ≈ source rtol=10eps(FT)
+    # `update_state!` reads the carried tendency and records that of the stage again: called twice, it gives the same
+    @test budget_column(cl.𝒬ᵠᵐ) == microphysical
     Oceananigans.TimeSteppers.update_state!(model)
+    @test budget_column(cl.𝒬ᵠ) ≈ source rtol=10eps(FT)
+    𝒬₁ = budget_column(cl.𝒬ᵠ); J₁ = budget_column(cl.Jᵠ)
+    Oceananigans.TimeSteppers.update_state!(model)
+    @test budget_column(cl.𝒬ᵠ) == 𝒬₁ && budget_column(cl.Jᵠ) == J₁
 
     ρ = Float64.(budget_column(model.dynamics.reference_state.density))
     Δzᶜ = diff(znodes(model.grid, Face()))
@@ -830,6 +842,33 @@ end
         @test budget_column(m.w′qᵗ′)[2:Nz] ≈ budget_column(m⁰.w′qᵗ′)[2:Nz] .+ budget_column(cl.Jᵠ)[2:Nz] rtol=1e-12 atol=1e-20
     end
     @test all(isfinite, budget_column(cl.B))
+end
+
+# The microphysical tendency that the flux carries from one stage to the next is checkpointed: a model restored from
+# the prognostic state of another continues as that one does, bit for bit
+@testset "Total water budget flux: a restart continues exactly ($path)" for path in total_water_budget_paths
+    continuous = moist_tke_column(; path, surface_fluxes = true, rain = true)
+    for _ in 1:3
+        time_step!(continuous, 10)
+    end
+    saved = Oceananigans.prognostic_state(continuous)
+    carried(model) = budget_column(model.closure_fields.subgrid_cloud.cloud.𝒬ᵠᵐ)
+    @test maximum(abs, carried(continuous)) > 0
+
+    restored = moist_tke_column(; path, surface_fluxes = true, rain = true)
+    Oceananigans.restore_prognostic_state!(restored, saved)
+    Oceananigans.TimeSteppers.update_state!(restored)
+    @test carried(restored) == carried(continuous)
+
+    for model in (continuous, restored), _ in 1:2
+        time_step!(model, 10)
+    end
+    for (original, copy) in zip(Oceananigans.prognostic_fields(continuous), Oceananigans.prognostic_fields(restored))
+        @test budget_column(original) == budget_column(copy)
+    end
+    flux(model) = budget_column(model.closure_fields.subgrid_cloud.cloud.Jᵠ)
+    @test flux(restored) == flux(continuous)
+    @test carried(restored) == carried(continuous)
 end
 
 @testset "Total water budget flux: coefficients" begin
