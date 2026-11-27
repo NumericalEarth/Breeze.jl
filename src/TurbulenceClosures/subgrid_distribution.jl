@@ -7,10 +7,8 @@ using Oceananigans.Operators: Δzᶜᶜᶠ
 """
 $(TYPEDEF)
 
-The time scale `τ` of the second moments (`θˡⁱ′² = ℂᵛ₁ τ Kᶜ (∂z θˡⁱ)²`, ...) and of the third-moment
-diagnosis, at the faces, from the closure's mixing length `ℓ`, turbulent velocity `√e` and
-static stability `N²` there: `ℂᵗ` eddy turnover times, limited by the buoyancy period in stable air and
-then by a `p`-norm of its rate and the buoyancy rate `N⁺ / ℂᴺ`,
+The time scale of the moments from the mixing length, the turbulent velocity and the static stability: `ℂᵗ` eddy
+turnover times, limited by the buoyancy period so that `τ N < ℂᴺ`.
 """
 struct StratificationLimitedMomentTimeScale{P, FT}
     ℂᵗ :: FT
@@ -53,9 +51,8 @@ end
 """
 $(TYPEDEF)
 
-The time scale `τ` of the second moments from the variance budget of a scalar `φ` (θˡⁱ or qᵗ) in
-local equilibrium, production equal to dissipation, with a scalar-variance dissipation time
-tied to the dissipation time of the closure's TKE,
+The time scale of the second moments from the variance budget of a scalar in local equilibrium, with the
+scalar-variance dissipation time `ℓ / (ℂᵠ 𝕊ᴰ √e)` tied to that of the TKE.
 """
 struct DissipationTimeScale{FT, T3}
     ℂᵠ :: FT
@@ -64,7 +61,7 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a [`DissipationTimeScale`](@ref); the third moment keeps `StratificationLimitedMomentTimeScale(FT)`.
+Return a [`DissipationTimeScale`](@ref).
 """
 DissipationTimeScale(FT::DataType = Oceananigans.defaults.FloatType; ℂᵠ = 2,
                      third_moment_time_scale = StratificationLimitedMomentTimeScale(FT)) =
@@ -139,13 +136,7 @@ Adapt.@adapt_structure DoubleGaussian
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a [`DoubleGaussian`](@ref). The defaults are the moment time scale of the scalar-variance budget
-([`DissipationTimeScale`](@ref) with `ℂᵠ = 1.3`), SHOC's down-gradient second moments
-([`DowngradientSecondMoments`](@ref)), the third moment of the TKE budget ([`TKEBudgetThirdMoment`](@ref), in place
-of SHOC's [`AlgebraicThirdMoment`](@ref)) with the bound [`RationalSaturatedStratificationNumber`](@ref) of the
-stratification number, the double Gaussian with equal within-component widths
-([`EqualWidthDoubleGaussianPDF`](@ref), whose bounds are smooth) and the limiter
-[`PolynomialSaturatedSkewness`](@ref) with the largest skewness that `assumed_pdf` represents,
+Return a [`DoubleGaussian`](@ref). The defaults are the components of the calibrated TKE closure.
 """
 function DoubleGaussian(FT::DataType = Oceananigans.defaults.FloatType;
                              time_scale = DissipationTimeScale(FT; ℂᵠ = 1.3),
@@ -181,9 +172,8 @@ struct AppliedFluxEnergetics end
 """
 $(TYPEDEF)
 
-The `fraction` of [`SaturationWeightedStaticStability`](@ref) given by the closure's own
-[`DoubleGaussian`](@ref) distribution: the saturated fraction is the ratio of the subgrid condensate
-flux to the flux of the saturation excess `s = c_q qᵗ - c_θ θˡⁱ` (linearized at the level),
+The `fraction` of [`SaturationWeightedStaticStability`](@ref) given by the closure's own [`DoubleGaussian`](@ref):
+the ratio of the subgrid condensate flux to the flux of the saturation excess.
 """
 struct CondensateFluxFraction{S, T}
     initial_stability :: S
@@ -211,8 +201,8 @@ struct LatentStratification end
 """
 $(TYPEDEF)
 
-The static stability of [`CondensateFluxFraction`](@ref) once the distribution exists of the grid-mean state with the
-distribution's mean liquid `q̄ˡ` as its condensate, the stratification of a displacement without phase change,
+The static stability of [`CondensateFluxFraction`](@ref), once the distribution exists, of the grid-mean state with
+the distribution's mean liquid as its condensate (the Brunt–Väisälä frequency of `shoc.F90`).
 """
 struct MeanLiquidStratification end
 

@@ -14,7 +14,8 @@ minimum_stratification_scale(lower = DEFAULT_STABILITY_COEFFICIENT_BOUNDS[1],
 """
 $(TYPEDEF)
 
-Stability functions for [`TKEBasedTurbulenceClosure`](@ref) of the turbulent Richardson number
+Stability functions for [`TKEBasedTurbulenceClosure`](@ref) of the turbulent Richardson number, formed from the
+stratification and shear numbers ``τ² N²`` and ``τ² S²`` with ``τ = ℓ / \\sqrt{e}``.
 """
 struct TurbulentRichardsonStabilityFunction{FT}
     ℂᵘ⁻ :: FT

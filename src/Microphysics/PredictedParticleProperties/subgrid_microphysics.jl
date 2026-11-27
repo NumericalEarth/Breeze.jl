@@ -2,10 +2,23 @@
 ##### The subgrid distribution of the saturation excess in every P3 process
 #####
 
+"""
+$(TYPEDEF)
+
+The subgrid distribution of [`SubgridCondensation`](@ref) enters only the condensation and evaporation of cloud liquid.
+"""
 struct CloudCondensationOnly end
 
 struct MixingEvaporationBalance end
 
+"""
+$(TYPEDEF)
+
+The subgrid distribution of [`SubgridCondensation`](@ref) enters every P3 process that is nonlinear in the local
+state: condensation, droplet activation, ice nucleation and vapor growth, autoconversion and accretion. The cloud
+liquid is placed between the saturated and subsaturated parts of the distribution by the balance of mixing and
+evaporation.
+"""
 struct AllProcesses{P}
     liquid_placement :: P
 end

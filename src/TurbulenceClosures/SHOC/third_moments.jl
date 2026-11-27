@@ -1,12 +1,8 @@
 """
 $(TYPEDEF)
 
-The third moment of vertical velocity diagnosed algebraically from the second moments and their
-vertical gradients: the stationary third-moment equations of Canuto et al. (2001, J. Atmos. Sci.
-58, 1169–1172) solved for `w′³`, as E3SM `shoc.F90` computes it
-(`compute_diag_third_shoc_moment`). With the return-to-isotropy time scale `τ`, the stratification
-`N²` and the stratification number `αᴺ = τ² N²` (the notation of Oceananigans'
-`TKEDissipationVerticalDiffusivity`),
+The third moment of vertical velocity diagnosed algebraically from the second moments and their vertical
+gradients, as E3SM `shoc.F90` computes it (`compute_diag_third_shoc_moment`, after Canuto et al. 2001).
 """
 struct AlgebraicThirdMoment{FT} <: AbstractSubgridDistributionComponent
     ℂʷ₂ :: FT
@@ -23,10 +19,7 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return `AlgebraicThirdMoment{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword
-argument. `location` is where the third moment is diagnosed: at the faces (`Face()`, the default), with the
-stencils of `shoc.F90`, and interpolated to the centers where the assumed PDF reads it, or at the centers
-(`Center()`).
+Return `AlgebraicThirdMoment{FT}` with the values of E3SM `shoc.F90`. Every field is a keyword argument.
 """
 function AlgebraicThirdMoment(FT::DataType = Oceananigans.defaults.FloatType; kw...)
     defaults = (ℂʷ₂ = 7, ℂʷ₃ = 0.52, ℂʷ₄ = 0.87, ℂʷ₅ = 0.5, ℂʷ₆ = 0.6, ℂʷ₇ = 2.4, ℂʷ₈ = 0.6, ℂʷ₉ = 1.2, ℂʷ₁₀ = 1.5, ℂʷ₁₁ = 1.25)

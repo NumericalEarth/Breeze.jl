@@ -2,9 +2,8 @@
 $(TYPEDEF)
 
 The mixing length of [Bogenschutz and Krueger (2013)](@cite Bogenschutz2013) as E3SM `shoc.F90` computes it
-(`compute_shoc_mix_shoc_length`): three lengths blended by the sum of their inverse squares, the distance to
-the surface `κ z`, an asymptotic length `ℓ∞` (the fraction `ℂˡ₄` of the height weighted by `√e` over the
-column) and, in stable air, the buoyancy length `√e / N`,
+(`compute_shoc_mix_shoc_length`): the distance to the surface `κ z`, an asymptotic length `ℓ∞` and, in stable air,
+the buoyancy length `√e / N`, blended by the sum of their inverse squares.
 """
 struct BlendedMixingLength{FT} <: AbstractMixingLength
     ℂˡ₁ :: FT

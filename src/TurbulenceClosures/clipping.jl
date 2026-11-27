@@ -1,9 +1,8 @@
 """
 $(TYPEDEF)
 
-Impose the bounds of an assumed PDF with smooth functions, so that the bounded quantities have continuous
-derivatives of every order in the state and in the coefficients. With `d = a - b` and the smoothing length
-`δ = width × scale`, where `scale` is the magnitude each call site gives for its quantity,
+Impose the bounds of an assumed PDF with smooth functions of smoothing length `width × scale`, so that the bounded
+quantities have continuous derivatives in the state and in the coefficients.
 """
 struct SmoothClipping{FT} <: AbstractSubgridDistributionComponent
     width :: FT

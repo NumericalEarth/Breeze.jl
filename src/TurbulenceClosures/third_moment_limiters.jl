@@ -6,7 +6,8 @@ abstract type AbstractStratificationNumberBound <: AbstractSubgridDistributionCo
 """
 $(TYPEDEF)
 
-In stable stratification the stratification number saturates toward `αᴺᵐᵃˣ`,
+The stratification number of the third-moment diagnosis, saturating in stable air toward `pole_fraction` times its
+first pole along a rational function.
 """
 struct RationalSaturatedStratificationNumber{FT} <: AbstractStratificationNumberBound
     pole_fraction :: FT
@@ -39,8 +40,7 @@ const default_maximum_skewness = 1.2 * sqrt(2)
 """
 $(TYPEDEF)
 
-The third moment saturates toward `±w′³ᵐᵃˣ = ±maximum_skewness (w′²)^{3/2}` along an odd quintic
-polynomial. With `u = (8 / 15) w′³ / w′³ᵐᵃˣ` between `-1` and `1` (the polynomial is the bound beyond),
+The limiter of the third moment: it saturates toward `±maximum_skewness (w′²)^{3/2}` along an odd quintic polynomial.
 """
 struct PolynomialSaturatedSkewness{FT} <: AbstractSkewnessLimiter
     maximum_skewness :: FT

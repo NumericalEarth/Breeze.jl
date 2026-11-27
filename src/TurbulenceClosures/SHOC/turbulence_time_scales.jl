@@ -1,10 +1,9 @@
 """
 $(TYPEDEF)
 
-The return-to-isotropy time scale and eddy diffusivities of E3SM `shoc.F90` (`isotropic_ts`,
-`eddy_diffusivities`, the dissipation of `adv_sgs_tke`) as stability functions of
-[`TKEBasedTurbulenceClosure`](@ref): with `τ₀ = 2 e / ε = 2 ℓ / (𝕊ᴰ √e)` the time scale of the dissipation,
-damped in stable air by the stability of the whole column and in unstable air by the buoyancy frequency,
+The return-to-isotropy time scale and eddy diffusivities of E3SM `shoc.F90` (`isotropic_ts`, `eddy_diffusivities`)
+as stability functions of [`TKEBasedTurbulenceClosure`](@ref): the time scale of the dissipation, damped by the
+stability of the column in stable air and by the buoyancy frequency in unstable air.
 """
 struct ColumnStabilityDamping{FT}
     ℂᵘ :: FT

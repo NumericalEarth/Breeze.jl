@@ -1,9 +1,8 @@
 """
 $(TYPEDEF)
 
-Stability functions of the local diagnosis of the scalar second moments of the [`DoubleGaussian`](@ref)
-of [`TKEBasedTurbulenceClosure`](@ref), in place of the ratio ``𝕊ᶜ / 𝕊ᴰ`` that the diagnosis
-``ℂᵛ τ Kᶜ ∂_z a ∂_z b`` inherits from the time scale ``τ`` and the diffusivity ``Kᶜ``:
+Stability functions of the local diagnosis of the scalar second moments of the [`DoubleGaussian`](@ref):
+``θˡⁱ′² = 𝕊ᵛ₁ ℓ² (∂_z θˡⁱ)²``, ``qᵗ′² = 𝕊ᵛ₂ ℓ² (∂_z qᵗ)²`` and their correlation ``𝕏ᵛ``.
 """
 struct VarianceStabilityFunctions{FT}
     ℂᵛ₁⁻ :: FT
@@ -44,11 +43,8 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Construct [`VarianceStabilityFunctions`](@ref). The defaults reproduce the down-gradient diagnosis of
-the default [`DoubleGaussian`](@ref) with the default [`TurbulentRichardsonStabilityFunction`](@ref):
-``ℂᵛ_i^{-,0,+} = (2 ℂᵛ_i / ℂᵠ) ℂᶜ^{-,0,+} / ℂᴰ^{-,0,+}`` with ``ℂᵛ_i = 1`` and ``ℂᵠ = 1.3``, and the
-perfect correlation ``ℂᵛ₃ = 1``. The variance coefficients must be positive and the correlation
-coefficients within ``[-1, 1]``.
+Construct [`VarianceStabilityFunctions`](@ref). The defaults reproduce the down-gradient diagnosis of the default
+[`DoubleGaussian`](@ref) with the default [`TurbulentRichardsonStabilityFunction`](@ref).
 """
 function VarianceStabilityFunctions(FT::DataType = Oceananigans.defaults.FloatType;
                                     ℂᵛ₁⁻ = 1.5480121696035578, ℂᵛ₁⁰ = 0.6836078066514023, ℂᵛ₁⁺ = 0.3096024339207115,
@@ -63,10 +59,8 @@ variance_time_scale_dissipation(::DissipationTimeScale, sf) = (sf.ℂᴰ⁻, sf.
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The [`VarianceStabilityFunctions`](@ref) that reproduce the down-gradient diagnosis
-``ℂᵛ τ Kᶜ ∂_z a ∂_z b`` of a [`DoubleGaussian`](@ref) with the time scale `time_scale`
-([`DissipationTimeScale`](@ref) or [`EddyTurnoverTimeScale`](@ref)) and the second moments
-`second_moments` ([`DowngradientSecondMoments`](@ref)) in a closure with the stability functions `sf`:
+The [`VarianceStabilityFunctions`](@ref) that reproduce the down-gradient diagnosis ``ℂᵛ τ Kᶜ ∂_z a ∂_z b`` with
+the stability functions `sf`, the `time_scale` and the `second_moments` of a [`DoubleGaussian`](@ref).
 """
 function VarianceStabilityFunctions(sf::TurbulentRichardsonStabilityFunction, time_scale,
                                     second_moments::DowngradientSecondMoments)

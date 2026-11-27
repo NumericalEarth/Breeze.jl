@@ -38,10 +38,8 @@ Adapt.@adapt_structure DoubleGaussianPDF
 """
 $(TYPEDEF)
 
-The double-Gaussian PDF of [`DoubleGaussianPDF`](@ref) (the updraft component of weight `a↑` and the
-downdraft component of weight `a↓ = 1 - a↑`, from the first three moments of vertical velocity)
-with the within-component variances of θˡⁱ and qᵗ shared equally between the components, as for
-vertical velocity:
+The double-Gaussian PDF of [`DoubleGaussianPDF`](@ref) with the within-component variances of θˡⁱ and qᵗ shared
+equally between the two components, as for vertical velocity.
 """
 struct EqualWidthDoubleGaussianPDF{FT, CP} <: AbstractSubgridDistributionComponent
     ℂᵍ₀ :: FT

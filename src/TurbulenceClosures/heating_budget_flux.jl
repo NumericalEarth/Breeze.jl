@@ -2,8 +2,8 @@ using Oceananigans.Fields: AbstractField, interior
 """
 $(TYPEDEF)
 
-A turbulent flux of θˡⁱ that redistributes diabatic heating over the turbulent layer, and its
-energy conversion in the TKE equation of [`TKEBasedTurbulenceClosure`](@ref),
+A turbulent flux of θˡⁱ that redistributes the radiative heating over the turbulent layer, with its energy
+conversion in the TKE equation of [`TKEBasedTurbulenceClosure`](@ref).
 """
 struct HeatingBudgetFlux{FT}
     ℂᑫ :: FT
@@ -12,9 +12,8 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a [`HeatingBudgetFlux`](@ref). By default half of the destabilizing flux is applied (`ℂᑫ = 0.5`),
-the heating is exchanged over eight mixing lengths, the local third moment is not changed (`ℂʷᑫ = 0`),
-and the heating is the radiative heating of the model.
+Return a [`HeatingBudgetFlux`](@ref) that applies the share `ℂᑫ` of the destabilizing flux, with the heating
+exchanged over `ℂᑫᴸ` mixing lengths.
 """
 function HeatingBudgetFlux(FT::DataType = Oceananigans.defaults.FloatType;
                            ℂᑫ = 0.5, ℂᑫᴸ = 8)
@@ -25,9 +24,8 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-The interval of each coefficient of a [`HeatingBudgetFlux`](@ref) for a calibration, as a
-`NamedTuple` of `(lower, upper)`: the share `ℂᑫ` in `[0, 1]`, the exchange length `ℂᑫᴸ` in
-`[1, 32]` mixing lengths and the local third-moment coefficient `ℂʷᑫ` in `[0, 2]`.
+The interval of each coefficient of a [`HeatingBudgetFlux`](@ref) for a calibration, as a `NamedTuple` of
+`(lower, upper)`.
 """
 heating_budget_flux_bounds() = (ℂᑫ = (0.0, 1.0), ℂᑫᴸ = (1.0, 32.0))
 

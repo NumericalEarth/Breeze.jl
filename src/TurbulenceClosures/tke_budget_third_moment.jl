@@ -1,9 +1,8 @@
 """
 $(TYPEDEF)
 
-The third moment of vertical velocity at the cell faces (interpolated to the centers with the other moments of the
-distribution) from the vertical integral of the
-budget of turbulent kinetic energy, with a damped local third moment,
+The third moment of vertical velocity at the cell faces from the vertical integral of the budget of turbulent kinetic
+energy, with a damped local member carried by the latent source of partly cloudy layers.
 """
 struct TKEBudgetThirdMoment{FT} <: AbstractSubgridDistributionComponent
     ℂʷᵉ :: FT
@@ -18,14 +17,7 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Return a [`TKEBudgetThirdMoment`](@ref). The defaults exchange the sink amplitude over eight mixing
-lengths, have a constant ratio and no transport of TKE, and of the damped local third moment only
-the latent source (`ℂʷᵇ = ℂʷᵍ = 0`: the buoyant source `B₊` cannot tell heating from below, carried
-by updrafts, from cooling from above, carried by downdrafts, so the budget fluxes carry that part
-of the third moment; `ℂʷˡ = 8`: the latent source is the heating of the cloudy updrafts of a partly
-cloudy layer, which the budget of the distribution without skewness does not hold). They diagnose
-the third moment once per evaluation of the closure fields, from the budget of the distribution
-without skewness.
+Return a [`TKEBudgetThirdMoment`](@ref).
 """
 function TKEBudgetThirdMoment(FT::DataType = Oceananigans.defaults.FloatType;
                               ℂʷᵉ = 0.12, ℂʷᵋ = 0.34, ℂʷᴸ = 8, ℂʷʳ = 0, ℂʷˡ = 8, ℂʷᴺ = 0, ℂʷᵀ = 0,

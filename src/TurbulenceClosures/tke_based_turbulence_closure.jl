@@ -10,8 +10,8 @@ using Oceananigans.Units: minute
 """
 $(TYPEDEF)
 
-Constant stability functions for [`TKEBasedTurbulenceClosure`](@ref): the mixing lengths for
-momentum, tracers and turbulent kinetic energy are constant multiples of the primary length ``ℓ``,
+Constant stability functions for [`TKEBasedTurbulenceClosure`](@ref): ``ℓᵘ = ℂᵘ ℓ``, ``ℓᶜ = ℂᶜ ℓ``, ``ℓᵉ = ℂᵉ ℓ``
+and ``ε = ℂᴰ e^{3/2} / ℓ``.
 """
 Base.@kwdef struct ConstantStabilityFunctions{FT}
     ℂᵘ :: FT = 0.149
@@ -43,9 +43,8 @@ end
 """
 $(TYPEDEF)
 
-Supertype of the formulations of the primary mixing length ``ℓ`` of [`TKEBasedTurbulenceClosure`](@ref).
-All are built from two lengths: the wall length ``ℂˢ z``, ``ℂˢ`` times the height above the surface,
-and the buoyancy penetration depth
+Supertype of the primary mixing length ``ℓ`` of [`TKEBasedTurbulenceClosure`](@ref), built from the wall length
+``ℂˢ z`` and the buoyancy penetration depth ``\\sqrt{e} / N``.
 """
 abstract type AbstractMixingLength end
 
@@ -71,8 +70,9 @@ end
 """
 $(TYPEDEF)
 
-A gradient-limited mixing length with wall coefficient ``ℂˢ``, interior slope ``ℂⁱ`` and buoyancy-length
-coefficient ``ℂˡᵇ`` ([Gaspar et al. 1990](@cite Gaspar1990)):
+A gradient-limited mixing length ([Gaspar et al. 1990](@cite Gaspar1990)) with wall coefficient ``ℂˢ``, interior
+slope ``ℂⁱ`` and buoyancy-length coefficient ``ℂˡᵇ``:
+``ℓ(z) = \\min(ℂˢ z, \\min_{z′} [ℂˡᵇ \\sqrt{e} / N (z′) + ℂⁱ |z - z′|])``.
 """
 struct GradientLimitedMixingLength{FT} <: AbstractMixingLength
     ℂˢ :: FT  # wall length coefficient
@@ -87,6 +87,8 @@ end
 
 GradientLimitedMixingLength(ℂˢ::Number) = GradientLimitedMixingLength(ℂˢ, ℂˢ)
 GradientLimitedMixingLength(ℂˢ::Number, ℂⁱ::Number) = GradientLimitedMixingLength(promote(ℂˢ, ℂⁱ, one(ℂˢ))...)
+GradientLimitedMixingLength{FT}(ℂˢ) where FT = GradientLimitedMixingLength{FT}(ℂˢ, ℂˢ)
+GradientLimitedMixingLength{FT}(ℂˢ, ℂⁱ) where FT = GradientLimitedMixingLength(convert(FT, ℂˢ), convert(FT, ℂⁱ), one(FT))
 
 Adapt.@adapt_structure LocalMinimumMixingLength
 Adapt.@adapt_structure GradientLimitedMixingLength
@@ -116,8 +118,9 @@ Base.show(io::IO, ml::GradientLimitedMixingLength) =
 """
 $(TYPEDEF)
 
-A vertical eddy-diffusivity closure carrying one prognostic equation for the subgrid turbulent
-kinetic energy ``e``, in the spirit of CATKE ([Wagner et al. 2025](@cite Wagner25catke)):
+A vertical eddy-diffusivity closure with a prognostic turbulent kinetic energy ``e``, in the spirit of CATKE
+([Wagner et al. 2025](@cite Wagner25catke)): ``Kᵘ = 𝕊ᵘ ℓ \\sqrt{e}``, ``Kᶜ = 𝕊ᶜ ℓ \\sqrt{e}``, ``Kᵉ = 𝕊ᵉ ℓ \\sqrt{e}``
+and ``ε = 𝕊ᴰ e^{3/2} / ℓ``.
 """
 struct TKEBasedTurbulenceClosure{TD, ML, SF, SS, FT, SH, SD, HB} <: AbstractScalarDiffusivity{TD, VerticalFormulation, 2}
     mixing_length :: ML                   # the primary mixing length ℓ
@@ -160,13 +163,9 @@ end
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
-Construct a [`TKEBasedTurbulenceClosure`](@ref) with the given time discretization (default
-`VerticallyImplicitTimeDiscretization()`), float type, mixing length, stability functions, static
-stability and numerical parameters. The default stability functions are
-[`TurbulentRichardsonStabilityFunction()`](@ref TurbulentRichardsonStabilityFunction), hand-tuned
-starting values for calibration. The default mixing length has the
-wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} = 1.299067385616381`` of the neutral values of the
-default stability functions (von Kármán's constant 0.4 in the surface layer) and the interior slope of the provisional calibration, 1.5609936948461662.
+Construct a [`TKEBasedTurbulenceClosure`](@ref). The defaults are the calibrated configuration: a
+[`GradientLimitedMixingLength`](@ref), [`TurbulentRichardsonStabilityFunction`](@ref), the [`DoubleGaussian`](@ref)
+subgrid distribution with its latent static stability, and a [`HeatingBudgetFlux`](@ref).
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;

@@ -1,9 +1,8 @@
 """
 $(TYPEDEF)
 
-The vertical transport of the scalar second moments `θˡⁱ′²`, `qᵗ′²` and `θˡⁱ′qᵗ′` of a
-[`DoubleGaussian`](@ref) (`variance_transport`). At each interior face the moments solve the
-steady budget
+The vertical transport of the scalar second moments `θˡⁱ′²`, `qᵗ′²` and `θˡⁱ′qᵗ′` of a [`DoubleGaussian`](@ref),
+diffused with `ℂᵛᵗ Kᶜ` in a steady budget relaxed to the local diagnosis.
 """
 struct ScalarVarianceTransport{FT}
     ℂᵛᵗ :: FT # ratio of the diffusivity of the scalar second moments to Kᶜ

@@ -1,5 +1,17 @@
+"""
+$(TYPEDEF)
+
+Cloud liquid condenses and evaporates at the rate of the grid-mean vapor excess (the default `condensation` of P3).
+"""
 struct GridMeanCondensation end
 
+"""
+$(TYPEDEF)
+
+Cloud liquid condenses at the rate averaged over the subgrid distribution of the vapor excess that `statistics`
+supplies (`supersaturation_statistics`), for instance the closure's own distribution, `TurbulenceClosureStatistics()`.
+`processes` sets which P3 processes read the distribution: [`CloudCondensationOnly`](@ref) or [`AllProcesses`](@ref).
+"""
 struct SubgridCondensation{S, P}
     statistics :: S
     processes :: P
