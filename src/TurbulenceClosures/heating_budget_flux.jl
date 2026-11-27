@@ -10,7 +10,7 @@
 ##### the mean profile has become unstable, and cannot carry it across a stable cloud base at all.
 ##### Here the heating 𝒬 (the tendency of θˡⁱ, K s⁻¹) is redistributed by the same construction as
 ##### the sink of `TKEBudgetThirdMoment`: the heating as the turbulence redistributes it is s = c ω,
-##### with the shape ω = e and an amplitude c exchanged between neighbouring levels over the length
+##### with the shape ω = e (`turbulent_shape`: e₊² / (e₊ + eᵐⁱⁿ), none in still air) and an amplitude c exchanged between neighbouring levels over the length
 ##### Λ = ℂᑫᴸ ℓ, and the flux that does the redistributing is J,
 #####
 #####     (ρJ)ₖ₊½ - (ρJ)ₖ₋½ = ρₖ Δzₖ (𝒬ₖ - sₖ),    (ρJ)½ = 0,
@@ -25,9 +25,17 @@
 #####
 ##### The closure applies the share ℂᑫ of the positive part to the mean state,
 #####
-#####     Jᑫ = ℂᑫ max(J, 0),    ∂t (ρ θˡⁱ) = ... - ∂z (ρ Jᑫ),
+#####     Jᑫ = ℂᑫ J₊,    J₊ = (J + √(J² + δ²)) / 2,    δ = ℓ ε / (ĉᵖ Π),    ∂t (ρ θˡⁱ) = ... - ∂z (ρ Jᑫ),
 #####
-##### (a heating that stabilizes stays where it acts, and the gradient closure sees it), and gives its
+##### (a heating that stabilizes stays where it acts, and the gradient closure sees it). The positive part is smooth,
+##### with the scale δ of a flux of θˡⁱ at the face: the mixing length times the rate ε / (ĉᵖ Π) at which the
+##### dissipation of the turbulence heats the air there, that is 𝕊ᴰ √e times the temperature e / (ĉᵖ Π) that the TKE
+##### is worth. It vanishes with the turbulence, so the flux still vanishes in still air, and it is small beside the
+##### flux of a radiative cooling (ℓ = 100 m and ε = 10⁻³ m² s⁻³ give 10⁻⁴ K m s⁻¹), so J₊ is the positive part
+##### but within that scale of J = 0. A scale built from the gradient of θˡⁱ (√e ℓ |∂z θˡⁱ|, or Kᶜ |∂z θˡⁱ|) would not
+##### do: where J = 0 the smooth part is δ / 2, which would add half the magnitude of the flux down the gradient to
+##### every stratified turbulent face, heated or not. The stored Jᑫ is both what the mean state receives and what is
+##### converted, so the energy closes whatever the scale. The closure gives its
 ##### energy conversion to the TKE equation, whose production is then P + B + G - ε:
 #####
 #####     G = b_θ Jᑫ - (b̄ᶜ - b̄ᵛ) aᴺ c_θ Jᑫ - (b̄ⁱ - b̄ᵛ) ηⁱ c_θⁱ Jᑫ    at the faces, moved to the centers with the half-cell weights.
@@ -42,9 +50,13 @@
 #####
 ##### The distribution receives the total flux of θˡⁱ (w′θˡⁱ′ of the moments includes Jᑫ), and the
 ##### third moment of `TKEBudgetThirdMoment` receives G through P + B. Its damped local member is
-##### signed by origin: Gᑫᶜ, the conversion of the flux that the cooling part min(𝒬, 0) alone would
+##### signed by origin: Gᑫᶜ, the conversion of the flux that the cooling part 𝒬₋ alone would
 ##### drive (with ℂᑫ = 1), is carried by downdrafts, so
-##### the buoyant source of the local member is ℂʷᵇ (B⁺ - Gᶜ) - ℂʷᑫ Gᶜ, Gᶜ = min(Gᑫᶜ, B⁺).
+##### the buoyant source of the local member is ℂʷᵇ (B₊ - Gᶜ) - ℂʷᑫ Gᶜ, Gᶜ = min(Gᑫᶜ, B₊) (a smooth minimum, with the
+##### scale ε). The cooling part is the smooth negative part 𝒬₋ = (𝒬 - √(𝒬² + (ε / (ĉᵖ Π))²)) / 2, with the scale of a
+##### heating rate there: the rate at which the dissipation heats the air. In still air that scale is zero and the
+##### part is min(𝒬, 0), which need not vanish there (the levels of still air do not exchange, so it drives no flux).
+##### The redistributed cooling and the integral of the flux read the same 𝒬₋, so its flux vanishes at the top too.
 ##### With ℂᑫ = 0 nothing is applied and J is a diagnostic that only signs the local member.
 #####
 
@@ -81,12 +93,13 @@ $(TYPEDEF)
 A turbulent flux of θˡⁱ that redistributes diabatic heating over the turbulent layer, and its
 energy conversion in the TKE equation of [`TKEBasedTurbulenceClosure`](@ref),
 
-    (ρJ)ₖ₊½ - (ρJ)ₖ₋½ = ρₖ Δzₖ (𝒬ₖ - sₖ),    Jᑫ = ℂᑫ max(J, 0),    G = (b_θ - (bˡ - bᵛ) aᴺ c_θ) Jᑫ,
+    (ρJ)ₖ₊½ - (ρJ)ₖ₋½ = ρₖ Δzₖ (𝒬ₖ - sₖ),    Jᑫ = ℂᑫ (J + √(J² + δ²)) / 2,    G = (b_θ - (bˡ - bᵛ) aᴺ c_θ) Jᑫ,
 
 where `𝒬` is the heating (the tendency of θˡⁱ of the sources in `heating`) and `s` the heating as
 the turbulence redistributes it: `s = c e` with an amplitude `c` exchanged between neighbouring
 levels over the length `ℂᑫᴸ ℓ` (one tridiagonal solve per column). `J` vanishes at the bottom and
-the top of the column and in still air. The closure applies `-∂z (ρ Jᑫ)` to `ρθ`, and the TKE
+the top of the column and in still air; its positive part is smooth, with the scale `δ = ℓ ε / (ĉᵖ Π)` of the
+dissipation `ε` of the turbulence at the face. The closure applies `-∂z (ρ Jᑫ)` to `ρθ`, and the TKE
 equation receives `ρ G`, the energy the flux takes from the mean state: the production is
 `P + B + G - ε`.
 
@@ -182,13 +195,15 @@ SimplifiedHigherOrderClosures.component_scalar_names(::HeatingBudgetFlux, name) 
 
 #####
 ##### Fields: the heating, the heating as redistributed, the applied flux and its conversions, the flux
-##### and conversion that the cooling alone would drive, and a work array
+##### and conversion that the cooling alone would drive, the rate at which the dissipation heats the air (the scale of
+##### the smooth parts), and a work array
 #####
 
 heating_budget_flux_fields(grid, ::Nothing) = NamedTuple()
 
 heating_budget_flux_fields(grid, ::HeatingBudgetFlux) =
     (𝒬 = CenterField(grid), sᑫ = CenterField(grid), sᑫᶜ = CenterField(grid), heating_work = CenterField(grid),
+     dissipative_heating_rate = CenterField(grid),
      Jᑫ = ZFaceField(grid), Jᑫᶜ = ZFaceField(grid),
      Gᑫ = CenterField(grid), Gᑫᴸ = CenterField(grid), Gᑫᶜ = CenterField(grid))
 
@@ -250,22 +265,32 @@ end
 ##### The redistributed heating and the flux, column by column
 #####
 
-# The cooling part min(𝒬, 0) of a heating, as an array of the centers
-struct CoolingPart{Q}
+# The cooling part of a heating, its smooth negative part with the scale `scale` (an array of the centers), as an array
+# of the centers
+struct CoolingPart{Q, S}
     heating :: Q
+    scale :: S
 end
 
-@inline Base.getindex(c::CoolingPart, i, j, k) = @inbounds min(c.heating[i, j, k], zero(eltype(c.heating)))
+@inline Base.getindex(c::CoolingPart, i, j, k) = @inbounds smooth_negative_part(c.heating[i, j, k], c.scale[i, j, k])
 
-# One thread per column: the redistributed heatings, then ρJ at the faces from the ground,
-# (ρJ)ₖ₊½ = (ρJ)ₖ₋½ + ρ Δz (𝒬 - s), whose positive part over ρ at the face is the flux (times the share ℂᑫ for the
-# applied one). The boundary faces carry none.
-@kernel function _compute_heating_budget_flux!(cl, grid, closure, ℓᵐ, e, ρ)
+# One thread per column: the rate ε / (ĉᵖ Π) at which the dissipation heats the air, the redistributed heatings, then ρJ
+# at the faces from the ground, (ρJ)ₖ₊½ = (ρJ)ₖ₋½ + ρ Δz (𝒬 - s), whose smooth positive part over ρ at the face is the
+# flux (times the share ℂᑫ for the applied one), with the scale ℓ ε / (ĉᵖ Π) of the face. The boundary faces carry none.
+@kernel function _compute_heating_budget_flux!(cl, grid, closure, closure_fields, e, velocities, ρ)
     i, j = @index(Global, NTuple)
-    hb = getclosure(i, j, closure).heating_budget_flux
+    closure_ij = getclosure(i, j, closure)
+    hb = closure_ij.heating_budget_flux
+    ℓᵐ = closure_fields.ℓᵐ
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
-    exchange_amplitudes!(cl.sᑫ, cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, NonNegativePart(e), cl.𝒬, CoolingPart(cl.𝒬), ρ, ℓᵐ)
+    rate = cl.dissipative_heating_rate
+    @inbounds for k in 1:Nz
+        rate[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields) / cl.ĉᵖΠ[i, j, k]
+    end
+    cooling = CoolingPart(cl.𝒬, rate)
+    exchange_amplitudes!(cl.sᑫ, cl.sᑫᶜ, cl.heating_work, i, j, grid, hb.ℂᑫᴸ, TurbulentShape(e, closure_ij.minimum_tke),
+                         cl.𝒬, cooling, ρ, ℓᵐ)
     below = zero(FT)
     belowᶜ = zero(FT)
     @inbounds begin
@@ -273,12 +298,12 @@ end
         cl.Jᑫᶜ[i, j, 1] = zero(FT)
         for k in 1:Nz
             ρΔz = ρ[i, j, k] * Δzᶜᶜᶜ(i, j, k, grid)
-            heating = cl.𝒬[i, j, k]
-            below += ρΔz * (heating - cl.sᑫ[i, j, k])
-            belowᶜ += ρΔz * (min(heating, zero(FT)) - cl.sᑫᶜ[i, j, k])
+            below += ρΔz * (cl.𝒬[i, j, k] - cl.sᑫ[i, j, k])
+            belowᶜ += ρΔz * (cooling[i, j, k] - cl.sᑫᶜ[i, j, k])
             ρᶠ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
-            cl.Jᑫ[i, j, k+1] = ifelse(k < Nz, hb.ℂᑫ * max(below, zero(FT)) / ρᶠ, zero(FT))
-            cl.Jᑫᶜ[i, j, k+1] = ifelse(k < Nz, max(belowᶜ, zero(FT)) / ρᶠ, zero(FT))
+            δ = ℓᵐ[i, j, k+1] * (rate[i, j, k] + rate[i, j, min(k + 1, Nz)]) / 2
+            cl.Jᑫ[i, j, k+1] = ifelse(k < Nz, hb.ℂᑫ * smooth_positive_part(below / ρᶠ, δ), zero(FT))
+            cl.Jᑫᶜ[i, j, k+1] = ifelse(k < Nz, smooth_positive_part(belowᶜ / ρᶠ, δ), zero(FT))
         end
     end
 end
@@ -292,8 +317,8 @@ function compute_heating_budget_flux!(fields, hb::HeatingBudgetFlux, closure_fie
     cl = fields.cloud
     fill!(parent(cl.𝒬), 0)
     add_diabatic_heating!(cl.𝒬, hb.heating, model, fields)
-    launch!(grid.architecture, grid, :xy, _compute_heating_budget_flux!, cl, grid, closure, closure_fields.ℓᵐ,
-            tracers[TKE_NAME], total_density(model.dynamics))
+    launch!(grid.architecture, grid, :xy, _compute_heating_budget_flux!, cl, grid, closure, closure_fields,
+            tracers[TKE_NAME], model.velocities, total_density(model.dynamics))
     return nothing
 end
 
@@ -345,9 +370,10 @@ end
 @inline applied_heating_flux(cl, i, j, k) = stored_or_zero(cl, Val(:Jᑫ), i, j, k, eltype(cl.w′²))
 @inline cooling_flux_conversion(cl, i, j, k) = stored_or_zero(cl, Val(:Gᑫᶜ), i, j, k, eltype(cl.B))
 
-# ℂʷᑫ of the closure at a column; zero without the flux
-@inline cooling_third_moment_coefficient(::Nothing, FT) = zero(FT)
-@inline cooling_third_moment_coefficient(hb::HeatingBudgetFlux, FT) = convert(FT, hb.ℂʷᑫ)
+# The conversion of the flux that the cooling drives with its coefficient ℂʷᑫ in the damped local third moment;
+# `nothing` without a heating budget flux
+@inline cooling_conversion(::Nothing, Gᑫᶜ) = nothing
+@inline cooling_conversion(hb::HeatingBudgetFlux, Gᑫᶜ) = (Gᑫᶜ, hb.ℂʷᑫ)
 
 #####
 ##### The flux in the stage tendency of ρθ, with the draw of the latent part of its conversion on the internal energy

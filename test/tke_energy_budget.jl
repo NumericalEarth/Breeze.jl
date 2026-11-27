@@ -563,11 +563,32 @@ end
     @test J[1] == 0 && J[Nz+1] == 0 && Jᶜ[1] == 0 && Jᶜ[Nz+1] == 0
     @test all(≥(0), J) && all(≥(0), Jᶜ)
 
-    # cooling above and warming below both drive an upward flux; it is the share ℂᑫ of the positive part of the
-    # integral of ρ (𝒬 - s), and it is applied below the cooled cells, which export their cooling
+    # cooling above and warming below both drive an upward flux; it is the share ℂᑫ of the smooth positive part of the
+    # integral of ρ (𝒬 - s) over ρ, with the scale δ = ℓ ε / (ĉᵖ Π) of the face, and it is applied below the cooled cells,
+    # which export their cooling
     ρᶠ = [(ρ[k] + ρ[k-1]) / 2 for k in 2:Nz]
     ρJ = cumsum(ρ .* Δzᶜ .* (𝒬 .- s))[1:Nz-1]
-    @test J[2:Nz] ≈ hb.ℂᑫ .* max.(ρJ, 0) ./ ρᶠ rtol=1e4ϵ atol=1e4ϵ * maximum(J)
+    rate = Float64.(budget_column(cl.dissipative_heating_rate))
+    ℓᵐ = Float64.(budget_column(model.closure_fields.ℓᵐ))
+    δ = [ℓᵐ[k] * (rate[k] + rate[k-1]) / 2 for k in 2:Nz]
+    @test all(>(0), δ)
+    smooth_part(x, δ) = (x + sqrt(x^2 + δ^2)) / 2
+    # (with a distribution the flux is formed with the mixing length of the prognostic state, before the solve of the
+    # static stability, which the closure fields no longer hold: the scale is recomputed here without one)
+    same_mixing_length = isnothing(model.closure.subgrid_distribution)
+    same_mixing_length && @test J[2:Nz] ≈ hb.ℂᑫ .* smooth_part.(ρJ ./ ρᶠ, δ) rtol=1e4ϵ atol=1e4ϵ * maximum(J)
+    # the scale is small beside the flux: the smooth part is the positive part to a hundredth of the largest flux
+    excess = J[2:Nz] .- hb.ℂᑫ .* max.(ρJ, 0) ./ ρᶠ
+    @test all(≥(-1e4ϵ * maximum(J)), excess) && maximum(excess) < 1e-2 * maximum(J)
+    same_mixing_length && @test maximum(excess) ≤ hb.ℂᑫ * maximum(δ) / 2 * (1 + 1e4ϵ)
+    # the cooling part is the smooth negative part of the heating with the scale of the dissipative heating rate, and
+    # its redistribution conserves it
+    cooling = (𝒬 .- sqrt.(𝒬 .^ 2 .+ rate .^ 2)) ./ 2
+    sᶜ = Float64.(budget_column(cl.sᑫᶜ))
+    @test abs(sum(ρ .* Δzᶜ .* (cooling .- sᶜ))) ≤ 100ϵ * sum(ρ .* Δzᶜ .* (abs.(cooling) .+ abs.(sᶜ)))
+    ρJᶜ = cumsum(ρ .* Δzᶜ .* (cooling .- sᶜ))[1:Nz-1]
+    same_mixing_length && @test Jᶜ[2:Nz] ≈ smooth_part.(ρJᶜ ./ ρᶠ, δ) rtol=1e4ϵ atol=1e4ϵ * maximum(Jᶜ)
+    @test all(≥(-1e4ϵ * maximum(Jᶜ)), Jᶜ[2:Nz] .- max.(ρJᶜ, 0) ./ ρᶠ)
     @test maximum(J) > 1e-3 # K m s⁻¹: a tenth of the 100 m × 5 K h⁻¹ of the cooling is 1.4e-2
     zᶠ = znodes(model.grid, Face())
     @test 300 < zᶠ[argmax(J)] ≤ 1100 # within the cooled cells or below them

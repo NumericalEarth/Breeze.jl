@@ -7,7 +7,8 @@
 #####
 ##### In a turbulent layer near steady state the total water changes at the rate the turbulence spreads over the layer,
 ##### and the flux carries the rest of its non-turbulent tendency 𝒬ᵠ (forcing, microphysics, sedimentation, and the
-##### surface flux, which enters the lowest cell): with the redistributed tendency sᵠ = c ω, of the shape ω = e and an
+##### surface flux, which enters the lowest cell): with the redistributed tendency sᵠ = c ω, of the shape ω = e
+##### (`turbulent_shape`: e₊² / (e₊ + eᵐⁱⁿ), none in still air) and an
 ##### amplitude c exchanged between neighbouring levels over the length Λ = ℂᵇᴸ ℓ, the flux Jᵠ that does the
 ##### redistributing is
 #####
@@ -297,10 +298,11 @@ carried_fields(::Val{true}, cl) = (; cl.𝒬ᵠᵐ)
 # over ρ at the face and times the share ℂᵇᵠ for the applied flux. The boundary faces carry none.
 @kernel function _compute_total_water_budget_flux!(cl, grid, closure, ℓᵐ, e, ρ)
     i, j = @index(Global, NTuple)
-    sb = getclosure(i, j, closure).total_water_budget_flux
+    closure_ij = getclosure(i, j, closure)
+    sb = closure_ij.total_water_budget_flux
     FT = grid_float_type(grid)
     Nz = size(grid, 3)
-    exchange_amplitudes!(cl.sᵠ, nothing, cl.budget_work, i, j, grid, sb.ℂᵇᴸ, NonNegativePart(e), cl.𝒬ᵠ, nothing, ρ, ℓᵐ)
+    exchange_amplitudes!(cl.sᵠ, nothing, cl.budget_work, i, j, grid, sb.ℂᵇᴸ, TurbulentShape(e, closure_ij.minimum_tke), cl.𝒬ᵠ, nothing, ρ, ℓᵐ)
     below = zero(FT)
     @inbounds begin
         cl.Jᵠ[i, j, 1] = zero(FT)

@@ -7,7 +7,7 @@
 ##### Large-eddy simulations give w′³ ≈ r w′e′ with r ≈ 1.5, and the
 ##### flux of TKE is what the TKE budget leaves over: ∂z (ρ F) = ρ (P + B - u), with P + B the shear
 ##### and buoyancy production the TKE equation receives and u a sink. The model takes the sink as
-##### u = c ω with a shape ω that vanishes with e (ω = e, one turnover rate; ω = ε, the closure's
+##### u = c ω with a shape ω that vanishes with e (ω = e, one turnover rate, as `turbulent_shape` forms it; ω = ε, the closure's
 ##### dissipation) and an amplitude c fixed by the budget, so that F vanishes at the ground and at
 ##### the top of the column and wherever the turbulence does. No depth of a turbulent layer is
 ##### diagnosed.
@@ -26,16 +26,22 @@
 ##### The damped local third moment is added to the flux members: the two sources of the stationary
 ##### budget of w′³, ∂t w′³ = 3 w′²b′ - 3 w′² ∂z w′² - w′³ / τ₃ + ..., relaxed over τ₃ = ℓ / √e,
 #####
-#####     w′³_local = τ₃ (√e (ℂʷᵇ B⁺ + ℂʷˡ (1 - aᶜ) Bˡ⁺) - ℂʷᵍ w′² ∂z w′²) / D,    D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ),    αᴺ = τ₃² N².
+#####     w′³_local = τ₃ (√e (ℂʷᵇ B₊ + ℂʷˡ (1 - aᶜ) Bˡ₊) - ℂʷᵍ w′² ∂z w′²) / D,    D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ),    αᴺ = τ₃² N².
 #####
-##### √e B⁺ stands for the buoyant source w′²b′ (the buoyancy flux carried at the turbulent velocity; it
+##### The positive parts are smooth: x₊ = (x + √(x² + δ²)) / 2 = δ smooth_positive_part(x / δ), with a scale δ of the
+##### dimension of x from the same place. B₊ has the scale of the dissipation ε = 𝕊ᴰ e^{3/2} / ℓ, the other term of the
+##### budget that B belongs to; Bˡ₊ has the scale aᶜ ε, the dissipation in the cloudy part of the cell, which carries the
+##### flux of liquid, so that the latent source vanishes in clear air (aᶜ = 0) as it does in saturated air. Both vanish
+##### where the turbulence does.
+#####
+##### √e B₊ stands for the buoyant source w′²b′ (the buoyancy flux carried at the turbulent velocity; it
 ##### is not closed with w′³), and D ≥ 1 for the feedback of the stratification on the third moment:
 ##### solving the coupled budgets of w′³, w′²θ′ and w′θ′² exactly gives a determinant that is 1 + c αᴺ to
 ##### first order and vanishes at finite αᴺ (the poles of `AlgebraicThirdMoment`); D keeps the damping
 ##### of stable air, αᴺ > 0, and neither amplifies nor vanishes in unstable air. δ is the width in αᴺ over
 ##### which D passes from one to 1 + ℂʷᴺ αᴺ.
 #####
-##### The latent source, ℂʷˡ √e (1 - aᶜ) Bˡ⁺, is the part of w′²b′ that condensation makes. The buoyancy is linear in
+##### The latent source, ℂʷˡ √e (1 - aᶜ) Bˡ₊, is the part of w′²b′ that condensation makes. The buoyancy is linear in
 ##### θˡⁱ and qᵗ but for the liquid, b′ = b_θ θ′ + b_q qᵗ′ + (b_qˡ - b_qᵛ) qˡ′, and the liquid is one-sided,
 ##### qˡ = max(s, 0) with s the saturation excess. For w and s jointly Gaussian with correlation ρ, spread σₛ and
 ##### t = s̄ / σₛ, the triple moments of the linear part vanish and
@@ -75,14 +81,15 @@ The third moment of vertical velocity at the cell faces (interpolated to the cen
 distribution) from the vertical integral of the
 budget of turbulent kinetic energy, with a damped local third moment,
 
-    w′³ = r (ℂʷᵉ Fᵉ + ℂʷᵋ Fᵋ) + τ₃ (√e (ℂʷᵇ B⁺ + ℂʷˡ (1 - aᶜ) Bˡ⁺) - ℂʷᵍ w′² ∂z w′²) / D,
+    w′³ = r (ℂʷᵉ Fᵉ + ℂʷᵋ Fᵋ) + τ₃ (√e (ℂʷᵇ B₊ + ℂʷˡ (1 - aᶜ) Bˡ₊) - ℂʷᵍ w′² ∂z w′²) / D,
     Fʸ(z) = (1 / ρ) ∫₀ᶻ ρ (P + B - uʸ) dz′,    uʸ = cʸ ωʸ,    ωᵉ = e,    ωᵋ = ε = 𝕊ᴰ e^{3/2} / ℓ,
     τ₃ = ℓ / √e,    αᴺ = τ₃² N²,    D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ),    r = 1 + ℂʷʳ αᴺ / (1 + |αᴺ|),
 
 where `P + B` is the shear and buoyancy production the TKE equation receives (the conversions of the
-fluxes the closure applies), `B⁺ = max(B, 0)` (a buoyancy sink makes no skewness of its own), `aᶜ` the cloud fraction and
-`Bˡ⁺ = max(Bˡ, 0)` the part of the buoyancy flux that the liquid flux carries, `Bˡ = (b_qˡ - b_qᵛ) w′qˡ′`,
-both of the distribution without skewness,
+fluxes the closure applies), `B₊ = (B + √(B² + ε²)) / 2` its smooth positive part with the scale of the dissipation
+`ε` there (a buoyancy sink makes little skewness of its own), `aᶜ` the cloud fraction and
+`Bˡ₊ = (Bˡ + √(Bˡ² + (aᶜ ε)²)) / 2` the smooth positive part, with the scale `aᶜ ε`, of the part of the buoyancy flux that
+the liquid flux carries, `Bˡ = (b_qˡ - b_qᵛ) w′qˡ′`, both of the distribution without skewness,
 `ℓ` the closure's mixing length and `αᴺ` the stratification number at the face (`|ℂʷʳ| < 1`
 keeps `r` positive).
 
@@ -94,8 +101,8 @@ the TKE equation is steady it is the flux `-Kᵉ ∂z e` the closure applies to 
 with one turnover rate for the column. `ℂʷᵀ > 0` adds `ℂʷᵀ Fᵉ` to the flux of TKE in the TKE equation.
 
 The damped local third moment holds the two sources of the stationary budget of `w′³`, the buoyant
-one as `√e B⁺` and the gradient production `-w′² ∂z w′²`, relaxed over `τ₃`. The latent source
-`√e (1 - aᶜ) Bˡ⁺` is the part of the buoyant source `w′²b′` that condensation makes in a partly cloudy
+one as `√e B₊` and the gradient production `-w′² ∂z w′²`, relaxed over `τ₃`. The latent source
+`√e (1 - aᶜ) Bˡ₊` is the part of the buoyant source `w′²b′` that condensation makes in a partly cloudy
 layer, where the cloudy air is the fastest-rising tail of the distribution and is the only air
 heated; it vanishes in saturated air (`aᶜ = 1`) and in clear air (`Bˡ = 0`), and it is positive in a
 layer of cumulus, whose net buoyancy flux without skewness is negative. The damping `D ≥ 1`
@@ -129,9 +136,9 @@ struct TKEBudgetThirdMoment{N, FT, L, A} <: SimplifiedHigherOrderClosures.Abstra
     ℂʷᴸ :: FT
     "Amplitude of the dependence of the ratio `r` on the stratification number, in (-1, 1)"
     ℂʷʳ :: FT
-    "Coefficient of the buoyant source `√e B⁺` of the damped local third moment"
+    "Coefficient of the buoyant source `√e B₊` of the damped local third moment"
     ℂʷᵇ :: FT
-    "Coefficient of the latent source `√e (1 - aᶜ) Bˡ⁺` of the damped local third moment"
+    "Coefficient of the latent source `√e (1 - aᶜ) Bˡ₊` of the damped local third moment"
     ℂʷˡ :: FT
     "Coefficient of the gradient production `-w′² ∂z w′²` of the damped local third moment"
     ℂʷᵍ :: FT
@@ -159,7 +166,7 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a [`TKEBudgetThirdMoment`](@ref). The defaults exchange the sink amplitude over eight mixing
 lengths, have a constant ratio and no transport of TKE, and of the damped local third moment only
-the latent source (`ℂʷᵇ = ℂʷᵍ = 0`: the buoyant source `B⁺` cannot tell heating from below, carried
+the latent source (`ℂʷᵇ = ℂʷᵍ = 0`: the buoyant source `B₊` cannot tell heating from below, carried
 by updrafts, from cooling from above, carried by downdrafts, so the budget fluxes carry that part
 of the third moment; `ℂʷˡ = 8`: the latent source is the heating of the cloudy updrafts of a partly
 cloudy layer, which the budget of the distribution without skewness does not hold). They diagnose
@@ -213,13 +220,14 @@ third_moment_location_field(grid, ::Center) = CenterField(grid)
 const TKEBudgetDistribution = DoubleGaussian{<:Any, <:Any, <:TKEBudgetThirdMoment}
 
 #####
-##### Fields: the two sinks, the two fluxes, the third moment before its limiter, the transport tendency of TKE and a work array
+##### Fields: the two sinks, the two fluxes, the dissipation, the third moment before its limiter, the transport tendency of
+##### TKE and a work array
 #####
 
 third_moment_fields(grid, third_moment) = NamedTuple()
 
 third_moment_fields(grid, tm::TKEBudgetThirdMoment) =
-    (Fᵉ = CenterField(grid), Fᵋ = CenterField(grid), uᵉ = CenterField(grid), uᵋ = CenterField(grid),
+    (Fᵉ = CenterField(grid), Fᵋ = CenterField(grid), uᵉ = CenterField(grid), uᵋ = CenterField(grid), ε = CenterField(grid),
      w′³ᵇ = third_moment_location_field(grid, tm.location), Tᵉ = CenterField(grid), budget_work = CenterField(grid),
      NamedTuple(pass_name(name) => ZFaceField(grid) for name in PASS_CLOSURE_FIELD_NAMES)...)
 
@@ -265,12 +273,25 @@ end
     return 2 * ℑzᵃᵃᶠ(i, j, k, grid, ρ) * Λ * Λ / Δzᶜᶜᶠ(i, j, k, grid)
 end
 
-# The non-negative part max(x, 0) of an array of the centers and the sum of two, as arrays of the centers
-struct NonNegativePart{X}
-    x :: X
+# The shape e of a sink or of a redistributed source, from the TKE e of a cell (which transport can leave negative) and
+# the TKE eᵐⁱⁿ that the closure gives still air (`minimum_tke`): e₊² / (e₊ + eᵐⁱⁿ), with e₊ the positive part of e. It
+# is zero, with zero slope, where e ≤ 0, so that still air has no shape (the levels of still air do not exchange and
+# no flux reaches them, whatever eᵐⁱⁿ); it is e²/eᵐⁱⁿ below eᵐⁱⁿ and e - eᵐⁱⁿ far above. The smooth positive part
+# (e + √(e² + eᵐⁱⁿ²)) / 2 would not do here: it is eᵐⁱⁿ / 2 in still air, and the redistribution reads the shape, not
+# its magnitude, so still air would exchange as uniformly weak turbulence does.
+@inline function turbulent_shape(e, eᵐⁱⁿ)
+    turbulent = e > 0
+    e₊ = ifelse(turbulent, e, one(e))
+    return ifelse(turbulent, e₊ * (e₊ / (e₊ + eᵐⁱⁿ)), zero(e))
 end
 
-@inline Base.getindex(p::NonNegativePart, i, j, k) = @inbounds max(p.x[i, j, k], zero(eltype(p.x)))
+# The shape of an array of the centers and the sum of two arrays, as arrays of the centers
+struct TurbulentShape{X, S}
+    e :: X
+    minimum_tke :: S
+end
+
+@inline Base.getindex(shape::TurbulentShape, i, j, k) = @inbounds turbulent_shape(shape.e[i, j, k], shape.minimum_tke)
 
 struct SumOfArrays{A, B}
     a :: A
@@ -383,16 +404,38 @@ end
     return ifelse(x >= 0, (x + s) / 2, 1 / (2 * (s - x)))
 end
 
+# x₊ = δ smooth_positive_part(x / δ) = (x + √(x² + δ²)) / 2 with the scale δ ≥ 0 of x, written without the division: it
+# is max(x, 0) where δ = 0, δ / 2 at x = 0, and x + δ² / (4x) and δ² / (4|x|) far on either side. The negative part
+# and the minimum of two numbers follow from it: x₋ = -(-x)₊ and min(a, b) = b - (b - a)₊, which is symmetric,
+# (a + b - √((a - b)² + δ²)) / 2.
+@inline function smooth_positive_part(x, δ)
+    s = sqrt(x * x + δ * δ)
+    return ifelse(x >= 0, (x + s) / 2, δ * δ / (2 * (s - x)))
+end
+
+@inline smooth_negative_part(x, δ) = -smooth_positive_part(-x, δ)
+@inline smooth_minimum(a, b, δ) = b - smooth_positive_part(b - a, δ)
+
 # D = 1 + ℂʷᴺ δ smooth_positive_part(αᴺ / δ) ≥ 1: one in unstable air, 1 + ℂʷᴺ αᴺ in stable air, with slope in (0, ℂʷᴺ)
 @inline stratification_damping(ℂʷᴺ, δ, αᴺ) = 1 + ℂʷᴺ * δ * smooth_positive_part(αᴺ / δ)
 
-# τ₃ (ℂʷᵇ √e B⁺ - ℂʷᵍ w′² ∂z w′²) / D at the interior face k; w′² ∂z w′² = ∂z (w′²)² / 2 is differenced across the
-# face, between the centers k - 1 and k (compact, as `shoc.F90` differences center quantities for its interface
-# third moment). With a `HeatingBudgetFlux` the buoyant source is signed by origin: of B⁺, the part
-# Gᶜ = min(Gᑫᶜ, B⁺) that the flux driven by cooling converts is carried by downdrafts, and the source is
-# ℂʷᵇ (B⁺ - Gᶜ) - ℂʷᑫ Gᶜ.
-@inline damped_local_third_moment(i, j, k, grid, tm, w′², τ, u, αᴺ, B, Gᑫᶜ = zero(B), ℂʷᑫ = zero(B), latent_source = zero(B)) =
-    damped_local_third_moment(tm.location, i, j, k, grid, tm, w′², τ, u, αᴺ, B, Gᑫᶜ, ℂʷᑫ, latent_source)
+# τ₃ (√e (ℂʷᵇ B₊ + ℂʷˡ L) - ℂʷᵍ w′² ∂z w′²) / D at the `location` k, with the latent source L = (1 - aᶜ) Bˡ₊ given;
+# w′² ∂z w′² = ∂z (w′²)² / 2 is differenced across the face, between the centers k - 1 and k (compact, as `shoc.F90`
+# differences center quantities for its interface third moment). `ε` is the dissipation there, the scale of the smooth
+# positive part B₊ and of the smooth minimum. With a `HeatingBudgetFlux` the buoyant source is signed by origin
+# (`cooling = (Gᑫᶜ, ℂʷᑫ)`, `nothing` without one): of B₊, the part Gᶜ = min(Gᑫᶜ, B₊) that the flux driven by cooling
+# converts is carried by downdrafts, and the source is ℂʷᵇ (B₊ - Gᶜ) - ℂʷᑫ Gᶜ.
+@inline buoyant_source(::Nothing, ℂʷᵇ, B₊, ε) = ℂʷᵇ * B₊
+
+@inline function buoyant_source(cooling::Tuple, ℂʷᵇ, B₊, ε)
+    Gᑫᶜ, ℂʷᑫ = cooling
+    Gᶜ = smooth_minimum(Gᑫᶜ, B₊, ε)
+    return ℂʷᵇ * (B₊ - Gᶜ) - ℂʷᑫ * Gᶜ
+end
+
+# The latent source (1 - aᶜ) Bˡ₊ at the center k, with the scale aᶜ ε of the positive part of Bˡ: none in clear air
+@inline latent_sourceᶜᶜᶜ(i, j, k, cl) =
+    @inbounds (1 - cl.aᶜ[i, j, k]) * smooth_positive_part(cl.Bˡ[i, j, k], cl.aᶜ[i, j, k] * cl.ε[i, j, k])
 
 # At the face k: (w′²)² differenced across the face, between the centers k - 1 and k
 @inline function local_variance_gradient(::Face, i, j, k, grid, w′²)
@@ -413,12 +456,11 @@ end
     return ifelse(kᵘ > kˡ, (w′²ᵘ * w′²ᵘ - w′²ˡ * w′²ˡ) / (2 * Δz), zero(Δz))
 end
 
-@inline function damped_local_third_moment(location, i, j, k, grid, tm, w′², τ, u, αᴺ, B, Gᑫᶜ, ℂʷᑫ, latent_source)
+@inline function damped_local_third_moment(location, i, j, k, grid, tm, w′², τ, u, αᴺ, B, ε, cooling, latent_source)
     w′²∂zw′² = local_variance_gradient(location, i, j, k, grid, w′²)
-    B⁺ = max(0, B)
-    Gᶜ = min(Gᑫᶜ, B⁺)
-    buoyant_source = tm.ℂʷᵇ * (B⁺ - Gᶜ) - ℂʷᑫ * Gᶜ + tm.ℂʷˡ * latent_source
-    return τ * (u * buoyant_source - tm.ℂʷᵍ * w′²∂zw′²) / stratification_damping(tm.ℂʷᴺ, tm.stratification_damping_width, αᴺ)
+    B₊ = smooth_positive_part(B, ε)
+    source = buoyant_source(cooling, tm.ℂʷᵇ, B₊, ε) + tm.ℂʷˡ * latent_source
+    return τ * (u * source - tm.ℂʷᵍ * w′²∂zw′²) / stratification_damping(tm.ℂʷᴺ, tm.stratification_damping_width, αᴺ)
 end
 
 #####
@@ -430,11 +472,14 @@ end
     closure_ij = getclosure(i, j, closure)
     tm = closure_ij.subgrid_distribution.third_moment
     ℓᵐ = closure_fields.ℓᵐ
+    eᵐⁱⁿ = closure_ij.minimum_tke
     @inbounds for k in 1:size(grid, 3)
-        # With ℂʷᵒ > 0 the shape reaches one cell above the turbulence (the overshoot); the cell below the first is none
-        e⁻ = ifelse(k > 1, max(e[i, j, max(k - 1, 1)], zero(grid_float_type(grid))), zero(grid_float_type(grid)))
-        cl.uᵉ[i, j, k] = max(e[i, j, k], zero(grid_float_type(grid))) + tm.ℂʷᵒ * e⁻
-        cl.uᵋ[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
+        # The shape e (`turbulent_shape`: none where e ≤ 0). With ℂʷᵒ > 0 the shape reaches one cell above the turbulence
+        # (the overshoot); the cell below the first is none
+        e⁻ = ifelse(k > 1, turbulent_shape(e[i, j, max(k - 1, 1)], eᵐⁱⁿ), zero(grid_float_type(grid)))
+        cl.uᵉ[i, j, k] = turbulent_shape(e[i, j, k], eᵐⁱⁿ) + tm.ℂʷᵒ * e⁻
+        cl.ε[i, j, k] = dissipationᶜᶜᶜ(i, j, k, grid, closure_ij, e, velocities, closure_fields)
+        cl.uᵋ[i, j, k] = cl.ε[i, j, k]
     end
     balance_sink!(cl.uᵉ, cl.budget_work, i, j, grid, tm.sink_amplitude, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
     balance_sink!(cl.uᵋ, cl.budget_work, i, j, grid, tm.sink_amplitude, tm.ℂʷᴸ, cl, ρ, ℓᵐ)
@@ -490,12 +535,13 @@ end
         τ = ℓ / u
         αᴺ = τ * τ * N²[i, j, k]
         r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
-        ℂʷᑫ = cooling_third_moment_coefficient(closure_ij.heating_budget_flux, grid_float_type(grid))
         B = (cl.B[i, j, k] + cl.B[i, j, k-1]) / 2
+        ε = (cl.ε[i, j, k] + cl.ε[i, j, k-1]) / 2
         Gᑫᶜ = (cooling_flux_conversion(cl, i, j, k) + cooling_flux_conversion(cl, i, j, k-1)) / 2
-        latent = ((1 - cl.aᶜ[i, j, k]) * max(cl.Bˡ[i, j, k], 0) + (1 - cl.aᶜ[i, j, k-1]) * max(cl.Bˡ[i, j, k-1], 0)) / 2
+        cooling = cooling_conversion(closure_ij.heating_budget_flux, Gᑫᶜ)
+        latent = (latent_sourceᶜᶜᶜ(i, j, k, cl) + latent_sourceᶜᶜᶜ(i, j, k-1, cl)) / 2
         cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * ρFᵉ + tm.ℂʷᵋ * ρFᵋ) / ρᶠ +
-                           damped_local_third_moment(Face(), i, j, k, grid, tm, cl.w′², τ, u, αᴺ, B, Gᑫᶜ, ℂʷᑫ, latent)
+                           damped_local_third_moment(Face(), i, j, k, grid, tm, cl.w′², τ, u, αᴺ, B, ε, cooling, latent)
     end
     return nothing
 end
@@ -512,11 +558,10 @@ end
         τ = ℓ / u
         αᴺ = τ * τ * (N²[i, j, k] + N²[i, j, k+1]) / 2
         r = 1 + tm.ℂʷʳ * αᴺ / (1 + abs(αᴺ))
-        ℂʷᑫ = cooling_third_moment_coefficient(closure_ij.heating_budget_flux, grid_float_type(grid))
+        cooling = cooling_conversion(closure_ij.heating_budget_flux, cooling_flux_conversion(cl, i, j, k))
         cl.w′³ᵇ[i, j, k] = r * (tm.ℂʷᵉ * Fᵉ + tm.ℂʷᵋ * Fᵋ) +
                            damped_local_third_moment(Center(), i, j, k, grid, tm, cl.w′², τ, u, αᴺ, cl.B[i, j, k],
-                                                     cooling_flux_conversion(cl, i, j, k), ℂʷᑫ,
-                                                     (1 - cl.aᶜ[i, j, k]) * max(cl.Bˡ[i, j, k], 0))
+                                                     cl.ε[i, j, k], cooling, latent_sourceᶜᶜᶜ(i, j, k, cl))
     end
     return nothing
 end

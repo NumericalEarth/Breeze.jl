@@ -8,7 +8,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 #####
 
 using Breeze
-using Breeze.TurbulenceClosures: closure_parameters, with_parameters, damped_local_third_moment, stratification_damping, smooth_positive_part
+using Breeze.TurbulenceClosures: closure_parameters, with_parameters, damped_local_third_moment, stratification_damping, smooth_positive_part,
+                                 smooth_negative_part, smooth_minimum
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: limit_third_moment
 
 using Oceananigans
@@ -130,6 +131,22 @@ end
     @test smooth_positive_part(50.0) ≈ (50 + sqrt(2501)) / 2 rtol = 1e-14
     @test smooth_positive_part(-800.0) > 0
     @test smooth_positive_part(-800.0) ≈ 1 / 3200 rtol = 1e-5
+    # With a scale δ: δ smooth_positive_part(x / δ), the positive part itself where δ = 0, in either precision
+    for FT in (Float64, Float32), x in FT.((-3, -1e-3, 0, 1e-3, 3)), δ in FT.((1e-4, 0.5, 20))
+        @test smooth_positive_part(x, δ) isa FT
+        @test smooth_positive_part(x, δ) ≈ δ * smooth_positive_part(x / δ) rtol = 100eps(FT)
+        @test smooth_positive_part(x, zero(FT)) == max(x, 0)
+        @test smooth_positive_part(x, δ) >= max(x, 0) && smooth_positive_part(x, δ) > 0
+        @test smooth_negative_part(x, δ) == -smooth_positive_part(-x, δ)
+        @test smooth_positive_part(x, δ) + smooth_negative_part(x, δ) ≈ x atol = 10eps(FT) * (abs(x) + δ)
+        for y in FT.((-2, 0, 1))
+            rounding = 10eps(FT) * (abs(x) + abs(y) + δ)
+            @test smooth_minimum(x, y, zero(FT)) ≈ min(x, y) atol = rounding
+            @test smooth_minimum(x, y, δ) ≈ smooth_minimum(y, x, δ) atol = rounding
+            @test min(x, y) - δ / 2 - rounding <= smooth_minimum(x, y, δ) <= min(x, y) + rounding
+        end
+    end
+    @test isfinite(smooth_positive_part(0.0, 0.0)) && isfinite(smooth_positive_part(-1.0, 0.0))
 
     # On a column with w′² rising and then falling: bounded by the undamped member at every stratification
     # number, of the sign of the buoyant source where w′² is uniform, and of the sign opposite to ∂z w′² without one
@@ -139,19 +156,37 @@ end
     damped = TKEBudgetThirdMoment(ℂʷᵇ = 0.6, ℂʷᵍ = 0.5, ℂʷᴺ = 4)
     undamped = TKEBudgetThirdMoment(ℂʷᵇ = 0.6, ℂʷᵍ = 0.5, ℂʷᴺ = 0)
     τ, u = 300.0, 0.5
-    for k in 1:8, B in (-1e-3, 0.0, 2e-3), αᴺ in (-1e8, -2.0, 0.0, 1.0, 1e8)
-        local_moment = damped_local_third_moment(1, 1, k, grid, damped, w′², τ, u, αᴺ, B)
-        reference = damped_local_third_moment(1, 1, k, grid, undamped, w′², τ, u, αᴺ, B)
+    for k in 2:8, B in (-1e-3, 0.0, 2e-3), αᴺ in (-1e8, -2.0, 0.0, 1.0, 1e8), ε in (0.0, 5e-4)
+        local_moment = damped_local_third_moment(Face(), 1, 1, k, grid, damped, w′², τ, u, αᴺ, B, ε, nothing, 0.0)
+        reference = damped_local_third_moment(Face(), 1, 1, k, grid, undamped, w′², τ, u, αᴺ, B, ε, nothing, 0.0)
         @test isfinite(local_moment)
         @test abs(local_moment) <= abs(reference)
         @test sign(local_moment) == sign(reference)
     end
     gradient_only = TKEBudgetThirdMoment(ℂʷᵇ = 0, ℂʷᵍ = 1, ℂʷᴺ = 1)
-    @test damped_local_third_moment(1, 1, 2, grid, gradient_only, w′², τ, u, 0.3, 1e-3) < 0 # w′² rises with height
-    @test damped_local_third_moment(1, 1, 7, grid, gradient_only, w′², τ, u, 0.3, 1e-3) > 0 # w′² falls with height
+    ε = 5e-4
+    @test damped_local_third_moment(Face(), 1, 1, 2, grid, gradient_only, w′², τ, u, 0.3, 1e-3, ε, nothing, 0.0) < 0 # w′² rises with height
+    @test damped_local_third_moment(Face(), 1, 1, 7, grid, gradient_only, w′², τ, u, 0.3, 1e-3, ε, nothing, 0.0) > 0 # w′² falls with height
     buoyant_only = TKEBudgetThirdMoment(ℂʷᵇ = 1, ℂʷᵍ = 0, ℂʷᴺ = 1)
-    @test damped_local_third_moment(1, 1, 3, grid, buoyant_only, w′², τ, u, -0.3, 1e-3) > 0
-    @test damped_local_third_moment(1, 1, 3, grid, buoyant_only, w′², τ, u, 0.3, -1e-3) == 0 # a buoyancy sink is no source
+    buoyant(B, ε, cooling = nothing) = damped_local_third_moment(Face(), 1, 1, 3, grid, buoyant_only, w′², τ, u, 0.3, B, ε, cooling, 0.0)
+    D = stratification_damping(1.0, 1.0, 0.3)
+    @test damped_local_third_moment(Face(), 1, 1, 3, grid, buoyant_only, w′², τ, u, -0.3, 1e-3, ε, nothing, 0.0) > 0
+    # the buoyant source is the smooth positive part of B with the scale of the dissipation: a buoyancy sink is a
+    # source below that scale, and none where there is no dissipation
+    @test buoyant(-1e-3, 0.0) == 0
+    @test buoyant(2e-3, 0.0) == τ * u * 2e-3 / D
+    for B in (-1e-3, 0.0, 2e-3)
+        @test buoyant(B, ε) ≈ τ * u * (B + sqrt(B^2 + ε^2)) / 2 / D rtol = 1e-13
+    end
+    @test 0 < buoyant(-1e-3, ε) < buoyant(0.0, ε) == τ * u * ε / 2 / D
+    # signed by origin with a heating budget flux: of B₊, the part min(Gᑫᶜ, B₊) (a smooth minimum) is carried by downdrafts
+    ℂʷᑫ = 0.7
+    for B in (-1e-3, 2e-3), Gᑫᶜ in (0.0, 5e-4, 5e-3)
+        B₊ = smooth_positive_part(B, ε)
+        Gᶜ = smooth_minimum(Gᑫᶜ, B₊, ε)
+        @test buoyant(B, ε, (Gᑫᶜ, ℂʷᑫ)) ≈ τ * u * (B₊ - Gᶜ - ℂʷᑫ * Gᶜ) / D rtol = 1e-13
+    end
+    @test buoyant(2e-3, 0.0, (5e-4, ℂʷᑫ)) ≈ τ * u * (2e-3 - 5e-4 - ℂʷᑫ * 5e-4) / D rtol = 1e-13
 
     # Through the limiter the skewness is strictly inside the bound whatever the coefficients
     model, ρ, Δz = budget_third_moment_column(TKEBudgetThirdMoment(ℂʷᵇ = 50, ℂʷᵍ = 50, ℂʷᴺ = 0); skewness = TanhSaturatedSkewness(maximum_skewness = 1.5))
@@ -175,14 +210,15 @@ end
     for ℂʷᴺ in (0, 2)
         latent = TKEBudgetThirdMoment(; ℂʷˡ = 3, ℂʷᴺ)
         D = stratification_damping(latent.ℂʷᴺ, latent.stratification_damping_width, αᴺ)
-        @test damped_local_third_moment(1, 1, 4, grid, latent, w′², τ, u, αᴺ, -1e-3, 0.0, 0.0, source) ≈ 3 * τ * u * source / D rtol = 1e-14
-        @test damped_local_third_moment(1, 1, 4, grid, latent, w′², τ, u, αᴺ, -1e-3, 0.0, 0.0, 0.0) == 0
-        @test damped_local_third_moment(1, 1, 4, grid, TKEBudgetThirdMoment(; ℂʷˡ = 0, ℂʷᴺ), w′², τ, u, αᴺ, -1e-3, 0.0, 0.0, source) == 0
+        @test damped_local_third_moment(Face(), 1, 1, 4, grid, latent, w′², τ, u, αᴺ, -1e-3, 0.0, nothing, source) ≈ 3 * τ * u * source / D rtol = 1e-14
+        @test damped_local_third_moment(Face(), 1, 1, 4, grid, latent, w′², τ, u, αᴺ, -1e-3, 0.0, nothing, 0.0) == 0
+        @test damped_local_third_moment(Face(), 1, 1, 4, grid, TKEBudgetThirdMoment(; ℂʷˡ = 0, ℂʷᴺ), w′², τ, u, αᴺ, -1e-3, 0.0, nothing, source) == 0
     end
 
     # In a column with a partly cloudy layer. The third moment is diagnosed from the distribution without skewness, which
     # is the distribution of the same column with no third moment at all: with the latent source alone,
-    # w′³ = ℂʷˡ ℓ (1 - aᶜ) max(Bˡ, 0) of that distribution, before the limiter.
+    # w′³ = ℂʷˡ ℓ (1 - aᶜ) Bˡ₊ of that distribution, before the limiter, with Bˡ₊ the smooth positive part of Bˡ with the
+    # scale aᶜ ε of the dissipation in the cloudy part of the cell.
     moist(model) = set!(model; qᵗ = z -> 1e-3 * (z < 520 ? 17.6 - z * 0.7 / 520 : z < 1480 ? 16.9 - (z - 520) * 5.0 / 960 : max(4.2, 11.9 - (z - 1480) * 7.7 / 520)))
     ℂʷˡ = 3
     unskewed, _, _ = budget_third_moment_column(TKEBudgetThirdMoment(ℂʷᵉ = 0, ℂʷᵋ = 0, ℂʷˡ = 0))
@@ -197,17 +233,18 @@ end
     @test length(partly_cloudy) >= 3
     # w′³ᵇ lives at the faces: the source of the two centers next to the face, averaged, times ℓ of the face
     ℓᵐ = Array(interior(unskewed.closure_fields.ℓᵐ))[1, 1, :]
-    L = (1 .- aᶜ) .* max.(Bˡ, 0)
+    ε = column(cl₀.ε)
+    @test all(ε .>= 0) && maximum(ε) > 0
+    L = (1 .- aᶜ) .* (Bˡ .+ sqrt.(Bˡ .^ 2 .+ (aᶜ .* ε) .^ 2)) ./ 2
     Nz = length(aᶜ)
     expected = [k == 1 || k == Nz + 1 ? 0.0 : ℂʷˡ * ℓᵐ[k] * (L[k] + L[k-1]) / 2 for k in 1:Nz+1]
     w′³ᵇ = column(cl.w′³ᵇ)
     @test w′³ᵇ ≈ expected rtol = 1e-10
     @test all(w′³ᵇ .>= 0)
     @test all(k -> w′³ᵇ[k] > 0 && w′³ᵇ[k+1] > 0, partly_cloudy)
-    @test count(Bˡ .<= 0) >= 3
-    no_source = [k for k in 2:Nz if Bˡ[k] <= 0 && Bˡ[k-1] <= 0]
-    @test !isempty(no_source)
-    @test all(w′³ᵇ[no_source] .== 0) # no upward flux of liquid, no latent source
+    clear = [k for k in 2:Nz if aᶜ[k] == 0 && aᶜ[k-1] == 0 && Bˡ[k] <= 0 && Bˡ[k-1] <= 0]
+    @test !isempty(clear)
+    @test all(w′³ᵇ[clear] .== 0) # no cloud and no upward flux of liquid, no latent source
     # The skewness of the distribution the stage uses is positive in the partly cloudy layer and inside the bound
     Sk = column(cl.w′³) ./ column(cl.w′²) .^ 1.5
     @test all(Sk[partly_cloudy] .> 0)

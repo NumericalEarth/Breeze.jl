@@ -1104,13 +1104,17 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The dissipation rate ``ε = 𝕊ᴰ e^{3/2} / ℓ`` at cell centers, from the specific turbulent kinetic
 energy field `e`, the velocities and the closure fields, whose stored ``ℓ`` and ``N²`` it reads;
 a diagnostic, evaluated in a `KernelFunctionOperation` at (Center, Center, Center) to compare the
-closure's TKE budget with a large-eddy simulation's. Negative ``e`` dissipates nothing.
+closure's TKE budget with a large-eddy simulation's. The power ``e^{3/2}`` is that of positive ``e``: zero or
+negative ``e`` dissipates nothing, whatever the mixing length there (which vanishes with ``e`` where
+`minimum_tke = 0`).
 """
 @inline function dissipationᶜᶜᶜ(i, j, k, grid, closure, e, velocities, closure_fields)
-    eᵢ = max(0, @inbounds e[i, j, k])
+    eᵢ = @inbounds e[i, j, k]
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
     𝕊ᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
-    return 𝕊ᴰ * eᵢ * sqrt(eᵢ) / ℓ
+    turbulent = eᵢ > 0
+    e₊ = ifelse(turbulent, eᵢ, one(eᵢ))
+    return ifelse(turbulent, 𝕊ᴰ * e₊ * sqrt(e₊) / ℓ, zero(eᵢ))
 end
 
 """
