@@ -31,8 +31,9 @@
 # rates are (`compute_p3_process_rates`): that budget would cap them again.
 #
 # Activation relaxes the droplet number toward the activated number over the activation time
-# scale in the same way, with the seed mass of the activated droplets. Its target is capped by
-# the aerosol available, so it asks for no more than the reservoir holds.
+# scale, with the seed mass of the activated droplets, as a third channel of the same relaxation:
+# its share of the decaying excess is ωᵃ / (εˡ + εʳ + ωᵃ). Its target is capped by the aerosol
+# available, so it asks for no more than the reservoir holds.
 #
 # Ice deposition, the liquid coating of ice and ice nucleation are left to the explicit rates and
 # their caps in `limit_ice_vapor_rates`. Where ice shares the vapor, the liquid and ice exchange
@@ -178,26 +179,36 @@ so the relaxation keeps its bounds.
     rain_excess = vapor_excess / ξˡ
     saturation_excess = vapor_excess + ξˡ * max(0, c̃)
     cloud_excess = liquid_equilibrium_condensate(Γ, saturation_excess, ξˡ) - c̃
-    cloud_rate, rain_rate = AM.shared_excess_relaxation_rates((cloud_excess, rain_excess),
-                                                              (cloud_relaxation, rain_relaxation), Δt)
+    # Activation relaxes toward its own target (`implicit_cloud_droplet_activation`) at its own
+    # rate ωᵃ, drawing on the same vapor excess as cloud growth and rain: activation, cloud and
+    # rain are channels of one backward-Euler relaxation of the vapor, which decays over the
+    # stage as x⁺ = x / (1 + Δt (εᶜˡ + εʳ + ωᵃ)). Each channel takes ωᵢ xᵢ / (1 + Δt Σω) of its own
+    # excess, so that together they do not carry the vapor past saturation for any stage interval.
+    # Activation alone over the stage is ωᵃ xᵃ / (1 + Δt ωᵃ); the shared decay replaces its
+    # denominator. A channel that does not act (no supersaturation, or no seed to add) does not
+    # slow the others.
+    activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
+                                                   qᵛ⁺ˡ + vapor_excess, qᵛ⁺ˡ, ξˡ, T, ρ)
+    ωᵃ = ifelse(activation.mass > 0, activation.relaxation, zero(FT))
+    shared_decay = 1 + Δt * (cloud_relaxation + rain_relaxation + ωᵃ)
+    cloud_rate = cloud_relaxation * cloud_excess / shared_decay
+    rain_rate = rain_relaxation * rain_excess / shared_decay
+    activation_share = (1 + Δt * ωᵃ) / shared_decay
+    activation = (; mass = activation.mass * activation_share, number = activation.number * activation_share)
 
     # Tiny rain in subsaturated air: the backstop of the explicit rates (no target)
     tiny_rain = subsaturated & (ℳ.qʳ < parameters.tiny_mass_evaporation_threshold)
     rain_cond = ifelse(tiny_rain, zero(FT), max(0, rain_rate))
     rain_evap = ifelse(tiny_rain, max(0, ℳ.qʳ) / τ, max(0, -rain_rate))
 
-    activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
-                                                   qᵛ⁺ˡ + vapor_excess, qᵛ⁺ˡ, ξˡ, T, ρ)
-
     # Diffusional growth and the seed mass of activation draw on one vapor: the vapor the stage
     # starts with plus what every other tendency adds or removes over the stage, `Δt Gᵛ`. Where
     # they ask for more of it together, they are scaled together, so that the vapor stays
-    # non-negative and activation is not left with what growth spares. The limit is the vapor,
-    # not its excess over saturation: each relaxation already targets saturation, and growth
-    # and activation may still remove vapor where the grid mean is subsaturated (growth on the
-    # subgrid correlation Γ, the refill of a negative cloud remainder, the seed of activation).
-    # The seed mass and the number take the same fraction, which keeps the size of the
-    # activated droplets.
+    # non-negative. It is the only limit: the shared relaxation above already keeps them from
+    # passing saturation, and growth and activation may still remove vapor where the grid mean is
+    # subsaturated (growth on the subgrid correlation Γ, the refill of a negative cloud
+    # remainder, the seed of activation). The seed mass and the number take the same fraction,
+    # which keeps the size of the activated droplets.
     available_vapor = max(0, qᵛ + stage.Δqᵛ + Δt * stage.Gᵛ)
     growth = max(0, cloud_rate) + rain_cond
     shared_fraction = sink_limiting_factor(growth + activation.mass, available_vapor, Δt)
@@ -231,7 +242,7 @@ end
     mass = max(0, AM.implicit_relaxation_rate(c̃, target, 1 / τ, Δt))
     S = (qᵛ - qᵛ⁺ˡ) / max(qᵛ⁺ˡ, parameters.floors.saturation_mass_fraction)
     supersaturated = S > parameters.activation_supersaturation_threshold
-    return (; mass = ifelse(supersaturated, mass, zero(FT)), number = zero(FT))
+    return (; mass = ifelse(supersaturated, mass, zero(FT)), number = zero(FT), relaxation = 1 / τ)
 end
 
 @inline activation_pool(aerosol::AerosolActivation{<:Any, false}, nᵃ) = sum_aerosol_number(aerosol)
@@ -249,5 +260,5 @@ end
     seed_mass = 4 * FT(π) / 3 * aerosol.liquid_water_density * aerosol.activated_droplet_radius^3
     supersaturated = S > aerosol.activation_supersaturation_threshold
     number = ifelse(supersaturated, number, zero(FT))
-    return (; mass = number * seed_mass, number)
+    return (; mass = number * seed_mass, number, relaxation = 1 / aerosol.activation_timescale)
 end
