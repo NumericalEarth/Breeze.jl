@@ -59,6 +59,10 @@ end
     @test all(name -> name ∈ names, (:ℂʷᵉ, :ℂʷᵋ, :ℂʷᴸ, :ℂʷʳ, :ℂʷᵇ, :ℂʷˡ, :ℂʷᵍ, :ℂʷᴺ, :ℂʷᵀ))
     @test allunique(names)
     @test with_parameters(model.closure; ℂʷᵉ = 0.2).subgrid_distribution.third_moment.ℂʷᵉ == 0.2
+    # The amplitude of the sinks is chosen with ℂʷᴸ at construction: a replacement that needs the other is an error
+    @test_throws ArgumentError with_parameters(model.closure; ℂʷᴸ = isfinite(ℂʷᴸ) ? Inf : 4.0)
+    @test with_parameters(model.closure; ℂʷᴸ = isfinite(ℂʷᴸ) ? 4.0 : Inf).subgrid_distribution.third_moment.sink_amplitude ==
+          model.closure.subgrid_distribution.third_moment.sink_amplitude
     for n in 1:120
         time_step!(model, 10)
     end

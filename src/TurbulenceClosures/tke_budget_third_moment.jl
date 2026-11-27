@@ -202,7 +202,27 @@ end
 # The number of passes is a type parameter, so that the loop over them is unrolled when traced
 third_moment_passes(::TKEBudgetThirdMoment{N}) where N = N
 
-SimplifiedHigherOrderClosures.component_constructor(::Type{<:TKEBudgetThirdMoment{N}}) where N = TKEBudgetThirdMoment{N}
+# The amplitude of the sinks is chosen by the constructor from ℂʷᴸ; a rebuild (`with_parameters`) that replaces ℂʷᴸ
+# keeps it, so a replacement that would need the other amplitude is an error (an exchange over Λ = Inf ℓ gives NaN,
+# and a finite ℂʷᴸ would be ignored by the amplitude of the column). Traced scalars are not checked.
+SimplifiedHigherOrderClosures.component_constructor(::Type{<:TKEBudgetThirdMoment{N}}) where N =
+    (args...) -> validate_sink_amplitude(TKEBudgetThirdMoment{N}(args...))
+
+function validate_sink_amplitude(tm::TKEBudgetThirdMoment)
+    validate_sink_amplitude(tm.sink_amplitude, tm.ℂʷᴸ)
+    return tm
+end
+
+validate_sink_amplitude(amplitude, ℂʷᴸ) = nothing
+
+validate_sink_amplitude(::ExchangedSinkAmplitude, ℂʷᴸ::AbstractFloat) =
+    isfinite(ℂʷᴸ) || throw(ArgumentError("ℂʷᴸ = $(ℂʷᴸ) replaces the finite exchange length of a TKEBudgetThirdMoment " *
+                                         "that exchanges its sink amplitude; construct it with ℂʷᴸ = Inf for one " *
+                                         "amplitude per column."))
+
+validate_sink_amplitude(::ColumnSinkAmplitude, ℂʷᴸ::AbstractFloat) =
+    isinf(ℂʷᴸ) || throw(ArgumentError("ℂʷᴸ = $(ℂʷᴸ) replaces Inf in a TKEBudgetThirdMoment with one sink amplitude " *
+                                      "per column; construct it with a finite ℂʷᴸ to exchange the amplitude."))
 
 # The scalars are adapted one by one and the location passes through unchanged, so that the adapted closure infers
 # (inside a kernel, `getclosure` adapts the closure of each column)
