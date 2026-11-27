@@ -186,7 +186,7 @@ end
     T = temperature(𝒰ᵃ, constants)
     qᵛ⁺ˡ = saturation_specific_humidity(T, density(𝒰ᵃ, constants), constants, PlanarLiquidSurface())
     initial = qᵛ - qᵛ⁺ˡ
-    forcing = external_vapor_excess_forcing(qᵛ⁺ˡ, vaporization_latent_heat(constants, T), T,
+    forcing = external_vapor_excess_forcing(qᵛ⁺ˡ, PlanarLiquidSurface(), T,
                                             air_pressure(𝒰ᵃ, constants), inputs.temperature_tendency,
                                             inputs.pressure_tendency, constants)
     return ρ * ifelse(known, (final - initial) / Δt + forcing, rates.prognostic_vapor_excess_tendency)

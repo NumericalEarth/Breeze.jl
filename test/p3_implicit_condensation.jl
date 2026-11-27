@@ -350,7 +350,8 @@ end
     end
     𝒰 = cell_state(vapor, 0.0, constants)
     saturation = saturation_specific_humidity(285.0, density(𝒰, constants), constants, PlanarLiquidSurface())
-    ξˡ = PPP.p3_liquid_psychrometric_correction(saturation, 285.0, constants)
+    # The psychrometric correction of the relaxation's vapor excess (`implicit_liquid_vapor_rates`)
+    ξˡ = PPP.liquid_psychrometric_correction(constants, PPP.vaporization_latent_heat(constants, 285.0), saturation, 285.0)
     Δt = 1e4
     r = stage_rates(p3, vapor, 0.0, constants, Δt; qʳ = 1e-3, nʳ = 1e6)
     @test r.rain_condensation > 0
