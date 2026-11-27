@@ -268,74 +268,41 @@ third moment is
 
     w′³ᵐᵃˣ = maximum_skewness (w′²)^{3/2}
 
-The default, `1.2 √2 ≈ 1.697`, is the bound of E3SM `shoc.F90`, which writes it
-`w3clip √(2 (w′²)³)` with `w3clip = 1.2`.
+The default of [`PolynomialSaturatedSkewness`](@ref), `1.2 √2 ≈ 1.697`, is the bound of E3SM `shoc.F90`, which writes
+it `w3clip √(2 (w′²)³)` with `w3clip = 1.2`.
 """
 abstract type AbstractSkewnessLimiter <: AbstractSubgridDistributionComponent end
 
 # The largest skewness of E3SM `shoc.F90`: `w3clip √2` with `w3clip = 1.2`
 const default_maximum_skewness = 1.2 * sqrt(2)
 
-# The largest magnitude of the third moment; `variance` is w′² interpolated to the interface
+# The largest magnitude of the third moment, from the vertical velocity variance where the moment is limited: zero,
+# with zero slope, where the variance is not positive
 @inline third_moment_bound(skewness::AbstractSkewnessLimiter, variance) =
-    skewness.maximum_skewness * (variance * sqrt(variance))
-
-"""
-$(TYPEDEF)
-
-A third moment whose magnitude exceeds the bound `maximum_skewness (w′²)^{3/2}` is reset to the
-constant `reset_third_moment`, whatever its sign; a third moment within the bound is unchanged.
-This is `clipping_diag_third_shoc_moments` of E3SM `shoc.F90`. The third moment jumps where it
-crosses the bound: from `±w′³ᵐᵃˣ` to `+reset_third_moment`.
-
-$(TYPEDFIELDS)
-"""
-struct ResetAboveThresholdSkewness{FT} <: AbstractSkewnessLimiter
-    "Largest magnitude of the skewness `w′³ / (w′²)^{3/2}` (`w3clip √2` of `shoc.F90`)"
-    maximum_skewness :: FT
-    "The value a third moment beyond the bound is reset to, m³ s⁻³ (`w3clipdef` of `shoc.F90`); dimensional"
-    reset_third_moment :: FT
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return `ResetAboveThresholdSkewness{FT}` with the values of E3SM `shoc.F90`:
-`maximum_skewness = 1.2 √2` and `reset_third_moment = 0.02` m³ s⁻³. Every field is a keyword
-argument.
-"""
-ResetAboveThresholdSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(ResetAboveThresholdSkewness, FT,
-                            (maximum_skewness = default_maximum_skewness, reset_third_moment = 0.02), kw)
-
-Adapt.@adapt_structure ResetAboveThresholdSkewness
-
-@inline function limit_third_moment(skewness::ResetAboveThresholdSkewness, variance, w′³)
-    bound = third_moment_bound(skewness, variance)
-    return ifelse(abs(w′³) > bound, skewness.reset_third_moment, w′³)
-end
+    skewness.maximum_skewness * (variance * zero_safe_sqrt(variance))
 
 """
 $(TYPEDEF)
 
 The third moment saturates toward `±w′³ᵐᵃˣ = ±maximum_skewness (w′²)^{3/2}` along an odd quintic
-polynomial. With `u = (8 / 15) w′³ / w′³ᵐᵃˣ` limited to `[-1, 1]`,
+polynomial. With `u = (8 / 15) w′³ / w′³ᵐᵃˣ` between `-1` and `1` (the polynomial is the bound beyond),
 
-    w′³ ← (15 / 8) w′³ᵐᵃˣ u (1 - (2/3) u² + (1/5) u⁴)
+    w′³ ← w′³ᵐᵃˣ P(u),    P(u) = u (15 - 10 u² + 3 u⁴) / 8 = sign(u) [1 - (1 - |u|)³ (8 + 9 |u| + 3 u²) / 8]
 
 which
 
-- is odd, so the sign of the third moment is kept, and increasing: its slope is `(1 - u²)²`;
+- is odd, so the sign of the third moment is kept, and increasing: the slope of `w′³ᵐᵃˣ P` in `w′³` is `(1 - u²)²`;
 - has slope one at zero: a third moment at a tenth of the bound is changed by 0.2 %, at half
   the bound by 4.6 %, at the bound by 17 %;
 - reaches the bound exactly at `|w′³| = (15 / 8) w′³ᵐᵃˣ` with zero slope and zero curvature, and is
   the bound beyond, so that value, first and second derivative are continuous everywhere;
 - costs one division and no transcendental function.
 
-The numbers `15/8`, `2/3` and `1/5` are fixed by those conditions, not fitted. The slope with
-respect to the diagnosed third moment is nonzero up to 1.875 times the bound, which covers the
-threshold at which [`ResetAboveThresholdSkewness`](@ref) jumps. The bound is taken as zero where
-the vertical velocity variance is not positive, and its square root is guarded there.
+The numbers `15`, `10`, `3` and `8` are fixed by those conditions, not fitted. The second form of `P` is one minus a
+product of factors that are not negative, so `|P| ≤ 1` and the limited third moment is within the bound in floating
+point too; it is the form evaluated where `|u| > 1/2`, and the first form, which keeps the relative precision of a
+small third moment, where `|u| ≤ 1/2` (there `|P| ≤ 0.8`). The bound is zero where the vertical velocity variance is
+not positive.
 
 $(TYPEDFIELDS)
 """
@@ -355,10 +322,14 @@ PolynomialSaturatedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw..
 
 Adapt.@adapt_structure PolynomialSaturatedSkewness
 
-# The bound with a guarded square root: zero, with zero slope, where the variance is not positive
-@inline function third_moment_bound(skewness::PolynomialSaturatedSkewness, variance)
-    variance = max(variance, zero(variance))
-    return skewness.maximum_skewness * (variance * zero_safe_sqrt(variance))
+# P(u) = u (15 - 10 u² + 3 u⁴) / 8 for |u| ≤ 1, in the form that cannot exceed one where it is close to one
+@inline function saturating_quintic(u)
+    FT = typeof(u)
+    u² = u * u
+    direct = u * (15 - u² * (10 - 3 * u²)) / 8
+    v = 1 - abs(u)
+    complement = v * v * v * (8 + 9 * abs(u) + 3 * u²) / 8
+    return ifelse(abs(u) > convert(FT, 1//2), sign(u) * (1 - complement), direct)
 end
 
 @inline function limit_third_moment(skewness::PolynomialSaturatedSkewness, variance, w′³)
@@ -366,12 +337,9 @@ end
     bound = third_moment_bound(skewness, variance)
     reach = (convert(FT, 15) / 8) * bound # the magnitude at which the bound is reached
     bounded = reach > 0
-    u = max(-one(FT), min(one(FT), w′³ / ifelse(bounded, reach, one(FT))))
-    u² = u * u
-    saturated = reach * u * (1 - u² * (convert(FT, 2) / 3 - u² / 5))
-    # The polynomial is the bound at |u| = 1 but for round-off, which the hard bound removes
-    saturated = max(-bound, min(bound, saturated))
-    return ifelse(bounded, saturated, zero(FT))
+    # The polynomial on [-1, 1]; beyond, the bound itself (P(±1) = ±1, with zero slope and curvature)
+    u = clamp(w′³ / ifelse(bounded, reach, one(FT)), -one(FT), one(FT))
+    return ifelse(bounded, bound * saturating_quintic(u), zero(FT))
 end
 
 """
@@ -411,38 +379,7 @@ Adapt.@adapt_structure TanhSaturatedSkewness
 
 @inline function limit_third_moment(skewness::TanhSaturatedSkewness, variance, w′³)
     FT = typeof(w′³)
-    variance = max(variance, zero(variance))
-    bound = skewness.maximum_skewness * (variance * zero_safe_sqrt(variance))
+    bound = third_moment_bound(skewness, variance)
     bounded = bound > 0
     return ifelse(bounded, bound * tanh(w′³ / ifelse(bounded, bound, one(FT))), zero(FT))
-end
-
-"""
-$(TYPEDEF)
-
-A third moment beyond the bound `b = maximum_skewness (w′²)^{3/2}` is set to the bound of its
-sign: `w′³ ← max(-b, min(b, w′³))`. Continuous, with a kink at the bound; [`PolynomialSaturatedSkewness`](@ref)
-and [`TanhSaturatedSkewness`](@ref) bound it smoothly.
-
-$(TYPEDFIELDS)
-"""
-struct ClampedSkewness{FT} <: AbstractSkewnessLimiter
-    "Largest magnitude of the skewness `w′³ / (w′²)^{3/2}` (`w3clip √2` of `shoc.F90`)"
-    maximum_skewness :: FT
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return `ClampedSkewness{FT}` with the bound of E3SM `shoc.F90`, `maximum_skewness = 1.2 √2`.
-"""
-ClampedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(ClampedSkewness, FT, (; maximum_skewness = default_maximum_skewness), kw)
-
-Adapt.@adapt_structure ClampedSkewness
-
-# The bound is positive: the interface variance it is made of is floored
-@inline function limit_third_moment(skewness::ClampedSkewness, variance, w′³)
-    bound = third_moment_bound(skewness, variance)
-    return max(-bound, min(bound, w′³))
 end

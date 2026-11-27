@@ -5,26 +5,26 @@
 """
 $(TYPEDEF)
 
-The Analytic Double Gaussian 1 of [`DoubleGaussianPDF`](@ref) with every switch of E3SM
-`shoc.F90` replaced by a regularization that has the switch's limit, so that the cloud fraction,
+The Analytic Double Gaussian 1 of [`DoubleGaussianPDF`](@ref) with the tolerances of E3SM
+`shoc.F90` as regularizations added to the variances, so that the cloud fraction,
 the liquid water and the buoyancy flux are smooth functions of the moments and of the
-coefficients:
+coefficients where a variance vanishes too:
 
-| `DoubleGaussianPDF` | `SmoothDoubleGaussianPDF` |
+| `shoc.F90` | `SmoothDoubleGaussianPDF` |
 |:--------------------|:--------------------------|
 | calm, `w′² ≤ vertical_velocity_tolerance²`: no skewness, equal components at the mean | skewness `w′³ / (w′² + vertical_velocity_tolerance²)^{3/2}`, which vanishes with `w′²`; the components collapse onto the mean as `√w′²` |
 | `√θˡⁱ′²` and `√qᵗ′²` floored at their tolerance | `√(variance + tolerance²)` |
 | uniform, variance ≤ tolerance²: components at the mean, no width | component separation scaled by `variance / √(variance + tolerance²)`; the widths vanish with the variance |
 | within-component variance from a ratio that is `0 / 0` where the component means coincide, set to zero there | the same ratio with the common factor cancelled, which tends to one |
-| skewness of total water ramping linearly between the component separations `ℂᵍ₃` and `ℂᵍ₄` | a cubic smooth step over the same interval |
 | within-component correlation zero where the components have no width | covariance over the product of the widths plus a tenth of the product of the tolerances |
 | saturation deficit of no spread: all or nothing | spread `√(variance + minimum_saturation_spread²)`, the error function everywhere |
 | no liquid where its mean is not positive | the mean of the positive part of a Gaussian, which is positive |
 
 The bounds of the updraft fraction, the correlations and the variance ratio go through the `clipping`
-policy of the PDF (`SmoothClipping()` by default), as in `DoubleGaussianPDF`. Where the variances are well above their tolerances and the
-components well apart the two agree closely; in calm or nearly uniform air this PDF keeps the Gaussian
-spread that `shoc.F90` drops.
+of the PDF ([`SmoothClipping`](@ref)), as in `DoubleGaussianPDF`, and the skewness of total water rises with the
+separation of its components as it does there. Where the variances are well above their tolerances the two agree
+closely; where a variance is near its tolerance `DoubleGaussianPDF` is the PDF of `shoc.F90` down to the tolerance
+(a smooth maximum), and this PDF differs from it by the fraction `tolerance² / variance`.
 
 $(TYPEDFIELDS)
 """
@@ -43,8 +43,6 @@ struct SmoothDoubleGaussianPDF{FT, CP} <: AbstractSubgridDistributionComponent
     total_water_tolerance :: FT
     "Standard deviation of vertical velocity that regularizes its vanishing, m s⁻¹"
     vertical_velocity_tolerance :: FT
-    "Lowest liquid water temperature of a component, K"
-    minimum_liquid_water_temperature :: FT
     "Lowest weight of the updraft component (literal `0.01`)"
     minimum_updraft_fraction :: FT
     "Highest weight of the updraft component (literal `0.99`)"
@@ -57,7 +55,7 @@ struct SmoothDoubleGaussianPDF{FT, CP} <: AbstractSubgridDistributionComponent
     component_width_floor :: FT
     "Regularization of the within-component correlation of θˡⁱ and qᵗ: the fraction of `potential_temperature_tolerance × total_water_tolerance` added to the product of the widths"
     correlation_regularization :: FT
-    "How the bounds are imposed: [`HardClipping`](@ref) or [`SmoothClipping`](@ref)"
+    "How the bounds are imposed: [`SmoothClipping`](@ref)"
     clipping :: CP
 end
 
@@ -65,13 +63,13 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Return a `SmoothDoubleGaussianPDF` with the coefficients and tolerances of E3SM `shoc.F90`, its bounds
-imposed smoothly by default. Every field is a keyword argument.
+imposed by `clipping`. Every field is a keyword argument.
 """
 SmoothDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; clipping = SmoothClipping(FT), kw...) =
     component_from_keywords(SmoothDoubleGaussianPDF, FT,
                             (ℂᵍ₁ = 0.4, ℂᵍ₂ = 1.2, ℂᵍ₃ = 0.2, ℂᵍ₄ = 0.4,
                              potential_temperature_tolerance = 1e-2, total_water_tolerance = 1e-4,
-                             vertical_velocity_tolerance = 2e-2, minimum_liquid_water_temperature = 100,
+                             vertical_velocity_tolerance = 2e-2,
                              minimum_updraft_fraction = 0.01, maximum_updraft_fraction = 0.99,
                              maximum_component_variance_ratio = 100,
                              minimum_saturation_spread = 1e-6, component_width_floor = 1e-3, correlation_regularization = 0.1), kw,
@@ -82,12 +80,6 @@ Adapt.@adapt_structure SmoothDoubleGaussianPDF
 # The two components have the same width in w (the share ℂᵍ₁ of w′²), as in `DoubleGaussianPDF`
 @inline representable_skewness(pdf::SmoothDoubleGaussianPDF) =
     representable_skewness(pdf.minimum_updraft_fraction, pdf.maximum_updraft_fraction, pdf.ℂᵍ₁)
-
-# 0 below 0, 1 above 1, and 3x² - 2x³ between: continuous with its first derivative
-@inline function smooth_step(x)
-    x = max(0, min(1, x))
-    return x * x * (3 - 2 * x)
-end
 
 # The component means of a scalar relative to its mean, in units of its standard deviation, and the
 # within-component variances over the variance, from the correlation `r` of the scalar with w and the
@@ -104,12 +96,11 @@ end
     x̂₂ = -r / α
     separation = x̂₂ - x̂₁
 
-    # The skewness of the scalar, which rises smoothly from zero as the components separate; where
-    # it is zero the division by the separation is not carried out.
-    distance = abs(separation)
-    skewness = ifelse(skewed, pdf.ℂᵍ₂ * Sk * smooth_step((distance - pdf.ℂᵍ₃) / (pdf.ℂᵍ₄ - pdf.ℂᵍ₃)), zero(FT))
-    close = distance < pdf.ℂᵍ₃ / 2
-    skewness_over_separation = ifelse(close, zero(FT), skewness / ifelse(close, one(FT), separation))
+    # The skewness of the scalar, which rises from zero as the components separate (`skewness_share`), over the
+    # separation: it vanishes with the separation, where the division is not carried out.
+    skewness = ifelse(skewed, pdf.ℂᵍ₂ * Sk * skewness_share(pdf, abs(separation)), zero(FT))
+    apart = separation != 0
+    skewness_over_separation = ifelse(apart, skewness / ifelse(apart, separation, one(FT)), zero(FT))
 
     unexplained = 1 - r * r / s²                          # 1 - a x̂₁² - (1 - a) x̂₂²
     asymmetry = r * r * (a * α) * (β * β - α * α) / (s² * s² * s²)
@@ -122,16 +113,16 @@ end
 end
 
 # shoc_assumed_pdf_compute_s with a spread that does not vanish (the arguments of `component_condensate`)
-@inline function smooth_component_condensate(pdf, qᵗ, qᵛ⁺, β, ĉᵖℒ⁻¹, Π, θˡⁱ′², qᵗ′², σθ, σq, r)
+@inline function smooth_component_condensate(pdf, qᵗ, qᵛ⁺, β, cᵖᵐℒ⁻¹, ∂Tˡ∂θ, θˡⁱ′², qᵗ′², σθ, σq, r)
     FT = typeof(qᵗ)
     sqrt2 = sqrt(convert(FT, 2))
     sqrt2pi = sqrt(2 * convert(FT, 3.14159265358979323))
 
     s = qᵗ - qᵛ⁺ * ((1 + β * qᵗ) / (1 + β * qᵛ⁺))
     denominator = 1 + β * qᵛ⁺
-    c_θ = ((1 + β * qᵗ) / (denominator * denominator)) * ĉᵖℒ⁻¹ * β * qᵛ⁺ * Π
+    c_θ = ((1 + β * qᵗ) / (denominator * denominator)) * cᵖᵐℒ⁻¹ * β * qᵛ⁺ * ∂Tˡ∂θ
     c_q = 1 / (1 + β * qᵛ⁺)
-    # Not negative but for round-off
+    # A quadratic form with |r| ≤ 1: not negative but for round-off, which the `max` removes
     variance = max(0, (c_θ * c_θ) * θˡⁱ′² + (c_q * c_q) * qᵗ′² - 2 * c_θ * σθ * c_q * σq * r)
     σₛ = sqrt(variance + pdf.minimum_saturation_spread * pdf.minimum_saturation_spread)
 
@@ -160,15 +151,15 @@ end
     w′qᵗ′ = interpolate(5)
     qᵗ′² = interpolate(6)
 
-    # The vertical velocity variance is floored with the turbulent kinetic energy; the scalar
-    # variances may vanish
+    # The standard deviations that form the correlations do not vanish with the variances
     σw = zero_safe_sqrt(w′²)
     σθ = sqrt(θˡⁱ′² + potential_temperature_tolerance * potential_temperature_tolerance)
     σq = sqrt(qᵗ′² + total_water_tolerance * total_water_tolerance)
 
     # Vertical velocity: skewness, updraft fraction, component velocities over the standard deviation
-    regularized_variance = w′² + calm_variance
-    Sk = w′³ / sqrt(regularized_variance * regularized_variance * regularized_variance)
+    w′²₊ = w′² + calm_variance
+    σw₊ = sqrt(w′²₊)
+    Sk = w′³ / (w′²₊ * σw₊)
     share = pdf.ℂᵍ₁
     one_minus_share = 1 - share
     a = clip_between(clipping, convert(FT, 0.5) * (1 - Sk * sqrt(1 / (4 * (one_minus_share * one_minus_share * one_minus_share) + Sk * Sk))),
@@ -178,8 +169,8 @@ end
     ŵ₂ = -1 * sqrt(a / (1 - a)) * sqrt_one_minus_share
 
     # The scalars: correlation with w, component means and within-component variances
-    rθ = clip_between(clipping, w′θˡⁱ′ / (σw * σθ), -1, 1, 1)
-    rq = clip_between(clipping, w′qᵗ′ / (σw * σq), -1, 1, 1)
+    rθ = clip_between(clipping, w′θˡⁱ′ / (σw₊ * σθ), -1, 1, 1)
+    rq = clip_between(clipping, w′qᵗ′ / (σw₊ * σq), -1, 1, 1)
 
     θ̂₁, θ̂₂, potential_temperature_ratio₁, potential_temperature_ratio₂ = smooth_scalar_components(pdf, clipping, rθ, ŵ₁, ŵ₂, Sk, a, false)
     q̂₁, q̂₂, total_water_ratio₁, total_water_ratio₂ = smooth_scalar_components(pdf, clipping, rq, ŵ₁, ŵ₂, Sk, a, true)
@@ -217,23 +208,19 @@ end
                                (spread + pdf.correlation_regularization * potential_temperature_tolerance * total_water_tolerance), -1, 1, 1)
 
     # Liquid water temperature and saturation of the components
-    Tˡ₁ = component_liquid_water_temperature(pdf, thermodynamics, θˡⁱ₁, qᵗ₁, p)
-    Tˡ₂ = component_liquid_water_temperature(pdf, thermodynamics, θˡⁱ₂, qᵗ₂, p)
+    Tˡ₁ = liquid_water_temperature(thermodynamics, θˡⁱ₁, qᵗ₁, p)
+    Tˡ₂ = liquid_water_temperature(thermodynamics, θˡⁱ₂, qᵗ₂, p)
 
-    qᵛ⁺₁, β₁, ĉᵖℒ⁻¹₁, Π₁ = component_saturation(thermodynamics, Tˡ₁, qᵗ₁, p)
-    qᵛ⁺₂, β₂, ĉᵖℒ⁻¹₂, Π₂ = component_saturation(thermodynamics, Tˡ₂, qᵗ₂, p)
+    qᵛ⁺₁, β₁, cᵖᵐℒ⁻¹₁, ∂Tˡ∂θ₁ = component_saturation(thermodynamics, Tˡ₁, qᵗ₁, p)
+    qᵛ⁺₂, β₂, cᵖᵐℒ⁻¹₂, ∂Tˡ∂θ₂ = component_saturation(thermodynamics, Tˡ₂, qᵗ₂, p)
 
-    s₁, σₛ₁, qᶜ₁, aᶜ₁ = smooth_component_condensate(pdf, qᵗ₁, qᵛ⁺₁, β₁, ĉᵖℒ⁻¹₁, Π₁, θˡⁱ′²₁, qᵗ′²₁, σθ₁, σq₁, r)
-    s₂, σₛ₂, qᶜ₂, aᶜ₂ = smooth_component_condensate(pdf, qᵗ₂, qᵛ⁺₂, β₂, ĉᵖℒ⁻¹₂, Π₂, θˡⁱ′²₂, qᵗ′²₂, σθ₂, σq₂, r)
+    s₁, σₛ₁, qᶜ₁, aᶜ₁ = smooth_component_condensate(pdf, qᵗ₁, qᵛ⁺₁, β₁, cᵖᵐℒ⁻¹₁, ∂Tˡ∂θ₁, θˡⁱ′²₁, qᵗ′²₁, σθ₁, σq₁, r)
+    s₂, σₛ₂, qᶜ₂, aᶜ₂ = smooth_component_condensate(pdf, qᵗ₂, qᵛ⁺₂, β₂, cᵖᵐℒ⁻¹₂, ∂Tˡ∂θ₂, θˡⁱ′²₂, qᵗ′²₂, σθ₂, σq₂, r)
 
-    qˡ₁ = clipped_minimum(clipping, qᶜ₁, qᵗ₁, total_water_tolerance)
-    qˡ₂ = clipped_minimum(clipping, qᶜ₂, qᵗ₂, total_water_tolerance)
+    qˡ₁ = bounded_condensate(qᶜ₁, qᵗ₁)
+    qˡ₂ = bounded_condensate(qᶜ₂, qᵗ₂)
 
-    aᶜ = min(1, a * aᶜ₁ + (1 - a) * aᶜ₂)
-    qˡ = max(0, a * qˡ₁ + (1 - a) * qˡ₂)
-
-    qˡ′² = a * (s₁ * qˡ₁ + aᶜ₁ * (σₛ₁ * σₛ₁)) + (1 - a) * (s₂ * qˡ₂ + aᶜ₂ * (σₛ₂ * σₛ₂)) - (qˡ * qˡ)
-    qˡ′² = max(0, qˡ′²)
+    aᶜ, qˡ, qˡ′² = mixture_cloud(a, aᶜ₁, aᶜ₂, qˡ₁, qˡ₂, s₁, s₂, σₛ₁, σₛ₂)
 
     w′qˡ′ = a * ((w₁ - w) * qˡ₁) + (1 - a) * ((w₂ - w) * qˡ₂)
 

@@ -82,11 +82,11 @@ column_data(field) = Array(interior(field))
         # Every component is a keyword argument
         swapped = SimplifiedHigherOrderClosure(FT; mixing_length = BlendedMixingLength(FT; ℂˡ₁ = 0.4),
                                                stability_functions = ColumnStabilityDamping(FT; ℂᶜ = 0.2),
-                                               subgrid_distribution = shoc_distribution(FT; skewness = ResetAboveThresholdSkewness(FT)))
+                                               subgrid_distribution = shoc_distribution(FT; skewness = TanhSaturatedSkewness(FT)))
         @test swapped isa SimplifiedHigherOrderClosure
         @test swapped.mixing_length.ℂˡ₁ == FT(0.4)
         @test swapped.stability_functions.ℂᶜ == FT(0.2)
-        @test swapped.subgrid_distribution.skewness isa ResetAboveThresholdSkewness
+        @test swapped.subgrid_distribution.skewness isa TanhSaturatedSkewness
         # Another mixing length or other stability functions give a TKE closure with SHOC's other components
         other = SimplifiedHigherOrderClosure(FT; mixing_length = GradientLimitedMixingLength(FT(1.3)))
         @test other isa TKEBasedTurbulenceClosure && !(other isa SimplifiedHigherOrderClosure)

@@ -33,10 +33,11 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 Return the [`DoubleGaussian`](@ref) subgrid distribution of [`SimplifiedHigherOrderClosure`](@ref) with the
 components and coefficients of E3SM `shoc.F90`: the moment time scale of the stability functions
 ([`ReturnToIsotropyTimeScale`](@ref)), [`DowngradientSecondMoments`](@ref), [`AlgebraicThirdMoment`](@ref) and the
-double Gaussian of `shoc.F90` ([`DoubleGaussianPDF`](@ref), its bounds imposed by `HardClipping` as in `shoc.F90`). Two
-limiters replace switches of `shoc.F90` by polynomial and rational forms: the third moment saturates along a
-polynomial toward its bound `1.2 √2 (w′²)^{3/2}` ([`PolynomialSaturatedSkewness`](@ref)) where `shoc.F90` resets it
-to `0.02` m³ s⁻³, and the stratification number of its diagnosis is bounded below the first pole
+double Gaussian of `shoc.F90` ([`DoubleGaussianPDF`](@ref)), whose bounds are smooth ([`SmoothClipping`](@ref)) and
+whose components collapse continuously onto the mean where `shoc.F90` switches. Two limiters replace switches of
+`shoc.F90` by polynomial and rational forms: the third moment saturates along a polynomial toward its bound
+`1.2 √2 (w′²)^{3/2}` ([`PolynomialSaturatedSkewness`](@ref)) where `shoc.F90` resets it to `0.02` m³ s⁻³, and the
+stratification number of its diagnosis is bounded below the first pole
 ([`RationalSaturatedStratificationNumber`](@ref)) where `shoc.F90` leaves it unbounded. Every keyword argument
 replaces a component.
 """
@@ -87,12 +88,24 @@ How this differs from the operator-split `shoc.F90` step:
 - the return-to-isotropy time scale is damped in unstable air too, `τ₀ / (1 + (ℂᶜ² / 4) |N²| τ₀²)`, where `shoc.F90`
   damps it in stable air only, so that the buoyant growth rate of the TKE, `ℂᶜ τ |N²|`, stays below `|N|` for any
   dissipation coefficient (see [`ColumnStabilityDamping`](@ref));
+- the switches of `shoc.F90` on the sign of `N²` (the stratification term of the mixing length, the damping of the
+  time scale) are the stable and unstable parts `(√(N⁴ + ω⁴) ± N²) / 2`, regular through `N² = 0` on the scale `ω²`
+  of the turbulence (`e / ℓ²` of the neutral length, `τ₀⁻²`); the stability damping `λ` of the column saturates
+  toward its bounds along a rational function where `shoc.F90` clamps it, and the static stability it integrates
+  over the lower troposphere is weighted by a rational function of the pressure where `shoc.F90` sums the levels
+  below 800 hPa;
+- the bounds of the assumed PDF (the weight of the updraft component, the correlations, the within-component
+  variances) are smooth ([`SmoothClipping`](@ref)), its components collapse continuously onto the mean in calm
+  and in uniform air, where `shoc.F90` switches, and the skewness of total water rises with the separation of its
+  components along a rational function where `shoc.F90` ramps it linearly; there is no lowest liquid-water
+  temperature;
 - the cold-surface fallback of the diffusivities and the boundary layer depth (a diagnostic of `shoc.F90`
   that only that fallback uses) are not included;
 - the constants are the model's: the assumed PDF condenses with the model's thermodynamic constants (gas
-  constants, heat capacities, temperature-dependent latent heats, saturation vapor pressure), its standard
-  pressure and the potential temperature of each level in place of `shoc.F90`'s fixed constants, `basepres`
-  and `basetemp`, and the third moment takes the model's gravitational acceleration in place of `ggr`;
+  constants, heat capacities, temperature-dependent latent heats, saturation vapor pressure) and its standard
+  pressure in place of `shoc.F90`'s fixed constants and `basepres`, its buoyancy flux is that of the model's
+  buoyancy linearized about each level in place of the virtual potential temperature about `basetemp`, and the
+  third moment takes the model's gravitational acceleration in place of `ggr`;
 - the assumed PDF condenses on the phase of the condensate in the water it distributes
   (`condensate_phase_equilibrium`): liquid, as `shoc.F90`, for warm microphysics and for the cloud liquid of P3,
   and liquid turning to ice between the freezing and homogeneous freezing temperatures, with the latent heat of
@@ -143,7 +156,7 @@ SimplifiedHigherOrderClosure{VerticallyImplicitTimeDiscretization}
 │   ├── third_moment: AlgebraicThirdMoment{Float64}
 │   ├── stratification_number_bound: RationalSaturatedStratificationNumber{Float64}
 │   ├── skewness: PolynomialSaturatedSkewness{Float64}
-│   └── assumed_pdf: DoubleGaussianPDF{Float64} with HardClipping
+│   └── assumed_pdf: DoubleGaussianPDF{Float64}
 ├── minimum_tke: 1.0e-6
 └── solver: SinglePass()
 ```
@@ -191,13 +204,10 @@ function Base.show(io::IO, closure::SimplifiedHigherOrderClosure)
               "│   ├── third_moment: ", summary(d.third_moment), '\n',
               "│   ├── stratification_number_bound: ", summary(d.stratification_number_bound), '\n',
               "│   ├── skewness: ", summary(d.skewness), '\n',
-              "│   ", isnothing(d.liquid_flux) ? "└" : "├", "── assumed_pdf: ", assumed_pdf_summary(d.assumed_pdf), '\n')
+              "│   ", isnothing(d.liquid_flux) ? "└" : "├", "── assumed_pdf: ", summary(d.assumed_pdf), '\n')
     isnothing(d.liquid_flux) || print(io, "│   └── liquid_flux: ", summary(d.liquid_flux), '\n')
     isnothing(closure.heating_budget_flux) || print(io, "├── heating_budget_flux: ", summary(closure.heating_budget_flux), '\n')
     isnothing(closure.total_water_budget_flux) || print(io, "├── total_water_budget_flux: ", summary(closure.total_water_budget_flux), '\n')
     print(io, "├── minimum_tke: ", prettysummary(closure.minimum_tke), '\n',
               "└── solver: ", summary(closure.solver))
 end
-
-# An assumed PDF with the policy that imposes its bounds, or one without bounds
-assumed_pdf_summary(pdf) = hasproperty(pdf, :clipping) ? string(summary(pdf), " with ", summary(pdf.clipping)) : summary(pdf)

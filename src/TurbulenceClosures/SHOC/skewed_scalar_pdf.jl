@@ -38,8 +38,6 @@ struct SkewedScalarDoubleGaussianPDF{FT} <: AbstractSubgridDistributionComponent
     ℂᵍᵏ :: FT
     "Within-component fraction of the variance of the saturation excess"
     ℂᵍᶜ :: FT
-    "Lowest liquid water temperature of a component, K"
-    minimum_liquid_water_temperature :: FT
 end
 
 """
@@ -51,7 +49,7 @@ within-component share of `w′²` of [`EqualWidthDoubleGaussianPDF`](@ref), `�
 """
 function SkewedScalarDoubleGaussianPDF(FT::DataType = Oceananigans.defaults.FloatType; kw...)
     pdf = component_from_keywords(SkewedScalarDoubleGaussianPDF, FT,
-                                  (ℂᵍ₀ = 0.4, ℂᵍᵏ = 1, ℂᵍᶜ = 0.5, minimum_liquid_water_temperature = 100), kw)
+                                  (ℂᵍ₀ = 0.4, ℂᵍᵏ = 1, ℂᵍᶜ = 0.5), kw)
     0 < pdf.ℂᵍ₀ < 1 || throw(ArgumentError("ℂᵍ₀ must be in (0, 1), got $(pdf.ℂᵍ₀)"))
     0 < pdf.ℂᵍᶜ < 1 || throw(ArgumentError("ℂᵍᶜ must be in (0, 1), got $(pdf.ℂᵍᶜ)"))
     return pdf
@@ -80,10 +78,10 @@ end
     FT = typeof(θ̄)
     tiny = sqrt(floatmin(FT))
     # the saturation excess s = c_q qᵗ′ - c_θ θˡⁱ′ linearized at the mean (`component_condensate`)
-    Tˡ = component_liquid_water_temperature(pdf, thermodynamics, θ̄, q̄, p)
-    qᵛ⁺, β, ĉᵖℒ⁻¹, Π = component_saturation(thermodynamics, Tˡ, q̄, p)
+    Tˡ = liquid_water_temperature(thermodynamics, θ̄, q̄, p)
+    qᵛ⁺, β, cᵖᵐℒ⁻¹, ∂Tˡ∂θ = component_saturation(thermodynamics, Tˡ, q̄, p)
     denominator = 1 + β * qᵛ⁺
-    c_θ = ((1 + β * q̄) / (denominator * denominator)) * ĉᵖℒ⁻¹ * β * qᵛ⁺ * Π
+    c_θ = ((1 + β * q̄) / (denominator * denominator)) * cᵖᵐℒ⁻¹ * β * qᵛ⁺ * ∂Tˡ∂θ
     c_q = 1 / denominator
     σₛ² = c_θ * c_θ * θˡⁱ′² + c_q * c_q * qᵗ′² - 2 * c_θ * c_q * θˡⁱ′qᵗ′
     resolved = (σₛ² > tiny * tiny) & (w′² > tiny)
@@ -136,12 +134,12 @@ liquid water variance, liquid water flux and buoyancy flux.
     m = skewed_scalar_components(pdf, thermodynamics, p, θˡⁱ, qᵗ, w′², w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)
     a = m.a
 
-    Tˡ₁ = component_liquid_water_temperature(pdf, thermodynamics, m.θ₁, m.q₁, p)
-    Tˡ₂ = component_liquid_water_temperature(pdf, thermodynamics, m.θ₂, m.q₂, p)
-    qᵛ⁺₁, β₁, ĉᵖℒ⁻¹₁, Π₁ = component_saturation(thermodynamics, Tˡ₁, m.q₁, p)
-    qᵛ⁺₂, β₂, ĉᵖℒ⁻¹₂, Π₂ = component_saturation(thermodynamics, Tˡ₂, m.q₂, p)
-    s₁, σ₁, qˡ₁, aᶜ₁ = component_condensate(m.q₁, qᵛ⁺₁, β₁, ĉᵖℒ⁻¹₁, Π₁, m.θˡⁱ′²ᵢ, m.qᵗ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ)
-    s₂, σ₂, qˡ₂, aᶜ₂ = component_condensate(m.q₂, qᵛ⁺₂, β₂, ĉᵖℒ⁻¹₂, Π₂, m.θˡⁱ′²ᵢ, m.qᵗ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ)
+    Tˡ₁ = liquid_water_temperature(thermodynamics, m.θ₁, m.q₁, p)
+    Tˡ₂ = liquid_water_temperature(thermodynamics, m.θ₂, m.q₂, p)
+    qᵛ⁺₁, β₁, cᵖᵐℒ⁻¹₁, ∂Tˡ∂θ₁ = component_saturation(thermodynamics, Tˡ₁, m.q₁, p)
+    qᵛ⁺₂, β₂, cᵖᵐℒ⁻¹₂, ∂Tˡ∂θ₂ = component_saturation(thermodynamics, Tˡ₂, m.q₂, p)
+    s₁, σ₁, qˡ₁, aᶜ₁ = component_condensate(m.q₁, qᵛ⁺₁, β₁, cᵖᵐℒ⁻¹₁, ∂Tˡ∂θ₁, m.θˡⁱ′²ᵢ, m.qᵗ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ)
+    s₂, σ₂, qˡ₂, aᶜ₂ = component_condensate(m.q₂, qᵛ⁺₂, β₂, cᵖᵐℒ⁻¹₂, ∂Tˡ∂θ₂, m.θˡⁱ′²ᵢ, m.qᵗ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ)
 
     aᶜ = a * aᶜ₁ + (1 - a) * aᶜ₂
     qˡ = a * qˡ₁ + (1 - a) * qˡ₂
@@ -166,7 +164,7 @@ end
     m = skewed_scalar_components(pdf, thermodynamics, p, θˡⁱ, qᵗ, w′², w′³, θˡⁱ′², w′θˡⁱ′, θˡⁱ′qᵗ′, w′qᵗ′, qᵗ′²)
     liquid = (PlanarLiquidSurface(), WarmPhaseEquilibrium())
     ice = (PlanarIceSurface(), IceSurfaceEquilibrium())
-    moments(θ, q, surface) = component_vapor_excess_moments(pdf, thermodynamics, p, θ, q, m.θˡⁱ′²ᵢ, m.qᵗ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ, surface)
+    moments(θ, q, surface) = component_vapor_excess_moments(thermodynamics, p, θ, q, m.θˡⁱ′²ᵢ, m.qᵗ′²ᵢ, m.σθᵢ, m.σqᵢ, m.rᵢ, surface)
     μ₁, σ₁, ∂₁ = moments(m.θ₁, m.q₁, liquid)
     μ₂, σ₂, ∂₂ = moments(m.θ₂, m.q₂, liquid)
     μⁱ₁, σⁱ₁, ∂ⁱ₁ = moments(m.θ₁, m.q₁, ice)

@@ -16,9 +16,9 @@ export BlendedMixingLength, ColumnStabilityDamping,
        DowngradientSecondMoments,
        AlgebraicThirdMoment,
        UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
-       ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness,
+       PolynomialSaturatedSkewness, TanhSaturatedSkewness,
        DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, SkewedScalarDoubleGaussianPDF,
-       HardClipping, SmoothClipping,
+       SmoothClipping,
        closure_parameters, with_parameters
 
 using Adapt: Adapt, adapt
@@ -43,7 +43,8 @@ using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
 using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equilibrated_surface, saturation_vapor_pressure_log_slope,
                              saturation_vapor_pressure_liquid_fraction_log_slope,
                              PlanarLiquidSurface, PlanarIceSurface, dry_air_gas_constant, vapor_gas_constant,
-                             liquid_latent_heat, ice_latent_heat, MoistureMassFractions, vapor_equivalent_heat_capacity,
+                             liquid_latent_heat, ice_latent_heat, absolute_zero_latent_heat, MoistureMassFractions,
+                             vapor_equivalent_heat_capacity, vapor_equivalent_gas_constant, mixture_heat_capacity,
                              exner_exponent, saturation_specific_humidity, mixture_gas_constant
 
 include("subgrid_distribution_components.jl")

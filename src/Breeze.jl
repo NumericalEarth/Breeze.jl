@@ -261,7 +261,7 @@ export
     AlgebraicThirdMoment, TKEBudgetThirdMoment, HeatingBudgetFlux, RadiativeHeating, PrescribedHeating, heating_budget_flux_bounds,
     TotalWaterBudgetFlux, total_water_budget_flux_bounds,
     UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
-    ResetAboveThresholdSkewness, PolynomialSaturatedSkewness, TanhSaturatedSkewness, ClampedSkewness, DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, SkewedScalarDoubleGaussianPDF, HardClipping, SmoothClipping,
+    PolynomialSaturatedSkewness, TanhSaturatedSkewness, DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, SkewedScalarDoubleGaussianPDF, SmoothClipping,
     closure_parameters, with_parameters,
     per_column_closure, set_per_column_coefficients!, PerColumnCoefficient,
     DoubleGaussian, LiquidFluxVarianceRelation, ScalarVarianceTransport, CondensateFluxFraction, LatentStratification, MeanLiquidStratification, InitialStratification, SinglePass, DampedFixedPoint, BracketedFractionSolve, StratificationLimitedMomentTimeScale, SecantIteration, BisectionIteration, LaggedStability, DissipationTimeScale, EddyTurnoverTimeScale, ReturnToIsotropyTimeScale, VarianceStabilityFunctions,
