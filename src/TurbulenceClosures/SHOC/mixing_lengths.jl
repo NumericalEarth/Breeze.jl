@@ -16,10 +16,16 @@ The mixing length of [Bogenschutz and Krueger (2013)](@cite Bogenschutz2013) as 
 the surface `κ z`, an asymptotic length `ℓ∞` (the fraction `ℂˡ₄` of the height weighted by `√e` over the
 column) and, in stable air, the buoyancy length `√e / N`,
 
-    ℓ⁻² = (ℂˡ₁ / ℂˡ₂)² [1 / (ℂˡ₅ √e κ z) + 1 / (ℂˡ₅ √e ℓ∞) + ℂˡ₃ N²⁺ / e] + 1 / ℓᵐᵃˣ² + 1 / Δʰ²,
+    ℓ⁻² = (ℂˡ₁ / ℂˡ₂)² [1 / (ℂˡ₅ √e κ z) + 1 / (ℂˡ₅ √e ℓ∞) + ℂˡ₃ N²₊ / e] + 1 / ℓᵐᵃˣ² + 1 / Δʰ²,
 
-with `N²⁺` the stable part of the stored static stability and `√e` the turbulent velocity of the closure
-(`e` floored at `minimum_tke`). `shoc.F90` bounds the length with `min(maxlen, ⋅)`, `max(minlen, ⋅)` and
+with `√e` the turbulent velocity of the closure and `N²₊` the stable part of the stored static stability, the
+`max(N², 0)` of `shoc.F90` made regular through `N² = 0` on the scale of the turbulence in neutral air:
+
+    N²₊ = (N² + √(N⁴ + (e / ℓ₀²)²)) / 2,
+
+where `ℓ₀` is the length without the stratification term. `N²₊` is positive and exceeds `max(N², 0)` by at most
+`e / (2 ℓ₀²)`, at `N² = 0`, so the length is shorter than with the `max` by at most the fraction `ℂˡ₃ (ℂˡ₁ / ℂˡ₂)² / 4`
+(`8 × 10⁻⁵` with the defaults). `shoc.F90` bounds the length with `min(maxlen, ⋅)`, `max(minlen, ⋅)` and
 `min(√(Δx Δy), ⋅)` (`check_length_scale_shoc_length`). Here the upper bounds `ℓᵐᵃˣ` (`maximum_length`) and the
 horizontal grid spacing `Δʰ = √(Δx Δy)` (none along `Flat` directions) enter the same sum of inverse squares,
 which changes the length by the fraction `(ℓ / ℓᵐᵃˣ)² / 2` where it is far below them, and the lower bound
@@ -84,17 +90,24 @@ Base.show(io::IO, ml::BlendedMixingLength) =
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The blended length at height `z` above the surface, with turbulent velocity `u = √e`, asymptotic length
-`ℓ∞`, stable stratification `N²⁺ ≥ 0` and squared horizontal grid spacing `Δʰ²`. The sum of inverse squares
-is multiplied through by `A = ℂˡ₅ u κ z`, so that the length is `√(A / D) ℂˡ₂ / ℂˡ₁` with
-`D = 1 + κ z / ℓ∞ + ℂˡ₃ ℂˡ₅ κ z N²⁺ / u + (ℂˡ₂ / ℂˡ₁)² A (1 / ℓᵐᵃˣ² + 1 / Δʰ²)`, finite and zero at `z = 0`.
+`ℓ∞`, static stability `N²` and squared horizontal grid spacing `Δʰ²`. The sum of inverse squares
+is multiplied through by `A = ℂˡ₅ u κ z`, so that the length is `√(A / D) ℂˡ₂ / ℂˡ₁` with `D = D₀ + X₊`,
+`D₀ = 1 + κ z / ℓ∞ + (ℂˡ₂ / ℂˡ₁)² A (1 / ℓᵐᵃˣ² + 1 / Δʰ²)` the sum without the stratification and
+`X₊ = (X + √(X² + (ℂˡ₃ (ℂˡ₁ / ℂˡ₂)² D₀)²)) / 2` the stable part of `X = ℂˡ₃ ℂˡ₅ κ z N² / u` (that is, `A ℂˡ₃ N²₊ / e`
+with `N²₊ = (N² + √(N⁴ + (e / ℓ₀²)²)) / 2` and `ℓ₀ = √(A / D₀) ℂˡ₂ / ℂˡ₁`); finite and zero at `z = 0`.
 """
-@inline function blended_length(ml::BlendedMixingLength, z, u, ℓ∞, N²⁺, Δʰ²)
+@inline function blended_length(ml::BlendedMixingLength, z, u, ℓ∞, N², Δʰ²)
     κz = ml.von_karman_constant * z
     A = ml.ℂˡ₅ * u * κz
     r = ml.ℂˡ₁ / ml.ℂˡ₂
     bounds = 1 / (ml.maximum_length * ml.maximum_length) + 1 / Δʰ²
-    D = 1 + κz / ℓ∞ + ml.ℂˡ₃ * ml.ℂˡ₅ * κz * N²⁺ / u + A * bounds / (r * r)
-    return sqrt(A / D) / r
+    D₀ = 1 + κz / ℓ∞ + A * bounds / (r * r)
+    X = ml.ℂˡ₃ * ml.ℂˡ₅ * κz * N² / u
+    X₀ = ml.ℂˡ₃ * (r * r) * D₀
+    # (X + √(X² + X₀²)) / 2, in unstable air in the form without the difference: X₀² / (2 (√(X² + X₀²) - X))
+    hypotenuse = sqrt(X * X + X₀ * X₀)
+    X₊ = ifelse(X >= 0, (X + hypotenuse) / 2, X₀ * X₀ / (2 * (hypotenuse - X)))
+    return sqrt(A / (D₀ + X₊)) / r
 end
 
 # The asymptotic length ℓ∞ = ℂˡ₄ ∫ √e z dz / ∫ √e dz over the column, from the cell centers
@@ -115,9 +128,8 @@ end
     ℓ∞ = asymptotic_length(i, j, grid, ml, closure, e)
     for k in 1:size(grid, 3)+1
         u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
-        N²⁺ = max(@inbounds(N²[i, j, k]), zero(ℓ∞))
         z = height_above_bottomᶜᶜᶠ(i, j, k, grid)
-        @inbounds ℓ[i, j, k] = blended_length(ml, z, u, ℓ∞, N²⁺, horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid))
+        @inbounds ℓ[i, j, k] = blended_length(ml, z, u, ℓ∞, N²[i, j, k], horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid))
         @inbounds ℓˢ[i, j, k] = ℓ∞
     end
     return nothing
@@ -125,10 +137,9 @@ end
 
 # At a cell center: the blend of the center, with N² reconstructed from the two adjacent faces
 @inline function TurbulenceClosures.mixing_lengthᶜᶜᶜ(i, j, k, grid, ml::BlendedMixingLength, closure, e, closure_fields)
-    FT = grid_float_type(grid)
     u = turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
-    N²⁺ = max(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, closure_fields.N²), zero(FT))
+    N² = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, closure_fields.N²)
     ℓ∞ = @inbounds closure_fields.ℓˢ[i, j, k]
     z = height_above_bottomᶜᶜᶜ(i, j, k, grid)
-    return blended_length(ml, z, u, ℓ∞, N²⁺, horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid))
+    return blended_length(ml, z, u, ℓ∞, N², horizontal_spacing_squaredᶜᶜᵃ(i, j, k, grid))
 end

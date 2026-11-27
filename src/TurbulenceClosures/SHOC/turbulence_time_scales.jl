@@ -4,7 +4,7 @@
 ##### SHOC's eddy diffusivities `Kᶜ = ℂᶜ τ e`, `Kᵘ = ℂᵘ τ e` and dissipation `ε = 𝕊ᴰ e^{3/2} / ℓ` are those of
 ##### the TKE closure, `K = 𝕊 ℓ √e`, with the stability functions `𝕊ᶜ = ℂᶜ τ √e / ℓ`, `𝕊ᵘ = ℂᵘ τ √e / ℓ` and the
 ##### constant `𝕊ᴰ`. The time scale is damped by one number of the column, `λ`, from the stability
-##### integrated over the lower column; the closure stores it in `closure_fields.column_stability`.
+##### integrated over the lower troposphere; the closure stores it in `closure_fields.column_stability`.
 #####
 
 """
@@ -15,15 +15,32 @@ The return-to-isotropy time scale and eddy diffusivities of E3SM `shoc.F90` (`is
 [`TKEBasedTurbulenceClosure`](@ref): with `τ₀ = 2 e / ε = 2 ℓ / (𝕊ᴰ √e)` the time scale of the dissipation,
 damped in stable air by the stability of the whole column and in unstable air by the buoyancy frequency,
 
-    τ = τᵈ / √(1 + (τᵈ / τᵐᵃˣ)²),    τᵈ = τ₀ / (1 + (λ N²⁺ + (ℂᶜ² / 4) N²⁻) τ₀²),    N²⁺ = max(N², 0),  N²⁻ = max(-N², 0),
+    τ = τᵈ / √(1 + (τᵈ / τᵐᵃˣ)²),    τᵈ = τ₀ / (1 + (λ N²₊ + (ℂᶜ² / 4) N²₋) τ₀²),
+    N²₊ = (√(N⁴ + τ₀⁻⁴) + N²) / 2,    N²₋ = (√(N⁴ + τ₀⁻⁴) - N²) / 2,
 
 the diffusivities are `Kᶜ = ℂᶜ τ e` (scalars and turbulent kinetic energy, which `shoc.F90` diffuses with the
 heat diffusivity) and `Kᵘ = ℂᵘ τ e`, that is, the stability functions
 
     𝕊ᶜ = 𝕊ᵉ = ℂᶜ τ √e / ℓ,    𝕊ᵘ = ℂᵘ τ √e / ℓ,    𝕊ᴰ = (ℂᴰ₃ + ℂᴰ₄) / ℂᴰ₅ × ℂᴰ₁³ / ℂᴰ₂⁴.
 
-The damping `λ = ℂᵝ₁ + (∫ N² dz / g - ℂᵝ₄) ℂᵝ₃`, kept between `ℂᵝ₁` and `ℂᵝ₂`, is one number per column, with
-the static stability integrated over the levels whose pressure exceeds `stability_integration_pressure`.
+`N²₊` and `N²₋` are the stable and the unstable parts of the static stability, `max(N², 0)` and `max(-N², 0)` of
+`shoc.F90`, made regular through `N² = 0` on the scale `τ₀⁻²` of the turbulence: each is positive, `N²₊ - N²₋ = N²`,
+`N²₊ N²₋ = τ₀⁻⁴ / 4`, and each exceeds its `max` by less than `τ₀⁻⁴ / (4 |N²|)` where `|N²| τ₀² ≫ 1`. Neutral air is
+damped by `(λ + ℂᶜ² / 4) / 2`, and the damping is nowhere less than that of the `max`.
+
+The damping of the column rises from `ℂᵝ₁` to `ℂᵝ₂` with the static stability integrated over the lower troposphere,
+
+    λ = λ̄ + δ / (1 + (δ / Δλ)⁴)^{1/4},    δ = ℂᵝ₁ + (I - ℂᵝ₄) ℂᵝ₃ - λ̄,    λ̄ = (ℂᵝ₁ + ℂᵝ₂) / 2,    Δλ = (ℂᵝ₂ - ℂᵝ₁) / 2,
+    I = ∫ N² / (1 + (pᴵ / p)¹⁶) dz / g,
+
+one number per column: the line `ℂᵝ₁ + (I - ℂᵝ₄) ℂᵝ₃` of `shoc.F90` where it is midway between `ℂᵝ₁` and `ℂᵝ₂`, with
+its slope `ℂᵝ₃` there, and between the two for every `I` (`shoc.F90` clamps the line at them). The line meets `ℂᵝ₁`
+at `I = ℂᵝ₄`, where `λ - ℂᵝ₁` is 8 % of `ℂᵝ₂ - ℂᵝ₁`. `I` is the logarithm of the ratio of the virtual potential
+temperatures across the lower troposphere, `ln(θᵛ(pᴵ) / θᵛ(surface))` (`N² / g` is the vertical gradient of `ln θᵛ`),
+a measure of its stability that does not depend on where the top of the model is, as the integral over the whole
+column would; `shoc.F90` sums `N² Δz` over the levels whose pressure exceeds
+`pᴵ = stability_integration_pressure`, and here each level has the weight `1 / (1 + (pᴵ / p)¹⁶)`: 0.97 at 1000 hPa,
+0.87 at 900 hPa, one half at `pᴵ` = 800 hPa and 0.11 at 700 hPa.
 
 `shoc.F90` damps the time scale in stable air only (`lambda = 0` where `N² ≤ 0`). In unstable air the TKE grows by
 buoyancy at the rate `B / e = ℂᶜ τ |N²|`; undamped, `τ = τ₀ ∝ 1 / 𝕊ᴰ` and this rate exceeds the growth rate `|N|` of
@@ -42,10 +59,10 @@ is not included.
 |:------------|:-----------|:--------|:--------|
 | `ℂᵘ`  | `Ckm`            | 0.1    | eddy diffusivity of momentum, `Kᵘ = ℂᵘ τ e` |
 | `ℂᶜ`  | `Ckh`            | 0.1    | eddy diffusivity of heat, scalars and turbulent kinetic energy, `Kᶜ = ℂᶜ τ e` |
-| `ℂᵝ₁` | `lambda_low`     | 0.001  | lowest value of the stability damping `λ` |
-| `ℂᵝ₂` | `lambda_high`    | 0.08   | highest value of `λ` |
-| `ℂᵝ₃` | `lambda_slope`   | 2.65   | slope of `λ` in the integrated column stability |
-| `ℂᵝ₄` | `lambda_thresh`  | 0.02   | integrated column stability at which `λ` starts to rise |
+| `ℂᵝ₁` | `lambda_low`     | 0.001  | infimum of the stability damping `λ` |
+| `ℂᵝ₂` | `lambda_high`    | 0.08   | supremum of `λ` |
+| `ℂᵝ₃` | `lambda_slope`   | 2.65   | slope of `λ` in the integrated stability `I`, midway between its bounds |
+| `ℂᵝ₄` | `lambda_thresh`  | 0.02   | integrated stability at which the line of that slope meets `ℂᵝ₁` |
 | `ℂᴰ₁` | `Ck` (`adv_sgs_tke`) | 0.1  | dissipation, see `𝕊ᴰ` |
 | `ℂᴰ₂` | `Cs` (`adv_sgs_tke`) | 0.15 | dissipation, see `𝕊ᴰ` |
 | `ℂᴰ₃` | literal `0.19`   | 0.19   | dissipation, see `𝕊ᴰ` |
@@ -87,7 +104,7 @@ struct ColumnStabilityDamping{FT}
     ℂᴰ₅ :: FT
     "Largest return-to-isotropy time scale, s (`maxiso`), in the sum of inverse squares"
     maximum_time_scale :: FT
-    "Pressure above which the static stability is integrated over the column, Pa (`troppres`)"
+    "Pressure at which the weight of the static stability in its integral over the lower troposphere is one half, Pa (`troppres`)"
     stability_integration_pressure :: FT
     "Fraction of the shear production that the TKE receives (`Ck_sh`); the rest heats the air"
     ℂᴾ :: FT
@@ -146,10 +163,12 @@ const ColumnStabilityDampingClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:
 @inline function isotropy_ratio(sf::ColumnStabilityDamping, λ, ℓ, u, N²)
     s₀ = 2 / shoc_dissipation_coefficient(sf)
     τ₀ = s₀ * ℓ / u
-    N²⁺ = max(N², zero(N²))
-    # In stable air the damping of the column; in unstable air ℂᶜ² / 4, which bounds τ by 1 / (ℂᶜ |N|)
-    λN² = λ * N²⁺ + sf.ℂᶜ * sf.ℂᶜ / 4 * (N²⁺ - N²)
-    s = s₀ / (1 + λN² * τ₀ * τ₀)
+    # The stable and unstable parts of αᴺ = N² τ₀², regular through zero: (√(αᴺ² + 1) ± αᴺ) / 2. In stable air the
+    # damping of the column; in unstable air ℂᶜ² / 4, which bounds τ by 1 / (ℂᶜ |N|)
+    αᴺ = N² * τ₀ * τ₀
+    α̃ᴺ = sqrt(αᴺ * αᴺ + 1)
+    λ⁻ = sf.ℂᶜ * sf.ℂᶜ / 4
+    s = s₀ / (1 + (λ * (α̃ᴺ + αᴺ) + λ⁻ * (α̃ᴺ - αᴺ)) / 2)
     τᵈ = s * ℓ / u
     x = τᵈ / sf.maximum_time_scale
     return s / sqrt(1 + x * x)
@@ -180,8 +199,32 @@ end
 
 TurbulenceClosures.column_stability_field(grid, ::ColumnStabilityDamping) = Field{Center, Center, Nothing}(grid)
 
-# λ = ℂᵝ₁ + (∫ N² dz / g - ℂᵝ₄) ℂᵝ₃ between ℂᵝ₁ and ℂᵝ₂, with N² at the centers from the two adjacent faces,
-# summed over the levels below the pressure `stability_integration_pressure`
+# The weight of a level at pressure `p` in the integral of the static stability over the lower troposphere,
+# 1 / (1 + (pᴵ / p)¹⁶): one far below the level of pressure pᴵ, one half at it, zero far above
+@inline function lower_troposphere_weight(p, pᴵ)
+    r = pᴵ / p
+    r² = r * r
+    r⁴ = r² * r²
+    r⁸ = r⁴ * r⁴
+    return 1 / (1 + r⁸ * r⁸)
+end
+
+# The damping of the column from its integrated stability `I`: the line ℂᵝ₁ + (I - ℂᵝ₄) ℂᵝ₃ about the middle λ̄ of
+# ℂᵝ₁ and ℂᵝ₂, saturating toward them, λ̄ + δ / (1 + (δ / Δλ)⁴)^(1/4). With x = δ / Δλ and R = (1 + x⁴)^(1/4) it is
+# the weighted mean ℂᵝ₁ (1 - t) / 2 + ℂᵝ₂ (1 + t) / 2 with t = x / R, evaluated with 1 - |t| = 1 / (R (R + |x|) (R² + x²))
+# (from R⁴ - x⁴ = 1), a positive number that is no difference, so that both weights are positive.
+@inline function column_stability_damping(sf::ColumnStabilityDamping, I)
+    Δλ = (sf.ℂᵝ₂ - sf.ℂᵝ₁) / 2
+    x = ((I - sf.ℂᵝ₄) * sf.ℂᵝ₃ - Δλ) / Δλ
+    x² = x * x
+    R² = sqrt(1 + x² * x²)
+    R = sqrt(R²)
+    smaller = 1 / (2 * R * (R + abs(x)) * (R² + x²)) # the weight of the bound the line is farther from, in (0, 1/2]
+    rising = x > 0
+    return sf.ℂᵝ₁ * ifelse(rising, smaller, 1 - smaller) + sf.ℂᵝ₂ * ifelse(rising, 1 - smaller, smaller)
+end
+
+# I = ∫ N² w(p) dz / g with N² at the centers from the two adjacent faces and the weight w of the lower troposphere
 @kernel function _compute_column_stability_damping!(λ, grid, closure, N², pressure, g)
     i, j = @index(Global, NTuple)
     sf = getclosure(i, j, closure).stability_functions
@@ -189,11 +232,10 @@ TurbulenceClosures.column_stability_field(grid, ::ColumnStabilityDamping) = Fiel
     integral = zero(FT)
     for k in 1:size(grid, 3)
         N²ᶜ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
-        lower = @inbounds pressure[i, j, k] > sf.stability_integration_pressure
-        integral += ifelse(lower, N²ᶜ * Δzᶜᶜᶜ(i, j, k, grid), zero(FT))
+        weight = lower_troposphere_weight(@inbounds(pressure[i, j, k]), sf.stability_integration_pressure)
+        integral += weight * N²ᶜ * Δzᶜᶜᶜ(i, j, k, grid)
     end
-    λᶜ = sf.ℂᵝ₁ + (integral / g - sf.ℂᵝ₄) * sf.ℂᵝ₃
-    @inbounds λ[i, j, 1] = clamp(λᶜ, sf.ℂᵝ₁, sf.ℂᵝ₂)
+    @inbounds λ[i, j, 1] = column_stability_damping(sf, integral / g)
 end
 
 function TurbulenceClosures.compute_column_stability!(::ColumnStabilityDamping, λ, grid, closure, N², model; parameters = :xyz)
