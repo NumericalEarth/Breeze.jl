@@ -744,7 +744,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
 
     Riᶠ(model) = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.closure,
                                                                            model.velocities,
-                                                                           model.closure_fields.N²)))
+                                                                           model.closure_fields.N², nothing, nothing)))
 
     @testset "a windless column with stable and unstable layers stays finite" begin
         # No shear, so Ri = N² / S²ᵐⁱⁿ at every interface, large and finite, and the sign changes
@@ -756,7 +756,7 @@ using Breeze.TurbulenceClosures: rational_stability, richardson_number, Riᶜᶜ
         set!(model; θ = θᵢ)
         set_tke!(model, FT(0.5))
 
-        Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.closure, model.velocities, model.closure_fields.N²)))
+        Ri = column(Field(KernelFunctionOperation{Center, Center, Face}(Riᶜᶜᶠ, grid, model.closure, model.velocities, model.closure_fields.N², nothing, nothing)))
         @test all(isfinite, Ri[interior_faces])
         @test all(abs.(Ri[interior_faces]) .> 1e4 * max(sf.Ri⁻, sf.Ri⁺))
         @test any(Ri[interior_faces] .< 0) && any(Ri[interior_faces] .> 0)

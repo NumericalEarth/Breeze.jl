@@ -3,16 +3,12 @@
 #####
 ##### A third-moment component implements
 #####
-#####     third_moment(tm, g, τ, N², w′², θˡⁱ, compact_inverse_spacing, wide_inverse_spacing,
-#####                  Δθˡⁱ′², Δw′θˡⁱ′, Δw′², Δe, w′θˡⁱ′) -> w′³
+#####     third_moment(tm, stratification_number_bound, g, τ, N², w′², θˡⁱ, compact_inverse_spacing,
+#####                  wide_inverse_spacing, Δθˡⁱ′², Δw′θˡⁱ′, Δw′², Δe, w′θˡⁱ′) -> w′³
 #####
-##### at an interior interface: the diagnosis of the third moment from the second moments. The
-##### method that takes a stratification number bound after the component,
-#####
-#####     third_moment(tm, stratification_number_bound, g, ...) -> w′³
-#####
-##### applies the bound to the stratification number αᴺ = τ² N² inside the diagnosis; the method
-##### without it leaves αᴺ unbounded.
+##### at an interior interface: the diagnosis of the third moment from the second moments, with the bound
+##### `stratification_number_bound` applied to the stratification number αᴺ = τ² N² inside the diagnosis
+##### (`UnboundedStratificationNumber()` leaves it unbounded).
 #####
 ##### Slot: stratification number bound (no counterpart in shoc.F90)
 #####
@@ -138,9 +134,6 @@ Adapt.@adapt_structure AlgebraicThirdMoment
 # differences are taken (`compact_inverse_spacing` between the two adjacent nodes, `wide_inverse_spacing` across the
 # two cells), and the differences of the moments across the interface; `w′θˡⁱ′` is the flux at the interface.
 # `g` is the gravitational acceleration of the model.
-@inline third_moment(tm::AlgebraicThirdMoment, g::Number, arguments...) =
-    third_moment(tm, UnboundedStratificationNumber(), g, arguments...)
-
 @inline function third_moment(tm::AlgebraicThirdMoment, stratification_number_bound, g, τ, N², w′², θˡⁱ,
                               compact_inverse_spacing, wide_inverse_spacing, Δθˡⁱ′², Δw′θˡⁱ′, Δw′², Δe, w′θˡⁱ′)
     FT = typeof(w′θˡⁱ′)

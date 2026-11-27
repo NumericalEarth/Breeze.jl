@@ -327,7 +327,7 @@ end
         windless = merge(column_cases.dry, (; u = 0.0))
         default = run_steps!(column_model(TKEBasedTurbulenceClosure(), windless))
         rational = run_steps!(column_model(TKEBasedTurbulenceClosure(stability_functions = RationalStabilityFunction()), windless))
-        Ri = face_field(rational, Riᶜᶜᶠ, rational.closure, rational.velocities, rational.closure_fields.N²)
+        Ri = face_field(rational, Riᶜᶜᶠ, rational.closure, rational.velocities, rational.closure_fields.N², nothing, nothing)
         @test maximum(abs, Ri[2:windless.Nz]) > 1e4 * max(rational.closure.stability_functions.Ri⁻, rational.closure.stability_functions.Ri⁺)
         @test all(a -> all(isfinite, a), state(default))
         @test maximum(column(default.closure_fields.Kᶜ)) > 0
@@ -479,7 +479,7 @@ end
         @test column(fields.ℓᵐ)[interior_faces] ≈ min.(closure.mixing_length.ℂˢ .* zᶠ, ℓᵇ)
 
         S² = face_field(model, shearᶜᶜᶠ, model.velocities.u, model.velocities.v)
-        Ri = face_field(model, Riᶜᶜᶠ, closure, model.velocities, fields.N²)
+        Ri = face_field(model, Riᶜᶜᶠ, closure, model.velocities, fields.N², nothing, nothing)
         @test Ri[interior_faces] ≈ N²[interior_faces] ./ (S²[interior_faces] .+ closure.shear.minimum_shear_squared)
 
         # and it changes them where the two frequencies differ

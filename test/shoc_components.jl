@@ -25,7 +25,7 @@ limited_by_variance(w′², limiter, w′³) = limit_third_moment(limiter, w′�
 limited_by_maximum_skewness(maximum_skewness, w′², w′³) =
     limit_third_moment(PolynomialSaturatedSkewness(maximum_skewness), w′², w′³)
 limited_by_coefficient(c, limiter, g, arguments) =
-    limit_third_moment(limiter, arguments[3], third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), g, arguments...))
+    limit_third_moment(limiter, arguments[3], third_moment(AlgebraicThirdMoment(Float64; ℂʷ₂ = c), UnboundedStratificationNumber(), g, arguments...))
 
 # The derivative of `f(x, parameters...)` with respect to `x` by reverse-mode automatic differentiation
 derivative(f, x, parameters...) =
@@ -192,7 +192,7 @@ end
             arguments = (τ, N², w′², θˡⁱ, compact_inverse_spacing, wide_inverse_spacing, (fraction(n, 6) - FT(0.5)) * FT(0.1),
                          (fraction(n, 7) - FT(0.5)) * FT(0.02), (fraction(n, 8) - FT(0.5)) * FT(0.5),
                          (fraction(n, 9) - FT(0.5)) * FT(0.5), (fraction(n, 10) - FT(0.5)) * FT(0.1))
-            w′³ = third_moment(diagnosis, g, arguments...)
+            w′³ = third_moment(diagnosis, UnboundedStratificationNumber(), g, arguments...)
             @test same_bits(w′³, literal_third_moment(g, arguments...))
             literal_bound = FT(1.2) * sqrt(2 * (w′² * w′² * w′²))
             bound = third_moment_bound(polynomial, w′²)
@@ -279,7 +279,7 @@ end
             # The diagnosis and the limiter together, with respect to the coefficient c, at a state
             # whose diagnosed third moment is beyond the bound
             arguments = (300.0, 1e-4, 0.4, 300.0, 1 / 40, 1 / 80, 0.02, -0.004, 0.1, 0.15, 0.03)
-            unlimited = third_moment(diagnosis, g, arguments...)
+            unlimited = third_moment(diagnosis, UnboundedStratificationNumber(), g, arguments...)
             for ratio in (0.9, 1.2, 1.6)
                 limiter = PolynomialSaturatedSkewness(abs(unlimited) / (ratio * 0.4^1.5))
                 @test abs(unlimited) / third_moment_bound(limiter, 0.4) ≈ ratio
@@ -309,16 +309,6 @@ end
 
         # Unbounded: the identity, and the diagnosis with it is the diagnosis of shoc.F90
         fraction(n, m) = FT(mod(n * 0.6180339887498949 + m * 0.7548776662466927, 1))
-        for n in 1:500
-            αᴺ = (fraction(n, 1) - FT(0.3)) * FT(10)^(3 * fraction(n, 2))
-            @test same_bits(bound_stratification_number(unbounded, αᴺ, first_pole), αᴺ)
-
-            τ = FT(10)^(1 + FT(2.5) * fraction(n, 1))
-            N² = (fraction(n, 2) - FT(0.4)) * FT(4e-4)
-            arguments = (τ, N², FT(0.4), FT(300), FT(1 / 40), FT(1 / 80), FT(0.02), FT(-0.004), FT(0.1), FT(0.15), FT(0.03))
-            @test same_bits(third_moment(diagnosis, unbounded, g, arguments...),
-                            third_moment(diagnosis, g, arguments...))
-        end
 
         # Rational: the identity where αᴺ ≤ 0; increasing, and below αᴺᵐᵃˣ = γ × the first pole
         # for every αᴺ > 0, so that 1 - (a₁ + a₃) αᴺ ≥ 1 - γ

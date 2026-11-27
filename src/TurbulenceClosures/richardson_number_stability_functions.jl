@@ -26,9 +26,6 @@ end
     return richardson_number(N²ᵢ, S², closure.shear.minimum_shear_squared)
 end
 
-# Without `e` and `ℓ`: the Richardson number of a shear that reads neither (`GridMeanShear`)
-@inline Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N²) = Riᶜᶜᶠ(i, j, k, grid, closure, velocities, N², nothing, nothing)
-
 struct RationalStabilityFunction{FT}
     ℂᵘ⁻ :: FT # momentum, unstable limit (Ri → -∞)
     ℂᵘ⁰ :: FT # momentum, neutral (Ri = 0)
