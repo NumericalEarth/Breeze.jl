@@ -222,13 +222,17 @@ julia> round(sum(Float64, sums .- u⁰) / length(sums), sigdigits = 1)
     return Float32(reinterpret(Float64, truncated))
 end
 
-@inline function rounded_add(r::StochasticRounding, a, b, i, j, k, key)
-    # TwoSum (Knuth): s + e == a + b exactly, for any magnitudes of a and b, so it also covers
-    # momentum near zero, where the increment can exceed the state. No fast-math: reassociating
-    # these operations would set e = 0.
-    s = a + b
+# The rounding error e of the round-to-nearest sum s = a + b, by TwoSum (Knuth): s + e == a + b
+# exactly, for any magnitudes of a and b, so it also covers momentum near zero, where the increment
+# can exceed the state. No fast-math: reassociating these operations would set e = 0.
+@inline function rounding_error(a, b, s)
     z = s - a
-    e = (a - (s - z)) + (b - z)
+    return (a - (s - z)) + (b - z)
+end
+
+@inline function rounded_add(r::StochasticRounding, a, b, i, j, k, key)
+    s = a + b
+    e = rounding_error(a, b, s)
 
     # Round toward the neighbor on the side of the exact sum with probability |e| / gap.
     neighbor = ifelse(e > 0, nextfloat(s), prevfloat(s))

@@ -661,5 +661,42 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
         end
     end
 
+    # A periodic channel has no preferred column, so the flow over a hill must not depend on where
+    # the hill sits relative to the edge of the grid. The slow tendency of the contravariant
+    # vertical momentum interpolates the horizontal momentum tendencies across the periodic edge,
+    # where it read their halos, which nothing fills: with the hill across the edge, the last
+    # column lost the tendency (Wicker–Skamarock, 10⁻⁵ of ρw in ten steps) or took the stage
+    # combination of a multirate infinitesimal step without it (0.7 of ρw).
+    @testset "Flow over a hill in a periodic channel is translation invariant [$timestepper]" for
+            timestepper in (:AcousticRungeKutta3, :MultirateInfinitesimalStep)
+
+        function translated_hill_state(shift)
+            Nx, Nz, Lx, Lz = 16, 8, 32e3, 12e3
+            Δx = Lx / Nx
+            z_faces = TerrainFollowingVerticalDiscretization(collect(range(0, Lz, length = Nz + 1)); formulation = LinearDecay())
+            grid = RectilinearGrid(default_arch; size = (Nx, Nz), halo = (5, 5), x = (0, Lx), z = z_faces,
+                                   topology = (Periodic, Flat, Bounded))
+            distance(x) = (d = mod(x - (Lx / 2 + shift * Δx), Lx); min(d, Lx - d))
+            materialize_terrain!(grid, x -> 400 / (1 + (distance(x) / 3e3)^2))
+            θᵣ(z) = 300 * exp(1e-5 * z)
+            dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = θᵣ)
+            model = AtmosphereModel(grid; dynamics, timestepper)
+            set!(model; θ = (x, z) -> θᵣ(z), u = 10, ρ = Breeze.HydrostaticallyBalancedDensity())
+            for _ in 1:10
+                time_step!(model, 2)
+            end
+            return map(field -> circshift(Array(interior(field)), (-shift, 0, 0)), Oceananigans.prognostic_fields(model))
+        end
+
+        centered = translated_hill_state(0)
+        across_the_edge = translated_hill_state(8)
+        @test maximum(abs, centered.ρw) > 0.1 # the hill forces a response
+
+        for name in keys(centered)
+            scale = maximum(abs, centered[name])
+            @test maximum(abs, across_the_edge[name] .- centered[name]) ≤ 10 * eps(scale)
+        end
+    end
+
 end
 end

@@ -182,6 +182,7 @@ export
     # TimeSteppers
     SSPRungeKutta3,
     AcousticRungeKutta3,
+    MultirateInfinitesimalStep,
     AcousticSubstepper,
     RoundToNearest,
     StochasticRounding,

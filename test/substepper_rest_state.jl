@@ -266,7 +266,9 @@ end
     # exact-rest contract.
     Δt_cases = (0.5, 20.0)
 
-    n_steps = 200
+    # The instability this guards against doubled `max|w|` every outer step and ran the
+    # density negative within about 15 of them, so 60 steps are far past its onset.
+    n_steps = 60
     bound   = 1e-10
 
     for Δt in Δt_cases
@@ -390,7 +392,7 @@ total_dry_mass(model) = sum(Float64.(interior(model.dynamics.dry_density)))
     @test relative_drift <= 1e-12
 end
 #####
-##### T8 — Unit test for _zero_x_wall_face! and _zero_y_wall_face! kernels
+##### T8 — Unit test for the _zero_x_wall_faces! and _zero_y_wall_faces! kernels
 #####
 ##### Direct coverage of the wall-zeroing kernels called by
 ##### `enforce_wall_impenetrability!`. Fills the momentum perturbation

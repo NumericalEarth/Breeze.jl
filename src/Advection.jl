@@ -4,6 +4,7 @@ export div_ρUc,
        bottom_advective_tracer_flux
 
 using Oceananigans.Advection:
+    Advection as OceananigansAdvection,
     _advective_tracer_flux_x,
     _advective_tracer_flux_y,
     _advective_tracer_flux_z,
@@ -31,6 +32,8 @@ using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δz�
 using Oceananigans.Utils: SumOfArrays, AdaptiveVerticallyImplicitDiscretization
 using Oceananigans.TimeSteppers: time_discretization
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+
+using Breeze.TimeSteppers: MassConsistentVelocity
 
 using ..AtmosphereModels:
     AtmosphereModels,
@@ -89,6 +92,11 @@ Adapt.adapt_structure(to, v::ExplicitVerticalVelocity) =
 @inline Base.getindex(v::ExplicitVerticalVelocity, i, j, k) =
     @inbounds explicit_velocity_scaleᶜᶜᶠ(i, j, k, v.grid, v.advection_scheme, v.time_discretization,
                                          v.vertical_velocity) * v.vertical_velocity[i, j, k]
+
+# A velocity that is the explicitly transported one already is taken as it is: where the explicit
+# fraction is limited, scaling it again would take off what it adds to the limited velocity.
+@inline OceananigansAdvection.explicit_velocity_scaleᶜᶜᶠ(i, j, k, grid, scheme, ::AdaptiveVerticallyImplicitDiscretization,
+                                                        ::ExplicitVerticalVelocity{<:Any, <:Any, <:Any, <:MassConsistentVelocity}) = one(grid)
 
 # Disambiguates against the `ZeroField` shortcut above.
 @inline AtmosphereModels.div_ρUc(i, j, k, grid, ::BoundsPreservingAVIDWENO, ρ, U, ::ZeroField) = zero(grid)

@@ -147,13 +147,43 @@ end
                                  clock,
                                  model_fields)
 
-    Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
-    Uᵗ = sum_of_velocities(velocities, Uᵖ)
     ρ_field = total_density(dynamics)  # total ρ: water/tracer mass-fraction advection & diffusion
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
 
-    return ( - div_ρUc(i, j, k, grid, advection, ρ_field, Uᵗ, c)
+    # The sum of `scalar_advective_tendency` and `nonadvective_scalar_tendency` below, in this
+    # association order; the terms are spelled out rather than summed from the two parts so the
+    # round-off of every path that builds the full tendency at once is unchanged.
+    return ( scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities, microphysics, microphysical_fields)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, c) # for PrescribedDynamics
+             - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, c, clock, model_fields, closure_buoyancy)
+             + c_forcing(i, j, k, grid, clock, model_fields))
+end
+
+# The advective part of `scalar_tendency`: -∇·(ρ 𝐔ᵗ c), with 𝐔ᵗ the transport plus sedimentation velocity.
+@inline function scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities, microphysics, microphysical_fields)
+    Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
+    Uᵗ = sum_of_velocities(velocities, Uᵖ)
+    return - div_ρUc(i, j, k, grid, advection, total_density(dynamics), Uᵗ, c)
+end
+
+# The same, taking the argument list of `scalar_tendency`, which a kernel can pass through whole.
+@inline function scalar_advective_tendency(i, j, k, grid, c, id, name, c_forcing, advection, dynamics, formulation,
+                                           constants, specific_prognostic_moisture, velocities, microphysics,
+                                           microphysical_fields, args...)
+    return scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities, microphysics,
+                                     microphysical_fields)
+end
+
+# The rest of `scalar_tendency`, with its signature: closure diffusion, forcing and the flux-form
+# correction of prescribed dynamics. Microphysical sources are added separately.
+@inline function nonadvective_scalar_tendency(i, j, k, grid, c, id, name, c_forcing, advection, dynamics, formulation,
+                                              constants, specific_prognostic_moisture, velocities, microphysics,
+                                              microphysical_fields, closure, closure_fields, clock, model_fields)
+
+    ρ_field = total_density(dynamics)
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)
+
+    return ( c_div_ρU(i, j, k, grid, dynamics, velocities, c)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, c, clock, model_fields, closure_buoyancy)
              + c_forcing(i, j, k, grid, clock, model_fields))
 end

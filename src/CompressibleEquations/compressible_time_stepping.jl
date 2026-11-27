@@ -378,7 +378,7 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
     arch = grid.architecture
     dynamics = model.dynamics
 
-    # Ensure halos are filled (may have been async from update_state!)
+    # Ensure halos are filled
     # These fields are needed for pressure computation via equation of state
     fill_halo_regions!(dynamics.dry_density)
     fill_halo_regions!(prognostic_fields(model.formulation))

@@ -242,6 +242,8 @@ makedocs(
         "Contributors guide" => "contributing.md",
     ],
     linkcheck = true,
+    # The CM1 test pages time out from CI runners
+    linkcheck_ignore = [r"www2\.mmm\.ucar\.edu/people/bryan/cm1"],
     draft = false,
     doctest = true,
 )

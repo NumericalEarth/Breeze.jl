@@ -155,8 +155,7 @@ function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    # Ensure halos are filled before velocity computation
-    # (prognostic field halo fill in update_state! is async).
+    # Ensure halos are filled before velocity computation (not every caller is `update_state!`).
     # Thread clock and model fields so time-dependent boundary conditions
     # (e.g. continuous-callable or FieldTimeSeries Open BCs) on density/momentum
     # dispatch correctly; without them `getbc` falls through to a signature that
@@ -389,23 +388,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     compute_momentum_tendencies!(model, model_fields)
 
-    # Arguments common to energy density, moisture density, and tracer density tendencies,
-    # given the advecting velocities (contravariant for terrain-following grids):
-    tendency_args(advecting_velocities) = (
-        model.dynamics,
-        model.formulation,
-        model.thermodynamic_constants,
-        specific_prognostic_moisture(model),
-        advecting_velocities,
-        model.microphysics,
-        model.microphysical_fields,
-        model.closure,
-        model.closure_fields,
-        model.clock,
-        model_fields)
-
     advecting_velocities = transport_velocities(model)
-    common_args = tendency_args(advecting_velocities)
 
     #####
     ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
@@ -413,8 +396,57 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     # The thermodynamic variable may advect with its own velocities, but its condensate
     # sedimentation term pairs with the moisture and tracer tendencies below, so it reads theirs.
-    compute_thermodynamic_tendency!(model, tendency_args(thermodynamic_transport_velocities(model)),
+    compute_thermodynamic_tendency!(model,
+                                    scalar_tendency_arguments(model, model_fields, thermodynamic_transport_velocities(model)),
                                     advecting_velocities.w)
+
+    #####
+    ##### Moisture, microphysical and tracer density tendencies, with the microphysical sources
+    #####
+
+    # A time stepper may rebuild these after its acoustic loop instead (see
+    # `scalar_tendencies_in_update_state`), in which case the build here is skipped.
+    scalar_tendencies_in_update_state(model.timestepper) &&
+        compute_scalar_tendencies!(model, model_fields, advecting_velocities, compute_scalar_tendency!)
+
+    #####
+    ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
+    #####
+
+    compute_dynamics_tendency!(model)
+
+    for callback in callbacks
+        callback.callsite isa TendencyCallsite && callback(model)
+    end
+
+    return nothing
+end
+
+# Whether `compute_tendencies!` builds the moisture, microphysical and tracer tendencies. A time
+# stepper that rebuilds them after its acoustic substep loop returns `false`.
+scalar_tendencies_in_update_state(timestepper) = true
+
+# Arguments common to the thermodynamic, moisture, microphysical and tracer density tendencies,
+# given the advecting velocities (contravariant for terrain-following grids).
+scalar_tendency_arguments(model, model_fields, advecting_velocities) = (
+    model.dynamics,
+    model.formulation,
+    model.thermodynamic_constants,
+    specific_prognostic_moisture(model),
+    advecting_velocities,
+    model.microphysics,
+    model.microphysical_fields,
+    model.closure,
+    model.closure_fields,
+    model.clock,
+    model_fields)
+
+# Build the moisture, microphysical and tracer tendencies into `Gⁿ` with `kernel`, then add the
+# microphysical sources. The tracers hold their specific values here, as in `update_state!`.
+function compute_scalar_tendencies!(model, model_fields, advecting_velocities, kernel)
+    grid = model.grid
+    arch = grid.architecture
+    common_args = scalar_tendency_arguments(model, model_fields, advecting_velocities)
 
     #####
     ##### Moisture density tendency
@@ -430,7 +462,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
         common_args...)
 
     Gρqᵛᵉ = getproperty(model.timestepper.Gⁿ, moist_name)
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵛᵉ, grid, ρq_args)
+    launch_scalar_tendency!(kernel, arch, grid, moist_name, Gρqᵛᵉ, ρq_args)
 
     #####
     ##### Tracer density tendencies
@@ -438,10 +470,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     # Pass specific (per-mass) fields for scalar advection: div_ρUc computes ∇·(ρ₀uq),
     # so passing density-weighted ρ₀q would double-count ρ₀.
-    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[specific_field_name(name)]
-                                                 for name in prognostic_field_names(model.microphysics))
-
-    scalars = merge(prognostic_microphysical_fields, model.tracers)
+    scalars = specific_scalar_fields(model)
     for (i, name) in enumerate(keys(scalars))
         ρc = scalars[name]
 
@@ -454,7 +483,7 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
             common_args...)
 
         Gρc = getproperty(model.timestepper.Gⁿ, name)
-        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
+        launch_scalar_tendency!(kernel, arch, grid, name, Gρc, scalar_args)
     end
 
     #####
@@ -463,16 +492,6 @@ function compute_tendencies!(model::AtmosphereModel, callbacks=[])
 
     compute_microphysical_tendencies!(model)
 
-    #####
-    ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
-    #####
-
-    compute_dynamics_tendency!(model)
-
-    for callback in callbacks
-        callback.callsite isa TendencyCallsite && callback(model)
-    end
-
     return nothing
 end
 
@@ -480,6 +499,58 @@ end
 @kernel function compute_scalar_tendency!(Gc, grid, args)
     i, j, k = @index(Global, NTuple)
     @inbounds Gc[i, j, k] = scalar_tendency(i, j, k, grid, args...)
+end
+
+# The same tendency, added to what `Gc` already holds (sources built before an acoustic loop).
+@kernel function add_scalar_tendency!(Gc, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gc[i, j, k] += scalar_tendency(i, j, k, grid, args...)
+end
+
+# The specific (per-mass) fields of the microphysical prognostics and the tracers, keyed by
+# their prognostic (density) names. The tracers are specific only inside `update_state!` and
+# the time steppers' post-loop scalar tendency build (`tracer_density_to_specific!`).
+function specific_scalar_fields(model)
+    density_names = prognostic_field_names(model.microphysics)
+    specific_names = map(specific_field_name, density_names)
+    specific_fields = map(name -> model.microphysical_fields[name], specific_names)
+    microphysical_scalars = NamedTuple{density_names}(specific_fields)
+    return merge(microphysical_scalars, model.tracers)
+end
+
+# Build one scalar's tendency `Gc` with `kernel`, a kernel function writing `Gc` alone or a
+# `SplitScalarTendencies` (below).
+launch_scalar_tendency!(kernel, arch, grid, name, Gc, args) = launch!(arch, grid, :xyz, kernel, Gc, grid, args)
+
+# Adds the non-advective part of each scalar's tendency to `Gⁿ` and assigns the advective part to
+# `advective_tendencies[name]`, each evaluated once. A scalar with no entry there gets the
+# non-advective part alone: whoever builds with the split evaluates its advective part later.
+struct SplitScalarTendencies{C}
+    advective_tendencies :: C
+end
+
+advective_tendency_storage(split::SplitScalarTendencies, name) = get(split.advective_tendencies, name, nothing)
+
+launch_scalar_tendency!(split::SplitScalarTendencies, arch, grid, name, Gc, args) =
+    launch_split_scalar_tendency!(advective_tendency_storage(split, name), arch, grid, Gc, args)
+
+launch_split_scalar_tendency!(C, arch, grid, Gc, args) =
+    launch!(arch, grid, :xyz, add_split_scalar_tendency!, Gc, C, grid, args)
+
+launch_split_scalar_tendency!(::Nothing, arch, grid, Gc, args) =
+    launch!(arch, grid, :xyz, add_nonadvective_scalar_tendency!, Gc, grid, args)
+
+@kernel function add_split_scalar_tendency!(Gc, C, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        C[i, j, k] = scalar_advective_tendency(i, j, k, grid, args...)
+        Gc[i, j, k] += nonadvective_scalar_tendency(i, j, k, grid, args...)
+    end
+end
+
+@kernel function add_nonadvective_scalar_tendency!(Gc, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gc[i, j, k] += nonadvective_scalar_tendency(i, j, k, grid, args...)
 end
 
 # Note: compute_static_energy_tendency! and compute_potential_temperature_tendency!

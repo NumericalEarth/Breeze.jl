@@ -1,6 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: prognostic_fields, fields, architecture
+using Oceananigans: prognostic_fields, fields, architecture, TendencyCallsite, CenterField
 using Oceananigans.Advection: AdaptiveImplicitVerticalAdvection, vertical_scheme,
                               implicit_vertical_velocityᶜᶜᶠ
 using Oceananigans.Operators: Azᶜᶜᶠ, δzᵃᵃᶜ, V⁻¹ᶜᶜᶜ, ℑzᵃᵃᶠ
@@ -8,8 +8,10 @@ using Oceananigans.Utils: launch!, KernelParameters
 
 using Breeze.AtmosphereModels:
     AtmosphereModel,
+    moisture_forcing_names,
     advecting_vertical_velocity,
     continuity_density,
+    StageEndDensity,
     total_density,
     thermodynamic_density_name,
     transport_velocities,
@@ -18,7 +20,11 @@ using Breeze.AtmosphereModels:
     dynamics_prognostic_fields,
     implicit_advection_velocities,
     implicit_step_scheme,
-    implicit_sedimentation_step!
+    implicit_sedimentation_step!,
+    compute_scalar_tendencies!,
+    add_scalar_tendency!,
+    tracer_density_to_specific!,
+    tracer_specific_to_density!
 
 using Breeze.CompressibleEquations: CompressibleDynamics, implicit_steps_in_place!, implicit_step_scratch,
                                      compute_transport_density_tendency!
@@ -55,6 +61,10 @@ end
 ##### Scalar (tracer / moisture) update with time-averaged velocities
 #####
 
+# The state the current stage's acoustic integration starts from and its scalars update from:
+# the stored outer-step-start state, unless the stepper's stages start elsewhere.
+stage_start_state(timestepper, model) = timestepper.U⁰
+
 # Freeze the time-averaged transport velocity the moisture and tracer tendencies were just built
 # from: the next acoustic loop rebuilds it, and the implicit remainder in `scalar_substep!` (and
 # `implicit_sedimentation_step!`) must split the same velocity the explicit fraction in Gⁿ was
@@ -66,7 +76,9 @@ function cache_transport_velocity!(model)
 
     # The moisture's part of the loop's pressure pairs the moisture tendencies with the divergence
     # of the mass flux they were built with, which the next acoustic loop likewise overwrites.
-    compute_transport_density_tendency!(substepper, model, transport_velocities(model))
+    # With `PostLoopScalarTendencies` only the post-loop build is followed by one
+    # (`cache_post_loop_transport!`): `update_state!` builds no moisture tendencies.
+    cache_transport_density_tendency!(model.timestepper.scalar_tendencies, substepper, model)
 
     return nothing
 end
@@ -82,7 +94,7 @@ tendency_transport_velocities(model) =
 function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     grid = model.grid
     arch = grid.architecture
-    U⁰ = model.timestepper.U⁰
+    U⁰ = stage_start_state(model.timestepper, model)
     Gⁿ = model.timestepper.Gⁿ
     prognostic = prognostic_fields(model)
     names = keys(prognostic)
@@ -91,10 +103,12 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     # Water species and tracers advect as mass fractions of the total density ρ = ρᵈ + Σρˣ
     # (see `scalar_tendency`), so the implicit solve is weighted with the same density; only
     # `update_state!` refreshes `total_density`, so it still holds the value the tendencies were
-    # built with. The vertical velocity is frozen for the same reason (`cache_transport_velocity!`):
-    # the acoustic loop has already overwritten the live time-averaged field with this stage's
-    # average, while `Gⁿ` was scaled by the previous one.
-    ρ = total_density(model.dynamics)
+    # built with, which is the density of the mass flux through the faces. The cells have been
+    # compressed by the acoustic loop since (see `scalar_implicit_density`). The vertical velocity
+    # is frozen for the same reason (`cache_transport_velocity!`): the acoustic loop has already
+    # overwritten the live time-averaged field with this stage's average, while `Gⁿ` was scaled
+    # by the previous one.
+    ρ = scalar_implicit_density(model)
     velocities = tendency_transport_velocities(model)
     implicit_solver = model.timestepper.implicit_solver
     implicit_requests = []
@@ -137,15 +151,174 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     # in `implicit_substep!`, so the moved content takes the same closure diffusion as the rest
     # of the field; its implicit vertical transport ran inside the substep loop, before this
     # step (a first-order splitting difference).
-    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, Δt_stage, velocities)
+    isnothing(model.timestepper.implicit_solver) ||
+        implicit_sedimentation_step!(model, Δt_stage, velocities, model.formulation, ρ)
 
     return nothing
 end
+
+# The density that weights the scalars' implicit solves: the stage-entry total density at the
+# faces and, in the cells, that density compressed as the acoustic loop compressed the dry air
+# (`StageEndDensity`), so that the solve sees the mass fraction the explicit update produced.
+# The stage-entry dry density is only kept under adaptive implicit vertical advection
+# (`cache_advecting_state!`); without it the solves are weighted with the stage-entry density.
+# TODO: weight the closure-diffusion-only solves with the stage-end density too, which needs the
+# stage-entry dry density kept whenever the scalars take an implicit solve.
+scalar_implicit_density(model) =
+    scalar_implicit_density(model.timestepper.substepper.density_cache, model.dynamics)
+
+scalar_implicit_density(::Nothing, dynamics) = total_density(dynamics)
+
+scalar_implicit_density(stage_entry_dry_density, dynamics) =
+    StageEndDensity(total_density(dynamics), continuity_density(dynamics), stage_entry_dry_density)
 
 # The prognostics the acoustic substep loop advances, which `scalar_substep!` therefore skips.
 acoustic_prognostic_names(model) = tuple(keys(dynamics_prognostic_fields(model.dynamics))...,
                                          keys(model.momentum)...,
                                          thermodynamic_density_name(model.formulation))
+
+# The prognostics `scalar_substep!` advances: every one the acoustic substep loop does not.
+scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_names(model), keys(prognostic_fields(model)))
+
+#####
+##### When the moisture and tracer tendencies are built: before or after the stage's acoustic loop
+#####
+##### `PreLoopScalarTendencies` (the default of `AcousticRungeKutta3`) builds them in `update_state!`,
+##### between stages; `PostLoopScalarTendencies` (the default of `MultirateInfinitesimalStep`) rebuilds
+##### them right after the stage's own loop, from its time-averaged mass flux, so that a uniform mass
+##### fraction stays uniform (issue #1089; see the Compressible dynamics section of the documentation).
+##### After the loop, `compute_scalar_tendencies!` rebuilds advection, closure diffusion, forcing and the
+##### microphysical sources, which `update_state!` skips (`scalar_tendencies_in_update_state`), with the
+##### stepper's build (`post_loop_scalar_tendency_kernel`). The flux boundary conditions and the closure's
+##### own scalar sources (TKE production) are still evaluated before the loop, at the stage-entry state,
+##### onto zeroed scalar tendencies, since after it they would pair stage-end velocities and θ with
+##### stage-entry TKE and diffusivities. `TendencyCallsite` callbacks fire a second time after the
+##### post-loop build (their momentum edits are then inert). The thermodynamic variable's condensate
+##### sedimentation term feeds the loop and is still built before it, a first-order splitting difference
+##### with sedimenting condensate. The transport velocity is frozen (`cache_post_loop_transport!`) after
+##### the build, so the implicit remainder of the scalar update splits the velocity the explicit fraction
+##### was scaled by. The loop's pressure takes the moisture tendencies of the stage before, with the
+##### divergence of the mass flux they were built with (see `PostLoopScalarTendencies`).
+#####
+
+# Scalar tendencies are built in `update_state!`, between stages.
+struct PreLoopScalarTendencies end
+
+# Scalar tendencies are rebuilt after each stage's own acoustic loop. The loop's pressure needs
+# the moisture and condensate tendencies before that (Section 3b of the acoustic substepper), and
+# is given those of the stage before, the same transport of the mass fractions one stage earlier.
+# `previous_tendencies` is where they are kept from one stage's build to the next stage's loop,
+# or `nothing` for a time stepper that keeps them in storage of its own.
+struct PostLoopScalarTendencies{P}
+    previous_tendencies :: P
+end
+
+PostLoopScalarTendencies() = PostLoopScalarTendencies(nothing)
+
+scalar_tendency_timing(post_loop_scalar_tendencies::Bool) =
+    post_loop_scalar_tendencies ? PostLoopScalarTendencies() : PreLoopScalarTendencies()
+
+# With fields for the tendencies of the stage before (`previous_tendency_storage`).
+scalar_tendency_timing(post_loop_scalar_tendencies::Bool, grid, prognostic_fields, dynamics, moisture_forcing_names) =
+    post_loop_scalar_tendencies ?
+        PostLoopScalarTendencies(previous_tendency_storage(grid, prognostic_fields, dynamics, moisture_forcing_names)) :
+        PreLoopScalarTendencies()
+
+# One field per moisture and condensate density, the prognostics whose tendencies the loop's
+# pressure ramps with (`moisture_forcing_names`).
+function previous_tendency_storage(grid, prognostic_fields, dynamics, moisture_forcing_names)
+    names = previous_tendency_names(prognostic_fields, dynamics, moisture_forcing_names)
+    return NamedTuple{names}(ntuple(_ -> CenterField(grid), length(names)))
+end
+
+previous_tendency_names(prognostic_fields, dynamics, moisture_forcing_names) =
+    filter(name -> name ∈ moisture_forcing_names, keys(prognostic_fields))
+
+# A time stepper built without the model (`moisture_forcing_names = nothing`) cannot tell the
+# moisture and condensate densities from the other scalars: every prognostic that the acoustic loop
+# does not advance by continuity or momentum gets a field, and only theirs are written.
+function previous_tendency_names(prognostic_fields, dynamics, ::Nothing)
+    excluded = (keys(dynamics_prognostic_fields(dynamics))..., :ρu, :ρv, :ρw)
+    return filter(name -> name ∉ excluded, keys(prognostic_fields))
+end
+
+# Keep the tendencies just built for the next stage's loop.
+keep_previous_scalar_tendencies!(::Nothing, model) = nothing
+
+function keep_previous_scalar_tendencies!(previous_tendencies, model)
+    Gⁿ = model.timestepper.Gⁿ
+    for name in moisture_forcing_names(model.microphysics)
+        copyto!(parent(previous_tendencies[name]), parent(Gⁿ[name]))
+    end
+    return nothing
+end
+
+# The `AcousticTimeStepper` method is in acoustic_runge_kutta_3.jl, with the abstract type.
+scalar_tendencies_in_update_state(::PreLoopScalarTendencies) = true
+scalar_tendencies_in_update_state(::PostLoopScalarTendencies) = false
+
+# With `PostLoopScalarTendencies`, zero the scalar tendencies: the stage-entry sources are added to
+# them before the loop, and the post-loop build adds to those.
+prepare_scalar_tendencies!(::PreLoopScalarTendencies, model) = nothing
+
+function prepare_scalar_tendencies!(::PostLoopScalarTendencies, model)
+    Gⁿ = model.timestepper.Gⁿ
+    for name in scalar_prognostic_names(model)
+        fill!(parent(Gⁿ[name]), 0)
+    end
+    return nothing
+end
+
+cache_transport_density_tendency!(::PreLoopScalarTendencies, substepper, model) =
+    compute_transport_density_tendency!(substepper, model, transport_velocities(model))
+
+cache_transport_density_tendency!(::PostLoopScalarTendencies, substepper, model) = nothing
+
+# After the post-loop build: freeze the transport velocity it used, and evaluate the divergence of
+# its mass flux, which is paired with the tendencies just built when they predict the next
+# stage's (`moisture_forcing`).
+function cache_post_loop_transport!(model)
+    substepper = model.timestepper.substepper
+    w_cache = substepper.time_averaged_vertical_velocity_cache
+    copyto!(parent(w_cache), parent(transport_velocities(model).w))
+    compute_transport_density_tendency!(substepper, model, transport_velocities(model))
+    return nothing
+end
+
+# Build the scalar tendencies with the loop's time-averaged transport velocity, fire the
+# `TendencyCallsite` callbacks again, keep what the next stage's loop needs of them, freeze the
+# transport velocity and assemble the stage forcing. A time stepper that left part of a scalar's
+# tendency out of the build adds it while the tracers still hold their specific values
+# (`complete_post_loop_scalar_tendencies!`).
+compute_post_loop_scalar_tendencies!(::PreLoopScalarTendencies, model, Δt, callbacks) = nothing
+
+function compute_post_loop_scalar_tendencies!(timing::PostLoopScalarTendencies, model, Δt, callbacks)
+    tracer_density_to_specific!(model)
+    prepare_post_loop_scalar_tendencies!(model.timestepper, model)
+    kernel = post_loop_scalar_tendency_kernel(model.timestepper, model)
+    compute_scalar_tendencies!(model, fields(model), transport_velocities(model), kernel)
+
+    for callback in callbacks
+        callback.callsite isa TendencyCallsite && callback(model)
+    end
+
+    keep_previous_scalar_tendencies!(timing.previous_tendencies, model)
+    cache_post_loop_transport!(model)
+    complete_post_loop_scalar_tendencies!(model.timestepper, model, Δt)
+    # The assembly may read the prognostic fields (see `StateIncrement`), so the tracers are densities again.
+    tracer_specific_to_density!(model)
+    assemble_post_loop_stage_forcing!(model.timestepper, model, Δt)
+    return nothing
+end
+
+# What a time stepper needs in hand before the post-loop build. Nothing by default.
+prepare_post_loop_scalar_tendencies!(timestepper, model) = nothing
+
+# What a time stepper's post-loop build left for after the sources and the callbacks. Nothing by default.
+complete_post_loop_scalar_tendencies!(timestepper, model, Δt) = nothing
+
+# The kernel of the post-loop build. By default the full tendency is added to what `Gⁿ` holds.
+post_loop_scalar_tendency_kernel(timestepper, model) = add_scalar_tendency!
 
 #####
 ##### Implicit vertical solve for the acoustic prognostics

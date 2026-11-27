@@ -8,9 +8,10 @@ ulp is ``4×10⁻⁶`` to ``3×10⁻⁵``, about the size of one stage's increme
 noise: the model stops warming or cooling while the radiation scheme keeps reporting the heating
 rate ([issue #1122](https://github.com/NumericalEarth/Breeze.jl/issues/1122)).
 
-The round-off treatment of the stage updates is selectable through `timestepper_kwargs`, for both
-the [`SSPRungeKutta3`](@ref) stepper of the anelastic core and the [`AcousticRungeKutta3`](@ref)
-stepper of the compressible core:
+The round-off treatment of the stage updates is selectable through `timestepper_kwargs`, for
+the [`SSPRungeKutta3`](@ref) stepper of the anelastic core and for the
+[`AcousticRungeKutta3`](@ref) (the default) and [`MultirateInfinitesimalStep`](@ref) steppers of the
+compressible core:
 
 - [`RoundToNearest`](@ref) (default): IEEE rounding, bitwise identical to the original stage update
   and free.
@@ -42,6 +43,16 @@ from ``Uⁿ``, so only the third stage's rounding reaches ``Uⁿ⁺¹``; that st
 acoustic prognostics and its scalar updates are rounded with the chosen treatment. The
 vertically-implicit solves, the pressure correction, and the acoustic perturbation updates stay
 round-to-nearest.
+
+The stages of a [`MultirateInfinitesimalStep`](@ref) start from and are forced with the increments
+``Y_j - U^n`` of earlier stages, so the rounding of an intermediate state would reach ``U^{n+1}``,
+recombined with weights of either sign. For the acoustic prognostics it does not: the acoustic loop
+integrates perturbations, so the rounding error of each intermediate sum (a stage's recovered state,
+the next stage's start state) is kept, exactly, and added back to the small quantity formed next
+from the rounded state (the increment, the perturbation the loop starts from). Only the last
+stage's recovery rounds, with the chosen treatment, as for [`AcousticRungeKutta3`](@ref). The
+moisture, microphysical and tracer fields take the chosen treatment in every stage whose increment
+a later stage reuses.
 
 Stochastic rounding works in any precision; in `Float64` it is supported but rarely useful, since
 increments are resolved. The default leaves `Float64` and `Float32` runs unchanged.

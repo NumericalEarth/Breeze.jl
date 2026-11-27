@@ -124,6 +124,12 @@ function parse_commandline()
             arg_type = Int
             default = 12
 
+        "--timestepper"
+            help = "Outer time stepper for compressible_splitexplicit dynamics: AcousticRungeKutta3 or " *
+                   "MultirateInfinitesimalStep."
+            arg_type = String
+            default = "AcousticRungeKutta3"
+
         "--grid_type"
             help = "Grid for the convective boundary layer: rectilinear, or latitude_longitude (the same box " *
                    "on a LatitudeLongitudeGrid, with SphericalCoriolis). Defaults to latitude_longitude " *
@@ -525,10 +531,13 @@ function run_benchmarks(args; kernel_cases = [])
             continue
         end
 
-        # Only non-default grids and substep counts show in the name, so the existing names stay as they are
+        # Only non-default grids, substep counts and time steppers show in the name, so the existing names stay as they are
         grid_suffix = grid_type == "rectilinear" ? "" : "_LatLon"
-        substeps_suffix = dyn_name == "compressible_splitexplicit" && args["substeps"] != 12 ? "_N$(args["substeps"])" : ""
-        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)"
+        split_explicit = dyn_name == "compressible_splitexplicit"
+        substeps_suffix = split_explicit && args["substeps"] != 12 ? "_N$(args["substeps"])" : ""
+        timestepper = split_explicit ? Symbol(args["timestepper"]) : nothing
+        timestepper_suffix = split_explicit && timestepper !== :AcousticRungeKutta3 ? "_$(timestepper)" : ""
+        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)$(substeps_suffix)$(timestepper_suffix)_$(adv_name)_$(cls_name)_$(micro_name)_$(topo_name)$(grid_suffix)_$(backend_name)$(mode_suffix)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
@@ -549,6 +558,7 @@ function run_benchmarks(args; kernel_cases = [])
                                                       Nx, Ny, Nz,
                                                       float_type = FT,
                                                       dynamics,
+                                                      timestepper,
                                                       advection,
                                                       closure,
                                                       microphysics,

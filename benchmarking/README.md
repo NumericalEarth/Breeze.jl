@@ -138,6 +138,7 @@ julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=2.0 -
 | `--advection` | `WENO5` | Advection scheme: `nothing`, `Centered2`, `WENO5`, `WENO9`, `bounded_WENO5`. Comma-separated for multiple. |
 | `--closure` | `nothing` | Turbulence closure: `nothing`, `SmagorinskyLilly`, `DynamicSmagorinsky`. Comma-separated for multiple. |
 | `--microphysics` | `nothing` | Microphysics scheme (see below). Comma-separated for multiple. |
+| `--timestepper` | `AcousticRungeKutta3` | Outer time stepper for `compressible_splitexplicit` dynamics: `AcousticRungeKutta3` or `MultirateInfinitesimalStep`. A non-default one shows in the case name. |
 | `--dt` | `0.5` | Time step size in seconds |
 | `--output` | `benchmark_results.json` | Output JSON filename for results |
 | `--clear` | `false` | Clear existing results file before writing |
