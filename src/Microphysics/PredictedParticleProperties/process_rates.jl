@@ -180,6 +180,7 @@ struct P3ProcessRates{FT}
 
     # Ice number loss from vapor-driven sinks (sublimation + coating evaporation)
     sublimation_number :: FT       # Ice number loss magnitude from sublimation / coating evaporation [1/kg/s]
+    coating_evaporation_number :: FT # Coating contribution to sublimation_number [1/kg/s]
 
     # Phase 2: Ice aggregation (positive magnitude)
     aggregation :: FT              # Ice number loss magnitude from self-collection [1/kg/s]
@@ -773,6 +774,10 @@ end
     # === SINK LIMITING ===
     dt_safety = parameters.sink_limiting_timescale
 
+    liquid_dt = liquid_interval(liquid_stage, dt_safety)
+    # Convert implicit rates to equivalent rates for the explicit reservoir budgets.
+    liquid_weight = liquid_dt / dt_safety
+
     # --- Vapor sinks ---
     # The saturation-adjustment caps are applied before the per-species conservation
     # budgets, so the cloud/rain/ice budgets below must see the final vapor-limited
@@ -785,13 +790,18 @@ end
     # On the grid, the liquid vapor exchange and activation are instead advanced implicitly over
     # the coming stage (see `implicit_liquid_relaxation.jl`); the explicit caps above stay the
     # gridless path and the fallback before the first time step.
-    liquid_rates = implicit_liquid_vapor_rates(liquid_stage, liquid_rates, p3, ρ, ℳ_adjusted, state, constants,
+    # The stage is read here, where it is first needed, rather than carried through the rates.
+    relaxation_stage = liquid_relaxation_stage(liquid_stage, p3.aerosol, ρ)
+    liquid_rates = implicit_liquid_vapor_rates(relaxation_stage, liquid_rates, p3, ρ, ℳ_adjusted, state, constants,
                                                vapor_excess_adjustment.cloud_water_adjustment,
                                                phase1.cloud_relaxation, phase1.rain_relaxation, Γ,
                                                distribution)
     # The ice-phase caps follow whichever liquid rates were chosen, so they are evaluated once.
     vapor_rates = limit_ice_vapor_rates(liquid_rates, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
-                                        dt_safety, T₀, temperature_tendency, pressure_tendency,
+                                        dt_safety, T₀, temperature_tendency, pressure_tendency, liquid_dt,
+                                        stage_vapor_offset(relaxation_stage, FT),
+                                        stage_rain(relaxation_stage, FT),
+                                        stage_coating(relaxation_stage, FT),
                                         distribution, qᵛ⁺ⁱ)
     cond = vapor_rates.cond
     ccn_activation_mass = vapor_rates.ccn_activation_mass
@@ -818,7 +828,7 @@ end
     # stage is shorter than that timescale or starts from more cloud than the rates see.
     implicit_evaporation = liquid_relaxation_is_active(liquid_stage)
     cloud_evap = ifelse(implicit_evaporation, zero(FT), max(0, -cond))
-    cloud_source_total = max(0, cond) + ccn_activation_mass
+    cloud_source_total = (max(0, cond) + ccn_activation_mass) * liquid_weight
     # Homogeneous freezing is applied after all ordinary process budgets below,
     # consistent with its place in the process ordering. Do not reserve liquid here:
     # ordinary cloud processes first act on the full cloud reservoir.
@@ -882,7 +892,7 @@ end
         sublim_n = sublim_n * f_dry_ice
 
         rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
-                            cloud_warm_to_rain + rain_cond
+                            cloud_warm_to_rain + rain_cond * liquid_weight
         rain_available = max(0, qʳ) + rain_source_total * dt_safety
         rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain +
                           ifelse(implicit_evaporation, zero(FT), rain_evap)
@@ -943,7 +953,6 @@ end
 
     qⁱ_total_coat = max(total_ice_mass(qⁱ, qʷⁱ), FT(parameters.floors.mass_scale))
     coat_evap_n = coat_evap * safe_divide(max(0, nⁱ), qⁱ_total_coat, zero(FT))
-    sublim_n = sublim_n + coat_evap_n
 
     # Recompute splintering from sink-limited riming rates
     diagnostic_mean_mass = qⁱ_total / nⁱ_diagnostic
@@ -1034,6 +1043,8 @@ end
     melt_n = min(melt_n, particle_sink_capacity)
     particle_sink_capacity = max(0, particle_sink_capacity - melt_n)
     sublim_n = min(sublim_n, particle_sink_capacity)
+    coat_evap_n = min(coat_evap_n, max(0, particle_sink_capacity - sublim_n))
+    sublim_n += coat_evap_n
     number_available_for_aggregation = max(0, particle_sink_capacity - sublim_n)
     agg = min(agg, number_available_for_aggregation)
     ice_number_sink_total = melt_n + sublim_n + agg
@@ -1105,13 +1116,13 @@ end
     # Re-diagnosing the rate from the residual also captures liquid created by
     # condensation, melting, or shedding during this interval.
     cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
-                       cloud_warm_q + wg_cloud + wg_shed + max(0, -cond)
+                       cloud_warm_q + wg_cloud + wg_shed + max(0, -cond) * liquid_weight
     cloud_remaining = max(0, max(0, qᶜˡ) +
                           (cloud_source_total - cloud_sink_total) * dt_safety)
 
     rain_source_total = autoconv + accr + complete_melt + shed + wg_shed +
-                        cloud_warm_to_rain + rain_cond
-    rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap
+                        cloud_warm_to_rain + rain_cond * liquid_weight
+    rain_sink_total = rain_rim + rain_frz_q + rain_warm_q + wg_rain + rain_evap * liquid_weight
     rain_remaining = max(0, max(0, qʳ) +
                          (rain_source_total - rain_sink_total) * dt_safety)
 
@@ -1120,7 +1131,7 @@ end
     # beginning-of-stage number. In the prescribed-Nᶜˡ path, re-diagnose the prescribed number
     # against the residual cloud mass so the frozen number keeps the cloud DSD slope bounds.
     cloud_number_tendency = cloud_number_tendency_before_homogeneous_freezing(
-        p3, ρ, qᶜˡ, Nᶜˡ, ccn_activation_mass, ccn_activation_number,
+        p3, ρ, qᶜˡ, Nᶜˡ, ccn_activation_mass * liquid_weight, ccn_activation_number * liquid_weight,
         autoconv, accr, cloud_self, cloud_rim_n, cloud_frz_n, cloud_warm_n)
     prognostic_cloud_number = max(0, cloud.nᶜˡ +
                                   cloud_number_tendency * dt_safety)
@@ -1131,7 +1142,7 @@ end
                                     prognostic_cloud_number)
 
     rain_number_tendency = rain_number_tendency_before_homogeneous_freezing(
-        p3, autoconv, melt_n, rain_evap_n, rain_self,
+        p3, autoconv, melt_n, rain_evap_n * liquid_weight, rain_self,
         rain_br, rain_rim_n, rain_frz_n, shed_n, cloud_warm_q, rain_warm_n, wg_shed_n)
     rain_number_remaining = max(0, nʳ +
                                 rain_number_tendency * dt_safety)
@@ -1180,7 +1191,7 @@ end
                                                      temperature_tendency, pressure_tendency,
                                                      constants)
     vapor_excess_tendency = final_prognostic_vapor_excess_tendency(
-        parameters, 𝒰, qᵛ, q.liquid, q.ice, constants, ℳ.δqᵛ⁺ˡ, dt_safety,
+        parameters, 𝒰, qᵛ, q.liquid, q.ice, constants, ℳ.δqᵛ⁺ˡ, liquid_dt,
         vapor_to_liquid, vapor_to_ice, liquid_to_ice, external_forcing)
     # `saturation_alignment_rate` is intentionally NOT rescaled by the cloud sink limiter: the
     # G&M alignment is its own one-shot saturation adjustment with a local
@@ -1195,7 +1206,7 @@ end
         dep, partial_melt, complete_melt, melt_n,
         clipping_dry_mass, clipping_rime_mass, clipping_rime_volume,
         post_process_clipping,
-        sublim_n,
+        sublim_n, coat_evap_n,
         agg, ni_lim,
         cloud_rim, cloud_rim_n, rain_rim, rain_rim_n, ρᶠ_new,
         shed, shed_n, refrz,

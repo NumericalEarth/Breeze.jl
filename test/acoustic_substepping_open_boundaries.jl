@@ -19,7 +19,7 @@ using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: SplitExplicitTimeDiscretization,
                                     explicit_horizontal_step!, enforce_wall_impenetrability!,
                                     _build_predictors!, prepare_acoustic_cache!,
-                                    factor_vertical_solver!, run_acoustic_substeps!
+                                    factor_vertical_solver!, acoustic_substep_loop!
 using Breeze.AtmosphereModels: thermodynamic_density
 using Breeze.Microphysics: SaturationAdjustment, WarmPhaseEquilibrium
 using Breeze.Thermodynamics: ExnerReferenceState
@@ -36,11 +36,9 @@ const arches = (Metal.functional() || get(ENV, "BREEZE_FORCE_METAL_FUNCTIONAL", 
 
 as_test_float_types(arch) = arch isa GPU{MetalBackend} ? (Float32,) : test_float_types()
 
-# On the grid of the relaxation tests below (with their 1 km spacing), so that the kernels of the
-# substep loop are compiled for one grid size.
 function open_boundary_momentum_model(arch, FT, damping)
-    grid = RectilinearGrid(arch, FT; size=(8, 8, 4), halo=(5, 5, 5),
-                           x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
+    grid = RectilinearGrid(arch, FT; size=(6, 6, 4), halo=(5, 5, 5),
+                           x=(0, 6kilometers), y=(0, 6kilometers), z=(0, 200),
                            topology=(Bounded, Bounded, Bounded))
     boundary_conditions = (
         ρu = FieldBoundaryConditions(west=NormalFlowBoundaryCondition(FT(2)),
@@ -68,9 +66,8 @@ for arch in arches
     @testset "Nonzero momentum OBC: defaults on perturbation, stable step [$(arch), $(FT)]" for FT in as_test_float_types(arch)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
-        # The thin channel of the relaxation tests below, so that its kernels are compiled once.
-        grid = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
-                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
+        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
                                topology=(Bounded, Periodic, Bounded))
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
@@ -187,7 +184,7 @@ for arch in arches
             stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ, U⁰ = model.timestepper.U⁰,
                      forcing_interval = 3Δτ)
             factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
-            run_acoustic_substeps!(3, model, substepper, stage, nothing)
+            acoustic_substep_loop!(3, model, substepper, stage, nothing)
 
             # Check momentum increments and the raw transport sum.
             for momentum in (substepper.momentum_perturbation, substepper.time_averaged_velocities)
@@ -247,15 +244,12 @@ for arch in arches
 
         # Doubly-periodic: no `Open` BC anywhere; `is_active_open_bc` should
         # return false on every side and the relaxation should be a no-op.
-        # The relaxation is the substep loop's, which the time steppers share: these two
-        # smoke runs name the one that is cheaper to compile, on the thin grids of the
-        # relaxation tests below, which run the default.
-        grid_periodic = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
-                                        x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
+        grid_periodic = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                                        x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
                                         topology=(Periodic, Periodic, Bounded))
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid_periodic; advection=WENO(), dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid_periodic; advection=WENO(), dynamics)
         set!(model; θ=300, u=0, qᵗ=0, ρ=model.dynamics.reference_state.density)
         run!(Simulation(model; Δt=1, stop_iteration=1, verbose=false))
         @test model.clock.iteration == 1
@@ -263,10 +257,10 @@ for arch in arches
 
         # Bounded but no OBC supplied: the prognostic-momentum BCs default to
         # impenetrable walls, which `is_active_open_bc` returns false for.
-        grid_walls = RectilinearGrid(arch; size=(8, 8, 4), halo=(5, 5, 5),
-                                     x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 200),
+        grid_walls = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
+                                     x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers),
                                      topology=(Bounded, Bounded, Bounded))
-        model_walls = AtmosphereModel(grid_walls; advection=WENO(), dynamics, timestepper=:AcousticRungeKutta3)
+        model_walls = AtmosphereModel(grid_walls; advection=WENO(), dynamics)
         set!(model_walls; θ=300, u=0, qᵗ=0, ρ=model_walls.dynamics.reference_state.density)
         run!(Simulation(model_walls; Δt=1, stop_iteration=1, verbose=false))
         @test model_walls.clock.iteration == 1

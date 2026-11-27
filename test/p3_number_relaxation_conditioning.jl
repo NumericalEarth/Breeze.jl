@@ -143,7 +143,7 @@ end
         stage = StageStart(fields, fields, false, Δt)
         rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, temperature(𝒰, constants), z, z,
                                          nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
-        φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, properties, rates)
+        φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
         limited_rates = PPP.patankar_limited_rates(rates, φ)
         result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited_rates)
         relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates, result)

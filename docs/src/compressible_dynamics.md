@@ -41,8 +41,8 @@ For static energy, ``χ = s``, the source encodes the pressure work.
 strategies:
 
 - [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization):
-  A multirate outer integration with an inner acoustic substep loop: a multirate infinitesimal
-  step by default, or Wicker–Skamarock RK3. The outer step
+  A multistage outer integration with an inner acoustic substep loop: Wicker–Skamarock RK3
+  by default, or a multirate infinitesimal step. The outer step
   is bounded by the **advective** CFL (``Δt \sim Δx / U``); the inner substep is bounded by the
   **horizontal acoustic** CFL (``Δτ \sim Δx / c_s``). This is the recommended choice and the
   rest of this page describes its design.
@@ -286,9 +286,9 @@ fields to ``U^n - U^L``.
 
 ### Outer schemes
 
-The default outer scheme for [`SplitExplicitTimeDiscretization`](@ref) is
-[`MultirateInfinitesimalStep`](@ref) with its `:ConvexLinearMIS6` coefficients. Select Wicker–Skamarock RK3 with
-`timestepper = :AcousticRungeKutta3`.
+The default outer scheme for [`SplitExplicitTimeDiscretization`](@ref) is Wicker–Skamarock RK3,
+[`AcousticRungeKutta3`](@ref). Select [`MultirateInfinitesimalStep`](@ref), with its default
+`:ConvexLinearMIS6` coefficients, with `timestepper = :MultirateInfinitesimalStep`.
 
 A multirate infinitesimal step
 ([Wensch et al. 2009](@cite WenschKnothGalant2009); [Knoth and Wensch 2014](@cite KnothWensch2014))

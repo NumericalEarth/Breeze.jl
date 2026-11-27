@@ -10,7 +10,7 @@ rate ([issue #1122](https://github.com/NumericalEarth/Breeze.jl/issues/1122)).
 
 The round-off treatment of the stage updates is selectable through `timestepper_kwargs`, for
 the [`SSPRungeKutta3`](@ref) stepper of the anelastic core and for the
-[`MultirateInfinitesimalStep`](@ref) (the default) and [`AcousticRungeKutta3`](@ref) steppers of the
+[`AcousticRungeKutta3`](@ref) (the default) and [`MultirateInfinitesimalStep`](@ref) steppers of the
 compressible core:
 
 - [`RoundToNearest`](@ref) (default): IEEE rounding, bitwise identical to the original stage update

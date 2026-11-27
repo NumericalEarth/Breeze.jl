@@ -11,10 +11,6 @@ include(joinpath(@__DIR__, "setup.jl"))
 ##### the explicit compressible and anelastic formulations, and a
 ##### balanced rest state that stays quiet.
 #####
-##### The inertia-gravity wave and the saturated column name
-##### AcousticRungeKutta3; the others take the default time stepper of
-##### split-explicit dynamics, MultirateInfinitesimalStep.
-#####
 ##### Component-level tests live in
 ##### `test/acoustic_substepping_components.jl`; open-boundary behavior
 ##### lives in `test/acoustic_substepping_open_boundaries.jl`.
@@ -159,7 +155,7 @@ for arch in arches
         dynamics = CompressibleDynamics(td; base_pressure=p₀,
                                         reference_potential_temperature=θᵇᵍ)
 
-        model = AtmosphereModel(grid; advection=WENO(), dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; advection=WENO(), dynamics)
 
         ref = model.dynamics.reference_state
         set!(model; θ=θᵢ, u=U, qᵗ=0, ρ=ref.density)
@@ -238,7 +234,7 @@ for arch in arches
                                             base_pressure,
                                             standard_pressure,
                                             reference_potential_temperature = θ_background)
-            timestepper = nothing  # the default for split-explicit dynamics, :MultirateInfinitesimalStep
+            timestepper = nothing  # auto-selects :AcousticRungeKutta3 for split-explicit dynamics
         else
             error("Unknown tiny bubble model kind: $kind")
         end
@@ -342,11 +338,9 @@ for arch in arches
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
 
-        # The grid of the first two testsets, which has the same 1 km spacings as the
-        # 16 × 8 × 10 km box this test used: the state is uniform, and a grid of another size
-        # would compile the kernels of the default time stepper again.
-        grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5),
-                               x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+        Nx, Ny, Nz = 16, 8, 10
+        grid = RectilinearGrid(arch; size=(Nx, Ny, Nz), halo=(5, 5, 5),
+                               x=(0, 16kilometers), y=(0, 8kilometers), z=(0, 10kilometers))
 
         td = SplitExplicitTimeDiscretization(substeps=8)
         dynamics = CompressibleDynamics(td; base_pressure=100000,
@@ -379,8 +373,7 @@ for arch in arches
     ##### the 2Δx mode of w grows to several m/s within the hour, until the cloud evaporates. A dry
     ##### density term of the adjusted pressure carried in the loop's flux, which jumps by more than θ
     ##### across a cloud edge, is unstable at the edges of the layer. Float64 only (the amplitudes are
-    ##### calibrated in Float64), so it is skipped on Metal. This is the Wicker–Skamarock stepper;
-    ##### `multirate_infinitesimal_step.jl` runs the same column under the default one.
+    ##### calibrated in Float64), so it is skipped on Metal.
     #####
 
     arch isa GPU{MetalBackend} || @testset "Saturated air keeps a seeded 2Δx mode at its amplitude [$(arch), $(label)]" for (label, qᵗ) in
@@ -398,8 +391,7 @@ for arch in arches
         td = SplitExplicitTimeDiscretization(; damping = NoDivergenceDamping())
         dynamics = CompressibleDynamics(td; base_pressure = 1e5, reference_potential_temperature = θ̄)
         microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
-        model = AtmosphereModel(grid; dynamics, microphysics, advection = WENO(order = 5),
-                                timestepper = :AcousticRungeKutta3)
+        model = AtmosphereModel(grid; dynamics, microphysics, advection = WENO(order = 5))
         set!(model; θ = θᵢ, u = 15, ρ = Breeze.HydrostaticallyBalancedDensity())
         set!(model; qᵗ)
 

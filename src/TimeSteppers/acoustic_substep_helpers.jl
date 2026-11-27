@@ -154,7 +154,8 @@ function scalar_substep!(model, Δt_stage, kernel_Δt, rounding)
     # in `implicit_substep!`, so the moved content takes the same closure diffusion as the rest
     # of the field; its implicit vertical transport ran inside the substep loop, before this
     # step (a first-order splitting difference).
-    isnothing(model.timestepper.implicit_solver) || implicit_sedimentation_step!(model, Δt_stage, velocities)
+    isnothing(model.timestepper.implicit_solver) ||
+        implicit_sedimentation_step!(model, Δt_stage, velocities, model.formulation, ρ)
 
     return nothing
 end
@@ -185,46 +186,22 @@ scalar_prognostic_names(model) = filter(name -> name ∉ acoustic_prognostic_nam
 #####
 ##### When the moisture and tracer tendencies are built: before or after the stage's acoustic loop
 #####
-##### With `PreLoopScalarTendencies` (the default of `AcousticRungeKutta3`) `update_state!` builds
-##### them between stages, so a stage advects its scalars with the mean velocity of the *preceding*
-##### loop (stage 1 with the outer-step-start velocity), while continuity applies the stage's own
-##### loop mean: the moisture mass flux is then not q/(1 − q) times the dry mass flux, and a
-##### uniform q does not stay uniform (issue #1089). `PostLoopScalarTendencies` (the default of
-##### `MultirateInfinitesimalStep`) rebuilds them right after the stage's own loop, as WRF
-##### (`rk_scalar_tend` with `ru_m, rv_m, ww_m`) and MPAS do, from that loop's
-##### time-averaged mass flux. Both densities of the flux (ρ/ρᵈ)⟨ρᵈu⟩q are then stage-entry values
-##### — `total_density` is refreshed only by `update_state!`, and the average divides by the
-##### stage-entry ρᵈ — so their ratio is the uniform 1/(1 − qᵗ) and the flux is exactly
-##### q/(1 − q) times the one continuity applied.
-#####
-##### What moves and what stays:
-#####   - Advection, closure diffusion, forcing and the microphysical sources of the scalars are
-#####     rebuilt after the loop (`compute_scalar_tendencies!` with the live transport velocity);
-#####     `update_state!` skips them (`scalar_tendencies_in_update_state`). The stepper picks the
-#####     build (`post_loop_scalar_tendency_kernel`): the full tendency added to `Gⁿ`, or, for a
-#####     multirate infinitesimal step, the advection built apart from the sources and summed with
-#####     them in the stage assembly, which recombines both across stages.
-#####   - The flux boundary conditions and the closure's own scalar sources (TKE production) are
-#####     still evaluated before the loop, at the stage-entry state, onto zeroed scalar
-#####     tendencies, and the post-loop build adds to them. Evaluating the closure sources after
-#####     the loop would pair stage-end velocities and θ with stage-entry TKE and diffusivities.
-#####   - `TendencyCallsite` callbacks fire a second time after the post-loop build, so their
-#####     scalar edits are not overwritten. Their momentum edits in that second firing are inert:
-#####     the loop has consumed the momentum tendencies, which the next `update_state!` rebuilds.
-#####   - The thermodynamic variable's condensate sedimentation term feeds the acoustic loop, so
-#####     it is still built before the loop with the preceding loop's transport velocity, while
-#####     the condensate mass it accompanies now falls with the current loop's. The mismatch is a
-#####     first-order splitting difference, of the same order as the existing split between the
-#####     explicit sedimentation term and `implicit_sedimentation_step!`, and only arises with
-#####     sedimenting condensate.
-#####   - The transport velocity is frozen (`cache_post_loop_transport!`) after the post-loop
-#####     build, so the implicit remainder of the scalar update splits the velocity the explicit
-#####     fraction was scaled by.
-#####   - The loop's pressure ramps with the moisture and condensate tendencies (Section 3b of the
-#####     acoustic substepper), which the stage has not built when its loop starts. The loop takes
-#####     those of the stage before, with the divergence of the mass flux they were built with
-#####     (see `PostLoopScalarTendencies`). Without them the dilution of the moisture, which the
-#####     advective part of its tendency balances, would force the pressure alone.
+##### `PreLoopScalarTendencies` (the default of `AcousticRungeKutta3`) builds them in `update_state!`,
+##### between stages; `PostLoopScalarTendencies` (the default of `MultirateInfinitesimalStep`) rebuilds
+##### them right after the stage's own loop, from its time-averaged mass flux, so that a uniform mass
+##### fraction stays uniform (issue #1089; see the Compressible dynamics section of the documentation).
+##### After the loop, `compute_scalar_tendencies!` rebuilds advection, closure diffusion, forcing and the
+##### microphysical sources, which `update_state!` skips (`scalar_tendencies_in_update_state`), with the
+##### stepper's build (`post_loop_scalar_tendency_kernel`). The flux boundary conditions and the closure's
+##### own scalar sources (TKE production) are still evaluated before the loop, at the stage-entry state,
+##### onto zeroed scalar tendencies, since after it they would pair stage-end velocities and θ with
+##### stage-entry TKE and diffusivities. `TendencyCallsite` callbacks fire a second time after the
+##### post-loop build (their momentum edits are then inert). The thermodynamic variable's condensate
+##### sedimentation term feeds the loop and is still built before it, a first-order splitting difference
+##### with sedimenting condensate. The transport velocity is frozen (`cache_post_loop_transport!`) after
+##### the build, so the implicit remainder of the scalar update splits the velocity the explicit fraction
+##### was scaled by. The loop's pressure takes the moisture tendencies of the stage before, with the
+##### divergence of the mass flux they were built with (see `PostLoopScalarTendencies`).
 #####
 
 # Scalar tendencies are built in `update_state!`, between stages.

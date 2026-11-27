@@ -1434,15 +1434,16 @@ core) turns it into the change of the continuity-density-weighted prognostic.
 @inline sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature) =
     sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, explicit_condensate_mass_fluxes,
-                                   formulation, dynamics, constants, microphysics, microphysical_fields,
-                                   specific_prognostic_moisture, temperature)
+                                   total_density(dynamics), formulation, dynamics, constants, microphysics,
+                                   microphysical_fields, specific_prognostic_moisture, temperature)
 
 # The tendency from the part of each condensate's mass fluxes that `mass_fluxes` selects:
 # `explicit_condensate_mass_fluxes` for the part the tracer tendency applies,
-# `implicit_condensate_mass_fluxes` for the remainder the adaptive implicit solve applied.
+# `implicit_condensate_mass_fluxes` for the remainder the adaptive implicit solve applied. `ρ` is
+# the total density that weighted the mass fluxes: the one the solve was weighted with for the latter.
 @inline sedimentation_content_tendency(i, j, k, grid, ::Tuple{}, args...) = zero(grid)
 
-@inline function sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, formulation, dynamics,
+@inline function sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, formulation, dynamics,
                                                 constants, microphysics, microphysical_fields, specific_prognostic_moisture,
                                                 temperature)
     # Content of the cells below, at, and above k; each face draws on the two cells flanking it.
@@ -1454,12 +1455,12 @@ core) turns it into the change of the continuity-density-weighted prognostic.
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     c⁺ = condensate_content(i, j, min(k + 1, grid.Nz), grid, formulation, dynamics, constants,
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
-    ρ = total_density(dynamics)
     ρᵈ = continuity_density(dynamics)
     Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
-    ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
-    ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
-    @inbounds density_ratio = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
+    ρᶠ⁻ = densityᶜᶜᶠ(i, j, k,     grid, ρ)
+    ρᶠ⁺ = densityᶜᶜᶠ(i, j, k + 1, grid, ρ)
+    # anelastic: 1; compressible: qᵈ, provided ρᵈ and ρ are from the same time
+    @inbounds density_ratio = ρᵈ[i, j, k] / densityᶜᶜᶜ(i, j, k, grid, ρ)
     return -(density_ratio * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻))
 end
 

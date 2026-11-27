@@ -150,8 +150,8 @@ r_taper_end = 300kilometers    # radial taper end, m
 # 128² cells horizontally and 75 levels vertically (``Δz ≈ 333`` m). The run
 # prefers GPU and falls back to CPU if CUDA isn't functional.
 #
-# Dynamics: `CompressibleDynamics(SplitExplicitTimeDiscretization())` with its default
-# outer time stepper, [`MultirateInfinitesimalStep`](@ref). Acoustic substepping replaces the
+# Dynamics: `CompressibleDynamics(SplitExplicitTimeDiscretization())` with the
+# [`AcousticRungeKutta3`](@ref) outer time stepper. Acoustic substepping replaces the
 # anelastic elliptic pressure solve with linearized acoustic substeps, which lets the
 # run go at `Float32`.
 

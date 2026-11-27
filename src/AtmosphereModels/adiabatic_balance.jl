@@ -194,15 +194,8 @@ the balance solver-agnostic. `CompressibleDynamics` extends this to swap the tim
 """
 adiabatic_twin_dynamics(dynamics, time_stepping) = dynamics
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return the name of the time stepper for the adiabatic-balance twin and the keyword arguments that
-select its scheme, given the production `timestepper` and the twin's dynamics. The fallback is the
-default time stepper of `twin_dynamics`. A twin that keeps split-explicit dynamics reuses the
-production model's own acoustic time stepper instead, so that `time_stepping = nothing` balances
-with the scheme that then integrates the model.
-"""
+# The name of the twin's time stepper and the keyword arguments that select its scheme: by default that
+# of `twin_dynamics`; a twin that keeps split-explicit dynamics reuses the production model's own.
 adiabatic_twin_timestepper(timestepper, twin_dynamics) = default_timestepper(twin_dynamics), NamedTuple()
 
 """
@@ -215,7 +208,7 @@ to no-flux (see [`adiabatic_scalar_bcs`](@ref)), sharing the production data so 
 reallocated. Prognostic aerosol number is carried as a passive tracer: activation and sedimentation
 are removed, while reversible transport preserves `nᵃ = ρnᵃ / ρ` as the balance adjusts density.
 The twin's dynamics comes from [`adiabatic_twin_dynamics`](@ref) (per
-`balancer.time_stepping`) and its time stepper from [`adiabatic_twin_timestepper`](@ref); microphysics, closure, the implicit diffusion solver, the sponge, and
+`balancer.time_stepping`) and its time stepper from `adiabatic_twin_timestepper`; microphysics, closure, the implicit diffusion solver, the sponge, and
 forcing are removed; the time stepper's `Gⁿ`/`U⁰` tendency storage *aliases* the production stepper's
 same-named arrays (moisture key re-mapped from the microphysics name, e.g. `:ρqᵉ`, to the
 moistureless `:ρqᵛ`); and a copy of the production clock is used, so boundary conditions that

@@ -73,18 +73,27 @@ function benchmark_tendency(tendency!, args, grid;
         # `nothing`, the profiler uses its default scratch directory.
         prof = Reactant.Profiler.@timed nrepeat=nrepeat profile_dir=profile_dir compiled!(args...)
         time_per_step_seconds = prof.runtime_ns / 1e9
+        # The Reactant profiler doesn't report host allocations or garbage collection
+        gc_time_seconds = 0.0
+        allocated_bytes_per_step = 0.0
+        allocations_per_step = 0.0
     else
         # Vanilla backend: launch the kernel eagerly (no Reactant compile). Warm
         # up once, then time `nrepeat` launches with device synchronization.
         compile_timings = (total=0.0, tracing=0.0, mlir=0.0, xla=0.0)
         tendency!(args...)
         synchronize_device(arch)
-        start_time = time_ns()
-        for _ in 1:nrepeat
-            tendency!(args...)
+        full_garbage_collection()
+        stats = @timed begin
+            for _ in 1:nrepeat
+                tendency!(args...)
+            end
+            synchronize_device(arch)
         end
-        synchronize_device(arch)
-        time_per_step_seconds = ((time_ns() - start_time) / 1e9) / nrepeat
+        time_per_step_seconds = stats.time / nrepeat
+        gc_time_seconds = stats.gctime
+        allocated_bytes_per_step = stats.bytes / nrepeat
+        allocations_per_step = Base.gc_alloc_count(stats.gcstats) / nrepeat
     end
 
     total_time_seconds = time_per_step_seconds * nrepeat
@@ -118,6 +127,10 @@ function benchmark_tendency(tendency!, args, grid;
         compile_timings.mlir,
         compile_timings.xla,
         gpu_memory_used,
+        gc_time_seconds,
+        allocated_bytes_per_step,
+        allocations_per_step,
+        0.0,         # host_time_per_step_seconds — only measured for time stepping
         metadata,
     )
 

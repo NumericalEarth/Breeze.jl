@@ -336,7 +336,8 @@ the [`thermodynamic_density`](@ref) (the tendency of [`sedimentation_tendency`](
 from [`implicit_sedimentation_mass_fluxes`](@ref)). `velocities` are the transport velocities
 whose vertical component the tracers' solves split, `Δt` the interval they solved over, and
 `formulation` selects the [`condensate_content`](@ref) methods, defaulting to the model's.
-The time steppers call this between the tracers' solves of a stage and the thermodynamic
+`ρ` is the density that weighted the tracers' solves, defaulting to the model's total density;
+after an acoustic substep loop the two differ. The time steppers call this between the tracers' solves of a stage and the thermodynamic
 variable's post-loop solve, so the moved content takes the same implicit diffusion as the rest of
 the field, and on the SSP path its implicit vertical transport too; the acoustic stepper applies
 that transport inside its substep loop, before this step (see the note above). A no-op when no
@@ -346,14 +347,15 @@ For potential temperature this is a derivative-times-increment update, not an ex
 thermal-energy reconstruction. Matching the implicit mass flux alone does not remove that
 finite-step error.
 """
-function implicit_sedimentation_step!(model, Δt, velocities, formulation = model.formulation)
+function implicit_sedimentation_step!(model, Δt, velocities, formulation = model.formulation,
+                                      ρ = total_density(model.dynamics))
     condensates = values(model.sedimentation)
     implicit_sedimentation(condensates) || return nothing
     grid = model.grid
     arch = grid.architecture
     φ = thermodynamic_density(model.formulation)
     launch!(arch, grid, :xyz, _implicit_sedimentation_step!,
-            φ, grid, kernel_time_step(arch, grid, Δt), condensates, velocities.w,
+            φ, grid, kernel_time_step(arch, grid, Δt), condensates, velocities.w, ρ,
             formulation, model.dynamics, model.thermodynamic_constants, model.microphysics,
             model.microphysical_fields, specific_prognostic_moisture(model),
             content_temperature(formulation, model.temperature))
@@ -399,11 +401,11 @@ which the tracers' solves have moved away from the one the temperature field was
 """
 content_temperature(formulation, temperature_field) = temperature_field
 
-@kernel function _implicit_sedimentation_step!(φ, grid, Δt, condensates, wᵗ, formulation, dynamics, constants,
+@kernel function _implicit_sedimentation_step!(φ, grid, Δt, condensates, wᵗ, ρ, formulation, dynamics, constants,
                                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     i, j, k = @index(Global, NTuple)
     tendency = sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, implicit_condensate_mass_fluxes,
-                                              formulation, dynamics, constants, microphysics, microphysical_fields,
+                                              ρ, formulation, dynamics, constants, microphysics, microphysical_fields,
                                               specific_prognostic_moisture, temperature)
     @inbounds φ[i, j, k] += Δt * tendency
 end

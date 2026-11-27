@@ -30,7 +30,7 @@ using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscr
                                     FixedHorizontalDampingScale, LocalHorizontalDampingScale,
                                     NoHorizontalDampingScale
 using Breeze.CompressibleEquations: _build_vertical_rhs!, _explicit_horizontal_step!,
-                                    implicit_damping_factors, prepare_acoustic_cache!, run_acoustic_substeps!,
+                                    implicit_damping_factors, prepare_acoustic_cache!, acoustic_substep_loop!,
                                     factor_vertical_solver!,
                                     solve_tridiagonal_columns_in_place!
 using Breeze.AtmosphereModels: SlowDynamics,
@@ -391,7 +391,8 @@ for arch in arches
         grid = RectilinearGrid(arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
-        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid;
+                                dynamics)
 
         @test model.timestepper isa AcousticRungeKutta3
         @test model.timestepper.substepper isa AcousticSubstepper
@@ -402,7 +403,7 @@ for arch in arches
     end
 
     #####
-    ##### Test that the default time stepper for split-explicit is MultirateInfinitesimalStep (ConvexLinearMIS6)
+    ##### Test that default time stepper for split-explicit is AcousticRungeKutta3 (WS-RK3)
     #####
 
     @testset "Default time stepper for SplitExplicitTimeDiscretization [$(arch), $(FT)]" for FT in as_test_float_types(arch)
@@ -413,7 +414,7 @@ for arch in arches
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
         model = AtmosphereModel(grid; dynamics)
 
-        @test model.timestepper isa MultirateInfinitesimalStep
+        @test model.timestepper isa AcousticRungeKutta3
         Oceananigans.defaults.FloatType = old_FT
     end
 
@@ -448,14 +449,9 @@ for arch in arches
     # topology-aware operators, so the substep loop reads no horizontal halo of the fields it writes
     # (and only the discarded boundary rows of the vertical right-hand side read their vertical halos).
     # Poisoned halos must therefore not reach the interior.
-    # Each topology and damping compiles its own model, so one pairing covers both of each and
-    # the exhaustive tests run the others.
-    halo_cases = test_sweep(((Periodic, ThermalDivergenceDamping), (Bounded, DirectDivergenceDamping),
-                             (Periodic, DirectDivergenceDamping), (Bounded, ThermalDivergenceDamping));
-                            representatives = 2)
-
     @testset "Acoustic substep reads no unfilled halo [$(arch), $(FT), $(TX), $(Damping)]" for FT in as_test_float_types(arch),
-                                                                                         (TX, Damping) in halo_cases
+                                                                                         TX in (Periodic, Bounded),
+                                                                                         Damping in (ThermalDivergenceDamping, DirectDivergenceDamping)
         old_FT = Oceananigans.defaults.FloatType
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(arch; size=(8, 8, 8), halo=(5, 5, 5), topology=(TX, Periodic, Bounded),
@@ -486,7 +482,7 @@ for arch in arches
         stage = (; Δτ, δτᵐ⁺ = ω * Δτ, δτˢ⁻ = (1 - ω) * Δτ, Gˢρᵡ = model.timestepper.Gⁿ.ρθ, U⁰ = model.timestepper.U⁰,
                  forcing_interval = 2Δτ)
         factor_vertical_solver!(substepper, grid, model.thermodynamic_constants, stage.δτᵐ⁺)
-        run_acoustic_substeps!(2, model, substepper, stage, nothing)
+        acoustic_substep_loop!(2, model, substepper, stage, nothing)
 
         for field in (substepper.density_perturbation,
                       substepper.density_potential_temperature_perturbation,

@@ -1509,30 +1509,19 @@ end
 #####
 ##### What the rounded state lacks of the exact one
 #####
-#####
-##### A stage of a multirate infinitesimal step starts from Uⁿ + Σⱼ αᵢⱼ ΔYⱼ and is forced with
-##### γᵢⱼ ΔYⱼ / Δt, where ΔYⱼ = Yⱼ − Uⁿ are the increments of earlier stages. Three sums on the way
-##### round a small increment into a state of the size of Uⁿ: the recovery Yⱼ = Yⱼ₋₁ + U′ at the
-##### end of a stage, the start state U⁰ = Uⁿ + Σⱼ αᵢⱼ ΔYⱼ, and the last recovery, Uⁿ⁺¹. Each
-##### rounding of the first two kinds is a perturbation of one unit in the last place that later
-##### stages recombine with weights of either sign, where a scheme whose stages start from Uⁿ
-##### (Wicker–Skamarock) makes only the last. They are also where increments below one unit in
-##### the last place are lost.
-#####
-##### Neither sum needs to round what the loop integrates, because the loop integrates
-##### perturbations: the rounding errors, exact in floating point (`rounding_error`), are added
-##### back to the small quantity that is formed next from the rounded state. That of a stage's
-##### state is kept in a field per acoustic prognostic (the *residual*) until the next stage is
-##### assembled; that of a start state is evaluated from its two terms where the loop starts:
+##### A multirate infinitesimal step forms states of the size of Uⁿ from small increments at the end of
+##### a stage, at the start of the next and at Uⁿ⁺¹. The loop integrates perturbations, so the rounding
+##### errors of the first two sums (exact in floating point, `rounding_error`) are added back to the
+##### small quantity formed next from the rounded state, and only the last recovery rounds, with the
+##### time stepper's round-off treatment (see the Round-off section of the documentation):
 #####
 #####   end of stage j:      Yⱼ = fl(Yⱼ₋₁ + U′),           residual = (Yⱼ₋₁ + U′) − Yⱼ
 #####   assembly of stage i: ΔYⱼ = (Yⱼ − Uⁿ) + residual
 #####   start of stage i:    U⁰ = fl(Uⁿ + Zᵢ),   U′ = (U⁰ − Yᵢ₋₁) + [(Uⁿ + Zᵢ) − U⁰]
 #####
-##### The differences in parentheses are exact (the states are within a factor of two of each
-##### other), so the increments and the loop's start state are those of exact sums to the
-##### precision of the *increment*. Only the last recovery rounds, and it takes the time
-##### stepper's round-off treatment.
+##### The residual of a stage's state is kept in a field per acoustic prognostic until the next stage is
+##### assembled; that of a start state is evaluated from its two terms where the loop starts. The
+##### differences in parentheses are exact (the states are within a factor of two of each other).
 #####
 
 # The residuals of the start state of the current stage of `timestepper`, a `NamedTuple` with keys
@@ -1691,13 +1680,13 @@ horizontal_substep_form(timestepper) = ForwardBackwardSubsteps()
 
 # R(U) - R(Uⁿ), where R(U) = P(U) - 𝖫 U is the pressure gradient and buoyancy less the loop's linear
 # operator. Differencing from the step-start state Uⁿ cancels the hydrostatic parts exactly.
-struct StageEntryForceRemainder{D, S, P, R, RD, WN, TC}
+struct StageEntryForceRemainder{D, S, P, R, RD, MN, TC}
     direction :: D
-    pressure_gradient_stencil :: S          # of the horizontal gradients; `nothing` in height coordinates
-    pressure_remainder :: P                 # Cᴸ [(ρθ − ρθⁿ) − Wⁿ] − (p − pⁿ); see `compute_pressure_remainder!`
-    total_density :: R                      # ρ
-    dry_density :: RD                       # ρᵈ
-    step_start_water_density :: WN          # (ρ - ρᵈ)ⁿ
+    pressure_gradient_stencil :: S           # of the horizontal gradients; `nothing` in height coordinates
+    pressure_remainder :: P                  # Cᴸ [(ρθ − ρθⁿ) − Wⁿ] − (p − pⁿ); see `compute_pressure_remainder!`
+    total_density :: R                       # ρ
+    dry_density :: RD                        # ρᵈ
+    step_start_total_moisture_density :: MN  # (ρ - ρᵈ)ⁿ
     thermodynamic_constants :: TC
 end
 
@@ -1707,7 +1696,7 @@ Adapt.adapt_structure(to, r::SEFR) =
     StageEntryForceRemainder(r.direction, r.pressure_gradient_stencil,
                              adapt(to, r.pressure_remainder),
                              adapt(to, r.total_density), adapt(to, r.dry_density),
-                             adapt(to, r.step_start_water_density),
+                             adapt(to, r.step_start_total_moisture_density),
                              r.thermodynamic_constants)
 
 # Fields holding the outer-step-start state that a `StageEntryForceRemainder` is measured from, and
@@ -1718,14 +1707,14 @@ Adapt.adapt_structure(to, r::SEFR) =
 # loops, so it shares the storage of `substepper`'s scaled thermodynamic tendency, which each loop
 # rebuilds when it starts and nothing reads once the loop has ended.
 step_start_force_state(grid, substepper) = (pressure = CenterField(grid),
-                                            water_density = CenterField(grid),
+                                            total_moisture_density = CenterField(grid),
                                             condensate_mass_fraction = CenterField(grid),
                                             pressure_remainder = substepper.scaled_thermodynamic_tendency)
 
 function store_step_start_force_state!(step_start, model)
     grid = model.grid
     parent(step_start.pressure) .= parent(model.dynamics.pressure)
-    parent(step_start.water_density) .= parent(model.dynamics.total_density) .- parent(model.dynamics.dry_density)
+    parent(step_start.total_moisture_density) .= parent(model.dynamics.total_density) .- parent(model.dynamics.dry_density)
     fill!(parent(step_start.pressure_remainder), 0)
     launch!(architecture(grid), grid, :xyz, _store_condensate_mass_fraction!,
             step_start.condensate_mass_fraction, grid, model.microphysics, model.dynamics.total_density,
@@ -1818,7 +1807,7 @@ end
 #
 # and δp = p₀ (exp(δ ln p) − 1). δρθ, δρᵛ and δρᵈ are exact differences of the prognostic densities,
 # δr and γ − γ₀ are formed from them without cancellation, and the logarithm and exponential are
-# those of `log_one_plus` and `exponential_minus_one`, so δp has the relative accuracy of the
+# `log1p` and `expm1`, so δp has the relative accuracy of the
 # arithmetic rather than that of p. It equals the difference of the diagnosed pressures up to the
 # rounding of those.
 @inline function clear_air_pressure_change(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation,
@@ -1856,10 +1845,10 @@ end
     γ = 1 / (1 - κ)
     δγ = γ * γ₀ * clear_air_exner_exponent_change(κ̂, r, r₀, δr, constants)
 
-    δlnm = log_one_plus(Rᵛ * δr / (Rᵈ + r₀ * Rᵛ))
-    δlnp = γ * (log_one_plus(δρᵡ / ρ̂ᵡ₀) + δlnm) + δγ * log(p̂₀ / pˢᵗ) / γ₀
+    δlnm = log1p(Rᵛ * δr / (Rᵈ + r₀ * Rᵛ))
+    δlnp = γ * (log1p(δρᵡ / ρ̂ᵡ₀) + δlnm) + δγ * log(p̂₀ / pˢᵗ) / γ₀
 
-    return p₀ * exponential_minus_one(δlnp)
+    return p₀ * expm1(δlnp)
 end
 
 # The Exner exponent of air with vapor mixing ratio r and no condensate (`exner_exponent`), where
@@ -1882,20 +1871,6 @@ end
     return δr * (Rᵛ * cᵖᵈ - Rᵈ * cᵖᵛ) / ((cᵖᵈ + r * cᵖᵛ) * (cᵖᵈ + r₀ * cᵖᵛ))
 end
 
-# ln(1 + x) and exp(x) − 1 to the relative accuracy of the arithmetic for small x, from `log` and
-# `exp` alone (Kahan): the rounding of 1 + x, or of exp(x), is undone by the factor it is multiplied by.
-@inline function log_one_plus(x)
-    u = 1 + x
-    d = u - 1
-    return ifelse(d == 0, x, log(u) * x / ifelse(d == 0, one(d), d))
-end
-
-@inline function exponential_minus_one(x)
-    u = exp(x)
-    l = log(u)
-    return ifelse(l == 0, x, (u - 1) * x / ifelse(l == 0, one(l), l))
-end
-
 function StageEntryForceRemainder(direction, substepper::AcousticSubstepper, model, step_start)
     dynamics = model.dynamics
 
@@ -1904,18 +1879,18 @@ function StageEntryForceRemainder(direction, substepper::AcousticSubstepper, mod
                                     step_start.pressure_remainder,
                                     dynamics.total_density,
                                     dynamics.dry_density,
-                                    step_start.water_density,
+                                    step_start.total_moisture_density,
                                     model.thermodynamic_constants)
 end
 
 @inline linearized_pressure_remainder(i, j, k, grid, r) = @inbounds r.pressure_remainder[i, j, k]
 
-# (ρ − ρᵈ) − (ρ − ρᵈ)ⁿ: the change of the water loading since the step start.
-@inline function water_density_change(i, j, k, grid, r)
+# (ρ − ρᵈ) − (ρ − ρᵈ)ⁿ: the change of the moisture loading since the step start.
+@inline function total_moisture_density_change(i, j, k, grid, r)
     @inbounds begin
         ρ = r.total_density[i, j, k]
         ρᵈ = r.dry_density[i, j, k]
-        ρˣⁿ = r.step_start_water_density[i, j, k]
+        ρˣⁿ = r.step_start_total_moisture_density[i, j, k]
     end
     return (ρ - ρᵈ) - ρˣⁿ
 end
@@ -1940,7 +1915,7 @@ pressure_gradient_stencil(dynamics) = nothing
 @inline function force_remainder(i, j, k, grid, r::SEFR{Val{:z}})
     g = r.thermodynamic_constants.gravitational_acceleration
     ∂z_R = ∂zᶜᶜᶠ(i, j, k, grid, linearized_pressure_remainder, r)
-    δρˣ = ℑzᵃᵃᶠ(i, j, k, grid, water_density_change, r)
+    δρˣ = ℑzᵃᵃᶠ(i, j, k, grid, total_moisture_density_change, r)
     interior_face = (k > 1) & (k < size(grid, 3) + 1)
     return ifelse(interior_face, ∂z_R - g * δρˣ, zero(grid))
 end
@@ -1948,7 +1923,7 @@ end
 # The substeps run under `ReactantCore.@trace`: a plain loop on ordinary arrays, a single traced
 # `while` loop under Reactant, so the compiled program holds one copy of the substep body rather
 # than `Nτ`. Reverse-mode differentiation of that loop caches a minimal cut of its values (`mincut`).
-function run_acoustic_substeps!(Nτ, model, substepper, stage, advection)
+function acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
     @trace mincut=true track_numbers=false for n in 1:Nτ
         acoustic_substep!(model, substepper, stage, advection, n)
     end
@@ -2552,14 +2527,20 @@ end
 
 # Zero normal perturbations at walls and prescribed-flow faces.
 
-@kernel function _zero_x_wall_face!(ρu′, iᶠ)
+@kernel function _zero_x_wall_faces!(ρu′, Nx, left, right)
     j, k = @index(Global, NTuple)
-    @inbounds ρu′[iᶠ, j, k] = 0
+    @inbounds begin
+        left && (ρu′[1, j, k] = 0)
+        right && (ρu′[Nx + 1, j, k] = 0)
+    end
 end
 
-@kernel function _zero_y_wall_face!(ρv′, jᶠ)
+@kernel function _zero_y_wall_faces!(ρv′, Ny, left, right)
     i, k = @index(Global, NTuple)
-    @inbounds ρv′[i, jᶠ, k] = 0
+    @inbounds begin
+        left && (ρv′[i, 1, k] = 0)
+        right && (ρv′[i, Ny + 1, k] = 0)
+    end
 end
 
 # Whether a wall closes the left or the right side of a direction with topology `T`. The topology of
@@ -2578,10 +2559,10 @@ function enforce_wall_impenetrability!(substepper, model, grid, arch)
     ρv′ = substepper.momentum_perturbation.v
     # Auxiliary `nothing` BCs do not zero faces. Enforce zero perturbations explicitly
     # to match the topology-aware divergence and hold prescribed flow in the stage-entry state.
-    left_side_is_closed(TX)  && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, 1)
-    right_side_is_closed(TX) && launch!(arch, grid, :yz, _zero_x_wall_face!, ρu′, Nx + 1)
-    left_side_is_closed(TY)  && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, 1)
-    right_side_is_closed(TY) && launch!(arch, grid, :xz, _zero_y_wall_face!, ρv′, Ny + 1)
+    xl, xr = left_side_is_closed(TX), right_side_is_closed(TX)
+    yl, yr = left_side_is_closed(TY), right_side_is_closed(TY)
+    (xl || xr) && launch!(arch, grid, :yz, _zero_x_wall_faces!, ρu′, Nx, xl, xr)
+    (yl || yr) && launch!(arch, grid, :xz, _zero_y_wall_faces!, ρv′, Ny, yl, yr)
     return nothing
 end
 
@@ -2842,7 +2823,7 @@ stage depend on `substepper.substep_distribution`. `advection` is the advection 
 thermodynamic density. The recovery of the full state from the stage-entry state and
 the accumulated perturbations is rounded with the round-off treatment `rounding`.
 """
-function acoustic_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection, rounding)
+function acoustic_rk3_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stage, Uᴸ, advection, rounding)
     grid = model.grid
     arch = architecture(grid)
     FT = eltype(grid)
@@ -2881,7 +2862,7 @@ function acoustic_substep_loop!(model::AtmosphereModel, substepper, Δt, β_stag
     stage = (; Δτ, δτᵐ⁺, δτˢ⁻, Gˢρᵡ, U⁰ = Uᴸ, forcing_interval)
     factor_implicit_advection!(model, substepper, advection, Δτ)
     factor_vertical_solver!(substepper, grid, constants, δτᵐ⁺)
-    run_acoustic_substeps!(Nτ, model, substepper, stage, advection)
+    acoustic_substep_loop!(Nτ, model, substepper, stage, advection)
 
     # Stage-end: convert the accumulated momentum perturbations into a
     # time-averaged velocity field. Read by `update_state!` through

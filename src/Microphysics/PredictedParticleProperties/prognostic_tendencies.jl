@@ -242,15 +242,14 @@ raises `nⁱ` where the tabulated lower bound binds and lowers it where the uppe
 """
 @inline function tendency_ρnⁱ(rates::P3ProcessRates, ρ)
     # Gains from nucleation, freezing, splintering, homogeneous freezing
+    frozen_number = rates.cloud_homogeneous_number + rates.rain_homogeneous_number
+    homogeneous_gain = frozen_number - rates.homogeneous_number_excess
     gain = rates.nucleation_number + rates.cloud_freezing_number +
-           rates.rain_freezing_number + rates.splintering_number +
-           rates.cloud_homogeneous_number + rates.rain_homogeneous_number
+           rates.rain_freezing_number + rates.splintering_number + homogeneous_gain
     # Losses (all positive magnitudes)
     # sublimation_number — ice number loss from sublimation
     # ni_limit: global Nⁱ cap; relaxation sink above Nⁱ_max/ρ.
-    # homogeneous_number_excess: frozen number that does not fit under the Nⁱ cap.
-    loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit +
-           rates.homogeneous_number_excess
+    loss = rates.melting_number + rates.sublimation_number + rates.aggregation + rates.ni_limit
     return ρ * (gain - loss + rates.ice_number_correction)
 end
 
@@ -362,6 +361,14 @@ preferentially, driving the remaining rime toward the configured solid-ice densi
     return ρ * (volume_gain - volume_loss - densification)
 end
 
+@inline function cloud_number_loss(rates, ρ, Nᶜˡ, qᶜˡ, p3)
+    number_per_mass = cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, p3.minimum_mass_mixing_ratio)
+    autoconversion = cloud_number_loss_from_autoconversion(p3, rates.autoconversion, qᶜˡ, Nᶜˡ, ρ)
+    return autoconversion + number_per_mass * rates.accretion + rates.cloud_self_collection +
+           rates.cloud_riming_number + rates.cloud_freezing_number + rates.cloud_homogeneous_number +
+           rates.cloud_warm_collection_number
+end
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -374,27 +381,13 @@ to the cloud mass they consume.
 @inline function tendency_ρnᶜˡ(rates::P3ProcessRates, ρ, Nᶜˡ, qᶜˡ, p3)
     FT = typeof(ρ)
     parameters = p3.process_rates
-    number_per_mass = cloud_number_per_cloud_mass(Nᶜˡ, ρ, qᶜˡ, p3.minimum_mass_mixing_ratio)
     seed_drop_mass = activated_droplet_mass(parameters, FT)
     activation_number = ifelse(iszero(rates.ccn_activation_number),
                                rates.ccn_activation_mass / seed_drop_mass,
                                rates.ccn_activation_number)
 
-    # Scheme-aware cloud-number loss from autoconversion. KK2000 scales by the
-    # in-cloud nᶜˡ/qᶜˡ ratio.
-    autoconv_n = cloud_number_loss_from_autoconversion(p3, rates.autoconversion,
-    qᶜˡ, Nᶜˡ, ρ)
-
-    number_loss = autoconv_n +
-                  number_per_mass * rates.accretion +
-                  rates.cloud_self_collection +
-                  rates.cloud_riming_number +
-                  rates.cloud_freezing_number +
-                  rates.cloud_homogeneous_number +
-                  rates.cloud_warm_collection_number
-
     # DSD number correction feedback (the cloud PSD diagnosis writes back a bounded Nᶜˡ)
-    return ρ * (activation_number - number_loss + rates.cloud_number_correction)
+    return ρ * (activation_number - cloud_number_loss(rates, ρ, Nᶜˡ, qᶜˡ, p3) + rates.cloud_number_correction)
 end
 
 """

@@ -28,9 +28,8 @@ Pkg.test("Breeze")
 - Most CI time is compilation. Kernels are compiled for a grid's size and topology, so a second
   size or topology in a file compiles every kernel again: reuse one grid across testsets where the
   size is not what is being tested
-- `MultirateInfinitesimalStep`, the default of split-explicit dynamics, takes two to four times
-  longer to compile than `AcousticRungeKutta3`. A test that is not about the time stepper can pass
-  `timestepper = :AcousticRungeKutta3`, as long as its file still steps the default somewhere
+- `MultirateInfinitesimalStep` takes two to four times longer to compile than
+  `AcousticRungeKutta3`, so test it only where the time stepper is what is being tested
 - Sweeps over configurations that each compile their own model (coefficient sets, terrain
   formulations, topologies) run one representative, and all members where
   `BREEZE_TEST_EXHAUSTIVE=true`: use `test_sweep` and `exhaustive_tests` from `test/setup.jl`

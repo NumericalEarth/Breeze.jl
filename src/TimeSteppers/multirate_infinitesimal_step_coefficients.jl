@@ -38,8 +38,6 @@ struct MultirateInfinitesimalStepTableau{FT}
     strong_stability_coefficient :: FT
 end
 
-Base.summary(::MultirateInfinitesimalStepTableau{FT}) where FT = "MultirateInfinitesimalStepTableau{$FT}"
-
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -153,8 +151,6 @@ Available:
 - `:SSPMIS43`: four stages, second order with the fast and slow parts coupled, with a
   strong-stability-preserving slow method.
 - `:MIS4a`: four stages, third order.
-- `:DiagonalMIS42`, `:DiagonalMIS52`: four and five stages, second order, with convex stage start states, non-negative
-  slow-tendency weights and a diagonal `β`: no slow tendency of an earlier stage is recombined (experimental).
 - `:LowStorageMIS52`: five stages, second order, convex, with a diagonal `β` and stages that start from and are forced with
   the preceding stage's increment alone (experimental).
 - `:ConvexLinearMIS3`, `:ConvexLinearMIS4`, `:ConvexLinearMIS5`, `:ConvexLinearMIS6`: three to six stages, second
@@ -171,6 +167,23 @@ multirate_infinitesimal_step_tableau(name::Symbol, FT=Float64) =
 
 multirate_infinitesimal_step_tableau(tableau::MultirateInfinitesimalStepTableau, FT=Float64) =
     MultirateInfinitesimalStepTableau(FT, tableau.α, tableau.β, tableau.γ)
+
+# Many sets have a diagonal `β` and `α`, `γ` on the first subdiagonal alone, and are written as the vectors of those entries.
+function diagonal_matrix(v)
+    A = zeros(length(v), length(v))
+    for (i, vᵢ) in enumerate(v)
+        A[i, i] = vᵢ
+    end
+    return A
+end
+
+function subdiagonal_matrix(v)
+    A = zeros(length(v) + 1, length(v) + 1)
+    for (i, vᵢ) in enumerate(v)
+        A[i + 1, i] = vᵢ
+    end
+    return A
+end
 
 function multirate_infinitesimal_step_tableau(::Val{:WickerSkamarock3}, FT)
     α = zeros(3, 3)
@@ -232,73 +245,15 @@ function multirate_infinitesimal_step_tableau(::Val{:SSPMIS43}, FT)
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end
 
-# Four stages, second order coupled, with `β` exactly diagonal: every stage applies its own slow tendency alone, so
-# nothing but the stage increments is recombined across stages (no step-start force state, and no mass-flux
-# correction with post-loop scalar tendencies). Convex start states and stage states, with implemented Shu–Osher
-# coefficient 1.95, which a diagonal `β` makes the strong-stability coefficient. From the memory-constrained tableau
-# search, which maximizes the smaller of the linear advective Courant limit and 0.8 times that coefficient, per cost:
-# the Courant limit is 1.56 with symmetric substeps, with or without divergence damping, and Σdᵢ = 1.515. The time
-# stepper keeps the increments instead of one accumulator pair per later stage, four registers per prognostic
-# (see `IncrementStorage`).
-function multirate_infinitesimal_step_tableau(::Val{:DiagonalMIS42}, FT)
-    α = [0 0 0 0
-         0 0 0 0
-         0 0.88514683994874044 0 0
-         0.3664959551631537 0.29935992617137053 0.039311611338098781 0]
-    β = [0.51177187773805322 0 0 0
-         0 0.28895574543041075 0 0
-         0 0 0.42121750914992656 0
-         0 0 0 0.29322583760994175]
-    γ = [0 0 0 0
-         0.56461825608637917 0 0 0
-         0 -0.062089681685503495 0 0
-         -0.2018771450445061 -0.11134931101323786 0.53365037526198633 0]
-    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
-end
-
-# Five stages, second order coupled, with `β` diagonal as in `:DiagonalMIS42`: implemented Shu–Osher coefficient 2.42,
-# linear advective Courant limit 1.95, Σdᵢ = 1.557; four registers for the acoustic prognostics as well, and five for
-# the moisture, microphysical and tracer fields.
-function multirate_infinitesimal_step_tableau(::Val{:DiagonalMIS52}, FT)
-    α = [0 0 0 0 0
-         0.050896904389432243 0 0 0 0
-         0.012704298121042686 0.6905828470129789 0 0 0
-         0.01353767743746746 0.051598541338775235 0.79361160395650987 0 0
-         0.20424189771173668 0.26529324023811207 0.27577585290001105 0.029858511137081902 0]
-    β = [0.41240278616984521 0 0 0 0
-         0 0.15116364355832304 0 0 0
-         0 0 0.3632329593575705 0 0
-         0 0 0 0.37039352668325987 0
-         0 0 0 0 0.25936521307531912]
-    γ = [0 0 0 0 0
-         0.31774185228832641 0 0 0 0
-         -0.00066111781354120187 0.19362406561646542 0 0 0
-         0.0026831788090638706 -0.03520219468637429 0.10543691494686007 0 0
-         0.038580726381893977 -0.23949824208718307 -0.22623312573504104 0.60020911915041797 0]
-    return MultirateInfinitesimalStepTableau(FT, α, β, γ)
-end
-
 # Five stages, second order coupled, with `β` diagonal and `α`, `γ` on the first subdiagonal only: stage i starts from
 # and is forced with ΔYᵢ₋₁ alone, which is read from the prognostic fields, so that two registers (Uⁿ and the tendency)
 # suffice, as for Wicker–Skamarock RK3 (see `TwoRegisterStorage`). Implemented Shu–Osher coefficient
 # 2.13, linear advective Courant limit 1.70, Σdᵢ = 1.565. The linear analysis finds it stable without damping, with
 # thermal divergence damping up to 0.12 and with momentum damping up to 0.1, and unstable with momentum damping of 0.12.
 function multirate_infinitesimal_step_tableau(::Val{:LowStorageMIS52}, FT)
-    α = [0 0 0 0 0
-         0.0013991509357238207 0 0 0 0
-         0 0.79033880228520836 0 0 0
-         0 0 0.36256755930919288 0 0
-         0 0 0 0.63128055525429994 0]
-    β = [0.45690239878443312 0 0 0 0
-         0 0.12035989682869004 0 0 0
-         0 0 0.28388661373577162 0 0
-         0 0 0 0.30614890482347923 0
-         0 0 0 0 0.39814509646625662]
-    γ = [0 0 0 0 0
-         0.36093390386149332 0 0 0 0
-         0 0.17946174723584538 0 0 0
-         0 0 0.28969456837427493 0 0
-         0 0 0 0.26410464601131539 0]
+    α = subdiagonal_matrix([0.0013991509357238207, 0.79033880228520836, 0.36256755930919288, 0.63128055525429994])
+    β = diagonal_matrix([0.45690239878443312, 0.12035989682869004, 0.28388661373577162, 0.30614890482347923, 0.39814509646625662])
+    γ = subdiagonal_matrix([0.36093390386149332, 0.17946174723584538, 0.28969456837427493, 0.26410464601131539])
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end
 
@@ -319,76 +274,34 @@ end
 # of at most one at an operational Courant number of 0.6 Ĉ) and to a pure acoustic response bounded by one.
 # Three stages: Ĉ = 1.00, r = 0.606, Σdᵢ = 1.493. Convex start states.
 function multirate_infinitesimal_step_tableau(::Val{:ConvexLinearMIS3}, FT)
-    α = [0 0 0
-         0.16425066756800452 0 0
-         0 0.5779053498780512 0]
-    β = [0.53697027710005463 0 0
-         0 0.44600079802097709 0
-         0 0 0.51012152271107825]
-    γ = [0 0 0
-         0.10584748318697976 0 0
-         0 0.25094248828923638 0]
+    α = subdiagonal_matrix([0.16425066756800452, 0.5779053498780512])
+    β = diagonal_matrix([0.53697027710005463, 0.44600079802097709, 0.51012152271107825])
+    γ = subdiagonal_matrix([0.10584748318697976, 0.25094248828923638])
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end
 
 # Four stages: Ĉ = 1.61, r = 1.296, Σdᵢ = 1.657.
 function multirate_infinitesimal_step_tableau(::Val{:ConvexLinearMIS4}, FT)
-    α = [0 0 0 0
-         -0.23561796464209589 0 0 0
-         0 0.36555602517304447 0 0
-         0 0 0.44122891850097196 0]
-    β = [0.56440354705502405 0 0 0
-         0 0.15937074022761633 0 0
-         0 0 0.38154551570837414 0
-         0 0 0 0.55174285510773424]
-    γ = [0 0 0 0
-         0.71552167337095685 0 0 0
-         0 0.2050266856629725 0 0
-         0 0 0.27366355087175587 0]
+    α = subdiagonal_matrix([-0.23561796464209589, 0.36555602517304447, 0.44122891850097196])
+    β = diagonal_matrix([0.56440354705502405, 0.15937074022761633, 0.38154551570837414, 0.55174285510773424])
+    γ = subdiagonal_matrix([0.71552167337095685, 0.2050266856629725, 0.27366355087175587])
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end
 
 # Five stages: Ĉ = 2.36, r = 1.428, Σdᵢ = 1.664. The linear analysis finds it stable with thermal or momentum damping
 # up to 0.12 as well.
 function multirate_infinitesimal_step_tableau(::Val{:ConvexLinearMIS5}, FT)
-    α = [0 0 0 0 0
-         -0.34738265449496974 0 0 0 0
-         0 0.42754741753914488 0 0 0
-         0 0 0.43388344450594291 0 0
-         0 0 0 0.60815615670062917 0]
-    β = [0.39310456011920114 0 0 0 0
-         0 0.1438676941792312 0 0 0
-         0 0 0.32938819204454312 0 0
-         0 0 0 0.39280650258950611 0
-         0 0 0 0 0.40518234159345851]
-    γ = [0 0 0 0 0
-         0.69482221493291174 0 0 0 0
-         0 0.042888455597287226 0 0 0
-         0 0 0.19705625665562709 0 0
-         0 0 0 0.26162286141340491 0]
+    α = subdiagonal_matrix([-0.34738265449496974, 0.42754741753914488, 0.43388344450594291, 0.60815615670062917])
+    β = diagonal_matrix([0.39310456011920114, 0.1438676941792312, 0.32938819204454312, 0.39280650258950611, 0.40518234159345851])
+    γ = subdiagonal_matrix([0.69482221493291174, 0.042888455597287226, 0.19705625665562709, 0.26162286141340491])
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end
 
 # Six stages: Ĉ = 2.91, r = 1.766, Σdᵢ = 1.703. The linear analysis finds it unstable with momentum damping of 0.12
 # (stable up to 0.1, and with thermal damping up to 0.12).
 function multirate_infinitesimal_step_tableau(::Val{:ConvexLinearMIS6}, FT)
-    α = [0 0 0 0 0 0
-         -0.49414852987630531 0 0 0 0 0
-         0 0.50600109567807228 0 0 0 0
-         0 0 0.41477758221556105 0 0 0
-         0 0 0 0.50055317910029518 0 0
-         0 0 0 0 0.66706048686987929 0]
-    β = [0.32388410628517567 0 0 0 0 0
-         0 0.1069817871491099 0 0 0 0
-         0 0 0.2347346264792626 0 0 0
-         0 0 0 0.32398443946971067 0 0
-         0 0 0 0 0.36509247402736411 0
-         0 0 0 0 0 0.34844396529154159]
-    γ = [0 0 0 0 0 0
-         0.79317206264657658 0 0 0 0 0
-         0 -0.089723138178645814 0 0 0 0
-         0 0 0.15862871680657281 0 0 0
-         0 0 0 0.14405498752978635 0 0
-         0 0 0 0 0.27441119491092125 0]
+    α = subdiagonal_matrix([-0.49414852987630531, 0.50600109567807228, 0.41477758221556105, 0.50055317910029518, 0.66706048686987929])
+    β = diagonal_matrix([0.32388410628517567, 0.1069817871491099, 0.2347346264792626, 0.32398443946971067, 0.36509247402736411, 0.34844396529154159])
+    γ = subdiagonal_matrix([0.79317206264657658, -0.089723138178645814, 0.15862871680657281, 0.14405498752978635, 0.27441119491092125])
     return MultirateInfinitesimalStepTableau(FT, α, β, γ)
 end

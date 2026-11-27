@@ -183,10 +183,19 @@ end
 end
 
 # The ice-phase caps of `limit_vapor_rates`, given the liquid-phase rates `liquid` already
-# limited (the result of `limit_liquid_vapor_rates`, or the implicitly relaxed rates on the grid)
+# limited (the result of `limit_liquid_vapor_rates`, or the implicitly relaxed rates on the grid).
+# On the grid the liquid exchange is projected as the stage applies it: over the stage interval
+# `liquid_dt`, from the state the stage starts from (the rate state with the vapor
+# `vapor_offset` that the stage starts with above it returned, see `LiquidRelaxationStage`), and
+# with no more rain and coating evaporated than `rain_available` and `coating_available`, what
+# the stage leaves of them. Evaporation that the stage does not apply would otherwise supply
+# vapor and cooling to deposition, and carry the cell below ice saturation.
 @inline function limit_ice_vapor_rates(liquid, dep, nuc_q, nuc_n, qᵛ, T, P, qᵗ, constants,
                                        dt_safety, freezing_temperature,
-                                       temperature_tendency, pressure_tendency,
+                                       temperature_tendency, pressure_tendency, liquid_dt = dt_safety,
+                                       vapor_offset = zero(qᵛ),
+                                       rain_available = convert(typeof(qᵛ), Inf),
+                                       coating_available = convert(typeof(qᵛ), Inf),
                                        distribution = nothing, qᵛ⁺ⁱ = qᵛ)
     (; cond, ccn_activation_mass, ccn_activation_number, rain_cond, rain_evap, coat_cond, coat_evap) = liquid
     FT = typeof(qᵛ)
@@ -194,36 +203,39 @@ end
     cᵖᵈ = p3_dry_air_heat_capacity(constants, FT)
 
     # Ice-phase cap, after netting the rescaled liquid tendencies into qᵛ and T.
-    net_liquid = max(0, cond) + ccn_activation_mass + rain_cond + coat_cond -
-                 rain_evap - coat_evap - max(0, -cond)
-    qᵛ_after = qᵛ - net_liquid * dt_safety
-    T_after = T + net_liquid * ℒˡ * dt_safety / cᵖᵈ
+    evaporated = min(rain_evap * liquid_dt, rain_available) + min(coat_evap * liquid_dt, coating_available)
+    liquid_change = (cond + ccn_activation_mass + rain_cond + coat_cond) * liquid_dt - evaporated - vapor_offset
+    qᵛ_after = qᵛ - liquid_change
+    T_after = T + liquid_change * ℒˡ / cᵖᵈ
     qᵛ⁺ⁱ_after = p3_adjustment_ice_saturation_specific_humidity(T_after, P, qᵗ, constants, freezing_temperature)
     ℒⁱ_after = sublimation_latent_heat(constants, T_after)
     ξⁱ_after = ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, T_after)
 
-    # Ice-phase deposition / sublimation caps.
+    # Ice-phase deposition / sublimation caps. The explicit ice rates are applied over the stage,
+    # so where the stage is longer than `dt_safety` the ice excess is budgeted over the stage:
+    # capped over `dt_safety` alone, the rates would consume it `liquid_dt / dt_safety` times.
+    ice_dt = max(dt_safety, liquid_dt)
     Aⁱ = external_vapor_excess_forcing(qᵛ⁺ⁱ_after, PlanarIceSurface(), T_after, P,
                                        temperature_tendency, pressure_tendency, constants)
-    δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * dt_safety) / ξⁱ_after
+    δqⁱ = (qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * ice_dt) / ξⁱ_after
     # With the subgrid distribution of every process the sinks draw on the positive part of the local excess over
-    # ice, shifted uniformly by what the liquid rates and the forcing do to the cell over `dt_safety`, and the sources
+    # ice, shifted uniformly by what the liquid rates and the forcing do to the cell over `ice_dt`, and the sources
     # on its negative part (their difference is the mean, δqⁱ)
-    excess = qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * dt_safety
+    excess = qᵛ_after - qᵛ⁺ⁱ_after + Aⁱ * ice_dt
     qdep_cap = available_ice_excess(distribution, qᵛ - qᵛ⁺ⁱ, excess) / ξⁱ_after
     # (Round-off guard: the mean of the positive part of the excess is not below its mean.)
     qsub_cap = max(0, qdep_cap - δqⁱ)
 
     # Deposition cap
     dep_sink_total = max(0, dep) + nuc_q
-    f_dep = sink_limiting_factor(dep_sink_total, qdep_cap, dt_safety)
+    f_dep = sink_limiting_factor(dep_sink_total, qdep_cap, ice_dt)
 
     nuc_q = nuc_q * f_dep
     nuc_n = nuc_n * f_dep
 
     # Sublimation cap
     sub_total = max(0, -dep)
-    f_sub = sink_limiting_factor(sub_total, qsub_cap, dt_safety)
+    f_sub = sink_limiting_factor(sub_total, qsub_cap, ice_dt)
 
     dep = max(0, dep) * f_dep + min(0, dep) * f_sub
 
