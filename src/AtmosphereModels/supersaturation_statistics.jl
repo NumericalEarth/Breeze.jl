@@ -41,17 +41,10 @@ The result is an isbits `NamedTuple` in one of two forms:
    - `σ ≥ 0`: standard deviation of ``δqᵛ⁺ˡ`` [kg kg⁻¹];
    - `skewness`: skewness of ``δqᵛ⁺ˡ`` (dimensionless; informational);
    - `f⁺ ∈ [0, 1]`: supersaturated fraction of the cell.
-2. A mixture of Gaussian components, `(; a, μ, σ)` or `(; a, μ, σ, f⁺)`, `a`, `μ` and `σ` each a
-   tuple with one entry per component:
+2. A mixture of Gaussian components, `(; a, μ, σ)`, each a tuple with one entry per component:
    - `a`: component weights, ``Σ aᵢ = 1``;
    - `μ`: component means ``μᵢ`` of ``δqᵛ⁺ˡ`` [kg kg⁻¹];
-   - `σ`: within-component standard deviations ``σᵢ ≥ 0`` [kg kg⁻¹];
-   - `f⁺` (optional): the saturated fraction, when the source holds its own (for instance the
-     cloud fraction of a closure's distribution). Without it [`saturated_fraction`](@ref)
-     forms ``Σᵢ aᵢ Φ(μᵢ / σᵢ)``.
-
-[`saturated_fraction`](@ref) returns ``f⁺`` from either form; a turbulence closure reads it as
-the saturated fraction of its static stability (`MicrophysicsSaturatedFraction`).
+   - `σ`: within-component standard deviations ``σᵢ ≥ 0`` [kg kg⁻¹].
 
 The microphysics uses its own grid-mean vapor excess ``μ̄`` as the mean of the
 distribution: it reads only `σ` from the first form, and only the offsets ``μᵢ - Σⱼ aⱼ μⱼ``
@@ -65,8 +58,7 @@ $(TYPEDEF)
 
 A prescribed, spatially uniform standard deviation `σ` [kg kg⁻¹] of the vapor excess over liquid
 (see [`supersaturation_statistics`](@ref)). Its mean is unknown to it, so it returns `μ = 0`,
-`skewness = 0` and `f⁺ = 1/2` (a distribution centered on saturation). The microphysics reads only
-`σ`; [`saturated_fraction`](@ref) returns that `f⁺`.
+`skewness = 0` and `f⁺ = 1/2`, which the microphysics does not read.
 
 ```jldoctest
 julia> using Breeze.AtmosphereModels: PrescribedStatistics, supersaturation_statistics
@@ -115,53 +107,12 @@ end
                                    closure, closure_fields, model_fields) =
     (; a = statistics.a, μ = statistics.μ, σ = statistics.σ)
 
-# The standard score (a - b) / σ of a Gaussian of spread σ, in a form that is regular at σ = 0:
-#
-#   z = (a - b) / √(σ² + δ²),   δ = ϵ (|a| + |b|) + floatmin,
-#
-# with ϵ the machine epsilon, so that δ is the round-off of the difference a - b itself (and the smallest normal number
-# where both vanish). Where the spread is resolved, σ ≫ δ, it is (a - b) / σ to round-off. A spread below δ is the
-# point mass: z = ±1/ϵ for any difference that is resolved from zero, whose distribution function is the step, and
-# z = 0 where a = b. The derivatives are finite at σ = 0 (∂z/∂σ = 0 there). An infinite difference has an infinite
-# score. The one treatment of a vanishing spread for the saturated fraction and for the partial moments of the
-# microphysics.
+# The standard score (a - b) / σ, regular at σ = 0: (a - b) / √(σ² + δ²) with δ the round-off of a - b
 @inline function standard_score(a, b, σ)
     FT = typeof(σ)
     x = a - b
     δ = eps(FT) * (abs(a) + abs(b)) + floatmin(FT)
     return ifelse(isfinite(x), x / hypotenuse(σ, δ), x)
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return the saturated fraction ``f⁺ ∈ [0, 1]``, the probability that the vapor excess over liquid
-is positive, from `statistics`, a result of [`supersaturation_statistics`](@ref): its `f⁺` when
-it has one, otherwise, for a mixture of Gaussian components, ``Σᵢ aᵢ Φ(μᵢ / σᵢ)`` with ``Φ`` the
-standard normal distribution function (a step where ``σᵢ = 0``).
-
-```jldoctest
-julia> using Breeze.AtmosphereModels: saturated_fraction
-
-julia> saturated_fraction((; μ = 0.0, σ = 1e-4, skewness = 0.0, f⁺ = 0.3))
-0.3
-
-julia> saturated_fraction((; a = (0.5, 0.5), μ = (1e-3, -1e-3), σ = (0.0, 0.0)))
-0.5
-```
-"""
-@inline saturated_fraction(statistics::NamedTuple{names}) where names =
-    saturated_fraction(Val(:f⁺ ∈ names), statistics)
-
-@inline saturated_fraction(::Val{true}, statistics) = statistics.f⁺
-
-@inline function saturated_fraction(::Val{false}, statistics)
-    terms = map(statistics.a, statistics.μ, statistics.σ) do aᵢ, μᵢ, σᵢ
-        FT = typeof(μᵢ / one(σᵢ))
-        z = standard_score(convert(FT, μᵢ), zero(FT), convert(FT, σᵢ))
-        aᵢ * erfc(-z / sqrt(FT(2))) / 2
-    end
-    return sum(terms)
 end
 
 """

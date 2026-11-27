@@ -54,7 +54,6 @@ export
     PrescribedMixtureStatistics,
     supersaturation_statistics,
     supersaturation_statistics_model_fields,
-    saturated_fraction,
     standard_score,
     phase_relaxation_rate,
     phase_relaxation_rates,
@@ -167,7 +166,6 @@ using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, hypotenuse
 
 using DocStringExtensions: TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
-using SpecialFunctions: erfc
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, Center, Face, CenterField, fields
