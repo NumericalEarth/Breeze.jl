@@ -3,9 +3,9 @@
 #####
 ##### `DryStaticStability` is the gradient ∂z_b of the buoyancy of the dynamics — condensate
 ##### loading included, latent heating excluded. `MoistStaticStability` switches, where the air
-##### is saturated, to the buoyancy frequency of a saturated displacement (Durran & Klemp 1982),
-##### in which the parcel condenses as it rises and its latent heating offsets part of the
-##### environmental stratification. `SaturationWeightedStaticStability` blends the two with a weight that
+##### is saturated, to the static stability of a saturated displacement (Durran & Klemp 1982)
+##### in the model's thermodynamics, in which the parcel condenses as it rises and its latent
+##### heating offsets part of the environmental stratification. `SaturationWeightedStaticStability` blends the two with a weight that
 ##### an external subgrid cloud model supplies. All are evaluated once per stage into `closure_fields.N²`.
 #####
 
@@ -29,8 +29,9 @@ Base.show(io::IO, ss::DryStaticStability) = print(io, summary(ss))
 """
 $(TYPEDEF)
 
-Static stability using the dry buoyancy gradient in subsaturated air and the saturated
-buoyancy frequency of [Durran and Klemp (1982)](@cite DurranKlemp1982) otherwise.
+Static stability using the dry buoyancy gradient in subsaturated air and otherwise the static stability of a
+saturated displacement [as Durran and Klemp (1982)](@cite DurranKlemp1982) define it, in the model's thermodynamics
+(`saturated_static_stabilityᶜᶜᶠ`).
 The saturation test excludes precipitating water, while its density loading remains in the
 buoyancy frequency. Latent heat follows the microphysics' phase equilibrium. This is the
 default for [`TKEBasedTurbulenceClosure`](@ref) without a subgrid distribution.
@@ -51,7 +52,7 @@ end
 $(TYPEDEF)
 
 Static stability as a blend of the dry buoyancy gradient ``N²ᵈ`` of [`DryStaticStability`](@ref)
-and the saturated buoyancy frequency ``N²⁺`` of [Durran and Klemp (1982)](@cite DurranKlemp1982),
+and the static stability ``N²⁺`` of a saturated displacement (see [`MoistStaticStability`](@ref)),
 
 ```math
 N² = (1 - aᴺ) N²ᵈ + aᴺ N²⁺,
@@ -230,12 +231,6 @@ end
 ##### Pointwise thermodynamics for the saturated branch
 #####
 
-# The latent heat over `surface` at temperature `T`, ℒ(T) = ℒ₀ + Δcᵖ T, linear in T with the
-# vapor-condensate heat capacity difference; over a mixed-phase surface both coefficients
-# interpolate between liquid and ice.
-@inline latent_heat(T, constants, surface) =
-    absolute_zero_latent_heat(constants, surface) + specific_heat_difference(constants, surface) * T
-
 # Temperature, pressure, total density and moisture mass fractions at cell `(i, j, k)`
 @inline function moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
     dynamics = buoyancy.dynamics
@@ -273,29 +268,6 @@ end
     return q.vapor + q.liquid + q.ice - qʳ
 end
 
-# Mixing ratios, per unit mass of dry air: qᵈ excludes all water, including rain.
-@inline function saturation_mixing_ratioᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
-    Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
-    qᵛ⁺ = local_saturation_specific_humidity(i, j, k, buoyancy, Tᵢ, q)
-    return qᵛ⁺ / (1 - q.vapor - q.liquid - q.ice)
-end
-
-@inline function total_water_mixing_ratioᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
-    Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
-    qᵗ = q.vapor + q.liquid + q.ice
-    return qᵗ / (1 - qᵗ)
-end
-
-# ln θ of the dry potential temperature θ = T (pˢᵗ / p)^{Rᵈ / cᵖᵈ}
-@inline function log_dry_potential_temperatureᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
-    Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
-    constants = buoyancy.thermodynamic_constants
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    pˢᵗ = standard_pressure(buoyancy.dynamics)
-    return log(Tᵢ) + Rᵈ / cᵖᵈ * log(pˢᵗ / p)
-end
-
 #####
 ##### The saturated branch at the face
 #####
@@ -306,27 +278,81 @@ end
     return qʷ ≥ qᵛ⁺
 end
 
-@inline function saturated_static_stabilityᶜᶜᶠ(i, j, k, grid, buoyancy, T, qᵛᵉ)
+# What a saturated displacement changes at center k, from the model's thermodynamics as the energetics of the applied
+# fluxes form it (`buoyancy_derivatives`, `saturation_linearization`): the buoyancy of the condensate of the distributed
+# water relative to that of vapor, b_qᶜ - b_qᵛ, the coefficients (c_q, c_θ) of its saturation excess, and its water qʷ,
+# liquid-ice potential temperature θʷ and condensate qᶜ. The distributed water is that of `distributed_water`: the vapor
+# and the cloud liquid of a microphysics with prognostic cloud liquid, whose other condensate is held, and otherwise all
+# the water, so that ĉᵖ Π θʷ = cᵖᵐ T - ℒˡ₀ (qˡ - held liquid) - ℒⁱ₀ (qⁱ - held ice).
+@inline function saturated_displacementᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
+    Tᵢ, p, ρ, q = moist_stateᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
     constants = buoyancy.thermodynamic_constants
+    microphysics = buoyancy.microphysics
+    pˢᵗ = standard_pressure(buoyancy.dynamics)
+    κ̂ = AtmosphereModels.liquid_ice_exner_exponent(buoyancy.formulation)
+    equilibrium = condensate_phase_equilibrium(microphysics)
+
+    ρqᶜˡ = cloud_liquid_density(buoyancy.microphysical_fields)
+    qᶜ = distributed_condensate(ρqᶜˡ, i, j, k, ρ, q)
+    qʷ = @inbounds qᵛᵉ[i, j, k] + distributed_cloud_liquid(ρqᶜˡ, i, j, k, ρ)
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
+    ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
+    Π = (p / pˢᵗ)^exner_exponent(κ̂, q, constants)
+    cᵖᵐT = mixture_heat_capacity(q, constants) * Tᵢ
+    θˡⁱ = (cᵖᵐT - ℒˡ₀ * q.liquid - ℒⁱ₀ * q.ice) / (ĉᵖ * Π)
+    θʷ = distributed_water_potential_temperature(ρqᶜˡ, i, j, k, θˡⁱ, ρ, q, ĉᵖ * Π, ℒˡ₀, ℒⁱ₀)
+
     g = constants.gravitational_acceleration
-    Rᵈ = dry_air_gas_constant(constants)
-    Rᵛ = vapor_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    ϵ = Rᵈ / Rᵛ
+    b = AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid, buoyancy.dynamics, T, qᵛᵉ, microphysics,
+                                          buoyancy.microphysical_fields, constants) / ρ
+    _, b_qᵛ, b_qˡ, b_qⁱ = buoyancy_derivatives(θˡⁱ, p, q, g - b, constants, κ̂, pˢᵗ)
+    λ, _ = distributed_condensate_liquid_fraction(equilibrium, Tᵢ)
+    b_qᶜ = λ * b_qˡ + (1 - λ) * b_qⁱ
 
-    Tᶠ = ℑzᵃᵃᶠ(i, j, k, grid, T)
-    rᵛ⁺ = ℑzᵃᵃᶠ(i, j, k, grid, saturation_mixing_ratioᶜᶜᶜ, buoyancy, T, qᵛᵉ)
-    equilibrium = microphysics_phase_equilibrium(buoyancy.microphysics)
-    ℒ = latent_heat(Tᶠ, constants, equilibrated_surface(equilibrium, Tᶠ))
+    thermodynamics = (; constants, phase_equilibrium = equilibrium)
+    linearization = saturation_linearization(thermodynamics, Tᵢ, p, q, θʷ, κ̂, pˢᵗ)
+    c_q = linearization.v_q / linearization.D
+    c_θ = linearization.v_θ / linearization.D
+    return (; b_qᶜ, b_qᵛ, c_q, c_θ, qʷ, θʷ, qᶜ)
+end
 
-    ∂z_lnθ = ∂zᶜᶜᶠ(i, j, k, grid, log_dry_potential_temperatureᶜᶜᶜ, buoyancy, T, qᵛᵉ)
-    ∂z_rᵛ⁺ = ∂zᶜᶜᶠ(i, j, k, grid, saturation_mixing_ratioᶜᶜᶜ, buoyancy, T, qᵛᵉ)
-    # All water contributes to density loading, even precipitation that does not
-    # equilibrate with vapor during the parcel displacement.
-    ∂z_rᵗ = ∂zᶜᶜᶠ(i, j, k, grid, total_water_mixing_ratioᶜᶜᶜ, buoyancy, T, qᵛᵉ)
+# The cloud liquid of the distributed water, which the moisture density leaves out: none where that is the total water
+@inline distributed_cloud_liquid(::Nothing, i, j, k, ρ) = zero(ρ)
+@inline distributed_cloud_liquid(ρqᶜˡ, i, j, k, ρ) = @inbounds ρqᶜˡ[i, j, k] / ρ
 
-    # The ratio of the saturated to the dry adiabatic lapse rate, Γₛ / Γ_d
-    A = (1 + ℒ * rᵛ⁺ / (Rᵈ * Tᶠ)) / (1 + ϵ * ℒ^2 * rᵛ⁺ / (cᵖᵈ * Rᵈ * Tᶠ^2))
+# θʷ: θˡⁱ where all the water is distributed, and otherwise θˡⁱ with the latent heat of the held condensate returned
+@inline distributed_water_potential_temperature(::Nothing, i, j, k, θˡⁱ, ρ, q, ĉᵖΠ, ℒˡ₀, ℒⁱ₀) = θˡⁱ
+@inline function distributed_water_potential_temperature(ρqᶜˡ, i, j, k, θˡⁱ, ρ, q, ĉᵖΠ, ℒˡ₀, ℒⁱ₀)
+    qᶜˡ = @inbounds ρqᶜˡ[i, j, k] / ρ
+    return θˡⁱ + (ℒˡ₀ * (q.liquid - qᶜˡ) + ℒⁱ₀ * q.ice) / ĉᵖΠ
+end
 
-    return g * (A * (∂z_lnθ + ℒ / (cᵖᵈ * Tᶠ) * ∂z_rᵛ⁺) - ∂z_rᵗ)
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The static stability of a saturated displacement at the face `k`, whose condensate follows the saturation excess
+``s = c_q qʷ - c_θ θʷ`` of its distributed water at fixed pressure:
+
+```math
+N²⁺ = ∂_z b + (b_{qᶜ} - b_{qᵛ}) (c_q ∂_z qʷ - c_θ ∂_z θʷ - ∂_z qᶜ),
+```
+
+with ``∂_z b`` the buoyancy gradient of the dynamics, ``b_{qᶜ} - b_{qᵛ}`` the buoyancy of the condensate of the
+distributed water relative to that of vapor at fixed pressure and ``(c_q, c_θ)`` the linearized saturation excess,
+from the model's thermodynamics as the energetics of the applied fluxes form them (`buoyancy_derivatives`,
+`saturation_linearization`), averaged from the two centers. It is the energetics' saturated stratification with the
+buoyancy gradient of the dynamics in place of the gradient of the mixed variables.
+"""
+@inline function saturated_static_stabilityᶜᶜᶠ(i, j, k, grid, buoyancy, T, qᵛᵉ)
+    N²ᵇ = ∂z_b(i, j, k, grid, buoyancy, (; T, qᵛᵉ))
+    s⁺ = saturated_displacementᶜᶜᶜ(i, j, k, grid, buoyancy, T, qᵛᵉ)
+    s⁻ = saturated_displacementᶜᶜᶜ(i, j, k-1, grid, buoyancy, T, qᵛᵉ)
+    Δz = Δzᶜᶜᶠ(i, j, k, grid)
+    bᶜᵛ = (s⁺.b_qᶜ + s⁻.b_qᶜ - (s⁺.b_qᵛ + s⁻.b_qᵛ)) / 2
+    c_q = (s⁺.c_q + s⁻.c_q) / 2
+    c_θ = (s⁺.c_θ + s⁻.c_θ) / 2
+    ∂z_s = (c_q * (s⁺.qʷ - s⁻.qʷ) - c_θ * (s⁺.θʷ - s⁻.θʷ)) / Δz
+    ∂z_qᶜ = (s⁺.qᶜ - s⁻.qᶜ) / Δz
+    return N²ᵇ + bᶜᵛ * (∂z_s - ∂z_qᶜ)
 end

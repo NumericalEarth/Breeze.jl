@@ -94,18 +94,19 @@ lies below the hard one by an amount that depends on ``p`` and on the grid spaci
 stage at cell interfaces and stored in `closure_fields.N²`, according to the closure's
 `static_stability`. [`DryStaticStability`](@ref) uses ``g \, ∂_z \ln θᵨ``, with ``θᵨ`` the density
 potential temperature. [`MoistStaticStability`](@ref), the default without a subgrid distribution, uses the dry value where
-subsaturated and, where saturated, the saturated buoyancy frequency of
-[Durran and Klemp (1982)](@cite DurranKlemp1982),
+subsaturated and, where saturated, the static stability of a saturated displacement
+[as Durran and Klemp (1982)](@cite DurranKlemp1982) define it, in the model's own thermodynamics,
 
 ```math
-N²_s = g \left[ \frac{1 + ℒ rˢ / (Rᵈ T)}{1 + ϵ ℒ² rˢ / (cᵖᵈ Rᵈ T²)}
-               \left( ∂_z \ln θ + \frac{ℒ}{cᵖᵈ T} ∂_z rˢ \right) - ∂_z rᵗ \right],
+N²_s = ∂_z b + (b_{qᶜ} - b_{qᵛ}) (c_q ∂_z qʷ - c_θ ∂_z θʷ - ∂_z qᶜ),
 ```
 
-where ``rˢ`` and ``rᵗ`` are the saturation and total-water mixing ratios, ``ϵ = Rᵈ / Rᵛ``,
-and ``ℒ`` is the latent heat, taken from the microphysics' phase equilibrium. Saturation is tested
-using the local moist density and excludes precipitation, while the loading term includes all
-condensate. ``N²_s`` nearly vanishes
+where ``b_{qᶜ} - b_{qᵛ}`` is the buoyancy of the condensate relative to that of vapor at fixed pressure,
+``s = c_q qʷ - c_θ θʷ`` the saturation excess of the distributed water ``qʷ`` with liquid-ice potential
+temperature ``θʷ``, linearized about the cell, and ``qᶜ`` its condensate: the saturated stratification of the
+energetics of the applied fluxes, with the buoyancy gradient of the dynamics. The condensate condenses on the phase
+of the microphysics' condensate. Saturation is tested using the local moist density and excludes precipitation,
+while the loading in ``∂_z b`` includes all condensate. ``N²_s`` nearly vanishes
 on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 
 [`SaturationWeightedStaticStability`](@ref) replaces the switch at grid-mean saturation with a blend,

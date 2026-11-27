@@ -82,7 +82,6 @@ of the dynamics, so the derivatives hold for any dynamics whose buoyancy is a fu
 ``Rᵐ T`` at fixed pressure.
 """
 @inline function buoyancy_derivativesᶜᶜᶜ(i, j, k, grid, s)
-    constants = s.constants
     @inbounds begin
         ρ = s.ρ[i, j, k]
         θ = s.ρθ[i, j, k] / ρ
@@ -91,6 +90,22 @@ of the dynamics, so the derivatives hold for any dynamics whose buoyancy is a fu
     end
     q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵛᵉ, s.microphysical_fields)
 
+    # g - b = g ρ / ρᵣ from the buoyancy force density -g (ρ - ρᵣ) of the dynamics
+    g = s.constants.gravitational_acceleration
+    b = AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid, s.dynamics, s.T, s.qᵛᵉ,
+                                          s.microphysics, s.microphysical_fields, s.constants) / ρ
+
+    b_θ, b_qᵛ, b_qˡ, b_qⁱ = buoyancy_derivatives(θ, p, q, g - b, s.constants, s.exner_exponent, s.standard_pressure)
+    return b_θ, b_qᵛ, b_qˡ, b_qⁱ, θ, q
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The derivatives `(b_θ, b_qᵛ, b_qˡ, b_qⁱ)` of the buoyancy at fixed pressure `p` of air with liquid-ice potential
+temperature `θ` and moisture mass fractions `q`, given `G = g - b` (see `buoyancy_derivativesᶜᶜᶜ`).
+"""
+@inline function buoyancy_derivatives(θ, p, q, G, constants, exner_exponent_formulation, pˢᵗ)
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
@@ -102,28 +117,22 @@ of the dynamics, so the derivatives hold for any dynamics whose buoyancy is a fu
 
     ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
     R̂ = vapor_equivalent_gas_constant(q, constants)
-    κ = exner_exponent(s.exner_exponent, q, constants)
-    κ′ = exner_exponent_moisture_derivative(s.exner_exponent, R̂, ĉᵖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    ln_p = log(p / s.standard_pressure)
-    Π = (p / s.standard_pressure)^κ
+    κ = exner_exponent(exner_exponent_formulation, q, constants)
+    κ′ = exner_exponent_moisture_derivative(exner_exponent_formulation, R̂, ĉᵖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    ln_p = log(p / pˢᵗ)
+    Π = (p / pˢᵗ)^κ
 
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵐ = mixture_gas_constant(q, constants)
     H = ĉᵖ * Π * θ + ℒˡ₀ * q.liquid + ℒⁱ₀ * q.ice # = cᵖᵐ T
     ∂H∂qᵗ = θ * Π * ((cᵖᵛ - cᵖᵈ) + ĉᵖ * ln_p * κ′)
 
-    # g - b = g ρ / ρᵣ from the buoyancy force density -g (ρ - ρᵣ) of the dynamics
-    g = constants.gravitational_acceleration
-    b = AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid, s.dynamics, s.T, s.qᵛᵉ,
-                                          s.microphysics, s.microphysical_fields, constants) / ρ
-    G = g - b
-
     b_θ = G * ĉᵖ * Π / H
     b_qᵛ = G * ((Rᵛ - Rᵈ) / Rᵐ + ∂H∂qᵗ / H - (cᵖᵛ - cᵖᵈ) / cᵖᵐ)
     b_qˡ = G * (-Rᵈ / Rᵐ + (∂H∂qᵗ + ℒˡ₀) / H - (cˡ - cᵖᵈ) / cᵖᵐ)
     b_qⁱ = G * (-Rᵈ / Rᵐ + (∂H∂qᵗ + ℒⁱ₀) / H - (cⁱ - cᵖᵈ) / cᵖᵐ)
 
-    return b_θ, b_qᵛ, b_qˡ, b_qⁱ, θ, q
+    return b_θ, b_qᵛ, b_qˡ, b_qⁱ
 end
 
 # The derivatives of the buoyancy and the enthalpy coefficient d(cᵖᵐ T)/dθˡⁱ = ĉᵖ Π at the centers,
@@ -964,8 +973,6 @@ cloud is off by ``ℒ qᶜ / ĉᵖ`` (several kelvin in a deep cloud) and misses
 of percent there.
 """
 @inline function cell_saturation_linearization(thermodynamics, i, j, k, grid, s, θʷ)
-    constants = thermodynamics.constants
-    equilibrium = thermodynamics.phase_equilibrium
     @inbounds begin
         ρ = s.ρ[i, j, k]
         T = s.T[i, j, k]
@@ -973,6 +980,14 @@ of percent there.
         qᵛᵉ = s.ρqᵛᵉ[i, j, k] / ρ
     end
     q = grid_moisture_fractions(i, j, k, grid, s.microphysics, ρ, qᵛᵉ, s.microphysical_fields)
+    return saturation_linearization(thermodynamics, T, p, q, θʷ, s.exner_exponent, s.standard_pressure)
+end
+
+# The linearization of `cell_saturation_linearization` at the temperature `T`, pressure `p` and moisture mass fractions
+# `q` of a cell, whose distributed water has the liquid-ice potential temperature `θʷ`
+@inline function saturation_linearization(thermodynamics, T, p, q, θʷ, exner_exponent_formulation, pˢᵗ)
+    constants = thermodynamics.constants
+    equilibrium = thermodynamics.phase_equilibrium
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
@@ -981,10 +996,10 @@ of percent there.
     cᵖᵐ = mixture_heat_capacity(q, constants)
     ĉᵖ = vapor_equivalent_heat_capacity(q, constants)
     R̂ = vapor_equivalent_gas_constant(q, constants)
-    κ = exner_exponent(s.exner_exponent, q, constants)
-    κ′ = exner_exponent_moisture_derivative(s.exner_exponent, R̂, ĉᵖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
-    ln_p = log(p / s.standard_pressure)
-    Π = (p / s.standard_pressure)^κ
+    κ = exner_exponent(exner_exponent_formulation, q, constants)
+    κ′ = exner_exponent_moisture_derivative(exner_exponent_formulation, R̂, ĉᵖ, Rᵈ, Rᵛ, cᵖᵈ, cᵖᵛ)
+    ln_p = log(p / pˢᵗ)
+    Π = (p / pˢᵗ)^κ
 
     qᵛ⁺ = saturation_specific_humidity(T, p / (Rᵐ * T), constants, saturation_surface(equilibrium, T))
     ℒ, log_slope = condensate_latent_heat_and_log_slope(equilibrium, constants, T)
