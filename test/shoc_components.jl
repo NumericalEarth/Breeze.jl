@@ -7,7 +7,7 @@ using Breeze.TurbulenceClosures: convert_eltype, column_stability_field, diffusi
                                  dissipation_stability_functionᶜᶜᶜ, shoc_distribution
 using Breeze.TurbulenceClosures.SimplifiedHigherOrderClosures: trainable_parameter_names, is_calibratable, component_scalar_names,
                                       clipped_maximum, clipped_minimum, clip_between,
-                                      hard_floor, third_moment_bound, limit_third_moment, third_moment,
+                                      third_moment_bound, limit_third_moment, third_moment,
                                       bound_stratification_number, assumed_pdf, component_saturation, liquid_water_temperature, component_variance,
                                       smooth_scalar_components, isotropy_ratio, shoc_dissipation_coefficient
 using Breeze.Thermodynamics: VaporEquivalentExponent, WarmPhaseEquilibrium
@@ -39,7 +39,6 @@ derivative(f, x, parameters...) =
         for a in values, b in values
             @test same_bits(clipped_maximum(policy, a, b, scale), max(a, b))
             @test same_bits(clipped_minimum(policy, a, b, scale), min(a, b))
-            @test same_bits(hard_floor(a, b), ifelse(a < b, b, a))
         end
 
         for x in values

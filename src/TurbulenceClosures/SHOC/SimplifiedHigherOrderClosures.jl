@@ -40,7 +40,8 @@ using Breeze.TurbulenceClosures: TurbulenceClosures, TKEBasedTurbulenceClosure, 
                                  HardMinimum, HarmonicBlend, TurbulentRichardsonStabilityFunction,
                                  face_valueᶜᶜᶠ, grid_float_type, column_kernel_parameters
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
-using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equilibrated_surface, saturation_vapor_pressure,
+using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equilibrated_surface, saturation_vapor_pressure_log_slope,
+                             saturation_vapor_pressure_liquid_fraction_log_slope,
                              PlanarLiquidSurface, PlanarIceSurface, dry_air_gas_constant, vapor_gas_constant,
                              liquid_latent_heat, ice_latent_heat, MoistureMassFractions, vapor_equivalent_heat_capacity,
                              exner_exponent, saturation_specific_humidity, mixture_gas_constant

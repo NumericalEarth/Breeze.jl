@@ -117,19 +117,18 @@ ice_saturation_thermodynamics(thermodynamics) = merge(thermodynamics, (; phase_e
     return λ, ifelse(ramp, 1 / (Tᶠ - Tʰ), zero(T))
 end
 
-# The latent heat of the condensate the equilibrium forms at T, and ∂ ln pᵛ⁺ / ∂T. On a surface of
-# fixed liquid fraction ln pᵛ⁺ is linear in the fraction, so the change of the fraction with
-# temperature adds (∂λ/∂T) ln(pᵛ⁺ˡ / pᵛ⁺ⁱ).
+# The latent heat of the condensate the equilibrium forms at T, and ∂ ln pᵛ⁺ / ∂T of the model's saturation vapor
+# pressure over its surface (`saturation_vapor_pressure_log_slope`); the change of the liquid fraction with temperature
+# adds (∂λ/∂T) ∂ ln pᵛ⁺ / ∂λ (`saturation_vapor_pressure_liquid_fraction_log_slope`).
 @inline function condensate_latent_heat_and_log_slope(equilibrium, constants, T)
     λ, ∂λ∂T = condensate_liquid_fraction(equilibrium, T)
-    Rᵛ = vapor_gas_constant(constants)
     ℒˡ = liquid_latent_heat(T, constants)
     ℒⁱ = ice_latent_heat(T, constants)
     ℒ = λ * ℒˡ + (1 - λ) * ℒⁱ
-    pᵛ⁺ˡ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
-    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
-    log_ratio = ifelse(∂λ∂T == 0, zero(T), log(pᵛ⁺ˡ / pᵛ⁺ⁱ))
-    return ℒ, ℒ / (Rᵛ * T * T) + ∂λ∂T * log_ratio
+    surface = saturation_surface(equilibrium, T)
+    ∂ln_pᵛ⁺∂T = saturation_vapor_pressure_log_slope(T, constants, surface)
+    ∂ln_pᵛ⁺∂λ = ifelse(∂λ∂T == 0, zero(T), saturation_vapor_pressure_liquid_fraction_log_slope(T, constants, surface))
+    return ℒ, ∂ln_pᵛ⁺∂T + ∂λ∂T * ∂ln_pᵛ⁺∂λ
 end
 
 @inline function liquid_water_temperature(thermodynamics, θˡⁱ, qᵗ, p)

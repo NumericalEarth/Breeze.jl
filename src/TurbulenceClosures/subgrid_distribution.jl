@@ -30,7 +30,7 @@ using Oceananigans.Operators: Δzᶜᶜᶠ
 using .SimplifiedHigherOrderClosures: interface_second_moments, vertical_velocity_variance,
                                       third_moment, limit_third_moment, assumed_pdf,
                                       liquid_water_temperature, component_saturation,
-                                      rate_norm_factor, linearly_interpolate, hard_floor, component_vapor_excess,
+                                      rate_norm_factor, linearly_interpolate, component_vapor_excess,
                                       representable_skewness, within_component_share, ice_saturation_thermodynamics,
                                       saturation_surface, condensate_latent_heat_and_log_slope,
                                       condensate_liquid_fraction as distributed_condensate_liquid_fraction
@@ -1181,8 +1181,6 @@ end
         # (`@inbounds` does not reach into the body of a closure: a bounds check there is an early exit of the column
         # loop, which Reactant raises to a loop of unknown trip count that Enzyme cannot differentiate)
         interface_moments(k) = @inbounds (m.θˡⁱ′²[i, j, k], m.w′θˡⁱ′[i, j, k], m.θˡⁱ′qᵗ′[i, j, k], m.w′qᵗ′[i, j, k], m.qᵗ′²[i, j, k])
-        large_negative = convert(FT, -99999999.99)
-        floors = (zero(FT), large_negative, large_negative, large_negative, zero(FT))
         for k in 1:Nz
             zᶜ = znode(i, j, k, grid, ccc...)
             zˡ = znode(i, j, k, grid, ccf...)
@@ -1192,7 +1190,7 @@ end
             w′²ᶜ = cl.w′²[i, j, k]
             mˡ = interface_moments(k)
             mᵘ = interface_moments(k+1)
-            mᶜ = map((yᵘ, yˡ, lower_bound) -> hard_floor(linearly_interpolate(zᵘ, zˡ, yᵘ, yˡ, zᶜ), lower_bound), mᵘ, mˡ, floors)
+            mᶜ = map((yᵘ, yˡ) -> linearly_interpolate(zᵘ, zˡ, yᵘ, yˡ, zᶜ), mᵘ, mˡ)
             mᶜ = (cl.w′³[i, j, k], mᶜ...)
             thermodynamicsᵏ = level_thermodynamics(thermodynamics, i, j, k)
             C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,

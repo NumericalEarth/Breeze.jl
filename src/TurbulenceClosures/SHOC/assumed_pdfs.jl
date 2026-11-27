@@ -319,18 +319,17 @@ end
 @inline function double_gaussian_components(pdf, zᶠ⁺, zᶠ⁻, zᶜ, θˡⁱ, w, qᵗ, w′², moments_below, moments_above)
     clipping = pdf.clipping
     FT = typeof(θˡⁱ)
-    large_negative = convert(FT, -99999999.99)
     potential_temperature_tolerance = pdf.potential_temperature_tolerance
     total_water_tolerance = pdf.total_water_tolerance
     calm_variance = pdf.vertical_velocity_tolerance * pdf.vertical_velocity_tolerance
 
-    interpolate(n, lower_bound) = hard_floor(linearly_interpolate(zᶠ⁺, zᶠ⁻, moments_above[n], moments_below[n], zᶜ), lower_bound)
-    w′³ = interpolate(1, large_negative)
-    θˡⁱ′² = interpolate(2, zero(FT))
-    w′θˡⁱ′ = interpolate(3, large_negative)
-    θˡⁱ′qᵗ′ = interpolate(4, large_negative)
-    w′qᵗ′ = interpolate(5, large_negative)
-    qᵗ′² = interpolate(6, zero(FT))
+    interpolate(n) = linearly_interpolate(zᶠ⁺, zᶠ⁻, moments_above[n], moments_below[n], zᶜ)
+    w′³ = interpolate(1)
+    θˡⁱ′² = interpolate(2)
+    w′θˡⁱ′ = interpolate(3)
+    θˡⁱ′qᵗ′ = interpolate(4)
+    w′qᵗ′ = interpolate(5)
+    qᵗ′² = interpolate(6)
 
     σw = zero_safe_sqrt(w′²)
     σθ = clipped_maximum(clipping, potential_temperature_tolerance, zero_safe_sqrt(θˡⁱ′²), potential_temperature_tolerance)

@@ -15,7 +15,7 @@
 #####
 ##### Not routed through the policy, in any configuration: guards against round-off whose bound
 ##### the exact value already satisfies (interpolated positive quantities, `aᶜ ≤ 1`, `qˡ ≥ 0`, the
-##### variance of `s`). They use `max`, `min` or `hard_floor` directly.
+##### variance of `s`). They use `max` or `min` directly.
 #####
 
 abstract type AbstractClippingPolicy <: AbstractSubgridDistributionComponent end
@@ -98,6 +98,3 @@ Adapt.adapt_structure(to, policy::SmoothClipping) = (width = adapt(to, policy.wi
 
 # √x whose value is exactly that of `sqrt` for x ≥ 0, with a finite (zero) derivative at x = 0.
 @inline zero_safe_sqrt(x) = ifelse(x > 0, sqrt(ifelse(x > 0, x, one(x))), zero(x))
-
-# `if (y < minthresh) y = minthresh` of shoc.F90, which keeps a negative zero where `max` would not.
-@inline hard_floor(y, lower_bound) = ifelse(y < lower_bound, lower_bound, y)
