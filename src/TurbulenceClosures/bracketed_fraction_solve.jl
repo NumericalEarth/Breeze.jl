@@ -257,7 +257,7 @@ end
     t_rf = ãᴺ(x_rf)
     R_rf = x_rf - t_rf.ãᴺ
     σₛ = sqrt(t_rf.τ * t_rf.Kᶜ) * abs(input.∂zs)
-    x_g = (1 + input.s̄ / (hypot(input.s̄, σₛ) + floatmin(FT))) / 2
+    x_g = (1 + input.s̄ / (hypotenuse(input.s̄, σₛ) + floatmin(FT))) / 2
     t_g = ãᴺ(x_g)
     R_g = x_g - t_g.ãᴺ
 

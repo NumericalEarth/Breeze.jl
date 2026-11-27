@@ -303,14 +303,14 @@ number `αˢ ≥ 0`: the blend ``Riᵗ⁻ + (Riᵗ⁺ - Riᵗ⁻)(1 + s)/2`` of 
     Riᵗ⁺ = αᴺ / D⁺
     # s = x / √(1 + x²) with x = αᴺ / (δ min(D⁻, D⁺)), formed without x² so that it is finite for any αᴺ
     δD = RICHARDSON_BLEND_WIDTH * min(D⁻, D⁺)
-    s = αᴺ / hypot(δD, αᴺ)
+    s = αᴺ / hypotenuse(δD, αᴺ)
     return Riᵗ⁻ + (Riᵗ⁺ - Riᵗ⁻) * (1 + s) / 2
 end
 
 # v = Riᵗ / √(1 + Riᵗ²) ∈ [-1, 1], formed without Riᵗ² so that it is finite for any Riᵗ
 @inline function bounded_richardson_coordinate(sf::TRStabilityFunction, αᴺ, αˢ)
     Riᵗ = turbulent_richardson_number(sf, αᴺ, αˢ)
-    return Riᵗ / hypot(one(Riᵗ), Riᵗ)
+    return Riᵗ / hypotenuse(one(Riᵗ), Riᵗ)
 end
 
 @inline evaluate_log_quadratic((l⁰, A, B), v) = exp(l⁰ + v * (A + B * v))

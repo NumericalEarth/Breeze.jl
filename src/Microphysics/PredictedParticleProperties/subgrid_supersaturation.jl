@@ -96,13 +96,13 @@ Adapt.adapt_structure(to, condensation::SubgridCondensation) =
 
 # Γ(μ, σ) = σ G(μ/σ) - μ = σ [φ(Q) - Q Φ(-Q)], Q = μ/σ, written without the cancellation of
 # σ G(Q) - μ for large Q. Q is the `standard_score` of μ, regular at σ = 0, and σ̃ = μ / Q the spread it is formed
-# with (σ̃ = hypot(σ, δ), δ the round-off of μ), so that σ = 0 gives the limit max(0, -μ) of the point mass without a
+# with (σ̃ = hypotenuse(σ, δ), δ the round-off of μ), so that σ = 0 gives the limit max(0, -μ) of the point mass without a
 # branch, and |Q| ≤ 1/ϵ keeps φ and Q Φ(-Q) finite. `max(0, ⋅)` removes the round-off of φ - Q Φ(-Q) below zero
 # far in the upper tail.
 @inline function gaussian_excess_correlation(μ, σ)
     FT = typeof(μ)
     Q = standard_score(μ, zero(FT), σ)
-    σ̃ = hypot(σ, eps(FT) * abs(μ) + floatmin(FT))
+    σ̃ = hypotenuse(σ, eps(FT) * abs(μ) + floatmin(FT))
     φ = exp(-Q^2 / 2) / sqrt(2 * FT(π))
     Φ⁻ = erfc(Q / sqrt(FT(2))) / 2
     return max(0, σ̃ * (φ - Q * Φ⁻))

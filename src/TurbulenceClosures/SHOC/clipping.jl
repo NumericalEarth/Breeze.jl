@@ -55,8 +55,8 @@ Adapt.adapt_structure(to, policy::SmoothClipping) = (width = adapt(to, policy.wi
 @inline function smooth_clamp(x, x⁻, x⁺, δ)
     d⁻ = x - x⁻
     d⁺ = x - x⁺
-    # `hypot` does not overflow where `x` is many orders of magnitude beyond the bounds
-    t = (d⁻ + d⁺) / (hypot(d⁻, δ) + hypot(d⁺, δ))
+    # `hypotenuse` does not overflow where `x` is many orders of magnitude beyond the bounds
+    t = (d⁻ + d⁺) / (hypotenuse(d⁻, δ) + hypotenuse(d⁺, δ))
     return (x⁻ * (1 - t) + x⁺ * (1 + t)) / 2
 end
 

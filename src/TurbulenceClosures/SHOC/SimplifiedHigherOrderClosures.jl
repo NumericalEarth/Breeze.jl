@@ -39,7 +39,7 @@ using Breeze.AtmosphereModels.Diagnostics: condensate_phase_equilibrium
 using Breeze.TurbulenceClosures: TurbulenceClosures, TKEBasedTurbulenceClosure, AbstractMixingLength,
                                  HardMinimum, HarmonicBlend, TurbulentRichardsonStabilityFunction,
                                  face_valueᶜᶜᶠ, grid_float_type, column_kernel_parameters
-using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS
+using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, hypotenuse
 using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equilibrated_surface, saturation_vapor_pressure_log_slope,
                              saturation_vapor_pressure_liquid_fraction_log_slope,
                              PlanarLiquidSurface, PlanarIceSurface, dry_air_gas_constant, vapor_gas_constant,

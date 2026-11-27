@@ -8,6 +8,7 @@ module Utils
 
 export sum_properties,
        safe_divide,
+       hypotenuse,
        chebyshev_gauss_nodes_weights,
        transform_to_diameter,
        jacobian_diameter_transform,
@@ -94,6 +95,33 @@ safe_divide(1.0, 0.0, -1.0)
 ```
 """
 @inline safe_divide(a, b, default) = ifelse(iszero(b), default, a / b)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return ``\\sqrt{a² + b²}`` without overflow or underflow in the squares, as `hypot` does, from the larger
+magnitude ``m`` and the ratio ``r ≤ 1`` of the smaller to it, ``m \\sqrt{1 + r²}``. It is written in arithmetic,
+`abs`, `max`, `min` and `sqrt`, which Reactant raises to StableHLO in a kernel, rather than with `hypot`, which
+the GPU compiler lowers to a library call (`__nv_hypot`) that Reactant cannot raise. Neither branch of its `ifelse`
+divides zero by zero or infinity by infinity, so its derivative is finite wherever it is defined, and zero at
+``a = b = 0``.
+
+```jldoctest
+using Breeze.Utils: hypotenuse
+(hypotenuse(3.0, 4.0), hypotenuse(1e300, 1e300) ≈ sqrt(2) * 1e300, hypotenuse(0.0, 0.0), hypotenuse(Inf, Inf))
+
+# output
+(5.0, true, 0.0, Inf)
+```
+"""
+@inline function hypotenuse(a, b)
+    a⁺ = abs(a)
+    b⁺ = abs(b)
+    m = max(a⁺, b⁺)
+    regular = (m > 0) & (m < Inf)
+    r = ifelse(regular, min(a⁺, b⁺), zero(m)) / ifelse(regular, m, one(m))
+    return m * sqrt(1 + r * r)
+end
 
 #####
 ##### Chebyshev–Gauss quadrature

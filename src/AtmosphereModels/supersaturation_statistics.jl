@@ -129,7 +129,7 @@ end
     FT = typeof(σ)
     x = a - b
     δ = eps(FT) * (abs(a) + abs(b)) + floatmin(FT)
-    return ifelse(isfinite(x), x / hypot(σ, δ), x)
+    return ifelse(isfinite(x), x / hypotenuse(σ, δ), x)
 end
 
 """
