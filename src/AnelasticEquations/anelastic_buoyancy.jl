@@ -32,6 +32,9 @@ to 1, and the subtraction of 1 preserves relative precision.
 Here, ``R^m = q^d R^d + q^v R^v`` is the mixture gas constant for the current
 moisture state and ``R^m_r`` is the mixture gas constant for the reference
 moisture state.
+
+The force is zero when `dynamics.buoyancy` is `false`; the gravitational acceleration
+is then still that of `constants`.
 """
 @inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
                                                     dynamics::AnelasticDynamics,
@@ -68,5 +71,5 @@ moisture state.
     g = constants.gravitational_acceleration
     ρ′ = ρᵣ * (Rᵐᵣ * Tᵣ / (Rᵐ * T) - 1)
 
-    return - g * ρ′
+    return ifelse(dynamics.buoyancy, - g * ρ′, zero(ρ′))
 end

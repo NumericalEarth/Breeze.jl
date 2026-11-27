@@ -41,22 +41,28 @@ particle's physical altitude changes at the rate ``w``.
 
 ## When particles are advected
 
-Both Breeze time steppers — `SSPRungeKutta3` and `AcousticRungeKutta3` — advect
-particles **once per time step**, at the end of the step, over the full `Δt`, using
-the velocity of the freshly updated state ``U^{n+1}``:
+Particles are advanced with the time-stepping scheme of the model, stage by stage, so particle
+trajectories have the same order of accuracy in time as the dycore. At the beginning of each stage,
+the particle velocity is interpolated with the fields at the beginning of the stage.
+Both Breeze time steppers — `SSPRungeKutta3` and `AcousticRungeKutta3` — combine every stage with the
+state at the beginning of the time step, so particle positions are advanced in terms of the position
+``X^n`` at the beginning of the time step and the displacement ``D`` from ``X^n``,
 
 ```math
-X^{n+1} = X^{n} + \Delta t \; \boldsymbol{u}(X^{n}, t^{n+1}) .
+D^{(k)} = a_k D^{(k-1)} + b_k \, \Delta t \, \boldsymbol{u}(X^{(k-1)}) , \qquad X^{(k)} = X^n + D^{(k)} , \qquad D^{(0)} = 0 .
 ```
 
-This is a consistent but first-order-in-time update, so particle trajectories are
-lower order than the third-order dycore. A stage-wise update is not possible
-without extra storage: unlike Oceananigans' low-storage Runge–Kutta 3, whose
-per-stage increments sum to `Δt`, both Breeze schemes recombine each stage with
-the stored state ``U^{0}``, so reproducing the stage structure for ``X`` would
-require keeping ``X^{n}`` alongside the current position. Any `tracked_fields`
-attached to the particles are likewise sampled once per step, after the
-operator-split microphysics update.
+With ``a_k = b_k = α_k = (1, 1/4, 2/3)``, this is the Shu–Osher form of SSP RK3,
+``X^{(k)} = (1 - α_k) X^n + α_k (X^{(k-1)} + Δt \, \boldsymbol{u}(X^{(k-1)}))``.
+With ``a_k = 0`` and ``b_k = β_k = (1/3, 1/2, 1)``, this is the Wicker–Skamarock scheme,
+``X^{(k)} = X^n + β_k Δt \, \boldsymbol{u}(X^{(k-1)})``.
+Boundary conditions are applied to ``X^{(k)}`` after every stage, but not to the displacement, so that
+particles crossing a periodic boundary during a time step are advanced consistently.
+
+At the beginning of each time step, particles are sorted (if `sorting` is specified) and their
+`dynamics` is called once with the full time step. Particles absorbed at an `AbsorbingBoundary` are
+removed at the end of the time step. Any `tracked_fields` attached to the particles are sampled after
+each stage.
 
 ## Boundary conditions
 
@@ -86,7 +92,7 @@ and interpolation is performed against ``r``. Breeze therefore inverts
 ``z(x, y, \cdot)`` for ``r`` at the particle position before interpolating. The
 inversion is exact for [`LinearDecay`](@ref) (the map is affine in ``r``) and uses
 a bracketed Newton solve for [`TwoLevelDecay`](@ref), which converges to roundoff
-in a handful of iterations. It is evaluated once per particle per step and reused
+in a handful of iterations. It is evaluated once per particle per stage and reused
 for all three velocity components.
 
 The terrain components ``h_n`` are interpolated horizontally to the particle

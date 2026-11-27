@@ -32,7 +32,7 @@ function AtmosphereModels.compute_pressure_correction!(model::AnelasticModel, Δ
     ρŨ = model.momentum
     solver = model.pressure_solver
     αᵣp′ = dynamics.pressure_anomaly  # kinematic pressure p'/ρᵣ
-    solve_for_anelastic_pressure!(αᵣp′, solver, ρŨ, Δt)
+    solve_for_anelastic_pressure!(αᵣp′, solver, ρŨ, Δt, dynamics.reference_state.density)
     fill_halo_regions!(αᵣp′)
 
     return nothing

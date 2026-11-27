@@ -63,7 +63,9 @@ end
     end
 
     @testset "Import via Owner" begin
-        @test ExplicitImports.check_all_explicit_imports_via_owners(Breeze) === nothing
+        # `@atomic` (owned by Atomix) and `StructArray` (owned by StructArrays) are re-exported by
+        # KernelAbstractions and Oceananigans' LagrangianParticleTracking; Breeze does not depend on their owners.
+        @test ExplicitImports.check_all_explicit_imports_via_owners(Breeze; ignore=(Symbol("@atomic"), :StructArray)) === nothing
     end
 
     @testset "Stale Explicit Imports" begin

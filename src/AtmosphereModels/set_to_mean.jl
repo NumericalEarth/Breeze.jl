@@ -1,4 +1,5 @@
-using ..Thermodynamics: Thermodynamics, ReferenceState, ExnerReferenceState, compute_hydrostatic_reference!,
+using ..Thermodynamics: Thermodynamics, ReferenceState, ExnerReferenceState, BoussinesqReferenceState,
+                        compute_hydrostatic_reference!,
                         _compute_exner_reference!, _compute_exner_reference_3d!,
                         bottom_face_height, constant_moist_hydrostatic_pressure,
                         is_column_reference, moist_hydrostatic_pressure, dry_air_gas_constant,
@@ -118,6 +119,10 @@ etc.) are rescaled by `ρᵣ_new / ρᵣ_old` so that the specific quantities
 (s, qᵗ, u, etc.) are unchanged. When `false` (default), the density-weighted
 fields are left as-is and only diagnostics are recomputed.
 """
+set_to_mean!(::BoussinesqReferenceState, model; rescale_densities=false) =
+    throw(ArgumentError("set_to_mean! is not supported for a BoussinesqReferenceState, " *
+                        "which is uniform in space rather than hydrostatically balanced."))
+
 function set_to_mean!(ref::ReferenceState, model; rescale_densities=false)
     constants = model.thermodynamic_constants
 
