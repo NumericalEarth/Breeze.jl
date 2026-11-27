@@ -210,8 +210,16 @@ end
 
         @test all(interior(ℐ_lw_up) .≥ 0)  # Upwelling should be positive
         @test all(interior(ℐ_lw_dn) .≤ 0)  # Downwelling should be negative
-        @test all(iszero, interior(ℐ_sw_up))  # Non-scattering gray optics has no upward shortwave
         @test all(interior(ℐ_sw_dn) .≤ 0)  # Downwelling should be negative
+
+        # 10% of the direct beam is reflected and reaches the top attenuated by
+        # exp(-D τ) = (ℐ_sw_dn[1] / ℐ_sw_dn[end])^(D μ₀)
+        ℐ_sw_up_column = vec(Array(interior(ℐ_sw_up)))
+        ℐ_sw_dn_column = vec(Array(interior(ℐ_sw_dn)))
+        μ₀ = @allowscalar radiation.shortwave_solver.bcs.cos_zenith[1]
+        D = Base.get_extension(Breeze, :BreezeRRTMGPExt).reflected_beam_diffusivity
+        @test ℐ_sw_up_column[1] ≈ -0.1 * ℐ_sw_dn_column[1]
+        @test ℐ_sw_up_column[end] / ℐ_sw_up_column[1] ≈ (ℐ_sw_dn_column[1] / ℐ_sw_dn_column[end])^(D * μ₀) rtol = sqrt(eps(FT))
 
         # Integrating -∂ℐ_net/∂z over the column must recover the boundary-flux
         # difference, where ℐ_net sums all four streams (positive upward).

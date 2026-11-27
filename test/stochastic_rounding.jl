@@ -199,81 +199,51 @@ end
 #####
 ##### A slow, uniform heating in a 3D Float32 model
 #####
-##### 1.5 K/day at Δt = 2.5 s puts each stage increment of ρθ below one ulp, as for radiative
-##### heating in the upper troposphere. Round to nearest loses most of it; stochastic rounding
-##### matches Float64 to within its random walk.
+##### 1.5 K/day puts each stage increment of ρθ below one ulp, as for radiative heating in the upper
+##### troposphere. Round to nearest loses most of it; stochastic rounding matches Float64 to within its
+##### random walk. Under the multirate infinitesimal step, stage i starts from Uⁿ + Σⱼ αᵢⱼ ΔYⱼ and is forced
+##### with γᵢⱼ ΔYⱼ / Δt, so every reused increment and the start state have to take the rounding treatment.
 #####
 
-@testset "Slow uniform heating in Float32" begin
+@testset "Slow uniform heating in Float32 [$dynamics_kind]" for (dynamics_kind, Δt, rtol) in
+        ((:anelastic, 2.5, 0.02), (:multirate_compressible, 0.25, 0.05))
     day = 86400
     heating = 1.5 / day
-    Δt = 2.5
     Nsteps = 1000
 
-    function mean_temperature_change(FT; rounding = RoundToNearest())
+    # Temperature, whose pressure the anelastic model holds fixed, or potential temperature
+    function mean_heating(FT; rounding = RoundToNearest())
         Oceananigans.defaults.FloatType = FT
         grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 1000), y=(0, 1000), z=(0, 10000))
-        model = AtmosphereModel(grid; forcing = (; θ = Returns(FT(heating))), timestepper_kwargs = (; rounding))
-        set!(model; θ = 300)
-        T₀ = mean(Float64.(Array(interior(model.temperature))))
+        forcing = (; θ = Returns(FT(heating)))
+        if dynamics_kind === :anelastic
+            model = AtmosphereModel(grid; forcing, timestepper_kwargs = (; rounding))
+            set!(model; θ = 300)
+            φ = model.temperature
+        else
+            dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+            model = AtmosphereModel(grid; dynamics, forcing, timestepper = compressible_timesteppers[dynamics_kind],
+                                    timestepper_kwargs = (; rounding))
+            set!(model; θ = 300, ρ = model.dynamics.reference_state.density)
+            φ = model.formulation.potential_temperature
+        end
+        φ₀ = mean(Float64.(Array(interior(φ))))
         for _ in 1:Nsteps
             time_step!(model, Δt)
         end
-        return mean(Float64.(Array(interior(model.temperature)))) - T₀
+        return mean(Float64.(Array(interior(φ)))) - φ₀
     end
 
-    exact = Float64(mean_temperature_change(Float64))
-    nearest = mean_temperature_change(Float32)
-    stochastic = mean_temperature_change(Float32; rounding = StochasticRounding(seed = 5))
-    @info "Mean temperature change over $(Nsteps) steps of $(Δt) s" exact nearest stochastic
+    exact = Float64(mean_heating(Float64))
+    nearest = mean_heating(Float32)
+    stochastic = mean_heating(Float32; rounding = StochasticRounding(seed = 5))
+    @info "Mean heating of $dynamics_kind over $(Nsteps) steps of $(Δt) s" exact nearest stochastic
 
     @test exact > 0
 
     # Round to nearest loses more than 20% of the heating; stochastic rounding recovers it
     @test nearest ≉ exact rtol = 0.2
-    @test stochastic ≈ exact rtol = 0.02
-
-    Oceananigans.defaults.FloatType = default_FT
-end
-
-#####
-##### The same heating under the multirate infinitesimal step
-#####
-##### Stage i starts from Uⁿ + Σⱼ αᵢⱼ ΔYⱼ and is forced with γᵢⱼ ΔYⱼ / Δt, so what the increments
-##### ΔYⱼ = Yⱼ - Uⁿ of the earlier stages lose to rounding is lost from Uⁿ⁺¹: every stage whose
-##### increment is reused has to take the round-off treatment, and so does the start state.
-##### At Δt = 0.25 s the stage increments of ρθ are below one ulp.
-#####
-
-@testset "Slow uniform heating in Float32 with a multirate infinitesimal step" begin
-    day = 86400
-    heating = 1.5 / day
-    Δt = 0.25
-    Nsteps = 1000
-
-    function mean_potential_temperature_change(FT; rounding = RoundToNearest())
-        Oceananigans.defaults.FloatType = FT
-        grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 1000), y=(0, 1000), z=(0, 10000))
-        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics, forcing = (; θ = Returns(FT(heating))),
-                                timestepper = :MultirateInfinitesimalStep, timestepper_kwargs = (; rounding))
-        set!(model; θ = 300, ρ = model.dynamics.reference_state.density)
-        θ = model.formulation.potential_temperature
-        θ₀ = mean(Float64.(Array(interior(θ))))
-        for _ in 1:Nsteps
-            time_step!(model, Δt)
-        end
-        return mean(Float64.(Array(interior(θ)))) - θ₀
-    end
-
-    exact = Float64(mean_potential_temperature_change(Float64))
-    nearest = mean_potential_temperature_change(Float32)
-    stochastic = mean_potential_temperature_change(Float32; rounding = StochasticRounding(seed = 5))
-    @info "Mean potential temperature change over $(Nsteps) steps of $(Δt) s" exact nearest stochastic
-
-    @test exact > 0
-    @test nearest ≉ exact rtol = 0.2
-    @test stochastic ≈ exact rtol = 0.05
+    @test stochastic ≈ exact rtol = rtol
 
     Oceananigans.defaults.FloatType = default_FT
 end

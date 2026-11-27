@@ -99,8 +99,7 @@ end
 
 @testset "TwoMomentCloudMicrophysics setting initial conditions [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -134,8 +133,7 @@ end
 
 @testset "TwoMomentCloudMicrophysics precipitation rate and bottom flux [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -219,8 +217,7 @@ end
 
 @testset "TwoMomentCloudMicrophysics sedimentation_velocity and velocities [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)

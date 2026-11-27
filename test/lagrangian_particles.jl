@@ -287,10 +287,9 @@ end
 
     @testset "Advection by uniform flow (compressible, acoustic RK3)" begin
         particles = uniform_flow_particles(FT)
-        # The terrain-following testset above steps particles with the default time stepper.
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics, particles, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; dynamics, particles)
         ref = model.dynamics.reference_state
         set!(model; θ=300, u=10, qᵗ=0, ρ=ref.density)
 

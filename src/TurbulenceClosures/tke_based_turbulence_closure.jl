@@ -666,14 +666,14 @@ centers and the stored static stability `N²` at the faces. One thread per colum
     fill_mixing_length!(ℓ, ℓˢ, i, j, grid, closure_ij.mixing_length, closure_ij, e, N²)
 end
 
-# One thread per column, over the columns `parameters`. A backend that runs loops over k slowly
-# inside a kernel (Reactant, where they become one round of launches per level on GPU) may extend
-# this for a whole-array form.
-compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²; parameters = :xy) =
-    launch!(grid.architecture, grid, parameters, _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
+# One thread per column. A backend that runs loops over k slowly inside a kernel (Reactant, where
+# they become one round of launches per level on GPU) may extend this for a whole-array form.
+compute_mixing_length!(ℓ, ℓˢ, grid, closure, e, N²; parameters = :xyz) =
+    launch!(grid.architecture, grid, column_kernel_parameters(parameters),
+            _compute_mixing_length!, ℓ, ℓˢ, grid, closure, e, N²)
 
-# The columns of three-dimensional kernel parameters
-column_kernel_parameters(parameters::Symbol) = :xy
+# The horizontal part of the volume kernel parameters, for kernels that run one thread per column.
+column_kernel_parameters(::Symbol) = :xy
 column_kernel_parameters(::KernelParameters{S, O}) where {S, O} = KernelParameters(S[1:2], O[1:2])
 
 """
@@ -832,8 +832,7 @@ function Oceananigans.TurbulenceClosures.compute_closure_fields!(closure_fields,
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
             closure_fields.N², grid, closure, tracers, buoyancy)
 
-    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²;
-                           parameters = column_kernel_parameters(parameters))
+    compute_mixing_length!(closure_fields.ℓᵐ, closure_fields.ℓˢ, grid, closure, tracers[TKE_NAME], closure_fields.N²; parameters)
 
     launch!(arch, grid, parameters, _compute_tke_closure_fields!,
             closure_fields, grid, closure, model.velocities, tracers)

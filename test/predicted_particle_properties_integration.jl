@@ -92,9 +92,8 @@ using Oceananigans.TimeSteppers: update_state!
 
     @testset "P3 tendencies and fall speeds follow the current RK-stage state" begin
         FT = Float64
-        # The grid size of the other 2 × 2 P3 models of this file: another size would compile every kernel again.
-        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4),
-                               extent = (100, 100, 200))
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 2),
+                               extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
                                          base_pressure = FT(101325),
@@ -212,9 +211,8 @@ end
         # held that constant rather than `ρnᶜˡ / ρ`, so the field drifted with nothing to
         # restore it and diagnostics reported the drift.
         FT = Float64
-        # The grid size of the other 2 × 2 P3 models of this file: another size would compile every kernel again.
-        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4),
-                               extent = (100, 100, 200))
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 2),
+                               extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
                                          base_pressure = FT(101325),
@@ -711,9 +709,8 @@ end
 
     @testset "P3 produces rain on its first RK step" begin
         FT = Float64
-        # The grid size of the other 2 × 2 P3 models of this file: another size would compile every kernel again.
-        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 4),
-                               extent = (100, 100, 200))
+        grid = RectilinearGrid(default_arch, FT; size = (2, 2, 2),
+                               extent = (100, 100, 100))
         constants = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, constants;
                                          base_pressure = FT(101325),

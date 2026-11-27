@@ -392,7 +392,7 @@ total_dry_mass(model) = sum(Float64.(interior(model.dynamics.dry_density)))
     @test relative_drift <= 1e-12
 end
 #####
-##### T8 — Unit test for _zero_x_wall_face! and _zero_y_wall_face! kernels
+##### T8 — Unit test for the _zero_x_wall_faces! and _zero_y_wall_faces! kernels
 #####
 ##### Direct coverage of the wall-zeroing kernels called by
 ##### `enforce_wall_impenetrability!`. Fills the momentum perturbation

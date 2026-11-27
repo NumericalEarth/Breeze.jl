@@ -19,7 +19,7 @@ BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysics
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 using Breeze.Microphysics: ConstantRateCondensateFormation
 
-using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition, fill_halo_regions!
 using Oceananigans.TimeSteppers: update_state!, implicit_step!
 using Oceananigans: fields
 using Oceananigans.Fields: ZeroField, ZFaceField
@@ -299,8 +299,7 @@ end
 
 @testset "Setting specific microphysical variables [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -591,6 +590,68 @@ end
     @test all(isfinite, interior(acoustic_model.microphysical_fields.ρqʳ))
 end
 
+@testset "Adaptive implicit sedimentation heat follows the solved mass after an acoustic loop [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    Nz = 8
+    Δz = FT(100)
+    Δt = FT(10)
+    grid = RectilinearGrid(default_arch; size=Nz, z=(0, Nz * Δz), topology=(Flat, Flat, Bounded))
+    adaptive = AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.05)
+    column(f) = Array(interior(f, 1, 1, :))
+
+    # The scalar update of one acoustic stage, with no explicit tendency, after a loop that changed the
+    # dry density by the factor `compression`: the total density is still that of the stage entry.
+    for ε in (0, FT(1e-2))
+        dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
+        scalar_advection = (; ρqʳ = WENO(FT; order=5, time_discretization=adaptive))
+        model = AtmosphereModel(grid; dynamics, microphysics=OneMomentCloudMicrophysics(FT), scalar_advection,
+                                timestepper=:AcousticRungeKutta3)
+        set!(model; ρ=model.dynamics.reference_state.density, θ=300, qᵗ=0.005, qᶜˡ=0,
+             qʳ=z -> ifelse(z > Nz * Δz / 2, FT(1e-3), FT(0)))
+        Oceananigans.TimeSteppers.time_discretization(model.advection.ρqʳ).Δt[] = Δt
+
+        ts = model.timestepper
+        for name in keys(ts.U⁰)
+            parent(ts.U⁰[name]) .= parent(Oceananigans.prognostic_fields(model)[name])
+            parent(ts.Gⁿ[name]) .= 0
+        end
+        Breeze.TimeSteppers.cache_advecting_state!(model)
+
+        ρᵈ = continuity_density(model.dynamics)
+        qᵈ = column(ρᵈ) ./ column(total_density(model.dynamics)) # unchanged by the loop
+        compression = CenterField(grid)
+        set!(compression, z -> 1 + ε * cospi(z / (Nz * Δz)))
+        interior(ρᵈ) .*= interior(compression)
+        fill_halo_regions!(ρᵈ)
+
+        μ = model.microphysical_fields
+        ρθ = model.formulation.potential_temperature_density
+        ρqʳ⁰ = column(μ.ρqʳ)
+        ρθ⁰ = column(ρθ)
+        Breeze.TimeSteppers.scalar_substep!(model, Δt, Δt, Breeze.RoundToNearest())
+        Δρqʳ = column(μ.ρqʳ) .- ρqʳ⁰
+        Δρθ = column(ρθ) .- ρθ⁰
+        @test maximum(abs.(Δρqʳ)) > 0
+
+        # The mass that fell through each face, integrated down from the top, carries the content of the
+        # cell above it, and the dry mass fraction converts the change of θ into that of ρᵈ θ. Neither
+        # depends on how far the loop compressed the cells.
+        F = zeros(FT, Nz + 1)
+        for k in Nz:-1:1
+            F[k] = F[k+1] + Δz * Δρqʳ[k]
+        end
+        temperature = Breeze.AtmosphereModels.content_temperature(model.formulation, model.temperature)
+        content(k) = @allowscalar Breeze.AtmosphereModels.condensate_content(
+            1, 1, k, grid, model.formulation, model.dynamics, model.thermodynamic_constants, model.microphysics, μ,
+            specific_prognostic_moisture(model), temperature)
+        c = [content(k) for k in 1:Nz]
+        Δρθ_expected = expected_sedimentation_tendency(Nz, Δz, ones(FT, Nz + 1), F, [cₖ.χ[1] for cₖ in c],
+                                                       [cₖ.h[1] for cₖ in c], [cₖ.∂φ∂h for cₖ in c];
+                                                       density_ratio = qᵈ)
+        @test maximum(abs, Δρθ .- Δρθ_expected) < FT(1e-4) * maximum(abs, Δρθ_expected)
+    end
+end
+
 @testset "The SSP RK3 stage solves ρθ after moving the implicitly sedimented content [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 8
@@ -654,8 +715,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature=300)
     microphysics = OneMomentCloudMicrophysics(FT)
     adaptive() = WENO(FT; order=5, time_discretization=AdaptiveVerticallyImplicitDiscretization(FT; cfl=0.5))
-    model = AtmosphereModel(grid; dynamics, microphysics, timestepper=:AcousticRungeKutta3,
-                            scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
+    model = AtmosphereModel(grid; dynamics, microphysics, scalar_advection = (; ρθ = adaptive(), ρqʳ = adaptive()))
     @test model.timestepper isa Breeze.TimeSteppers.AcousticRungeKutta3
 
     Δt = FT(10)
@@ -836,8 +896,7 @@ end
 
 @testset "Mixed-phase non-equilibrium time-stepping [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)
@@ -874,8 +933,7 @@ end
 
 @testset "sedimentation_velocity, condensate_liquid_fraction, and microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=300)
@@ -930,8 +988,7 @@ end
 
 @testset "Diagnosed cloud condensate does not sediment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), extent=(100, 100, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), extent=(100, 100, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=280)
@@ -1377,8 +1434,7 @@ end
 
 @testset "Mixed-phase sedimenting condensates and snow bottom flux [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=250)
@@ -1414,8 +1470,7 @@ end
 
 @testset "Mixed-phase non-equilibrium snow field materialization [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    # The size of the grid of the time-stepping tests above: another size would compile every kernel again.
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=260)

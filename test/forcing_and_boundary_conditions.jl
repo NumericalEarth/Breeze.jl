@@ -430,10 +430,8 @@ end
         west = NormalFlowBoundaryCondition(ρu_west; parameters=(; ρ=FT(1.17), ω=FT(0.01))))
 
     # `set!` triggers `update_state!` → `compute_velocities!` → momentum halo fill.
-    # Pre-#717 this threw before any explicit time step. The halo fill is the model's, whichever
-    # time stepper takes the step, so this and the next testset name the one that is cheaper to
-    # compile; `acoustic_substepping_open_boundaries.jl` steps open boundaries with the default.
-    model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs), timestepper=:AcousticRungeKutta3)
+    # Pre-#717 this threw before any explicit time step.
+    model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs))
     set!(model; θ=FT(300), ρ=FT(1.17))
 
     # West boundary face (i=1) carries the prescribed value at the current time.
@@ -470,7 +468,7 @@ end
     end
 
     ρu_bcs = FieldBoundaryConditions(west = NormalFlowBoundaryCondition(ρu_fts))
-    model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs), timestepper=:AcousticRungeKutta3)
+    model = AtmosphereModel(grid; dynamics, boundary_conditions=(; ρu=ρu_bcs))
     set!(model; θ=FT(300), ρ=FT(1.17))
 
     # t = 0: west boundary face equals the first slice.

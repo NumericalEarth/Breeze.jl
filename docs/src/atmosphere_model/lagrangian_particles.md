@@ -41,9 +41,7 @@ particle's physical altitude changes at the rate ``w``.
 
 ## When particles are advected
 
-Breeze's time steppers — `SSPRungeKutta3` for anelastic and explicit compressible dynamics,
-and `MultirateInfinitesimalStep` (the default) and `AcousticRungeKutta3` for compressible
-dynamics with acoustic substepping — advect
+Both Breeze time steppers — `SSPRungeKutta3` and `AcousticRungeKutta3` — advect
 particles **once per time step**, at the end of the step, over the full `Δt`, using
 the velocity of the freshly updated state ``U^{n+1}``:
 
@@ -54,7 +52,7 @@ X^{n+1} = X^{n} + \Delta t \; \boldsymbol{u}(X^{n}, t^{n+1}) .
 This is a consistent but first-order-in-time update, so particle trajectories are
 lower order than the third-order dycore. A stage-wise update is not possible
 without extra storage: unlike Oceananigans' low-storage Runge–Kutta 3, whose
-per-stage increments sum to `Δt`, Breeze's schemes recombine each stage with
+per-stage increments sum to `Δt`, both Breeze schemes recombine each stage with
 the stored state ``U^{0}``, so reproducing the stage structure for ``X`` would
 require keeping ``X^{n}`` alongside the current position. Any `tracked_fields`
 attached to the particles are likewise sampled once per step, after the
