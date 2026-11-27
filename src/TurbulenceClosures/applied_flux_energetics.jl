@@ -321,8 +321,8 @@ function compute_applied_flux_conversions!(fields::SubgridCloudFields{<:AppliedF
     return nothing
 end
 
-# The shear production of the TKE equation: CATKE's without the cloud buoyancy flux, the
-# conversion of the applied momentum fluxes with it
+# The shear production of the TKE equation: CATKE's without the energetics of the applied
+# fluxes, the conversion of the applied momentum fluxes with them
 @inline tke_shear_productionᶜᶜᶜ(i, j, k, grid, fields, closure_fields, u, v) =
     shear_production(i, j, k, grid, closure_fields.Kᵘ, u, u, v, v)
 
@@ -532,7 +532,7 @@ end
 ##### removed from the solved e, ρ ĉᵖ Π Δθˡⁱ = Δt ρ ωᴰ e (ωᴰ = -Lᵉ - ωᴮ).
 #####
 
-const ImplicitCloudBuoyancyFields = SubgridCloudFields{<:AppliedFluxEnergetics}
+const ImplicitAppliedFluxFields = SubgridCloudFields{<:AppliedFluxEnergetics}
 
 implicit_stage(closure, model) =
     time_discretization(closure) isa VerticallyImplicitTimeDiscretization && !isnothing(model.timestepper.implicit_solver)
@@ -560,7 +560,7 @@ end
     end
 end
 
-function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
+function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitAppliedFluxFields},
                                                              closure::FlavorOfTKEClosure, model, Δt, α)
     implicit_stage(closure, model) || return nothing
     fill!(closure_fields.subgrid_cloud.cloud.stage_time_step, α * Δt)
@@ -607,7 +607,7 @@ end
 ##### latent conversion carry, and what the recombination removed from the mean flow.
 #####
 
-function AtmosphereModels.build_closure_stage_storage(::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
+function AtmosphereModels.build_closure_stage_storage(::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitAppliedFluxFields},
                                                       closure, grid, stages)
     exchange = ntuple(_ -> CenterField(grid), stages)
     momentum = ntuple(_ -> (ρu = XFaceField(grid), ρv = YFaceField(grid)), stages - 1)
@@ -652,7 +652,7 @@ end
     end
 end
 
-function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
+function AtmosphereModels.closure_before_stage_combination!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitAppliedFluxFields},
                                                              closure::FlavorOfTKEClosure, model, Δt,
                                                              recombination::AtmosphereModels.StageRecombination)
     implicit_stage(closure, model) || return nothing
@@ -692,7 +692,7 @@ end
 recombined_stage_exchange(::Nothing) = nothing
 recombined_stage_exchange(storage) = storage.recombined_exchange
 
-function AtmosphereModels.closure_before_implicit_solve!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
+function AtmosphereModels.closure_before_implicit_solve!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitAppliedFluxFields},
                                                           closure::FlavorOfTKEClosure, model, name)
     implicit_stage(closure, model) || return nothing
     cl = closure_fields.subgrid_cloud.cloud
@@ -718,7 +718,7 @@ end
     end
 end
 
-function AtmosphereModels.closure_before_thermodynamic_solve!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
+function AtmosphereModels.closure_before_thermodynamic_solve!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitAppliedFluxFields},
                                                                closure::FlavorOfTKEClosure, model, Δt)
     implicit_stage(closure, model) || return nothing
     fields = closure_fields.subgrid_cloud
@@ -798,7 +798,7 @@ end
     @inbounds ρθ[i, j, k] += cl.after_solves_ρθ[i, j, k]
 end
 
-function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitCloudBuoyancyFields},
+function AtmosphereModels.closure_after_implicit_solves!(closure_fields::TKEClosureFields{<:Any, <:Any, <:Any, <:Any, <:Any, <:ImplicitAppliedFluxFields},
                                                           closure::FlavorOfTKEClosure, model, Δt)
     implicit_stage(closure, model) || return nothing
     grid = model.grid
@@ -1047,7 +1047,7 @@ end
 end
 
 """
-    condensing_fraction(x)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The share ``η(x) = 1 - (1 - e^{-x}) / x`` of the saturated response that a parcel displaced for an
 eddy time ``tₑ`` feels when its condensate relaxes the vapor excess at the rate ``ωᶜ``, with
@@ -1239,9 +1239,9 @@ end
     end
 end
 
-# The pass of the stability coupling with the cloud buoyancy flux: the latent-corrected N², then the
+# The pass of the stability coupling with the energetics of the applied fluxes: the latent-corrected N², then the
 # mixing length and the diffusivities from it
-function cloud_buoyancy_stability_pass!(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, closure, model, tracers,
+function applied_flux_stability_pass!(fields::SubgridCloudFields{<:AppliedFluxEnergetics}, closure_fields, closure, model, tracers,
                                         parameters, ω = nothing)
     grid = model.grid
     arch = grid.architecture

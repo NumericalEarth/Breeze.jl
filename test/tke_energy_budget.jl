@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "setup.jl"))
 
 #####
-##### The energy budget of TKEBasedTurbulenceClosure with the cloud buoyancy flux: the TKE equation
+##### The energy budget of TKEBasedTurbulenceClosure with the energetics of the applied fluxes: the TKE equation
 ##### receives exactly the energy the closure's fluxes take from the mean state, and the energy it
 ##### dissipates heats the air. Checked step by step on a moist column with P3 (its own
 ##### condensation; no closure-owned cloud) and the subgrid distribution, with and without rain and surface fluxes, from conversions computed here independently

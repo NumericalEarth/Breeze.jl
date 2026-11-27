@@ -126,7 +126,7 @@ end
     @test maximum(column(cloud.aᶜ)) > 0
     @test all(0 .≤ column(cloud.aᶜ) .≤ 1)
     @test all(column(cloud.qˡ) .≥ 0)
-    @test all(isfinite, column(cloud.w′θᵥ′))
+    @test all(isfinite, column(cloud.w′θᵛ′))
 end
 
 @testset "The second and third moments are SHOC's down-gradient forms on the closure's ℓ, e, Kᶜ" begin
@@ -228,12 +228,12 @@ end
             w′³ᶜ = column(cl.w′³)[k]
             @test abs(w′³ᶜ) ≤ d.skewness.maximum_skewness * w′²ᶜ^1.5 * (1 + 1e-12)
             mᶜ = (w′³ᶜ, mᶜ...)
-            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, distribution_thermodynamics(model),
+            C, qˡ, qˡ′², w′qˡ′, w′θᵛ′ = assumed_pdf(pdf, distribution_thermodynamics(model),
                                                    zf[k+1], zf[k], zc[k], p[k], θ[k], 0.0, qᵗ[k], w′²ᶜ, mᶜ, mᶜ)
             @test matches(column(cl.aᶜ)[k], C)
             @test matches(column(cl.qˡ)[k], qˡ)
             @test matches(column(cl.w′qˡ′)[k], w′qˡ′)
-            @test matches(column(cl.w′θᵥ′)[k], w′θᵥ′)
+            @test matches(column(cl.w′θᵛ′)[k], w′θᵛ′)
         end
         @test maximum(column(cl.aᶜ)) > 0
         @test maximum(column(cl.qˡ)) > 0

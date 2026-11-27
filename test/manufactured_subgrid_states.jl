@@ -334,8 +334,8 @@ standard_normal_cdf(x) = (1 + erf(x / sqrt(2))) / 2
 
 The diagnostics of the closure and of P3 from the moments of a cell:
 
-* `aᶜ`, `qˡ`, `w′qˡ′`, `w′θᵥ′`: `assumed_pdf` with the model's saturation;
-* `w′b′ = (∂b/∂θˡⁱ) w′θᵥ′`, the closure's buoyancy flux, and `w′b′ˡⁱⁿ`, the same linear coefficients
+* `aᶜ`, `qˡ`, `w′qˡ′`, `w′θᵛ′`: `assumed_pdf` with the model's saturation;
+* `w′b′ = (∂b/∂θˡⁱ) w′θᵛ′`, the closure's buoyancy flux, and `w′b′ˡⁱⁿ`, the same linear coefficients
   applied to a given `w′qˡ′` (the sampled one), which isolates the linearization of b. `∂b/∂θˡⁱ = g ĉᵖ Π / (cᵖᵐ T)`
   is that of the model's buoyancy `b = g (α / ᾱ - 1)`, `α = Rᵐ T / p`, at the cell mean;
 * `aʷ = w′qˡ′ / w′s′`, with `w′s′` from the linearized saturation excess at the cell mean;
@@ -346,7 +346,7 @@ function analytic_diagnostics(m, p, thermodynamics; w′qˡ′_given = nothing, 
     constants = thermodynamics.constants
     g = constants.gravitational_acceleration
     moments = (m.w′³, m.θ′², m.w′θ′, m.θ′q′, m.w′q′, m.q′²)
-    aᶜ, qˡ, _, w′qˡ′, w′θᵥ′ = assumed_pdf(pdf, thermodynamics, 1.0, 0.0, 0.5, p, m.θ̄, m.w̄, m.q̄, m.w′², moments, moments)
+    aᶜ, qˡ, _, w′qˡ′, w′θᵛ′ = assumed_pdf(pdf, thermodynamics, 1.0, 0.0, 0.5, p, m.θ̄, m.w̄, m.q̄, m.w′², moments, moments)
 
     A_q, A_c = buoyancy_flux_coefficients(thermodynamics, p, m.θ̄, m.q̄, qˡ)
     # ∂b/∂θˡⁱ = g ĉᵖ Π / (cᵖᵐ T) at the cell mean with its mean liquid, from the model's functions
@@ -354,7 +354,7 @@ function analytic_diagnostics(m, p, thermodynamics; w′qˡ′_given = nothing, 
     𝒰 = LiquidIcePotentialTemperatureState(m.θ̄, q, thermodynamics.standard_pressure, p)
     Π = (p / thermodynamics.standard_pressure)^exner_exponent(thermodynamics.exner_exponent, q, constants)
     ∂b∂θ = g * vapor_equivalent_heat_capacity(q, constants) * Π / (mixture_heat_capacity(q, constants) * temperature(𝒰, constants))
-    w′b′ = ∂b∂θ * w′θᵥ′
+    w′b′ = ∂b∂θ * w′θᵛ′
     w′b′ˡⁱⁿ = ∂b∂θ * (m.w′θ′ + A_q * m.w′q′ + A_c * something(w′qˡ′_given, w′qˡ′))
 
     # The linearized saturation excess at the cell mean: s = c_q qᵗ′ - c_θ θˡⁱ′
@@ -372,7 +372,7 @@ function analytic_diagnostics(m, p, thermodynamics; w′qˡ′_given = nothing, 
     shift = μ̄ - (statistics.a[1] * statistics.μ[1] + statistics.a[2] * statistics.μ[2])
     f⁺ = sum(statistics.a[i] * standard_normal_cdf((statistics.μ[i] + shift) / statistics.σ[i]) for i in 1:2)
 
-    return (; aᶜ, qˡ, w′qˡ′, w′θᵥ′, w′b′, w′b′ˡⁱⁿ, w′s′, aʷ = w′qˡ′ / w′s′, Γ, μ̄, excess = μ̄ + Γ, f⁺,
+    return (; aᶜ, qˡ, w′qˡ′, w′θᵛ′, w′b′, w′b′ˡⁱⁿ, w′s′, aʷ = w′qˡ′ / w′s′, Γ, μ̄, excess = μ̄ + Γ, f⁺,
               qᶜ = (mixture.components[1].qᶜ, mixture.components[2].qᶜ), mixture)
 end
 

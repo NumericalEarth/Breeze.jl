@@ -322,12 +322,12 @@ end
     end
 end
 
-function cloud_buoyancy_stability!(buoyancy_flux::BracketedAppliedFluxEnergetics, fields, closure_fields, closure, model, tracers, parameters)
+function applied_flux_stability!(energetics::BracketedAppliedFluxEnergetics, fields, closure_fields, closure, model, tracers, parameters)
     grid = model.grid
     arch = grid.architecture
     s = applied_flux_state(model)
     e = SpecificValue(model.tracers[TKE_NAME], nothing)
-    launch!(arch, grid, parameters, _bracketed_fraction_solve!, closure_fields.N², buoyancy_flux.stability_solver, grid, closure,
+    launch!(arch, grid, parameters, _bracketed_fraction_solve!, closure_fields.N², energetics.stability_solver, grid, closure,
             model.velocities, e, closure_fields, s)
     # The column envelope of the mixing length, the diffusivities and the distribution, once
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)

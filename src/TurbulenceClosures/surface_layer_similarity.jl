@@ -3,7 +3,7 @@
 #####
 
 """
-    SurfaceLayerSimilarity()
+$(TYPEDEF)
 
 Selects the constructors of [`RationalStabilityFunction`](@ref) and [`ConstantStabilityFunctions`](@ref)
 whose neutral values follow from neutral surface-layer similarity.

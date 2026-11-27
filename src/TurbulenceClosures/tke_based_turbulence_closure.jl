@@ -1136,7 +1136,7 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The buoyancy production of the TKE equation at cell centers: ``-Kᶜ N²``, formed at the faces and
-reconstructed to the center, or, with the cloud buoyancy flux of a
+reconstructed to the center, or, with the energetics of the applied fluxes of a
 subgrid distribution, the exact conversion of the scalar fluxes the closure applies.
 """
 @inline tke_buoyancy_productionᶜᶜᶜ(i, j, k, grid, closure_fields) =

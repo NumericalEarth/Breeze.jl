@@ -7,7 +7,7 @@
 #####     `ℂᵛ τ Kᶜ ∂z a ∂z b` and `-Kᶜ ∂z a`, with the closure's `Kᶜ` and a moment time scale `τ` built
 #####     from its `ℓ`, `e` and `N²`; `w′² = ℂʷ₁ (2/3) e`; the third moment w′³ and its limiter; and the
 #####     assumed double-Gaussian distribution, condensing on the condensate phase of the microphysics, which gives the cloud fraction aᶜ,
-#####     the cloud liquid, the condensate flux w′qᶜ′ and the buoyancy flux w′θᵥ′ = w′θˡⁱ′ + A_q w′qᵗ′ + A_c w′qᶜ′.
+#####     the cloud liquid, the condensate flux w′qᶜ′ and the buoyancy flux w′θᵛ′ = w′θˡⁱ′ + A_q w′qᵗ′ + A_c w′qᶜ′.
 #####   * the energetics (`AppliedFluxEnergetics`, internal): the TKE equation takes its shear and
 #####     buoyancy production from the energy the fluxes the closure applies take from the mean state
 #####     (applied_flux_energetics.jl), and the dissipated energy heats the air.
@@ -550,7 +550,7 @@ end
 AppliedFluxEnergetics(solver) = AppliedFluxEnergetics{coupling_iterations(solver)}(coupling_relaxation(solver), solver)
 
 """
-    stability_iterations(energetics::AppliedFluxEnergetics)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The number of extra passes of the distribution and the static stability (the type parameter).
 """
@@ -610,7 +610,7 @@ Base.show(io::IO, f::CondensateFluxFraction) =
     print(io, "CondensateFluxFraction(", summary(f.initial_stability), stratification_summary(f.stratification), ")")
 
 """
-    LatentStratification()
+$(TYPEDEF)
 
 The static stability of [`CondensateFluxFraction`](@ref) once the distribution exists that carries the latent part of
 the subgrid condensation, `N² = N²ᶜ + (b_qˡ - b_qᵛ) [η aʷ ∂z s̄ + (1 - η) ∂z qᶜ]`: the share `aᴺ = η aʷ` of the flux of the
@@ -620,7 +620,7 @@ of the TKE are then one.
 struct LatentStratification end
 
 """
-    MeanLiquidStratification()
+$(TYPEDEF)
 
 The static stability of [`CondensateFluxFraction`](@ref) once the distribution exists of the grid-mean state with the
 distribution's mean liquid `q̄ˡ` as its condensate, the stratification of a displacement without phase change,
@@ -634,7 +634,7 @@ assumed PDF. The latent part of the subgrid condensation enters the buoyancy pro
 struct MeanLiquidStratification end
 
 """
-    InitialStratification()
+$(TYPEDEF)
 
 The static stability of [`CondensateFluxFraction`](@ref) stays its `initial_stability` once the distribution exists;
 the latent part of the subgrid condensation enters the buoyancy production of the TKE only.
@@ -693,12 +693,12 @@ $(TYPEDEF)
 The fields of the [`DoubleGaussian`](@ref) subgrid distribution in the closure fields of
 [`TKEBasedTurbulenceClosure`](@ref): the second moments at faces (`τ`, `θˡⁱ′²`, `qᵗ′²`, `θˡⁱ′qᵗ′`,
 `w′θˡⁱ′`, `w′qᵗ′`) and the cloud at centers (`w′²`, `w′³`, cloud fraction `aᶜ`, liquid `qˡ`, its
-variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵥ′`, the part `Bˡ = (g / θ) A_c w′qˡ′` of its buoyancy
+variance `qˡ′²`, the fluxes `w′qˡ′` and `w′θᵛ′`, the part `Bˡ = (g / θ) A_c w′qˡ′` of its buoyancy
 flux carried by the condensate flux, and the shear and buoyancy production `P` and `B` of the TKE
 equation from the applied fluxes).
 """
 struct SubgridCloudFields{BF, M, C, S, P}
-    buoyancy_flux :: BF
+    energetics :: BF
     moments :: M
     cloud :: C
     solver_state :: S
@@ -707,7 +707,7 @@ end
 
 
 Adapt.adapt_structure(to, f::SubgridCloudFields) =
-    SubgridCloudFields(f.buoyancy_flux, adapt(to, f.moments), adapt(to, f.cloud), adapt(to, f.solver_state),
+    SubgridCloudFields(f.energetics, adapt(to, f.moments), adapt(to, f.cloud), adapt(to, f.solver_state),
                        adapt(to, f.presolve))
 
 # Without a distribution: the plain closure, or, with a saturated fraction from the microphysics
@@ -733,7 +733,7 @@ function build_subgrid_cloud_fields(grid, distribution, solver, static_stability
                unit_variance = ZFaceField(grid), qⁱ′² = ZFaceField(grid), qⁱ′sⁱ′ = ZFaceField(grid), qᵈ′² = ZFaceField(grid),
                scalar_variance_transport_fields(grid, distribution.variance_transport)...)
     cloud = (w′² = CenterField(grid), w′³ = CenterField(grid), aᶜ = CenterField(grid), qˡ = CenterField(grid), qˡ′² = CenterField(grid),
-             w′qˡ′ = CenterField(grid), w′θᵥ′ = CenterField(grid), Bˡ = CenterField(grid),
+             w′qˡ′ = CenterField(grid), w′θᵛ′ = CenterField(grid), Bˡ = CenterField(grid),
              vapor_excess_component_fields(grid)...,
              qⁱ′sⁱ′ = CenterField(grid), qᵈ′² = CenterField(grid),
              applied_flux_conversion_fields(grid, energetics)...,
@@ -1211,7 +1211,7 @@ end
             mᶜ = map((yᵘ, yˡ) -> linearly_interpolate(zᵘ, zˡ, yᵘ, yˡ, zᶜ), mᵘ, mˡ)
             mᶜ = (cl.w′³[i, j, k], mᶜ...)
             thermodynamicsᵏ = level_thermodynamics(thermodynamics, i, j, k)
-            C, qˡ, qˡ′², w′qˡ′, w′θᵥ′ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
+            C, qˡ, qˡ′², w′qˡ′, w′θᵛ′ = assumed_pdf(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
                                                    p[i, j, k], θᵏ, wᶜ, qᵗ[i, j, k], w′²ᶜ, mᶜ, mᶜ)
             store_vapor_excess_components!(cl, i, j, k,
                                            component_vapor_excess(d.assumed_pdf, thermodynamicsᵏ, zᵘ, zˡ, zᶜ,
@@ -1224,7 +1224,7 @@ end
             cl.qˡ[i, j, k] = qˡ
             cl.qˡ′²[i, j, k] = qˡ′²
             cl.w′qˡ′[i, j, k] = w′qˡ′
-            cl.w′θᵥ′[i, j, k] = w′θᵥ′
+            cl.w′θᵛ′[i, j, k] = w′θᵛ′
             # The stability uses the exact derivatives b_χ of the model's buoyancy at the level
             # (g / θᵥ, the moisture dependence of Π and the loading included):
             # w′b′ = b_θ w′θʷ′ + b_qᵛ w′qᵗ′ + (b_qᶜ - b_qᵛ) w′qˡ′, b_qᶜ that of the distributed condensate. The buoyancy production of the TKE
@@ -1376,7 +1376,7 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields{<:AppliedFluxEnergeti
     launch!(arch, grid, parameters, _set_lagged_stability!, closure_fields.N², N²₋)
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     compute_subgrid_distribution!(fields, closure_fields, closure, model)
-    solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
+    solve_static_stability!(closure.static_stability, fields.energetics, fields, closure_fields, closure, model, tracers, parameters)
     parent(N²₋) .= parent(closure_fields.N²)
     return nothing
 end
@@ -1401,14 +1401,14 @@ function compute_subgrid_cloud!(fields::SubgridCloudFields, closure_fields, clos
     compute_subgrid_cloud_buoyancy_derivatives!(fields, subgrid_distribution(closure), model)
     compute_subgrid_cloud_budget_fluxes!(fields, subgrid_distribution(closure), closure_fields, closure, model, tracers)
     compute_subgrid_distribution!(fields, closure_fields, closure, model)
-    solve_static_stability!(closure.static_stability, fields.buoyancy_flux, fields, closure_fields, closure, model, tracers, parameters)
+    solve_static_stability!(closure.static_stability, fields.energetics, fields, closure_fields, closure, model, tracers, parameters)
     return nothing
 end
 
 # The coupling of the static stability with the distribution is solved only when the static
 # stability slot reads the distribution, with the closure's solver
-solve_static_stability!(static_stability, buoyancy_flux, args...) = nothing
-solve_static_stability!(::CondensateFluxFractionStability, buoyancy_flux, args...) = cloud_buoyancy_stability!(buoyancy_flux, args...)
+solve_static_stability!(static_stability, energetics, args...) = nothing
+solve_static_stability!(::CondensateFluxFractionStability, energetics, args...) = applied_flux_stability!(energetics, args...)
 
 # The update of the stored N² toward the N²ᵇ of a pass: N²ᵇ itself, or the blend with the relaxation ω
 @inline relax_stability(N², N²ᵇ, ::Nothing) = N²ᵇ
@@ -1453,10 +1453,10 @@ end
     return (; Δz, Δθ, Δq, ∂zθ, ∂zq, b_θᶠ, ∂zs, bᶜᵛ)
 end
 
-function cloud_buoyancy_stability!(buoyancy_flux::AppliedFluxEnergetics{N, W, <:Union{SecantIteration, BisectionIteration}},
+function applied_flux_stability!(energetics::AppliedFluxEnergetics{N, W, <:Union{SecantIteration, BisectionIteration}},
                                    fields, closure_fields, closure, model, tracers, parameters) where {N, W}
-    solver = buoyancy_flux.stability_solver
-    ω = buoyancy_flux.stability_relaxation
+    solver = energetics.stability_solver
+    ω = energetics.stability_relaxation
     solve_stability_pass!(solver, Val(0), Val(N), ω, fields, closure_fields, closure, model, tracers, parameters)
     for p in 1:N
         compute_subgrid_distribution!(fields, closure_fields, closure, model)
@@ -1468,7 +1468,7 @@ end
 function solve_stability_pass!(solver, ::Val{P}, ::Val{N}, ω, fields, closure_fields, closure, model, tracers, parameters) where {P, N}
     grid = model.grid
     arch = grid.architecture
-    launch!(arch, grid, parameters, _solve_cloud_buoyancy_stability!, closure_fields.N², solver, P == 0, P == N, ω, grid,
+    launch!(arch, grid, parameters, _solve_applied_flux_stability!, closure_fields.N², solver, P == 0, P == N, ω, grid,
             closure, closure_fields, model.velocities, applied_flux_state(model), tracers[TKE_NAME])
     compute_mixing_length_and_diffusivities!(closure_fields, closure, model, tracers, parameters)
     # After the last pass: the latent correction of the solved state for the buoyancy production (N² unchanged)
@@ -1508,7 +1508,7 @@ end
     return x′, L′, U′
 end
 
-@kernel function _solve_cloud_buoyancy_stability!(N², solver, first_pass, last_pass, ω, grid, closure, closure_fields, velocities, s, e)
+@kernel function _solve_applied_flux_stability!(N², solver, first_pass, last_pass, ω, grid, closure, closure_fields, velocities, s, e)
     i, j, k = @index(Global, NTuple)
     fields = closure_fields.subgrid_cloud
     state, m, cl = fields.solver_state, fields.moments, fields.cloud
@@ -1548,13 +1548,13 @@ end
     end
 end
 
-function cloud_buoyancy_stability!(buoyancy_flux::AppliedFluxEnergetics, fields, closure_fields, closure, model, tracers, parameters)
-    cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
+function applied_flux_stability!(energetics::AppliedFluxEnergetics, fields, closure_fields, closure, model, tracers, parameters)
+    applied_flux_stability_pass!(fields, closure_fields, closure, model, tracers, parameters)
     # The extra passes of the coupling; the count is a type parameter, so the loop is unrolled when traced
-    for _ in 1:stability_iterations(buoyancy_flux)
+    for _ in 1:stability_iterations(energetics)
         compute_subgrid_distribution!(fields, closure_fields, closure, model)
-        cloud_buoyancy_stability_pass!(fields, closure_fields, closure, model, tracers, parameters,
-                                       buoyancy_flux.stability_relaxation)
+        applied_flux_stability_pass!(fields, closure_fields, closure, model, tracers, parameters,
+                                       energetics.stability_relaxation)
     end
     return nothing
 end

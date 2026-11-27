@@ -765,7 +765,7 @@ closure_before_thermodynamic_solve!(closure_fields, closure, model, Δt) = nothi
 closure_before_implicit_solve!(closure_fields, closure, model, name) = nothing
 
 """
-    solved_after_thermodynamic_variable(closure, name)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether the closure asks for the vertically implicit solve of its prognostic `name` to follow the solve of the
 thermodynamic variable, so that it can form, before that solve, what the solves of momentum, the tracers and the
@@ -774,7 +774,7 @@ thermodynamic variable converted. Time steppers for which [`closure_prognostics_
 solved_after_thermodynamic_variable(closure, name) = false
 
 """
-    closure_prognostics_solved_last(model)
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Whether a stage of the time stepper of `model` solves momentum, then the tracers, then the thermodynamic variable,
 and last the closure's prognostics for which [`solved_after_thermodynamic_variable`](@ref) holds, calling
