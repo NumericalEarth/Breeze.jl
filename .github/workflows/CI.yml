@@ -116,6 +116,14 @@ jobs:
           # Pool of GitHub-hosted runners can have several different ISAs, try to
           # target all of them, with safe fallbacks.
           echo "JULIA_CPU_TARGET=generic;haswell,-xsaveopt,clone_all;x86-64-v4,-rdrnd,base(1)" | tee -a "${GITHUB_ENV}"
+      - name: Set JULIA_CPU_TARGET (macOS)
+        if: ${{ runner.environment == 'github-hosted' && runner.os == 'macOS' && runner.arch == 'ARM64' }}
+        shell: bash
+        run: |
+          # The macOS pool mixes Apple M1 and M2 Pro machines. Package images compiled
+          # natively on an M2 are rejected on an M1, which turns a cache hit into a full
+          # precompilation. Target the M1 baseline, as the official Julia binaries do.
+          echo "JULIA_CPU_TARGET=generic;apple-m1,clone_all" | tee -a "${GITHUB_ENV}"
       - name: Show versioninfo
         run: |
           julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
@@ -132,6 +140,15 @@ jobs:
           cache-compiled: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
           cache-scratchspaces: true
           cache-logs: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+          # On GitHub-hosted runners, pull requests restore the depot cache saved by `main`
+          # but never save their own. One set of hosted caches is about 4.3 GB and GitHub
+          # allows 10 GB per repository, so per-pull-request caches evict each other (and
+          # the ones of `main`) within hours, and almost every run starts from scratch.
+          # The action has no input to skip saving, so we tell its post step that the job
+          # did not succeed: with `save-always: false` it then skips the save.
+          # `_job-status` is an internal input: check `src/post.ts` when updating the action.
+          save-always: ${{ github.event_name != 'pull_request' || startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+          _job-status: ${{ (github.event_name == 'pull_request' && ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-')) && 'restore-only' || job.status }}
       - name: "Set test arguments and other environment variables"
         shell: bash
         run: |
