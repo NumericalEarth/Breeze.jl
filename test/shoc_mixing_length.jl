@@ -144,7 +144,7 @@ column(f) = Array{Float64}(interior(f))[1, 1, :]
     e_field = Field(model.tracers.ρe / model.dynamics.reference_state.density)
     compute!(e_field)
     for k in 2:Nz-1
-        ℓᶜ = mixing_lengthᶜᶜᶜ(1, 1, k, grid, closure, e_field, fields)
+        ℓᶜ = @allowscalar mixing_lengthᶜᶜᶜ(1, 1, k, grid, closure, e_field, fields)
         ℓˢ = shoc_mixing_length(max(e[k], eᵐⁱⁿ), (N²[k] + N²[k+1]) / 2, zᶜ[k], ℓ∞, Inf)
         ℓˢ > 20 || continue
         @test abs(ℓᶜ - ℓˢ) / ℓˢ ≤ bound_fraction(ml, ℓˢ, Inf) + roundoff

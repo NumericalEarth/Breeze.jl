@@ -220,7 +220,8 @@ end
     @test limit(-1e-3, 0.0, 0.0, 0.0, 1e-4).cond ≈ limit(-1e-3, 0.0, 0.0, 0.0).cond * 2 / 3
 end
 
-reverse_gradient(f, x) = Enzyme.autodiff(Enzyme.set_strong_zero(Enzyme.Reverse), Enzyme.Const(f),
+# Runtime activity: on Julia 1.11 Enzyme cannot prove statically that the rebuilt scheme's constant storage is inactive
+reverse_gradient(f, x) = Enzyme.autodiff(Enzyme.set_runtime_activity(Enzyme.set_strong_zero(Enzyme.Reverse)), Enzyme.Const(f),
                                          Enzyme.Active, Enzyme.Active(x))[1][1]
 central_difference(f, x, h) = (f(x * (1 + h)) - f(x * (1 - h))) / (2x * h)
 
