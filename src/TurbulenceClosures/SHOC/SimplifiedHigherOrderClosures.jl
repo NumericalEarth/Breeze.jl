@@ -15,9 +15,9 @@ module SimplifiedHigherOrderClosures
 export BlendedMixingLength, ColumnStabilityDamping,
        DowngradientSecondMoments,
        AlgebraicThirdMoment,
-       UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
-       PolynomialSaturatedSkewness, TanhSaturatedSkewness,
-       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, SkewedScalarDoubleGaussianPDF,
+       RationalSaturatedStratificationNumber,
+       PolynomialSaturatedSkewness,
+       DoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
        SmoothClipping,
        closure_parameters, with_parameters
 
@@ -37,7 +37,7 @@ using Oceananigans.Utils: launch!, prettysummary
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.AtmosphereModels.Diagnostics: condensate_phase_equilibrium
 using Breeze.TurbulenceClosures: TurbulenceClosures, TKEBasedTurbulenceClosure, AbstractMixingLength,
-                                 HardMinimum, HarmonicBlend, TurbulentRichardsonStabilityFunction,
+                                 TurbulentRichardsonStabilityFunction,
                                  face_valueᶜᶜᶠ, grid_float_type, column_kernel_parameters
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, hypotenuse
 using Breeze.Thermodynamics: WarmPhaseEquilibrium, MixedPhaseEquilibrium, equilibrated_surface, saturation_vapor_pressure_log_slope,
@@ -56,8 +56,6 @@ include("second_moments.jl")
 include("third_moments.jl")
 include("pdf_saturation.jl")
 include("assumed_pdfs.jl")
-include("smooth_assumed_pdf.jl")
-include("skewed_scalar_pdf.jl")
 include("shoc_parameters.jl")
 
 end # module SimplifiedHigherOrderClosures

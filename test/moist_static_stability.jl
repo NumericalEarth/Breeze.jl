@@ -163,69 +163,12 @@ stability_column(operation, model, arguments...) =
             set!(μ.qʳ, rʳ * qᵈ)
             set!(tracers.T, T)
             fill_halo_regions!((tracers.qᵛᵉ, μ.qᶜˡ, μ.qʳ, tracers.T))
-            (stability_column(saturated_static_stabilityᶜᶜᶠ, model, buoyancy, tracers.T, tracers.qᵛᵉ),
-             stability_column(static_stabilityᶜᶜᶠ, model, DryStaticStability(), buoyancy, tracers))
+            stability_column(saturated_static_stabilityᶜᶜᶠ, model, buoyancy, tracers.T, tracers.qᵛᵉ)
         end
 
-        # At fixed T, p, and vapor/cloud mixing ratios, rain adds its density loading to the buoyancy gradient ∂z b,
-        # -g ∂z rʳ in the dilute-water approximation, which the saturated stability carries. (Its latent part changes
-        # too: at fixed T the heat capacity of the rain changes θʷ, ĉᵖ Π θʷ = cᵖᵐ T - ℒˡ₀ qᶜˡ, and the rain dilutes the
-        # mass fractions of the vapor and the cloud.)
-        loading = profiles[2][2][2:8] - profiles[1][2][2:8]
-        @test all(isapprox.(loading, -constants.gravitational_acceleration * slope; rtol=1e-2))
-        @test all(isfinite, profiles[2][1])
-    end
-end
-
-using Breeze.TurbulenceClosures: applied_flux_state, buoyancy_derivativesᶜᶜᶜ, distributed_water, distributed_condensateᶜᶜᶜ,
-                                 saturated_condensate_coefficients, distributed_condensate_liquid_fraction
-using Oceananigans.Operators: Δzᶜᶜᶠ
-
-# The saturated static stability is the saturated stratification of the energetics of the applied fluxes,
-# N²ᵇ + (b_qᶜ - b_qᵛ) (∂z s̄ - ∂z qᶜ), with the buoyancy gradient of the dynamics in place of the gradient N²ᵇ of the mixed
-# variables: the latent part is the energetics' to round-off, and the whole differs from it by ∂z b - N²ᵇ.
-@testset "Saturated static stability against the energetics of the applied fluxes [$FT, mixed phase = $mixed]" for
-        FT in test_float_types(), mixed in (false, true)
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch, FT; size = 16, z = (0, 1600), topology = (Flat, Flat, Bounded))
-    equilibrium = mixed ? MixedPhaseEquilibrium(FT) : WarmPhaseEquilibrium()
-    microphysics = SaturationAdjustment(FT; equilibrium)
-    model = AtmosphereModel(grid; microphysics, advection = nothing)
-    # Saturated throughout: warm cloud, or a mixed-phase cloud at about 250 K
-    θ₀, q₀ = mixed ? (250, 0.0016) : (285, 0.012)
-    set!(model; θ = z -> θ₀ + 3e-3 * z, qᵗ = z -> q₀ * (1 - z / 8000))
-    buoyancy, tracers = buoyancy_force(model), buoyancy_tracers(model)
-    s = applied_flux_state(model)
-    θʷ, qʷ, thermodynamics = distributed_water(s, grid)
-
-    saturated = stability_column(saturatedᶜᶜᶠ, model, buoyancy, tracers.T, tracers.qᵛᵉ)
-    N²⁺ = stability_column(saturated_static_stabilityᶜᶜᶠ, model, buoyancy, tracers.T, tracers.qᵛᵉ)
-    N²ᵈ = stability_column(static_stabilityᶜᶜᶠ, model, DryStaticStability(), buoyancy, tracers)
-    @test all(saturated[2:16] .== 1)
-
-    @allowscalar for k in 2:16
-        terms = map((k, k-1)) do m
-            b_θ, b_qᵛ, b_qˡ, b_qⁱ, θ, q = buoyancy_derivativesᶜᶜᶜ(1, 1, m, grid, s)
-            λ, _ = distributed_condensate_liquid_fraction(s.phase_equilibrium, s.T[1, 1, m])
-            c_q, c_θ = saturated_condensate_coefficients(thermodynamics, 1, 1, m, grid, s, θʷ[1, 1, m])
-            (; b_θ, b_qᵛ, b_qˡ, b_qⁱ, b_qᶜ = λ * b_qˡ + (1 - λ) * b_qⁱ, θ, q, c_q, c_θ,
-               qʷ = qʷ[1, 1, m], θʷ = θʷ[1, 1, m], qᶜ = distributed_condensateᶜᶜᶜ(1, 1, m, grid, s))
-        end
-        t⁺, t⁻ = terms
-        Δz = Δzᶜᶜᶠ(1, 1, k, grid)
-        N²ᵇ = ((t⁺.b_θ + t⁻.b_θ) / 2 * (t⁺.θ - t⁻.θ) + (t⁺.b_qᵛ + t⁻.b_qᵛ) / 2 * (t⁺.q.vapor - t⁻.q.vapor) +
-               (t⁺.b_qˡ + t⁻.b_qˡ) / 2 * (t⁺.q.liquid - t⁻.q.liquid) + (t⁺.b_qⁱ + t⁻.b_qⁱ) / 2 * (t⁺.q.ice - t⁻.q.ice)) / Δz
-        bᶜᵛ = (t⁺.b_qᶜ + t⁻.b_qᶜ - (t⁺.b_qᵛ + t⁻.b_qᵛ)) / 2
-        ∂z_s = ((t⁺.c_q + t⁻.c_q) / 2 * (t⁺.qʷ - t⁻.qʷ) - (t⁺.c_θ + t⁻.c_θ) / 2 * (t⁺.θʷ - t⁻.θʷ)) / Δz
-        latent = bᶜᵛ * (∂z_s - (t⁺.qᶜ - t⁻.qᶜ) / Δz)
-
-        # The latent part, to round-off of the buoyancy gradient it offsets
-        @test N²⁺[k] - N²ᵈ[k] ≈ latent rtol = FT == Float32 ? 1e-3 : 1e-8
-        # The whole differs from the energetics' by ∂z b - N²ᵇ, the buoyancy gradient of `DryStaticStability`,
-        # g ∂z ln θᵨ, against the stratification of the mixed variables from the derivatives of the anelastic buoyancy:
-        # 4 to 7 percent of the stratification in the warm column and 10 to 11 percent in the cold one
-        @test abs(N²⁺[k] - (N²ᵇ + latent)) ≤ 0.15 * abs(N²ᵈ[k])
-        # Latent heating offsets part of the stratification
-        @test N²⁺[k] < N²ᵈ[k]
+        # At fixed T, p, and vapor/cloud mixing ratios, only rain changes the parcel's
+        # density loading. The dilute-water approximation used here gives -g ∂z rʳ.
+        difference = profiles[2][2:8] - profiles[1][2:8]
+        @test all(isapprox.(difference, -constants.gravitational_acceleration * slope; rtol=max(1e-8, 2000eps(FT))))
     end
 end

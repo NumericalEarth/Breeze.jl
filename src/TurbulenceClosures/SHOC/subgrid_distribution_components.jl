@@ -68,11 +68,6 @@ end
     return component_constructor(T)(fields...), n
 end
 
-# The blending rule of a mixing length is structural, not an SHOC coefficient
-const MixingLengthBlending = Union{HardMinimum, HarmonicBlend}
-@inline component_scalars(::MixingLengthBlending) = ()
-component_scalar_names(::MixingLengthBlending, name) = ()
-@inline rebuild_component(blending::MixingLengthBlending, scalars, n) = blending, n
 
 # A `Val` field is a structural choice (such as `ScalarVarianceTransport`'s `component_third_moment`), not a coefficient
 @inline map_scalars(f, choice::Val) = choice

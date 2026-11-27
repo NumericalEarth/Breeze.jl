@@ -144,10 +144,6 @@ AtmosphereModels.dynamics_prognostic_fields(d::PrescribedDynamics) = (; ρ=conti
 # Pressure accessors
 AtmosphereModels.dynamics_pressure_solver(::PrescribedDynamics, grid) = nothing
 AtmosphereModels.dynamics_pressure(d::PrescribedDynamics) = d.pressure
-
-# The prescribed velocity feels no buoyancy: the buoyancy of its state is zero relative to itself, as the closures that
-# differentiate the buoyancy read it (`TurbulenceClosures.saturated_displacementᶜᶜᶜ`, g - b = g)
-@inline AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::PrescribedDynamics, args...) = zero(grid)
 AtmosphereModels.pressure_anomaly(::PrescribedDynamics) = ZeroField()
 AtmosphereModels.total_pressure(d::PrescribedDynamics) = d.pressure
 AtmosphereModels.surface_pressure(d::PrescribedDynamics) = d.surface_pressure

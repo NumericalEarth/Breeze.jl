@@ -6,16 +6,12 @@ export TKEBasedTurbulenceClosure,
        LocalMinimumMixingLength,
        IntegralMixingLength,
        GradientLimitedMixingLength,
-       HardMinimum,
-       HarmonicBlend,
-       PositivePartFrequency,
-       RegularizedPositivePartFrequency,
        ConstantStabilityFunctions,
        RationalStabilityFunction, SurfaceLayerSimilarity,
        TurbulentRichardsonStabilityFunction,
        DryStaticStability,
        MoistStaticStability,
-       SaturationWeightedStaticStability, MicrophysicsSaturatedFraction,
+       SaturationWeightedStaticStability,
        GridMeanShear,
        SimplifiedHigherOrderClosure, SHOC,
        BlendedMixingLength,
@@ -23,14 +19,14 @@ export TKEBasedTurbulenceClosure,
        DowngradientSecondMoments,
        AlgebraicThirdMoment, TKEBudgetThirdMoment,
        HeatingBudgetFlux, RadiativeHeating, PrescribedHeating, heating_budget_flux_bounds,
-       UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
-       PolynomialSaturatedSkewness, TanhSaturatedSkewness,
-       DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, SkewedScalarDoubleGaussianPDF,
+       RationalSaturatedStratificationNumber,
+       PolynomialSaturatedSkewness,
+       DoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
        SmoothClipping,
        closure_parameters, with_parameters,
        per_column_closure, set_per_column_coefficients!, PerColumnCoefficient,
-       DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, LatentStratification, MeanLiquidStratification, InitialStratification,
-       StratificationLimitedMomentTimeScale, DissipationTimeScale, EddyTurnoverTimeScale, ReturnToIsotropyTimeScale,
+       DoubleGaussian, ScalarVarianceTransport, CondensateFluxFraction, LatentStratification, MeanLiquidStratification,
+       StratificationLimitedMomentTimeScale, DissipationTimeScale, ReturnToIsotropyTimeScale,
        VarianceStabilityFunctions
 
 using Adapt: Adapt, adapt
@@ -58,6 +54,8 @@ using Oceananigans.Operators:
     # Interpolator functions used for ρᵣ at faces
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ,
     ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ,
+    # Vertical derivative at faces, for the static stability
+    ∂zᶜᶜᶠ,
     # Cell height, for the mixing-length sweeps
     Δzᶜᶜᶜ
 
@@ -84,7 +82,7 @@ using Breeze.AtmosphereModels: grid_moisture_fractions, dynamics_pressure, stand
 using Breeze.AtmosphereModels.Diagnostics: microphysics_phase_equilibrium, condensate_phase_equilibrium
 using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics, SubgridCondensation
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturation_specific_humidity,
-                             absolute_zero_latent_heat,
+                             equilibrated_surface, absolute_zero_latent_heat, specific_heat_difference,
                              vapor_equivalent_heat_capacity, vapor_equivalent_gas_constant, MoistureMassFractions
 using Breeze.Utils: TYPEDSIGNATURES_WITH_DEFAULTS, hypotenuse
 
@@ -270,9 +268,9 @@ using .SimplifiedHigherOrderClosures: SimplifiedHigherOrderClosures,
                                       BlendedMixingLength, ColumnStabilityDamping,
                                       DowngradientSecondMoments,
                                       AlgebraicThirdMoment,
-                                      UnboundedStratificationNumber, RationalSaturatedStratificationNumber,
-                                      PolynomialSaturatedSkewness, TanhSaturatedSkewness,
-                                      DoubleGaussianPDF, SmoothDoubleGaussianPDF, EqualWidthDoubleGaussianPDF, SkewedScalarDoubleGaussianPDF,
+                                      RationalSaturatedStratificationNumber,
+                                      PolynomialSaturatedSkewness,
+                                      DoubleGaussianPDF, EqualWidthDoubleGaussianPDF,
                                       SmoothClipping,
                                       closure_parameters, with_parameters
 

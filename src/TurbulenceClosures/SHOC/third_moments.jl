@@ -192,20 +192,6 @@ abstract type AbstractStratificationNumberBound <: AbstractSubgridDistributionCo
 """
 $(TYPEDEF)
 
-The stratification number enters the diagnosis of the third moment as it is, as in E3SM
-`shoc.F90`. The diagnosis is then singular in stable air: its denominator vanishes at
-`αᴺ ≈ 24.3` and the terms `X₀`, `X₁` have a pole at `αᴺ = 1 / (a₁ + a₃) = 28.7` (with the
-coefficients of `shoc.F90`).
-"""
-struct UnboundedStratificationNumber <: AbstractStratificationNumberBound end
-
-Adapt.@adapt_structure UnboundedStratificationNumber
-
-@inline bound_stratification_number(::UnboundedStratificationNumber, αᴺ, first_pole) = αᴺ
-
-"""
-$(TYPEDEF)
-
 In stable stratification the stratification number saturates toward `αᴺᵐᵃˣ`,
 
     αᴺ ← αᴺ / (1 + αᴺ / αᴺᵐᵃˣ)    for αᴺ > 0,    αᴺ ← αᴺ    for αᴺ ≤ 0,
@@ -333,46 +319,4 @@ end
     # The polynomial on [-1, 1]; beyond, the bound itself (P(±1) = ±1, with zero slope and curvature)
     u = clamp(w′³ / ifelse(bounded, reach, one(FT)), -one(FT), one(FT))
     return ifelse(bounded, bound * saturating_quintic(u), zero(FT))
-end
-
-"""
-$(TYPEDEF)
-
-The third moment saturates toward `±w′³ᵐᵃˣ = ±maximum_skewness (w′²)^{3/2}` along a hyperbolic tangent,
-
-    w′³ ← w′³ᵐᵃˣ tanh(w′³ / w′³ᵐᵃˣ)
-
-so that the skewness `w′³ / (w′²)^{3/2}` lies strictly inside `±maximum_skewness` for every input. The map
-
-- is odd and increasing, with slope `sech²(w′³ / w′³ᵐᵃˣ)`: one at zero, positive everywhere (unlike
-  [`PolynomialSaturatedSkewness`](@ref), whose slope is zero beyond 15/8 of the bound), at most one;
-- has bounded sensitivity to the variance too: `∂w′³/∂w′³ᵐᵃˣ = tanh(y) - y sech²(y) ∈ [0, 1)`, `y = w′³ / w′³ᵐᵃˣ`;
-- changes a third moment at a tenth of the bound by 0.3 %, at half the bound by 7.6 %, at the bound by 24 %;
-- is zero, with zero slope in the variance, where the variance is not positive.
-
-The default `maximum_skewness = 2.5` is above the skewness of the large-eddy simulations the third-moment
-models were compared with (|Sk| ≲ 2 in cumulus), so the map is a guard and not a fitted part of the model.
-
-$(TYPEDFIELDS)
-"""
-struct TanhSaturatedSkewness{FT} <: AbstractSkewnessLimiter
-    "Supremum of the magnitude of the skewness `w′³ / (w′²)^{3/2}`"
-    maximum_skewness :: FT
-end
-
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return `TanhSaturatedSkewness{FT}` with `maximum_skewness = 2.5`.
-"""
-TanhSaturatedSkewness(FT::DataType = Oceananigans.defaults.FloatType; kw...) =
-    component_from_keywords(TanhSaturatedSkewness, FT, (; maximum_skewness = 2.5), kw)
-
-Adapt.@adapt_structure TanhSaturatedSkewness
-
-@inline function limit_third_moment(skewness::TanhSaturatedSkewness, variance, w′³)
-    FT = typeof(w′³)
-    bound = third_moment_bound(skewness, variance)
-    bounded = bound > 0
-    return ifelse(bounded, bound * tanh(w′³ / ifelse(bounded, bound, one(FT))), zero(FT))
 end

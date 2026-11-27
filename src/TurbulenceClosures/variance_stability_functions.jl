@@ -140,7 +140,6 @@ end
 
 # The endpoint values of the 𝕊ᴰ of the time scale (1 for EddyTurnoverTimeScale, which has no 𝕊ᴰ)
 variance_time_scale_dissipation(::DissipationTimeScale, sf) = (sf.ℂᴰ⁻, sf.ℂᴰ⁰, sf.ℂᴰ⁺)
-variance_time_scale_dissipation(::EddyTurnoverTimeScale, sf) = (1, 1, 1)
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)

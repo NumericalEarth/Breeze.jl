@@ -147,23 +147,6 @@ struct DissipationTimeScale{FT, T3}
     third_moment_time_scale :: T3
 end
 
-"""
-$(TYPEDEF)
-
-As [`DissipationTimeScale`](@ref) without the stability function of the dissipation:
-`τᵠ = ℓ / (ℂᵠ √e)`, `τ = 2 τᵠ`, so that `ρ² = 3 ℂᵠ 𝕊ᶜ(Ri) / (4 ℂᵛ ℂʷ₁)` and
-`ℂᵠ < 4 ℂᵛ ℂʷ₁ (1 - ℂᵍ₁) / (3 max 𝕊ᶜ)`.
-
-$(TYPEDFIELDS)
-"""
-struct EddyTurnoverTimeScale{FT, T3}
-    "Eddy turnovers `ℓ / √e` per scalar-variance dissipation time, `τᵠ = ℓ / (ℂᵠ √e)`"
-    ℂᵠ :: FT
-    "Time scale of the third-moment diagnosis"
-    third_moment_time_scale :: T3
-end
-
-const VarianceBudgetTimeScale = Union{DissipationTimeScale, EddyTurnoverTimeScale}
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -174,16 +157,7 @@ DissipationTimeScale(FT::DataType = Oceananigans.defaults.FloatType; ℂᵠ = 2,
                      third_moment_time_scale = StratificationLimitedMomentTimeScale(FT)) =
     DissipationTimeScale(convert(FT, ℂᵠ), third_moment_time_scale)
 
-"""
-$(TYPEDSIGNATURES_WITH_DEFAULTS)
-
-Return an [`EddyTurnoverTimeScale`](@ref); the third moment keeps `StratificationLimitedMomentTimeScale(FT)`.
-"""
-EddyTurnoverTimeScale(FT::DataType = Oceananigans.defaults.FloatType; ℂᵠ = 1,
-                      third_moment_time_scale = StratificationLimitedMomentTimeScale(FT)) =
-    EddyTurnoverTimeScale(convert(FT, ℂᵠ), third_moment_time_scale)
-
-for TS in (:DissipationTimeScale, :EddyTurnoverTimeScale)
+for TS in (:DissipationTimeScale,)
     @eval begin
         Adapt.adapt_structure(to, ts::$TS) = $TS(adapt(to, ts.ℂᵠ), adapt(to, ts.third_moment_time_scale))
         convert_eltype(::Type{FT}, ts::$TS) where FT = $TS(convert(FT, ts.ℂᵠ), convert_eltype(FT, ts.third_moment_time_scale))
@@ -218,9 +192,6 @@ validate_moment_time_scale(stability_functions, time_scale) = nothing
 @inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts, closure, velocities, closure_fields, e, ℓ, u) =
     moment_time_scale(ts, ℓ, u, @inbounds closure_fields.N²[i, j, k])
 
-@inline moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::EddyTurnoverTimeScale, closure, velocities, closure_fields, e, ℓ, u) =
-    2 * ℓ / (ts.ℂᵠ * u)
-
 @inline function moment_time_scaleᶜᶜᶠ(i, j, k, grid, ts::DissipationTimeScale, closure, velocities, closure_fields, e, ℓ, u)
     𝕊ᴰ = dissipation_stability_functionᶜᶜᶠ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
     return 2 * ℓ / (ts.ℂᵠ * 𝕊ᴰ * u)
@@ -232,7 +203,7 @@ end
 # The time scale of the third-moment diagnosis: the stored second-moment time scale, or its own
 @inline third_moment_time_scale(::StratificationLimitedMomentTimeScale, τ, ℓ, u, N²) = τ
 @inline third_moment_time_scale(::ReturnToIsotropyTimeScale, τ, ℓ, u, N²) = τ
-@inline third_moment_time_scale(ts::VarianceBudgetTimeScale, τ, ℓ, u, N²) =
+@inline third_moment_time_scale(ts::DissipationTimeScale, τ, ℓ, u, N²) =
     moment_time_scale(ts.third_moment_time_scale, ℓ, u, N²)
 
 #####
@@ -422,17 +393,8 @@ assumed PDF. The latent part of the subgrid condensation enters the buoyancy pro
 """
 struct MeanLiquidStratification end
 
-"""
-$(TYPEDEF)
-
-The static stability of [`CondensateFluxFraction`](@ref) stays its `initial_stability` once the distribution exists;
-the latent part of the subgrid condensation enters the buoyancy production of the TKE only.
-"""
-struct InitialStratification end
-
 Base.summary(::LatentStratification) = "LatentStratification()"
 Base.summary(::MeanLiquidStratification) = "MeanLiquidStratification()"
-Base.summary(::InitialStratification) = "InitialStratification()"
 
 # The default stratification, `LatentStratification()`, is not shown
 stratification_summary(::LatentStratification) = ""
@@ -443,7 +405,6 @@ stratification_summary(stratification) = string(", ", summary(stratification))
 # of the distribution's mean liquid and of the microphysics' condensate, N²⁰ the static stability before the pass
 @inline condensate_flux_stratification(::LatentStratification, N²ᵉ, N²ᵇ, bˡᵛ, Δqˡ, Δqᶜ, Δz, N²⁰) = N²ᵉ
 @inline condensate_flux_stratification(::MeanLiquidStratification, N²ᵉ, N²ᵇ, bˡᵛ, Δqˡ, Δqᶜ, Δz, N²⁰) = N²ᵇ + bˡᵛ * (Δqˡ - Δqᶜ) / Δz
-@inline condensate_flux_stratification(::InitialStratification, N²ᵉ, N²ᵇ, bˡᵛ, Δqˡ, Δqᶜ, Δz, N²⁰) = N²⁰
 
 const CondensateFluxFractionStability = SaturationWeightedStaticStability{<:CondensateFluxFraction}
 
@@ -493,12 +454,6 @@ Adapt.adapt_structure(to, f::SubgridCloudFields) =
 # (or any fraction other than the distribution's), the energetics of the applied fluxes with the
 # latent conversion of the condensate flux that the fraction implies
 build_subgrid_cloud_fields(grid, ::Nothing, static_stability, tracer_names, heating_budget_flux = nothing) = nothing
-
-function build_subgrid_cloud_fields(grid, ::Nothing, ::SaturationWeightedStaticStability, tracer_names, heating_budget_flux = nothing)
-    energetics = AppliedFluxEnergetics()
-    cloud = merge(applied_flux_conversion_fields(grid, energetics), heating_budget_flux_fields(grid, heating_budget_flux))
-    return SubgridCloudFields(energetics, nothing, cloud, build_presolve_fields(grid, energetics, tracer_names))
-end
 
 function build_subgrid_cloud_fields(grid, distribution, static_stability, tracer_names, heating_budget_flux = nothing)
     energetics = AppliedFluxEnergetics()

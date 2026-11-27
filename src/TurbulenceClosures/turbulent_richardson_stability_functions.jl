@@ -376,8 +376,8 @@ end
     τʷ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, ℓ) / turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
     # 1 / τᵇ = N / ℂˡᵇ, the inverse of the buoyancy length per √e: zero where N² ≤ 0
     ml = closure.mixing_length
-    τᵇ⁻¹ = buoyancy_frequency(buoyancy_frequency_rule(ml), N²ᵢ) / buoyancy_length_coefficient(ml)
-    τ = inv(inverse_blend(length_blending(ml), inv(τʷ), τᵇ⁻¹))
+    τᵇ⁻¹ = sqrt(max(N²ᵢ, zero(N²ᵢ))) / buoyancy_length_coefficient(ml)
+    τ = inv(max(inv(τʷ), τᵇ⁻¹))
     τ² = τ * τ
     return τ² * N²ᵢ, τ² * S²
 end
