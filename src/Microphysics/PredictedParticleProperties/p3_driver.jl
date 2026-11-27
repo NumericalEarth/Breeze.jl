@@ -130,10 +130,12 @@ end
                                      GridLiquidRelaxationStage(i, j, k, G, stage))
 
     # Scale every transfer to what the coming stage leaves of the species it draws on.
-    φ = p3_sink_fractions(i, j, k, G, stage, p3, inputs.ρ, inputs.properties, rates)
+    φ = p3_sink_fractions(i, j, k, G, stage, p3, inputs.ρ, inputs.ℳ, inputs.properties, rates)
+    unlimited_condensation = rates.condensation
     rates = patankar_limited_rates(rates, φ)
 
-    result = p3_tendencies(p3, inputs.ρ, inputs.ℳ, inputs.properties, rates)
+    excess = stage_vapor_excess_tendency(p3.process_rates, inputs, stage, constants, rates, unlimited_condensation)
+    result = p3_tendencies(p3, inputs.ρ, inputs.ℳ, inputs.properties, rates, excess)
 
     # Read `G` before the process tendencies land on it: each number is relaxed into the size
     # bounds of the mass that the stage start and every tendency leave.
@@ -143,6 +145,51 @@ end
     rime = p3_rime_limits(i, j, k, G, stage, result)
 
     add_p3_tendencies!(G, i, j, k, grid, p3, result, relaxations, rime)
+end
+
+@inline stage_vapor_excess_tendency(::ProcessRate{FT, DiagnosticVaporExcess}, inputs, stage, constants,
+                                    rates, unlimited_condensation) where FT = zero(inputs.ρ)
+
+# The prognostic vapor excess follows the phase changes that the stage applies: the limited
+# `rates`, over the stage interval. As in `final_prognostic_vapor_excess_tendency`, they are
+# projected from the aligned state, and the alignment itself is left out: it moves the host
+# toward the prognostic vapor excess over `sink_limiting_timescale` and is not a tendency of
+# that excess. Projected from the host's unaligned state instead, the prognostic excess would be
+# drawn to the host's diagnosed one wherever the stage applies less than the whole alignment.
+# The change is the difference between the vapor excess diagnosed after and before the phase
+# changes at that one state. The aligned state does not always reach the prognostic vapor
+# excess (the alignment evaporates no more cloud than there is, and is first order), and
+# measured from the prognostic value the difference would move it to the host's in one stage
+# with no phase change at all.
+# `rates.condensation` carries the alignment, limited by the same fraction as the condensation
+# it is part of; `unlimited_condensation` is that rate before the limit. Liquid includes cloud,
+# rain and the coating on ice.
+@inline function stage_vapor_excess_tendency(parameters::ProcessRate{FT, PrognosticVaporExcess},
+                                             inputs, stage, constants, rates, unlimited_condensation) where FT
+    (; ρ, 𝒰) = inputs
+    q = 𝒰.moisture_mass_fractions
+    known = AM.stage_interval_is_known(stage)
+    τ = max(parameters.sink_limiting_timescale, eps(typeof(ρ)))
+    Δt = ifelse(known, stage.Δt, τ)
+
+    alignment_rate = rates.prognostic_vapor_excess_adjustment
+    cloud_water_adjustment = τ * alignment_rate
+    applied_alignment_rate = alignment_rate * safe_divide(rates.condensation, unlimited_condensation, one(ρ))
+
+    Δqᵛ = Δt * (tendency_ρqᵛ(rates, one(ρ)) + applied_alignment_rate)
+    Δqⁱ = Δt * tendency_ρqⁱ(rates, one(ρ))
+    qᵛ = q.vapor - cloud_water_adjustment
+    qˡ = q.liquid + cloud_water_adjustment
+    final = vapor_excess_after_moisture_update(𝒰, qᵛ + Δqᵛ, qˡ - Δqᵛ - Δqⁱ, q.ice + Δqⁱ, constants)
+
+    𝒰ᵃ = with_moisture(𝒰, MoistureMassFractions(qᵛ, qˡ, q.ice))
+    T = temperature(𝒰ᵃ, constants)
+    qᵛ⁺ˡ = saturation_specific_humidity(T, density(𝒰ᵃ, constants), constants, PlanarLiquidSurface())
+    initial = qᵛ - qᵛ⁺ˡ
+    forcing = external_vapor_excess_forcing(qᵛ⁺ˡ, vaporization_latent_heat(constants, T), T,
+                                            air_pressure(𝒰ᵃ, constants), inputs.temperature_tendency,
+                                            inputs.pressure_tendency, constants)
+    return ρ * ifelse(known, (final - initial) / Δt + forcing, rates.prognostic_vapor_excess_tendency)
 end
 
 #####
@@ -161,7 +208,9 @@ struct GridLiquidRelaxationStage{I, G, S}
     stage :: S
 end
 
-# What the stage start and every other tendency leave of the cloud, per unit mass.
+# What the stage start and every other tendency leave of the cloud, the rain and the liquid
+# coating of ice, per unit mass, and the vapor that the stage starts with above the current
+# fields, which the rates are evaluated at.
 @inline function liquid_relaxation_stage(grid_stage::GridLiquidRelaxationStage, aerosol, ρ)
     i, j, k = grid_stage.i, grid_stage.j, grid_stage.k
     G = grid_stage.tendencies
@@ -170,8 +219,18 @@ end
     Δt = ifelse(active, stage.Δt, zero(stage.Δt))
     qᶜˡ = AM.stage_remainder(i, j, k, G.ρqᶜˡ, stage, Val(:ρqᶜˡ)) / ρ
     nᶜˡ = p3_cloud_number_remainder(i, j, k, G, stage, aerosol) / ρ
-    return LiquidRelaxationStage(Δt, ifelse(active, qᶜˡ, zero(qᶜˡ)), ifelse(active, nᶜˡ, zero(nᶜˡ)), active)
+    qʳ = AM.stage_remainder(i, j, k, G.ρqʳ, stage, Val(:ρqʳ)) / ρ
+    qʷⁱ = AM.stage_remainder(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ)) / ρ
+    @inbounds ρqᵛ = stage.current.ρqᵛ[i, j, k]
+    Δqᵛ = (AM.stage_start_value(i, j, k, stage, Val(:ρqᵛ)) - ρqᵛ) / ρ
+    unbounded = convert(typeof(Δt), Inf)
+    return LiquidRelaxationStage(Δt, ifelse(active, qᶜˡ, zero(qᶜˡ)), ifelse(active, nᶜˡ, zero(nᶜˡ)), active,
+                                 ifelse(active, Δqᵛ, zero(Δqᵛ)),
+                                 ifelse(active, qʳ, unbounded), ifelse(active, qʷⁱ, unbounded))
 end
+
+@inline liquid_interval(s::GridLiquidRelaxationStage, fallback) =
+    ifelse(AM.stage_interval_is_known(s.stage), s.stage.Δt, fallback)
 
 @inline liquid_relaxation_is_active(grid_stage::GridLiquidRelaxationStage) =
     AM.stage_interval_is_known(grid_stage.stage)
@@ -224,6 +283,9 @@ struct P3SinkFractions{FT}
     vapor :: FT              # explicit vapor sinks: deposition, nucleation, coating condensation
     cloud :: FT              # explicit cloud sinks
     rain :: FT               # explicit rain sinks
+    cloud_number :: FT       # cloud droplet number sinks (one where the number is prescribed)
+    splintering :: FT        # splinter production, weighted by the limited riming it follows
+    homogeneous_number_excess :: FT  # a rate [1/kg/s], not a fraction: frozen number above the ice number cap
     rain_number :: FT
     ice :: FT
     ice_number :: FT
@@ -253,7 +315,7 @@ not `known`.
     return ifelse(known, φᶠ, one(φ))
 end
 
-@inline function p3_sink_fractions(i, j, k, G, stage, p3::P3, ρ, properties, rates::P3ProcessRates)
+@inline function p3_sink_fractions(i, j, k, G, stage, p3::P3, ρ, ℳ, properties, rates::P3ProcessRates)
     liquid_on_ice = liquid_fraction_routing_active(p3.process_rates)
     condensation = max(0, rates.condensation)
     cloud_evaporation = max(0, -rates.condensation)
@@ -283,7 +345,7 @@ end
 
     # `ni_limit` is a relaxation, advanced implicitly with the number corrections.
     ice_number_loss_with_mass = rates.melting_number + rates.sublimation_number
-    ice_number_loss = ice_number_loss_with_mass + rates.aggregation + rates.homogeneous_number_excess
+    ice_number_loss = ice_number_loss_with_mass + rates.aggregation
 
     coating_shedding = ifelse(liquid_on_ice, rates.wet_growth_shedding, zero(ρ))
     coating_loss = rates.shedding + rates.refreezing + rates.coating_evaporation + coating_shedding
@@ -294,6 +356,7 @@ end
     κⁿʳ, φⁿʳ = sequential_sink_fractions(i, j, k, G.ρnʳ, stage, Val(:ρnʳ),
                                          ρ * rates.rain_evaporation_number, ρ * rain_number_loss)
 
+    φⁿᶜˡ = cloud_number_sink_fraction(i, j, k, G, stage, p3.aerosol, p3, ρ, ℳ, properties, rates)
     φⁱ = patankar_sink_fraction(i, j, k, G.ρqⁱ, stage, Val(:ρqⁱ), ρ * ice_loss)
     φⁿⁱ = patankar_sink_fraction(i, j, k, G.ρnⁱ, stage, Val(:ρnⁱ), ρ * ice_number_loss)
     φʷⁱ = patankar_sink_fraction(i, j, k, G.ρqʷⁱ, stage, Val(:ρqʷⁱ), ρ * coating_loss)
@@ -319,14 +382,37 @@ end
     ρqⁱ_left = φⁱ * max(0, AM.stage_remainder(i, j, k, G.ρqⁱ, stage, Val(:ρqⁱ))) +
                ifelse(liquid_on_ice, max(0, ρqʷⁱ_left), zero(ρ))
     ρnⁱ_min = properties.nⁱ_minimum_per_mass * ρqⁱ_left
+    dry_number_loss = rates.melting_number + (rates.sublimation_number - rates.coating_evaporation_number)
+    limited_number_loss = min(φⁱ, φⁿⁱ) * dry_number_loss + min(φʷⁱ, φⁿⁱ) * rates.coating_evaporation_number
     ρnⁱ_left = max(0, AM.stage_remainder(i, j, k, G.ρnⁱ, stage, Val(:ρnⁱ))) -
-               Δt * ρ * min(φⁱ, φⁿⁱ) * ice_number_loss_with_mass
+               Δt * ρ * limited_number_loss
     φᵃᵍᵍ = floored_sink_fraction(φⁿⁱ, ρnⁱ_left, ρnⁱ_min, Δt, ρ * rates.aggregation, known)
 
+    # Splinter production is linear in each riming rate, with a configurable cloud weight.
+    cloud_rime = rates.cloud_riming * p3.process_rates.splintering_cloud_riming_scale
+    φˢᵖˡ = safe_divide(φᶜˡ * cloud_rime + φʳ * rates.rain_riming, cloud_rime + rates.rain_riming, one(ρ))
+
+    # Homogeneous freezing only hands ice as many frozen drops as fit after
+    # the other limited gains and losses. Every frozen drop leaves its liquid donor.
+    cn = min(φᶜˡ, φⁿᶜˡ)
+    rn = min(φʳ, φⁿʳ)
+    ordinary_gain = φᵛ * rates.nucleation_number + cn * rates.cloud_freezing_number +
+                    rn * rates.rain_freezing_number + φˢᵖˡ * rates.splintering_number
+    ordinary_number = ρnⁱ_left + Δt * ρ * (ordinary_gain - φᵃᵍᵍ * rates.aggregation)
+    capacity = max(0, p3.process_rates.maximum_ice_number_density - ordinary_number)
+    frozen_number = cn * rates.cloud_homogeneous_number + rn * rates.rain_homogeneous_number
+    excess = ifelse(known, max(0, frozen_number - capacity / (ρ * Δt)), rates.homogeneous_number_excess)
+
     return P3SinkFractions(
-        φᵛ, φᶜˡ, φʳ, φⁿʳ, φⁱ, φⁿⁱ, φʷⁱ,
+        φᵛ, φᶜˡ, φʳ, φⁿᶜˡ, φˢᵖˡ, excess, φⁿʳ, φⁱ, φⁿⁱ, φʷⁱ,
         aerosol_sink_fraction(i, j, k, G, stage, p3.aerosol, ρ * rates.ccn_activation_number),
         κᵛ, κᶜˡ, κʳ, κⁿʳ, φˢᶜ, φᵃᵍᵍ)
+end
+
+@inline cloud_number_sink_fraction(i, j, k, G, stage, ::Nothing, p3, ρ, ℳ, properties, rates) = one(ρ)
+@inline function cloud_number_sink_fraction(i, j, k, G, stage, ::AerosolActivation, p3, ρ, ℳ, properties, rates)
+    loss = cloud_number_loss(rates, ρ, properties.Nᶜˡ, ℳ.qᶜˡ, p3)
+    return patankar_sink_fraction(i, j, k, G.ρnᶜˡ, stage, Val(:ρnᶜˡ), ρ * loss)
 end
 
 # Activation draws on the aerosol reservoir only where that reservoir is prognostic. It is the
@@ -349,6 +435,7 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
 """
 @inline function patankar_limited_rates(rates::P3ProcessRates, φ::P3SinkFractions)
     v, c, r, i, w = φ.vapor, φ.cloud, φ.rain, φ.ice, φ.coating
+    cn = min(c, φ.cloud_number)
     rn = min(r, φ.rain_number)
     in = min(i, φ.ice_number)
     cw = min(c, w)
@@ -356,11 +443,12 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
     activation = min(condensation, φ.aerosol)
     evaporation = φ.rain_evaporation
 
+    coating_number = rates.coating_evaporation_number * min(w, φ.ice_number)
     return P3ProcessRates(
         rates.condensation * ifelse(rates.condensation > 0, condensation, φ.cloud_evaporation),
-        rates.autoconversion * c,
-        rates.accretion * c,
-        rates.cloud_self_collection * c,
+        rates.autoconversion * cn,
+        rates.accretion * cn,
+        rates.cloud_self_collection * φ.cloud_number,
         rates.rain_evaporation * evaporation,
         rates.rain_evaporation_number * min(evaporation, φ.rain_number_evaporation),
         rates.rain_self_collection * φ.rain_self_collection,
@@ -373,11 +461,12 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
         rates.clipping_rime_mass * i,
         rates.clipping_rime_volume * i,
         rates.post_process_clipping,
-        rates.sublimation_number * in,
+        (rates.sublimation_number - rates.coating_evaporation_number) * in + coating_number,
+        coating_number,
         rates.aggregation * φ.aggregation,
         rates.ni_limit,
         rates.cloud_riming * c,
-        rates.cloud_riming_number * c,
+        rates.cloud_riming_number * cn,
         rates.rain_riming * r,
         rates.rain_riming_number * rn,
         rates.rime_density_new,
@@ -386,19 +475,19 @@ Sources that draw on no prognostic, and the number relaxations, are unchanged.
         rates.refreezing * w,
         rates.nucleation_mass * v,
         rates.nucleation_number * v,
-        rates.cloud_freezing_mass * c,
-        rates.cloud_freezing_number * c,
+        rates.cloud_freezing_mass * cn,
+        rates.cloud_freezing_number * cn,
         rates.rain_freezing_mass * r,
         rates.rain_freezing_number * rn,
-        rates.splintering_mass,
-        rates.splintering_number,
-        rates.cloud_homogeneous_mass * c,
-        rates.cloud_homogeneous_number * c,
+        rates.splintering_mass * φ.splintering,
+        rates.splintering_number * φ.splintering,
+        rates.cloud_homogeneous_mass * cn,
+        rates.cloud_homogeneous_number * cn,
         rates.rain_homogeneous_mass * r,
         rates.rain_homogeneous_number * rn,
-        rates.homogeneous_number_excess * min(c, rn),
+        φ.homogeneous_number_excess,
         rates.cloud_warm_collection * c,
-        rates.cloud_warm_collection_number * c,
+        rates.cloud_warm_collection_number * cn,
         rates.rain_warm_collection * r,
         rates.rain_warm_collection_number * rn,
         rates.wet_growth_cloud * c,
@@ -490,6 +579,25 @@ end
 #
 # The bounds per unit mass, `n₁` and `n₂`, are those of the state the rates are evaluated at
 # where they depend on it (the table bracket of ice, the shape parameter of cloud droplets).
+#
+# Where the stage leaves no mass, the bounds close on zero, and the relaxation toward the upper
+# one would drain the number. Transport that is not sign-preserving leaves such cells next to
+# falling rain, with the number still positive; mass that is carried back into a drained cell
+# has no number to go with it, its mean size sits at the largest the scheme admits, and its
+# fall speed is the largest there is. The relaxation down to the upper bound is therefore
+# weighted by
+#
+#     w(q̃) = clamp((q̃ - qˢ) / qˢ, 0, 1),    qˢ = ρ * minimum_mass_mixing_ratio,
+#
+# with `qˢ` the mass density below which P3 treats a species as absent:
+#
+#     c⁺ = c̃ + Δt (max(c̃, q̃ n₁) - c̃ + w(q̃) (min(c̃, q̃ n₂) - c̃)) / (τ + Δt).
+#
+# A number above its upper bound is left to transport below `qˢ`, relaxed in full above
+# `2 qˢ`, and the weight is linear in between. The relaxation up to the lower bound is not
+# weighted: with no mass that bound is zero, and it is what brings a negative number back. The
+# tendency is still continuous in `c̃` and `q̃`, divides by no mass, and leaves `c⁺` between
+# `c̃` and the bound.
 
 struct P3NumberRelaxations{FT}
     cloud :: FT  # tendency replacing the explicit cloud number relaxation, minus that relaxation
@@ -501,16 +609,35 @@ end
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 The tendency that relaxes a number density into the bounds `lower ≤ c ≤ upper` implicitly over
-the coming stage, at the rate `1 / τ`, minus the explicit relaxation tendency `explicit` that
-the process rates already carry: `(clamp(c̃, lower, upper) - c̃) / (τ + Δt) - explicit`.
+the coming stage, minus the explicit relaxation tendency `explicit` that the process rates
+already carry:
+`(max(c̃, lower) - c̃ + weight * (min(c̃, upper) - c̃)) / (τ + Δt) - explicit`,
+which is `(clamp(c̃, lower, upper) - c̃) / (τ + Δt) - explicit` for a `weight` of one.
 
 `c̃` is the number density that the stage start and every tendency but the relaxation leave,
-and the bounds are those of the mass that they leave. Zero (so that the explicit relaxation
-stands) before the first time step, when the stage interval is not known.
+and the bounds, with `lower ≤ upper`, are those of the mass that they leave. A number below
+`lower` rises to it at the rate `1 / τ`, and one above `upper` falls to it at the rate
+`weight / τ`, with `weight` the [`number_relaxation_weight`](@ref) of that mass, between zero
+and one. Zero (so that the explicit relaxation stands) before the first time step, when the
+stage interval is not known.
 """
-@inline function bounded_number_relaxation(c̃, lower, upper, explicit, τ, stage)
-    implicit = (clamp(c̃, lower, upper) - c̃) / (τ + stage.Δt)
+@inline function bounded_number_relaxation(c̃, lower, upper, explicit, τ, stage, weight = one(c̃))
+    implicit = (max(c̃, lower) - c̃ + weight * (min(c̃, upper) - c̃)) / (τ + stage.Δt)
     return ifelse(AM.stage_interval_is_known(stage), implicit - explicit, zero(explicit))
+end
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+The weight of the relaxation of a number down to the upper size bound of the mass density `q̃`
+that the stage leaves: `clamp((q̃ - qˢ) / qˢ, 0, 1)`, with `qˢ` the mass density below which
+the species is treated as absent. Zero for `q̃ ≤ qˢ`, where there is no mass whose size the
+number could be bounded by, and one for `q̃ ≥ 2 qˢ`. A threshold `qˢ` of zero gives the step at
+`q̃ = 0`.
+"""
+@inline function number_relaxation_weight(q̃, qˢ)
+    ramp = clamp((q̃ - qˢ) / max(qˢ, floatmin(qˢ)), zero(q̃), one(q̃))
+    return ifelse(qˢ > 0, ramp, ifelse(q̃ > 0, one(q̃), zero(q̃)))
 end
 
 # What the stage start and every tendency leave of the field `name`, given the P3 process
@@ -522,6 +649,7 @@ end
     FT = typeof(ρ)
     parameters = p3.process_rates
     τ = parameters.sink_limiting_timescale
+    ρqˢ = ρ * FT(p3.minimum_mass_mixing_ratio) # the mass density below which a species is absent
 
     # Rain: the bounds on the slope of the exponential distribution, `λ₁ ≤ λʳ ≤ λ₂`, bound the
     # number by `q̃ λ³ / π ρʷ`.
@@ -531,7 +659,7 @@ end
     rain = bounded_number_relaxation(ρñʳ,
                                      rain_number_from_slope(ρq̃ʳ, parameters.minimum_rain_slope, parameters),
                                      rain_number_from_slope(ρq̃ʳ, parameters.maximum_rain_slope, parameters),
-                                     rain_explicit, τ, stage)
+                                     rain_explicit, τ, stage, number_relaxation_weight(ρq̃ʳ, ρqˢ))
 
     # Ice: the λ limiter bounds the number per unit of total ice mass (with the liquid coating
     # where it is tracked), and the number density is capped.
@@ -543,7 +671,8 @@ end
     ice_upper = min(maximum_ice_number(properties.nⁱ_maximum_per_mass, ρq̃ⁱ),
                     FT(parameters.maximum_ice_number_density))
     ice_lower = min(properties.nⁱ_minimum_per_mass * ρq̃ⁱ, ice_upper)
-    ice = bounded_number_relaxation(ρñⁱ, ice_lower, ice_upper, ice_explicit, τ, stage)
+    ice = bounded_number_relaxation(ρñⁱ, ice_lower, ice_upper, ice_explicit, τ, stage,
+                                    number_relaxation_weight(ρq̃ⁱ, ρqˢ))
 
     cloud = p3_cloud_number_relaxation(i, j, k, G, stage, p3, p3.aerosol, ρ, ℳ, properties, rates, result, τ)
 
@@ -572,7 +701,8 @@ end
     minimum_slope, maximum_slope = cloud_slope_bounds(μᶜˡ, parameters)
     lower = cloud_number_from_slope(ρq̃ᶜˡ, minimum_slope, μᶜˡ, parameters.liquid_water_density)
     upper = cloud_number_from_slope(ρq̃ᶜˡ, maximum_slope, μᶜˡ, parameters.liquid_water_density)
-    return bounded_number_relaxation(ρñᶜˡ, lower, upper, explicit, τ, stage)
+    weight = number_relaxation_weight(ρq̃ᶜˡ, ρ * FT(p3.minimum_mass_mixing_ratio))
+    return bounded_number_relaxation(ρñᶜˡ, lower, upper, explicit, τ, stage, weight)
 end
 
 #####

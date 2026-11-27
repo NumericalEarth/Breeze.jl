@@ -1,8 +1,9 @@
 using Oceananigans: ReactantState, initialize!
+using Oceananigans.Architectures: on_architecture
 using Oceananigans.TimeSteppers: Clock
 using Oceananigans.Utils: IterationInterval
 using Reactant: TracedRNumber, @trace
-using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, update_state!, reconcile_state!
+using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, reconcile_state!
 using Breeze.AtmosphereModels: AtmosphereModels
 using Breeze.Microphysics: Microphysics, DCMIP2016KesslerMicrophysics
 using Breeze.TimeSteppers: TimeSteppers, SSPRungeKutta3, CompressibleAcousticModel
@@ -16,7 +17,7 @@ const ReactantSSPRungeKutta3Model = AtmosphereModel{<:Any, <:Any, <:ReactantStat
 function TimeSteppers.prepare_first_time_step!(model::ReactantSSPRungeKutta3Model, Δt)
     model.clock.last_Δt = Δt
     reconcile_state!(model)
-    update_state!(model; compute_tendencies = isnothing(model.radiation))
+    AtmosphereModels.update_state_between_radiation_solves!(model; compute_tendencies = isnothing(model.radiation))
     initialize_radiation!(model.radiation, model)
     return nothing
 end
@@ -24,8 +25,8 @@ end
 initialize_radiation!(::Nothing, model) = nothing
 
 function initialize_radiation!(radiation, model)
-    AtmosphereModels._update_radiation!(radiation, model)
-    update_state!(model)
+    AtmosphereModels.solve_scheduled_radiation!(radiation, model)
+    AtmosphereModels.update_state_between_radiation_solves!(model)
     return nothing
 end
 
@@ -43,6 +44,9 @@ end
 # A traced Δt is a time step: traced stepping sets `last_Δt` before the first step, and the
 # eager guard cannot branch on a traced value.
 @inline AtmosphereModels.invalid_time_step(::TracedRNumber) = false
+
+# A stage weight that holds a traced time step cannot be branched on, so its term is always added.
+TimeSteppers.is_known_zero(::TracedRNumber) = false
 
 # Reactant initializes through `first_time_step!`, and the eager guard branches on traced
 # clock fields; mirrors OceananigansReactantExt's no-ops for the upstream steppers.
@@ -64,12 +68,16 @@ end
 
 function AtmosphereModels.conditionally_update_radiation!(due::TracedRNumber{Bool}, rtm, model)
     @trace track_numbers=false if due
-        AtmosphereModels._update_radiation!(rtm, model)
+        AtmosphereModels.solve_scheduled_radiation!(rtm, model)
     end
     return nothing
 end
 
 AtmosphereModels.validate_schedule(schedule::IterationInterval, ::ReactantState) = schedule
+
+# Reactant has no updates between solves; validity is a device array so compiled steps can change it
+AtmosphereModels.approximate_radiation_updates(::ReactantState, grid, schedule, solar_position) = nothing
+AtmosphereModels.radiation_cache_validity(arch::ReactantState) = on_architecture(arch, [false])
 
 AtmosphereModels.validate_schedule(schedule, ::ReactantState) =
     throw(ArgumentError("The radiation schedule $(summary(schedule)) cannot be used on ReactantState. " *

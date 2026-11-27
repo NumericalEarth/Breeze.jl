@@ -141,12 +141,14 @@ using Oceananigans.TimeSteppers: update_state!
         @test second_rain_source != first_rain_source
     end
 
-@testset "P3 number relaxations are stable for any time step [$FT]" for FT in test_float_types()
+@testset "P3 numbers without mass are left alone for any time step [$FT]" for FT in test_float_types()
     # Rain and ice number with no mass, in dry air: the only process acting is the
     # relaxation of each number towards its bound, which is zero without mass. Advanced
     # explicitly over τ = sink_limiting_timescale it overshoots through zero for Δt > τ
     # and is unstable for Δt ≳ 2.5 τ under Wicker–Skamarock RK3. Advanced implicitly over
-    # each stage, the final stage leaves τ / (τ + Δt) of the step-start number for any Δt.
+    # each stage toward that bound, it drains the number of every cell that transport leaves
+    # without mass, and mass that returns has no number. The relaxation down to the upper
+    # bound is weighted by the mass that the stage leaves, so here the numbers do not change.
     grid = RectilinearGrid(default_arch, FT; size = (6, 6, 6), halo = (5, 5, 5),
                            x = (0, 6e3), y = (0, 6e3), z = (0, 6e3))
     p3 = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = nothing)
@@ -191,16 +193,14 @@ using Oceananigans.TimeSteppers: update_state!
         @test all(ρnʳ₂ .> 0)
         @test all(ρnⁱ₂ .> 0)
 
-        # The compressible stepper restarts its last stage from the step-start state, so
-        # the decay over a step is exactly backward Euler over Δt.
-        if !isnothing(dynamics)
-            decay = FT(τ / (τ + Δt))
-            @test all(isapprox.(ρnʳ₂ ./ ρnʳ₁, decay; rtol = 1e-3))
-            @test all(isapprox.(ρnⁱ₂ ./ ρnⁱ₁, decay; rtol = 1e-3))
-        else
-            @test all(ρnʳ₂ .< ρnʳ₁)
-            @test all(ρnⁱ₂ .< ρnⁱ₁)
-        end
+        # Neither overshoot nor decay, over steps shorter and longer than τ: a relaxation
+        # toward no number would leave τ / (τ + Δt) of it per step. What changes them is the
+        # weak motion of the compressible model, by a few parts in 10⁵.
+        @test Δt < τ || Δt > 2.5τ
+        @test all(isapprox.(ρnʳ₂, ρnʳ₁; rtol = 1e-3))
+        @test all(isapprox.(ρnⁱ₂, ρnⁱ₁; rtol = 1e-3))
+        @test all(isapprox.(ρnʳ₂, 1; rtol = 1e-3))
+        @test all(isapprox.(ρnⁱ₂, 1000; rtol = 1e-3))
     end
 end
 

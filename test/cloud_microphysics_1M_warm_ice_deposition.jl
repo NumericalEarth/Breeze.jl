@@ -316,12 +316,12 @@ end
     end
 end
 
-function compressible_autoconversion_model(grid, cloud_formation, parameters, time_discretization; timestepper=nothing)
+function compressible_autoconversion_model(grid, cloud_formation, parameters, time_discretization)
     FT = eltype(grid)
     categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories(FT; parameters)
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation, categories)
     dynamics = CompressibleDynamics(time_discretization; reference_potential_temperature=290)
-    return AtmosphereModel(grid; dynamics, microphysics, timestepper)
+    return AtmosphereModel(grid; dynamics, microphysics)
 end
 
 # The transport velocity differs from the physical velocity on terrain-following grids, where it
@@ -357,8 +357,7 @@ end
     @testset "AcousticRungeKutta3 time-averaged velocity" for cloud_formation in cloud_formations
         grid = RectilinearGrid(default_arch, FT; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 1000),
                                topology=(Periodic, Periodic, Bounded))
-        model = compressible_autoconversion_model(grid, cloud_formation, convective, SplitExplicitTimeDiscretization();
-                                                  timestepper=:AcousticRungeKutta3)
+        model = compressible_autoconversion_model(grid, cloud_formation, convective, SplitExplicitTimeDiscretization())
         @test model.timestepper isa AcousticRungeKutta3
 
         set_cloudy_state!(model; ρ=model.dynamics.reference_state.density)

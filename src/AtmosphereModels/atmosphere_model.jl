@@ -186,6 +186,7 @@ function AtmosphereModel(grid;
     # Validate that the radiation's solar position can read the clock, and that its schedule
     # can be evaluated on this architecture (before anything is traced)
     validate_radiation(radiation, clock, grid.architecture)
+    initialize_radiation_schedule!(radiation, clock)
 
     # A single user-specified scalar scheme covers every scalar, microphysical fields included.
     # Otherwise, microphysical fields the user did not name get the microphysics' own defaults.
@@ -265,10 +266,11 @@ function AtmosphereModel(grid;
 
     # Materialize dynamics and formulation
     dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants, microphysics, formulation)
+    validate_dynamics_halo(dynamics, grid, momentum_advection, closure)
     formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
     # Adaptive implicit vertical advection is supported for all prognostics with SSPRungeKutta3
-    # (per-substep solve) and with AcousticRungeKutta3 (moisture and tracers via the generic
+    # (per-substep solve) and with the acoustic time steppers (moisture and tracers via the generic
     # implicit step; momentum and the thermodynamic variable via a per-stage solve after the
     # acoustic substep loop — see TimeSteppers/acoustic_substep_helpers.jl). On terrain-following
     # grids the split partitions the contravariant velocity (see `advecting_vertical_velocity`).
@@ -343,7 +345,10 @@ function AtmosphereModel(grid;
     # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
     if timestepper_uses_dynamics(timestepper)
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver,
-                                  cache_advecting_state = advection_needs_solver, timestepper_kwargs...)
+                                  cache_advecting_state = advection_needs_solver,
+                                  moisture_forcing_names = moisture_forcing_names(microphysics),
+                                  microphysical_names = prognostic_field_names(microphysics),
+                                  timestepper_kwargs...)
     else
         timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
     end

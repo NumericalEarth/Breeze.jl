@@ -51,7 +51,7 @@ using Oceananigans.TurbulenceClosures:
     _diffusive_flux_x, _diffusive_flux_y, _diffusive_flux_z
 
 using Oceananigans.TimeSteppers: time_discretization
-using Oceananigans.Utils: Utils, launch!, prettysummary
+using Oceananigans.Utils: Utils, launch!, prettysummary, KernelParameters
 
 using ..AtmosphereModels: AtmosphereModels
 using ..BoundaryConditions: BoundaryConditions as AtmosphereBoundaryConditions, DefaultGustiness, TKEGustiness

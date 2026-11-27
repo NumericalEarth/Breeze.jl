@@ -41,8 +41,8 @@ For static energy, ``χ = s``, the source encodes the pressure work.
 strategies:
 
 - [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization):
-  A multirate outer integration with an inner acoustic substep loop: a multirate infinitesimal
-  step by default, or Wicker–Skamarock RK3. The outer step
+  A multistage outer integration with an inner acoustic substep loop: Wicker–Skamarock RK3
+  by default, or a multirate infinitesimal step. The outer step
   is bounded by the **advective** CFL (``Δt \sim Δx / U``); the inner substep is bounded by the
   **horizontal acoustic** CFL (``Δτ \sim Δx / c_s``). This is the recommended choice and the
   rest of this page describes its design.
@@ -137,23 +137,49 @@ Without condensate all give ``γ^e = 1 / (1 - \hat κ)``, which is
 ``γ^m = c^p_m / c^v_m`` with the vapor-equivalent exponent and ``γ^d`` with the dry one; condensate
 lowers it. In dry air ``C^L = γ^d R^d (p^L / p^{st})^{κ^d}``.
 
-The substep loop also moves the dry density and holds the water densities fixed. Scalar
-transport then advects the water with the preceding loop's mean velocity (the
-outer-step-start velocity in stage 1;
+The substep loop also moves the dry density and holds the water densities fixed. The water and
+tracer tendencies are built either between stages or after each stage's own loop
+(`post_loop_scalar_tendencies` in `timestepper_kwargs`). Built between stages, they advect the
+water with the preceding loop's mean velocity (the outer-step-start velocity in stage 1;
 [#1089](https://github.com/NumericalEarth/Breeze.jl/issues/1089)), so the water follows the
-loop-mean compression of the
-air, one stage late, but not the acoustic oscillation within a loop. Because the preceding
-loop's mean differs from the one continuity applies, a uniform mass fraction does not stay
-uniform. With `timestepper_kwargs = (; post_loop_scalar_tendencies = true)` the water and
-tracer tendencies are instead rebuilt after each stage's own loop, from its mean mass flux, as
-WRF and MPAS do; their fluxes are then exactly ``q / (1 - q)`` times the dry-mass flux the stage
-applied, and a uniform mass fraction stays uniform to round-off with `AcousticRungeKutta3`. Under
+loop-mean compression of the air, one stage late, but not the acoustic oscillation within a loop.
+Because the preceding loop's mean differs from the one continuity applies, a uniform mass fraction
+does not stay uniform. Built after each stage's own loop, from its mean mass flux, as WRF and MPAS
+do, their fluxes are exactly ``q / (1 - q)`` times the dry-mass flux the stage applied, and a
+uniform mass fraction stays uniform to round-off. This is the default of
+[`MultirateInfinitesimalStep`](@ref); [`AcousticRungeKutta3`](@ref) builds them between stages
+unless `post_loop_scalar_tendencies = true`. Under
 a multirate infinitesimal step the whole post-loop tendency, advection included, is recombined
 across stages with the tableau like any other slow tendency. Leaving the advective part at weight
 one from the current stage would keep the fluxes paired with continuity's, but it integrates
 advection with a first-order, anti-diffusive method that amplifies scalars at every Courant
-number; recombined, a uniform mass fraction stays uniform to the accuracy of the scheme rather
-than to round-off. The loop linearizes at
+number. Recombined, the tendencies of earlier stages carry the mass fluxes ``F_j`` of those stages'
+loops, while stage ``i`` moves the dry air with ``d_i F_i``. Each stage therefore transports the
+water and the tracers with the mass flux ``F_j + R_j``,
+``R_j = \sum_{k \le j} W_{jk} F_k``, ``W = β^{-1} \mathrm{diag}(d) - I``, for which the recombined
+fluxes carry the stage's own: ``\sum_j β_{ij} (F_j + R_j) = d_i F_i``. With it the stage applies
+exactly its own mass flux to a uniform mass fraction, which stays uniform to round-off with every
+coefficient set. ``F_j + R_j`` is the slow mass flux that the stages would recombine into the dry
+air's own, and one reconstruction of the scalar carries both parts, so the scalars keep the order
+of accuracy of the slow method where the mass flux changes during a step. The correction is
+recombined with the rest of the tendency, so a strong-stability-preserving coefficient set still
+advances the scalars by convex combinations of forward-Euler steps of their own advection
+operator. Under adaptive implicit vertical advection the implicit remainder
+forms the mass fraction it transports with the density the loop has compressed the cell to,
+for the same reason.
+
+The pressure that the loop integrates changes with the water densities over a stage, through
+their stage forcing and the dilution it is paired with. Built after the loop, a stage's water
+tendencies are not in hand when its loop starts. The loop is given the forcing with the tendencies
+that the stage before built in place of the stage's own (in the first stage, those of the last
+stage of the step before): the same transport, of the mass fractions one stage earlier. What the
+loop's pressure missed of the change of the water over the stage reaches the next stage with the
+state it starts from. Without this the loop would see the water one stage late, which amplifies
+the vertical velocity where a sharp vapor gradient is advected
+([#1093](https://github.com/NumericalEarth/Breeze.jl/issues/1093)) and makes a multirate
+infinitesimal step first-order accurate.
+
+The loop linearizes at
 fixed composition. This is exact for the slow, loop-mean compression, where it keeps the loop
 consistent with the re-diagnosed pressure in balanced flow, and it gives the moist adiabatic
 compressibility. For the oscillation itself the re-diagnosed state is closer to fixed water
@@ -260,9 +286,9 @@ fields to ``U^n - U^L``.
 
 ### Outer schemes
 
-The default outer scheme for [`SplitExplicitTimeDiscretization`](@ref) is
-[`MultirateInfinitesimalStep`](@ref) with its `:SSPMIS43` coefficients. Select Wicker–Skamarock RK3 with
-`timestepper = :AcousticRungeKutta3`.
+The default outer scheme for [`SplitExplicitTimeDiscretization`](@ref) is Wicker–Skamarock RK3,
+[`AcousticRungeKutta3`](@ref). Select [`MultirateInfinitesimalStep`](@ref), with its default
+`:ConvexLinearMIS6` coefficients, with `timestepper = :MultirateInfinitesimalStep`.
 
 A multirate infinitesimal step
 ([Wensch et al. 2009](@cite WenschKnothGalant2009); [Knoth and Wensch 2014](@cite KnothWensch2014))
@@ -276,7 +302,8 @@ V(0) = U^n + \sum_{j < i} α_{ij} (Y_j - U^n) ,
 
 over the interval ``d_i Δt``, with ``d_i = \sum_j β_{ij}``, ``Y_0 = U^n``, and sets ``Y_i`` to the
 result; ``U^{n+1} = Y_s``. The acoustic substep loop is the integrator of each stage. The default
-`:SSPMIS43` set has four stages; `:MIS4a`, `:TVDMISB` and `:WickerSkamarock3` are also available
+`:ConvexLinearMIS6` set has six stages and a diagonal ``β``; `:SSPMIS43`, `:MIS4a`, `:TVDMISB`, `:WickerSkamarock3`
+and others are also available
 (see [`MultirateInfinitesimalStep`](@ref)). Wicker–Skamarock RK3 is the special case
 ``α = γ = 0``, ``β = \mathrm{diag}(1/3, 1/2, 1)``.
 
@@ -595,8 +622,8 @@ After ``N_τ`` substeps, the full prognostic state is recovered by addition:
 
 There is no Exner-to-``ρθ`` conversion and no convex blend, because the perturbation system
 already advances the same prognostic variables as the outer scheme. The slow tendencies
-``G^s`` are applied through the substep loop, so the WS-RK3 stage update
-``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})`` falls out of the same loop.
+``G^s`` are applied through the substep loop, so the stage update of the outer scheme (for
+WS-RK3, ``U^{(k)} = U^n + β_k Δt R(U^{(k-1)})``) falls out of the same loop.
 
 ## [Klemp divergence damping](@id klemp-damping)
 

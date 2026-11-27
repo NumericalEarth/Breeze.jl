@@ -704,7 +704,7 @@ end
 
 # The tendency of every P3 prognostic from one set of process rates.
 @inline function p3_tendencies(p3::P3, ρ, ℳ::P3MicrophysicalState, properties::P3ProcessProps,
-                               rates::P3ProcessRates)
+                               rates::P3ProcessRates, vapor_excess_tendency = tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates))
     Fᶠ = properties.Fᶠ
     ρᶠ = properties.ρᶠ
 
@@ -719,7 +719,6 @@ end
     rime_mass_tendency = tendency_ρqᶠ(rates, ρ, Fᶠ)
     rime_volume_tendency = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
     coating_mass_tendency = tendency_ρqʷⁱ(rates, ρ, p3.process_rates)
-    vapor_excess_tendency = tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates)
     vapor_mass_tendency = tendency_ρqᵛ(rates, ρ)
     # Aerosol depletion: every activated cloud droplet removes one from ρnᵃ. Zero in the
     # prescribed-Nᶜˡ path, and discarded when the population is fixed rather than prognostic.

@@ -445,8 +445,9 @@ before it adds its own to `G`.
 # `Gᵒ` has to hold everything else the stage applies, transport above all: a sink budgeted
 # against `c⁰` alone can remove what advection removes too. A time stepper that keeps part of
 # a stage's tendency apart from `Gⁿ` (the multirate infinitesimal step with post-loop scalar
-# tendencies keeps the advective part apart) hands it over through
-# `separate_stage_tendencies`, and `accumulated_tendency` adds it to `Gⁿ`.
+# tendencies keeps the advective part apart where it recombines the tendencies of earlier
+# stages) hands it over through `separate_stage_tendencies`, and `accumulated_tendency` adds it
+# to `Gⁿ`.
 
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
@@ -590,8 +591,8 @@ function compute_microphysical_tendencies!(microphysics, model)
 
     # Microphysics responds to the physical velocity of the current state, so we pass
     # `model.velocities` rather than `transport_velocities(model)`, which is the contravariant
-    # vertical velocity on terrain-following grids and the acoustic time average under
-    # `AcousticRungeKutta3`.
+    # vertical velocity on terrain-following grids and the acoustic time average under the
+    # acoustic time steppers.
     launch!(arch, grid, :xyz, _default_microphysical_tendencies_kernel!,
             G_tuple, name_tuple, grid, microphysics, model.dynamics, model.formulation,
             model.thermodynamic_constants, specific_prognostic_moisture(model),
@@ -755,6 +756,10 @@ volume. It defaults to all prognostic fields; schemes with prognostic number con
 """
 condensate_field_names(microphysics) = prognostic_field_names(microphysics)
 condensate_field_names(::Nothing) = tuple()
+
+# The densities whose tendencies the pressure of an acoustic substep loop ramps with: the prognostic
+# moisture and the condensate masses. Number concentrations, other moments and tracers are not among them.
+moisture_forcing_names(microphysics) = (moisture_prognostic_name(microphysics), condensate_field_names(microphysics)...)
 
 # Precipitating water is part of the thermodynamic moisture bundle, but does not
 # equilibrate as cloud condensate during a saturated parcel displacement.
@@ -1429,15 +1434,16 @@ core) turns it into the change of the continuity-density-weighted prognostic.
 @inline sedimentation_tendency(i, j, k, grid, condensates, wᵗ, formulation, dynamics, constants,
                                microphysics, microphysical_fields, specific_prognostic_moisture, temperature) =
     sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, explicit_condensate_mass_fluxes,
-                                   formulation, dynamics, constants, microphysics, microphysical_fields,
-                                   specific_prognostic_moisture, temperature)
+                                   total_density(dynamics), formulation, dynamics, constants, microphysics,
+                                   microphysical_fields, specific_prognostic_moisture, temperature)
 
 # The tendency from the part of each condensate's mass fluxes that `mass_fluxes` selects:
 # `explicit_condensate_mass_fluxes` for the part the tracer tendency applies,
-# `implicit_condensate_mass_fluxes` for the remainder the adaptive implicit solve applied.
+# `implicit_condensate_mass_fluxes` for the remainder the adaptive implicit solve applied. `ρ` is
+# the total density that weighted the mass fluxes: the one the solve was weighted with for the latter.
 @inline sedimentation_content_tendency(i, j, k, grid, ::Tuple{}, args...) = zero(grid)
 
-@inline function sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, formulation, dynamics,
+@inline function sedimentation_content_tendency(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, formulation, dynamics,
                                                 constants, microphysics, microphysical_fields, specific_prognostic_moisture,
                                                 temperature)
     # Content of the cells below, at, and above k; each face draws on the two cells flanking it.
@@ -1449,12 +1455,12 @@ core) turns it into the change of the continuity-density-weighted prognostic.
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
     c⁺ = condensate_content(i, j, min(k + 1, grid.Nz), grid, formulation, dynamics, constants,
                             microphysics, microphysical_fields, specific_prognostic_moisture, temperature)
-    ρ = total_density(dynamics)
     ρᵈ = continuity_density(dynamics)
     Φ⁻, Φ⁺ = condensate_content_fluxes(i, j, k, grid, condensates, wᵗ, mass_fluxes, ρ, c⁻, c⁰, c⁺)
-    ρᶠ⁻ = ℑzᵃᵃᶠ(i, j, k,     grid, ρ)
-    ρᶠ⁺ = ℑzᵃᵃᶠ(i, j, k + 1, grid, ρ)
-    @inbounds density_ratio = ρᵈ[i, j, k] / ρ[i, j, k] # one anelastic, qᵈ compressible
+    ρᶠ⁻ = densityᶜᶜᶠ(i, j, k,     grid, ρ)
+    ρᶠ⁺ = densityᶜᶜᶠ(i, j, k + 1, grid, ρ)
+    # anelastic: 1; compressible: qᵈ, provided ρᵈ and ρ are from the same time
+    @inbounds density_ratio = ρᵈ[i, j, k] / densityᶜᶜᶜ(i, j, k, grid, ρ)
     return -(density_ratio * V⁻¹ᶜᶜᶜ(i, j, k, grid) * (ρᶠ⁺ * Φ⁺ - ρᶠ⁻ * Φ⁻))
 end
 
@@ -1563,7 +1569,7 @@ apply microphysics processes that operate on the full model state by the full `�
 rather than through the per-stage tendency interface. It runs after the time-stepper's
 `update_state!` has refreshed the diagnostic state it reads. Schemes that mutate
 prognostic fields here are responsible for restoring a consistent model state (halos,
-diagnostics, and tendencies) before returning — e.g. by calling `update_state!`.
+diagnostics, and tendencies) before returning, by calling `update_state_between_radiation_solves!`.
 Defaults to a no-op; specific microphysics schemes extend this function.
 """
 microphysics_model_update!(microphysics::Nothing, model) = nothing

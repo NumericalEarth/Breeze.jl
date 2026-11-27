@@ -8,9 +8,10 @@ ulp is ``4×10⁻⁶`` to ``3×10⁻⁵``, about the size of one stage's increme
 noise: the model stops warming or cooling while the radiation scheme keeps reporting the heating
 rate ([issue #1122](https://github.com/NumericalEarth/Breeze.jl/issues/1122)).
 
-The round-off treatment of the stage updates is selectable through `timestepper_kwargs`, for both
-the [`SSPRungeKutta3`](@ref) stepper of the anelastic core and the [`AcousticRungeKutta3`](@ref)
-stepper of the compressible core:
+The round-off treatment of the stage updates is selectable through `timestepper_kwargs`, for
+the [`SSPRungeKutta3`](@ref) stepper of the anelastic core and for the
+[`AcousticRungeKutta3`](@ref) (the default) and [`MultirateInfinitesimalStep`](@ref) steppers of the
+compressible core:
 
 - [`RoundToNearest`](@ref) (default): IEEE rounding, bitwise identical to the original stage update
   and free.

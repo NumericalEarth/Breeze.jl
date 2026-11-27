@@ -167,29 +167,18 @@ end
 end
 
 # The same, taking the argument list of `scalar_tendency`, which a kernel can pass through whole.
-@inline scalar_advective_tendency(i, j, k, grid, c, id, name, c_forcing, advection, dynamics, formulation, constants,
-                                  specific_prognostic_moisture, velocities, microphysics, microphysical_fields, args...) =
-    scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities, microphysics, microphysical_fields)
+@inline function scalar_advective_tendency(i, j, k, grid, c, id, name, c_forcing, advection, dynamics, formulation,
+                                           constants, specific_prognostic_moisture, velocities, microphysics,
+                                           microphysical_fields, args...)
+    return scalar_advective_tendency(i, j, k, grid, c, name, advection, dynamics, velocities, microphysics,
+                                     microphysical_fields)
+end
 
 # The rest of `scalar_tendency`, with its signature: closure diffusion, forcing and the flux-form
 # correction of prescribed dynamics. Microphysical sources are added separately.
-@inline function nonadvective_scalar_tendency(i, j, k, grid,
-                                              c,
-                                              id,
-                                              name,
-                                              c_forcing,
-                                              advection,
-                                              dynamics,
-                                              formulation,
-                                              constants,
-                                              specific_prognostic_moisture,
-                                              velocities,
-                                              microphysics,
-                                              microphysical_fields,
-                                              closure,
-                                              closure_fields,
-                                              clock,
-                                              model_fields)
+@inline function nonadvective_scalar_tendency(i, j, k, grid, c, id, name, c_forcing, advection, dynamics, formulation,
+                                              constants, specific_prognostic_moisture, velocities, microphysics,
+                                              microphysical_fields, closure, closure_fields, clock, model_fields)
 
     ρ_field = total_density(dynamics)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants, microphysics, microphysical_fields)

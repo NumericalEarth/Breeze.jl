@@ -3,8 +3,9 @@ TimeSteppers module for Breeze.jl
 
 Provides time stepping schemes for AtmosphereModel, including:
 - `SSPRungeKutta3`: Standard SSP RK3 scheme for explicit time stepping
+- `MultirateInfinitesimalStep`: multirate infinitesimal step methods with acoustic substepping,
+  the default for compressible dynamics with a split-explicit time discretization
 - `AcousticRungeKutta3`: Wicker-Skamarock RK3 with acoustic substepping for compressible dynamics
-- `MultirateInfinitesimalStep`: multirate infinitesimal step methods with acoustic substepping
 """
 module TimeSteppers
 

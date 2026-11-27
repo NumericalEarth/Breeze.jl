@@ -178,7 +178,7 @@ const TERRAIN_FORMULATIONS = (LinearDecay(),
 
         dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=6);
                                         reference_potential_temperature=300)
-        model = AtmosphereModel(grid; dynamics, timestepper=:AcousticRungeKutta3)
+        model = AtmosphereModel(grid; dynamics)
         set!(model, θ=300, ρ=model.dynamics.reference_state.density, u=0, w=0)
 
         @test model.timestepper isa AcousticRungeKutta3

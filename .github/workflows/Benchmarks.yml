@@ -111,6 +111,18 @@ jobs:
             # collide and only one set of results survives the publish merge).
             mode: 'scalar_tendency'
             extra_flags: '--mode scalar_tendency --float_type=Float32,BFloat16 --time_steps 320'
+          # Reverse-mode AD of the scalar tendency: the gradient of
+          # L = mean(Gc²) with respect to c and 𝐮, differentiated by Enzyme-MLIR
+          # after Reactant raises the kernel (raise=true). Reactant only: vanilla
+          # Enzyme cannot differentiate the kernel launch on the GPU.
+          - dynamics: 'none'
+            microphysics: 'none'
+            grid: '256x256x128'
+            advection: 'WENO5, WENO7, WENO9'
+            backend: 'reactant'
+            topology: 'PPB'
+            mode: 'scalar_tendency_ad'
+            extra_flags: '--mode scalar_tendency_ad --float_type=Float32 --time_steps 320'
           # Full-model tendency: time compute_tendencies! for a compressible
           # AtmosphereModel across WENO orders, vanilla vs Reactant. --mode
           # model_tendency builds the model, so dynamics/microphysics are unused.
@@ -297,12 +309,13 @@ jobs:
               # a fixed grid. Reuses BenchmarkResult with mode == 'tendency';
               # closure/dynamics/microphysics are 'none', so skip the forward
               # clauses below via continue.
-              if mode in ('scalar_tendency', 'model_tendency'):
+              if mode in ('scalar_tendency', 'scalar_tendency_ad', 'model_tendency'):
                   # One figure per case (ScalarTendency / ModelTendency), one
                   # side-by-side panel per WENO order, and one line per
                   # float-type × backend config. Scalar gets 4 lines (Float32 /
                   # BFloat16 × vanilla / reactant); model gets 2 (Float32 only,
-                  # since it has no BFloat16 rows).
+                  # since it has no BFloat16 rows); AD gets 1 (Float32 Reactant
+                  # raise=true), where points/s counts gradient evaluations.
                   ft_short = {'Float32': 'F32', 'BFloat16': 'BF16', 'Float64': 'F64'}.get(ft, ft)
                   level_1 = f'{base_name}; Grid: {grid_str}'
                   level_2 = f'Advection: {advection}'

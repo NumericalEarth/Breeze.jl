@@ -7,6 +7,11 @@ using Breeze.AtmosphereModels: AtmosphereModels, StageStart
 using Breeze.Microphysics.PredictedParticleProperties: AerosolActivation, AerosolMode,
                                                        PredictedParticlePropertiesMicrophysics
 
+using Breeze.Thermodynamics: ThermodynamicConstants, MoistureMassFractions, LiquidIcePotentialTemperatureState,
+                             PlanarIceSurface, saturation_specific_humidity, density, temperature,
+                             with_temperature
+using Breeze.Microphysics.PredictedParticleProperties: P3MicrophysicalState, compute_p3_process_rates
+
 using Oceananigans: Bounded, CenterField, Flat, RectilinearGrid, WENO, interior, prognostic_fields, set!,
                      time_step!
 using Oceananigans.Utils: AdaptiveVerticallyImplicitDiscretization
@@ -48,6 +53,125 @@ const PPP = Breeze.Microphysics.PredictedParticleProperties
 
     # Before the first time step the stage interval is not known, and the explicit relaxation stands
     @test iszero(relaxation(FT(7), FT(Inf); explicit = FT(0.3)))
+end
+
+#####
+##### The weight of the relaxation where the stage leaves no mass
+#####
+
+@testset "Weight of the number relaxation [$FT]" for FT in (Float32, Float64)
+    qˢ = FT(1e-14)
+    weight(q̃) = PPP.number_relaxation_weight(q̃, qˢ)
+
+    # None where the species is absent, all of it from twice the threshold, linear in between
+    @test all(iszero, weight.(FT.((-1e-3, -1e-20, 0, 1e-20, 1e-14))))
+    @test all(isone, weight.(FT.((2e-14, 1e-12, 1e-3))))
+    @test weight(FT(1.5e-14)) ≈ FT(0.5)
+    @test weight(FT(1.25e-14)) ≈ FT(0.25)
+
+    # Continuous at both ends of the ramp
+    for q̃ in (qˢ, 2qˢ), δ in FT.((1e-2, 1e-4)) .* qˢ
+        @test abs(weight(q̃ + δ) - weight(q̃ - δ)) ≤ 2δ / qˢ * (1 + 10 * eps(FT))
+    end
+
+    # A threshold of zero is the step at no mass
+    @test PPP.number_relaxation_weight(FT(1e-20), zero(FT)) == 1
+    @test PPP.number_relaxation_weight(zero(FT), zero(FT)) == 0
+    @test PPP.number_relaxation_weight(FT(-1e-20), zero(FT)) == 0
+
+    # The weighted relaxation leaves the number between where it was and the bound. Where the
+    # weight is zero a number above the lower bound is left alone, and one below it, a negative
+    # one among them, still rises to it.
+    τ, Δt = FT(10), FT(300)
+    lower, upper = FT(2), FT(5)
+    field = fill(zero(FT), 1, 1, 1)
+    stage = StageStart(field, field, false, Δt)
+    for c̃ in FT.((-3, 0, 1, 7, 100)), w in FT.((0, 0.3, 1))
+        c⁺ = c̃ + Δt * PPP.bounded_number_relaxation(c̃, lower, upper, zero(FT), τ, stage, w)
+        bound = clamp(c̃, lower, upper)
+        @test min(c̃, bound) ≤ c⁺ ≤ max(c̃, bound)
+        w == 0 && c̃ ≥ lower && @test c⁺ == c̃
+        c̃ < lower && @test c⁺ ≈ (c̃ + Δt / τ * lower) / (1 + Δt / τ)
+        w == 1 && @test c⁺ == c̃ + Δt * PPP.bounded_number_relaxation(c̃, lower, upper, zero(FT), τ, stage)
+    end
+    for w in FT.((0, 0.3, 1)) # no mass: the bounds are zero, and a negative number is brought back
+        c⁺ = -FT(3) + Δt * PPP.bounded_number_relaxation(-FT(3), zero(FT), zero(FT), zero(FT), τ, stage, w)
+        @test c⁺ ≈ -FT(3) / (1 + Δt / τ)
+    end
+
+    # Where the weight is zero the explicit relaxation of the rates is still taken back
+    @test PPP.bounded_number_relaxation(FT(7), zero(FT), zero(FT), FT(0.3), τ, stage, zero(FT)) == -FT(0.3)
+end
+
+#####
+##### A cell that the stage leaves without mass keeps its number
+#####
+##### Transport that is not sign-preserving leaves cells with no rain or ice mass, or a little
+##### less than none, and a positive number. The bounds of no mass are zero, and a relaxation
+##### toward them would drain the number, so that mass carried back into the cell would have the
+##### largest particles the scheme admits. The number is left to transport instead.
+#####
+
+@testset "A cell without mass keeps its number [$FT]" for FT in (Float32, Float64)
+    p3 = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = nothing)
+    constants = ThermodynamicConstants(FT)
+    z = zero(FT)
+    names = (:ρqᵛ, :ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ)
+    one_cell(values) = NamedTuple{names}(map(v -> fill(v, 1, 1, 1), values))
+
+    # Air at 0.8 bar and 265 K, saturated over ice: nothing nucleates, deposits or sublimates
+    T, p = FT(265), FT(8e4)
+    thermodynamic_state(qᵛ) = with_temperature(
+        LiquidIcePotentialTemperatureState(z, MoistureMassFractions(qᵛ, z, z), FT(1e5), p), T, constants)
+    qᵛ = FT(1e-3)
+    for _ in 1:10
+        qᵛ = saturation_specific_humidity(T, density(thermodynamic_state(qᵛ), constants), constants, PlanarIceSurface())
+    end
+    𝒰 = thermodynamic_state(qᵛ)
+    ρ = density(𝒰, constants)
+    ρqˢ = ρ * FT(p3.minimum_mass_mixing_ratio)
+    nʳ, nⁱ = FT(1e3), FT(1e4)
+
+    # The number tendencies of rain and ice over a stage that starts with the mass densities `ρqʳ`
+    # and `ρqⁱ` and the numbers above, and the relaxations among them.
+    function number_tendencies(ρqʳ, ρqⁱ, Δt)
+        qʳ, qⁱ = max(0, ρqʳ) / ρ, max(0, ρqⁱ) / ρ
+        ℳ = P3MicrophysicalState(z, FT(p3.cloud.number_concentration), qʳ, nʳ, qⁱ, nⁱ, z, z, z, z, z, z)
+        properties = PPP.p3_process_properties(p3, ρ, ℳ)
+        fields = one_cell((ρ * qᵛ, z, ρqʳ, ρ * nʳ, ρqⁱ, ρ * nⁱ, z, z, z))
+        G = one_cell(ntuple(_ -> z, 9))
+        stage = StageStart(fields, fields, false, Δt)
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties, temperature(𝒰, constants), z, z,
+                                         nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
+        φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
+        limited_rates = PPP.patankar_limited_rates(rates, φ)
+        result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited_rates)
+        relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited_rates, result)
+        return (rain = result.tendency_ρnʳ + relaxations.rain, ice = result.tendency_ρnⁱ + relaxations.ice,
+                rain_relaxation = relaxations.rain, ice_relaxation = relaxations.ice,
+                rain_explicit = ρ * limited_rates.rain_number_correction,
+                ice_explicit = ρ * (limited_rates.ice_number_correction - limited_rates.ni_limit))
+    end
+
+    @testset "Δt = $Δt s" for Δt in FT.((1, 120, 1e4))
+        # No mass, less than none, and a trace below the threshold: the numbers do not change,
+        # and the explicit relaxation that the rates carry toward no number is taken back.
+        for ρq in (z, -FT(1e-9), -ρqˢ, ρqˢ / 2)
+            G = number_tendencies(ρq, ρq, Δt)
+            @test G.rain_explicit < 0
+            @test G.ice_explicit < 0
+            @test G.rain_relaxation == -G.rain_explicit
+            @test G.ice_relaxation == -G.ice_explicit
+            @test abs(G.rain) * Δt ≤ 10 * eps(FT) * ρ * nʳ
+            @test abs(G.ice) * Δt ≤ 10 * eps(FT) * ρ * nⁱ
+        end
+    end
+
+    # With a mass well above the threshold the same numbers, far more than that mass can carry,
+    # are relaxed toward its bounds.
+    G = number_tendencies(FT(1e-9), FT(1e-12), FT(1))
+    @test G.rain_relaxation + G.rain_explicit < 0
+    @test G.ice_relaxation + G.ice_explicit < 0
 end
 
 #####
