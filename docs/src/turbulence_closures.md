@@ -88,6 +88,14 @@ build the envelope. The recursion is not the ``p``-norm of all the bounds at onc
 between an obstacle and the level of interest adds its own bound again, so the blended envelope
 lies below the hard one by an amount that depends on ``p`` and on the grid spacing.
 
+The buoyancy length ``ℂˡᵇ \sqrt{e} / N`` enters every combination through its inverse ``N / (ℂˡᵇ \sqrt{e})``,
+which is zero in neutral and unstable air, where the stratification does not bound the length, so the combination
+of the bounds is finite there. The frequency ``N`` is the `buoyancy_frequency` of the
+[`GradientLimitedMixingLength`](@ref): [`PositivePartFrequency`](@ref), ``\sqrt{\max(N², 0)}``, by default, whose
+derivative is infinite as ``N² → 0⁺``, or [`RegularizedPositivePartFrequency`](@ref), ``N²₊ / \sqrt{N²₊ + N★²}``,
+which is zero in unstable air too, has a finite derivative at ``N² = 0`` and departs from ``\sqrt{N²}`` where
+``N ≲ N★``.
+
 ### Static stability
 
 ``N²`` enters the stratification length, the buoyancy flux, and ``Ri``. It is diagnosed once per

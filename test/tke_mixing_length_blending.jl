@@ -5,7 +5,8 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.TurbulenceClosures: TKE_NAME, blend, length_blending, fill_mixing_length!, mixing_lengthᶜᶜᶜ, convert_eltype,
-                                 buoyancy_penetration_depthᶜᶜᶠ
+                                 inverse_blend, buoyancy_frequency,
+                                 buoyancy_lengthᶜᶜᶠ
 using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.TimeSteppers: update_state!
@@ -155,6 +156,34 @@ end
     end
 end
 
+@testset "Inverse lengths and the buoyancy frequency [$(FT)]" for FT in all_float_types()
+    # The combination of inverse lengths is the inverse of the combination of the lengths, and finite where a
+    # length is infinite
+    for blending in (HardMinimum(), HarmonicBlend(FT(4))), (a, b) in ((FT(30), FT(120)), (FT(30), FT(Inf)), (FT(0), FT(30)))
+        @test inv(inverse_blend(blending, inv(a), inv(b))) ≈ blend(blending, a, b) rtol = 8eps(FT)
+    end
+    @test inverse_blend(HarmonicBlend(FT(4)), zero(FT), zero(FT)) == 0
+
+    exact = PositivePartFrequency()
+    regular = RegularizedPositivePartFrequency(FT(1e-4))
+    @test isbits(exact) && isbits(regular)
+    @test GradientLimitedMixingLength().buoyancy_frequency === exact
+    @test occursin("RegularizedPositivePartFrequency", sprint(show, GradientLimitedMixingLength(buoyancy_frequency = regular)))
+    @test convert_eltype(Float32, GradientLimitedMixingLength(buoyancy_frequency = RegularizedPositivePartFrequency(1e-4))).buoyancy_frequency ===
+          RegularizedPositivePartFrequency(1f-4)
+    for N² in FT.((-1e-4, -1e-12, 0))
+        @test buoyancy_frequency(exact, N²) == 0
+        @test buoyancy_frequency(regular, N²) == 0
+    end
+    for N² in FT.((1e-6, 1e-4, 1e-2))
+        @test buoyancy_frequency(exact, N²) ≈ sqrt(N²)
+        @test abs(buoyancy_frequency(regular, N²) / sqrt(N²) - 1) ≤ FT(1e-8) / N² + 8eps(FT)
+    end
+    # The regular frequency has the finite slope 1 / N★ at N² = 0⁺
+    h = FT == Float32 ? 1f-12 : 1e-16 # (the slope departs from 1 / N★ by h / (2 N★²))
+    @test buoyancy_frequency(regular, h) / h ≈ 1 / regular.frequency rtol = FT == Float32 ? 1e-3 : 1e-6
+end
+
 # The envelope at a center blends the upward sweep at the face below with the downward sweep alone at the face
 # above, which share no bound. Here each sweep is formed on its own from the stored penetration depths.
 @testset "The center envelope blends two sweeps that share no bound [$(FT)]" for FT in test_float_types()
@@ -169,7 +198,7 @@ end
         N² = model.closure_fields.N²
         ml = closure.mixing_length
         @allowscalar begin
-            ℓᵇ = [k == 1 ? FT(Inf) : ml.ℂˡᵇ * buoyancy_penetration_depthᶜᶜᶠ(1, 1, k, grid, closure, e, N²)
+            ℓᵇ = [k == 1 ? FT(Inf) : buoyancy_lengthᶜᶜᶠ(1, 1, k, grid, closure, e, N²)
                   for k in 1:Nz+1]
             ℓᵇ = map(ℓ -> isnan(ℓ) ? FT(Inf) : ℓ, ℓᵇ)
             Δz = [Δzᶜᶜᶜ(1, 1, k, grid) for k in 1:Nz]

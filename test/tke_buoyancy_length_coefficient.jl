@@ -94,8 +94,10 @@ end
 @testset "ℂˡᵇ = 1 is the original gradient-limited length [$(FT)]" for FT in test_float_types()
     model = length_column(GradientLimitedMixingLength(; ℂˢ = FT(0.79), ℂⁱ = FT(1.78)); FT)
     ℓ, ℓˢ = original_envelope(model)
-    @test column(model.closure_fields.ℓᵐ) == ℓ
-    @test column(model.closure_fields.ℓˢ) == ℓˢ
+    # To round-off: the closure forms the buoyancy length through its inverse, N / √e
+    roundoff = 8eps(FT)
+    @test all(isapprox.(column(model.closure_fields.ℓᵐ), ℓ; rtol = roundoff))
+    @test all(isapprox.(column(model.closure_fields.ℓˢ), ℓˢ; rtol = roundoff))
 
     # The centers: the smaller face envelope carried half a cell, bounded by the center's √e / N (N² from the two
     # faces, as the closure reconstructs it) and ℂˢ z
@@ -108,7 +110,7 @@ end
         ℓᵇ = ifelse(N²₊ == 0, FT(Inf), ℓᵇ)
         expected = min(min(ℓˢ[k], ℓˢ[k+1]) + closure.mixing_length.ℂⁱ * Δzᶜᶜᶜ(1, 1, k, grid) / 2,
                        min(closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶜ(1, 1, k, grid), ℓᵇ))
-        @test center_lengths(model, e)[k] == expected
+        @test center_lengths(model, e)[k] ≈ expected rtol = roundoff
     end
 end
 

@@ -40,7 +40,7 @@
 using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities:
     shearᶜᶜᶠ, ℑbzᵃᵃᶜ, mask_diffusivity, turbulent_velocityᶜᶜᶜ
 
-using Oceananigans.TurbulenceClosures: clip, height_above_bottomᶜᶜᶠ, height_above_bottomᶜᶜᶜ, shear_production
+using Oceananigans.TurbulenceClosures: height_above_bottomᶜᶜᶠ, height_above_bottomᶜᶜᶜ, shear_production
 using Oceananigans.Units: minute
 
 #####
@@ -239,6 +239,81 @@ Combine the two lengths `ℓ₁` and `ℓ₂` that bound a mixing length by the 
 end
 
 """
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Combine the inverses `λ₁ = 1/ℓ₁` and `λ₂ = 1/ℓ₂` of two lengths by the rule `blending`, returning the inverse
+of `blend(blending, ℓ₁, ℓ₂)`: `max(λ₁, λ₂)` for the hard minimum and `(λ₁ᵖ + λ₂ᵖ)^{1/p}` for a harmonic blend.
+A length without a bound has a zero inverse, so the combination is finite and regular where a length is infinite.
+"""
+@inline inverse_blend(::HardMinimum, λ₁, λ₂) = max(λ₁, λ₂)
+
+# λ⁺ (1 + (λ⁻ / λ⁺)ᵖ)^(1/p) with λ⁻ ≤ λ⁺: the ratio is in [0, 1], so nothing overflows for any p. With a zero or an
+# infinite λ⁺ the blend is λ⁺ itself; both branches of an `ifelse` are evaluated and differentiated, so the unselected
+# blend is formed from two inverses of one.
+@inline function inverse_blend(blending::HarmonicBlend, λ₁, λ₂)
+    p = blending.exponent
+    λ⁻ = min(λ₁, λ₂)
+    λ⁺ = max(λ₁, λ₂)
+    comparable = (λ⁺ > 0) & (λ⁺ < Inf)
+    λ⁻¹ = ifelse(comparable, λ⁻, one(λ⁻))
+    λ⁺¹ = ifelse(comparable, λ⁺, one(λ⁺))
+    λ = λ⁺¹ * (1 + (λ⁻¹ / λ⁺¹)^p)^(1 / p)
+    return ifelse(comparable, λ, λ⁺)
+end
+
+"""
+$(TYPEDEF)
+
+The buoyancy frequency ``N = \\sqrt{\\max(N², 0)}`` with which the buoyancy length ``ℂˡᵇ \\sqrt{e} / N`` of a mixing
+length bounds it, through its inverse ``N / (ℂˡᵇ \\sqrt{e})``: zero in neutral and unstable air, which the buoyancy
+length does not bound. The default. Its derivative is infinite as ``N² → 0⁺``: no frequency that vanishes for
+``N² ≤ 0`` and equals ``\\sqrt{N²}`` for ``N² > 0`` is differentiable there.
+"""
+struct PositivePartFrequency end
+
+"""
+$(TYPEDEF)
+
+The buoyancy frequency ``N = N²₊ / \\sqrt{N²₊ + N★²}``, ``N²₊ = \\max(N², 0)``, of the buoyancy length of a mixing
+length (see [`PositivePartFrequency`](@ref)): zero in neutral and unstable air, as the exact one, with the finite
+derivative ``1 / N★`` at ``N² = 0⁺``, and within the fraction ``N★² / (2 N²)`` of ``\\sqrt{N²}`` in stable air.
+
+Fields
+======
+
+$(TYPEDFIELDS)
+"""
+struct RegularizedPositivePartFrequency{FT}
+    "frequency ``N★`` [s⁻¹] below which the buoyancy frequency departs from ``\\sqrt{N²}``"
+    frequency :: FT
+end
+
+RegularizedPositivePartFrequency(; frequency = 1e-4) = RegularizedPositivePartFrequency(frequency)
+
+Adapt.@adapt_structure RegularizedPositivePartFrequency
+
+Base.summary(::PositivePartFrequency) = "PositivePartFrequency"
+Base.summary(::RegularizedPositivePartFrequency) = "RegularizedPositivePartFrequency"
+Base.show(io::IO, f::PositivePartFrequency) = print(io, summary(f), "()")
+Base.show(io::IO, f::RegularizedPositivePartFrequency) =
+    print(io, summary(f), "(frequency = ", prettysummary(f.frequency), ")")
+
+@inline convert_eltype(::Type{FT}, f::PositivePartFrequency) where FT = f
+@inline convert_eltype(::Type{FT}, f::RegularizedPositivePartFrequency) where FT =
+    RegularizedPositivePartFrequency(convert(FT, f.frequency))
+
+@inline buoyancy_frequency(::PositivePartFrequency, N²) = sqrt(max(N², zero(N²)))
+
+@inline function buoyancy_frequency(f::RegularizedPositivePartFrequency, N²)
+    N²₊ = max(N², zero(N²))
+    return N²₊ / sqrt(N²₊ + f.frequency * f.frequency)
+end
+
+# The inverse of the buoyancy length ℂˡᵇ u / N of the mixing length `ml`, with u = √e: zero where N² ≤ 0
+@inline inverse_buoyancy_length(ml, u, N²) =
+    buoyancy_frequency(buoyancy_frequency_rule(ml), N²) / (buoyancy_length_coefficient(ml) * u)
+
+"""
 $(TYPEDEF)
 
 The mixing length as the smaller of the wall length and the buoyancy penetration depth at the eddy's
@@ -324,17 +399,21 @@ a single positional coefficient or a lone `ℂˢ` keyword still sets both slopes
 [`HarmonicBlend`](@ref), which smooths both the combination of the wall length with the envelope
 and each step of the two sweeps that build the envelope.
 """
-struct GradientLimitedMixingLength{FT, B} <: AbstractMixingLength
+struct GradientLimitedMixingLength{FT, B, F} <: AbstractMixingLength
     ℂˢ :: FT       # wall length coefficient
     ℂⁱ :: FT       # interior envelope slope; equal slopes recover the original formulation
     ℂˡᵇ :: FT      # coefficient of the buoyancy length ℂˡᵇ √e / N; 1 is the original formulation
     blending :: B  # how the bounds on the length combine
+    buoyancy_frequency :: F # the frequency N of the buoyancy length, from N²
 end
 
-function GradientLimitedMixingLength(; ℂˢ = 1.316, ℂⁱ = ℂˢ, ℂˡᵇ = 1, blending = HardMinimum())
+function GradientLimitedMixingLength(; ℂˢ = 1.316, ℂⁱ = ℂˢ, ℂˡᵇ = 1, blending = HardMinimum(),
+                                     buoyancy_frequency = PositivePartFrequency())
     ℂˢ, ℂⁱ, ℂˡᵇ = promote(ℂˢ, ℂⁱ, ℂˡᵇ)
-    return GradientLimitedMixingLength(ℂˢ, ℂⁱ, ℂˡᵇ, blending)
+    return GradientLimitedMixingLength(ℂˢ, ℂⁱ, ℂˡᵇ, blending, buoyancy_frequency)
 end
+
+GradientLimitedMixingLength(ℂˢ, ℂⁱ, ℂˡᵇ, blending) = GradientLimitedMixingLength(ℂˢ, ℂⁱ, ℂˡᵇ, blending, PositivePartFrequency())
 
 GradientLimitedMixingLength(ℂˢ::Number) = GradientLimitedMixingLength(ℂˢ, ℂˢ)
 GradientLimitedMixingLength(ℂˢ::Number, ℂⁱ::Number) = GradientLimitedMixingLength(ℂˢ, ℂⁱ, HardMinimum())
@@ -355,29 +434,34 @@ Adapt.@adapt_structure GradientLimitedMixingLength
 @inline interior_slope(ml::GradientLimitedMixingLength) = ml.ℂⁱ
 @inline interior_slope(ml::AbstractMixingLength) = ml.ℂˢ
 
-# The coefficient of the buoyancy length ℂˡᵇ √e / N
+# The coefficient of the buoyancy length ℂˡᵇ √e / N, and the rule for its frequency N
 @inline buoyancy_length_coefficient(ml::GradientLimitedMixingLength) = ml.ℂˡᵇ
 @inline buoyancy_length_coefficient(ml::AbstractMixingLength) = 1
+@inline buoyancy_frequency_rule(ml::GradientLimitedMixingLength) = ml.buoyancy_frequency
+@inline buoyancy_frequency_rule(ml::AbstractMixingLength) = PositivePartFrequency()
 
 Base.summary(ml::LocalMinimumMixingLength{FT}) where FT = "LocalMinimumMixingLength{$FT}"
 Base.summary(ml::IntegralMixingLength{FT}) where FT = "IntegralMixingLength{$FT}"
 Base.summary(ml::GradientLimitedMixingLength{FT}) where FT = "GradientLimitedMixingLength{$FT}"
 
-# The default blending, the hard minimum, is not shown
+# The default blending, the hard minimum, and the default frequency are not shown
 blending_summary(::HardMinimum) = ""
 blending_summary(blending) = string(", blending = ", blending)
+frequency_summary(::PositivePartFrequency) = ""
+frequency_summary(frequency) = string(", buoyancy_frequency = ", frequency)
 
 Base.show(io::IO, ml::AbstractMixingLength) =
     print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), blending_summary(length_blending(ml)), ")")
 Base.show(io::IO, ml::GradientLimitedMixingLength) =
     print(io, summary(ml), " (ℂˢ = ", prettysummary(ml.ℂˢ), ", ℂⁱ = ", prettysummary(ml.ℂⁱ), ", ℂˡᵇ = ", prettysummary(ml.ℂˡᵇ),
-          blending_summary(ml.blending), ")")
+          blending_summary(ml.blending), frequency_summary(ml.buoyancy_frequency), ")")
 
 @inline convert_eltype(::Type{FT}, ml::LocalMinimumMixingLength) where FT =
     LocalMinimumMixingLength(convert(FT, ml.ℂˢ), convert_eltype(FT, ml.blending))
 @inline convert_eltype(::Type{FT}, ml::IntegralMixingLength) where FT = IntegralMixingLength{FT}(convert(FT, ml.ℂˢ))
 @inline convert_eltype(::Type{FT}, ml::GradientLimitedMixingLength) where FT =
-    GradientLimitedMixingLength(convert(FT, ml.ℂˢ), convert(FT, ml.ℂⁱ), convert(FT, ml.ℂˡᵇ), convert_eltype(FT, ml.blending))
+    GradientLimitedMixingLength(convert(FT, ml.ℂˢ), convert(FT, ml.ℂⁱ), convert(FT, ml.ℂˡᵇ), convert_eltype(FT, ml.blending),
+                                convert_eltype(FT, ml.buoyancy_frequency))
 
 #####
 ##### The closure
@@ -849,31 +933,38 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 The buoyancy penetration depth ``ℓᵇ = \\sqrt{e} / N`` at (Center, Center, Face): how far an eddy
 with kinetic energy ``e`` — floored at `minimum_tke` and reconstructed at the face from the cell
 centers — penetrates air of static stability ``N²`` before its kinetic energy is spent against
-buoyancy. Infinite where ``N² ≤ 0``, so that neutral and unstable air is no obstacle.
+buoyancy, with the frequency ``N`` of the mixing length's `buoyancy_frequency` rule. Infinite where
+``N² ≤ 0``, so that neutral and unstable air is no obstacle.
 """
 @inline function buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
-    FT = grid_float_type(grid)
-    N²₊ = clip(@inbounds N²[i, j, k])
-    ℓᵇ = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e) / sqrt(N²₊)
-    return ifelse(N²₊ == 0, FT(Inf), ℓᵇ)
+    u = ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e)
+    N = buoyancy_frequency(buoyancy_frequency_rule(closure.mixing_length), @inbounds(N²[i, j, k]))
+    return inv(N / u)
 end
 
+# The inverse of the buoyancy length ℂˡᵇ √e / N at a face: zero where N² ≤ 0
+@inline inverse_buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²) =
+    inverse_buoyancy_length(closure.mixing_length, ℑzᵃᵃᶠ(i, j, k, grid, turbulent_velocityᶜᶜᶜ, closure, e), @inbounds(N²[i, j, k]))
+
+# The buoyancy length ℂˡᵇ √e / N at a face: infinite where N² ≤ 0
+@inline buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²) = inv(inverse_buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²))
+
 # The local minimum at a face: the ground — or an immersed bottom — through the wall length, and
-# the stratification there through the penetration depth
+# the stratification there through the buoyancy length, combined as inverse lengths, which are finite where
+# the buoyancy length is not
 @inline function local_mixing_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶠ(i, j, k, grid)
-    ℓᵇ = buoyancy_length_coefficient(closure.mixing_length) * buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
-    ℓ = blend(length_blending(closure.mixing_length), d, ℓᵇ)
+    λᵇ = inverse_buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
+    ℓ = inv(inverse_blend(length_blending(closure.mixing_length), inv(d), λᵇ))
     return ifelse(isnan(ℓ), d, ℓ)
 end
 
 # The local minimum at a cell center, with N² reconstructed from the two adjacent faces
 @inline function local_mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, N²)
-    FT = grid_float_type(grid)
     d = closure.mixing_length.ℂˢ * height_above_bottomᶜᶜᶜ(i, j, k, grid)
-    N²₊ = clip(ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²))
-    ℓᵇ = buoyancy_length_coefficient(closure.mixing_length) * turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e) / sqrt(N²₊)
-    ℓ = blend(length_blending(closure.mixing_length), d, ifelse(N²₊ == 0, FT(Inf), ℓᵇ))
+    N²ᶜ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
+    λᵇ = inverse_buoyancy_length(closure.mixing_length, turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e), N²ᶜ)
+    ℓ = inv(inverse_blend(length_blending(closure.mixing_length), inv(d), λᵇ))
     return ifelse(isnan(ℓ), d, ℓ)
 end
 
@@ -908,7 +999,7 @@ end
     @inbounds begin
         ℓˢ[i, j, 1] = FT(Inf)
         for k in 2:Nz+1
-            ℓᵇ = ml.ℂˡᵇ * buoyancy_penetration_depthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
+            ℓᵇ = buoyancy_lengthᶜᶜᶠ(i, j, k, grid, closure, e, N²)
             ℓˢ[i, j, k] = ifelse(isnan(ℓᵇ), FT(Inf), ℓᵇ)
         end
         # The downward sweep alone at face k + 1, kept at center k

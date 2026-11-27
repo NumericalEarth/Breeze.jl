@@ -374,9 +374,10 @@ end
     S² = ℑbzᵃᵃᶜ(i, j, k, grid, effective_shear_squaredᶜᶜᶠ, closure, velocities, e, ℓ) + closure.shear.minimum_shear_squared
     N²ᵢ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
     τʷ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, ℓ) / turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
-    stratified = N²ᵢ > 0
-    τᵇ = buoyancy_length_coefficient(closure.mixing_length) / sqrt(ifelse(stratified, N²ᵢ, one(N²ᵢ)))
-    τ = blend(length_blending(closure.mixing_length), τʷ, ifelse(stratified, τᵇ, convert(typeof(τᵇ), Inf)))
+    # 1 / τᵇ = N / ℂˡᵇ, the inverse of the buoyancy length per √e: zero where N² ≤ 0
+    ml = closure.mixing_length
+    τᵇ⁻¹ = buoyancy_frequency(buoyancy_frequency_rule(ml), N²ᵢ) / buoyancy_length_coefficient(ml)
+    τ = inv(inverse_blend(length_blending(ml), inv(τʷ), τᵇ⁻¹))
     τ² = τ * τ
     return τ² * N²ᵢ, τ² * S²
 end
