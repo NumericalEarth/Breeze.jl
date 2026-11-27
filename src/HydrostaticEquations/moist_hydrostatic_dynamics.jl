@@ -46,13 +46,14 @@ mutable struct StateValidation
     interval :: Int
 end
 
-struct HydrostaticMoisture{T, I, S, D, E, L, F, C, V}
+struct HydrostaticMoisture{T, I, S, D, E, L, P, F, C, V}
     density_potential_temperature :: T  # θᵨ = ϑ θ at cell centers
     interface_pressure :: I             # total pressure pᶠ = A + B pˢ at z-faces
     total_surface_pressure :: S         # pˢ, the prognostic surface pressure itself
     total_density :: D                  # ρ, the layer mass of the coordinate itself
     column_enthalpy :: E                # scratch of the column physics: the enthalpy a layer is given
     ledger :: L                         # accumulated fluxes through the ground (two-dimensional)
+    surface_precipitation :: P          # SurfacePrecipitationFlux of the last time step
     fallout :: F                        # sedimentation of the stages of a time step (`stage_fallout`), or nothing
     column_physics :: C                 # ColumnPhysicsDispatch, or nothing inside kernels
     state_validation :: V               # StateValidation, or nothing inside kernels
@@ -66,11 +67,50 @@ Adapt.adapt_structure(to, moisture::HydrostaticMoisture) =
                         adapt(to, moisture.total_density),
                         adapt(to, moisture.column_enthalpy),
                         adapt(to, moisture.ledger),
+                        adapt(to, moisture.surface_precipitation),
                         adapt(to, moisture.fallout),
                         nothing,
                         nothing)
 
 @regional HydrostaticMoisture
+
+# The water that a time step took through the ground, as a flux over that step (kg m⁻² s⁻¹), in
+# total and in its frozen part. The removals of a step add to it; the first removal of a new
+# iteration of the clock zeroes it, so it holds what the last step that removed water removed.
+struct SurfacePrecipitationFlux{T, F, I}
+    total :: T          # kg m⁻² s⁻¹, all phases
+    frozen :: F         # kg m⁻² s⁻¹, the ice part of the total
+    iteration :: I      # Base.RefValue{Int}: the iteration of the clock the fields belong to; nothing inside kernels
+end
+
+SurfacePrecipitationFlux(grid) = SurfacePrecipitationFlux(Field{Center, Center, Nothing}(grid),
+                                                          Field{Center, Center, Nothing}(grid),
+                                                          Ref(-1))
+
+Adapt.adapt_structure(to, flux::SurfacePrecipitationFlux) =
+    SurfacePrecipitationFlux(adapt(to, flux.total), adapt(to, flux.frozen), nothing)
+
+@regional SurfacePrecipitationFlux
+
+# Zero the flux at the first removal of a new iteration of the clock
+function begin_surface_precipitation!(flux::SurfacePrecipitationFlux, clock)
+    if flux.iteration[] != clock.iteration
+        set!(flux.total, 0)
+        set!(flux.frozen, 0)
+        flux.iteration[] = clock.iteration
+    end
+    return nothing
+end
+
+# Add the water `total`, of which `frozen` is ice, removed through the ground over a step of
+# length `step_Δt`, kg m⁻²
+@inline function add_surface_precipitation!(flux, i, j, total, frozen, step_Δt)
+    @inbounds begin
+        flux.total[i, j, 1] += total / step_Δt
+        flux.frozen[i, j, 1] += min(frozen, total) / step_Δt
+    end
+    return nothing
+end
 
 const MoistHydrostaticDynamics = HydrostaticDynamics{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any,
                                                      <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:HydrostaticMoisture}
@@ -78,6 +118,17 @@ const MoistHydrostaticDynamics = HydrostaticDynamics{<:Any, <:Any, <:Any, <:Any,
 const MoistHydrostaticModel = AtmosphereModel{<:MoistHydrostaticDynamics}
 const MoistHydrostaticPotentialTemperatureModel =
     AtmosphereModel{<:MoistHydrostaticDynamics, <:LiquidIcePotentialTemperatureFormulation}
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the water that the last time step of moist `HydrostaticDynamics` took through the ground,
+as a flux over that step: a named tuple of two-dimensional fields, `total` and its `frozen` part,
+in kg m⁻² s⁻¹. Over a step of length Δt, `total` times Δt is what that step added to the
+accumulated surface rain of the ledger, `dynamics.moisture.ledger.surface_rain`.
+"""
+surface_precipitation_flux(dynamics::MoistHydrostaticDynamics) =
+    (total = dynamics.moisture.surface_precipitation.total, frozen = dynamics.moisture.surface_precipitation.frozen)
 
 # Fluxes through the ground accumulated over the integration, per unit area. The frictional
 # heating is not a flux through a boundary: it is the potential energy that falling rain leaves
@@ -147,7 +198,9 @@ function stage_fallout(grid)
             potential_temperature_increment = CenterField(grid),        # K kg m⁻² s⁻¹
             first_stage_water_flux = ZFaceField(grid),
             first_stage_enthalpy_flux = ZFaceField(grid),
-            first_stage_potential_temperature_increment = CenterField(grid))
+            first_stage_potential_temperature_increment = CenterField(grid),
+            frozen_surface_water_flux = Field{Center, Center, Nothing}(grid),   # kg m⁻² s⁻¹, the ice through the ground
+            first_stage_frozen_surface_water_flux = Field{Center, Center, Nothing}(grid))
 end
 
 # The total surface pressure and the total density are those of the coordinate: the same fields
@@ -158,6 +211,7 @@ function HydrostaticMoisture(grid, surface_pressure, density, fallout)
                                density,
                                CenterField(grid),
                                precipitation_ledger(grid),
+                               SurfacePrecipitationFlux(grid),
                                fallout,
                                ColumnPhysicsDispatch(true),
                                StateValidation(1))
@@ -915,7 +969,7 @@ end
 @inline no_inflows(grid, condensates::Tuple) = (zero(grid), no_inflows(grid, Base.tail(condensates))...)
 
 @inline fall_through_cell!(i, j, k, grid, ::Tuple{}, ::Tuple{}, ::Tuple{}, Δz, Δtᵉ, T, T⁺, constants) =
-    ((), zero(grid), zero(grid), zero(grid), zero(grid), zero(grid))
+    ((), zero(grid), zero(grid), zero(grid), zero(grid), zero(grid), zero(grid))
 
 @inline function fall_through_cell!(i, j, k, grid, G::Tuple, condensates::Tuple, inflows::Tuple, Δz, Δtᵉ, T, T⁺, constants)
     condensate = first(condensates)
@@ -934,9 +988,10 @@ end
     h⁻ = condensate_enthalpy(condensate.liquid_fraction, T, constants)
     h⁺ = condensate_enthalpy(condensate.liquid_fraction, T⁺, constants)
 
-    outflows, ΣF⁻, ΣF⁺, Σ𝒬⁻, Σ𝒬⁺, largest = fall_through_cell!(i, j, k, grid, Base.tail(G), Base.tail(condensates),
+    outflows, ΣF⁻, ΣF⁺, Σ𝒬⁻, Σ𝒬⁺, largest, ΣFⁱ⁻ = fall_through_cell!(i, j, k, grid, Base.tail(G), Base.tail(condensates),
                                                               Base.tail(inflows), Δz, Δtᵉ, T, T⁺, constants)
-    return ((F⁻, outflows...), ΣF⁻ + F⁻, ΣF⁺ + F⁺, Σ𝒬⁻ + F⁻ * h⁻, Σ𝒬⁺ + F⁺ * h⁺, max(largest, courant))
+    return ((F⁻, outflows...), ΣF⁻ + F⁻, ΣF⁺ + F⁺, Σ𝒬⁻ + F⁻ * h⁻, Σ𝒬⁺ + F⁺ * h⁺, max(largest, courant),
+            ΣFⁱ⁻ + (1 - condensate.liquid_fraction) * F⁻)
 end
 
 # One term of a sum over the stages of a time step, in its two registers. The first stage sets
@@ -966,10 +1021,11 @@ end
     @inbounds begin
         largest = zero(grid)
         inflows = no_inflows(grid, condensates)  # nothing falls through the model top
+        frozen⁻ = zero(grid)                     # the ice through the lower face, at the end of the ground
 
         for k in Nz:-1:1
             Δz = Δzᶜᶜᶜ(i, j, k, grid)
-            inflows, F⁻, F⁺, 𝒬⁻, 𝒬⁺, courant = fall_through_cell!(i, j, k, grid, G, condensates, inflows, Δz, Δtᵉ,
+            inflows, F⁻, F⁺, 𝒬⁻, 𝒬⁺, courant, frozen⁻ = fall_through_cell!(i, j, k, grid, G, condensates, inflows, Δz, Δtᵉ,
                                                                  T[i, j, k], T[i, j, min(k + 1, Nz)], constants)
 
             Πᵏ = Π[i, j, k]
@@ -985,6 +1041,9 @@ end
 
             largest = max(largest, courant)
         end
+
+        accumulate_stage!(fallout.frozen_surface_water_flux, fallout.first_stage_frozen_surface_water_flux,
+                          i, j, 1, weight * frozen⁻, stage, one(frozen⁻))
 
         ledger.maximum_sedimentation_courant[i, j, 1] = max(ledger.maximum_sedimentation_courant[i, j, 1], largest)
     end
@@ -1285,7 +1344,8 @@ end
 # (`surface_pressure_kinetic_energy`): the rain carries it through the ground, and the ledger
 # books it with the enthalpy and the geopotential of the rain.
 @inline function sediment_column_rain!(i, j, grid, ρθ, ρqʳ, scaled, ρqˣ, ledger, column_enthalpy, microphysics,
-                                       dynamics, velocities, θ, θᵨ, p, T, qᵛ, qˡ, qⁱ, constants, κ, g, Δt, inflow_fall_speed)
+                                       dynamics, velocities, θ, θᵨ, p, T, qᵛ, qˡ, qⁱ, constants, κ, g, Δt, step_Δt,
+                                       inflow_fall_speed)
     Nz = size(grid, 3)
 
     ρ = dynamics.density
@@ -1347,6 +1407,7 @@ end
         accumulate_ledger!(ledger.precipitation_energy, i, j, (enthalpy_inflow + inflow * Φˢ[i, j, 1]) / g + kinetic_outflow)
         accumulate_ledger!(ledger.precipitation_kinetic_energy, i, j, kinetic_outflow)
         accumulate_ledger!(ledger.rain_frictional_heating, i, j, friction)
+        add_surface_precipitation!(dynamics.moisture.surface_precipitation, i, j, inflow / g, zero(inflow), step_Δt)
         ledger.maximum_sedimentation_courant[i, j, 1] = max(ledger.maximum_sedimentation_courant[i, j, 1], courant)
     end
 
@@ -1427,7 +1488,7 @@ end
             else
                 sediment_column_rain!(i, j, grid, ρθ, ρqʳ, scaled, ρqˣ, ledger, moisture.column_enthalpy, microphysics,
                                       dynamics, velocities, θ, θᵨ, p, temperature, water.qᵛ, water.qˡ, water.qⁱ, constants, κ, g, Δt,
-                                      inflow_fall_speed)
+                                      substeps * Δt, inflow_fall_speed)
             end
 
             diagnosed = false
@@ -1470,6 +1531,7 @@ function warm_rain_column_physics!(microphysics, model::MoistHydrostaticModel;
     κ = dry_air_gas_constant(constants) / cᵖᵈ
     g = constants.gravitational_acceleration
     substep_Δt = convert(eltype(grid), Δt / substeps)
+    begin_surface_precipitation!(dynamics.moisture.surface_precipitation, model.clock)
 
     @apply_regionally launch!(arch, grid, :xy, _apply_warm_rain_column_physics!,
                               model.formulation.potential_temperature_density, model.moisture_density, water.ρqʳ,
@@ -1503,6 +1565,7 @@ end
                                                             velocities.u, velocities.v, g)
         accumulate_ledger!(ledger.surface_rain, i, j, outflow / g)
         accumulate_ledger!(ledger.precipitation_energy, i, j, kinetic_outflow)
+        add_surface_precipitation!(dynamics.moisture.surface_precipitation, i, j, outflow / g, zero(outflow), Δt)
         accumulate_ledger!(ledger.precipitation_kinetic_energy, i, j, kinetic_outflow)
     end
 
@@ -1538,6 +1601,7 @@ end
     @inbounds begin
         weight = zero(grid)          # g P Δt
         enthalpy_outflow = zero(grid)
+        frozen = zero(grid)          # Pⁱ Δt
 
         for k in 1:Nz
             Δz = Δzᶜᶜᶜ(i, j, k, grid)
@@ -1550,6 +1614,7 @@ end
             column_enthalpy[i, j, k] = ifelse(ρc > 0, ℋ - ρc * cᵖᵈ * T, zero(ℋ))
 
             weight += g * Δz * ρc
+            frozen += Δz * ρcⁱ
             enthalpy_outflow += Δz * (ρcˡ * (cˡ * T - ℒˡ₀) + ρcⁱ * (cⁱ * T - ℒⁱ₀))
         end
 
@@ -1558,6 +1623,7 @@ end
         accumulate_ledger!(ledger.surface_rain, i, j, weight / g)
         accumulate_ledger!(ledger.precipitation_energy, i, j, enthalpy_outflow + weight * Φˢ[i, j, 1] / g + kinetic_outflow)
         accumulate_ledger!(ledger.precipitation_kinetic_energy, i, j, kinetic_outflow)
+        add_surface_precipitation!(dynamics.moisture.surface_precipitation, i, j, weight / g, frozen, Δt)
     end
 
     change_column_surface_pressure!(i, j, grid, - weight, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
@@ -1620,6 +1686,8 @@ end
         accumulate_ledger!(ledger.surface_rain, i, j, weight / g)
         accumulate_ledger!(ledger.precipitation_energy, i, j, enthalpy_outflow + weight * Φˢ[i, j, 1] / g + kinetic_outflow)
         accumulate_ledger!(ledger.precipitation_kinetic_energy, i, j, kinetic_outflow)
+        add_surface_precipitation!(dynamics.moisture.surface_precipitation, i, j, weight / g,
+                                   Δt * fallout.frozen_surface_water_flux[i, j, 1], Δt)
     end
 
     change_column_surface_pressure!(i, j, grid, - weight, ρθ, column_enthalpy, scaled, ρqˣ, dynamics, constants, κ, g)
@@ -1637,6 +1705,7 @@ function AtmosphereModels.precipitation_mass_change!(::MoistHydrostaticDynamics,
     column_enthalpy = dynamics.moisture.column_enthalpy
     ledger = dynamics.moisture.ledger
     Δt = convert(eltype(grid), Δt)
+    begin_surface_precipitation!(dynamics.moisture.surface_precipitation, model.clock)
 
     if !isnothing(stage_fallout)
         @apply_regionally launch!(grid.architecture, grid, :xy, _change_mass_by_stage_fallout!,
