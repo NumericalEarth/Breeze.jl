@@ -506,3 +506,178 @@ end
         @test maximum(abs, structured[name] .- accumulated[name]) ≤ 1000 * eps(scale)
     end
 end
+
+#####
+##### Microphysical sinks are budgeted against the advection of the same stage
+#####
+##### A sink is budgeted against what the stage-start state and every other tendency of the stage
+##### leave of a species. The microphysical sources are added right after the post-loop build of the
+##### scalars' other tendencies, and where that build leaves the advection is a matter of the storage
+##### layout: `TwoRegisterStorage` (a diagonal `β` and first-subdiagonal `α` and `γ`) adds the
+##### whole tendency to `Gⁿ`, and `AccumulatorStorage` keeps each scalar's advective tendency apart
+##### from `Gⁿ`, which then holds no advection. A sink budgeted against the stage-start state and
+##### `Gⁿ` alone can then remove what advection removes too, and the two together leave a species
+##### negative where neither does alone: at the edge of a cloud that the wind carries into dry air,
+##### cloud evaporation takes all the cloud that advection is also carrying away.
+##### `separate_stage_tendencies` hands the microphysics what `Gⁿ` lacks, and nothing that it holds.
+#####
+
+using Breeze.AtmosphereModels: separate_stage_tendencies
+using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics
+using Breeze.TimeSteppers: multirate_infinitesimal_step_tableau, post_loop_scalar_tendency_kernel
+using CloudMicrophysics.Parameters: CloudIce, CloudLiquid
+
+# One coefficient set and more for each storage layout, all strong-stability preserving. The last
+# is a set whose structure takes `TwoRegisterStorage`, made to accumulate.
+const sink_budget_layouts = ((:SSPMIS43, true, AccumulatorStorage),
+                             (:LowStorageMIS52, true, TwoRegisterStorage),
+                             (:ConvexLinearMIS4, true, TwoRegisterStorage),
+                             (:LowStorageMIS52, false, AccumulatorStorage))
+
+function with_stage_storage(build, structured)
+    structured_stage_storage[] = structured
+    try
+        return build()
+    finally
+        structured_stage_storage[] = true
+    end
+end
+
+@testset "Tendencies held apart from Gⁿ when the microphysical sources are added [$coefficients, $layout]" for
+        (coefficients, structured, layout) in sink_budget_layouts
+
+    @test multirate_infinitesimal_step_tableau(coefficients).strong_stability_coefficient > 0
+
+    grid = RectilinearGrid(default_arch; size = (8, 8), halo = (5, 5), x = (-20e3, 20e3), z = (0, 8e3),
+                           topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
+    ρc_forcing = Forcing((x, z, t) -> 1e-6 * exp(-(x / 5e3)^2))
+
+    build(post_loop_scalar_tendencies) = with_stage_storage(structured) do
+        AtmosphereModel(grid; dynamics, advection = WENO(order = 5), tracers = :ρc,
+                        closure = ScalarDiffusivity(ν = 10, κ = 10), forcing = (; ρc = ρc_forcing),
+                        timestepper = :MultirateInfinitesimalStep,
+                        timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies))
+    end
+
+    # Pre-loop, `update_state!` builds the whole tendency into `Gⁿ` with every layout.
+    pre_loop = build(false)
+    @test pre_loop.timestepper.storage isa layout
+    @test isnothing(separate_stage_tendencies(pre_loop.timestepper, pre_loop))
+
+    model = build(true)
+    ts = model.timestepper
+    @test ts.storage isa layout
+    set!(model; θ = θ_bubble, qᵛ = (x, z) -> q₀ * exp(-((x / 4e3)^2 + (z / 2e3)^2)),
+         ρ = HydrostaticallyBalancedDensity(), u = 5)
+    set!(model.tracers.ρc, (x, z) -> c₀ * exp(-((x / 3e3)^2 + ((z - 2e3) / 2e3)^2)))
+    parent(model.tracers.ρc) .*= parent(total_density(model.dynamics))
+
+    time_step!(model, 1)
+
+    # The tendencies as the first stage builds them, with a mass flux that no layout corrects:
+    # the whole of each...
+    ts.stage[] = 1
+    names = scalar_prognostic_names(model)
+    zero_scalar_tendencies!() = foreach(name -> fill!(parent(ts.Gⁿ[name]), 0), names)
+    tracer_density_to_specific!(model)
+    velocities = transport_velocities(model)
+    compute_scalar_tendencies!(model, fields(model), velocities, compute_scalar_tendency!)
+    full = Dict(name => Array(interior(ts.Gⁿ[name])) for name in names)
+
+    # ...its advective part...
+    zero_scalar_tendencies!()
+    compute_scalar_tendencies!(model, fields(model), velocities, SplitScalarTendencies(map(similar, ts.Gⁿ[names])))
+    advective = Dict(name => full[name] .- Array(interior(ts.Gⁿ[name])) for name in names)
+
+    # ...and what the stage's own build leaves in `Gⁿ` and apart from it for the microphysics.
+    zero_scalar_tendencies!()
+    compute_scalar_tendencies!(model, fields(model), velocities, post_loop_scalar_tendency_kernel(ts, model))
+    tracer_specific_to_density!(model)
+    separate = separate_stage_tendencies(ts, model)
+
+    # With accumulators the moisture and microphysical densities hold their advection apart; a plain
+    # tracer, which no microphysical budget reads, has its advection built after the microphysics.
+    if layout === AccumulatorStorage
+        @test haskey(separate, :ρqᵛ)
+        @test !haskey(separate, :ρc)
+    else
+        @test isnothing(separate)
+    end
+    held_apart = isnothing(separate) ? names : filter(name -> haskey(separate, name), names)
+
+    for name in held_apart
+        G = Array(interior(ts.Gⁿ[name]))
+        apart = isnothing(separate) ? zero(G) : Array(interior(separate[name]))
+        scale = maximum(abs, full[name])
+        @test maximum(abs, advective[name]) > 1e-3 * scale
+
+        # Together they are the whole tendency, once: nothing missing, and nothing counted twice.
+        @test maximum(abs, G .+ apart .- full[name]) < 1e-13 * scale
+
+        # What is held apart is the advection, which `Gⁿ` then lacks.
+        if layout === AccumulatorStorage
+            @test maximum(abs, apart .- advective[name]) < 1e-13 * scale
+        end
+    end
+end
+
+# The moist bubble of the positivity tests (multirate_infinitesimal_step.jl,
+# bulk_microphysics_positivity.jl), carried by a 20 m s⁻¹ wind: bounded advection of every
+# scalar, no repair of negative densities, and strong-stability-preserving coefficients.
+function advected_cloud_extrema(microphysics; coefficients = :SSPMIS43, structured = true, Δt = 10, Nt = 120)
+    FT = Float64
+    grid = RectilinearGrid(default_arch, FT; size = (32, 24), halo = (5, 5),
+                           x = (-10e3, 10e3), z = (0, 12e3), topology = (Periodic, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5,
+                                    standard_pressure = 1e5, reference_potential_temperature = 300)
+    model = with_stage_storage(structured) do
+        AtmosphereModel(grid; dynamics, microphysics, momentum_advection = WENO(order=5),
+                        scalar_advection = WENO(order=5, bounds=(0.0, 1e30)),
+                        timestepper = :MultirateInfinitesimalStep,
+                        timestepper_kwargs = (; coefficients, post_loop_scalar_tendencies = true))
+    end
+
+    constants = model.thermodynamic_constants
+    θᵢ(x, z) = 300 + 3 * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2
+    ρᵢ(x, z) = adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, constants)
+    set!(model; ρ = ρᵢ, θ = θᵢ, qᵗ = 0.012, u = 20)
+
+    prognostics = prognostic_fields(model)
+    names = filter(name -> startswith(string(name), "ρq") || startswith(string(name), "ρn") ||
+                           name === :ρbᶠ, keys(prognostics))
+    minima = Dict(name => Inf for name in names)
+    maxima = Dict(name => -Inf for name in names)
+
+    for _ in 1:Nt
+        time_step!(model, Δt)
+        for name in names
+            minima[name] = min(minima[name], minimum(prognostics[name]))
+            maxima[name] = max(maxima[name], maximum(prognostics[name]))
+        end
+    end
+
+    return minima, maxima, model.timestepper.storage
+end
+
+@testset "Post-loop advection counts against the microphysical sink budgets [$label, $coefficients, $layout]" for
+        (label, microphysics) in
+            (("P3", PredictedParticlePropertiesMicrophysics(Float64; negative_moisture_correction = nothing)),
+             ("1M", OneMomentCloudMicrophysics(Float64; negative_moisture_correction = nothing,
+                                               cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(Float64), CloudIce(Float64))))),
+        (coefficients, structured, layout) in sink_budget_layouts
+
+    minima, maxima, storage = advected_cloud_extrema(microphysics; coefficients, structured)
+    @test storage isa layout
+
+    # Cloud, rain and ice form and are carried through dry air...
+    @test all(maxima[name] > 0 for name in keys(maxima))
+
+    # ...and nothing goes negative, beyond the roundoff of the bounded advection of fields whose
+    # neighbouring cells are many orders of magnitude apart (see bulk_microphysics_positivity.jl):
+    # a few rounding errors of the largest value, which the sums of a stage accumulate (P3 rime
+    # volume reaches -1.25 eps times its maximum with `:ConvexLinearMIS4`). Budgeted without the
+    # advective tendency, P3 leaves cloud liquid at -4e-7 kg m⁻³ and the one-moment scheme rain at
+    # -2e-4 kg m⁻³, 4% of its maximum, with `:SSPMIS43`.
+    @test all(minima[name] ≥ -4 * eps(Float64) * maxima[name] for name in keys(minima))
+end

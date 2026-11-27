@@ -116,7 +116,8 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                              U⁰::U0 = map(similar, prognostic_fields),
                              rounding = RoundToNearest(),
                              post_loop_scalar_tendencies = false,
-                             moisture_forcing_names = nothing) where {TI, TG, U0}
+                             moisture_forcing_names = nothing,
+                             microphysical_names = ()) where {TI, TG, U0}
 
     FT = eltype(grid)
     rounding = materialize_rounding(rounding, grid.architecture)
@@ -179,6 +180,11 @@ the cost is confined to CFL targeting on one stage when ``Δt`` changes (see
     Δt_last = stage_fraction(timestepper, stage) * clock.last_Δt
     return ifelse(isfinite(Δt_stage), Δt_stage, Δt_last)
 end
+
+# Stages 2 and 3 update from U⁰. The tendencies of stage 1 are built at the end of the
+# previous step, when the current state is the coming Uⁿ.
+@inline AtmosphereModels.stage_starts_from_initial_state(::AcousticRungeKutta3, clock) = clock.stage > 1
+@inline AtmosphereModels.initial_state_fields(timestepper::AcousticRungeKutta3, model) = timestepper.U⁰
 
 #####
 ##### One stage of the outer scheme

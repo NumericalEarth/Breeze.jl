@@ -306,6 +306,13 @@ defaults admit mean droplet diameters of 1–40 μm.
     return ((μᶜˡ + 1) / ℂᶜˡ₅, (μᶜˡ + 1) / ℂᶜˡ₆)
 end
 
+# The droplet number [1/m³] that carries the cloud content `qᶜˡ_abs` [kg/m³] at the slope `λᶜˡ`:
+# N = qᶜˡ_abs × 6 λ³ / (π ρʷ Γ(μ+4)/Γ(μ+1)), with Γ(μ+4)/Γ(μ+1) = (μ+3)(μ+2)(μ+1).
+@inline function cloud_number_from_slope(qᶜˡ_abs, λᶜˡ, μᶜˡ, ρᴸ)
+    FT = typeof(qᶜˡ_abs)
+    return qᶜˡ_abs * FT(6) * λᶜˡ^3 / (FT(π) * ρᴸ * (μᶜˡ + 3) * (μᶜˡ + 2) * (μᶜˡ + 1))
+end
+
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
@@ -336,11 +343,8 @@ from the clamped slope to maintain mass-PSD consistency, so that downstream rate
     minimum_slope, maximum_slope = cloud_slope_bounds(μᶜˡ, parameters)
     λᶜˡ = clamp(unbounded_slope, minimum_slope, maximum_slope)
 
-    # If the slope was clamped, recompute N from it to maintain
-    # mass consistency: N = qᶜˡ_abs × λ³ × 6 / (π ρ_w Γ(μ+4)/Γ(μ+1))
-    # Since Γ(μ+4)/Γ(μ+1) = (μ+3)(μ+2)(μ+1), the result simplifies to:
-    Nᶜˡ_bounded = qᶜˡ_abs * FT(6) * λᶜˡ^3 /
-                  (FT(π) * ρᴸ * (μᶜˡ + 3) * (μᶜˡ + 2) * (μᶜˡ + 1))
+    # If the slope was clamped, recompute N from it to maintain mass consistency
+    Nᶜˡ_bounded = cloud_number_from_slope(qᶜˡ_abs, λᶜˡ, μᶜˡ, ρᴸ)
 
     # Only adjust when clamping was needed; use per-volume [1/m³] convention
     needs_adjustment = (unbounded_slope < minimum_slope) | (unbounded_slope > maximum_slope)

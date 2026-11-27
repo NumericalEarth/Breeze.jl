@@ -8,6 +8,7 @@ include(joinpath(@__DIR__, "setup.jl"))
 
 using Breeze
 using Breeze.AtmosphereModels: stage_time_step, moisture_prognostic_name
+using Breeze.Microphysics.PredictedParticleProperties: PredictedParticlePropertiesMicrophysics
 using Breeze.CompressibleEquations: freeze_linearization_state!, compute_pressure_remainder!,
                                     StageEntryForceRemainder, linearized_pressure_remainder,
                                     pressure_change, moisture_content_arguments,
@@ -295,6 +296,55 @@ end
     β = [1 0 0; 1//4 1//4 0; 1//6 1//6 2//3]
     shu_osher = MultirateInfinitesimalStepTableau(Float64, α, β, zeros(3, 3))
     @test shu_osher.strong_stability_coefficient ≈ 1 atol = 1e-6
+end
+
+@testset "P3 stays non-negative under strong-stability-preserving MIS [$coefficients]" for coefficients in (:TVDMISB, :SSPMIS43)
+    # A moist bubble that makes cloud, rain, ice, rime and liquid on ice, with bounded
+    # advection of every scalar and no repair of negative densities. Every stage of these
+    # coefficient sets is a convex combination of forward-Euler steps no longer than Δt / C,
+    # P3 budgets its sinks over that interval, and the bounded scheme is within its Courant
+    # budget, so nothing may go negative.
+    FT = Float64
+    grid = RectilinearGrid(default_arch, FT; size = (32, 24), halo = (5, 5),
+                           x = (-10e3, 10e3), z = (0, 12e3), topology = (Bounded, Flat, Bounded))
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); base_pressure = 1e5,
+                                    standard_pressure = 1e5, reference_potential_temperature = 300)
+    microphysics = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = nothing)
+    model = AtmosphereModel(grid; dynamics, microphysics, momentum_advection = WENO(order=5),
+                            scalar_advection = WENO(order=5, bounds=(0.0, 1e30)),
+                            timestepper = :MultirateInfinitesimalStep, timestepper_kwargs = (; coefficients))
+
+    constants = model.thermodynamic_constants
+    θᵢ(x, z) = 300 + 3 * cos(π * min(1, sqrt((x / 2e3)^2 + ((z - 2e3) / 2e3)^2)) / 2)^2
+    ρᵢ(x, z) = adiabatic_hydrostatic_density(z, 1e5, 300, 1e5, constants)
+    set!(model; ρ = ρᵢ, θ = θᵢ, qᵗ = 0.012)
+
+    Δt = 10
+    μ = model.microphysical_fields
+    names = (:ρqᶜˡ, :ρqʳ, :ρnʳ, :ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρqʷⁱ)
+    minima = Dict(name => Inf for name in names)
+    maxima = Dict(name => -Inf for name in names)
+    minimum_vapor = Inf
+
+    for _ in 1:180
+        time_step!(model, Δt)
+        for name in names
+            field = getproperty(μ, name)
+            minima[name] = min(minima[name], minimum(field))
+            maxima[name] = max(maxima[name], maximum(field))
+        end
+        minimum_vapor = min(minimum_vapor, minimum(model.moisture_density))
+    end
+
+    C = model.timestepper.tableau.strong_stability_coefficient
+    @test stage_time_step(model.timestepper, model.clock) ≈ Δt / C
+
+    # Every species forms, so the test exercises the mixed-phase sinks...
+    @test all(maxima[name] > 0 for name in names)
+
+    # ...and none of them, nor the vapor, is ever negative.
+    @test all(minima[name] ≥ 0 for name in names)
+    @test minimum_vapor > 0
 end
 
 @testset "MIS forward-Euler interval [$coefficients]" for coefficients in mis_coefficient_sets

@@ -380,8 +380,10 @@ end
 @inline AM.microphysical_state(::P3, ρ, ::Nothing, 𝒰, velocities) = AM.NothingMicrophysicalState(typeof(ρ))
 @inline AM.microphysical_state(::P3, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = AM.NothingMicrophysicalState(typeof(ρ))
 
-# Apply the same rime-state writeback to parcel prognostics that
-# `AM.update_microphysical_fields!` applies to grid fields.
+# Write the consistent rime state back to parcel prognostics after each parcel substep.
+# The grid path does not: there, the projection is applied only where the state is read
+# (see `AM.update_microphysical_fields!`), because writing it back would overwrite the
+# prognostics between the stages of a multistage time step.
 @inline function AM.postprocess_microphysical_prognostics(p3::P3, μ::NamedTuple, ρ)
     qⁱ = μ.ρqⁱ / ρ
     qᶠ = μ.ρqᶠ / ρ
@@ -470,24 +472,11 @@ end
                                  moments.nⁱ, ρ_mean)
 end
 
-# Write the consistent rime state back to the prognostic densities. `grid_microphysical_state`
-# already passes `ρqᶠ`/`ρbᶠ` through `consistent_rime_state`, so `ℳ.qᶠ`/`ℳ.bᶠ` are what every
-# process rate sees, and (through `μ.qᶠ`/`μ.bᶠ`) what the scalar transport operators advect:
-# the correction zeroes `qᶠ` when the rime volume vanishes, zeroes both below the rime-mass
-# floor, and caps `qᶠ` at the dry ice mass.
-#
-# Without this writeback the prognostic keeps the uncorrected mass while the advected specific
-# field reports the corrected one, so hidden rime receives no transport while the ice carrying
-# it moves away, then reappears once the correction stops firing.
-#
-# Rime mass is a *component* of the ice mass rather than an independent water reservoir
-# (`condensate_field_names` excludes `ρqᶠ`), so the clip moves the rime fraction Fᶠ and never
-# the total water or the total density.
-@inline function clamp_rime_state!(μ, i, j, k, ρ, ℳ::P3MicrophysicalState)
-    @inbounds μ.ρqᶠ[i, j, k] = ρ * ℳ.qᶠ
-    @inbounds μ.ρbᶠ[i, j, k] = ρ * ℳ.bᶠ
-    return nothing
-end
+# The rime state is made consistent where it is read (`consistent_rime_state`, inside
+# `grid_microphysical_state`), never written back to the prognostics. Writing it back would
+# overwrite the prognostic densities between the stages of a time step, which multistage
+# time steppers cannot account for, and would add grid-scale noise wherever it fires.
+# Transport stays consistent because the specific rime fields advect the raw prognostics.
 
 # GPU-compatible update_microphysical_fields! for P3.
 # Bypasses the generic extract_microphysical_prognostics which uses runtime Symbol
@@ -504,7 +493,6 @@ end
         # in the tendency kernel.
         velocities = (u = ZeroField(), v = ZeroField(), w = ZeroField())
         ℳ = AM.grid_microphysical_state(i, j, k, grid, p3, μ, ρ, 𝒰, velocities)
-        clamp_rime_state!(μ, i, j, k, ρ, ℳ)
         AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, p3, ℳ, ρ, 𝒰, constants)
     end
     return nothing
@@ -543,8 +531,10 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.nʳ[i, j, k]  = ℳ.nʳ
     @inbounds μ.qⁱ[i, j, k]  = ℳ.qⁱ
     @inbounds μ.nⁱ[i, j, k]  = ℳ.nⁱ
-    @inbounds μ.qᶠ[i, j, k]  = ℳ.qᶠ
-    @inbounds μ.bᶠ[i, j, k]  = ℳ.bᶠ
+    # The raw prognostic ratios, not the consistent rime state the rates see: these are what
+    # transport advects, and they must equal ρqᶠ / ρ and ρbᶠ / ρ.
+    @inbounds μ.qᶠ[i, j, k]  = μ.ρqᶠ[i, j, k] / ρ
+    @inbounds μ.bᶠ[i, j, k]  = μ.ρbᶠ[i, j, k] / ρ
     @inbounds μ.qʷⁱ[i, j, k] = ℳ.qʷⁱ
     write_cloud_number_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
     write_aerosol_diagnostic!(μ, i, j, k, grid, p3.aerosol, ℳ)
@@ -619,6 +609,8 @@ struct P3ProcessProps{FT}
     qⁱ_total :: FT
     nⁱ :: FT
     nⁱ_diagnostic :: FT
+    nⁱ_minimum_per_mass :: FT  # fewest ice particles per unit ice mass: the lower λ bound [1/kg]
+    nⁱ_maximum_per_mass :: FT  # most ice particles per unit ice mass: the upper λ bound [1/kg]
     ρ_mean :: FT
     Nᶜˡ :: FT
     λʳ :: FT
@@ -684,19 +676,34 @@ end
     return P3FallSpeedResult{FT}(𝕎ᶜˡ, 𝕎ⁿᶜˡ, 𝕎ʳ, 𝕎ⁿʳ, 𝕎ⁱ, 𝕎ⁿⁱ)
 end
 
+@inline p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
+                            constants, properties::P3ProcessProps,
+                            surface_temperature, temperature_tendency, pressure_tendency) =
+    p3_tendency_compute(p3, ρ, ℳ, 𝒰, constants, properties,
+                        surface_temperature, temperature_tendency, pressure_tendency,
+                        nothing)
+
+# `subgrid_statistics` are the statistics of the `condensation` option (`nothing`
+# for `GridMeanCondensation`).
 @inline function p3_tendency_compute(p3::P3, ρ, ℳ::P3MicrophysicalState, 𝒰,
                                      constants, properties::P3ProcessProps,
                                      surface_temperature, temperature_tendency,
-                                     pressure_tendency)
-    Fᶠ = properties.Fᶠ
-    ρᶠ = properties.ρᶠ
+                                     pressure_tendency, subgrid_statistics)
     # Passing `properties` lets compute_p3_process_rates skip the redundant
     # rain_slope_parameter / consistent_rime_state / qⁱ_total / Fˡ recomputation.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
                                      surface_temperature, temperature_tendency,
-                                     pressure_tendency)
+                                     pressure_tendency, subgrid_statistics)
 
-    # Tendency extraction
+    return p3_tendencies(p3, ρ, ℳ, properties, rates)
+end
+
+# The tendency of every P3 prognostic from one set of process rates.
+@inline function p3_tendencies(p3::P3, ρ, ℳ::P3MicrophysicalState, properties::P3ProcessProps,
+                               rates::P3ProcessRates, vapor_excess_tendency = tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates))
+    Fᶠ = properties.Fᶠ
+    ρᶠ = properties.ρᶠ
+
     cloud_mass_tendency = tendency_ρqᶜˡ(rates, ρ)
     # Prescribed-Nᶜˡ path: nc is a scheme parameter (not advected); tendency = 0.
     cloud_number_tendency = isnothing(p3.aerosol) ? zero(typeof(ρ)) :
@@ -708,7 +715,6 @@ end
     rime_mass_tendency = tendency_ρqᶠ(rates, ρ, Fᶠ)
     rime_volume_tendency = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
     coating_mass_tendency = tendency_ρqʷⁱ(rates, ρ, p3.process_rates)
-    vapor_excess_tendency = tendency_ρδqᵛ⁺ˡ(rates, ρ, p3.process_rates)
     vapor_mass_tendency = tendency_ρqᵛ(rates, ρ)
     # Aerosol depletion: every activated cloud droplet removes one from ρnᵃ. Zero in the
     # prescribed-Nᶜˡ path, and discarded when the population is fixed rather than prognostic.
@@ -754,31 +760,47 @@ end
     return nothing
 end
 
-# `G` is the reduced tuple from `p3_tendency_fields`. The `+=` lands on top of the
-# advection, diffusion and forcing the scalar kernels have already written.
-@inline function add_p3_tendencies!(G, i, j, k, grid, p3::P3, result::P3TendencyResult)
+# `G` is the reduced tuple from `p3_tendency_fields`. The sums land on top of the
+# advection, diffusion and forcing the scalar kernels have already written. `relaxations`
+# and `rime` are the number relaxations and rime limits (see `p3_driver.jl`), added after
+# the process tendency of the field they correct.
+#
+# Every sum is formed before any is stored. The compiler cannot tell that the tendency
+# fields do not alias, so a load that follows a store is issued again; loading first lets
+# it reuse the values that the sink fractions, relaxations and rime limits already read.
+@inline function add_p3_tendencies!(G, i, j, k, grid, p3::P3, result::P3TendencyResult, relaxations, rime)
     @inbounds begin
-        G.ρqᶜˡ[i, j, k] += result.tendency_ρqᶜˡ
-        G.ρqʳ[i, j, k]  += result.tendency_ρqʳ
-        G.ρnʳ[i, j, k]  += result.tendency_ρnʳ
-        G.ρqⁱ[i, j, k]  += result.tendency_ρqⁱ
-        G.ρnⁱ[i, j, k]  += result.tendency_ρnⁱ
-        G.ρqᶠ[i, j, k]  += result.tendency_ρqᶠ
-        G.ρbᶠ[i, j, k]  += result.tendency_ρbᶠ
-        G.ρqʷⁱ[i, j, k] += result.tendency_ρqʷⁱ
-        G.ρqᵛ[i, j, k]  += result.tendency_ρqᵛ
+        Gρqᶜˡ = G.ρqᶜˡ[i, j, k] + result.tendency_ρqᶜˡ
+        Gρqʳ  = G.ρqʳ[i, j, k]  + result.tendency_ρqʳ
+        Gρnʳ  = G.ρnʳ[i, j, k]  + result.tendency_ρnʳ + relaxations.rain
+        Gρqⁱ  = G.ρqⁱ[i, j, k]  + result.tendency_ρqⁱ
+        Gρnⁱ  = G.ρnⁱ[i, j, k]  + result.tendency_ρnⁱ + relaxations.ice
+        Gρqᶠ  = G.ρqᶠ[i, j, k]  + result.tendency_ρqᶠ + rime.mass
+        Gρbᶠ  = G.ρbᶠ[i, j, k]  + result.tendency_ρbᶠ + rime.volume
+        Gρqʷⁱ = G.ρqʷⁱ[i, j, k] + result.tendency_ρqʷⁱ
+        Gρqᵛ  = G.ρqᵛ[i, j, k]  + result.tendency_ρqᵛ
+
+        G.ρqᶜˡ[i, j, k] = Gρqᶜˡ
+        G.ρqʳ[i, j, k]  = Gρqʳ
+        G.ρnʳ[i, j, k]  = Gρnʳ
+        G.ρqⁱ[i, j, k]  = Gρqⁱ
+        G.ρnⁱ[i, j, k]  = Gρnⁱ
+        G.ρqᶠ[i, j, k]  = Gρqᶠ
+        G.ρbᶠ[i, j, k]  = Gρbᶠ
+        G.ρqʷⁱ[i, j, k] = Gρqʷⁱ
+        G.ρqᵛ[i, j, k]  = Gρqᵛ
     end
-    add_cloud_number_tendency!(G, i, j, k, grid, p3.aerosol, result)
+    add_cloud_number_tendency!(G, i, j, k, grid, p3.aerosol, result, relaxations)
     add_aerosol_tendency!(G, i, j, k, grid, p3.aerosol, result)
     add_vapor_excess_tendency!(G, i, j, k, grid, p3.process_rates, result)
     return nothing
 end
 
 # Match tendency writes to the allocated prognostic fields.
-@inline add_cloud_number_tendency!(G, i, j, k, grid, ::Nothing, result) = nothing
+@inline add_cloud_number_tendency!(G, i, j, k, grid, ::Nothing, result, relaxations) = nothing
 
-@inline function add_cloud_number_tendency!(G, i, j, k, grid, ::AerosolActivation, result)
-    @inbounds G.ρnᶜˡ[i, j, k] += result.tendency_ρnᶜˡ
+@inline function add_cloud_number_tendency!(G, i, j, k, grid, ::AerosolActivation, result, relaxations)
+    @inbounds G.ρnᶜˡ[i, j, k] = G.ρnᶜˡ[i, j, k] + result.tendency_ρnᶜˡ + relaxations.cloud
     return nothing
 end
 
@@ -915,8 +937,11 @@ end
     cloud = diagnose_cloud_dsd(p3, ℳ.qᶜˡ, ℳ.nᶜˡ, ρ)
     λʳ = rain_slope_parameter(ℳ.qʳ, ℳ.nʳ, p3.process_rates)
     ρ_mean = ice_mean_density(p3.ice.bulk, ice.prep)
+    nⁱ_minimum_per_mass = minimum_ice_number_per_mass(p3.ice.lambda_limiter, ice.prep, ice.qⁱ_total)
+    nⁱ_maximum_per_mass = maximum_ice_number_per_mass(p3.ice.lambda_limiter, ice.prep, ice.qⁱ_total)
     return P3ProcessProps{FT}(ice.qᶠ, ice.bᶠ, ice.Fᶠ, ice.Fˡ, ice.ρᶠ,
-                              ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, ρ_mean,
+                              ice.qⁱ_total, ice.nⁱ, ice.nⁱ_diagnostic, nⁱ_minimum_per_mass, nⁱ_maximum_per_mass,
+                              ρ_mean,
                               cloud.Nᶜˡ, λʳ)
 end
 
