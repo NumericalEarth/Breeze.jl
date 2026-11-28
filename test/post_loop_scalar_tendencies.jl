@@ -247,7 +247,7 @@ end
     # the two modes agree to round-off in a column, where the scalars have no advective tendency.
     grid = RectilinearGrid(default_arch; size = 16, z = (0, 1000), topology = (Flat, Flat, Bounded))
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(); reference_potential_temperature = 300)
-    closure = TKEBasedTurbulenceClosure()
+    closure = TKEBasedTurbulenceClosure(; subgrid_distribution = nothing, heating_budget_flux = nothing)
     mean_tke = Dict{Bool, Float64}()
     for post_loop_scalar_tendencies in (false, true)
         model = AtmosphereModel(grid; dynamics, closure, timestepper = :AcousticRungeKutta3,

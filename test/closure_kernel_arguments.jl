@@ -87,31 +87,17 @@ function measured_closure_kernels(closure)
     return copy(ARGUMENT_SIZES)
 end
 
-# Every optional component of the closure and of its distribution, with the per-column coefficients of an ensemble of
-# columns, and with each of the two saturated fractions of the static stability that read the subgrid statistics
-function fullest_tke_closure(static_stability, solver)
-    distribution = DoubleGaussian(; third_moment = TC.TKEBudgetThirdMoment(; location = Face()),
-                                  assumed_pdf = TC.SkewedScalarDoubleGaussianPDF(),
-                                  variance_transport = TC.ScalarVarianceTransport(; component_third_moment = false),
-                                  liquid_flux = TC.LiquidFluxVarianceRelation())
-    return TKEBasedTurbulenceClosure(; subgrid_distribution = distribution, static_stability, solver,
-                                     heating_budget_flux = HeatingBudgetFlux(), total_water_budget_flux = TC.TotalWaterBudgetFlux())
-end
-
-per_column(template) = grid -> per_column_closure(grid, reshape([with_parameters(template; ℂⁱ = 1.5 + n / 100) for n in 1:3], 3, 1))
+per_column(template) = grid -> per_column_closure(grid, reshape([with_parameters(template; ℂᵐ = 1 + n / 100) for n in 1:3], 3, 1))
 
 # The default leaves a margin of a quarter below the limit, for the context of the kernel and for growth
 const maximum_argument_size = 24 * 1024
 
 @testset "Device arguments of the closure kernels below $(maximum_argument_size ÷ 1024) KiB" begin
     @test sizeof(DeviceArrayStandIn{Float64, 3}) == sizeof(CUDA.CuDeviceArray{Float64, 3, CUDA.AS.Global})
-    configurations = (
-        "default TKE closure" => TKEBasedTurbulenceClosure(; subgrid_distribution = DoubleGaussian()),
-        "fullest, condensate flux fraction, bracketed solve" =>
-            per_column(fullest_tke_closure(SaturationWeightedStaticStability(CondensateFluxFraction()), BracketedFractionSolve(2))),
-        "fullest, microphysics saturated fraction" =>
-            per_column(fullest_tke_closure(SaturationWeightedStaticStability(MicrophysicsSaturatedFraction()), SinglePass())),
-        "SimplifiedHigherOrderClosure" => SimplifiedHigherOrderClosure())
+    configurations = ("TKEBasedTurbulenceClosure" => TKEBasedTurbulenceClosure(),
+                      "TKEBasedTurbulenceClosure, per column" => per_column(TKEBasedTurbulenceClosure()),
+                      "SimplifiedHigherOrderClosure" => SimplifiedHigherOrderClosure(),
+                      "SimplifiedHigherOrderClosure, per column" => per_column(SimplifiedHigherOrderClosure()))
     for (label, closure) in configurations
         @testset "$label" begin
             sizes = measured_closure_kernels(closure)

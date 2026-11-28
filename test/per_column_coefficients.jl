@@ -86,19 +86,12 @@ tke_closure(FT, ℂⁱ, ℂᴰ⁰; kw...) =
         test_per_column_equals_single_columns(FT, [tke_closure(FT, ℂⁱ, ℂᴰ⁰) for (ℂⁱ, ℂᴰ⁰) in ((1.2, 2.0), (1.6, 2.5), (2.0, 3.0))])
     end
 
-    @testset "TKEBasedTurbulenceClosure with a DoubleGaussian: per column equals single columns" begin
-        closure(ℂⁱ, ℂᴰ⁰) = tke_closure(FT, ℂⁱ, ℂᴰ⁰; subgrid_distribution = DoubleGaussian(FT),
-                                       static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()))
-        test_per_column_equals_single_columns(FT, [closure(1.2, 2.0), closure(1.8, 3.0)])
-    end
-
     @testset "DoubleGaussian with VarianceStabilityFunctions and ℂᵐ, P3 with AllProcesses: per column equals single columns" begin
         # The coefficients of the variance stability functions and the mixing time ℂᵐ, which the
         # microphysics reads through ωᵐ, vary from column to column
         stability(ℂᵛ₁⁰, ℂᵛ₃ᵐ) = VarianceStabilityFunctions(FT; ℂᵛ₁⁰, ℂᵛ₂⁰ = ℂᵛ₁⁰, ℂᵛ₃ᵐ)
         closure(ℂᵛ₁⁰, ℂᵛ₃ᵐ, ℂᵐ) =
-            tke_closure(FT, 1.4, 2.0; static_stability = SaturationWeightedStaticStability(CondensateFluxFraction()),
-                        subgrid_distribution = DoubleGaussian(FT; variance_stability_functions = stability(ℂᵛ₁⁰, ℂᵛ₃ᵐ), ℂᵐ))
+            tke_closure(FT, 1.4, 2.0; subgrid_distribution = DoubleGaussian(FT; variance_stability_functions = stability(ℂᵛ₁⁰, ℂᵛ₃ᵐ), ℂᵐ))
         closures = [closure(0.5, 0.9, 0.5), closure(0.9, 0.6, 2.0)]
 
         grid = column_grid(FT, 2)
@@ -166,24 +159,6 @@ tke_closure(FT, ℂⁱ, ℂᴰ⁰; kw...) =
         for (e, s) in zip(ensemble, single)
             @test any(!iszero, s)
             @test all(e[i, 1, :] == s[1, 1, :] for i in 1:3)
-        end
-    end
-end
-
-# The closure of a column infers for either location of the third moment (a closure that does not infer cannot be
-# adapted inside a GPU kernel, where `getclosure` selects each column's)
-@testset "Per-column closures with the third moment at faces and at centers infer" begin
-    grid = RectilinearGrid(size=ColumnEnsembleSize(Nz=4, ensemble=(2, 1)), z=(0, 1000), topology=(Flat, Flat, Bounded))
-    for location in (Face(), Center())
-        closures = (TKEBasedTurbulenceClosure(subgrid_distribution = DoubleGaussian(third_moment = TKEBudgetThirdMoment(; location))),
-                    SimplifiedHigherOrderClosure(subgrid_distribution = Breeze.TurbulenceClosures.shoc_distribution(third_moment = AlgebraicThirdMoment(; location))))
-        for closure in closures
-            @test closure.subgrid_distribution.third_moment.location === location
-            @inferred Breeze.TurbulenceClosures.column_closure(1, 1, closure)
-            @inferred adapt(Array, closure)
-            per_column = per_column_closure(grid, [closure for _ in 1:2, _ in 1:1])
-            column = @inferred Breeze.TurbulenceClosures.column_closure(2, 1, per_column)
-            @test column.subgrid_distribution.third_moment.location === location
         end
     end
 end

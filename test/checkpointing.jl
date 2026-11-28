@@ -120,7 +120,7 @@ end
         end
 
         @testset "prognostic TKE closure" begin
-            test_bitwise_restart(() -> anelastic_model(FT; closure=TKEBasedTurbulenceClosure()))
+            test_bitwise_restart(() -> anelastic_model(FT; closure=TKEBasedTurbulenceClosure(; subgrid_distribution=nothing, heating_budget_flux=nothing)))
         end
 
         @testset "gray radiation" begin
@@ -188,7 +188,7 @@ end
         end
 
         @testset "prognostic TKE closure" begin
-            test_bitwise_restart(() -> compressible_model(FT; closure=TKEBasedTurbulenceClosure()))
+            test_bitwise_restart(() -> compressible_model(FT; closure=TKEBasedTurbulenceClosure(; subgrid_distribution=nothing, heating_budget_flux=nothing)))
         end
 
         @testset "split-explicit, stochastic rounding" begin

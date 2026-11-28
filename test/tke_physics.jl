@@ -16,7 +16,7 @@ using Test
         (ExplicitTimeDiscretization(), VerticallyImplicitTimeDiscretization())
 
         grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 4), y=(0, 4), z=(0, 8))
-        closure = TKEBasedTurbulenceClosure(time_discretization; stability_functions = coefficients)
+        closure = TKEBasedTurbulenceClosure(time_discretization; stability_functions = coefficients, subgrid_distribution = nothing, heating_budget_flux = nothing)
         model = AtmosphereModel(grid; closure, advection=nothing)
         density = Array(interior(model.dynamics.reference_state.density))
 
@@ -45,7 +45,7 @@ using Test
         # With `minimum_tke` above e the turbulent velocity, and so the viscosity ν(z) = ℓ √eᵐⁱⁿ, does not change as
         # e grows: the only TKE source is ν (1 + t)². SSP-RK3 integrates this quadratic
         # exactly; averaging with whole-step-old velocities introduces a first-order bias.
-        closure = TKEBasedTurbulenceClosure(ExplicitTimeDiscretization(); stability_functions = coefficients, minimum_tke = 1e4)
+        closure = TKEBasedTurbulenceClosure(ExplicitTimeDiscretization(); stability_functions = coefficients, minimum_tke = 1e4, subgrid_distribution = nothing, heating_budget_flux = nothing)
         model = AtmosphereModel(grid; dynamics=PrescribedDynamics(reference_state),
                                 closure, advection=nothing)
         set!(model; θ=300, u=z -> z, ρe=1)

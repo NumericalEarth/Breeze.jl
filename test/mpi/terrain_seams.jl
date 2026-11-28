@@ -91,7 +91,7 @@ compared_fields(model) = Oceananigans.prognostic_fields(model)
     @test_throws ArgumentError AtmosphereModel(terrain_grid(arch); dynamics=terrain_dynamics(), advection=WENO(order=9))
 end
 
-closures = (nothing, SmagorinskyLilly(), TKEBasedTurbulenceClosure())
+closures = (nothing, SmagorinskyLilly(), TKEBasedTurbulenceClosure(; subgrid_distribution = nothing, heating_budget_flux = nothing))
 
 for closure in closures
     @testset "Terrain seams on Distributed($(partition_name)) with $(nameof(typeof(closure))) [$(nranks) ranks, $(use_gpu ? "GPU" : "CPU")]" begin
