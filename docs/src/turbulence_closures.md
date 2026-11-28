@@ -79,58 +79,31 @@ The mixing length is stored in `closure_fields.ℓᵐ`. The standalone construct
 ``ℂˢ = 1.316`` (`GradientLimitedMixingLength(ℂˢ=c)` also sets ``ℂⁱ = c``); the default closure uses the
 calibrated ``ℂˢ ≈ 0.788`` and ``ℂⁱ ≈ 1.78``.
 
-Each minimum above is the `blending` of the mixing length. The default, [`HardMinimum`](@ref), is
-continuous with a derivative that jumps where the binding length changes.
-[`HarmonicBlend`](@ref) replaces it with ``(ℓ₁^{-p} + ℓ₂^{-p})^{-1/p}``, which is smooth, never
-exceeds the minimum and tends to it as ``p → ∞``. In the gradient-limited length the blend is applied
-where the wall length meets the envelope and, recursively, at every step of the two sweeps that
-build the envelope. The recursion is not the ``p``-norm of all the bounds at once: every level
-between an obstacle and the level of interest adds its own bound again, so the blended envelope
-lies below the hard one by an amount that depends on ``p`` and on the grid spacing.
-
-The buoyancy length ``ℂˡᵇ \sqrt{e} / N`` enters every combination through its inverse ``N / (ℂˡᵇ \sqrt{e})``,
-which is zero in neutral and unstable air, where the stratification does not bound the length, so the combination
-of the bounds is finite there. The frequency ``N`` is the `buoyancy_frequency` of the
-[`GradientLimitedMixingLength`](@ref): [`PositivePartFrequency`](@ref), ``\sqrt{\max(N², 0)}``, by default, whose
-derivative is infinite as ``N² → 0⁺``, or [`RegularizedPositivePartFrequency`](@ref), ``N²₊ / \sqrt{N²₊ + N★²}``,
-which is zero in unstable air too, has a finite derivative at ``N² = 0`` and departs from ``\sqrt{N²}`` where
-``N ≲ N★``.
-
 ### Static stability
 
 ``N²`` enters the stratification length, the buoyancy flux, and ``Ri``. It is diagnosed once per
 stage at cell interfaces and stored in `closure_fields.N²`, according to the closure's
 `static_stability`. [`DryStaticStability`](@ref) uses ``g \, ∂_z \ln θᵨ``, with ``θᵨ`` the density
-potential temperature. [`MoistStaticStability`](@ref), the default without a subgrid distribution, uses the dry value where
-subsaturated and, where saturated, the static stability of a saturated displacement
-[as Durran and Klemp (1982)](@cite DurranKlemp1982) define it, in the model's own thermodynamics,
+potential temperature. [`MoistStaticStability`](@ref) uses the dry value where
+subsaturated and, where saturated, the saturated buoyancy frequency of
+[Durran and Klemp (1982)](@cite DurranKlemp1982),
 
 ```math
-N²_s = ∂_z b + (b_{qᶜ} - b_{qᵛ}) (c_q ∂_z qʷ - c_θ ∂_z θʷ - ∂_z qᶜ),
+N²_s = g \left[ \frac{1 + ℒ rˢ / (Rᵈ T)}{1 + ϵ ℒ² rˢ / (cᵖᵈ Rᵈ T²)}
+               \left( ∂_z \ln θ + \frac{ℒ}{cᵖᵈ T} ∂_z rˢ \right) - ∂_z rᵗ \right],
 ```
 
-where ``b_{qᶜ} - b_{qᵛ}`` is the buoyancy of the condensate relative to that of vapor at fixed pressure,
-``s = c_q qʷ - c_θ θʷ`` the saturation excess of the distributed water ``qʷ`` with liquid-ice potential
-temperature ``θʷ``, linearized about the cell, and ``qᶜ`` its condensate: the saturated stratification of the
-energetics of the applied fluxes, with the buoyancy gradient of the dynamics. The condensate condenses on the phase
-of the microphysics' condensate. Saturation is tested using the local moist density and excludes precipitation,
-while the loading in ``∂_z b`` includes all condensate. ``N²_s`` nearly vanishes
+where ``rˢ`` and ``rᵗ`` are the saturation and total-water mixing ratios, ``ϵ = Rᵈ / Rᵛ``,
+and ``ℒ`` is the latent heat, taken from the microphysics' phase equilibrium. Saturation is tested
+using the local moist density and excludes precipitation, while the loading term includes all
+condensate. ``N²_s`` nearly vanishes
 on a saturated adiabat, so mixing is not shut off inside stratocumulus.
 
-[`SaturationWeightedStaticStability`](@ref) replaces the switch at grid-mean saturation with a blend,
-``N² = (1 - aᴺ) N²_d + aᴺ N²_s``, the moist-buoyancy weighting of
-[Cuijpers and Duynkerke (1993)](@cite CuijpersDuynkerke1993). The weight ``aᴺ``, the effective
-saturated fraction, comes from the `fraction` argument, which extends
-`Breeze.TurbulenceClosures.saturated_stability_weightᶜᶜᶠ`.
-`SaturationWeightedStaticStability()` is `SaturationWeightedStaticStability(MicrophysicsSaturatedFraction())`,
-the saturated fraction of the subgrid model that the microphysics holds. A fraction that reads the
-mixing length reads the stored `closure_fields.ℓᵐ` of the previous update, because ``N²`` is
-diagnosed before ``ℓ``. With a `subgrid_distribution` ([`DoubleGaussian`](@ref)) the fraction can be
-[`CondensateFluxFraction`](@ref), ``aᴺ = w′qᶜ′ / w′s′``; because it depends on the diffusivities,
-the closure's `solver` ([`SinglePass`](@ref), [`DampedFixedPoint`](@ref) or
-[`BracketedFractionSolve`](@ref)) solves the two together. With a distribution,
-`SaturationWeightedStaticStability(CondensateFluxFraction())` is the default: the static stability is then the
-one the buoyancy production of the TKE carries, latent part included ([`LatentStratification`](@ref)).
+With a `subgrid_distribution` ([`DoubleGaussian`](@ref), the default) the static stability is
+[`SaturationWeightedStaticStability`](@ref)`(`[`CondensateFluxFraction`](@ref)`())`,
+``N² = (1 - aᴺ) N²_d + aᴺ N²_s`` with the saturated fraction ``aᴺ = w′qᶜ′ / w′s′`` of the distribution
+([Cuijpers and Duynkerke 1993](@cite CuijpersDuynkerke1993)), the stratification that the buoyancy production of
+the TKE carries ([`LatentStratification`](@ref)).
 
 ### Stability functions
 
