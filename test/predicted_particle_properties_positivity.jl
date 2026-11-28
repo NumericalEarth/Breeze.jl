@@ -338,14 +338,17 @@ one_cell_aerosol_fields(values) = NamedTuple{p3_aerosol_density_names}(map(v -> 
             limited_rates = PPP.patankar_limited_rates(rates, φ)
 
             # The activated number exceeds the reservoir, so the droplet number relaxes toward
-            # all of it, and backward Euler leaves 1 / (1 + x) of the reservoir, not (1 + x) / (1 + 2x).
+            # all of it. Alone, backward Euler would leave 1 / (1 + x) of the reservoir, not
+            # (1 + x) / (1 + 2x); the droplets it seeds grow over the same stage and share the
+            # decay of the vapor excess, 1 + x + Δt εᶜˡ, which leaves more of it.
             @test rates.ccn_activation_number > 0
             @test φ.aerosol == 1
             @test φ.condensation == 1
             @test limited_rates.ccn_activation_number == rates.ccn_activation_number
             @test limited_rates.ccn_activation_mass == rates.ccn_activation_mass
             remaining = (nᵃ - Δt * limited_rates.ccn_activation_number) / nᵃ
-            @test remaining ≈ 1 / (1 + x) rtol = 100 * eps(FT) * (1 + x)
+            @test 1 / (1 + x) * (1 - 100 * eps(FT) * (1 + x)) ≤ remaining < 1
+            @test rates.condensation > 0
         end
     end
 end
