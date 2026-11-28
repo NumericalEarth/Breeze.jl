@@ -165,8 +165,8 @@ Here ``ωˡ = 4π Dᵛ Nᶜˡ r̄ / ξˡ`` is the phase relaxation rate of the c
 (`AtmosphereModels.phase_relaxation_rate`). With the default
 `processes = CloudCondensationOnly()` of `SubgridCondensation`, rain, ice, activation and
 collection keep their grid-mean form; with `processes = AllProcesses()` the distribution also
-enters activation, the deposition nucleation of ice, autoconversion, accretion, the vapor exchange
-of the dry ice and the cap on the vapor sinks of ice (see
+enters activation, the deposition nucleation of ice, autoconversion, accretion and the vapor exchange
+of the dry ice (see
 [`AllProcesses`](@ref Breeze.Microphysics.PredictedParticleProperties.AllProcesses)).
 
 The `cloud_relaxation` keyword selects ``ωˡ``:
