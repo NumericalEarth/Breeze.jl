@@ -62,22 +62,14 @@ end
     θ_init = initial_θ()
     dθ_init = CenterField(grid); set!(dθ_init, 0)
     dmodel = Enzyme.make_zero(model)
-    # The gradient does not compile: the optimized StableHLO multiplies mismatched slices of the inverse face and center
-    # spacings of the stretched grid ("stablehlo.multiply" of tensor<5xf64> by tensor<4xf64>, at grid.z.Δ⁻¹ᵃᵃᶠ), a
-    # failure that appeared with the sinks and budget fluxes of e65b95d2. The exchange solve alone,
-    # `exchange_amplitudes!` on the same column, compiles and differentiates, so the failure needs more of the closure.
-    # When the gradient compiles, @test_broken fails and the checks below become the test.
-    compiled_grad = try
-        @with_stack_size Reactant.@compile compile_options=compile_options grad_tke_loss(model, dmodel, θ_init, dθ_init, Δt, Ns)
-    catch
-        nothing
-    end
-    @test_broken !isnothing(compiled_grad)
-    if !isnothing(compiled_grad)
-        dθ, loss_value = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
-        gradient = @allowscalar Array(interior(dθ))
-        @test isfinite(loss_value)
-        @test all(isfinite, gradient)
-        @test any(!iszero, gradient)
-    end
+    # The gradient compiles since the stability functions at the centers read the stored shear of the faces, rather
+    # than differentiating it there (the mixed-shape multiply of the inverse face and center spacings it raised
+    # through the dissipative heating rate of the heating budget flux, on a stretched grid)
+    compiled_grad = @with_stack_size Reactant.@compile compile_options=compile_options grad_tke_loss(
+        model, dmodel, θ_init, dθ_init, Δt, Ns)
+    dθ, loss_value = @with_stack_size compiled_grad(model, dmodel, θ_init, dθ_init, Δt, Ns)
+    gradient = @allowscalar Array(interior(dθ))
+    @test isfinite(loss_value)
+    @test all(isfinite, gradient)
+    @test any(!iszero, gradient)
 end

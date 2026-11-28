@@ -20,8 +20,9 @@ end
 
 # Reconstruct N² and S² separately rather than averaging the face Richardson numbers, so that the
 # center sees the stratification and shear of both faces even when Ri changes sign between them.
-@inline function Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N², e, ℓ)
-    S² = ℑbzᵃᵃᶜ(i, j, k, grid, effective_shear_squaredᶜᶜᶠ, closure, velocities, e, ℓ)
+# At the centers, from the stored effective squared shear of the faces, S²ᶠ
+@inline function Riᶜᶜᶜ(i, j, k, grid, closure, S²ᶠ, N², e, ℓ)
+    S² = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, S²ᶠ)
     N²ᵢ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
     return richardson_number(N²ᵢ, S², closure.shear.minimum_shear_squared)
 end
@@ -150,7 +151,7 @@ end
     return dissipation_stability_function(closure.stability_functions, Ri)
 end
 
-@inline function dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::RichardsonStabilityClosure, velocities, N², e=nothing, ℓ=nothing)
-    Ri = Riᶜᶜᶜ(i, j, k, grid, closure, velocities, N², e, ℓ)
+@inline function dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::RichardsonStabilityClosure, S²ᶠ, N², e=nothing, ℓ=nothing)
+    Ri = Riᶜᶜᶜ(i, j, k, grid, closure, S²ᶠ, N², e, ℓ)
     return dissipation_stability_function(closure.stability_functions, Ri)
 end

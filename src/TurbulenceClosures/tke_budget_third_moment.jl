@@ -50,7 +50,7 @@ pass_name(name) = Symbol(:pass_, name)
 function pass_closure_fields(closure_fields::TKEClosureFields, cl)
     Kᵘ, Kᶜ, Kᵉ = cl.pass_Kᵘ, cl.pass_Kᶜ, cl.pass_Kᵉ
     tracer_diffusivities = map(K -> K === closure_fields.Kᵉ ? Kᵉ : Kᶜ, closure_fields.tupled_tracer_diffusivities)
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, cl.pass_N², cl.pass_ℓᵐ, cl.pass_ℓˢ, cl.pass_ℓˢᶜ, closure_fields.Lᵉ, tracer_diffusivities,
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, cl.pass_N², closure_fields.S², cl.pass_ℓᵐ, cl.pass_ℓˢ, cl.pass_ℓˢᶜ, closure_fields.Lᵉ, tracer_diffusivities,
                             closure_fields.tupled_implicit_linear_coefficients, closure_fields.subgrid_cloud,
                             closure_fields.column_stability)
 end

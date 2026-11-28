@@ -171,8 +171,9 @@ const TurbulentRichardsonClosure = TKEBasedTurbulenceClosure{<:Any, <:Any, <:TRS
     return τ² * @inbounds(N²[i, j, k]), τ² * S²
 end
 
-@inline function stratification_and_shear_numbersᶜᶜᶜ(i, j, k, grid, closure, velocities, N², e, ℓ)
-    S² = ℑbzᵃᵃᶜ(i, j, k, grid, effective_shear_squaredᶜᶜᶠ, closure, velocities, e, ℓ) + closure.shear.minimum_shear_squared
+# At the centers, from the stored effective squared shear of the faces, S²ᶠ
+@inline function stratification_and_shear_numbersᶜᶜᶜ(i, j, k, grid, closure, S²ᶠ, N², e, ℓ)
+    S² = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, S²ᶠ) + closure.shear.minimum_shear_squared
     N²ᵢ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, N²)
     τʷ = ℑbzᵃᵃᶜ(i, j, k, grid, face_valueᶜᶜᶠ, ℓ) / turbulent_velocityᶜᶜᶜ(i, j, k, grid, closure, e)
     ml = closure.mixing_length
@@ -202,7 +203,7 @@ end
     return dissipation_stability_function(closure.stability_functions, αᴺ, αˢ)
 end
 
-@inline function dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::TurbulentRichardsonClosure, velocities, N², e, ℓ)
-    αᴺ, αˢ = stratification_and_shear_numbersᶜᶜᶜ(i, j, k, grid, closure, velocities, N², e, ℓ)
+@inline function dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure::TurbulentRichardsonClosure, S²ᶠ, N², e, ℓ)
+    αᴺ, αˢ = stratification_and_shear_numbersᶜᶜᶜ(i, j, k, grid, closure, S²ᶠ, N², e, ℓ)
     return dissipation_stability_function(closure.stability_functions, αᴺ, αˢ)
 end

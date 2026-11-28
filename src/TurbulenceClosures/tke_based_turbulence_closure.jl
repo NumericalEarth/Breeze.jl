@@ -293,6 +293,7 @@ struct TKEClosureFields{K, N, L, KC, LC, SG, CS, C}
     Kᶜ :: K # eddy diffusivity for scalars, at (Center, Center, Face)
     Kᵉ :: K # eddy diffusivity for turbulent kinetic energy, at (Center, Center, Face)
     N² :: N # static stability, at (Center, Center, Face)
+    S² :: N # effective squared shear of the stability functions, at (Center, Center, Face), without its floor
     ℓᵐ :: N # the primary mixing length, at (Center, Center, Face)
     ℓˢ :: N # stratification-only envelope, before capping at the surface length
     ℓˢᶜ :: C
@@ -308,6 +309,7 @@ Adapt.adapt_structure(to, fields::TKEClosureFields) =
                      adapt(to, fields.Kᶜ),
                      adapt(to, fields.Kᵉ),
                      adapt(to, fields.N²),
+                     adapt(to, fields.S²),
                      adapt(to, fields.ℓᵐ),
                      adapt(to, fields.ℓˢ),
                      adapt(to, fields.ℓˢᶜ),
@@ -329,6 +331,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
     Kᶜ = ZFaceField(grid, boundary_conditions=bcs.Kᶜ)
     Kᵉ = ZFaceField(grid, boundary_conditions=bcs.Kᵉ)
     N² = ZFaceField(grid)
+    S² = ZFaceField(grid)
     ℓ = ZFaceField(grid)
     ℓˢ = ZFaceField(grid)
     ℓˢᶜ = CenterField(grid)
@@ -341,7 +344,7 @@ function Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, trace
 
     column_stability = column_stability_field(grid, closure_stability_functions(closure))
 
-    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², ℓ, ℓˢ, ℓˢᶜ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients, subgrid_cloud,
+    return TKEClosureFields(Kᵘ, Kᶜ, Kᵉ, N², S², ℓ, ℓˢ, ℓˢᶜ, Lᵉ, tracer_diffusivities, implicit_linear_coefficients, subgrid_cloud,
                             column_stability)
 end
 
@@ -543,6 +546,13 @@ end
 ##### Diffusivities
 #####
 
+# The effective squared shear at the faces, once per evaluation: the stability functions at the centers average it
+@kernel function _compute_tke_shear_squared!(S², grid, closure, velocities, e, closure_fields)
+    i, j, k = @index(Global, NTuple)
+    closure_ij = getclosure(i, j, closure)
+    @inbounds S²[i, j, k] = effective_shear_squaredᶜᶜᶠ(i, j, k, grid, closure_ij, velocities, e, closure_fields.ℓᵐ)
+end
+
 @kernel function _compute_tke_static_stability!(N², grid, closure, tracers, buoyancy, closure_fields)
     i, j, k = @index(Global, NTuple)
     closure_ij = getclosure(i, j, closure)
@@ -580,7 +590,7 @@ end
 @inline function dissipationᶜᶜᶜ(i, j, k, grid, closure, e, velocities, closure_fields)
     eᵢ = @inbounds e[i, j, k]
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
-    𝕊ᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
+    𝕊ᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, closure_fields.S², closure_fields.N², e, closure_fields.ℓᵐ)
     turbulent = eᵢ > 0
     e₊ = ifelse(turbulent, eᵢ, one(eᵢ))
     return ifelse(turbulent, 𝕊ᴰ * e₊ * sqrt(e₊) / ℓ, zero(eᵢ))
@@ -589,7 +599,7 @@ end
 @inline function tke_sink_rate(i, j, k, grid, closure, e, B, velocities, closure_fields)
     eᵢ = @inbounds e[i, j, k]
     ℓ = mixing_lengthᶜᶜᶜ(i, j, k, grid, closure, e, closure_fields)
-    𝕊ᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, velocities, closure_fields.N², e, closure_fields.ℓᵐ)
+    𝕊ᴰ = dissipation_stability_functionᶜᶜᶜ(i, j, k, grid, closure, closure_fields.S², closure_fields.N², e, closure_fields.ℓᵐ)
 
     τ = closure.negative_tke_damping_time_scale
     ω = ifelse(eᵢ < 0, 1 / τ, 𝕊ᴰ * sqrt(abs(eᵢ)) / ℓ)
@@ -645,6 +655,8 @@ function compute_stability_and_diffusivities!(closure_fields, closure, model, tr
     arch = grid.architecture
     buoyancy = Oceananigans.TurbulenceClosures.buoyancy_force(model)
 
+    launch!(arch, grid, parameters, _compute_tke_shear_squared!,
+            closure_fields.S², grid, closure, model.velocities, tracers[TKE_NAME], closure_fields)
     launch!(arch, grid, parameters, _compute_tke_static_stability!,
             closure_fields.N², grid, closure, tracers, buoyancy, closure_fields)
 
