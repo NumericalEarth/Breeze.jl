@@ -137,6 +137,21 @@ column(field) = Array(interior(field, 1, 1, :))
     @test closure.mixing_length.ℂⁱ === FT(1.5609936948461662)
     @test closure.mixing_length.ℂˢ * (sf.ℂᵘ⁰^3 / sf.ℂᴰ⁰)^(1/4) ≈ 0.4 rtol=1e-6
     @test sf.ℂᵘ⁰ / sf.ℂᶜ⁰ ≈ 0.15900569445804447 / 0.19872163735761372
+    @test neutral_wall_length_coefficient(TurbulentRichardsonStabilityFunction()) === 1.299067385616381
+
+    # The default wall coefficient follows the neutral values of the stability functions given
+    changed = TurbulentRichardsonStabilityFunction(; ℂᵘ⁰ = 0.12, ℂᴰ⁰ = 0.3)
+    derived = plain_closure(FT; stability_functions = changed).mixing_length
+    @test derived.ℂˢ === FT(0.4 * (0.3 / 0.12^3)^(1/4))
+    @test derived.ℂⁱ === FT(1.5609936948461662)
+    @test neutral_wall_length_coefficient(changed; von_karman_constant = 0.41) ≈ 0.41 / 0.4 * derived.ℂˢ
+    constant = ConstantStabilityFunctions()
+    @test plain_closure(FT; stability_functions = constant).mixing_length.ℂˢ ===
+          FT(neutral_wall_length_coefficient(constant))
+    # A mixing length that is given keeps its wall coefficient
+    @test plain_closure(FT; stability_functions = changed,
+                        mixing_length = GradientLimitedMixingLength(ℂˢ = 2)).mixing_length.ℂˢ === FT(2)
+
     @test GradientLimitedMixingLength(2).ℂⁱ == 2
     @test GradientLimitedMixingLength{FT}(2).ℂⁱ === FT(2)
     @test GradientLimitedMixingLength(ℂˢ=2, ℂⁱ=0.5).ℂⁱ === 0.5

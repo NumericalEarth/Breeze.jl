@@ -251,7 +251,7 @@ export
     TKEBasedTurbulenceClosure, AbstractMixingLength, LocalMinimumMixingLength, IntegralMixingLength,
     GradientLimitedMixingLength,
     ConstantStabilityFunctions,
-    RationalStabilityFunction, TurbulentRichardsonStabilityFunction,
+    RationalStabilityFunction, TurbulentRichardsonStabilityFunction, neutral_wall_length_coefficient,
     DryStaticStability, MoistStaticStability, SaturationWeightedStaticStability,
     GridMeanShear,
     SimplifiedHigherOrderClosure, SHOC,

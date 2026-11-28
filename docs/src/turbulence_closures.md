@@ -149,7 +149,9 @@ this bound keeps it below one, the width condition of the stability functions. T
 with ``ℂᴿⁱ⁻ = 16``, ``ℂᴿⁱ⁺ = 0.33`` and ``ℂᵅ = 4.4``. Under strong shear ``ℂᴿⁱ⁺ = 0.33`` puts the
 stable functions halfway through their transition, ``v = 1/2``, at ``Ri = 0.20``, where turbulence
 observations show marginal stability (``v = 0.1`` at ``Ri = 0.045``, ``v = 0.9`` at ``Ri = 0.69``);
-``ℂᴿⁱ⁻ = 16`` puts the unstable halfway point at ``Ri = -9.2``. The mixing length's wall coefficient is ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 1.30`` and its
+``ℂᴿⁱ⁻ = 16`` puts the unstable halfway point at ``Ri = -9.2``. The mixing length's wall coefficient is ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4} ≈ 1.30``,
+[`neutral_wall_length_coefficient`](@ref) of the stability functions, which [`TKEBasedTurbulenceClosure`](@ref)
+computes from the stability functions it is given unless a mixing length is given, and its
 interior slope ``ℂⁱ ≈ 1.56``.
 
 [`RationalStabilityFunction`](@ref) is

@@ -37,6 +37,41 @@ function Base.show(io::IO, sf::ConstantStabilityFunctions)
     show_stability_function_lines(io, sf, "")
 end
 
+# The neutral momentum and dissipation coefficients ``(ℂᵘ⁰, ℂᴰ⁰)`` of the stability functions
+neutral_momentum_and_dissipation_coefficients(sf::ConstantStabilityFunctions) = (sf.ℂᵘ, sf.ℂᴰ)
+neutral_momentum_and_dissipation_coefficients(sf) = (sf.ℂᵘ⁰, sf.ℂᴰ⁰)
+
+"""
+$(TYPEDSIGNATURES_WITH_DEFAULTS)
+
+Return the wall coefficient ``ℂˢ`` of a [`GradientLimitedMixingLength`](@ref) with which the
+neutral values ``ℂᵘ⁰`` and ``ℂᴰ⁰`` of `stability_functions` give a log layer with von Kármán's
+constant ``κ`` = `von_karman_constant`:
+
+```math
+ℂˢ = κ \\left( \\frac{ℂᴰ⁰}{(ℂᵘ⁰)^3} \\right)^{1/4} .
+```
+
+In a neutral surface layer, where shear production balances dissipation, the mixing length
+``ℓ = ℂˢ z`` gives the eddy viscosity ``ℂᵘ⁰ ℓ \\sqrt{e} = κ u_\\star z`` for this ``ℂˢ``. It is the
+default wall coefficient of [`TKEBasedTurbulenceClosure`](@ref), from the stability functions it
+is given.
+
+```jldoctest
+using Breeze
+
+neutral_wall_length_coefficient(TurbulentRichardsonStabilityFunction())
+
+# output
+1.299067385616381
+```
+"""
+function neutral_wall_length_coefficient(stability_functions; von_karman_constant = 0.4)
+    ℂᵘ⁰, ℂᴰ⁰ = neutral_momentum_and_dissipation_coefficients(stability_functions)
+    κ = von_karman_constant
+    return κ * (ℂᴰ⁰ / ℂᵘ⁰^3)^(1/4)
+end
+
 #####
 ##### Mixing length
 #####
@@ -165,12 +200,16 @@ $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
 Construct a [`TKEBasedTurbulenceClosure`](@ref). The defaults are the calibrated configuration: a
 [`GradientLimitedMixingLength`](@ref), [`TurbulentRichardsonStabilityFunction`](@ref), the [`DoubleGaussian`](@ref)
-subgrid distribution with its latent static stability, and a [`HeatingBudgetFlux`](@ref).
+subgrid distribution with its latent static stability, and a [`HeatingBudgetFlux`](@ref). The mixing length has the
+wall coefficient ``ℂˢ = 0.4 (ℂᴰ⁰ / ℂᵘ⁰³)^{1/4}`` of the neutral values of `stability_functions`,
+[`neutral_wall_length_coefficient`](@ref)`(stability_functions)` (1.299067385616381 for the default stability
+functions); a `mixing_length` that is given keeps its own ``ℂˢ``.
 """
 function TKEBasedTurbulenceClosure(time_discretization::TD = VerticallyImplicitTimeDiscretization(),
                                    FT = Oceananigans.defaults.FloatType;
-                                   mixing_length = GradientLimitedMixingLength(ℂˢ = 1.299067385616381, ℂⁱ = 1.5609936948461662),
                                    stability_functions = TurbulentRichardsonStabilityFunction(),
+                                   mixing_length = GradientLimitedMixingLength(ℂˢ = neutral_wall_length_coefficient(stability_functions),
+                                                                               ℂⁱ = 1.5609936948461662),
                                    subgrid_distribution = DoubleGaussian(FT),
                                    static_stability = default_static_stability(subgrid_distribution),
                                    minimum_tke = 1e-6,
