@@ -84,7 +84,8 @@ function grad_column_loss(model, dmodel, θ_init, dθ_init, Δt, Nsteps)
 end
 
 @testset "Reactant forward and gradient of a column [$label]" for (label, closure) in
-        (("TKEBasedTurbulenceClosure", TKEBasedTurbulenceClosure()), ("SimplifiedHigherOrderClosure", SimplifiedHigherOrderClosure()))
+        (("TKEBasedTurbulenceClosure", TKEBasedTurbulenceClosure(; subgrid_distribution = nothing, heating_budget_flux = nothing)),
+         ("SimplifiedHigherOrderClosure", SimplifiedHigherOrderClosure()))
     Δt = 1.0
     Ns = 2
     grid = RectilinearGrid(ReactantState(); size = 8, z = (0, 2000), topology = (Flat, Flat, Bounded))
