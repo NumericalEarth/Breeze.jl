@@ -502,19 +502,6 @@ end
     return (P⁻ + P⁺, (bᵢ - d.ξⁱˡ * qᶜˡ⁻) * P⁻ + βⁱᵢ * M⁻ + bᵢ * P⁺ + rᵢ * M⁺)
 end
 
-@inline available_ice_excess(::Nothing, grid_excess, excess) = max(0, excess)
-
-@inline available_ice_excess(d::NamedTuple{names}, grid_excess, excess) where names =
-    available_ice_excess(Val(:mⁱ ∈ names), d, grid_excess, excess)
-
-@inline available_ice_excess(::Val{false}, d, grid_excess, excess) = max(0, excess)
-
-@inline function available_ice_excess(::Val{true}, d, grid_excess, excess)
-    shift = excess - grid_excess
-    P, M = ice_excess_exceedance(d, -shift)
-    return ifelse(d.degenerate, max(0, excess), max(0, M + shift * P))
-end
-
 @inline function positive_linear_exceedance(m, σ, r, c)
     FT = typeof(m)
     r₊ = ifelse(r > 0, r, one(FT))

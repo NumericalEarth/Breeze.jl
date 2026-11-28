@@ -21,6 +21,7 @@ struct P3CoupledVaporRates{FT}
     coating_evaporation :: FT
     cloud_relaxation :: FT  # vapor relaxation coefficient of cloud liquid [s⁻¹]
     rain_relaxation :: FT   # vapor relaxation coefficient of rain [s⁻¹]
+    ice_relaxation :: FT    # vapor relaxation coefficient of dry ice, εⁱ [s⁻¹], before its calibration factor
 end
 
 """
@@ -393,7 +394,7 @@ cloud/precipitation fraction framework is handled separately.
 
     return P3CoupledVaporRates{FT}(condensation, rain_evaporation, rain_condensation,
                                    deposition, coating_condensation, coating_evaporation,
-                                   cloud_relaxation, rain_relaxation)
+                                   cloud_relaxation, rain_relaxation, dry_ice_relaxation)
 end
 
 # The vapor growth of dry ice over the subgrid distribution. The ice fills the cell; at each point it grows as on the

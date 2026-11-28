@@ -322,7 +322,8 @@ end
                                            LiquidRelaxationStage(Δt, 0.0, 0.0, true, 0.0, rain, Inf))
     supplied, empty = rates(Inf), rates(0.0)
     # The rate asks for the same evaporation either way; the stage applies none of it where it
-    # leaves no rain, and deposition then takes no more than the ice excess holds
+    # leaves no rain, and deposition, relaxed implicitly over the stage, then takes no more than the
+    # ice excess holds, however long the stage
     @test supplied.rain_evaporation > 0
     @test empty.rain_evaporation == supplied.rain_evaporation
     @test 0 < Δt * empty.deposition ≤ ice_excess
@@ -335,12 +336,12 @@ end
     qᵛ = ice_saturation + ice_excess
     P = air_pressure(𝒰, constants)
     capped(coating) = PPP.limit_ice_vapor_rates(liquid, 1e-6, 0.0, 0.0, qᵛ, T, P, qᵛ, constants, 10.0, 273.15,
-                                                0.0, 0.0, Δt, 0.0, Inf, coating).dep
+                                                0.0, 0.0, Δt, 0.0, Inf, coating, 0.0, 1e-2, p3.process_rates).dep
     @test capped(0.0) < capped(1e-6) < capped(Inf)
     @test capped(Inf) ≈ capped(Δt * 1e-7)
 end
 
-@testset "Activation and rain growth share the vapor excess" begin
+@testset "Activation and rain growth share the vapor" begin
     constants = ThermodynamicConstants(Float64)
     p3 = P3Microphysics(Float64)
     vapor = cell_saturation(0.0, constants)
@@ -350,13 +351,12 @@ end
     end
     𝒰 = cell_state(vapor, 0.0, constants)
     saturation = saturation_specific_humidity(285.0, density(𝒰, constants), constants, PlanarLiquidSurface())
-    # The psychrometric correction of the relaxation's vapor excess (`implicit_liquid_vapor_rates`)
-    ξˡ = PPP.liquid_psychrometric_correction(constants, PPP.vaporization_latent_heat(constants, 285.0), saturation, 285.0)
     Δt = 1e4
     r = stage_rates(p3, vapor, 0.0, constants, Δt; qʳ = 1e-3, nʳ = 1e6)
     @test r.rain_condensation > 0
     @test r.ccn_activation_mass > 0
-    @test Δt * (r.ccn_activation_mass + r.rain_condensation) ≤ (vapor - saturation) / ξˡ * (1 + 5eps())
+    # Together they remove no more than the vapor there is (they are not limited to its excess over saturation)
+    @test Δt * (r.ccn_activation_mass + r.rain_condensation) ≤ vapor * (1 + 5eps())
 end
 
 @testset "Implicit activation relaxes toward the activated number" begin

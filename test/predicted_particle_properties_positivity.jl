@@ -668,6 +668,88 @@ end
 end
 
 #####
+##### Cloud number sinks stay within the cloud number the stage leaves
+#####
+##### Every cloud number sink removes droplets with the cloud mass it draws, at the droplets per
+##### unit mass of the state the rates see. A stage that starts from another state, or that
+##### transport takes number from faster than mass, holds fewer droplets per unit mass than that,
+##### and the cloud mass fraction alone lets the sinks remove more droplets than there are.
+#####
+
+@testset "P3 cloud number sinks stay within the stage remainder [$FT]" for FT in (Float32, Float64)
+    aerosol = PPP.AerosolActivation(PPP.AerosolMode(number_mixing_ratio = 3e8); prognostic = true)
+    p3 = PredictedParticlePropertiesMicrophysics(FT; aerosol, negative_moisture_correction = nothing)
+    constants = ThermodynamicConstants(FT)
+    rng = LinearCongruentialGenerator(4321)
+    roundoff = 100 * eps(FT)
+    z = zero(FT)
+
+    # `same_state`: the stage starts from the state the rates see, as SSP RK3 stages do, and
+    # only the other tendencies set the two apart. Otherwise it starts from an unrelated state.
+    @testset "Δt = $Δt s, same state = $same_state" for Δt in (2, 45, 200), same_state in (true, false)
+        Δt = FT(Δt)
+        negative = 0
+        number_limited = 0  # the number fraction is the smaller of the two
+        unpaired = 0        # droplets that freeze and ice crystals that form differ
+
+        for _ in 1:4000
+            ρ, 𝒰, ℳ, specific = random_p3_state(rng, p3, constants, FT)
+            nᶜˡ = ℳ.qᶜˡ > 0 ? FT(10.0^(6 + 3 * uniform!(rng))) :
+                              (uniform!(rng) < 0.3 ? FT(10.0^(6 * uniform!(rng))) : z)
+            nᵃ = FT(3e8 * uniform!(rng))
+            ℳ = P3MicrophysicalState(ℳ.qᶜˡ, nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.qⁱ, ℳ.nⁱ, ℳ.qᶠ, ℳ.bᶠ, ℳ.qʷⁱ, z, nᵃ, z)
+            specific = (specific..., nᶜˡ, nᵃ)
+            properties = PPP.p3_process_properties(p3, ρ, ℳ)
+
+            c⁰ = same_state ? map(q -> ρ * q, specific) :
+                              map(q -> uniform!(rng) < 0.3 ? z : ρ * q * FT(2 * uniform!(rng)), specific)
+            Gᵒ = map((c, q) -> (-FT(uniform!(rng)) * c + (uniform!(rng) < 0.5 ? FT(uniform!(rng)) * ρ * q : z)) / Δt,
+                     c⁰, specific)
+            ρñᶜˡ = c⁰[10] + Δt * Gᵒ[10]
+
+            fields = one_cell_aerosol_fields(c⁰)
+            G = one_cell_aerosol_fields(Gᵒ)
+            stage = StageStart(fields, fields, false, Δt)
+            rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants, properties,
+                                             temperature(𝒰, constants), z, z,
+                                             nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
+
+            φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, p3, ρ, ℳ, properties, rates)
+            limited = PPP.patankar_limited_rates(rates, φ)
+            result = PPP.p3_tendencies(p3, ρ, ℳ, properties, limited)
+            relaxations = PPP.p3_number_relaxations(1, 1, 1, G, stage, p3, ρ, ℳ, properties, limited, result)
+
+            Gᵖ = result.tendency_ρnᶜˡ + relaxations.cloud
+            ρnᶜˡ⁺ = ρñᶜˡ + Δt * Gᵖ
+            negative += ρnᶜˡ⁺ < -roundoff * (abs(ρñᶜˡ) + ρ * nᶜˡ + Δt * abs(Gᵖ))
+            number_limited += φ.cloud_number < φ.cloud
+
+            # The droplets that freeze are the ice crystals that form: one limited rate for both.
+            cn = min(φ.cloud, φ.cloud_number)
+            unpaired += (limited.cloud_freezing_number != cn * rates.cloud_freezing_number) |
+                        (limited.cloud_homogeneous_number != cn * rates.cloud_homogeneous_number)
+        end
+
+        @test negative == 0
+        @test unpaired == 0
+        # The sample exercises the number fraction.
+        @test number_limited > 10
+    end
+
+    # The cloud number is no reservoir where it is prescribed, and the fraction is one.
+    prescribed = PredictedParticlePropertiesMicrophysics(FT; negative_moisture_correction = nothing)
+    ρ, 𝒰, ℳ, specific = random_p3_state(rng, prescribed, constants, FT)
+    properties = PPP.p3_process_properties(prescribed, ρ, ℳ)
+    fields = one_cell_fields(map(q -> ρ * q, specific))
+    G = one_cell_fields(map(q -> z, specific))
+    stage = StageStart(fields, fields, false, FT(45))
+    rates = compute_p3_process_rates(prescribed, ρ, ℳ, 𝒰, constants, properties, temperature(𝒰, constants), z, z,
+                                     nothing, PPP.GridLiquidRelaxationStage(1, 1, 1, G, stage))
+    φ = PPP.p3_sink_fractions(1, 1, 1, G, stage, prescribed, ρ, ℳ, properties, rates)
+    @test φ.cloud_number == 1
+end
+
+#####
 ##### A kinematic column without negative-density repair
 #####
 ##### P3 repairs nothing between stages, so its prognostics stay non-negative only if transport

@@ -1198,9 +1198,10 @@ end
         @test limited.ccn_activation_number < ccn_activation_number
         @test limited.rain_cond < rain_cond
         @test limited.coat_cond < coat_cond
-        @test limited.dep < dep
-        @test limited.nuc_q < nuc_q
-        @test limited.nuc_n < nuc_n
+        # Deposition and nucleation are limited by the vapor, of which there is plenty, not by its excess over ice
+        @test limited.dep == dep
+        @test limited.nuc_q == nuc_q
+        @test limited.nuc_n == nuc_n
 
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)
         ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T, constants)
@@ -1212,19 +1213,20 @@ end
                           limited.rain_cond + limited.coat_cond
         @test cond_sink_total * dt_safety <= qcon_cap + FT(10) * eps(FT)
 
-        # Ice satadj cap: dep + nuc_q ≤ qdep_cap/dt_safety, evaluated against
-        # the post-liquid thermodynamic state.
+        # Deposition and nucleation remove no more than the vapor the liquid sinks leave over `dt_safety`
         net_liquid = max(zero(FT), limited.cond) + limited.ccn_activation_mass +
                      limited.rain_cond + limited.coat_cond -
                      rain_evap - coat_evap - max(zero(FT), -limited.cond)
         qᵛ_after = qᵛ - net_liquid * dt_safety
-        T_after = T + net_liquid * ℒˡ * dt_safety / constants.dry_air.heat_capacity
-        qᵛ⁺ⁱ_after = adjustment_saturation_specific_humidity(T_after, P, qᵗ, constants, PlanarIceSurface())
-        ℒⁱ_after = Breeze.Thermodynamics.ice_latent_heat(T_after, constants)
-        ξⁱ_after = PPP.ice_psychrometric_correction(constants, ℒⁱ_after, qᵛ⁺ⁱ_after, T_after)
-        qdep_cap = max(zero(FT), qᵛ_after - qᵛ⁺ⁱ_after) / ξⁱ_after
         dep_sink_total = max(zero(FT), limited.dep) + limited.nuc_q
-        @test dep_sink_total * dt_safety <= qdep_cap + FT(10) * eps(FT)
+        @test dep_sink_total * dt_safety <= qᵛ_after + FT(10) * eps(FT)
+
+        # With little vapor they are scaled to it, and the vapor stays non-negative
+        scarce = PPP.limit_vapor_rates(zero(FT), zero(FT), zero(FT), zero(FT), zero(FT),
+                                       FT(1e-3), zero(FT), zero(FT), FT(1e-3), FT(5e2),
+                                       FT(1e-4), qᵛ⁺ˡ, T, P, qᵗ, constants, dt_safety, FT(273.15))
+        @test (scarce.dep + scarce.nuc_q) * dt_safety ≈ FT(1e-4)
+        @test scarce.nuc_n / scarce.nuc_q ≈ FT(5e2) / FT(1e-3)
     end
 
     @testset "Prescribed droplet activation and the vapor caps share one psychrometric convention" begin
@@ -1303,7 +1305,7 @@ end
         @test limited.rain_evap < rain_evap
         @test limited.coat_evap < coat_evap
         @test limited.cond > cond  # less negative → smaller magnitude
-        @test limited.dep > dep    # sublimation reduced
+        @test limited.dep == dep   # sublimation is limited by the ice mass in the per-species budgets, not here
 
         # Verify the liquid evaporation cap: |cond_neg| + rain_evap + coat_evap ≤ qevp_cap/dt_safety
         Rᵛ = Breeze.Thermodynamics.vapor_gas_constant(constants)

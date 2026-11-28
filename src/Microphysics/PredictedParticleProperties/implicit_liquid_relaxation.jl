@@ -31,8 +31,9 @@
 # rates are (`compute_p3_process_rates`): that budget would cap them again.
 #
 # Activation relaxes the droplet number toward the activated number over the activation time
-# scale in the same way, with the seed mass of the activated droplets. Its target is capped by
-# the aerosol available, so it asks for no more than the reservoir holds.
+# scale, with the seed mass of the activated droplets, as a third channel of the same relaxation:
+# its share of the decaying excess is ωᵃ / (εˡ + εʳ + ωᵃ). Its target is capped by the aerosol
+# available, so it asks for no more than the reservoir holds.
 #
 # Ice deposition, the liquid coating of ice and ice nucleation are left to the explicit rates and
 # their caps in `limit_ice_vapor_rates`. Where ice shares the vapor, the liquid and ice exchange
@@ -53,6 +54,9 @@ not known; the explicit rates are used then.
 are evaluated at, which is zero where the stage starts from that state. `qʳ` and `qʷⁱ` are the
 rain and the liquid coating of ice that the stage start and every other tendency leave, which
 bound what the stage can evaporate of them where the ice-phase caps project that evaporation.
+`Gᵛ` is the tendency of the vapor per unit mass accumulated so far (transport and every other
+tendency but the microphysics'): the vapor available to the stage is that of its start plus
+`Δt Gᵛ`, which bounds what condensation and activation remove over the stage.
 """
 struct LiquidRelaxationStage{FT, B}
     Δt :: FT
@@ -62,25 +66,38 @@ struct LiquidRelaxationStage{FT, B}
     Δqᵛ :: FT
     qʳ :: FT
     qʷⁱ :: FT
+    Gᵛ :: FT
 end
 
-# A stage that starts from the state the rates see, with rain and coating that do not bound
-# their evaporation (single-cell tests).
+# A stage that starts from the state the rates see, with no other vapor tendency and with rain
+# and coating that do not bound their evaporation (single-cell tests).
 LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active) =
-    LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active, zero(Δt), convert(typeof(Δt), Inf), convert(typeof(Δt), Inf))
+    LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active, zero(Δt), convert(typeof(Δt), Inf), convert(typeof(Δt), Inf), zero(Δt))
+
+# A stage with the vapor offset, rain and coating of a stage and no other vapor tendency
+LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active, Δqᵛ, qʳ, qʷⁱ) =
+    LiquidRelaxationStage(Δt, qᶜˡ, nᶜˡ, active, Δqᵛ, qʳ, qʷⁱ, zero(Δt))
 
 # A stage that is already evaluated (single-cell tests). The grid kernel passes one that reads
 # the tendencies where the relaxation needs them; see `GridLiquidRelaxationStage`.
 @inline liquid_relaxation_stage(stage::LiquidRelaxationStage, aerosol, ρ) = stage
 @inline liquid_relaxation_stage(::Nothing, aerosol, ρ) = nothing
 
-# What the ice-phase caps (`limit_ice_vapor_rates`) need of the stage to project the liquid
-# exchange that it applies: the vapor the stage starts with above the rate state, and the rain
-# and the liquid coating of ice that the stage leaves to evaporate. The evaporation rates of
+# What the ice-phase limits (`limit_ice_vapor_rates`) need of the stage to project the vapor it
+# leaves: the vapor the stage starts with above the rate state, the vapor tendency of every other
+# process, and the rain and the liquid coating of ice that the stage leaves to evaporate. The evaporation rates of
 # both can ask for more, and are limited to that afterwards (`p3_sink_fractions`). Without a
 # stage the projection starts from the rate state and both are budgeted afterwards.
 @inline stage_vapor_offset(::Nothing, FT) = zero(FT)
 @inline stage_vapor_offset(stage::LiquidRelaxationStage, FT) = ifelse(stage.active, stage.Δqᵛ, zero(FT))
+
+# The vapor relaxation coefficient of dry ice with which deposition is relaxed implicitly over the
+# stage (`limit_ice_vapor_rates`): zero, which keeps the explicit rate, without a stage
+@inline stage_ice_relaxation(::Nothing, εⁱ) = zero(εⁱ)
+@inline stage_ice_relaxation(stage::LiquidRelaxationStage, εⁱ) = ifelse(stage.active, εⁱ, zero(εⁱ))
+
+@inline stage_vapor_tendency(::Nothing, FT) = zero(FT)
+@inline stage_vapor_tendency(stage::LiquidRelaxationStage, FT) = ifelse(stage.active, stage.Gᵛ, zero(FT))
 
 @inline stage_rain(::Nothing, FT) = convert(FT, Inf)
 @inline stage_rain(stage::LiquidRelaxationStage, FT) = ifelse(stage.active, max(0, stage.qʳ), convert(FT, Inf))
@@ -164,38 +181,60 @@ so the relaxation keeps its bounds.
     rain_excess = vapor_excess / ξˡ
     saturation_excess = vapor_excess + ξˡ * max(0, c̃)
     cloud_excess = liquid_equilibrium_condensate(Γ, saturation_excess, ξˡ) - c̃
-    cloud_rate, rain_rate = AM.shared_excess_relaxation_rates((cloud_excess, rain_excess),
-                                                              (cloud_relaxation, rain_relaxation), Δt)
+    # Activation relaxes toward its own target (`implicit_cloud_droplet_activation`) at its own
+    # rate ωᵃ, drawing on the same vapor excess as cloud growth and rain: activation, cloud and
+    # rain are channels of one backward-Euler relaxation of the vapor, which decays over the
+    # stage as x⁺ = x / (1 + Δt (εᶜˡ + εʳ + ωᵃ)). Each channel takes ωᵢ xᵢ / (1 + Δt Σω) of its own
+    # excess, so that together they do not carry the vapor past saturation for any stage interval.
+    # Activation alone over the stage is ωᵃ xᵃ / (1 + Δt ωᵃ); the shared decay replaces its
+    # denominator. A channel that does not act (no supersaturation, or no seed to add) does not
+    # slow the others.
+    #
+    # Activation sees the vapor of the explicit rates (`p3_activation_vapor`): with a subgrid
+    # distribution, the mean vapor excess of the part of the cell above its threshold; with
+    # `CloudCondensationOnly`, prescribed-number droplets are seeded at the vapor that cloud liquid
+    # sees, qᵛ + Γ. Without cloud the droplets' relaxation rate is zero, so this seed is what
+    # starts cloud in a cell whose subgrid distribution is saturated and whose grid mean is not.
+    # The grid-mean vapor it sees is that of the stage start, qᵛ⁺ˡ + vapor_excess. Activation is
+    # then a channel of the activating part of the cell, which relaxes the grid-mean vapor at its
+    # rate times the fraction of the cell it covers.
+    #
+    # The droplets that activation seeds grow over the same stage: the cloud channel relaxes at
+    # the coefficient of the droplets the stage leaves, its cloud and the seeds, not at that of
+    # the rate state, which has none where the stage starts cloud. Otherwise a seeded cell waits
+    # a stage before it grows, a lag that grows with the number of stages. The seeds depend on
+    # the shared decay in turn; one pass of the coupled step evaluates the coefficient at the
+    # seeds of the decay without them.
+    activating = p3_activation_vapor(p3, Γ, qᵛ⁺ˡ + vapor_excess, qᵛ⁺ˡ, distribution)
+    activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
+                                                   activating.qᵛ, qᵛ⁺ˡ, ξˡ, T, ρ)
+    ωᵃ = ifelse(activation.mass > 0, activation.relaxation, zero(FT))
+    activation_share = activating.fraction * (1 + Δt * ωᵃ) /
+                       (1 + Δt * (cloud_relaxation + rain_relaxation + activating.fraction * ωᵃ))
+    cloud_relaxation = seeded_cloud_relaxation(p3, cloud_relaxation, activation, activation_share,
+                                               c̃, stage.nᶜˡ, Δt, ρ, state.Dᵛ)
+    shared_decay = 1 + Δt * (cloud_relaxation + rain_relaxation + activating.fraction * ωᵃ)
+    cloud_rate = cloud_relaxation * cloud_excess / shared_decay
+    rain_rate = rain_relaxation * rain_excess / shared_decay
+    activation_share = activating.fraction * (1 + Δt * ωᵃ) / shared_decay
+    activation = (; mass = activation.mass * activation_share, number = activation.number * activation_share)
 
     # Tiny rain in subsaturated air: the backstop of the explicit rates (no target)
     tiny_rain = subsaturated & (ℳ.qʳ < parameters.tiny_mass_evaporation_threshold)
     rain_cond = ifelse(tiny_rain, zero(FT), max(0, rain_rate))
     rain_evap = ifelse(tiny_rain, max(0, ℳ.qʳ) / τ, max(0, -rain_rate))
 
-    # Activation sees the vapor of the explicit rates (`p3_activation_vapor`): with a subgrid
-    # distribution, the mean vapor excess of the part of the cell above its threshold; with
-    # `CloudCondensationOnly`, prescribed-number droplets are seeded at the vapor that cloud liquid
-    # sees, qᵛ + Γ. Without cloud the droplets' relaxation rate is zero, so this seed is what
-    # starts cloud in a cell whose subgrid distribution is saturated and whose grid mean is not.
-    # The grid-mean vapor it sees is that of the stage start, qᵛ⁺ˡ + vapor_excess.
-    activating = p3_activation_vapor(p3, Γ, qᵛ⁺ˡ + vapor_excess, qᵛ⁺ˡ, distribution)
-    activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
-                                                   activating.qᵛ, qᵛ⁺ˡ, ξˡ, T, ρ)
-    activation = (; mass = activation.mass * activating.fraction,
-                    number = activation.number * activating.fraction)
-
-    # Diffusional growth and the seed mass of activation draw on one vapor excess. Where they
-    # ask for more together, they are scaled together, as the explicit rates are
-    # (`limit_liquid_vapor_rates`), so activation is not left with what growth spares, which
-    # vanishes as `Δt` grows. The seed mass and the number take the same fraction, which keeps
-    # the size of the activated droplets. Growth alone never exceeds the budget: growth on the
-    # subgrid correlation Γ, and the refill of a negative remainder, are not bounded by the
-    # grid-mean excess. Nor is activation alone: it draws on the vapor excess of the part of
-    # the cell that activates, which is the grid-mean excess without a subgrid distribution.
+    # Diffusional growth and the seed mass of activation draw on one vapor: the vapor the stage
+    # starts with plus what every other tendency adds or removes over the stage, `Δt Gᵛ`. Where
+    # they ask for more of it together, they are scaled together, so that the vapor stays
+    # non-negative. It is the only limit: the shared relaxation above already keeps them from
+    # passing saturation, and growth and activation may still remove vapor where the grid mean is
+    # subsaturated (growth on the subgrid correlation Γ, the refill of a negative cloud
+    # remainder, the seed of activation). The seed mass and the number take the same fraction,
+    # which keeps the size of the activated droplets.
+    available_vapor = max(0, qᵛ + stage.Δqᵛ + Δt * stage.Gᵛ)
     growth = max(0, cloud_rate) + rain_cond
-    activation_excess = activating.fraction * (activating.qᵛ - qᵛ⁺ˡ) / ξˡ
-    budget = max(max(0, rain_excess, activation_excess), Δt * growth)
-    shared_fraction = sink_limiting_factor(growth + activation.mass, budget, Δt)
+    shared_fraction = sink_limiting_factor(growth + activation.mass, available_vapor, Δt)
     cloud_rate = ifelse(cloud_rate > 0, shared_fraction * cloud_rate, cloud_rate)
     rain_cond = shared_fraction * rain_cond
 
@@ -208,6 +247,23 @@ so the relaxation keeps its bounds.
             coat_cond = liquid_rates.coat_cond,
             coat_evap = liquid_rates.coat_evap)
 end
+
+# The vapor relaxation coefficient of the cloud droplets that the stage leaves where activation
+# seeds them: its cloud `c̃` and number `ñ` with the seed mass and number of `activation` over
+# `Δt` (the share `activation_share` of it that the shared decay leaves), and the prescribed
+# number where the number is not prognostic. Where activation seeds nothing, the coefficient of
+# the rate state, `cloud_relaxation`.
+@inline function seeded_cloud_relaxation(p3, cloud_relaxation, activation, activation_share, c̃, ñ, Δt, ρ, Dᵛ)
+    seeded = activation.mass > 0
+    qᶜˡ = max(0, c̃) + Δt * activation_share * activation.mass
+    nᶜˡ = seeded_cloud_number(p3.aerosol, p3, max(0, ñ) + Δt * activation_share * activation.number, ρ)
+    dsd = diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+    seeded_relaxation = cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, Dᵛ, dsd.μᶜˡ, dsd.λᶜˡ, dsd.nᶜˡ)
+    return ifelse(seeded, max(cloud_relaxation, seeded_relaxation), cloud_relaxation)
+end
+
+@inline seeded_cloud_number(::Nothing, p3, n, ρ) = p3.cloud.number_concentration / ρ
+@inline seeded_cloud_number(aerosol, p3, n, ρ) = n
 
 #####
 ##### Implicit activation
@@ -226,7 +282,7 @@ end
     mass = max(0, AM.implicit_relaxation_rate(c̃, target, 1 / τ, Δt))
     S = (qᵛ - qᵛ⁺ˡ) / max(qᵛ⁺ˡ, parameters.floors.saturation_mass_fraction)
     supersaturated = S > parameters.activation_supersaturation_threshold
-    return (; mass = ifelse(supersaturated, mass, zero(FT)), number = zero(FT))
+    return (; mass = ifelse(supersaturated, mass, zero(FT)), number = zero(FT), relaxation = 1 / τ)
 end
 
 @inline activation_pool(aerosol::AerosolActivation{<:Any, false}, nᵃ) = sum_aerosol_number(aerosol)
@@ -244,5 +300,5 @@ end
     seed_mass = 4 * FT(π) / 3 * aerosol.liquid_water_density * aerosol.activated_droplet_radius^3
     supersaturated = S > aerosol.activation_supersaturation_threshold
     number = ifelse(supersaturated, number, zero(FT))
-    return (; mass = number * seed_mass, number)
+    return (; mass = number * seed_mass, number, relaxation = 1 / aerosol.activation_timescale)
 end
