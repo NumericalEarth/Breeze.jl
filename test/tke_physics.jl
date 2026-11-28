@@ -11,12 +11,15 @@ using Test
     Oceananigans.defaults.FloatType = FT
     # Only the viscosity: no scalar or TKE diffusivity and no dissipation, so the shear production is the only source
     coefficients = ConstantStabilityFunctions(ℂᵘ=1, ℂᶜ=0, ℂᵉ=0, ℂᴰ=0)
+    # Without dissipation there is no neutral log layer to set the wall coefficient, so the mixing length is given
+    mixing_length = GradientLimitedMixingLength(ℂˢ = 1.299067385616381, ℂⁱ = 1.5609936948461662)
 
     @testset "Uniform shear stays uniform across periodic boundaries" for time_discretization in
         (ExplicitTimeDiscretization(), VerticallyImplicitTimeDiscretization())
 
         grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 4), y=(0, 4), z=(0, 8))
-        closure = TKEBasedTurbulenceClosure(time_discretization; stability_functions = coefficients, subgrid_distribution = nothing, heating_budget_flux = nothing)
+        closure = TKEBasedTurbulenceClosure(time_discretization; mixing_length, stability_functions = coefficients,
+                                            subgrid_distribution = nothing, heating_budget_flux = nothing)
         model = AtmosphereModel(grid; closure, advection=nothing)
         density = Array(interior(model.dynamics.reference_state.density))
 
@@ -45,7 +48,7 @@ using Test
         # With `minimum_tke` above e the turbulent velocity, and so the viscosity ν(z) = ℓ √eᵐⁱⁿ, does not change as
         # e grows: the only TKE source is ν (1 + t)². SSP-RK3 integrates this quadratic
         # exactly; averaging with whole-step-old velocities introduces a first-order bias.
-        closure = TKEBasedTurbulenceClosure(ExplicitTimeDiscretization(); stability_functions = coefficients, minimum_tke = 1e4, subgrid_distribution = nothing, heating_budget_flux = nothing)
+        closure = TKEBasedTurbulenceClosure(ExplicitTimeDiscretization(); mixing_length, stability_functions = coefficients, minimum_tke = 1e4, subgrid_distribution = nothing, heating_budget_flux = nothing)
         model = AtmosphereModel(grid; dynamics=PrescribedDynamics(reference_state),
                                 closure, advection=nothing)
         set!(model; θ=300, u=z -> z, ρe=1)
