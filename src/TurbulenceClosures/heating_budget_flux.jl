@@ -1,4 +1,3 @@
-using Oceananigans.Fields: AbstractField, interior
 """
 $(TYPEDEF)
 

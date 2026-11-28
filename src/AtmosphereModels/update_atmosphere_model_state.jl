@@ -307,19 +307,6 @@ end
 ##### Closure fields, computed one cell into the horizontal halos
 #####
 
-# The viscous and diffusive fluxes of an interior tendency read an eddy viscosity or diffusivity one
-# cell into the halo, corners included (`νᶠᶠᶜ` at `(1, 1)` averages the centers `(0:1, 0:1)`). On a
-# `Distributed` grid a closure field that is computed in the interior alone is stale there, because
-# its halos are filled locally and never received from a neighbouring rank. So, as Oceananigans'
-# `HydrostaticFreeSurfaceModel` does with `horizontally_extended_interior_kernel_parameters`, the
-# closure fields are computed over `0:Nx+1` and `0:Ny+1`, from the halos of the velocities,
-# thermodynamic variables and tracers, which are filled (and exchanged between ranks) before the
-# closure fields are computed. A closure's own stencil reaches one further cell, to index `-1` or
-# `N+2`, which is why these closures require a halo of at least two (`required_halo_size_x`).
-#
-# The ranges are written out, rather than taken from `horizontally_extended_interior_kernel_parameters`,
-# because on a grid with an active cells map that function returns a map of the active cells only,
-# whereas `:xyz` covers every cell and column kernels need the horizontal ranges.
 """
 $(TYPEDSIGNATURES_WITH_DEFAULTS)
 
