@@ -187,9 +187,19 @@ so the relaxation keeps its bounds.
     # Activation alone over the stage is ωᵃ xᵃ / (1 + Δt ωᵃ); the shared decay replaces its
     # denominator. A channel that does not act (no supersaturation, or no seed to add) does not
     # slow the others.
+    #
+    # The droplets that activation seeds grow over the same stage: the cloud channel relaxes at
+    # the coefficient of the droplets the stage leaves, its cloud and the seeds, not at that of
+    # the rate state, which has none where the stage starts cloud. Otherwise a seeded cell waits
+    # a stage before it grows, a lag that grows with the number of stages. The seeds depend on
+    # the shared decay in turn; one pass of the coupled step evaluates the coefficient at the
+    # seeds of the decay without them.
     activation = implicit_cloud_droplet_activation(p3.aerosol, p3, Δt, c̃, stage.nᶜˡ, ℳ,
                                                    qᵛ⁺ˡ + vapor_excess, qᵛ⁺ˡ, ξˡ, T, ρ)
     ωᵃ = ifelse(activation.mass > 0, activation.relaxation, zero(FT))
+    activation_share = (1 + Δt * ωᵃ) / (1 + Δt * (cloud_relaxation + rain_relaxation + ωᵃ))
+    cloud_relaxation = seeded_cloud_relaxation(p3, cloud_relaxation, activation, activation_share,
+                                               c̃, stage.nᶜˡ, Δt, ρ, state.Dᵛ)
     shared_decay = 1 + Δt * (cloud_relaxation + rain_relaxation + ωᵃ)
     cloud_rate = cloud_relaxation * cloud_excess / shared_decay
     rain_rate = rain_relaxation * rain_excess / shared_decay
@@ -224,6 +234,23 @@ so the relaxation keeps its bounds.
             coat_cond = liquid_rates.coat_cond,
             coat_evap = liquid_rates.coat_evap)
 end
+
+# The vapor relaxation coefficient of the cloud droplets that the stage leaves where activation
+# seeds them: its cloud `c̃` and number `ñ` with the seed mass and number of `activation` over
+# `Δt` (the share `activation_share` of it that the shared decay leaves), and the prescribed
+# number where the number is not prognostic. Where activation seeds nothing, the coefficient of
+# the rate state, `cloud_relaxation`.
+@inline function seeded_cloud_relaxation(p3, cloud_relaxation, activation, activation_share, c̃, ñ, Δt, ρ, Dᵛ)
+    seeded = activation.mass > 0
+    qᶜˡ = max(0, c̃) + Δt * activation_share * activation.mass
+    nᶜˡ = seeded_cloud_number(p3.aerosol, p3, max(0, ñ) + Δt * activation_share * activation.number, ρ)
+    dsd = diagnose_cloud_dsd(p3, qᶜˡ, nᶜˡ, ρ)
+    seeded_relaxation = cloud_vapor_relaxation_coefficient(p3, qᶜˡ, ρ, Dᵛ, dsd.μᶜˡ, dsd.λᶜˡ, dsd.nᶜˡ)
+    return ifelse(seeded, max(cloud_relaxation, seeded_relaxation), cloud_relaxation)
+end
+
+@inline seeded_cloud_number(::Nothing, p3, n, ρ) = p3.cloud.number_concentration / ρ
+@inline seeded_cloud_number(aerosol, p3, n, ρ) = n
 
 #####
 ##### Implicit activation
