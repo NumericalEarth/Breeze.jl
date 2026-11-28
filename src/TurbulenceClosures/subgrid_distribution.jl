@@ -504,6 +504,7 @@ end
                                                              closure_fields, e, Δθ, Δq, Δz, θˡⁱ′², qᵗ′², θˡⁱ′qᵗ′)
 
             w′θˡⁱ′ += applied_heating_flux(cl, i, j, k)
+            w′qᵗ′ += zero(FT) # keeps a vanishing flux +0, as the budget flux of θˡⁱ does for w′θˡⁱ′
 
             _, unit_variance, _ = interface_second_moments(sm, τ, Kᶜ, Kᵘ, 1 / Δz, zero(FT), Δz, zero(FT), zero(FT), zero(FT))
             _, unit_variance, _ = local_scalar_second_moments(d.variance_stability_functions, i, j, k, grid, closure, velocities,
