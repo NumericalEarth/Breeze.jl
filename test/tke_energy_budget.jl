@@ -360,4 +360,3 @@ end
     @test Gᵉ(whole) .- Gᵉ(shoc) ≈ 0.9 .* ρ .* Pᵉ rtol=1e-10 atol=1e-12 * scale
     @test ĉᵖΠ .* (Gᶿ(shoc) .- Gᶿ(whole)) ≈ 0.9 .* ρ .* Pᵉ rtol=1e-10 atol=1e-12 * scale
 end
-
