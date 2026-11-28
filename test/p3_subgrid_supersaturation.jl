@@ -140,7 +140,8 @@ end
 
 # A mean-subsaturated cell without cloud liquid whose subgrid distribution is saturated in part:
 # the droplets' relaxation rate is zero, so the seed of activation is what starts cloud. The
-# implicit relaxation over the stage must seed it as the explicit rates do.
+# implicit relaxation over the stage must seed it as the explicit rates do, and the seeded droplets
+# grow within the same stage.
 @testset "P3 subgrid supersaturation: cloud starts in a subsaturated cell without cloud [$processes]" for
         processes in (PPP.CloudCondensationOnly(), PPP.AllProcesses())
     constants = ThermodynamicConstants(Float64)
@@ -164,7 +165,8 @@ end
         @test rates(plain, stage).ccn_activation_mass == 0  # the grid mean is subsaturated
         implicit = rates(p3, stage)
         @test 0 < Δt * implicit.ccn_activation_mass ≤ seed * (1 + 1e-12)
-        @test implicit.condensation == 0  # no droplets yet
+        @test implicit.condensation > 0  # the seeded droplets grow within the stage
+        @test Δt * (implicit.condensation + implicit.ccn_activation_mass) ≤ qᵛ
     end
 end
 

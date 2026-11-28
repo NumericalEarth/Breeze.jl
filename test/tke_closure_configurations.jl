@@ -82,10 +82,13 @@ end
 end
 
 # One short column of each calibrated configuration: finite, realizable, and the same as when it was calibrated
-# Σ e (m² s⁻²), the largest cloud fraction and Σ ρqᶜˡ (kg m⁻³) after 20 minutes, at the calibrated commit
-const REGRESSION = Dict("TKEBasedTurbulenceClosure" => (2.825995495882156, 0.0041570081060038, 1.5924532691005748e-7),
-                        "SimplifiedHigherOrderClosure" => (0.9032918412584622, 9.494176956646707e-9, 5.3137606541913e-8),
-                        "SimplifiedHigherOrderClosure with ℂᴾ = 1" => (2.6726511998460794, 2.198283854539088e-6, 5.3802022565686416e-8))
+# Σ e (m² s⁻²), the largest cloud fraction and Σ ρqᶜˡ (kg m⁻³) after 20 minutes, with the P3 vapor limited by the
+# vapor and activation a channel of the implicit liquid relaxation (#1243); at the calibrated commit they were
+# (2.825995495882156, 0.0041570081060038, 1.5924532691005748e-7), (0.9032918412584622, 9.494176956646707e-9,
+# 5.3137606541913e-8) and (2.6726511998460794, 2.198283854539088e-6, 5.3802022565686416e-8)
+const REGRESSION = Dict("TKEBasedTurbulenceClosure" => (2.825963802259923, 0.004182943511429558, 1.432466647025727e-7),
+                        "SimplifiedHigherOrderClosure" => (0.9032893275518391, 9.502628905822751e-9, 5.302631977382515e-8),
+                        "SimplifiedHigherOrderClosure with ℂᴾ = 1" => (2.672646925418039, 2.1946753945856037e-6, 5.36897298882235e-8))
 
 configurations = (("TKEBasedTurbulenceClosure", TKEBasedTurbulenceClosure(), AllProcesses()),
                   ("SimplifiedHigherOrderClosure", SimplifiedHigherOrderClosure(), Breeze.Microphysics.PredictedParticleProperties.CloudCondensationOnly()),
